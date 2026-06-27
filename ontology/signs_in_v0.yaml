@@ -1,0 +1,31 @@
+# Indian RTO traffic-sign taxonomy (M2.3). Three categories: mandatory/regulatory, cautionary/warning,
+# informatory/guide. text_bearing routes the sign's text to OCR (M2.4). Prompts are the SigLIP 2
+# zero-shot text queries (no labeled sign data needed). No em-dashes.
+version: signs-in-0.1.0
+categories: [mandatory, cautionary, informatory]
+types:
+  # mandatory / regulatory
+  - { name: stop, category: mandatory, text_bearing: false, prompt: "a red octagonal STOP traffic sign" }
+  - { name: give_way, category: mandatory, text_bearing: false, prompt: "a give way yield triangle traffic sign" }
+  - { name: no_entry, category: mandatory, text_bearing: false, prompt: "a no entry sign, a red circle with a white horizontal bar" }
+  - { name: speed_limit, category: mandatory, text_bearing: true, prompt: "a speed limit sign with a number in a red circle" }
+  - { name: no_parking, category: mandatory, text_bearing: false, prompt: "a no parking traffic sign" }
+  - { name: no_horn, category: mandatory, text_bearing: false, prompt: "a no horn traffic sign" }
+  - { name: one_way, category: mandatory, text_bearing: false, prompt: "a one way arrow traffic sign" }
+  - { name: compulsory_direction, category: mandatory, text_bearing: false, prompt: "a compulsory turn direction sign, a blue circle with a white arrow" }
+  # cautionary / warning
+  - { name: pedestrian_crossing, category: cautionary, text_bearing: false, prompt: "a pedestrian crossing warning sign" }
+  - { name: school_ahead, category: cautionary, text_bearing: false, prompt: "a school children ahead warning sign" }
+  - { name: speed_breaker, category: cautionary, text_bearing: false, prompt: "a speed breaker hump ahead warning sign" }
+  - { name: right_curve, category: cautionary, text_bearing: false, prompt: "a right hand curve ahead warning sign" }
+  - { name: left_curve, category: cautionary, text_bearing: false, prompt: "a left hand curve ahead warning sign" }
+  - { name: narrow_road, category: cautionary, text_bearing: false, prompt: "a narrow road ahead warning sign" }
+  - { name: junction_ahead, category: cautionary, text_bearing: false, prompt: "a road junction ahead warning sign" }
+  - { name: roundabout, category: cautionary, text_bearing: false, prompt: "a roundabout ahead warning sign" }
+  # informatory / guide
+  - { name: destination_board, category: informatory, text_bearing: true, prompt: "a green destination direction board with place names and arrows" }
+  - { name: parking, category: informatory, text_bearing: false, prompt: "a parking information sign with the letter P" }
+  - { name: hospital, category: informatory, text_bearing: false, prompt: "a hospital information sign" }
+  - { name: petrol_pump, category: informatory, text_bearing: true, prompt: "a fuel petrol pump information sign" }
+  - { name: bus_stop, category: informatory, text_bearing: false, prompt: "a bus stop information sign" }
+  - { name: toll_ahead, category: informatory, text_bearing: true, prompt: "a toll plaza ahead information board" }

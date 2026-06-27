@@ -1,0 +1,168 @@
+# LabeloxAV typed configuration. Every value is env-overridable with the LBX_ prefix and
+# __ as the nesting delimiter, e.g. LBX_GPU__MODE=concurrent, LBX_POSTGRES__HOST=db.
+# Hosts/ports target the localhost-exposed docker-compose services.
+
+env: local
+log_level: INFO
+
+postgres:
+  host: localhost
+  port: 5432
+  user: labelox
+  password: labelox
+  db: labeloxav
+
+minio:
+  endpoint: http://localhost:9000
+  access_key: labelox
+  secret_key: labelox123
+  secure: false
+  bucket: labeloxav
+
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+
+redpanda:
+  brokers: localhost:19092
+
+ingest:
+  target_fps: 3.0            # labeling cadence, not full GMSL2 rate
+  blur_threshold: 60.0       # variance-of-Laplacian floor; below is rejected
+  exposure_low: 12.0         # mean-luma floor (tunnels)
+  exposure_high: 243.0       # mean-luma ceiling (glare)
+  clip_fraction_max: 0.45    # max fraction of clipped pixels before reject
+  max_width: 1920            # downscale frames wider than this (0 disables); 4K wastes compute
+
+gpu:
+  device: cuda:0
+  mode: sequential           # sequential (safe on 16 GB) | concurrent
+  vram_total_mb: 16000
+  vram_headroom_mb: 1500     # refuse to load a stage if free VRAM would drop below this
+
+models:
+  # Path A. Production target yolo26l.pt; realized today with yolo11l.pt (model-substitution note).
+  yolo:
+    weights: yolo11l.pt
+    imgsz: 1280
+    half: true
+    conf: 0.20
+  # Path B. Production target SAM 3.1 PCS (sam3.pt); realized as YOLO-World (text -> boxes) + SAM.
+  openvocab:
+    detector_weights: yolov8s-worldv2.pt
+    seg_weights: sam_b.pt
+    half: true
+    conf: 0.12
+    max_boxes: 40
+  # Path C verifier. Spec target Qwen3-VL-4B Q4. On this Blackwell box bitsandbytes 4-bit is
+  # unusable and transformers lacks Qwen3-VL, so the working backend is Ollama serving a Qwen-VL
+  # model. Swap ollama_tag to qwen3-vl:4b once pulled (`ollama pull qwen3-vl:4b`).
+  vlm:
+    enabled: true
+    backend: ollama          # ollama | transformers | vllm
+    model: Qwen/Qwen2-VL-2B-Instruct
+    ollama_url: http://localhost:11434
+    ollama_tag: "qwen2.5vl:7b"
+    quant: nf4               # 30B forbidden on this box; context capped well below 256K
+    max_context: 8192
+    crop_margin: 0.15
+    max_calls_per_session: 400
+    max_calls_per_frame: 2
+    shortlist_size: 20
+    vote_count: 1            # set >1 (e.g. 3) for N-vote agreement on overrides (costs N VLM calls)
+    cross_vote_min: 0.6
+    timeout_s: 60.0
+
+fusion:
+  iou_match: 0.55
+  iom_match: 0.65            # intersection-over-min, catches contained masks
+  centroid_px: 48.0
+  mask_box_disagree_iou: 0.70  # below this, flag geometry disagreement
+  class_priors:
+    # per-path, per-L1 reliability weights used in the weighted class vote.
+    path_a_yolo26:
+      two_wheeler: 0.9
+      four_wheeler: 0.95
+      heavy: 0.9
+      vru: 0.9
+      default: 0.7
+    path_b_sam3:
+      three_wheeler: 0.9
+      animal: 0.9
+      temporary: 0.9
+      fallback: 0.95
+      default: 0.6
+
+calibrate:
+  method: temperature        # temperature | isotonic (isotonic needs a sealed gold set)
+  temperature: 1.5
+  agreement_bonus: 0.10      # added (pre-clip) when paths agree on class
+  disagreement_penalty: 0.25
+  isotonic_uri: null         # set to s3://.../isotonic.json (from make calibrate) + method=isotonic
+
+gate:
+  auto_accept: 0.95
+  review_low: 0.60
+  force_review_on_rare: true
+  force_review_on_mask_box_disagree: true
+
+intelligence:
+  tracker:
+    iou_match: 0.3
+    max_age_frames: 5
+    min_track_len: 2
+  events:
+    hard_brake_decel: -3.0       # m/s^2 on ego longitudinal (from CAN ego_speed deltas)
+    static_disp_frac: 0.04
+    static_min_frames: 4
+    congestion_min_objects: 8
+    congestion_max_speed_frac: 0.01
+    cut_in_area_growth: 1.35
+    cut_in_center_frac: 0.33
+    near_miss_ttc_s: 2.0
+    wrong_side_frames: 4
+    shoulder_margin_frac: 0.15
+
+# Gate A (DPDPA): mandatory PII anonymization in the ingest plane. enabled:true is the legal gate;
+# LBX_PII__ENABLED=false is the explicit, audited opt-out. Weights swappable (verified at build).
+pii:
+  enabled: true
+  blur_method: gaussian      # gaussian | pixelate
+  kernel: 51
+  face_conf: 0.50
+  plate_conf: 0.35
+  face_weights: .scratch/models/pii/face_yunet.onnx
+  plate_weights: .scratch/models/pii/plate_yolov8.pt
+  device: cpu                # keep PII off the 16 GB autolabel GPU budget
+
+# Gate B (measurement): gold-set eval + Safe-mIoU + calibration reliability.
+m9:
+  safety_weight: 2.0
+  mask_iou_thresh: 0.5
+  ece_bins: 10
+
+# In-app training platform: one worker drains the training_job queue serially on the single GPU.
+training:
+  worker_poll_s: 5.0
+  default_epochs: 20
+  default_imgsz: 960
+  default_batch: 12
+  advisory_lock_key: 815
+  vram_required_mb: 4000
+
+# Hybrid GPU: RunPod A100 environment for heavy real-model work (cloud compute_target). The cloud/
+# runbook scripts and the app share these names/paths. Pod provisioned on demand; budget capped.
+cloud:
+  volume_name: labeloxav-vol
+  workspace: /workspace
+  ckpt_dir: /workspace/ckpts
+  gpu_pref: ["A100 80GB", "H100 PCIe"]
+  budget_cap_usd: 50.0
+  image: ""
+
+ontology:
+  path: ontology/labelox_in_v0.yaml
+
+paths:
+  scratch: .scratch          # local working dir (frames cache, model weights)

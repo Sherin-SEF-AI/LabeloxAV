@@ -1,0 +1,225 @@
+version: "labelox-in-0.1.0"   # ids 1-45 frozen; 46-150 are the P2 long-tail expansion (additive)
+hierarchy_levels: 4
+attributes:
+  occlusion:      { type: enum, values: [0, 25, 50, 75, 100] }
+  truncation:     { type: float, range: [0.0, 1.0] }
+  direction:      { type: enum, values: [same, cross, wrong_way] }
+  helmet:         { type: bool_array }          # per rider
+  passenger_load: { type: int }
+  overload:       { type: bool }
+  on_shoulder:    { type: bool }
+  marking_state:  { type: enum, values: [present, faded, absent] }
+  blocks_lane:    { type: bool }
+  static:         { type: bool }
+  articulated:    { type: bool }
+  signal_state:   { type: enum, values: [R, Y, G, "off"] }
+  livery:         { type: bool }
+  # ---- P2 behavioral attributes: dynamic per-object state for planning + prediction. Global like the
+  # rest; annotators fill the ones relevant to the object's class (vehicles get motion/brake/indicator,
+  # signals get signal_arrow/kind/mount, etc). YAML-boolean words (on/off/none) are quoted so they stay
+  # strings. ----
+  motion:         { type: enum, values: [moving, stopped, parked, waiting] }
+  maneuver:       { type: enum, values: [straight, turning_left, turning_right, u_turn, reversing] }
+  brake:          { type: enum, values: ["on", "off"] }
+  indicator:      { type: enum, values: ["off", left, right, hazard] }
+  lane_position:  { type: enum, values: [ego, left, right, oncoming, opposite] }
+  occlusion_pct:  { type: int }                 # precise 0-100 occlusion when the bucket is not enough
+  signal_arrow:   { type: enum, values: ["none", left, right, straight, u_turn] }
+  signal_kind:    { type: enum, values: [vehicle, pedestrian, cyclist] }
+  signal_mount:   { type: enum, values: [pole, gantry, wall, portable] }
+  pole_id:        { type: int }                 # id of the pole/structure a signal or sign is mounted on
+classes:
+  # L0 OBJECT / L1 two_wheeler
+  - { id: 1,  name: motorcycle,        l0: object,  l1: two_wheeler, india: false }
+  - { id: 2,  name: scooter,           l0: object,  l1: two_wheeler, india: false }
+  - { id: 3,  name: moped,             l0: object,  l1: two_wheeler, india: false }
+  - { id: 4,  name: cycle,             l0: object,  l1: two_wheeler, india: false }
+  - { id: 5,  name: delivery_rider_bike, l0: object, l1: two_wheeler, india: true }
+  # L1 three_wheeler (the moat primitives)
+  - { id: 6,  name: autorickshaw,      l0: object,  l1: three_wheeler, india: true }
+  - { id: 7,  name: e_auto,            l0: object,  l1: three_wheeler, india: true }
+  - { id: 8,  name: goods_3w,          l0: object,  l1: three_wheeler, india: true }
+  - { id: 9,  name: e_rickshaw,        l0: object,  l1: three_wheeler, india: true }
+  # L1 four_wheeler
+  - { id: 10, name: hatchback,         l0: object,  l1: four_wheeler, india: false }
+  - { id: 11, name: sedan,             l0: object,  l1: four_wheeler, india: false }
+  - { id: 12, name: suv,               l0: object,  l1: four_wheeler, india: false }
+  - { id: 13, name: taxi,              l0: object,  l1: four_wheeler, india: false }
+  - { id: 14, name: app_cab,           l0: object,  l1: four_wheeler, india: true }
+  - { id: 15, name: pickup,            l0: object,  l1: four_wheeler, india: false }
+  # L1 heavy_commercial
+  - { id: 16, name: bus,               l0: object,  l1: heavy, india: false }
+  - { id: 17, name: school_bus,        l0: object,  l1: heavy, india: false }
+  - { id: 18, name: lcv,               l0: object,  l1: heavy, india: false }
+  - { id: 19, name: truck,             l0: object,  l1: heavy, india: false }
+  - { id: 20, name: water_tanker,      l0: object,  l1: heavy, india: true }
+  - { id: 21, name: garbage_truck,     l0: object,  l1: heavy, india: true }
+  - { id: 22, name: tipper,            l0: object,  l1: heavy, india: false }
+  - { id: 23, name: construction_veh,  l0: object,  l1: heavy, india: true }
+  - { id: 24, name: tractor,           l0: object,  l1: heavy, india: false }
+  # L1 VRU
+  - { id: 25, name: pedestrian,        l0: object,  l1: vru, india: false }
+  - { id: 26, name: rider,             l0: object,  l1: vru, india: true }
+  - { id: 27, name: traffic_police,    l0: object,  l1: vru, india: true }
+  - { id: 28, name: street_vendor,     l0: object,  l1: vru, india: true }
+  - { id: 29, name: child,             l0: object,  l1: vru, india: false }
+  - { id: 30, name: animal_handler,    l0: object,  l1: vru, india: true }
+  # L1 animal
+  - { id: 31, name: cattle,            l0: object,  l1: animal, india: true }
+  - { id: 32, name: dog,               l0: object,  l1: animal, india: false }
+  - { id: 33, name: goat,              l0: object,  l1: animal, india: true }
+  # L0 INFRA fixed
+  - { id: 34, name: traffic_signal,    l0: infra,   l1: fixed, india: false }
+  - { id: 35, name: traffic_sign,      l0: infra,   l1: fixed, india: false }
+  - { id: 36, name: pole,              l0: infra,   l1: fixed, india: false }
+  - { id: 37, name: barrier,           l0: infra,   l1: fixed, india: false }
+  # L0 INFRA temporary (the Indian street reality)
+  - { id: 38, name: cone,              l0: infra,   l1: temporary, india: false }
+  - { id: 39, name: temp_barricade,    l0: infra,   l1: temporary, india: true }
+  - { id: 40, name: push_cart,         l0: infra,   l1: temporary, india: true }
+  - { id: 41, name: roadside_shop,     l0: infra,   l1: temporary, india: true }
+  - { id: 42, name: debris,            l0: infra,   l1: temporary, india: false }
+  - { id: 43, name: speed_breaker,     l0: surface, l1: boundary, india: true }
+  # Fallback (the single most important idea to inherit)
+  - { id: 44, name: vehicle_fallback,    l0: object, l1: fallback, india: true }
+  - { id: 45, name: object_fallback,     l0: object, l1: fallback, india: true }
+  # ---- v0.2 long-tail expansion (ids 46-150), ids 1-45 frozen above ----
+  # two_wheeler long tail
+  - { id: 46, name: electric_scooter,  l0: object,  l1: two_wheeler, india: false }
+  - { id: 47, name: sports_bike,       l0: object,  l1: two_wheeler, india: false }
+  - { id: 48, name: cargo_bike,        l0: object,  l1: two_wheeler, india: true }
+  # three_wheeler long tail
+  - { id: 49, name: cycle_rickshaw,    l0: object,  l1: three_wheeler, india: true }
+  - { id: 50, name: e_loader_3w,       l0: object,  l1: three_wheeler, india: true }
+  - { id: 51, name: shared_auto,       l0: object,  l1: three_wheeler, india: true }
+  # four_wheeler long tail
+  - { id: 52, name: minivan,           l0: object,  l1: four_wheeler, india: false }
+  - { id: 53, name: jeep,              l0: object,  l1: four_wheeler, india: false }
+  - { id: 54, name: mpv,               l0: object,  l1: four_wheeler, india: false }
+  - { id: 55, name: luxury_sedan,      l0: object,  l1: four_wheeler, india: false }
+  - { id: 56, name: vintage_car,       l0: object,  l1: four_wheeler, india: true }
+  # heavy / commercial long tail
+  - { id: 57, name: petrol_tanker,     l0: object,  l1: heavy, india: false }
+  - { id: 58, name: container_truck,   l0: object,  l1: heavy, india: false }
+  - { id: 59, name: cement_mixer,      l0: object,  l1: heavy, india: false }
+  - { id: 60, name: crane_truck,       l0: object,  l1: heavy, india: false }
+  - { id: 61, name: dumper,            l0: object,  l1: heavy, india: false }
+  - { id: 62, name: multi_axle_trailer, l0: object, l1: heavy, india: false }
+  - { id: 63, name: tempo,             l0: object,  l1: heavy, india: true }
+  - { id: 64, name: milk_van,          l0: object,  l1: heavy, india: true }
+  - { id: 65, name: fire_truck,        l0: object,  l1: heavy, india: false }
+  - { id: 66, name: ambulance,         l0: object,  l1: heavy, india: false }
+  - { id: 67, name: police_van,        l0: object,  l1: heavy, india: true }
+  - { id: 68, name: army_truck,        l0: object,  l1: heavy, india: true }
+  # VRU long tail
+  - { id: 69, name: cyclist,           l0: object,  l1: vru, india: false }
+  - { id: 70, name: hawker,            l0: object,  l1: vru, india: true }
+  - { id: 71, name: construction_worker, l0: object, l1: vru, india: true }
+  - { id: 72, name: sweeper,           l0: object,  l1: vru, india: true }
+  - { id: 73, name: wheelchair_user,   l0: object,  l1: vru, india: false }
+  - { id: 74, name: person_with_umbrella, l0: object, l1: vru, india: true }
+  - { id: 75, name: person_carrying_load, l0: object, l1: vru, india: true }
+  - { id: 76, name: religious_figure,  l0: object,  l1: vru, india: true }
+  - { id: 77, name: school_children_group, l0: object, l1: vru, india: true }
+  # animal long tail
+  - { id: 78, name: buffalo,           l0: object,  l1: animal, india: true }
+  - { id: 79, name: pig,               l0: object,  l1: animal, india: true }
+  - { id: 80, name: monkey,            l0: object,  l1: animal, india: true }
+  - { id: 81, name: horse,             l0: object,  l1: animal, india: false }
+  - { id: 82, name: donkey,            l0: object,  l1: animal, india: true }
+  - { id: 83, name: elephant,          l0: object,  l1: animal, india: true }
+  - { id: 84, name: camel,             l0: object,  l1: animal, india: true }
+  - { id: 85, name: stray_cat,         l0: object,  l1: animal, india: false }
+  - { id: 86, name: poultry,           l0: object,  l1: animal, india: true }
+  - { id: 87, name: goat_herd,         l0: object,  l1: animal, india: true }
+  # SURFACE drivable
+  - { id: 88, name: road,              l0: surface, l1: drivable, india: false }
+  - { id: 89, name: service_lane,      l0: surface, l1: drivable, india: true }
+  - { id: 90, name: drivable_fallback, l0: surface, l1: drivable, india: true }
+  - { id: 91, name: intersection,      l0: surface, l1: drivable, india: false }
+  - { id: 92, name: parking_area,      l0: surface, l1: drivable, india: false }
+  # SURFACE lane / boundary
+  - { id: 93, name: lane_marking,      l0: surface, l1: boundary, india: false }
+  - { id: 94, name: road_edge,         l0: surface, l1: boundary, india: false }
+  - { id: 95, name: shoulder,          l0: surface, l1: boundary, india: false }
+  - { id: 96, name: median,            l0: surface, l1: boundary, india: false }
+  - { id: 97, name: crosswalk,         l0: surface, l1: boundary, india: false }
+  - { id: 98, name: stop_line,         l0: surface, l1: boundary, india: false }
+  - { id: 99, name: yellow_line,       l0: surface, l1: boundary, india: false }
+  - { id: 100, name: rumble_strip,     l0: surface, l1: boundary, india: true }
+  - { id: 101, name: curb,             l0: surface, l1: boundary, india: false }
+  # SURFACE non-drivable
+  - { id: 102, name: sidewalk,         l0: surface, l1: non_drivable, india: false }
+  - { id: 103, name: non_drivable_fallback, l0: surface, l1: non_drivable, india: true }
+  - { id: 104, name: rail_track,       l0: surface, l1: non_drivable, india: false }
+  - { id: 105, name: green_belt,       l0: surface, l1: non_drivable, india: false }
+  - { id: 106, name: encroached_footpath, l0: surface, l1: non_drivable, india: true }
+  # INFRA temporary long tail
+  - { id: 107, name: construction_barrier, l0: infra, l1: temporary, india: true }
+  - { id: 108, name: metro_pillar,     l0: infra,   l1: temporary, india: true }
+  - { id: 109, name: excavation_pit,   l0: infra,   l1: temporary, india: true }
+  - { id: 110, name: sandbag,          l0: infra,   l1: temporary, india: false }
+  - { id: 111, name: hume_pipe,        l0: infra,   l1: temporary, india: true }
+  - { id: 112, name: road_roller,      l0: infra,   l1: temporary, india: false }
+  - { id: 113, name: excavator,        l0: infra,   l1: temporary, india: false }
+  - { id: 114, name: tar_drum,         l0: infra,   l1: temporary, india: true }
+  - { id: 115, name: fallen_tree,      l0: infra,   l1: temporary, india: false }
+  - { id: 116, name: waterlogging,     l0: infra,   l1: temporary, india: true }
+  - { id: 117, name: garbage_pile,     l0: infra,   l1: temporary, india: true }
+  - { id: 118, name: crowd,            l0: infra,   l1: temporary, india: true }
+  - { id: 119, name: procession,       l0: infra,   l1: temporary, india: true }
+  - { id: 120, name: festival_pandal,  l0: infra,   l1: temporary, india: true }
+  # INFRA fixed long tail
+  - { id: 121, name: street_light,     l0: infra,   l1: fixed, india: false }
+  - { id: 122, name: hoarding,         l0: infra,   l1: fixed, india: true }
+  - { id: 123, name: bus_shelter,      l0: infra,   l1: fixed, india: false }
+  - { id: 124, name: foot_overbridge,  l0: infra,   l1: fixed, india: true }
+  - { id: 125, name: flyover_pillar,   l0: infra,   l1: fixed, india: true }
+  - { id: 126, name: toll_booth,       l0: infra,   l1: fixed, india: false }
+  - { id: 127, name: milestone,        l0: infra,   l1: fixed, india: true }
+  - { id: 128, name: km_stone,         l0: infra,   l1: fixed, india: true }
+  - { id: 129, name: guardrail,        l0: infra,   l1: fixed, india: false }
+  - { id: 130, name: chevron_sign,     l0: infra,   l1: fixed, india: false }
+  - { id: 131, name: speed_camera,     l0: infra,   l1: fixed, india: false }
+  - { id: 132, name: cctv_pole,        l0: infra,   l1: fixed, india: false }
+  - { id: 133, name: transformer,      l0: infra,   l1: fixed, india: true }
+  - { id: 134, name: electric_pole,    l0: infra,   l1: fixed, india: true }
+  - { id: 135, name: telephone_booth,  l0: infra,   l1: fixed, india: false }
+  - { id: 136, name: postbox,          l0: infra,   l1: fixed, india: false }
+  - { id: 137, name: overhead_water_tank, l0: infra, l1: fixed, india: true }
+  - { id: 138, name: shrine,           l0: infra,   l1: fixed, india: true }
+  - { id: 139, name: tree,             l0: infra,   l1: fixed, india: false }
+  - { id: 140, name: vegetation,       l0: infra,   l1: fixed, india: false }
+  # final India long-tail
+  - { id: 141, name: e_rickshaw_loader, l0: object, l1: three_wheeler, india: true }
+  - { id: 142, name: tractor_trolley,  l0: object,  l1: heavy, india: true }
+  - { id: 143, name: harvester,        l0: object,  l1: heavy, india: true }
+  - { id: 144, name: sweeper_machine,  l0: object,  l1: heavy, india: false }
+  - { id: 145, name: bullock_cart,     l0: object,  l1: heavy, india: true }
+  - { id: 146, name: vendor_handcart,  l0: infra,   l1: temporary, india: true }
+  - { id: 147, name: ice_cream_cart,   l0: infra,   l1: temporary, india: true }
+  - { id: 148, name: tea_stall_cart,   l0: infra,   l1: temporary, india: true }
+  - { id: 149, name: balloon_seller,   l0: object,  l1: vru, india: true }
+  - { id: 150, name: barricade_line,   l0: infra,   l1: temporary, india: true }
+  # ---- P1 taxonomy completion (AV-review gaps): road markings, drainage, ignore regions, poles,
+  # barriers, pedestrian signal, India bus-shelter subtypes. Additive within labelox-in-0.1.0. ----
+  # L0 SURFACE / L1 boundary: road markings + drainage
+  - { id: 151, name: lane_arrow,       l0: surface, l1: boundary, india: false }
+  - { id: 152, name: drain,            l0: surface, l1: boundary, india: true }
+  # L0 IGNORE / L1 region: annotation-cost regions, never safety-critical
+  - { id: 153, name: sky,              l0: ignore,  l1: region, india: false }
+  - { id: 154, name: ignore_region,    l0: ignore,  l1: region, india: false }
+  - { id: 155, name: background,       l0: ignore,  l1: region, india: false }
+  # L0 INFRA / L1 fixed: barriers + distinct pole types + pedestrian signal (HD mapping + localization)
+  - { id: 156, name: fence,            l0: infra,   l1: fixed, india: false }
+  - { id: 157, name: crash_barrier,    l0: infra,   l1: fixed, india: false }
+  - { id: 158, name: median_barrier,   l0: infra,   l1: fixed, india: false }
+  - { id: 159, name: pedestrian_signal, l0: infra,  l1: fixed, india: false }
+  - { id: 160, name: traffic_pole,     l0: infra,   l1: fixed, india: false }
+  - { id: 161, name: signal_pole,      l0: infra,   l1: fixed, india: false }
+  - { id: 162, name: light_pole,       l0: infra,   l1: fixed, india: false }
+  # L0 INFRA / L1 fixed: India bus-shelter subtypes
+  - { id: 163, name: bmtc_bus_shelter, l0: infra,   l1: fixed, india: true }
+  - { id: 164, name: metro_bus_stop,   l0: infra,   l1: fixed, india: true }
+  - { id: 165, name: school_bus_stop,  l0: infra,   l1: fixed, india: true }
+  - { id: 166, name: temp_bus_stop,    l0: infra,   l1: fixed, india: true }

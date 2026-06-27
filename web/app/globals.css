@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: #0b0c0e;
+  color: #e7e9eb;
+}
+
+/* Matte surfaces, hairline separators, depth from a single tone step (no shadows). */
+.panel {
+  background: #131519;
+  border: 1px solid #23262b;
+}
+
+.hairline {
+  border-color: #23262b;
+}
+
+/* Binary motion: one-frame confirm flash on accept, no easing-heavy transitions. */
+@keyframes confirm-flash {
+  0% { background-color: rgba(86, 211, 100, 0.35); }
+  100% { background-color: transparent; }
+}
+.confirm-flash {
+  animation: confirm-flash 120ms steps(1, end);
+}
+
+::selection {
+  background: rgba(255, 122, 47, 0.3);
+}
+
+/* Keyboard focus: a clear accent ring for accessibility, no motion. */
+:focus-visible {
+  outline: 1px solid rgba(255, 122, 47, 0.65);
+  outline-offset: 1px;
+}
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+/* Thin instrument-grade scrollbars so dense panels read as surfaces, not web pages. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2e34 transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2a2e34;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #3a3f46;
+}
+
+/* Horizontal nav scrolls without a visible bar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

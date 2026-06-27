@@ -1,0 +1,149 @@
+# LabeloxAV local infrastructure. Single-box edition: compose only, never Kubernetes.
+# Sized to coexist with the Python workers and one GPU process inside 32 GB RAM.
+
+name: labeloxav
+
+services:
+  postgres:
+    # PostGIS 16 + pgvector (db/Dockerfile.postgres). pgvector powers the embedding HNSW indexes.
+    build:
+      context: ./db
+      dockerfile: Dockerfile.postgres
+    image: labeloxav/postgis-pgvector:16-3.4
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-labelox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-labelox}
+      POSTGRES_DB: ${POSTGRES_DB:-labeloxav}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-labelox} -d ${POSTGRES_DB:-labeloxav}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 2g
+    shm_size: 512m
+
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-labelox}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-labelox123}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 1g
+
+  # One-shot: create the bucket so `docker compose up` leaves a ready store.
+  minio-init:
+    image: minio/mc:RELEASE.2024-10-08T09-37-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-labelox}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-labelox123}
+      MINIO_BUCKET: ${MINIO_BUCKET:-labeloxav}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
+      mc mb --ignore-existing local/$${MINIO_BUCKET};
+      mc anonymous set none local/$${MINIO_BUCKET};
+      echo 'bucket ready';
+      "
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 768m
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:29092,EXTERNAL://0.0.0.0:19092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:29092,EXTERNAL://localhost:19092
+    ports:
+      - "${REDPANDA_PORT:-19092}:19092"
+      - "${REDPANDA_ADMIN_PORT:-9644}:9644"
+    volumes:
+      - redpandadata:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 7s
+      timeout: 5s
+      retries: 20
+    mem_limit: 1500m
+
+  # lakeFS: git-like branch/commit/merge over the MinIO object store (Phase 4 M4.3). Single node, local
+  # metadata KV, blockstore = the existing MinIO. Auto-provisions the admin key on first boot so the
+  # Python client can connect with no manual setup.
+  lakefs:
+    image: treeverse/lakefs:1.33.0
+    user: root  # so it can create its metadata dir on the root-owned named volume
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      LAKEFS_INSTALLATION_USER_NAME: ${LAKEFS_USER:-admin}
+      LAKEFS_INSTALLATION_ACCESS_KEY_ID: ${LAKEFS_ACCESS_KEY:-AKIALABELOXAVKEY01}
+      LAKEFS_INSTALLATION_SECRET_ACCESS_KEY: ${LAKEFS_SECRET_KEY:-labeloxavlakefssecretkey0123456789abcd}
+      LAKEFS_DATABASE_TYPE: local
+      LAKEFS_DATABASE_LOCAL_PATH: /lakefs/metadata
+      LAKEFS_AUTH_ENCRYPT_SECRET_KEY: ${LAKEFS_ENCRYPT_SECRET:-labelox-lakefs-encrypt-secret-change-me}
+      LAKEFS_BLOCKSTORE_TYPE: s3
+      LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE: "true"
+      LAKEFS_BLOCKSTORE_S3_ENDPOINT: http://minio:9000
+      # the client runs on the host and cannot resolve the internal "minio" hostname, so route object
+      # data through the lakeFS server rather than handing back presigned MinIO URLs.
+      LAKEFS_BLOCKSTORE_S3_DISABLE_PRE_SIGNED: "true"
+      LAKEFS_BLOCKSTORE_S3_DISABLE_PRE_SIGNED_UI: "true"
+      LAKEFS_BLOCKSTORE_S3_DISCOVER_BUCKET_REGION: "false"
+      LAKEFS_BLOCKSTORE_S3_REGION: us-east-1
+      LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-labelox}
+      LAKEFS_BLOCKSTORE_S3_CREDENTIALS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-labelox123}
+    command: ["run"]
+    ports:
+      - "${LAKEFS_PORT:-8001}:8000"
+    volumes:
+      - lakefsdata:/lakefs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8000/_health || exit 1"]
+      interval: 7s
+      timeout: 5s
+      retries: 20
+    mem_limit: 768m
+
+volumes:
+  pgdata:
+  miniodata:
+  redisdata:
+  lakefsdata:
+  redpandadata:

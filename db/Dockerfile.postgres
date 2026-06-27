@@ -1,0 +1,8 @@
+# PostGIS 16 + pgvector. The base postgis image does not bundle pgvector, so install it from the PGDG
+# apt repo (already configured in the postgis image). Adds the `vector` extension for the Data
+# Intelligence Layer (SigLIP 2 + DINOv3 embeddings on HNSW indexes). Data lives in the pgdata volume, so
+# rebuilding this image and recreating the container preserves the corpus.
+FROM postgis/postgis:16-3.4
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-16-pgvector \
+    && rm -rf /var/lib/apt/lists/*
