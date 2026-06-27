@@ -20,6 +20,10 @@ Labeling that data by hand is slow and expensive. The cases that actually matter
 
 ## What it does
 
+**One annotation canvas.** Draw and adjust boxes, run promptable segmentation, edit lane splines and drivable area, toggle layers, and read each object's derived dynamics, all on a single keyboard driven surface. Click a wrong label and fix it in place, or add a brand new class on the fly. Here it is on a real Indian street, with a truck, an autorickshaw, a hatchback, and pedestrians.
+
+![Annotation canvas on a real Indian street](docs/screenshots/07-annotation-canvas.png)
+
 **Smart triage, not endless clicking.** Every detection gets a calibrated confidence and a reason. High confidence agrees get auto accepted. The uncertain, rare, and conflicting ones rise to the top of a priority queue. You spend your attention where it matters.
 
 ![Priority queue](docs/screenshots/03-triage.png)
@@ -91,6 +95,17 @@ make web      # http://localhost:3000
 Open the web app, pick a session, and start in the triage queue.
 
 ---
+
+## Models
+
+Detectors are trained on the India Driving Dataset and live in a versioned registry. The current baseline, on the IDD validation split:
+
+| Model | Backbone | mAP@50 | Precision | Notes |
+| --- | --- | --- | --- | --- |
+| idd-v1 | YOLO11l | 0.39 | 0.77 | 5 epochs, India 15 class |
+| idd-corpus-v1 | YOLO11l | 0.31 | 0.44 | 20 epochs |
+
+The model learns the common road agents well (bus, road, sedan, truck, motorcycle, rider, pedestrian all above 0.55 AP) and the rare India specific classes less so, which is exactly the gap the active learning loop is built to close. A size family is training now: YOLO11n for on vehicle edge inference and YOLO11l for accuracy, plus a general detector. Each lands in the registry as it finishes, gated by the champion and challenger promotion above.
 
 ## Honest status
 
