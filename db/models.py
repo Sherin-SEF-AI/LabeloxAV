@@ -763,3 +763,55 @@ class ObjectDynamics(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_object_dynamics_track", "track_id"), Index("ix_object_dynamics_frame", "frame_id"))
+
+
+# ---- LiDAR module (3D) ----
+class PointCloud(Base):
+    """One row per scan (real LiDAR) or per synthesized cloud (pseudo-LiDAR), from any source. ts_ns is on
+    the PPS base, so a cloud and the camera frames captured at the same ts_ns in the session are one query."""
+    __tablename__ = "point_cloud"
+
+    cloud_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)        # lidar | pseudo | dataset
+    cloud_uri: Mapped[str] = mapped_column(Text, nullable=False)            # compressed npz in the object store
+    point_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    depth_model: Mapped[str | None] = mapped_column(String(96))             # pinned checkpoint, for pseudo-LiDAR
+    calibration_version: Mapped[str | None] = mapped_column(String(64))
+    bounds: Mapped[dict | None] = mapped_column(JSONB)                      # 3D extent {min,max,n}
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_point_cloud_session_ts", "session_id", "ts_ns"),)
+
+
+class PointCloudDerived(Base):
+    """A cleaned or ground-removed variant of a cloud. Raw is immutable: derived variants never overwrite it."""
+    __tablename__ = "point_cloud_derived"
+
+    derived_id: Mapped[uuid.UUID] = _uuid_pk()
+    cloud_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("point_cloud.cloud_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)          # ground_removed | denoised | ground_plane
+    uri: Mapped[str] = mapped_column(Text, nullable=False)
+    method: Mapped[str] = mapped_column(String(48), nullable=False)
+    params: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_point_cloud_derived_cloud", "cloud_id"),)
+
+
+class LidarCalibrationValidation(Base):
+    """Extends the Phase 3 calibration concept to the LiDAR triple. A failing session is flagged and excluded
+    from 3D work until fixed, exactly as the 2D calibration validation does."""
+    __tablename__ = "lidar_calibration_validation"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    pair: Mapped[str] = mapped_column(String(24), nullable=False)          # lidar_camera | lidar_imu | lidar_radar
+    reproj_error: Mapped[float | None] = mapped_column(Float)
+    consistency: Mapped[dict] = mapped_column(JSONB, default=dict)
+    drift_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(8), nullable=False, default="pass")  # pass | warn | fail
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_lidar_calib_session", "session_id"),)

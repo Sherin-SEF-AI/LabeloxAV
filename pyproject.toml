@@ -31,6 +31,8 @@ dependencies = [
     "mcap==1.2.1",
     "mcap-protobuf-support==0.5.2",
     "protobuf==5.29.2",
+    "pypcd4==1.4.3",
+    "laspy[lazrs]==2.7.0",
     "click==8.1.8",
     "httpx==0.28.1",
     "scikit-learn==1.6.0",       # also used by cleanlab confident learning (Phase 4 M4.1)

@@ -419,6 +419,23 @@ class AuthSettings(BaseModel):
     enabled: bool = True
 
 
+class LidarSettings(BaseModel):
+    # 3D LiDAR module. The BluRabbit fleet is camera only, so pseudo-LiDAR (camera depth lift) is the
+    # default source; real LiDAR and public datasets normalize to the same internal cloud.
+    source_default: str = "pseudo"          # lidar | pseudo | dataset
+    depth_model: str = "depth-anything-v2-metric-hypersim-vitl"  # pinned metric depth checkpoint (pseudo-LiDAR)
+    ground_method: str = "ransac"           # patchwork | ransac
+    ground_dist_thresh_m: float = 0.2       # RANSAC plane inlier distance
+    ground_max_iter: int = 300
+    denoise_nb_neighbors: int = 20          # statistical outlier removal neighbourhood
+    denoise_std_ratio: float = 2.0          # statistical outlier removal std multiplier
+    denoise_radius_m: float = 0.5           # radius outlier removal radius
+    denoise_min_points: int = 8             # radius outlier removal minimum neighbours
+    voxel_size_m: float = 0.05              # voxel downsample for bulk operations
+    viewer_max_points: int = 400000         # decimation ceiling for interactive rendering
+    cloud_prefix: str = "clouds"            # object-store key prefix for stored clouds
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="LBX_",
@@ -452,6 +469,7 @@ class Settings(BaseSettings):
     paths: PathsSettings = PathsSettings()
     phase4: Phase4Settings = Phase4Settings()  # Phase 4 closed loop + governance
     auth: AuthSettings = AuthSettings()        # deny-by-default API auth
+    lidar: LidarSettings = LidarSettings()     # 3D LiDAR module (ingestion, clean, viewer)
 
     @classmethod
     def settings_customise_sources(

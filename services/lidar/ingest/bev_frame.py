@@ -1,6 +1,7 @@
-"""Ingest a LiDAR sweep as a BEV frame: store the raw point cloud, rasterize a bird's-eye image, and
-create a Session/Frame the editor renders. Oriented boxes drawn on the image lift to 3D cuboids using the
-stored BEV params and the point cloud (services.lidar.cuboids)."""
+"""Ingest a cloud as a BEV frame for the existing 2D editor: rasterize a bird's-eye image and create a
+Session/Frame, so oriented boxes drawn on the image lift to 3D cuboids (services.lidar.bev). This is the
+lightweight 2D-editor path; the full 3D viewer path is the point_cloud pipeline in this package.
+"""
 
 from __future__ import annotations
 
@@ -17,12 +18,7 @@ from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
 from services.lidar.bev import default_bev_params, rasterize_bev
 
-log = get_logger("lidar_ingest")
-
-
-def read_kitti_bin(data: bytes) -> np.ndarray:
-    """KITTI Velodyne .bin -> N x 4 float32 (x, y, z, intensity)."""
-    return np.frombuffer(data, dtype=np.float32).reshape(-1, 4)
+log = get_logger("lidar_bev_frame")
 
 
 async def ingest_lidar_sweep(points: np.ndarray, raw_bytes: bytes, name: str,
@@ -55,5 +51,5 @@ async def ingest_lidar_sweep(points: np.ndarray, raw_bytes: bytes, name: str,
         await db.flush()
         fid = f.frame_id
         await db.commit()
-    log.info("lidar.ingested", session=str(sid), frame=str(fid), points=int(points.shape[0]))
+    log.info("lidar.bev_ingested", session=str(sid), frame=str(fid), points=int(points.shape[0]))
     return {"session_id": str(sid), "frame_id": str(fid), "n_points": int(points.shape[0]), "bev": p}
