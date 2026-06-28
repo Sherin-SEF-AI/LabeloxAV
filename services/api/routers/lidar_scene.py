@@ -26,6 +26,39 @@ class AggregateIn(BaseModel):
     compute_target: str = "local"
 
 
+class Export3DIn(BaseModel):
+    session_ids: list[uuid.UUID] = []
+    states: list[str] = ["accepted", "auto_accept"]
+    class_names: list[str] = []
+    min_conf: float = 0.0
+    formats: list[str] = ["openlabel", "nuscenes", "kitti", "waymo"]
+    export_clouds: bool = False
+
+
+@router.post("/lidar/export3d")
+async def export3d(body: Export3DIn):
+    """Seal a 3D slice into a dataset commit and export it to OpenLABEL, nuScenes, KITTI, Waymo, and raw
+    clouds (LAS/PCD), with a provenance sidecar and a pinned commit (M-L3.4)."""
+    from services.lidar.export import Slice3D, export_3d_dataset
+    spec = Slice3D(session_ids=body.session_ids, states=body.states, class_names=body.class_names,
+                   min_conf=body.min_conf)
+    return await export_3d_dataset(spec, formats=body.formats, export_clouds=body.export_clouds)
+
+
+@router.get("/lidar/analytics3d")
+async def analytics3d():
+    """3D coverage metrics for the dashboard: object counts, point density, and 3D scene coverage (M-L3.4)."""
+    from services.lidar.export import metrics_3d
+    return await metrics_3d()
+
+
+@router.get("/lidar/search3d")
+async def search3d(q: str):
+    """Natural-language cloud search: clouds whose 3D objects co-occur with the classes named in the query."""
+    from services.lidar.export import search_clouds_3d
+    return await search_clouds_3d(q)
+
+
 @router.post("/lidar/aggregate")
 async def aggregate(body: AggregateIn):
     """Register, loop-close, and accumulate the clouds across sessions into a dense map (M-L3.2). Local on the
