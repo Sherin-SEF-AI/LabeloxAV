@@ -57,6 +57,51 @@ async def traverse(cloud_id: uuid.UUID):
     return res
 
 
+@router.post("/lidar/clouds/{cloud_id}/quality3d")
+async def quality3d(cloud_id: uuid.UUID):
+    """Run the mandatory 3D quality checker over a cloud's objects (floating, below-ground, impossible dims,
+    duplicate, misaligned, missing neighbour) and write quality_flag_3d rows (M-L3.3)."""
+    from services.lidar.quality3d import check_cloud
+    res = await check_cloud(cloud_id)
+    if res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@router.post("/lidar/quality3d/{flag_id}/confirm")
+async def confirm_quality3d(flag_id: uuid.UUID):
+    """Confirm a 3D quality flag: demote the flagged object back to review (the same loop as 2D)."""
+    from services.lidar.quality3d import confirm_flag
+    res = await confirm_flag(flag_id)
+    if res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@router.get("/lidar/clouds/{cloud_id}/quality3d")
+async def list_quality3d(cloud_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
+    from db.models import QualityFlag3D
+    rows = (await db.execute(select(QualityFlag3D).where(QualityFlag3D.cloud_id == cloud_id)
+            .order_by(QualityFlag3D.score.desc()))).scalars().all()
+    return {"cloud_id": str(cloud_id), "flags": [{"flag_id": str(f.flag_id), "kind": f.kind, "score": f.score,
+            "status": f.status, "object_3d_id": str(f.object_3d_id) if f.object_3d_id else None,
+            "detail": f.detail} for f in rows]}
+
+
+@router.post("/lidar/sessions/{session_id}/scene3d")
+async def scene3d(session_id: uuid.UUID):
+    """Classify the 3D structure (tunnel/flyover/open) of a session and merge it into Frame.scene (M-L3.3)."""
+    from services.lidar.quality3d import classify_session_3d
+    return await classify_session_3d(session_id)
+
+
+@router.post("/lidar/sessions/{session_id}/rare3d")
+async def rare3d(session_id: uuid.UUID):
+    """Mine 3D rare cues (flooded road, animal, emergency vehicle, debris) into ScenarioCandidate rows."""
+    from services.lidar.quality3d import mine_session_3d
+    return await mine_session_3d(session_id)
+
+
 @router.get("/lidar/sessions/{session_id}/static_elements")
 async def list_static_elements(session_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
     rows = (await db.execute(select(StaticElement).where(StaticElement.session_id == session_id)
