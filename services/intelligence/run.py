@@ -18,8 +18,8 @@ from core.logging import get_logger, setup_logging
 from db.models import Frame, Object, Scenario, Track
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
-from services.intelligence.events import detect_events
 from services.autolabel.track.tracker import track_camera_botsort
+from services.intelligence.events import detect_events
 from services.intelligence.tracking import Det, track_camera
 from services.intelligence.trajectory import FrameCtx, build_trajectory
 

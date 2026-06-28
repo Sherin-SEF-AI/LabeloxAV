@@ -43,7 +43,7 @@ class BBox(BaseModel):
         return [self.x1, self.y1, self.x2, self.y2]
 
     @classmethod
-    def from_list(cls, v: list[float]) -> "BBox":
+    def from_list(cls, v: list[float]) -> BBox:
         return cls(x1=v[0], y1=v[1], x2=v[2], y2=v[3])
 
     @property

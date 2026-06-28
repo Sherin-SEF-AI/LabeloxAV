@@ -111,6 +111,16 @@ def test_triage_surfaces_rare_lowconf_with_reason():
 
 
 @requires_infra
+def test_session_stats_and_first_frame():
+    sid, fid, oid = _seed()
+    with _client() as c:
+        stats = c.get(f"/api/sessions/{sid}/stats").json()
+        assert stats["frames"] >= 1 and "by_state" in stats and 0.0 <= stats["progress"] <= 1.0
+        ff = c.get(f"/api/sessions/{sid}/first-frame").json()
+        assert ff["frame_id"] == str(fid)
+
+
+@requires_infra
 def test_object_detail_and_image_proxy():
     sid, fid, oid = _seed()
     with _client() as c:
@@ -151,6 +161,24 @@ def test_review_persists_correction_and_writes_review_row():
 
     state, source, overload, n = run_async(_check())
     assert (state, source, overload, n) == ("accepted", "human", True, 1)
+
+
+@requires_infra
+def test_review_optimistic_lock_rejects_stale_write():
+    """R3: a review carrying a stale expected_version is rejected (409); the up-to-date one succeeds."""
+    sid, fid, oid = _seed()
+    with _client() as c:
+        v0 = c.get(f"/api/objects/{oid}").json()["version"]
+        # first edit at the loaded version succeeds and advances the version
+        r1 = c.post(f"/api/objects/{oid}/review",
+                    json={"action": "confirm", "state": "accepted", "expected_version": v0})
+        assert r1.status_code == 200 and r1.json()["version"] == v0 + 1
+        # a second editor still on the old version is refused
+        r2 = c.post(f"/api/objects/{oid}/review",
+                    json={"action": "confirm", "state": "accepted", "expected_version": v0})
+        assert r2.status_code == 409
+        # without a version (legacy clients) the write still goes through
+        assert c.post(f"/api/objects/{oid}/review", json={"action": "confirm", "state": "accepted"}).status_code == 200
 
 
 @requires_infra

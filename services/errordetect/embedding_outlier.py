@@ -42,7 +42,7 @@ async def detect_embedding_outliers(db: AsyncSession, session_id: str | None = N
         centroid /= np.linalg.norm(centroid) + 1e-9
         dist = 1.0 - mat @ centroid  # cosine distance to the class centroid
         thresh = float(np.percentile(dist, pct))
-        for (oid, _), d in zip(members, dist):
+        for (oid, _), d in zip(members, dist, strict=False):
             if d > thresh and d > 0.35:  # also an absolute floor so tight clusters do not over-flag
                 out.append({"object_id": oid, "kind": "embedding_outlier", "score": round(float(d), 4),
                             "proposed_label": None,

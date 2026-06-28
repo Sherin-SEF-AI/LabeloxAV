@@ -31,6 +31,7 @@ async def run(session_id: str):
 
 @router.get("/discovery/queue")
 async def queue(state: str = "pending", limit: int = 200, db: AsyncSession = Depends(db_session)):
+    limit = min(max(limit, 1), 1000)
     rows = (await db.execute(
         select(ScenarioCandidate, Frame.session_id, DbSession.vehicle_id)
         .join(Frame, Frame.frame_id == ScenarioCandidate.frame_id)
@@ -46,12 +47,12 @@ async def queue(state: str = "pending", limit: int = 200, db: AsyncSession = Dep
 
 
 @router.post("/discovery/{candidate_id}/state")
-async def set_state(candidate_id: str, body: CandidateStateIn, db: AsyncSession = Depends(db_session)):
-    cand = await db.get(ScenarioCandidate, UUID(candidate_id))
+async def set_state(candidate_id: UUID, body: CandidateStateIn, db: AsyncSession = Depends(db_session)):
+    cand = await db.get(ScenarioCandidate, candidate_id)
     if cand is None:
         raise HTTPException(404, "candidate not found")
     cand.state = body.state
     if body.tag is not None:
         cand.tag = body.tag
     await db.commit()
-    return {"candidate_id": candidate_id, "state": cand.state, "tag": cand.tag}
+    return {"candidate_id": str(candidate_id), "state": cand.state, "tag": cand.tag}

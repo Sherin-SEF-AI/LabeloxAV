@@ -30,3 +30,6 @@ class ExportRecord:
     track_id: UUID | None = None
     attrs: dict = field(default_factory=dict)
     provenance: dict = field(default_factory=dict)
+    cuboid_3d: dict | None = None  # ego-frame {center,size,yaw} when a 3D label exists
+    rot_deg: float = 0.0           # oriented-box rotation about the box centre (0 = axis-aligned)
+    keypoints: dict | None = None  # COCO-style {"skeleton","points":[[x,y,v],...]} pose, when present

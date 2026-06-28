@@ -39,6 +39,18 @@ class ObjectStore:
             config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
             region_name="us-east-1",
         )
+        # Presigned URLs are handed to browsers/buyers, so they must point at the public endpoint, not
+        # the internal one. When no public endpoint is configured, sign against the internal client.
+        self._sign_client = self._client
+        if m.public_endpoint and m.public_endpoint != m.endpoint:
+            self._sign_client = boto3.client(
+                "s3",
+                endpoint_url=m.public_endpoint,
+                aws_access_key_id=m.access_key,
+                aws_secret_access_key=m.secret_key,
+                config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+                region_name="us-east-1",
+            )
 
     def ensure_bucket(self) -> None:
         try:
@@ -95,8 +107,15 @@ class ObjectStore:
         except ClientError:
             return False
 
+    def remove(self, uri_or_key: str) -> None:
+        """Best-effort delete of a single object (used to clean orphaned masks on idempotent re-runs)."""
+        try:
+            self._client.delete_object(Bucket=self.bucket, Key=self._key(uri_or_key))
+        except ClientError:
+            pass
+
     def presigned_get(self, uri_or_key: str, expires: int = 3600) -> str:
-        return self._client.generate_presigned_url(
+        return self._sign_client.generate_presigned_url(
             "get_object",
             Params={"Bucket": self.bucket, "Key": self._key(uri_or_key)},
             ExpiresIn=expires,
@@ -108,7 +127,7 @@ class ObjectStore:
 
     def presigned_put(self, key: str, content_type: str = "application/octet-stream", expires: int = 3600) -> str:
         """Single-shot presigned PUT for small files (no multipart overhead)."""
-        return self._client.generate_presigned_url(
+        return self._sign_client.generate_presigned_url(
             "put_object",
             Params={"Bucket": self.bucket, "Key": key, "ContentType": content_type},
             ExpiresIn=expires,
@@ -119,7 +138,7 @@ class ObjectStore:
         return resp["UploadId"]
 
     def presign_part(self, key: str, upload_id: str, part_number: int, expires: int = 3600) -> str:
-        return self._client.generate_presigned_url(
+        return self._sign_client.generate_presigned_url(
             "upload_part",
             Params={"Bucket": self.bucket, "Key": key, "UploadId": upload_id, "PartNumber": part_number},
             ExpiresIn=expires,

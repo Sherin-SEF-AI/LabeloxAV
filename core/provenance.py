@@ -37,9 +37,8 @@ def build_provenance(
 
 async def walk_provenance(session: AsyncSession, object_id: UUID) -> dict:
     """Return the complete lineage chain for one object. Raises if the chain is broken."""
-    from db.models import DatasetCommit, Frame, Object, Review
+    from db.models import DatasetCommit, Frame, Object, Review, Track
     from db.models import Session as DbSession
-    from db.models import Track
 
     obj = await session.get(Object, object_id)
     if obj is None:

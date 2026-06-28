@@ -25,7 +25,9 @@ from db.models import DatasetCommit, Frame, Object
 from db.models import Session as DbSession
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
+from services.export.adapter_bdd import write_bdd
 from services.export.adapter_coco import write_coco
+from services.export.adapter_kitti import write_kitti
 from services.export.adapter_nuscenes import write_nuscenes
 from services.export.adapter_openlabel import write_openlabel
 from services.export.adapter_parquet import write_parquet
@@ -100,6 +102,9 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
                 track_id=obj.track_id,
                 attrs=obj.attrs or {},
                 provenance=obj.provenance or {},
+                cuboid_3d=obj.cuboid_3d,
+                rot_deg=obj.rot_deg or 0.0,
+                keypoints=obj.keypoints,
             )
         )
     return records
@@ -145,6 +150,10 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
         written.append(write_openlabel(records, onto, store, out_dir / "openlabel"))
     if "nuscenes" in spec.formats:
         written.append(write_nuscenes(records, onto, out_dir / "nuscenes"))
+    if "kitti" in spec.formats:
+        written.append(write_kitti(records, onto, out_dir / "kitti"))
+    if "bdd" in spec.formats:
+        written.append(write_bdd(records, onto, out_dir / "bdd"))
 
     prefix = f"datasets/{spec.name}/{commit_id}"
     export_uris = _upload_dir(store, prefix, out_dir)

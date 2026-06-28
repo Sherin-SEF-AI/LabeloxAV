@@ -5,11 +5,18 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from uuid import UUID
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.session import get_sessionmaker
+
+# Role hierarchy: a higher rank satisfies any floor at or below it. admin is the superuser.
+ROLE_RANK = {"annotator": 1, "reviewer": 2, "admin": 3}
+
+
+def role_rank(role: str | None) -> int:
+    return ROLE_RANK.get(role or "", 0)
 
 
 async def db_session() -> AsyncIterator[AsyncSession]:
@@ -19,7 +26,7 @@ async def db_session() -> AsyncIterator[AsyncSession]:
 
 async def current_user(x_lbx_user_id: str | None = Header(default=None), db: AsyncSession = Depends(db_session)):
     """The acting user, chosen client-side (lightweight, no password). Returns the User row or None.
-    Sent as the X-Lbx-User-Id header by the web client."""
+    Sent as the X-Lbx-User-Id header by the web client. Open (read) endpoints may receive None."""
     from db.models import User
 
     if not x_lbx_user_id:
@@ -28,6 +35,24 @@ async def current_user(x_lbx_user_id: str | None = Header(default=None), db: Asy
         return await db.get(User, UUID(x_lbx_user_id))
     except Exception:  # noqa: BLE001
         return None
+
+
+async def require_user(user=Depends(current_user)):
+    """Dependency that rejects unauthenticated callers (401). Use on any state-changing route."""
+    if user is None:
+        raise HTTPException(status_code=401, detail="authentication required (X-Lbx-User-Id)")
+    return user
+
+
+def require_role(min_role: str):
+    """Dependency factory: require the acting user to hold at least `min_role` (else 403)."""
+
+    async def _dep(user=Depends(require_user)):
+        if role_rank(user.role) < role_rank(min_role):
+            raise HTTPException(status_code=403, detail=f"requires {min_role} role or higher")
+        return user
+
+    return _dep
 
 
 class OntologyClassOut(BaseModel):
@@ -69,6 +94,9 @@ class ObjectDetail(BaseModel):
     state: str
     source: str
     provenance: dict
+    version: int = 1
+    rot_deg: float = 0.0
+    keypoints: dict | None = None
 
 
 class ReviewIn(BaseModel):
@@ -79,6 +107,10 @@ class ReviewIn(BaseModel):
     attrs: dict | None = None
     state: str | None = None
     time_spent_ms: int = 0
+    expected_version: int | None = None  # optimistic lock: 409 if the object moved on under the editor
+    rot_deg: float | None = None         # oriented-box rotation (only updated when provided)
+    keypoints: dict | None = None        # keypoints/skeleton (only updated when provided)
+    mask_polygons: list[list[float]] | None = None  # write the mask in the same request (atomic save)
 
 
 class SegmentIn(BaseModel):
@@ -90,10 +122,13 @@ class SegmentIn(BaseModel):
 
 class CreateObjectIn(BaseModel):
     class_name: str
-    bbox: list[float]                              # xyxy pixel
+    bbox: list[float]                              # xyxy pixel (axis-aligned AABB)
     attrs: dict = {}
     mask_polygons: list[list[float]] | None = None  # flattened [x,y,x,y,...] per polygon
     state: str = "accepted"
+    idem_key: str | None = None                    # client temp id; de-dupes a retried/raced create
+    rot_deg: float = 0.0                           # oriented-box rotation about the box centre
+    keypoints: dict | None = None                  # {"skeleton": str, "points": [[x,y,v],...]} image px
 
 
 class MaskIn(BaseModel):

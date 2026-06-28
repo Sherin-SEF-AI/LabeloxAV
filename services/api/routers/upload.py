@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from core.storage import get_object_store
 from services.api.deps import (
@@ -25,6 +25,14 @@ def _key(filename: str) -> str:
     return f"uploads/{uuid.uuid4()}/{safe}"
 
 
+def _require_upload_key(key: str) -> str:
+    """Reject any client-supplied key that is not under uploads/. Without this, sign/complete/abort
+    would presign or mutate arbitrary bucket keys (models/, frames/, masks/) -- an object-store IDOR."""
+    if not isinstance(key, str) or not key.startswith("uploads/") or ".." in key:
+        raise HTTPException(400, "key must be an uploads/ object created via /upload/init")
+    return key
+
+
 @router.post("/upload/init")
 async def init(payload: MultipartInitIn):
     store = get_object_store()
@@ -36,19 +44,19 @@ async def init(payload: MultipartInitIn):
 
 @router.post("/upload/sign")
 async def sign(payload: MultipartSignIn):
-    url = get_object_store().presign_part(payload.key, payload.upload_id, payload.part_number)
+    url = get_object_store().presign_part(_require_upload_key(payload.key), payload.upload_id, payload.part_number)
     return {"url": url, "part_number": payload.part_number}
 
 
 @router.post("/upload/complete")
 async def complete(payload: MultipartCompleteIn):
-    uri = get_object_store().complete_multipart(payload.key, payload.upload_id, payload.parts)
+    uri = get_object_store().complete_multipart(_require_upload_key(payload.key), payload.upload_id, payload.parts)
     return {"uri": uri, "key": payload.key}
 
 
 @router.post("/upload/abort")
 async def abort(payload: MultipartAbortIn):
-    get_object_store().abort_multipart(payload.key, payload.upload_id)
+    get_object_store().abort_multipart(_require_upload_key(payload.key), payload.upload_id)
     return {"ok": True}
 
 

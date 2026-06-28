@@ -38,11 +38,11 @@ async def detect_confident_learning(db: AsyncSession, session_id: str | None = N
 
     # keep only classes with enough samples for cross-validation, then densify labels to 0..K-1
     uniq, counts = np.unique(y_raw, return_counts=True)
-    keep = set(int(c) for c, n in zip(uniq, counts) if n >= min_per_class)
+    keep = set(int(c) for c, n in zip(uniq, counts, strict=False) if n >= min_per_class)
     if len(keep) < 2:
         return []
     mask = np.array([c in keep for c in y_raw])
-    oids = [o for o, m in zip(oids, mask) if m]
+    oids = [o for o, m in zip(oids, mask, strict=False) if m]
     y_raw, X = y_raw[mask], X[mask]
     classes = sorted(keep)
     idx = {c: i for i, c in enumerate(classes)}

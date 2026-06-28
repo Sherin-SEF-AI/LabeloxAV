@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 
 from services.autolabel.ontology import Ontology
@@ -20,6 +21,18 @@ from services.export.records import ExportRecord
 
 IDENTITY_QUAT = [1.0, 0.0, 0.0, 0.0]
 ZERO3 = [0.0, 0.0, 0.0]
+
+
+def _box3d(cuboid: dict | None) -> tuple[list[float], list[float], list[float], bool]:
+    """nuScenes (translation, size, rotation, is_real) from an ego-frame cuboid {center,size,yaw}.
+    rotation is the yaw quaternion [w,x,y,z] about the vertical axis. Returns placeholders when absent."""
+    if not cuboid or not cuboid.get("center") or not cuboid.get("size"):
+        return ZERO3, ZERO3, IDENTITY_QUAT, False
+    center = [round(float(x), 3) for x in cuboid["center"]]
+    size = [round(float(x), 3) for x in cuboid["size"]]
+    yaw = float(cuboid.get("yaw", 0.0))
+    rotation = [round(math.cos(yaw / 2), 6), 0.0, 0.0, round(math.sin(yaw / 2), 6)]
+    return center, size, rotation, True
 
 
 def _tok(kind: str, key: str) -> str:
@@ -136,10 +149,11 @@ def build_nuscenes(records: list[ExportRecord], onto: Ontology) -> dict[str, lis
             attr_tokens = [attr_tok[k] for k, v in (r.attrs or {}).items() if v is True and k in attr_tok]
             occ = (r.attrs or {}).get("occlusion")
             vis = {0: "4", 25: "3", 50: "2", 75: "1", 100: "1"}.get(occ, "4")
+            translation, size, rotation, has3d = _box3d(r.cuboid_3d)
             annotation_t.append({
                 "token": ann_tokens[j], "sample_token": str(r.frame_id).replace("-", ""),
                 "instance_token": inst_tok, "visibility_token": vis, "attribute_tokens": attr_tokens,
-                "translation": ZERO3, "size": ZERO3, "rotation": IDENTITY_QUAT,
+                "translation": translation, "size": size, "rotation": rotation, "lbx_has_3d": has3d,
                 "num_lidar_pts": 0, "num_radar_pts": 0,
                 "prev": ann_tokens[j - 1] if j > 0 else "", "next": ann_tokens[j + 1] if j < len(members_sorted) - 1 else "",
                 "lbx_bbox2d": [round(v, 2) for v in r.bbox],  # non-standard: the real 2D box
@@ -159,12 +173,14 @@ def write_nuscenes(records: list[ExportRecord], onto: Ontology, out_dir: Path) -
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, rows in tables.items():
         (out_dir / f"{name}.json").write_text(json.dumps(rows, indent=2))
+    n3d = sum(1 for r in records if r.cuboid_3d)
     (out_dir / "LIMITATIONS.md").write_text(
         "# nuScenes export scope\n\n"
-        "This is a 2D single-camera export in nuScenes table shape. 3D fields "
-        "(translation/size/rotation, camera_intrinsic, ego pose) are identity placeholders; the real "
-        "2D box is in the non-standard `lbx_bbox2d` field on each sample_annotation. Full nuScenes "
-        "fidelity (3D boxes, ego pose, calibrated sensors) arrives with the LiDAR + calibration seam. "
-        "The Parquet provenance sidecar is the lossless source of truth.\n"
+        "nuScenes table shape over a single camera. Each sample_annotation carries the real 2D box in the "
+        "non-standard `lbx_bbox2d` field. When an object has a 3D cuboid label its translation/size/rotation "
+        "are real (ego-frame metres, yaw quaternion) and `lbx_has_3d` is true; otherwise they are identity "
+        f"placeholders. This export has {n3d} of {len(records)} annotations with a real 3D box. Global ego "
+        "pose and calibrated sensors arrive with the LiDAR + calibration seam. The Parquet provenance "
+        "sidecar is the lossless source of truth.\n"
     )
     return out_dir

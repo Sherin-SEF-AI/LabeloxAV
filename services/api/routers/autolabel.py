@@ -81,8 +81,8 @@ async def start(payload: AutolabelStartIn, db: AsyncSession = Depends(db_session
 
 
 @router.get("/autolabel/{job_id}")
-async def status(job_id: str, db: AsyncSession = Depends(db_session)):
-    j = await db.get(AutolabelJob, uuid.UUID(job_id))
+async def status(job_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
+    j = await db.get(AutolabelJob, job_id)
     if j is None:
         raise HTTPException(404, "autolabel job not found")
     return _job_dict(j)

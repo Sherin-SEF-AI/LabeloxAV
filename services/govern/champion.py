@@ -37,13 +37,19 @@ def _map(m: dict) -> float:
 
 
 def champion_gate(challenger: dict, champion: dict | None, onto, cfg, safety_class_drop: float = 0.15) -> dict:
-    """Pure promotion decision. Never promote on a safety-class or Safe-mIoU regression."""
+    """Pure promotion decision. Fail-closed: a challenger that cannot prove its safety (no Safe-mIoU)
+    is never promoted, and a safety-class or Safe-mIoU regression always blocks."""
     map_c, map_ch = _map(challenger), _map(champion or {})
     beats_map = map_c >= map_ch + cfg.min_map_uplift
 
     sm_c, sm_ch = challenger.get("safe_miou"), (champion or {}).get("safe_miou")
-    safe_ok = True
-    if sm_c is not None and sm_ch is not None:
+    # A missing challenger Safe-mIoU is a fail, not a silent pass: we cannot verify it did not regress
+    # safety, so we refuse. With an incumbent baseline present, enforce the max-drop floor.
+    if sm_c is None:
+        safe_ok = False
+    elif sm_ch is None:
+        safe_ok = True  # no incumbent baseline to regress against
+    else:
         safe_ok = sm_c >= sm_ch - cfg.safe_miou_max_drop
 
     pc_c = challenger.get("per_class", {}) or {}
@@ -52,15 +58,21 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, safety_cla
                  if _is_safety_class(cn, onto) and pc_c.get(cn, 0.0) < ap - safety_class_drop]
     safety_ok = not regressed
 
-    reasons: list[str] = []
     if champion is None:
-        return {"promote": True, "beats_map": True, "map_delta": round(map_c, 4), "safe_ok": True,
-                "safety_ok": True, "regressed_safety": [], "reasons": ["no incumbent; first champion"]}
+        # First champion still must clear the safety floor: require a present Safe-mIoU (fail-closed).
+        promote = sm_c is not None
+        reasons = (["no incumbent; first champion (Safe-mIoU present)"] if promote
+                   else ["no incumbent but challenger lacks Safe-mIoU; refused (fail-closed)"])
+        return {"promote": promote, "beats_map": True, "map_delta": round(map_c, 4), "safe_ok": promote,
+                "safety_ok": True, "regressed_safety": [], "reasons": reasons}
+
     promote = bool(beats_map and safe_ok and safety_ok)
+    reasons: list[str] = []
     if not beats_map:
         reasons.append(f"does not beat champion mAP ({map_c:.3f} vs {map_ch:.3f})")
     if not safe_ok:
-        reasons.append(f"Safe-mIoU regressed ({sm_c} vs {sm_ch})")
+        reasons.append("challenger lacks Safe-mIoU (fail-closed)" if sm_c is None
+                       else f"Safe-mIoU regressed ({sm_c} vs {sm_ch})")
     if not safety_ok:
         reasons.append(f"safety-class regression: {regressed}")
     if promote:

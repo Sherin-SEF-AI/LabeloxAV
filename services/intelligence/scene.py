@@ -13,7 +13,6 @@ import numpy as np
 from sqlalchemy import select, update
 
 from core.bus import TOPIC_SCENE_READY, EventBus
-from core.config import get_settings
 from core.logging import get_logger
 from db.models import Frame, FrameEmbedding
 from db.session import get_sessionmaker

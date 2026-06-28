@@ -5,7 +5,8 @@ executor (services/training/jobs.run_job) drives build -> train -> evaluate -> g
 
 from __future__ import annotations
 
-from typing import Callable, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import Protocol, runtime_checkable
 
 # Progress is reported as a dict, e.g. {"stage": "train", "epoch": 3, "total_epochs": 20,
 # "metrics": {"map50": 0.41}}. The executor persists it onto the training_job row.

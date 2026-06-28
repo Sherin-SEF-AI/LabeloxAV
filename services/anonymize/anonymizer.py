@@ -41,13 +41,21 @@ class PiiAnonymizer:
         self.plate = (
             plate_detector if plate_detector is not None else PlateDetector(cfg.plate_weights, cfg.plate_conf, cfg.device)
         )
-        # Fail loud when the gate is on but no face detector is available: storing un-anonymized
-        # frames would create a legally-unsellable dataset (DPDPA). Plates may be unavailable
-        # (faces still blur), but a total absence of detection is unacceptable.
-        if cfg.enabled and not self.face.available and not self.plate.available:
+        # Fail loud when the gate is on but a required detector is unavailable: storing un-anonymized
+        # frames would create a legally-unsellable dataset (DPDPA). Faces are always required. Plates are
+        # required by default (plate_mandatory) so an absent plate model can never silently pass plates
+        # through in the clear; opting out is an explicit, audited choice for face-only corpora.
+        if cfg.enabled and not self.face.available:
             raise RuntimeError(
-                "PII gate enabled but no face/plate detector available. Run `make pii-models` "
+                "PII gate enabled but the face detector is unavailable. Run `make pii-models` "
                 "or set LBX_PII__ENABLED=false (audited opt-out)."
+            )
+        if cfg.enabled and cfg.plate_mandatory and not self.plate.available:
+            raise RuntimeError(
+                f"PII gate enabled but the license-plate detector is unavailable; plates would reach the "
+                f"object store un-blurred (DPDPA). Provide plate weights at {cfg.plate_weights} "
+                f"(run `make pii-models`), or set LBX_PII__PLATE_MANDATORY=false for a provably face-only "
+                f"corpus (audited opt-out)."
             )
         self.method_version = (
             f"{Path(cfg.face_weights).stem}+{Path(cfg.plate_weights).stem}@{cfg.blur_method}-k{cfg.kernel}"

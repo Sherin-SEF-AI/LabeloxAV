@@ -57,8 +57,8 @@ async def _store_mask(db, frame, classes, width, height, coverage, model, source
 
 
 @router.post("/frames/{frame_id}/drivable")
-async def segment_frame(frame_id: str, db: AsyncSession = Depends(db_session)):
-    frame = await db.get(Frame, UUID(frame_id))
+async def segment_frame(frame_id: UUID, db: AsyncSession = Depends(db_session)):
+    frame = await db.get(Frame, frame_id)
     if frame is None:
         raise HTTPException(404, "frame not found")
     img = _decode(get_object_store(), frame.img_uri)
@@ -66,12 +66,12 @@ async def segment_frame(frame_id: str, db: AsyncSession = Depends(db_session)):
         raise HTTPException(500, "could not decode frame image")
     out = segment_drivable(img)
     uri = await _store_mask(db, frame, out["classes"], out["width"], out["height"], out["coverage"], out["model"], "proposed")
-    return {"frame_id": frame_id, "coverage": out["coverage"], "mask_uri": uri, "model": out["model"]}
+    return {"frame_id": str(frame_id), "coverage": out["coverage"], "mask_uri": uri, "model": out["model"]}
 
 
 @router.get("/frames/{frame_id}/drivable")
-async def get_drivable(frame_id: str, db: AsyncSession = Depends(db_session)):
-    dm = await db.get(DrivableMask, UUID(frame_id))
+async def get_drivable(frame_id: UUID, db: AsyncSession = Depends(db_session)):
+    dm = await db.get(DrivableMask, frame_id)
     if dm is None:
         return {"found": False}
     data = json.loads(get_object_store().get_bytes(dm.mask_uri))
@@ -80,10 +80,10 @@ async def get_drivable(frame_id: str, db: AsyncSession = Depends(db_session)):
 
 
 @router.put("/frames/{frame_id}/drivable")
-async def refine_drivable(frame_id: str, body: DrivableIn, db: AsyncSession = Depends(db_session)):
-    frame = await db.get(Frame, UUID(frame_id))
+async def refine_drivable(frame_id: UUID, body: DrivableIn, db: AsyncSession = Depends(db_session)):
+    frame = await db.get(Frame, frame_id)
     if frame is None:
         raise HTTPException(404, "frame not found")
     cov = _coverage(body.classes, body.width, body.height)
     uri = await _store_mask(db, frame, body.classes, body.width, body.height, cov, "human", "human")
-    return {"frame_id": frame_id, "coverage": cov, "mask_uri": uri}
+    return {"frame_id": str(frame_id), "coverage": cov, "mask_uri": uri}

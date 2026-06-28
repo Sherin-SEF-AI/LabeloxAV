@@ -39,14 +39,14 @@ def _row(lane: Lane) -> dict:
 
 
 @router.get("/frames/{frame_id}/lanes")
-async def list_lanes(frame_id: str, db: AsyncSession = Depends(db_session)):
-    rows = (await db.execute(select(Lane).where(Lane.frame_id == UUID(frame_id)))).scalars().all()
+async def list_lanes(frame_id: UUID, db: AsyncSession = Depends(db_session)):
+    rows = (await db.execute(select(Lane).where(Lane.frame_id == frame_id))).scalars().all()
     return [_row(lane) for lane in rows]
 
 
 @router.post("/frames/{frame_id}/lanes/propose")
-async def propose(frame_id: str, db: AsyncSession = Depends(db_session)):
-    frame = await db.get(Frame, UUID(frame_id))
+async def propose(frame_id: UUID, db: AsyncSession = Depends(db_session)):
+    frame = await db.get(Frame, frame_id)
     if frame is None:
         raise HTTPException(404, "frame not found")
     img = _decode(get_object_store(), frame.img_uri)
@@ -68,8 +68,8 @@ async def propose(frame_id: str, db: AsyncSession = Depends(db_session)):
 
 
 @router.post("/frames/{frame_id}/lanes")
-async def create_lane(frame_id: str, body: LaneIn, db: AsyncSession = Depends(db_session)):
-    frame = await db.get(Frame, UUID(frame_id))
+async def create_lane(frame_id: UUID, body: LaneIn, db: AsyncSession = Depends(db_session)):
+    frame = await db.get(Frame, frame_id)
     if frame is None:
         raise HTTPException(404, "frame not found")
     lane = Lane(frame_id=frame.frame_id, session_id=frame.session_id, control_points=body.control_points,
@@ -82,8 +82,8 @@ async def create_lane(frame_id: str, body: LaneIn, db: AsyncSession = Depends(db
 
 
 @router.put("/lanes/{lane_id}")
-async def update_lane(lane_id: str, body: LaneIn, db: AsyncSession = Depends(db_session)):
-    lane = await db.get(Lane, UUID(lane_id))
+async def update_lane(lane_id: UUID, body: LaneIn, db: AsyncSession = Depends(db_session)):
+    lane = await db.get(Lane, lane_id)
     if lane is None:
         raise HTTPException(404, "lane not found")
     lane.control_points, lane.lane_type, lane.is_ego, lane.source = body.control_points, body.lane_type, body.is_ego, "human"
@@ -92,19 +92,19 @@ async def update_lane(lane_id: str, body: LaneIn, db: AsyncSession = Depends(db_
 
 
 @router.delete("/lanes/{lane_id}")
-async def delete_lane(lane_id: str, db: AsyncSession = Depends(db_session)):
-    lane = await db.get(Lane, UUID(lane_id))
+async def delete_lane(lane_id: UUID, db: AsyncSession = Depends(db_session)):
+    lane = await db.get(Lane, lane_id)
     if lane is None:
         raise HTTPException(404, "lane not found")
     await db.delete(lane)
     await db.commit()
-    return {"deleted": lane_id}
+    return {"deleted": str(lane_id)}
 
 
 @router.post("/frames/{frame_id}/lanes/propagate")
-async def propagate(frame_id: str, frames: int = 8, db: AsyncSession = Depends(db_session)):
+async def propagate(frame_id: UUID, frames: int = 8, db: AsyncSession = Depends(db_session)):
     """Carry this frame's lanes forward via optical flow; the annotator only fixes keyframes."""
-    frame = await db.get(Frame, UUID(frame_id))
+    frame = await db.get(Frame, frame_id)
     if frame is None:
         raise HTTPException(404, "frame not found")
     store = get_object_store()

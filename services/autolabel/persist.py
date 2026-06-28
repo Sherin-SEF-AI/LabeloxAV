@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import uuid
 
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.bus import TOPIC_OBJECT_GATED, EventBus
@@ -20,9 +21,25 @@ from services.autolabel.paths.path_b_sam3 import polygons_from_mask
 
 log = get_logger("persist")
 
+# Re-running autolabel on a frame must replace only its own machine output, never human work. These are
+# the machine-written sources; an object a human has touched becomes source="human" and is preserved.
+_MACHINE_SOURCES = (ObjectSource.fused.value, ObjectSource.auto_accept.value)
+
 
 def _mask_key(session_id, frame_id, object_id) -> str:
     return f"masks/{session_id}/{frame_id}/{object_id}.json"
+
+
+async def _clear_machine_objects(db: AsyncSession, store: ObjectStore, frame: FrameMeta) -> None:
+    """Idempotency: drop this frame's prior machine objects (and their mask blobs) before re-inserting,
+    so a re-run does not duplicate. Human-reviewed objects (source='human') are never touched."""
+    rows = (await db.execute(
+        select(Object.mask_uri).where(Object.frame_id == frame.frame_id, Object.source.in_(_MACHINE_SOURCES))
+    )).all()
+    for (mask_uri,) in rows:
+        if mask_uri:
+            store.remove(mask_uri)
+    await db.execute(delete(Object).where(Object.frame_id == frame.frame_id, Object.source.in_(_MACHINE_SOURCES)))
 
 
 async def persist_frame_objects(
@@ -33,6 +50,7 @@ async def persist_frame_objects(
     fused: list[FusedObject],
 ) -> dict[str, int]:
     by_state: dict[str, int] = {}
+    await _clear_machine_objects(db, store, frame)
 
     for fo in fused:
         obj = fo.obj
@@ -80,6 +98,13 @@ async def persist_frame_objects(
             )
         )
         by_state[obj.state.value] = by_state.get(obj.state.value, 0) + 1
+
+        # Control sample (M4.4): mirror a small random fraction of the gate's own auto-accepts into the
+        # always-reviewed control stream, so measured precision reflects the live gate, not a backfill.
+        if obj.state == GateState.auto_accept:
+            from services.govern.control_sample import maybe_sample
+
+            await maybe_sample(db, str(object_id), True)
 
         await bus.emit(
             TOPIC_OBJECT_GATED,

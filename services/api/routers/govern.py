@@ -11,7 +11,11 @@ from services.api.deps import db_session
 from services.govern import killswitch as K
 from services.govern.audit import list_audit
 from services.govern.champion import evaluate_and_promote
-from services.govern.control_sample import measured_precision, record_verdict, seed_from_recent_auto_accepts
+from services.govern.control_sample import (
+    measured_precision,
+    record_verdict,
+    seed_from_recent_auto_accepts,
+)
 from services.govern.controller import tick
 from services.govern.drift import run_drift_scan
 from services.govern.registry import list_models, register, register_from_run

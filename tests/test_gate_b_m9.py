@@ -75,9 +75,10 @@ def test_calibrate_uses_isotonic_curve(monkeypatch):
     # identity curve -> calibrated base equals raw_conf; no agreement adjustments
     val = calibrate_confidence(0.7, False, False, False, cfg)
     assert abs(val - 0.7) < 1e-6
-    # agreement bonus still applies on top of the isotonic base
+    # isotonic output is the empirical P(correct); the agreement bonus must NOT be added on top, or the
+    # calibration is corrupted and the gate's 0.95 stops meaning 95% precision (R1.5).
     val2 = calibrate_confidence(0.7, True, False, False, cfg)
-    assert abs(val2 - 0.8) < 1e-6
+    assert abs(val2 - 0.7) < 1e-6
 
 
 def _infra_up() -> bool:

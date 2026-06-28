@@ -21,6 +21,14 @@ class ImportObject:
     # If the source is one of our own lossless exports, these carry through verbatim.
     ontology_class_id: int | None = None
     provenance: dict = field(default_factory=dict)
+    # Segmentation survives the round-trip: a Parquet export carries the mask blob uri verbatim, while
+    # polygon-bearing formats (COCO segmentation, OpenLABEL poly2d) provide flattened pixel polygons that
+    # services.imports.run writes to a fresh mask blob.
+    mask_uri: str | None = None
+    mask_encoding: str | None = None
+    mask_polygons: list[list[float]] | None = None  # flattened [x,y,x,y,...] per polygon, pixel coords
+    rot_deg: float = 0.0  # oriented-box rotation about the box centre (0 = axis-aligned)
+    keypoints: dict | None = None  # COCO-style {"skeleton","points":[[x,y,v],...]} pose
 
 
 @dataclass

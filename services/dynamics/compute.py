@@ -15,7 +15,6 @@ from collections import defaultdict
 from uuid import UUID
 
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
 from core.logging import get_logger
@@ -70,7 +69,8 @@ async def compute_session_dynamics(session_id: UUID) -> dict:
             scale = (w or rig.ref_width) / rig.ref_width
             fx, fy, cx, cy = K.fx * scale, K.fy * scale, (w or rig.ref_width) / 2.0, (h or 1080) / 2.0
             u, v = (bbox[0] + bbox[2]) / 2.0, bbox[3]   # bottom-centre = where the object meets the road
-            fl = ipm_pixel_to_vehicle(u, v, fx, fy, cx, cy, sp.camera_height_m, pitch)
+            fl = ipm_pixel_to_vehicle(u, v, fx, fy, cx, cy, sp.camera_height_m, pitch,
+                                      dist=K.dist, fisheye=K.model == "fisheye")
             forward, lateral, dist = (None, None, None)
             if fl is not None:
                 forward, lateral = fl
@@ -92,7 +92,12 @@ async def compute_session_dynamics(session_id: UUID) -> dict:
                     p = items[i - 1]
                     dt = (r["ts"] - p["ts"]) / 1e9
                     if DT_MIN_S <= dt <= DT_MAX_S:
-                        fwd_speed = (r["forward"] - p["forward"]) / dt + r["ego"]  # object ground forward speed
+                        # object ground forward speed = relative range rate + ego ground speed over the
+                        # interval. Use the interval-average ego (not just the endpoint) so the conversion
+                        # matches the averaging the finite difference already implies. Straight-line
+                        # assumption: no ego yaw-rate model, so turns add some phantom lateral speed.
+                        ego_avg = (r["ego"] + p["ego"]) / 2.0
+                        fwd_speed = (r["forward"] - p["forward"]) / dt + ego_avg
                         lat_speed = (r["lateral"] - p["lateral"]) / dt
                         cand = math.hypot(fwd_speed, lat_speed) * MPS_TO_KMH
                         if cand <= MAX_SPEED_KMH:  # reject implausible jumps (bad track / IPM artifact)
@@ -108,7 +113,10 @@ async def compute_session_dynamics(session_id: UUID) -> dict:
         tracked = 0
         for oid, r in recs.items():
             d = dyn.get(oid, {})
-            is_vru = onto.by_id(r["cid"]).l1 in _VRU
+            try:
+                is_vru = onto.by_id(r["cid"]).l1 in _VRU
+            except Exception:  # noqa: BLE001 -- an OOD class_id must not crash the whole session
+                is_vru = False
             closing_mps = (d["closing"] / MPS_TO_KMH) if d.get("closing") is not None else None
             risk = _risk(d.get("ttc"), r["dist"], is_vru, closing_mps) if r["dist"] is not None else None
             if d.get("speed") is not None:

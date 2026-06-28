@@ -37,7 +37,8 @@ def test_blur_is_local_and_irreversible():
     img = np.random.default_rng(0).integers(0, 255, (200, 200, 3), dtype=np.uint8)
     orig = img.copy()
     region = (50.0, 50.0, 120.0, 120.0, 0.9)
-    anon = PiiAnonymizer(PiiSettings(), face_detector=_StubFace(region), plate_detector=_StubPlate())
+    anon = PiiAnonymizer(PiiSettings(plate_mandatory=False), face_detector=_StubFace(region),
+                         plate_detector=_StubPlate())
 
     res = anon.anonymize(img)
     assert res.n_faces == 1 and res.n_plates == 0
@@ -83,7 +84,8 @@ async def test_ingest_writes_pii_audit_per_frame():
                  image_bgr=rng.integers(30, 220, (480, 640, 3), dtype=np.uint8))
         for i in range(3)
     ]
-    anon = PiiAnonymizer(PiiSettings(), face_detector=_StubFace((100.0, 100.0, 180.0, 180.0, 0.95)),
+    anon = PiiAnonymizer(PiiSettings(plate_mandatory=False),
+                         face_detector=_StubFace((100.0, 100.0, 180.0, 180.0, 0.95)),
                          plate_detector=_StubPlate())
 
     result = await ingest(

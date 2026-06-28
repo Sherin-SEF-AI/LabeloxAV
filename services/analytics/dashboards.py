@@ -417,7 +417,7 @@ async def cluster_map(limit: int = 1500) -> dict:
     xy = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1, metric="cosine").fit_transform(mat)
     labels = hdbscan.HDBSCAN(min_cluster_size=15).fit_predict(mat)
     points = []
-    for (fid, _, scene), (x, y), lbl in zip(rows, xy, labels):
+    for (fid, _, scene), (x, y), lbl in zip(rows, xy, labels, strict=False):
         s = scene or {}
         points.append({"frame_id": str(fid), "x": round(float(x), 3), "y": round(float(y), 3),
                        "cluster": int(lbl), "time_of_day": s.get("time_of_day"), "road_type": s.get("road_type")})

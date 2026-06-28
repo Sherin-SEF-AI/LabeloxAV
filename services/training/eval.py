@@ -63,7 +63,6 @@ def evaluate(weights: str, data_yaml: str, split: str = "val", imgsz: int = 960)
 def safe_miou_report(weights: str, data_yaml: str, split: str = "val", imgsz: int = 960) -> dict:
     """Run a val pass and score the class confusion matrix with the ontology-derived Safe-mIoU, so
     unsafe confusions (pedestrian->pole) are penalized far harder than benign ones (sedan->hatchback)."""
-    import yaml as _yaml
     from ultralytics import YOLO
 
     from services.autolabel.ontology import get_ontology

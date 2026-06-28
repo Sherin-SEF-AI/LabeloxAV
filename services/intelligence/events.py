@@ -12,8 +12,8 @@ from dataclasses import dataclass, field
 
 from core.config import EventSettings, get_settings
 from services.autolabel.ontology import Ontology
-from services.intelligence.trajectory import FrameCtx, Trajectory
 from services.intelligence.tracking import TrackResult
+from services.intelligence.trajectory import FrameCtx, Trajectory
 
 NS_PER_S = 1_000_000_000
 
@@ -56,7 +56,7 @@ def _geo(track: TrackResult, frame_ctx: dict) -> tuple[float | None, float | Non
 
 def detect_hard_brake(ego_series: list[tuple[int, float]], cfg: EventSettings) -> list[ScenarioRecord]:
     out: list[ScenarioRecord] = []
-    for (t0, s0), (t1, s1) in zip(ego_series, ego_series[1:]):
+    for (t0, s0), (t1, s1) in zip(ego_series, ego_series[1:], strict=False):
         dt = (t1 - t0) / NS_PER_S
         if dt <= 0 or s0 is None or s1 is None:
             continue

@@ -9,7 +9,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -43,6 +43,10 @@ class MinioSettings(BaseModel):
     secret_key: str = "labelox123"
     secure: bool = False
     bucket: str = "labeloxav"
+    # Public-facing endpoint for presigned URLs handed to browsers/buyers. Defaults to the internal
+    # endpoint (works only on-host); set to the externally reachable S3/MinIO URL in any real deployment
+    # so download/upload links resolve off the host.
+    public_endpoint: str = ""
 
 
 class RedisSettings(BaseModel):
@@ -262,6 +266,16 @@ class PiiSettings(BaseModel):
     face_weights: str = ".scratch/models/pii/face_yunet.onnx"
     plate_weights: str = ".scratch/models/pii/plate_yolov8.pt"
     device: str = "cpu"
+    # DPDPA: when the gate is on, BOTH face and plate detectors must be available, otherwise ingestion
+    # fails loud rather than silently passing un-blurred plates into the object store. Set false only for
+    # face-only corpora where plates are provably absent.
+    plate_mandatory: bool = True
+    # Source for `make pii-models` to fetch a license-plate detector to plate_weights. Override with
+    # LBX_PII__PLATE_URL if this mirror moves; an Ultralytics-loadable .pt is expected.
+    plate_url: str = (
+        "https://huggingface.co/morsetechlab/yolov8-license-plate-detection/resolve/main/"
+        "yolov8n-license-plate.pt"
+    )
 
 
 class M9Settings(BaseModel):
@@ -325,6 +339,9 @@ class RigSettings(BaseModel):
     ref_width: int = 1920
     # per-camera lens type (the narrow front + wide surround typical of the rig)
     camera_lens: dict[str, str] = {"cam_f": "narrow", "cam_l": "wide", "cam_r": "wide", "cam_b": "wide"}
+    # nominal per-camera mounting yaw (deg) relative to vehicle forward, composed into world georef so
+    # side/rear cameras are not rotated up to 180deg. Real extrinsics override these once calibrated.
+    camera_yaw_deg: dict[str, float] = {"cam_f": 0.0, "cam_l": -90.0, "cam_r": 90.0, "cam_b": 180.0}
 
 
 class SpatialSettings(BaseModel):
@@ -379,12 +396,14 @@ class GovernSettings(BaseModel):
     # M4.4 governance. Safety is never automated to zero.
     safety_affinity_min: float = 0.8     # affinity_cost >= this is a safety-critical confusion (VRU vs non-VRU = 1.0)
     safe_miou_max_drop: float = 0.0      # a challenger may not regress Safe-mIoU at all
-    min_map_uplift: float = 0.0          # challenger must beat champion mAP by at least this
+    min_map_uplift: float = 0.005        # challenger must strictly beat champion mAP by at least this (no ties)
     control_sample_rate: float = 0.02    # fraction of auto-accepts mirrored to human control review
     control_precision_floor: float = 0.97  # measured auto-accept precision below this pauses auto-promotion
     drift_psi_breach: float = 0.2        # population-stability-index breach on embeddings / label dist
     ood_zscore: float = 3.0              # input this far from the corpus centroid defers regardless of confidence
     offhours_utc: list[int] = [18, 19, 20, 21, 22, 23, 0, 1, 2, 3]  # when the controller may burst the A100
+    controller_poll_s: float = 60.0      # the autonomy daemon ticks the controller this often
+    controller_lock_key: int = 816       # Postgres advisory-lock id so only one controller daemon runs
 
 
 class Phase4Settings(BaseModel):
@@ -392,6 +411,12 @@ class Phase4Settings(BaseModel):
     lakefs: LakeFSSettings = LakeFSSettings()
     relabel: RelabelSettings = RelabelSettings()
     govern: GovernSettings = GovernSettings()
+
+
+class AuthSettings(BaseModel):
+    # Deny-by-default API auth. When enabled, every mutating /api request needs a known X-Lbx-User-Id,
+    # and role floors gate destructive/governance routes. Reads stay open. Disable only for unit tests.
+    enabled: bool = True
 
 
 class Settings(BaseSettings):
@@ -426,6 +451,7 @@ class Settings(BaseSettings):
     ontology: OntologySettings = OntologySettings()
     paths: PathsSettings = PathsSettings()
     phase4: Phase4Settings = Phase4Settings()  # Phase 4 closed loop + governance
+    auth: AuthSettings = AuthSettings()        # deny-by-default API auth
 
     @classmethod
     def settings_customise_sources(
@@ -444,6 +470,27 @@ class Settings(BaseSettings):
             YamlConfigSettingsSource(settings_cls),
             file_secret_settings,
         )
+
+    _DEV_ENVS = {"local", "test", "ci", "dev"}
+
+    @model_validator(mode="after")
+    def _require_prod_secrets(self):
+        """Outside a dev env, the known dev-default credentials are refused so a deployment cannot ship
+        with `labelox`/`labelox123`. Set the real secrets via env (LBX_POSTGRES__PASSWORD, etc.)."""
+        if self.env.lower() in self._DEV_ENVS:
+            return self
+        weak = []
+        if self.postgres.password == "labelox":
+            weak.append("LBX_POSTGRES__PASSWORD")
+        if self.minio.secret_key == "labelox123":
+            weak.append("LBX_MINIO__SECRET_KEY")
+        if self.phase4.lakefs.secret_key.startswith("labeloxavlakefssecret"):
+            weak.append("LBX_PHASE4__LAKEFS__SECRET_KEY")
+        if weak:
+            raise ValueError(
+                f"env '{self.env}' is not a dev env but still uses default credentials; set: {', '.join(weak)}"
+            )
+        return self
 
     def scratch_path(self) -> Path:
         p = REPO_ROOT / self.paths.scratch

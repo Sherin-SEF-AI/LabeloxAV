@@ -13,7 +13,7 @@ from __future__ import annotations
 from uuid import UUID
 
 import numpy as np
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import or_, select, update
 
 from core.config import get_settings
 from core.logging import get_logger

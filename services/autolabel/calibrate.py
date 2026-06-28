@@ -40,12 +40,16 @@ def calibrate_confidence(
         try:
             from services.autolabel.isotonic import apply_isotonic
 
-            cal = apply_isotonic(cfg.isotonic_uri, raw_conf)
+            # The isotonic output is already the empirical P(correct) for this raw score. Adding the
+            # agreement bonus on top would corrupt that calibration so the gate's 0.95 no longer means
+            # 95% precision. Return it as-is; agreement should be learned as a feature of the fit.
+            return float(min(max(apply_isotonic(cfg.isotonic_uri, raw_conf), 0.0), 1.0))
         except Exception:  # noqa: BLE001 - fall back to temperature if the curve cannot be loaded
             cal = _sigmoid(_logit(raw_conf) / max(cfg.temperature, 1e-6))
     else:
         cal = _sigmoid(_logit(raw_conf) / max(cfg.temperature, 1e-6))
 
+    # Temperature path only (no gold-fit curve yet): the agreement signal is a heuristic adjustment.
     if agreement:
         cal += cfg.agreement_bonus
     if class_disagreement:

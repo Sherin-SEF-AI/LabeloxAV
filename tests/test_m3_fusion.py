@@ -42,6 +42,9 @@ def test_overlapping_detections_fuse_with_agreement():
     assert fo.obj.conf >= 0.95
     state = gate_object(fo.obj, get_ontology(), get_settings().gate)
     assert state == GateState.auto_accept  # high conf, agreement, not rare
+    # Governance kill switch (R1.3): with auto-accept disabled the same object falls to review.
+    assert gate_object(fo.obj, get_ontology(), get_settings().gate,
+                       auto_accept_enabled=False) == GateState.review
 
 
 def test_non_overlapping_detections_are_singletons_not_autoaccept():

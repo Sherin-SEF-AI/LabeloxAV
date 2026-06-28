@@ -165,6 +165,15 @@ async def run_job(job_id) -> dict:
 
         await _bump(job_id, stage="evaluate", progress=0.88)
         candidate = await loop.run_in_executor(None, task.evaluate, weights, ds["data_yaml"], imgsz)
+        # Safe-mIoU so the challenger carries a safety score the champion gate requires (fail-closed).
+        try:
+            from services.training.eval import safe_miou_report
+
+            sm = await loop.run_in_executor(None, safe_miou_report, weights, ds["data_yaml"], "val", imgsz)
+            if sm.get("safe_miou") is not None:
+                candidate["safe_miou"] = sm["safe_miou"]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("training.safe_miou_failed", job_id=str(job_id), error=str(exc))
         gate = task.gate(candidate, baseline, spec.gate)
 
         store = get_object_store()
@@ -184,6 +193,15 @@ async def run_job(job_id) -> dict:
                 job_id=uuid.UUID(str(job_id)), notes=spec.notes or f"task={spec.task_type}",
             ))
             await db.commit()
+            # Auto-register as a non-champion challenger so the controller can see and gate it; this is
+            # the seam that lets the loop close (train -> register -> champion gate -> serve) on its own.
+            try:
+                from services.govern.registry import register
+
+                await register(db, run_id, spec.task_type, candidate or {}, dataset_commit=name,
+                               weights_uri=weights_uri, notes=f"auto-registered from job {job_id}")
+            except Exception as exc:  # noqa: BLE001
+                log.warning("registry.auto_register_failed", job_id=str(job_id), run_id=run_id, error=str(exc))
 
         result = {
             "run_id": run_id, "weights_uri": weights_uri, "gate": gate, "promoted": do_promote,

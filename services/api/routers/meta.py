@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import OntologyClass
+from db.models import Frame, Object, OntologyClass
 from db.models import Session as DbSession
 from services.api.deps import OntologyClassOut, db_session
 from services.autolabel.ontology import add_custom_class, get_ontology
@@ -54,8 +56,8 @@ async def ontology():
 
 
 @router.get("/sessions")
-async def sessions(db: AsyncSession = Depends(db_session)):
-    rows = (await db.execute(select(DbSession).order_by(DbSession.created_at.desc()))).scalars().all()
+async def sessions(db: AsyncSession = Depends(db_session), limit: int = Query(200, ge=1, le=1000)):
+    rows = (await db.execute(select(DbSession).order_by(DbSession.created_at.desc()).limit(limit))).scalars().all()
     return [
         {
             "session_id": str(s.session_id),
@@ -68,3 +70,30 @@ async def sessions(db: AsyncSession = Depends(db_session)):
         }
         for s in rows
     ]
+
+
+@router.get("/sessions/{session_id}/stats")
+async def session_stats(session_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
+    """Per-session progress for the Open Annotation browser: frame count + object counts by state, and a
+    progress fraction (auto-accepted + human-accepted over total)."""
+    frames = (await db.execute(
+        select(func.count()).select_from(Frame).where(Frame.session_id == session_id))).scalar_one()
+    rows = (await db.execute(
+        select(Object.state, func.count()).join(Frame, Object.frame_id == Frame.frame_id)
+        .where(Frame.session_id == session_id).group_by(Object.state))).all()
+    by_state = {k: int(v) for k, v in rows}
+    objects = sum(by_state.values())
+    done = by_state.get("auto_accept", 0) + by_state.get("accepted", 0)
+    return {"session_id": str(session_id), "frames": int(frames), "objects": objects,
+            "by_state": by_state, "done": done,
+            "progress": round(done / objects, 3) if objects else 0.0}
+
+
+@router.get("/sessions/{session_id}/first-frame")
+async def first_frame(session_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
+    """The chronological first frame of a session, so a card can open it directly in the editor."""
+    fid = (await db.execute(select(Frame.frame_id).where(Frame.session_id == session_id)
+           .order_by(Frame.ts_ns.asc()).limit(1))).scalar_one_or_none()
+    if fid is None:
+        raise HTTPException(404, "no frames in session")
+    return {"frame_id": str(fid)}

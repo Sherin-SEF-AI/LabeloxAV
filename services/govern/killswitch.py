@@ -60,12 +60,29 @@ async def release(db: AsyncSession) -> dict:
     return {"engaged": False}
 
 
+_DRIFT_PAUSE_PREFIX = "drift breach"
+
+
 async def pause_auto_promote(db: AsyncSession, reason: str) -> None:
     """Soft pause: stop auto-promotion (drift breach) without disabling the whole loop or rolling back."""
     st = await get_state(db)
     st.auto_promote_enabled = False
     st.paused_reason = reason
     await db.commit()
+
+
+async def resume_auto_promote(db: AsyncSession) -> bool:
+    """Lift a drift-induced soft pause once the breach clears. Only resumes a pause that drift set (not
+    the kill switch): requires the loop still enabled and a drift paused_reason. Returns True if resumed."""
+    st = await get_state(db)
+    if not st.loop_enabled or st.auto_promote_enabled:
+        return False
+    if not (st.paused_reason or "").startswith(_DRIFT_PAUSE_PREFIX):
+        return False  # paused by something other than drift; leave it to an operator
+    st.auto_promote_enabled = True
+    st.paused_reason = None
+    await db.commit()
+    return True
 
 
 async def state_dict(db: AsyncSession) -> dict:

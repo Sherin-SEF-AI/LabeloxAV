@@ -66,9 +66,9 @@ async def registry():
 
 
 @router.get("/training/{job_id}")
-async def status(job_id: str):
+async def status(job_id: uuid.UUID):
     async with get_sessionmaker()() as db:
-        j = await db.get(TrainingJob, uuid.UUID(job_id))
+        j = await db.get(TrainingJob, job_id)
     if j is None:
         raise HTTPException(status_code=404, detail="training job not found")
     return _job_dict(j)
@@ -76,15 +76,16 @@ async def status(job_id: str):
 
 @router.get("/training")
 async def list_jobs(limit: int = 50):
+    limit = min(max(limit, 1), 1000)
     async with get_sessionmaker()() as db:
         rows = (await db.execute(select(TrainingJob).order_by(TrainingJob.created_at.desc()).limit(limit))).scalars().all()
     return [_job_dict(j) for j in rows]
 
 
 @router.post("/training/{job_id}/cancel")
-async def cancel(job_id: str):
+async def cancel(job_id: uuid.UUID):
     async with get_sessionmaker()() as db:
-        j = await db.get(TrainingJob, uuid.UUID(job_id))
+        j = await db.get(TrainingJob, job_id)
         if j is None:
             raise HTTPException(status_code=404, detail="training job not found")
         if j.status == "pending":

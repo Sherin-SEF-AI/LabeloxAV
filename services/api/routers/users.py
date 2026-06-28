@@ -38,7 +38,11 @@ async def create_user(payload: UserCreateIn, db: AsyncSession = Depends(db_sessi
         raise HTTPException(400, "name required")
     if (await db.execute(select(User).where(User.name == name))).scalar_one_or_none():
         raise HTTPException(409, f"user '{name}' already exists")
-    u = User(name=name, role=payload.role)
+    # Bootstrap: the very first user (the auth middleware lets it through when the table is empty) is
+    # forced to admin so the system has a manager. After that, role gating governs who can create users.
+    n = (await db.execute(select(func.count()).select_from(User))).scalar_one()
+    role = "admin" if n == 0 else payload.role
+    u = User(name=name, role=role)
     db.add(u)
     await db.commit()
     return {"user_id": str(u.user_id), "name": u.name, "role": u.role, "reviews": 0}

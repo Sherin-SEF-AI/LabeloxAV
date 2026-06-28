@@ -9,9 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
+from core.storage import get_object_store
 from core.timebase import now_ns
-from db.models import Object, Review, TrainingJob
+from db.models import Frame, Object, Review, TrainingJob
 from services.api.deps import BulkReviewIn, ReviewIn, current_user, db_session
+from services.api.routers.objects import _write_mask
 from services.autolabel.ontology import get_ontology
 
 log = get_logger("api_review")
@@ -89,10 +91,14 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
 
 
 @router.post("/objects/{object_id}/review")
-async def review_object(object_id: str, payload: ReviewIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
-    obj = await db.get(Object, UUID(object_id))
+async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    obj = await db.get(Object, object_id)
     if obj is None:
         raise HTTPException(404, "object not found")
+    # Optimistic lock: if the editor's view is stale (someone else edited since), refuse with 409 so the
+    # client can reload rather than clobber the other annotator's change.
+    if payload.expected_version is not None and obj.version != payload.expected_version:
+        raise HTTPException(409, {"detail": "object changed since you loaded it", "current_version": obj.version})
     onto = get_ontology()
     reviewer, uid = _attrib(user, payload.reviewer)
 
@@ -121,9 +127,22 @@ async def review_object(object_id: str, payload: ReviewIn, db: AsyncSession = De
         merged.update(payload.attrs)
         obj.attrs = merged
 
+    if payload.rot_deg is not None:
+        obj.rot_deg = payload.rot_deg
+    if payload.keypoints is not None:
+        obj.keypoints = payload.keypoints
+    if payload.mask_polygons is not None:
+        # Write the mask blob in the same request so geometry + mask persist atomically (one transaction),
+        # instead of a separate updateMask call that can leave them out of sync on a partial failure.
+        frame = await db.get(Frame, obj.frame_id)
+        obj.mask_uri = _write_mask(get_object_store(), frame.session_id, frame.frame_id, obj.object_id,
+                                   payload.mask_polygons, frame.width, frame.height)
+        obj.mask_encoding = "polygon"
+
     # State: explicit override wins, else derive from the action verb.
     obj.state = payload.state or _ACTION_STATE.get(payload.action, obj.state)
     obj.source = "human"
+    obj.version = (obj.version or 1) + 1  # advance the optimistic-lock version on every human edit
 
     after = {
         "class_id": obj.class_id,
@@ -153,4 +172,7 @@ async def review_object(object_id: str, payload: ReviewIn, db: AsyncSession = De
         "attrs": obj.attrs,
         "state": obj.state,
         "source": obj.source,
+        "version": obj.version,
+        "rot_deg": obj.rot_deg or 0.0,
+        "keypoints": obj.keypoints,
     }

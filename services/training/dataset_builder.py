@@ -14,7 +14,6 @@ import random
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from uuid import UUID
 
 import cv2
 import numpy as np

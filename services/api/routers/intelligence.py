@@ -33,6 +33,7 @@ async def list_scenarios(
     city: str | None = None,
     limit: int = 100,
 ):
+    limit = min(max(limit, 1), 1000)
     stmt = (
         select(Scenario, DbSession.city, DbSession.vehicle_id)
         .join(DbSession, Scenario.session_id == DbSession.session_id)
@@ -63,8 +64,8 @@ async def scenarios_search(
 
 
 @router.get("/scenarios/{scenario_id}")
-async def scenario_detail(scenario_id: str, db: AsyncSession = Depends(db_session)):
-    scn = await db.get(Scenario, UUID(scenario_id))
+async def scenario_detail(scenario_id: UUID, db: AsyncSession = Depends(db_session)):
+    scn = await db.get(Scenario, scenario_id)
     if scn is None:
         raise HTTPException(404, "scenario not found")
     sess = await db.get(DbSession, scn.session_id)

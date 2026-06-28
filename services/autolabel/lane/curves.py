@@ -21,7 +21,7 @@ def fit_control_points(polyline: list, k: int | None = None) -> list[list[float]
     u = np.linspace(0.0, d[-1], k)
     x = np.interp(u, d, pts[:, 0])
     y = np.interp(u, d, pts[:, 1])
-    return [[float(a), float(b)] for a, b in zip(x, y)]
+    return [[float(a), float(b)] for a, b in zip(x, y, strict=False)]
 
 
 def mark_ego(lanes_cp: list[list[list[float]]], width: int, height: int) -> int | None:

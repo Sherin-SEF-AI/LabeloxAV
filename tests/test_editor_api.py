@@ -106,6 +106,73 @@ def test_create_mask_and_delete_object():
 
 
 @requires_infra
+def test_rotated_box_create_and_review():
+    """Oriented boxes: rot_deg is stored on create, returned on detail, and updatable via review."""
+    sid, f1, f2 = run_async(_seed_two_frames())
+    with _client() as c:
+        created = c.post(f"/api/frames/{f1}/objects", json={
+            "class_name": "sedan", "bbox": [10, 10, 60, 50], "rot_deg": 25.0}).json()
+        oid = created["object_id"]
+        assert abs(created["rot_deg"] - 25.0) < 1e-6
+        assert abs(c.get(f"/api/objects/{oid}").json()["rot_deg"] - 25.0) < 1e-6
+        r = c.post(f"/api/objects/{oid}/review", json={"action": "adjust_geometry", "rot_deg": -40.0,
+                                                       "state": "accepted"}).json()
+        assert abs(r["rot_deg"] - (-40.0)) < 1e-6
+        # a review without rot_deg leaves it unchanged
+        r2 = c.post(f"/api/objects/{oid}/review", json={"action": "confirm", "state": "accepted"}).json()
+        assert abs(r2["rot_deg"] - (-40.0)) < 1e-6
+
+
+@requires_infra
+def test_create_is_idempotent_on_idem_key():
+    """R3: a retried/raced create with the same client idem_key must not duplicate the object."""
+    sid, f1, f2 = run_async(_seed_two_frames())
+    with _client() as c:
+        body = {"class_name": "pedestrian", "bbox": [10, 10, 60, 50], "attrs": {}, "idem_key": "tmp-1"}
+        a = c.post(f"/api/frames/{f1}/objects", json=body).json()
+        b = c.post(f"/api/frames/{f1}/objects", json=body).json()
+        assert a["object_id"] == b["object_id"]  # second create returns the first, no duplicate
+        objs = c.get(f"/api/frames/{f1}/objects").json()
+        assert sum(1 for o in objs if o["object_id"] == a["object_id"]) == 1
+        # a different idem_key on the same frame is a genuinely new object
+        c2 = c.post(f"/api/frames/{f1}/objects",
+                    json={**body, "idem_key": "tmp-2"}).json()
+        assert c2["object_id"] != a["object_id"]
+
+
+@requires_infra
+def test_review_writes_mask_atomically():
+    """Atomic save: a review can write the mask in the same request (no separate updateMask)."""
+    sid, f1, f2 = run_async(_seed_two_frames())
+    poly = [[5, 5, 40, 5, 40, 40, 5, 40]]
+    with _client() as c:
+        oid = c.post(f"/api/frames/{f1}/objects", json={"class_name": "sedan", "bbox": [5, 5, 40, 40]}).json()["object_id"]
+        r = c.post(f"/api/objects/{oid}/review",
+                   json={"action": "adjust_geometry", "state": "accepted", "mask_polygons": poly})
+        assert r.status_code == 200
+        assert c.get(f"/api/objects/{oid}").json()["mask_polygons"] == poly
+
+
+@requires_infra
+def test_keypoints_create_and_review():
+    """Pose tool: keypoints round-trip through create + detail + list + review."""
+    sid, f1, f2 = run_async(_seed_two_frames())
+    kp = {"skeleton": "person_17", "points": [[10, 10, 2], [12, 8, 2]] + [[0, 0, 0]] * 15}
+    with _client() as c:
+        created = c.post(f"/api/frames/{f1}/objects",
+                         json={"class_name": "pedestrian", "bbox": [5, 5, 40, 80], "keypoints": kp}).json()
+        oid = created["object_id"]
+        assert created["keypoints"]["skeleton"] == "person_17"
+        assert c.get(f"/api/objects/{oid}").json()["keypoints"]["points"][0] == [10, 10, 2]
+        objs = c.get(f"/api/frames/{f1}/objects").json()
+        assert next(o for o in objs if o["object_id"] == oid)["keypoints"]["skeleton"] == "person_17"
+        kp2 = {"skeleton": "person_17", "points": [[20, 20, 2]] + [[0, 0, 0]] * 16}
+        r = c.post(f"/api/objects/{oid}/review",
+                   json={"action": "adjust_geometry", "keypoints": kp2, "state": "accepted"}).json()
+        assert r["keypoints"]["points"][0] == [20, 20, 2]
+
+
+@requires_infra
 def test_track_view_and_relabel():
     # seed a track whose two objects disagree on class, then relabel the whole track in one call
     sid, f1, f2 = run_async(_seed_two_frames())

@@ -20,7 +20,7 @@ def epipolar_residual(pts1: np.ndarray, pts2: np.ndarray, R: np.ndarray, t: np.n
     pts2 = np.asarray(pts2, dtype=np.float64).reshape(-1, 2)
     F = np.linalg.inv(K2).T @ (_skew(np.asarray(t, np.float64).ravel()) @ np.asarray(R, np.float64)) @ np.linalg.inv(K1)
     res = []
-    for (x1, x2) in zip(pts1, pts2):
+    for (x1, x2) in zip(pts1, pts2, strict=False):
         p1 = np.array([x1[0], x1[1], 1.0])
         p2 = np.array([x2[0], x2[1], 1.0])
         Fp1, Ftp2 = F @ p1, F.T @ p2

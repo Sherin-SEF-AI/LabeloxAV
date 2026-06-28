@@ -50,6 +50,7 @@ async def triage(
     city: str | None = None,
     limit: int = 200,
 ):
+    limit = min(max(limit, 1), 1000)
     onto = get_ontology()
     state_list = [s.strip() for s in states.split(",") if s.strip()]
     stmt = (

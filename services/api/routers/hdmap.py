@@ -7,11 +7,10 @@ from __future__ import annotations
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from geoalchemy2 import Geometry
 from sqlalchemy import cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import Depends
 
 from db.models import Frame, MapCommit, MapElement
 from db.models import Session as DbSession
@@ -37,8 +36,8 @@ async def fuse(session_ids: str = Query(..., description="comma-separated sessio
 
 
 @router.get("/hdmap/commits")
-async def commits(db: AsyncSession = Depends(db_session)):
-    rows = (await db.execute(select(MapCommit).order_by(MapCommit.created_at.desc()))).scalars().all()
+async def commits(db: AsyncSession = Depends(db_session), limit: int = Query(200, ge=1, le=1000)):
+    rows = (await db.execute(select(MapCommit).order_by(MapCommit.created_at.desc()).limit(limit))).scalars().all()
     return [{"commit_id": c.commit_id, "region": c.region, "element_count": c.element_count,
              "session_ids": c.session_ids, "formats": c.formats, "calibration_version": c.calibration_version,
              "created_at": c.created_at.isoformat() if c.created_at else None} for c in rows]
@@ -67,8 +66,8 @@ async def elements(commit_id: str | None = None, session_id: str | None = None,
 
 
 @router.get("/hdmap/provenance")
-async def provenance(element_id: str, db: AsyncSession = Depends(db_session)):
-    el = await db.get(MapElement, UUID(element_id))
+async def provenance(element_id: UUID, db: AsyncSession = Depends(db_session)):
+    el = await db.get(MapElement, element_id)
     if el is None:
         return {"found": False}
     frames = []
@@ -83,7 +82,7 @@ async def provenance(element_id: str, db: AsyncSession = Depends(db_session)):
         frames.append({"frame_id": fid, "session_id": str(f.session_id), "cam_id": f.cam_id, "ts_ns": f.ts_ns,
                        "vehicle_id": sess.vehicle_id if sess else None,
                        "ontology_version": sess.ontology_version if sess else None})
-    return {"found": True, "element_id": element_id, "kind": el.kind, "attrs": el.attrs,
+    return {"found": True, "element_id": str(element_id), "kind": el.kind, "attrs": el.attrs,
             "confidence": el.confidence, "calibration_version": el.calibration_version,
             "commit_id": el.commit_id, "fusion_job_id": str(el.fusion_job_id) if el.fusion_job_id else None,
             "source_sessions": el.source_sessions, "source_frames": frames}

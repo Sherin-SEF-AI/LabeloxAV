@@ -57,6 +57,7 @@ def test_governance_end_to_end():
     from services.govern.registry import register
 
     tag = uuid.uuid4().hex[:6]
+    task = f"det-{tag}"  # isolate from any real registered champion (hermetic per run)
     v_champ, v_unsafe, v_good, v_paused = (f"m-champ-{tag}", f"m-unsafe-{tag}", f"m-good-{tag}", f"m-paused-{tag}")
     good = {"map": 0.74, "safe_miou": 0.91, "per_class": {"pedestrian": 0.82, "child": 0.79, "motorcycle": 0.70}}
     unsafe = {"map": 0.80, "safe_miou": 0.91, "per_class": {"pedestrian": 0.50, "child": 0.79, "motorcycle": 0.95}}
@@ -71,18 +72,18 @@ def test_governance_end_to_end():
             await db.commit()
 
             # first model becomes champion (no incumbent)
-            await register(db, v_champ, "detection", CHAMP)
-            r0 = await evaluate_and_promote(db, v_champ)
+            await register(db, v_champ, task, CHAMP)
+            r0 = await evaluate_and_promote(db, v_champ, task)
             assert r0["promoted"] is True
 
             # an unsafe challenger is rejected despite higher mAP
-            await register(db, v_unsafe, "detection", unsafe)
-            r1 = await evaluate_and_promote(db, v_unsafe)
+            await register(db, v_unsafe, task, unsafe)
+            r1 = await evaluate_and_promote(db, v_unsafe, task)
             assert r1["promoted"] is False and "pedestrian" in r1["gate"]["regressed_safety"]
 
             # a good challenger is promoted, recording what it beat
-            await register(db, v_good, "detection", good)
-            r2 = await evaluate_and_promote(db, v_good)
+            await register(db, v_good, task, good)
+            r2 = await evaluate_and_promote(db, v_good, task)
             assert r2["promoted"] is True and r2["promoted_from"] == v_champ
 
             # control sample: 5 auto-accepted controls (real object FKs), 2 judged incorrect -> precision 0.6
@@ -108,13 +109,13 @@ def test_governance_end_to_end():
             assert stt.auto_promote_enabled is False
 
             # a further good challenger is now PAUSED, not promoted
-            await register(db, v_paused, "detection",
+            await register(db, v_paused, task,
                            {"map": 0.9, "safe_miou": 0.95, "per_class": {"pedestrian": 0.9, "child": 0.9, "motorcycle": 0.9}})
-            r3 = await evaluate_and_promote(db, v_paused)
+            r3 = await evaluate_and_promote(db, v_paused, task)
             assert r3["promoted"] is False and r3.get("paused") is True
 
             # kill switch pauses the loop and rolls back to the prior champion (v_champ)
-            ks = await K.engage(db, "test kill")
+            ks = await K.engage(db, "test kill", task)
             assert ks["rollback"]["rolled_back"] is True and ks["rollback"]["to"] == v_champ
             stt2 = await K.get_state(db)
             assert stt2.loop_enabled is False and stt2.champion_version == v_champ
@@ -138,6 +139,35 @@ def test_governance_end_to_end():
             st = await K.get_state(db)
             st.loop_enabled = st.auto_accept_enabled = st.auto_promote_enabled = True
             st.champion_version, st.paused_reason = None, None
+            await db.commit()
+
+    asyncio.run(run())
+
+
+@requires_infra
+def test_drift_pause_recovers_but_not_killswitch():
+    """R1.4: a drift-induced soft pause lifts when the breach clears; a non-drift pause does not."""
+    from db.session import get_sessionmaker
+    from services.govern import killswitch as K
+
+    async def run():
+        async with get_sessionmaker()() as db:
+            st = await K.get_state(db)
+            st.loop_enabled, st.auto_promote_enabled = True, False
+            st.paused_reason = "drift breach: control_precision=0.5"
+            await db.commit()
+            assert await K.resume_auto_promote(db) is True
+            st = await K.get_state(db)
+            assert st.auto_promote_enabled is True and st.paused_reason is None
+
+            # a non-drift pause (operator/kill switch) is never auto-resumed
+            st.loop_enabled, st.auto_promote_enabled = True, False
+            st.paused_reason = "manual operator hold"
+            await db.commit()
+            assert await K.resume_auto_promote(db) is False
+
+            st = await K.get_state(db)
+            st.auto_promote_enabled, st.paused_reason = True, None
             await db.commit()
 
     asyncio.run(run())

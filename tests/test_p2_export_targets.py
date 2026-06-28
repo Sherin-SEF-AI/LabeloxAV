@@ -78,6 +78,48 @@ def test_nuscenes_tables_link_and_group_by_track():
     assert ann["size"] == [0.0, 0.0, 0.0]
 
 
+def test_parquet_roundtrip_preserves_keypoints(tmp_path):
+    """Pose: keypoints survive the lossless parquet export -> import round-trip."""
+    from services.export.adapter_parquet import write_parquet
+    from services.imports.adapter_parquet import parse
+
+    rec = _rec(uuid.uuid4(), uuid.uuid4(), 1000, 6, "autorickshaw", [10, 10, 60, 60])
+    rec.keypoints = {"skeleton": "person_17", "points": [[1, 2, 2], [3, 4, 1]]}
+    write_parquet([rec], tmp_path / "parquet")
+    objs = [o for f in parse(tmp_path) for o in f.objects]
+    assert objs[0].keypoints["skeleton"] == "person_17" and objs[0].keypoints["points"][1] == [3, 4, 1]
+
+
+def test_nuscenes_real_3d_when_cuboid_present():
+    """R4.3: an object with a 3D cuboid exports real translation/size/rotation; others stay placeholders."""
+    import math
+
+    onto = get_ontology()
+    f = uuid.uuid4()
+    a = _rec(uuid.uuid4(), f, 1000, 6, "autorickshaw", [100, 100, 200, 200])
+    a.cuboid_3d = {"center": [5.0, 1.0, 0.8], "size": [1.2, 2.4, 1.5], "yaw": 1.5708}
+    b = _rec(uuid.uuid4(), f, 1000, 11, "sedan", [300, 300, 360, 360])  # no cuboid
+    t = build_nuscenes([a, b], onto)
+    anns = {ann["lbx_class"]: ann for ann in t["sample_annotation"]}
+    assert anns["autorickshaw"]["lbx_has_3d"] is True
+    assert anns["autorickshaw"]["translation"] == [5.0, 1.0, 0.8]
+    assert anns["autorickshaw"]["size"] == [1.2, 2.4, 1.5]
+    assert abs(anns["autorickshaw"]["rotation"][0] - math.cos(1.5708 / 2)) < 1e-3
+    assert anns["sedan"]["lbx_has_3d"] is False and anns["sedan"]["size"] == [0.0, 0.0, 0.0]
+
+
+def test_parquet_roundtrip_preserves_rot_deg(tmp_path):
+    """Oriented boxes: rot_deg survives the lossless parquet export -> import round-trip."""
+    from services.export.adapter_parquet import write_parquet
+    from services.imports.adapter_parquet import parse
+
+    rec = _rec(uuid.uuid4(), uuid.uuid4(), 1000, 6, "autorickshaw", [10, 10, 60, 60])
+    rec.rot_deg = 30.0
+    write_parquet([rec], tmp_path / "parquet")
+    objs = [o for f in parse(tmp_path) for o in f.objects]
+    assert len(objs) == 1 and abs(objs[0].rot_deg - 30.0) < 1e-6
+
+
 # --- integration through the export driver -----------------------------------
 
 

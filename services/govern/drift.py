@@ -14,7 +14,7 @@ from core.logging import get_logger
 from db.models import DriftMetric, Frame, FrameEmbedding, Object
 from services.govern.audit import record
 from services.govern.control_sample import measured_precision
-from services.govern.killswitch import pause_auto_promote
+from services.govern.killswitch import pause_auto_promote, resume_auto_promote
 
 log = get_logger("govern_drift")
 
@@ -94,9 +94,17 @@ async def run_drift_scan(db: AsyncSession, ref_sessions: list[str] | None = None
     await db.commit()
 
     breaches = [r for r in results if r["breach"]]
+    resumed = False
     if breaches:
         reason = "drift breach: " + ", ".join(f"{b['metric']}={b['value']}" for b in breaches)
         await pause_auto_promote(db, reason)
         await record(db, "drift", "pause_auto_promote", None, {"breaches": breaches})
         log.info("govern.drift_breach", breaches=[b["metric"] for b in breaches])
-    return {"metrics": results, "breached": [b["metric"] for b in breaches], "paused": bool(breaches)}
+    else:
+        # No breach this scan: lift a prior drift-induced pause so the loop is not trapped forever.
+        resumed = await resume_auto_promote(db)
+        if resumed:
+            await record(db, "drift", "resume_auto_promote", None, {})
+            log.info("govern.drift_recovered")
+    return {"metrics": results, "breached": [b["metric"] for b in breaches], "paused": bool(breaches),
+            "resumed": resumed}

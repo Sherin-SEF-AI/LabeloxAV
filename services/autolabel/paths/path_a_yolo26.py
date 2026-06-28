@@ -41,18 +41,19 @@ COCO_TO_ONTOLOGY: dict[str, str] = {
 class YoloPath:
     name = "path_a_yolo26"
 
-    def __init__(self) -> None:
+    def __init__(self, weights: str | None = None) -> None:
         self.settings = get_settings()
         self.onto = get_ontology()
         self._model = None
-        self.model_version = self.settings.models.yolo.weights
+        # weights override lets the governance champion serve instead of the static config default.
+        self.weights = weights or self.settings.models.yolo.weights
+        self.model_version = self.weights
 
     def load(self) -> None:
         from ultralytics import YOLO
 
-        cfg = self.settings.models.yolo
-        self._model = YOLO(cfg.weights)
-        log.info("path_a.loaded", weights=cfg.weights, device=self.settings.gpu.device)
+        self._model = YOLO(self.weights)
+        log.info("path_a.loaded", weights=self.weights, device=self.settings.gpu.device)
 
     def unload(self) -> None:
         self._model = None

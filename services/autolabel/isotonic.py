@@ -22,22 +22,23 @@ from sqlalchemy import select
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
 from core.storage import get_object_store
-from db.models import Object
-from db.models import Session as DbSession
+from db.models import Frame, Object
 from db.session import get_sessionmaker
-from db.models import Frame
 
 log = get_logger("isotonic")
 
-_CORRECT = {"accepted", "auto_accept"}
+_CORRECT = {"accepted"}
 _INCORRECT = {"rejected"}
 
 
 async def _collect_pairs(session_id: str | None = None) -> tuple[np.ndarray, np.ndarray]:
     maker = get_sessionmaker()
     async with maker() as db:
+        # Train only on human-verified labels (a review sets source="human"). Unreviewed auto_accepts
+        # must not count as "correct" -- that would teach the curve to predict its own gate decisions and
+        # report a falsely low calibration error.
         stmt = select(Object.provenance, Object.state).where(
-            Object.source.in_(["fused", "auto_accept"]),
+            Object.source == "human",
             Object.state.in_(list(_CORRECT | _INCORRECT)),
         )
         if session_id:

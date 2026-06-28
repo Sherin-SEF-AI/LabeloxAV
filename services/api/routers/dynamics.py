@@ -30,13 +30,13 @@ async def compute(session_id: str):
 
 
 @router.get("/dynamics/object/{object_id}")
-async def get_object(object_id: str, db: AsyncSession = Depends(db_session)):
-    d = await db.get(ObjectDynamics, UUID(object_id))
-    return _row(d) if d else {"object_id": object_id, "computed": False}
+async def get_object(object_id: UUID, db: AsyncSession = Depends(db_session)):
+    d = await db.get(ObjectDynamics, object_id)
+    return _row(d) if d else {"object_id": str(object_id), "computed": False}
 
 
 @router.get("/dynamics/frame/{frame_id}")
-async def get_frame(frame_id: str, db: AsyncSession = Depends(db_session)):
+async def get_frame(frame_id: UUID, db: AsyncSession = Depends(db_session)):
     rows = (await db.execute(
-        select(ObjectDynamics).where(ObjectDynamics.frame_id == UUID(frame_id)))).scalars().all()
-    return {"frame_id": frame_id, "dynamics": [_row(d) for d in rows]}
+        select(ObjectDynamics).where(ObjectDynamics.frame_id == frame_id))).scalars().all()
+    return {"frame_id": str(frame_id), "dynamics": [_row(d) for d in rows]}

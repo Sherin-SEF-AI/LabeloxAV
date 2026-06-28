@@ -57,7 +57,7 @@ async def embed_frames(session_id: UUID | None = None, limit: int | None = None,
             continue
         dvecs, svecs = dinov3.encode_images(imgs), siglip2.encode_images(imgs)
         async with maker() as db:
-            for fid, dv, sv in zip(fids, dvecs, svecs):
+            for fid, dv, sv in zip(fids, dvecs, svecs, strict=False):
                 await db.merge(FrameEmbedding(frame_id=fid, dino_vec=dv.tolist(), siglip_vec=sv.tolist(), model_versions=mv))
             await db.commit()
         n += len(fids)
@@ -94,7 +94,7 @@ async def embed_objects(session_id: UUID | None = None, limit: int | None = None
             continue
         dvecs = dinov3.encode_images(crops)
         async with maker() as db:
-            for oid, dv in zip(oids, dvecs):
+            for oid, dv in zip(oids, dvecs, strict=False):
                 await db.merge(ObjectEmbedding(object_id=oid, dino_vec=dv.tolist(), model_versions=mv))
             await db.commit()
         n += len(oids)

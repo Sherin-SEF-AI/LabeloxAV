@@ -18,8 +18,8 @@ import cv2
 import numpy as np
 from sqlalchemy import select
 
-from core.logging import get_logger, setup_logging
 from core.config import get_settings
+from core.logging import get_logger, setup_logging
 from core.storage import get_object_store
 from db.models import Frame, Object, Review
 from db.session import get_sessionmaker

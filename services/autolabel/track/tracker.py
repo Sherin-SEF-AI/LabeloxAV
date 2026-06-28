@@ -122,7 +122,7 @@ def track_camera_botsort(dets: list[Det]) -> tuple[dict, list[TrackResult], dict
                         C[i, j] = _INF
             ri, ci = linear_sum_assignment(C)
             matched_t: set[int] = set()
-            for i, j in zip(ri, ci):
+            for i, j in zip(ri, ci, strict=False):
                 if C[i, j] >= _INF:
                     continue
                 t, d = active[i], fd[j]

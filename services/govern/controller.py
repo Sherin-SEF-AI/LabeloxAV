@@ -9,7 +9,7 @@ hot path here stays deterministic so the loop is cheap, replayable, and safe to 
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,11 +59,13 @@ async def tick(db: AsyncSession, now_hour_utc: int | None = None, schedule_burst
                         "promoted": res.get("promoted"), "paused": res.get("paused", False)})
 
     # 3. schedule a retrain when enough new signal has accrued and we are in off-hours
-    hour = now_hour_utc if now_hour_utc is not None else datetime.now(timezone.utc).hour
+    hour = now_hour_utc if now_hour_utc is not None else datetime.now(UTC).hour
     signal = await new_signal_count(db)
     offhours = hour in cfg.govern.offhours_utc
     if schedule_bursts and offhours and signal["total"] >= cfg.activelearn.retrain_min_new:
-        r = await maybe_retrain(db, compute_target="cloud", force=True)
+        # Retrain locally (the on-box GPU worker drains it); cloud dispatch is an unimplemented seam,
+        # so scheduling "cloud" here would park a job nothing runs and the loop would never close.
+        r = await maybe_retrain(db, compute_target="local", force=True)
         if r.get("triggered"):
             actions.append({"action": "schedule_retrain", "job_id": r.get("job_id")})
 

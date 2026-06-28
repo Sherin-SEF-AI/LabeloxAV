@@ -6,7 +6,7 @@ Frame indices are derived, never primary. Float seconds and local time are not u
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 NS_PER_SECOND = 1_000_000_000
 
@@ -18,12 +18,12 @@ def now_ns() -> int:
 
 def datetime_to_ns(dt: datetime) -> int:
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return int(dt.astimezone(timezone.utc).timestamp() * NS_PER_SECOND)
+        dt = dt.replace(tzinfo=UTC)
+    return int(dt.astimezone(UTC).timestamp() * NS_PER_SECOND)
 
 
 def ns_to_datetime(ts_ns: int) -> datetime:
-    return datetime.fromtimestamp(ts_ns / NS_PER_SECOND, tz=timezone.utc)
+    return datetime.fromtimestamp(ts_ns / NS_PER_SECOND, tz=UTC)
 
 
 def ns_to_iso(ts_ns: int) -> str:

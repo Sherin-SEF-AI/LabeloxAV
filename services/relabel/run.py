@@ -9,7 +9,6 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from db.models import RelabelJob, RelabelRun

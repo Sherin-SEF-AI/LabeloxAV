@@ -41,6 +41,13 @@ down: ## Stop infra (keep volumes)
 nuke: ## Stop infra and delete volumes (destroys local data)
 	docker compose down -v
 
+.PHONY: backup
+backup: ## Back up Postgres (pg_dump.gz) and note the MinIO mirror command, into .scratch/backups/
+	@mkdir -p .scratch/backups
+	docker compose exec -T postgres pg_dump -U labelox labeloxav | gzip > .scratch/backups/pg_$$(date +%Y%m%d_%H%M%S).sql.gz
+	@echo "Postgres dumped to .scratch/backups/"
+	@echo "MinIO: configure an mc alias, then 'mc mirror local/labeloxav .scratch/backups/minio' to mirror blobs"
+
 .PHONY: migrate
 migrate: ## Apply Alembic migrations
 	$(RUN) alembic upgrade head
@@ -142,6 +149,10 @@ train: ## Close the loop: build trainset + fine-tune + eval-gate. Usage: make tr
 .PHONY: train-worker
 train-worker: ## Run the training worker (drains LOCAL training jobs serially on the GPU)
 	$(RUN) python -m services.training.worker
+
+.PHONY: govern-daemon
+govern-daemon: ## Run the autonomy controller daemon (ticks the closed loop: drift, promotion, retrain)
+	$(RUN) python -m services.govern.daemon
 
 .PHONY: cloud-provision
 cloud-provision: ## Provision a RunPod A100, verify the heavy stack, smoke test, then stop the pod

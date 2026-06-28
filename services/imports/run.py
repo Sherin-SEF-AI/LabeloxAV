@@ -11,6 +11,7 @@ the full ingest plane (PII + quality + manifest) applies. Names remap to the ont
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 import zipfile
 from pathlib import Path
@@ -30,7 +31,9 @@ from db.session import get_sessionmaker
 from services.anonymize.anonymizer import get_anonymizer
 from services.autolabel.ontology import get_ontology
 from services.imports import (
+    adapter_bdd,
     adapter_coco,
+    adapter_kitti,
     adapter_mapillary,
     adapter_nuscenes,
     adapter_openlabel,
@@ -52,6 +55,8 @@ ADAPTERS = {
     "nuscenes": adapter_nuscenes.parse,
     "parquet": adapter_parquet.parse,
     "mapillary": adapter_mapillary.parse,
+    "kitti": adapter_kitti.parse,
+    "bdd": adapter_bdd.parse,
 }
 RAW_FORMATS = {"video", "mcap", "images"}
 ALL_FORMATS = sorted(set(ADAPTERS) | RAW_FORMATS)
@@ -109,10 +114,10 @@ async def _bump_job(job_id, **fields) -> None:
 
 
 async def _import_raw(spec: ImportSpec, job_id, root: Path) -> dict:
+    from services.imports.raw_media import read_image_folder
     from services.ingest.reader_mcap import read_mcap
     from services.ingest.reader_video import read_video
     from services.ingest.run import ingest
-    from services.imports.raw_media import read_image_folder
 
     if spec.format == "images":
         frame_iter = read_image_folder(root)
@@ -216,9 +221,21 @@ async def import_dataset(spec: ImportSpec, job_id=None) -> dict:
                         counts["unmapped"] += 1
                     prov = {**(o.provenance or {}), "import_format": spec.format,
                             "import_job": str(job_id) if job_id else None, "original_name": o.name}
-                    db.add(Object(frame_id=frame_row.frame_id, class_id=cid, bbox=[float(x) * scale for x in o.bbox],
-                                  conf=float(o.conf), source="imported", state="review",
-                                  provenance=prov, attrs=o.attrs or {}))
+                    # Mask round-trip: carry a lossless export's mask uri through, or materialize polygons
+                    # (COCO/OpenLABEL) into a fresh mask blob, so segmentation is not silently dropped.
+                    oid = uuid.uuid4()
+                    mask_uri, mask_encoding = o.mask_uri, o.mask_encoding
+                    if mask_uri is None and o.mask_polygons:
+                        scaled = [[float(v) * scale for v in poly] for poly in o.mask_polygons]
+                        payload = {"encoding": "polygon", "polygons": scaled, "height": h, "width": w}
+                        mask_uri = store.put_bytes(f"masks/{session_id}/{frame_row.frame_id}/{oid}.json",
+                                                   json.dumps(payload).encode(), "application/json")
+                        mask_encoding = "polygon"
+                    db.add(Object(object_id=oid, frame_id=frame_row.frame_id, class_id=cid,
+                                  bbox=[float(x) * scale for x in o.bbox], conf=float(o.conf),
+                                  source="imported", state="review", provenance=prov, attrs=o.attrs or {},
+                                  mask_uri=mask_uri, mask_encoding=mask_encoding, rot_deg=o.rot_deg,
+                                  keypoints=o.keypoints))
                     counts["objects"] += 1
                 counts["frames"] += 1
 

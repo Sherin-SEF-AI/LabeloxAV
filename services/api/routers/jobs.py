@@ -19,13 +19,14 @@ def _iso(dt) -> str | None:
 
 @router.get("/jobs")
 async def jobs(limit: int = 100, db: AsyncSession = Depends(db_session)):
+    limit = min(max(limit, 1), 1000)
     out: list[dict] = []
 
     for j in (await db.execute(select(ImportJob).order_by(ImportJob.created_at.desc()).limit(limit))).scalars():
         c = j.counts or {}
         out.append({"job_id": str(j.job_id), "kind": "import", "status": j.status, "progress": j.progress,
                     "label": j.format, "detail": f"{c.get('frames', 0)}fr / {c.get('objects', 0)}obj",
-                    "link": f"/import", "error": j.error,
+                    "link": "/import", "error": j.error,
                     "created_at": _iso(j.created_at), "updated_at": _iso(j.updated_at)})
 
     for j in (await db.execute(select(TrainingJob).order_by(TrainingJob.created_at.desc()).limit(limit))).scalars():

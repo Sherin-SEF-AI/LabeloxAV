@@ -40,6 +40,10 @@ def parse(root: Path) -> list[ImportFrame]:
             conf=float(r.get("conf") or 1.0),
             ontology_class_id=r.get("class_id"),
             provenance=json.loads(r["provenance_json"]) if r.get("provenance_json") else {},
+            mask_uri=r.get("mask_uri"),
+            mask_encoding=r.get("mask_encoding"),
+            rot_deg=float(r.get("rot_deg") or 0.0),
+            keypoints=json.loads(r["keypoints_json"]) if r.get("keypoints_json") else None,
         ))
     frames = list(by_frame.values())
     log.info("import_parquet.parsed", frames=len(frames), objects=len(table))

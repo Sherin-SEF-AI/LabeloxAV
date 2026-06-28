@@ -16,7 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.storage import get_object_store
 from core.timebase import now_ns
 from db.models import Frame, Object, Review
-from services.api.deps import CreateObjectIn, MaskIn, ObjectDetail, SegmentIn, current_user, db_session
+from services.api.deps import (
+    CreateObjectIn,
+    MaskIn,
+    ObjectDetail,
+    SegmentIn,
+    current_user,
+    db_session,
+)
 from services.autolabel.ontology import get_ontology
 
 router = APIRouter()
@@ -63,6 +70,9 @@ def _detail(obj: Object, frame: Frame, onto) -> ObjectDetail:
         state=obj.state,
         source=obj.source,
         provenance=obj.provenance or {},
+        version=obj.version,
+        rot_deg=obj.rot_deg or 0.0,
+        keypoints=obj.keypoints,
     )
 
 
@@ -91,6 +101,9 @@ async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
             "conf": o.conf,
             "state": o.state,
             "mask_polygons": _mask_polygons(o.mask_uri),
+            "version": o.version,
+            "rot_deg": o.rot_deg or 0.0,
+            "keypoints": o.keypoints,
         }
         for o in rows
     ]
@@ -115,6 +128,8 @@ async def get_frame(frame_id: str, db: AsyncSession = Depends(db_session)):
         "width": frame.width, "height": frame.height, "ts_ns": frame.ts_ns, "cam_id": frame.cam_id,
         "image_url": f"/api/frames/{frame.frame_id}/image", "n_objects": int(n),
         "prev_frame_id": str(prev) if prev else None, "next_frame_id": str(nxt) if nxt else None,
+        "is_lidar": bool(frame.lidar), "lidar_points": (frame.lidar or {}).get("n_points"),
+        "lidar_res": ((frame.lidar or {}).get("bev") or {}).get("res"),  # metres per pixel, for the ruler
     }
 
 
@@ -134,6 +149,15 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         if errors:
             raise HTTPException(400, {"attr_errors": errors})
 
+    # Idempotency: if this frame already carries an object for the client's idem_key, return it rather
+    # than creating a duplicate (a retried or raced autosave from the editor).
+    if payload.idem_key:
+        existing = (await db.execute(
+            select(Object).where(Object.frame_id == frame.frame_id,
+                                  Object.provenance["idem_key"].astext == payload.idem_key))).scalars().first()
+        if existing is not None:
+            return _detail(existing, frame, onto)
+
     oid = uuid.uuid4()
     mask_uri = mask_encoding = None
     if payload.mask_polygons:
@@ -143,7 +167,8 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
     obj = Object(
         object_id=oid, frame_id=frame.frame_id, class_id=onto.by_name(payload.class_name).id,
         bbox=payload.bbox, mask_uri=mask_uri, mask_encoding=mask_encoding, attrs=payload.attrs or {},
-        conf=1.0, source="human", state=payload.state, provenance={"created_by": "human-annotation"},
+        conf=1.0, source="human", state=payload.state, rot_deg=payload.rot_deg, keypoints=payload.keypoints,
+        provenance={"created_by": "human-annotation", "idem_key": payload.idem_key},
     )
     db.add(obj)
     db.add(Review(object_id=oid, reviewer=user.name if user else "anon", user_id=user.user_id if user else None,

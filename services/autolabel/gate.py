@@ -17,7 +17,8 @@ def is_rare(class_id: int, onto: Ontology) -> bool:
     return c.india or c.l1 == "fallback"
 
 
-def gate_object(obj: UnifiedObject, onto: Ontology, cfg: GateSettings) -> GateState:
+def gate_object(obj: UnifiedObject, onto: Ontology, cfg: GateSettings,
+                auto_accept_enabled: bool = True) -> GateState:
     conf = obj.conf
     prov = obj.provenance
     rare = is_rare(obj.class_id, onto)
@@ -31,7 +32,9 @@ def gate_object(obj: UnifiedObject, onto: Ontology, cfg: GateSettings) -> GateSt
         cfg.force_review_on_mask_box_disagree and prov.mask_box_disagree
     )
 
-    if conf >= cfg.auto_accept and prov.agreement and not forced_review:
+    # auto_accept_enabled is the governance kill switch: when the loop is paused, nothing auto-accepts
+    # and everything falls to review until an operator releases it.
+    if auto_accept_enabled and conf >= cfg.auto_accept and prov.agreement and not forced_review:
         return GateState.auto_accept
 
     return GateState.review

@@ -8,7 +8,7 @@ dropped event never loses data, it only delays a downstream consumer.
 from __future__ import annotations
 
 import json
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 

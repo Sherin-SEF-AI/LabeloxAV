@@ -18,8 +18,7 @@ import numpy as np
 
 from core.config import Settings, get_settings
 from core.logging import get_logger
-from core.schemas import BBox, MaskEncoding, ObjectSource, Provenance, UnifiedObject
-from core.schemas import PathProposal
+from core.schemas import BBox, MaskEncoding, ObjectSource, PathProposal, Provenance, UnifiedObject
 from services.autolabel.calibrate import calibrate_confidence
 from services.autolabel.ontology import Ontology, get_ontology
 from services.autolabel.paths.base import RawDetection, mask_to_bbox

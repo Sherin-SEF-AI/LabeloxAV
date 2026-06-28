@@ -11,9 +11,9 @@ from __future__ import annotations
 import math
 from uuid import UUID
 
+from geoalchemy2 import Geometry
 from geoalchemy2.elements import WKTElement
 from sqlalchemy import cast, delete, func, select
-from geoalchemy2 import Geometry
 
 from core.config import get_settings
 from core.logging import get_logger
@@ -28,11 +28,23 @@ _LANE_CONF = {"human": 0.95, "propagated": 0.7, "proposed": 0.6}
 
 
 def ipm_pixel_to_vehicle(u: float, v: float, fx: float, fy: float, cx: float, cy: float,
-                         height_m: float, pitch_rad: float = 0.0) -> tuple[float, float] | None:
+                         height_m: float, pitch_rad: float = 0.0,
+                         dist: list[float] | None = None, fisheye: bool = False) -> tuple[float, float] | None:
     """Flat-ground IPM: a pixel to (forward, lateral) metres in the vehicle frame. None above the horizon.
-    Camera frame x-right, y-down, z-forward; the road plane is height_m below the camera."""
-    x = (u - cx) / fx
-    y = (v - cy) / fy
+    Camera frame x-right, y-down, z-forward; the road plane is height_m below the camera. For the wide
+    surround cameras (fisheye/equidistant) the pixel is first undistorted, otherwise a pinhole ray is wrong
+    off-centre and distance is badly skewed."""
+    if fisheye and dist:
+        import cv2
+        import numpy as np
+
+        km = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float64)
+        d = np.array((list(dist) + [0.0, 0.0, 0.0, 0.0])[:4], dtype=np.float64).reshape(4, 1)
+        und = cv2.fisheye.undistortPoints(np.array([[[float(u), float(v)]]], dtype=np.float64), km, d)
+        x, y = float(und[0, 0, 0]), float(und[0, 0, 1])  # undistorted normalized ray
+    else:
+        x = (u - cx) / fx
+        y = (v - cy) / fy
     z = 1.0
     if pitch_rad:  # rotate the ray about the camera x-axis (downward pitch raises the horizon)
         cy_, sy_ = math.cos(pitch_rad), math.sin(pitch_rad)
@@ -47,11 +59,13 @@ def ipm_pixel_to_vehicle(u: float, v: float, fx: float, fy: float, cx: float, cy
 
 
 def vehicle_to_world(forward: float, lateral: float, lat: float, lon: float,
-                     heading_rad: float) -> tuple[float, float]:
+                     heading_rad: float, cam_yaw_rad: float = 0.0) -> tuple[float, float]:
     """Vehicle-frame (forward, lateral) to world (lat, lon) given the GNSS pos + heading (rad from north,
-    clockwise). Lateral is +right of travel."""
-    east = forward * math.sin(heading_rad) + lateral * math.cos(heading_rad)
-    north = forward * math.cos(heading_rad) - lateral * math.sin(heading_rad)
+    clockwise). cam_yaw_rad is the camera's mounting yaw relative to vehicle forward, composed in so a side
+    or rear camera is not georeferenced as if it faced forward. Lateral is +right of the camera axis."""
+    h = heading_rad + cam_yaw_rad
+    east = forward * math.sin(h) + lateral * math.cos(h)
+    north = forward * math.cos(h) - lateral * math.sin(h)
     return lat + north / 111320.0, lon + east / (111320.0 * math.cos(math.radians(lat)))
 
 
@@ -97,14 +111,17 @@ async def georef_session(session_id: UUID, height_m: float | None = None) -> dic
             # at the image centre (real per-camera intrinsics, when ingested, override this).
             scale = w / cfg.rig.ref_width
             fx, fy, cx, cy = K.fx * scale, K.fy * scale, w / 2.0, h / 2.0
+            is_fisheye = K.model == "fisheye"
+            cam_yaw = math.radians(cfg.rig.camera_yaw_deg.get(cam, 0.0))
 
             for lane in (await db.execute(select(Lane).where(Lane.frame_id == fid))).scalars().all():
                 world = []
                 for pt in lane.control_points:
-                    fl = ipm_pixel_to_vehicle(pt[0], pt[1], fx, fy, cx, cy, height_m, pitch)
+                    fl = ipm_pixel_to_vehicle(pt[0], pt[1], fx, fy, cx, cy, height_m, pitch,
+                                              dist=K.dist, fisheye=is_fisheye)
                     if fl is None:
                         continue
-                    wlat, wlon = vehicle_to_world(fl[0], fl[1], lat, lon, hd)
+                    wlat, wlon = vehicle_to_world(fl[0], fl[1], lat, lon, hd, cam_yaw_rad=cam_yaw)
                     world.append((wlon, wlat))
                 if len(world) < 2:
                     continue
@@ -118,10 +135,11 @@ async def georef_session(session_id: UUID, height_m: float | None = None) -> dic
             for s in (await db.execute(
                     select(Object).where(Object.frame_id == fid, Object.sign_type.isnot(None)))).scalars().all():
                 bb = s.bbox
-                fl = ipm_pixel_to_vehicle((bb[0] + bb[2]) / 2.0, bb[3], fx, fy, cx, cy, height_m, pitch)
+                fl = ipm_pixel_to_vehicle((bb[0] + bb[2]) / 2.0, bb[3], fx, fy, cx, cy, height_m, pitch,
+                                          dist=K.dist, fisheye=is_fisheye)
                 if fl is None:
                     continue
-                wlat, wlon = vehicle_to_world(fl[0], fl[1], lat, lon, hd)
+                wlat, wlon = vehicle_to_world(fl[0], fl[1], lat, lon, hd, cam_yaw_rad=cam_yaw)
                 db.add(MapElement(kind="sign", geometry=WKTElement(f"POINT({wlon} {wlat})", srid=4326),
                                   attrs={"sign_type": s.sign_type, "sign_category": s.sign_category, "approx": True},
                                   source_frames=[str(fid)], source_sessions=[str(session_id)],

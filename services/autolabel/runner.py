@@ -99,16 +99,18 @@ EST_PATHB_MB = 3500
 
 
 class StagedRunner:
-    def __init__(self) -> None:
+    def __init__(self, yolo_weights: str | None = None) -> None:
         self.settings = get_settings()
         self.guard = VramGuard()
         self.yolo: YoloPath | None = None
         self.sam: Sam3Path | None = None
+        # When set, Path A loads the governance champion's weights instead of the config default.
+        self.yolo_weights = yolo_weights
 
     def open_stage1(self) -> None:
         self.guard.reset_peak()
         self.guard.require(EST_YOLO_MB, "path_a_detector")
-        self.yolo = YoloPath()
+        self.yolo = YoloPath(self.yolo_weights)
         self.yolo.load()
         self.guard.require(EST_PATHB_MB, "path_b_openvocab")
         self.sam = Sam3Path()
@@ -165,10 +167,45 @@ async def fetch_frames(session_id: UUID, limit: int | None) -> list[FrameMeta]:
     ]
 
 
+def _local_champion_weights(weights_uri: str) -> str | None:
+    """Resolve a champion's weights_uri to a local file path Path A can load: a local path is used
+    as-is, otherwise the blob is pulled from the object store into a scratch cache."""
+    import re
+    from pathlib import Path
+
+    p = Path(weights_uri)
+    if p.exists() and p.is_file():
+        return str(p)
+    try:
+        data = get_object_store().get_bytes(weights_uri)
+    except Exception:  # noqa: BLE001
+        log.warning("champion.weights_unreadable", uri=weights_uri)
+        return None
+    cache = get_settings().scratch_path() / "models" / "champion"
+    cache.mkdir(parents=True, exist_ok=True)
+    dest = cache / (re.sub(r"[^A-Za-z0-9._-]", "_", weights_uri.split("/")[-1]) or "champion.pt")
+    dest.write_bytes(data)
+    return str(dest)
+
+
+async def resolve_detector_weights(db) -> str | None:
+    """The governance champion's detector weights (local path), or None to fall back to config."""
+    try:
+        from services.govern.registry import get_champion
+
+        champ = await get_champion(db, "detection")
+    except Exception:  # noqa: BLE001
+        return None
+    if not champ or not champ.weights_uri:
+        return None
+    return _local_champion_weights(champ.weights_uri)
+
+
 async def process_session(
     session_id: UUID,
     limit: int | None,
     on_frame: Callable[[FrameDetections], Awaitable[None]],
+    yolo_weights: str | None = None,
 ) -> dict:
     """Stream a session's frames through Stage 1, invoking on_frame per frame. The callback is the
     plug point for fusion + gate + persistence (M3) and the VLM pass (M4)."""
@@ -176,7 +213,7 @@ async def process_session(
     if not frames:
         raise RuntimeError(f"no frames for session {session_id}")
 
-    runner = StagedRunner()
+    runner = StagedRunner(yolo_weights)
     runner.open_stage1()
     n_a = 0
     n_b = 0
@@ -238,6 +275,18 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
     async with maker() as db:
         per_frame_cap = settings.models.vlm.max_calls_per_frame
 
+        # Governance wiring: the kill switch gates auto-accept, and the registered champion's weights
+        # serve in Path A. Both fail safe (auto-accept on, config weights) if governance is unavailable.
+        try:
+            from services.govern.killswitch import get_state
+
+            auto_accept_enabled = (await get_state(db)).auto_accept_enabled
+        except Exception:  # noqa: BLE001
+            auto_accept_enabled = True
+        champion_weights = await resolve_detector_weights(db)
+        if champion_weights:
+            log.info("autolabel.champion_serving", weights=champion_weights)
+
         async def on_frame(fd: FrameDetections) -> None:
             fused = engine.fuse_frame(fd.frame.frame_id, fd.dets_a, fd.dets_b)
             # Spend the per-frame VLM budget on the most uncertain objects first (lowest conf).
@@ -245,13 +294,14 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
             frame_vlm = 0
             for i in order:
                 fo = fused[i]
-                fo.obj.state = gate_object(fo.obj, onto, settings.gate)
+                fo.obj.state = gate_object(fo.obj, onto, settings.gate, auto_accept_enabled=auto_accept_enabled)
                 if verifier and needs_vlm(fo.obj, onto, settings.gate):
                     totals["vlm_eligible"] += 1
                     if totals["vlm_calls"] < budget and frame_vlm < per_frame_cap:
                         res = verifier.verify_object(fd.image_bgr, tuple(fo.obj.bbox.as_list()), fo.obj.class_id)
                         apply_vlm(fo.obj, res, onto, settings.models.vlm.ollama_tag)
-                        fo.obj.state = gate_object(fo.obj, onto, settings.gate)  # re-gate post-VLM
+                        fo.obj.state = gate_object(fo.obj, onto, settings.gate,
+                                                   auto_accept_enabled=auto_accept_enabled)  # re-gate post-VLM
                         totals["vlm_calls"] += 1
                         frame_vlm += 1
             by_state = await persist_frame_objects(db, store, bus, fd.frame, fused)
@@ -260,7 +310,7 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
                 totals["by_state"][k] = totals["by_state"].get(k, 0) + v
 
         try:
-            summary = await process_session(session_id, limit, on_frame)
+            summary = await process_session(session_id, limit, on_frame, yolo_weights=champion_weights)
             await db.commit()
         finally:
             await bus.stop()

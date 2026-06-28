@@ -43,14 +43,14 @@ async def list_sessions(db: AsyncSession = Depends(db_session)):
 
 
 @router.get("/calibration/{session_id}")
-async def get_validation(session_id: str, db: AsyncSession = Depends(db_session)):
+async def get_validation(session_id: UUID, db: AsyncSession = Depends(db_session)):
     rows = (await db.execute(
-        select(CalibrationValidation).where(CalibrationValidation.session_id == UUID(session_id))
+        select(CalibrationValidation).where(CalibrationValidation.session_id == session_id)
         .order_by(CalibrationValidation.cam_id))).scalars().all()
     cams = (await db.execute(
-        select(Frame.cam_id).where(Frame.session_id == UUID(session_id)).distinct())).scalars().all()
+        select(Frame.cam_id).where(Frame.session_id == session_id).distinct())).scalars().all()
     return {
-        "session_id": session_id, "cameras_in_session": list(cams),
+        "session_id": str(session_id), "cameras_in_session": list(cams),
         "validations": [{"cam_id": r.cam_id, "model": r.model, "reproj_error_px": r.reproj_error_px,
                          "fov_check": r.fov_check, "time_offset_ns": r.time_offset_ns, "status": r.status}
                         for r in rows],

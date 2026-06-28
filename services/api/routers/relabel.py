@@ -3,8 +3,6 @@ A100 burst), list runs, ingest cloud-pod output, and revert a run."""
 
 from __future__ import annotations
 
-from uuid import UUID
-
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
