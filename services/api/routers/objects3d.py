@@ -14,7 +14,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
-from db.models import Frame, Object3D, PointCloud, PointCloudDerived
+from db.models import Frame, Object3D, PointCloud, PointCloudDerived, Track3D
 from services.api.deps import db_session
 from services.autolabel.ontology import get_ontology
 from services.lidar.boxes import project_cuboid, snap_to_ground
@@ -171,6 +171,65 @@ async def delete_object3d(object_3d_id: uuid.UUID, db: AsyncSession = Depends(db
     if res.rowcount == 0:
         raise HTTPException(404, "object_3d not found")
     return {"deleted": str(object_3d_id)}
+
+
+@router.post("/lidar/sessions/{session_id}/track3d")
+async def run_tracking(session_id: uuid.UUID):
+    """Track the session's 3D objects across frames into track_3d, linked to the 2D tracks, with a dynamic
+    state per track (M-L2.2)."""
+    from services.lidar.track3d import track_session
+    return await track_session(session_id)
+
+
+@router.get("/lidar/sessions/{session_id}/tracks3d")
+async def list_tracks3d(session_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
+    onto = get_ontology()
+    rows = (await db.execute(select(Track3D).where(Track3D.session_id == session_id)
+                             .order_by(Track3D.first_ts_ns))).scalars().all()
+    return {"session_id": str(session_id), "tracks": [
+        {"track_3d_id": str(t.track_3d_id), "track_id": str(t.track_id) if t.track_id else None,
+         "class_id": t.class_id, "class_name": onto.by_id(t.class_id).name, "first_ts_ns": t.first_ts_ns,
+         "last_ts_ns": t.last_ts_ns, "dynamic_state": t.dynamic_state,
+         "n_points": len((t.trajectory or {}).get("points", []))} for t in rows]}
+
+
+@router.post("/lidar/tracks3d/{track_3d_id}/interpolate")
+async def interpolate_track(track_3d_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
+    """Fill the cuboid pose between the human keyframes on a 3D track, writing interpolated object_3d for the
+    clouds in the span that lack one (M-L2.2 keyframe interpolation)."""
+    from services.lidar.track3d import interpolate_cuboids
+    tr = await db.get(Track3D, track_3d_id)
+    if tr is None:
+        raise HTTPException(404, "track_3d not found")
+    members = (await db.execute(
+        select(Object3D, PointCloud.ts_ns).join(PointCloud, Object3D.cloud_id == PointCloud.cloud_id)
+        .where(Object3D.track_3d_id == track_3d_id))).all()
+    keyframes = [{"ts_ns": int(ts), "center": o.center, "dims": o.dims, "yaw": o.yaw}
+                 for o, ts in members if o.is_keyframe or o.source == "human"]
+    if len(keyframes) < 2:
+        return {"track_3d_id": str(track_3d_id), "filled": 0, "reason": "need at least two keyframes"}
+    keyframes.sort(key=lambda k: k["ts_ns"])
+    have_ts = {int(ts) for _, ts in members}
+    clouds = (await db.execute(
+        select(PointCloud.cloud_id, PointCloud.ts_ns).where(
+            PointCloud.session_id == tr.session_id, PointCloud.ts_ns > keyframes[0]["ts_ns"],
+            PointCloud.ts_ns < keyframes[-1]["ts_ns"]).order_by(PointCloud.ts_ns))).all()
+    targets = [(cid, int(ts)) for cid, ts in clouds if int(ts) not in have_ts]
+    by_ts = {c["ts_ns"]: c for c in interpolate_cuboids(keyframes, [ts for _, ts in targets])}
+    filled = 0
+    for cid, ts in targets:
+        c = by_ts.get(ts)
+        if not c:
+            continue
+        frame = (await db.execute(select(Frame.frame_id).where(Frame.session_id == tr.session_id,
+                 Frame.ts_ns == ts).limit(1))).scalar_one_or_none()
+        db.add(Object3D(cloud_id=cid, frame_id=frame, track_3d_id=track_3d_id, class_id=tr.class_id,
+                        center=c["center"], dims=c["dims"], yaw=c["yaw"], conf=0.7, box_source="lifted",
+                        source="fused", state="auto_accept", is_keyframe=False, interp_source="linear"))
+        filled += 1
+    await db.commit()
+    log.info("objects3d.interpolate", track=str(track_3d_id), filled=filled)
+    return {"track_3d_id": str(track_3d_id), "filled": filled}
 
 
 @router.get("/lidar/objects3d/{object_3d_id}/projection")
