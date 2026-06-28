@@ -40,6 +40,8 @@ async def segment_cloud(cloud_id: uuid.UUID, method: str | None = None) -> dict:
         cuboids = (await db.execute(select(Object3D).where(Object3D.cloud_id == cloud_id))).scalars().all()
         session_id, cloud_uri = pc.session_id, pc.cloud_uri
     cub_list = [{"center": o.center, "dims": o.dims, "yaw": o.yaw, "class_id": o.class_id} for o in cuboids]
+    # instance index i in the projected segmentation maps to this stable object_3d identity
+    instance_ids = [str(o.object_3d_id) for o in cuboids]
 
     cloud = load_cloud(cloud_uri)
     _, plane, _ = segment_ground(cloud)
@@ -55,7 +57,8 @@ async def segment_cloud(cloud_id: uuid.UUID, method: str | None = None) -> dict:
         result = segment_projected(cloud, cub_list, plane)
 
     buf = io.BytesIO()
-    np.savez_compressed(buf, semantic=result["semantic"], instance=result["instance"], conf=result["conf"])
+    np.savez_compressed(buf, semantic=result["semantic"], instance=result["instance"], conf=result["conf"],
+                        object_3d_ids=np.array(instance_ids))   # fixed-width strings, no pickle on load
     store = get_object_store()
     store.ensure_bucket()
     uri = store.put_bytes(f"{cfg.cloud_prefix}/{session_id}/seg/{cloud_id}.npz", buf.getvalue(),
@@ -74,11 +77,12 @@ async def segment_cloud(cloud_id: uuid.UUID, method: str | None = None) -> dict:
     return {"seg_id": str(seg_id), "cloud_id": str(cloud_id), "method": method_used,
             "kind": "panoptic", "labels_uri": uri, "n_points": cloud.n,
             "classes_present": result["classes_present"], "n_instances": result["n_instances"],
-            "low_conf_frac": round(result["low_conf_frac"], 4)}
+            "instance_object_3d_ids": instance_ids, "low_conf_frac": round(result["low_conf_frac"], 4)}
 
 
 def load_segmentation(labels_uri: str) -> dict:
-    """Read stored per-point labels back."""
+    """Read stored per-point labels back, including the instance-to-object_3d identity map."""
     store = get_object_store()
     with np.load(io.BytesIO(store.get_bytes(labels_uri))) as z:
-        return {"semantic": z["semantic"], "instance": z["instance"], "conf": z["conf"]}
+        return {"semantic": z["semantic"], "instance": z["instance"], "conf": z["conf"],
+                "object_3d_ids": [str(x) for x in z["object_3d_ids"]] if "object_3d_ids" in z.files else []}

@@ -177,3 +177,64 @@ def test_lift_frame_persists_object3d_linked_to_2d():
         asyncio.run(run())
     finally:
         _clear()
+
+
+@requires_infra
+def test_lift_is_per_frame_not_per_cloud_multicamera():
+    """Two cameras share one fused cloud at a ts_ns. Re-lifting one camera must not wipe the other's cuboids
+    (the idempotent clear is scoped to the frame, not the shared cloud)."""
+    async def run():
+        from core.storage import get_object_store
+        from core.timebase import now_ns
+        from db.models import Frame, Object, Object3D
+        from db.models import Session as DbSession
+        from db.session import get_sessionmaker
+        from services.lidar.detect3d import lift_frame
+        from services.lidar.ingest import Cloud, store_cloud
+
+        get_object_store().ensure_bucket()
+        onto = get_ontology()
+        car = onto.by_name("sedan").id
+        sid, ts = uuid.uuid4(), now_ns()
+        ff, fb = uuid.uuid4(), uuid.uuid4()
+        rng = np.random.default_rng(0)
+        ground = np.stack([rng.uniform(2, 30, 4000), rng.uniform(-10, 10, 4000),
+                           rng.normal(0, 0.02, 4000)], axis=1)
+        car_pts = _box_points([12.0, 0.0, 0.75], [4.0, 1.8, 1.5], yaw=0.0, n=3000)
+        cloud = Cloud(xyz=np.vstack([ground, car_pts]).astype(np.float32),
+                      intensity=np.ones(7000, np.float32), ts_ns=ts, source="pseudo")
+        async with get_sessionmaker()() as db:
+            db.add(DbSession(session_id=sid, vehicle_id="MC-3D", start_ts_ns=ts, end_ts_ns=ts + 1,
+                             city="BLR", sensors={}, ontology_version=onto.version))
+            db.add(Frame(frame_id=ff, session_id=sid, ts_ns=ts, cam_id="cam_f", img_uri="s3://x.jpg",
+                         width=W, height=H, quality=1.0))
+            db.add(Frame(frame_id=fb, session_id=sid, ts_ns=ts, cam_id="cam_b", img_uri="s3://x.jpg",
+                         width=W, height=H, quality=1.0))
+            db.add(Object(frame_id=ff, class_id=car, bbox=[W / 2 - 200, H / 2 - 120, W / 2 + 200, H / 2 + 160],
+                          conf=0.97, source="auto_accept", state="auto_accept", provenance={"agreement": True}))
+            await db.commit()
+        stored = await store_cloud(cloud, sid, source="pseudo")
+        cloud_id = uuid.UUID(stored["cloud_id"])
+
+        await lift_frame(ff)
+        # cam_b lifted its own machine cuboid earlier on the SAME shared cloud (inserted directly)
+        async with get_sessionmaker()() as db:
+            db.add(Object3D(cloud_id=cloud_id, frame_id=fb, class_id=car, center=[-12, 0, 0.75],
+                            dims=[4, 1.8, 1.5], yaw=0.0, conf=0.9, box_source="lifted", source="fused",
+                            state="auto_accept"))
+            await db.commit()
+
+        await lift_frame(ff)                       # re-lift the front camera on the shared cloud
+        from sqlalchemy import func, select
+        async with get_sessionmaker()() as db:
+            n_f = (await db.execute(select(func.count()).select_from(Object3D)
+                   .where(Object3D.frame_id == ff))).scalar()
+            n_b = (await db.execute(select(func.count()).select_from(Object3D)
+                   .where(Object3D.frame_id == fb))).scalar()
+            assert n_f == 1 and n_b == 1          # the rear camera's lift was not wiped by the front re-lift
+
+    _clear()
+    try:
+        asyncio.run(run())
+    finally:
+        _clear()

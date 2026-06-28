@@ -65,8 +65,8 @@ def _bev_rect(center, dims, yaw: float):
     return ((float(center[0]), float(center[1])), (float(dims[0]), float(dims[1])), math.degrees(yaw))
 
 
-def iou_bev(a: dict, b: dict) -> float:
-    """BEV (top-down) IoU of two oriented boxes via rotated-rectangle intersection."""
+def bev_intersection_area(a: dict, b: dict) -> float:
+    """The overlapping footprint area of two oriented boxes via rotated-rectangle intersection."""
     import cv2
 
     ra = _bev_rect(a["center"], a["dims"], a["yaw"])
@@ -74,20 +74,31 @@ def iou_bev(a: dict, b: dict) -> float:
     inter_type, region = cv2.rotatedRectangleIntersection(ra, rb)
     if inter_type == 0 or region is None:
         return 0.0
-    inter = float(cv2.contourArea(region))
-    area_a = a["dims"][0] * a["dims"][1]
-    area_b = b["dims"][0] * b["dims"][1]
-    union = area_a + area_b - inter
+    return float(cv2.contourArea(region))
+
+
+def iou_bev(a: dict, b: dict) -> float:
+    """BEV (top-down) IoU of two oriented boxes."""
+    inter = bev_intersection_area(a, b)
+    if inter <= 0:
+        return 0.0
+    union = a["dims"][0] * a["dims"][1] + b["dims"][0] * b["dims"][1] - inter
     return inter / union if union > 1e-6 else 0.0
 
 
 def iou_3d(a: dict, b: dict) -> float:
-    """3D IoU: BEV IoU scaled by the vertical overlap of the two boxes."""
-    bev = iou_bev(a, b)
-    if bev <= 0:
+    """True volumetric 3D IoU: the intersection volume (footprint overlap times vertical overlap) over the
+    union volume. Not the BEV IoU scaled by a z ratio, which is wrong when the footprints or heights differ."""
+    inter_area = bev_intersection_area(a, b)
+    if inter_area <= 0:
         return 0.0
     az0, az1 = a["center"][2] - a["dims"][2] / 2, a["center"][2] + a["dims"][2] / 2
     bz0, bz1 = b["center"][2] - b["dims"][2] / 2, b["center"][2] + b["dims"][2] / 2
     z_inter = max(0.0, min(az1, bz1) - max(az0, bz0))
-    z_union = max(az1, bz1) - min(az0, bz0)
-    return bev * (z_inter / z_union) if z_union > 1e-6 else 0.0
+    if z_inter <= 0:
+        return 0.0
+    inter_vol = inter_area * z_inter
+    vol_a = a["dims"][0] * a["dims"][1] * a["dims"][2]
+    vol_b = b["dims"][0] * b["dims"][1] * b["dims"][2]
+    union = vol_a + vol_b - inter_vol
+    return inter_vol / union if union > 1e-6 else 0.0

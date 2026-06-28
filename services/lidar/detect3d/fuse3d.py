@@ -23,8 +23,8 @@ log = get_logger("lidar_fuse3d")
 
 def gate_cuboid(cuboid: dict, *, class_id: int, conf_2d: float, frame_id, box_source: str,
                 bbox_2d: list[float] | None = None, agreement_2d: bool = True, track_id=None,
-                model_version: str = "lift-3d-0.1", auto_accept_enabled: bool = True,
-                onto: Ontology | None = None) -> dict:
+                model_version: str = "lift-3d-0.1", calibration_version: str | None = None,
+                auto_accept_enabled: bool = True, onto: Ontology | None = None) -> dict:
     """Gate one 3D proposal. Returns the calibrated 3D confidence, the gate state, the inherited class, and a
     one-walk provenance. The cuboid's class is NEVER changed here: governance happens on the inherited or
     mapped ontology class."""
@@ -46,7 +46,9 @@ def gate_cuboid(cuboid: dict, *, class_id: int, conf_2d: float, frame_id, box_so
                                 verdict="proposed", model_version=model_version)],
         agreement=agreement, mask_box_disagree=False, raw_conf={f"{box_source}_3d": conf3d},
         calibrated_from=conf_2d, ontology_version=onto.version,
-        notes=[f"box_source={box_source}", f"n_points={cuboid.get('n_points')}", f"fill={cuboid.get('fill')}"])
+        notes=[f"box_source={box_source}", f"n_points={cuboid.get('n_points')}", f"fill={cuboid.get('fill')}",
+               f"calibration_version={calibration_version}", f"model_version={model_version}",
+               f"track_id={track_id}"])
     uo = UnifiedObject(frame_id=frame_id, track_id=track_id, class_id=class_id, class_name=cls.name,
                        bbox=BBox(x1=bb[0], y1=bb[1], x2=bb[2], y2=bb[3]), conf=conf3d,
                        source=ObjectSource.fused, provenance=prov)

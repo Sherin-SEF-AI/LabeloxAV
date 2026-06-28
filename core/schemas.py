@@ -93,7 +93,7 @@ class UnifiedObject(BaseModel):
     """The internal object contract. One per fused cluster."""
 
     object_id: UUID | None = None
-    frame_id: UUID
+    frame_id: UUID | None = None  # a 3D proposal on a cloud may have no synchronized camera frame
     track_id: UUID | None = None
     class_id: int
     class_name: str

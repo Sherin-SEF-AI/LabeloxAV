@@ -22,6 +22,7 @@ from services.lidar.ingest.store import load_cloud
 
 log = get_logger("lidar_detect3d")
 LIFT_VERSION = "lift-3d-0.1"
+CALIB_VERSION = "labelox-calib-0.1"   # the calibration that placed the cloud (Phase 1), recorded in provenance
 
 
 async def _auto_accept_enabled(db) -> bool:
@@ -74,11 +75,15 @@ async def lift_frame(frame_id: uuid.UUID) -> dict:
         agreement = bool(prov.get("agreement", o.source in ("auto_accept", "human")))
         g = gate_cuboid(cuboid, class_id=o.class_id, conf_2d=float(o.conf), frame_id=frame_id,
                         box_source="lifted", bbox_2d=list(o.bbox), agreement_2d=agreement,
-                        track_id=o.track_id, model_version=LIFT_VERSION, auto_accept_enabled=aae)
+                        track_id=o.track_id, model_version=LIFT_VERSION, calibration_version=CALIB_VERSION,
+                        auto_accept_enabled=aae)
         proposals.append((o.object_id, cuboid, g))
 
     async with get_sessionmaker()() as db:
-        await db.execute(delete(Object3D).where(Object3D.cloud_id == cloud_id, Object3D.source != "human"))
+        # scope the idempotent clear to THIS frame's lifted objects: a fused cloud is shared by every camera
+        # at this ts_ns, so deleting by cloud_id would wipe another camera's lifts. Human boxes survive.
+        await db.execute(delete(Object3D).where(Object3D.frame_id == frame_id,
+                         Object3D.box_source == "lifted", Object3D.source != "human"))
         rows = [_row(cloud_id, frame_id, oid, g, cuboid) for oid, cuboid, g in proposals]
         for r in rows:
             db.add(r)
@@ -100,8 +105,8 @@ async def detect_native_cloud(cloud_id: uuid.UUID) -> dict:
         if pc is None:
             return {"error": "cloud not found"}
         frame = (await db.execute(
-            select(Frame).where(Frame.session_id == pc.session_id, Frame.ts_ns == pc.ts_ns).limit(1))
-        ).scalar_one_or_none()
+            select(Frame).where(Frame.session_id == pc.session_id, Frame.ts_ns == pc.ts_ns)
+            .order_by(Frame.cam_id).limit(1))).scalar_one_or_none()
         aae = await _auto_accept_enabled(db)
         frame_id = frame.frame_id if frame else None
 
@@ -110,11 +115,15 @@ async def detect_native_cloud(cloud_id: uuid.UUID) -> dict:
     proposals = []
     for d in dets:
         g = gate_cuboid(d, class_id=d["class_id"], conf_2d=d["conf"], frame_id=frame_id,
-                        box_source="native", auto_accept_enabled=aae)
+                        box_source="native", model_version=d.get("native_class", "native-3d"),
+                        calibration_version=CALIB_VERSION, auto_accept_enabled=aae)
         proposals.append((None, d, g))
 
     async with get_sessionmaker()() as db:
-        await db.execute(delete(Object3D).where(Object3D.cloud_id == cloud_id, Object3D.source != "human"))
+        # native detection is per-cloud (one set per scan); scope the clear to native machine objects so it
+        # never deletes the per-frame lifted boxes on the same cloud.
+        await db.execute(delete(Object3D).where(Object3D.cloud_id == cloud_id,
+                         Object3D.box_source == "native", Object3D.source != "human"))
         rows = [_row(cloud_id, frame_id, oid, g, cuboid) for oid, cuboid, g in proposals]
         for r in rows:
             db.add(r)

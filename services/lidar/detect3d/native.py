@@ -31,10 +31,17 @@ _NATIVE_TO_ONTOLOGY = {
 
 
 def _object_fallback_id(onto: Ontology) -> int:
-    for fid in onto.fallback_ids():
-        if onto.by_id(fid).name in ("object_fallback", "object"):
-            return fid
-    return onto.fallback_ids()[0]
+    """The typed object fallback by name, so a native detection lands in the object catch-all (not the
+    vehicle fallback). Falls back to any fallback class, raising if the ontology has none."""
+    for name in ("object_fallback", "object"):
+        try:
+            return onto.by_name(name).id
+        except Exception:
+            continue
+    fids = onto.fallback_ids()
+    if not fids:
+        raise ValueError(f"ontology {onto.version} has no fallback class; cannot govern an unsupported class")
+    return fids[0]
 
 
 def native_class_to_ontology(name: str, onto: Ontology | None = None) -> int:

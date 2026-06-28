@@ -45,6 +45,9 @@ def test_iou_3d():
     assert iou_3d(a, far) == 0.0                       # disjoint
     half = {"center": [2, 0, 0], "dims": [4, 2, 2], "yaw": 0.0}
     assert 0.2 < iou_3d(a, half) < 0.5                 # partial overlap
+    # true volumetric IoU: different footprints AND heights (the BEV-times-z-ratio shortcut is wrong here)
+    b = {"center": [0, 0, 0], "dims": [2, 2, 4], "yaw": 0.0}
+    assert abs(iou_3d(a, b) - 8.0 / 24.0) < 1e-3       # V_inter=4*2=8, V_union=16+16-8=24
 
 
 def _infra_up() -> bool:

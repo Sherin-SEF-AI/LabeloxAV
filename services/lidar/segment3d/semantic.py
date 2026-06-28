@@ -37,7 +37,10 @@ def road_class_id(onto: Ontology | None = None) -> int:
     for fid in onto.fallback_ids():
         if "drivable" in onto.by_id(fid).name:
             return fid
-    return onto.fallback_ids()[0]
+    fids = onto.fallback_ids()
+    if not fids:
+        raise ValueError(f"ontology {onto.version} has no fallback class for the road surface")
+    return fids[0]
 
 
 def points_in_cuboid(points: np.ndarray, cuboid: dict) -> np.ndarray:

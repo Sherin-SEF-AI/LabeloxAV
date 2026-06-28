@@ -48,39 +48,44 @@ def _iou(a: list[float], b: list[float]) -> float:
 
 
 async def link_cloud(cloud_id: uuid.UUID, iou_thresh: float = 0.3) -> dict:
-    """Link unlinked 3D cuboids on a cloud to the 2D objects on the synchronized frame by projection IoU."""
+    """Link unlinked 3D cuboids on a cloud to the 2D objects across EVERY synchronized camera, by projecting
+    each cuboid into each camera and taking the best bbox IoU. A fused cloud is shared by all cameras at its
+    ts_ns, so a rear object links to a rear-camera 2D object, not just the front."""
     async with get_sessionmaker()() as db:
         pc = await db.get(PointCloud, cloud_id)
         if pc is None:
             return {"error": "cloud not found"}
-        frame = (await db.execute(select(Frame).where(Frame.session_id == pc.session_id,
-                 Frame.ts_ns == pc.ts_ns).limit(1))).scalar_one_or_none()
-        if frame is None:
-            return {"cloud_id": str(cloud_id), "linked": 0, "reason": "no synchronized frame"}
-        objs2d = (await db.execute(select(Object).where(Object.frame_id == frame.frame_id))).scalars().all()
+        frames = (await db.execute(select(Frame).where(Frame.session_id == pc.session_id,
+                  Frame.ts_ns == pc.ts_ns).order_by(Frame.cam_id))).scalars().all()
+        if not frames:
+            return {"cloud_id": str(cloud_id), "linked": 0, "reason": "no synchronized frames"}
+        per_cam = []
+        for fr in frames:
+            objs = (await db.execute(select(Object).where(Object.frame_id == fr.frame_id))).scalars().all()
+            per_cam.append((fr.cam_id, fr.width or 1280, fr.height or 960, objs))
         cuboids = (await db.execute(select(Object3D).where(Object3D.cloud_id == cloud_id,
                    Object3D.object_id.is_(None)))).scalars().all()
-        w, h, cam = frame.width or 1280, frame.height or 960, frame.cam_id
 
         linked = 0
         used: set[uuid.UUID] = set()
         for o3 in cuboids:
-            pbox = projected_bbox(o3.center, o3.dims, o3.yaw, cam, w, h, o3.pitch, o3.roll)
-            if pbox is None:
-                continue
             best, best_iou = None, iou_thresh
-            for o2 in objs2d:
-                if o2.object_id in used or o2.class_id != o3.class_id:
+            for cam, w, h, objs in per_cam:
+                pbox = projected_bbox(o3.center, o3.dims, o3.yaw, cam, w, h, o3.pitch, o3.roll)
+                if pbox is None:
                     continue
-                i = _iou(pbox, list(o2.bbox))
-                if i >= best_iou:
-                    best, best_iou = o2, i
+                for o2 in objs:
+                    if o2.object_id in used or o2.class_id != o3.class_id:
+                        continue
+                    i = _iou(pbox, list(o2.bbox))
+                    if i >= best_iou:
+                        best, best_iou = o2, i
             if best is not None:
                 o3.object_id = best.object_id
                 used.add(best.object_id)
                 linked += 1
         await db.commit()
-    log.info("lidar.link_cloud", cloud=str(cloud_id), linked=linked)
+    log.info("lidar.link_cloud", cloud=str(cloud_id), linked=linked, cameras=len(frames))
     return {"cloud_id": str(cloud_id), "linked": linked, "cuboids": len(cuboids)}
 
 
@@ -94,7 +99,7 @@ async def linked_views(object_3d_id: uuid.UUID) -> dict:
             return {"error": "object_3d not found"}
         pc = await db.get(PointCloud, o3.cloud_id)
         frame = (await db.execute(select(Frame).where(Frame.session_id == pc.session_id,
-                 Frame.ts_ns == pc.ts_ns).limit(1))).scalar_one_or_none()
+                 Frame.ts_ns == pc.ts_ns).order_by(Frame.cam_id).limit(1))).scalar_one_or_none()
         obj2d = await db.get(Object, o3.object_id) if o3.object_id else None
     w = frame.width if frame else 1280
     h = frame.height if frame else 960
