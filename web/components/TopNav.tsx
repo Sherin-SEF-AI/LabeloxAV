@@ -8,6 +8,8 @@ import UserPicker from "./UserPicker";
 
 const LINKS = [
   { href: "/", label: "TRIAGE" },
+  { href: "/annotate/new", label: "NEW" },
+  { href: "/annotations", label: "OPEN" },
   { href: "/scenarios", label: "SCENARIOS" },
   { href: "/analytics", label: "ANALYTICS" },
   { href: "/search", label: "SEARCH" },

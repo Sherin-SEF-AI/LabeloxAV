@@ -2,6 +2,7 @@ import type {
   AlItem,
   AssignmentRow,
   AuditRow,
+  Keypoints,
   ErrorCandidateRow,
   GovState,
   MergeRequestRow,
@@ -80,6 +81,8 @@ export const api = {
   ontology: () => get<Ontology>("/api/ontology"),
   addClass: (name: string) => post<OntologyClass & { existed: boolean }>("/api/ontology/classes", { name }),
   sessions: () => get<SessionRow[]>("/api/sessions"),
+  sessionStats: (id: string) => get<{ session_id: string; frames: number; objects: number; by_state: Record<string, number>; done: number; progress: number }>(`/api/sessions/${id}/stats`),
+  firstFrame: (id: string) => get<{ frame_id: string }>(`/api/sessions/${id}/first-frame`),
   // M4.0/M4.1 review queue
   alScore: (sessionId?: string, limit = 50) => get<{ pool: number; items: AlItem[] }>(`/api/activelearn/score?limit=${limit}${sessionId ? `&session_id=${sessionId}` : ""}`),
   errorCandidates: (status = "pending", limit = 100) => get<ErrorCandidateRow[]>(`/api/errordetect/candidates?status=${status}&limit=${limit}`),
@@ -120,11 +123,12 @@ export const api = {
   // P3 per-object dynamics (derived: distance/speed/heading/ttc/risk)
   frameDynamics: (id: string) => get<{ frame_id: string; dynamics: ObjectDynamicsRow[] }>(`/api/dynamics/frame/${id}`),
   computeDynamics: (session_id: string) => post<{ objects: number; tracked_with_speed: number; with_distance: number }>(`/api/dynamics/compute?session_id=${session_id}`, {}),
+  computeLidarCuboids: (frameId: string) => post<{ frame_id: string; cuboids: number; objects: { object_id: string; cuboid_3d: Record<string, unknown> }[] }>(`/api/lidar/cuboids/${frameId}`, {}),
   segmentPrompt: (frame_id: string, p: SegmentPrompt) =>
     post<SegmentResult>("/api/segment", { frame_id, ...p }),
   createObject: (
     frame_id: string,
-    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string },
+    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null },
   ) => post<ObjectDetail>(`/api/frames/${frame_id}/objects`, body),
   updateMask: (object_id: string, polygons: number[][], width?: number, height?: number) =>
     put<{ object_id: string }>(`/api/objects/${object_id}/mask`, { polygons, width, height }),
@@ -222,8 +226,12 @@ export const api = {
       attrs?: Record<string, unknown>;
       state?: string;
       time_spent_ms?: number;
+      expected_version?: number;
+      rot_deg?: number;
+      keypoints?: Keypoints | null;
+      mask_polygons?: number[][];
     },
-  ) => post<ObjectDetail>(`/api/objects/${id}/review`, payload),
+  ) => post<ObjectDetail & { version?: number; rot_deg?: number }>(`/api/objects/${id}/review`, payload),
   scenarios: (params: Record<string, string>) =>
     get<Scenario[]>("/api/scenarios?" + new URLSearchParams(params).toString()),
   scenarioSearch: (q: string, semantic = false) =>

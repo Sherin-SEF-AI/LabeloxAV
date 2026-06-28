@@ -6,7 +6,7 @@
 // image pixels; the stage transform maps to screen. getRelativePointerPosition() returns image coords.
 
 import { useEffect, useRef, useState } from "react";
-import { Circle, Image as KImage, Layer, Line, Rect, Stage, Transformer } from "react-konva";
+import { Circle, Group, Image as KImage, Layer, Line, Rect, Stage, Text as KText, Transformer } from "react-konva";
 import type Konva from "konva";
 import { classColor, classFill } from "@/lib/colors";
 import type { EdObject, Tool, Viewport } from "./useEditor";
@@ -29,8 +29,14 @@ type Props = {
   layers?: LayerFlags;
   onViewport: (v: Viewport) => void;
   onSelect: (id: string | null) => void;
-  onUpdateBbox: (id: string, bbox: number[]) => void;
+  onUpdateBbox: (id: string, bbox: number[], rot?: number) => void;
   onDrawBox: (bbox: number[]) => void;
+  onDrawPolygon: (points: number[]) => void;   // manual polygon: flattened [x,y,...], no GPU/SAM needed
+  keypointDraft?: number[][] | null;           // in-progress pose points [[x,y,v],...] (placed so far)
+  skeletonEdges?: number[][];                  // index pairs connecting keypoints, for rendering
+  onPlaceKeypoint: (pt: number[]) => void;     // keypoint tool: drop the next skeleton point
+  onUpdateKeypoints: (id: string, points: number[][]) => void;  // drag a committed pose point
+  mPerPx?: number;                             // metres per pixel for the measure tool (LiDAR BEV)
   onSamPoint: (pt: number[], label: number) => void;
   onSamBox: (box: number[]) => void;
   onUpdateMask: (id: string, polys: number[][]) => void;
@@ -46,6 +52,8 @@ export default function EditorCanvas(p: Props) {
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [draw, setDraw] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [poly, setPoly] = useState<number[]>([]); // in-progress manual polygon, flattened [x,y,...]
+  const [measure, setMeasure] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const trRef = useRef<Konva.Transformer>(null);
   const selRectRef = useRef<Konva.Rect>(null);
@@ -109,6 +117,12 @@ export default function EditorCanvas(p: Props) {
     const [x, y] = toImg();
     if (p.tool === "box" || p.tool === "sam-box") {
       setDraw({ x0: x, y0: y, x1: x, y1: y });
+    } else if (p.tool === "measure") {
+      setMeasure({ x0: x, y0: y, x1: x, y1: y });
+    } else if (p.tool === "polygon") {
+      setPoly((pp) => [...pp, x, y]); // each click drops a vertex; double-click closes
+    } else if (p.tool === "keypoint") {
+      p.onPlaceKeypoint([x, y]); // each click drops the next skeleton point
     } else if (p.tool === "sam-point") {
       p.onSamPoint([x, y], e.evt.shiftKey ? 0 : 1);
     } else if (p.tool === "select" && e.target === e.target.getStage()) {
@@ -116,13 +130,29 @@ export default function EditorCanvas(p: Props) {
     }
   }
 
+  function onDblClick() {
+    if (p.tool !== "polygon") return;
+    if (poly.length >= 6) p.onDrawPolygon(poly); // at least 3 vertices
+    setPoly([]);
+  }
+
+  // abandon a half-drawn polygon when the tool changes
+  useEffect(() => { if (p.tool !== "polygon") setPoly([]); }, [p.tool]);
+  useEffect(() => { if (p.tool !== "measure") setMeasure(null); }, [p.tool]);
+
   function onMove() {
     const [x, y] = toImg();
     p.onCursor([x, y]);
     if (draw) setDraw((d) => (d ? { ...d, x1: x, y1: y } : d));
+    if (measure) setMeasure((m) => (m ? { ...m, x1: x, y1: y } : m));
   }
 
   function onUp() {
+    if (measure) {
+      // ruler is ephemeral: keep the last segment on screen until the next drag or tool change
+      const tiny = Math.hypot(measure.x1 - measure.x0, measure.y1 - measure.y0) < 2;
+      if (tiny) setMeasure(null);
+    }
     if (!draw) return;
     const box = [Math.min(draw.x0, draw.x1), Math.min(draw.y0, draw.y1), Math.max(draw.x0, draw.x1), Math.max(draw.y0, draw.y1)];
     setDraw(null);
@@ -149,6 +179,7 @@ export default function EditorCanvas(p: Props) {
         onMouseDown={onDown}
         onMouseMove={onMove}
         onMouseUp={onUp}
+        onDblClick={onDblClick}
         onMouseLeave={() => p.onCursor(null)}
         onDragEnd={(e) => {
           if (p.panning) p.onViewport({ ...v, ox: e.target.x(), oy: e.target.y() });
@@ -182,16 +213,18 @@ export default function EditorCanvas(p: Props) {
               strokeWidth={2.5 / v.scale} dash={ln.lane_type === "dashed" ? [10 / v.scale, 8 / v.scale] : undefined} />
           ))}
 
-          {/* boxes */}
+          {/* boxes (rendered around their centre so rotation is about the centre; bbox stays the AABB) */}
           {L.boxes && p.objects.filter((o) => o.visible).map((o) => {
             const w = o.bbox[2] - o.bbox[0];
             const h = o.bbox[3] - o.bbox[1];
+            const cx = o.bbox[0] + w / 2;
+            const cy = o.bbox[1] + h / 2;
             const isSel = o.id === p.selectedId;
             return (
               <Rect
                 key={o.id}
                 ref={isSel ? selRectRef : undefined}
-                x={o.bbox[0]} y={o.bbox[1]} width={w} height={h}
+                x={cx} y={cy} offsetX={w / 2} offsetY={h / 2} width={w} height={h} rotation={o.rot ?? 0}
                 stroke={classColor(o.class_id)} strokeWidth={(isSel ? 2.5 : 1.5) / v.scale}
                 dash={o.isNew ? [6 / v.scale, 4 / v.scale] : undefined}
                 draggable={isSel && p.tool === "select"}
@@ -202,9 +235,9 @@ export default function EditorCanvas(p: Props) {
                   }
                 }}
                 onDragEnd={(e) => {
-                  const nx = e.target.x();
-                  const ny = e.target.y();
-                  p.onUpdateBbox(o.id, [nx, ny, nx + w, ny + h]);
+                  const ncx = e.target.x();
+                  const ncy = e.target.y();
+                  p.onUpdateBbox(o.id, [ncx - w / 2, ncy - h / 2, ncx + w / 2, ncy + h / 2]);
                 }}
                 onTransformEnd={(e) => {
                   const node = e.target as Konva.Rect;
@@ -212,15 +245,18 @@ export default function EditorCanvas(p: Props) {
                   const sy = node.scaleY();
                   node.scaleX(1);
                   node.scaleY(1);
-                  const nx = node.x();
-                  const ny = node.y();
-                  p.onUpdateBbox(o.id, [nx, ny, nx + w * sx, ny + h * sy]);
+                  const nw = w * sx;
+                  const nh = h * sy;
+                  const ncx = node.x();
+                  const ncy = node.y();
+                  const rot = ((node.rotation() % 360) + 360) % 360;
+                  p.onUpdateBbox(o.id, [ncx - nw / 2, ncy - nh / 2, ncx + nw / 2, ncy + nh / 2], rot);
                 }}
               />
             );
           })}
 
-          {/* selected object's mask vertices (drag to edit) */}
+          {/* selected object's mask vertices: drag to move, right-click to delete */}
           {sel && p.tool === "select" && sel.mask.map((poly, pi) =>
             poly.map((_, k) =>
               k % 2 === 0 ? (
@@ -231,16 +267,113 @@ export default function EditorCanvas(p: Props) {
                     next[pi][k] = e.target.x();
                     next[pi][k + 1] = e.target.y();
                     p.onUpdateMask(sel.id, next);
+                  }}
+                  onContextMenu={(e) => {
+                    e.evt.preventDefault();
+                    if (poly.length <= 6) return; // never below a triangle
+                    const next = sel.mask.map((pp) => pp.slice());
+                    next[pi].splice(k, 2);
+                    p.onUpdateMask(sel.id, next);
                   }} />
               ) : null,
             ),
           )}
+
+          {/* edge midpoints: click to insert a new vertex on that edge */}
+          {sel && p.tool === "select" && sel.mask.map((poly, pi) => {
+            const n = poly.length / 2;
+            return Array.from({ length: n }, (_, j) => {
+              const ax = poly[2 * j], ay = poly[2 * j + 1];
+              const bx = poly[2 * ((j + 1) % n)], by = poly[2 * ((j + 1) % n) + 1];
+              const mx = (ax + bx) / 2, my = (ay + by) / 2;
+              return (
+                <Circle key={`mid${pi}-${j}`} x={mx} y={my} radius={2.5 / v.scale}
+                  fill="rgba(255,122,47,0.55)" stroke="#0B0C0E" strokeWidth={1 / v.scale}
+                  onClick={() => {
+                    const next = sel.mask.map((pp) => pp.slice());
+                    next[pi].splice(2 * j + 2, 0, mx, my);
+                    p.onUpdateMask(sel.id, next);
+                  }} />
+              );
+            });
+          })}
 
           {/* SAM candidate */}
           {p.candidate?.map((poly, i) => (
             <Line key={`cand${i}`} points={poly} closed listening={false}
               stroke="#56D364" strokeWidth={2 / v.scale} fill="rgba(86,211,100,0.25)" />
           ))}
+
+          {/* in-progress manual polygon: open polyline + vertex dots; double-click closes it */}
+          {p.tool === "polygon" && poly.length >= 2 && (
+            <>
+              <Line points={poly} listening={false} stroke="#FF7A2F" strokeWidth={1.5 / v.scale}
+                dash={[6 / v.scale, 4 / v.scale]} />
+              {poly.map((_, k) => (k % 2 === 0 ? (
+                <Circle key={`pp${k}`} x={poly[k]} y={poly[k + 1]} radius={3 / v.scale}
+                  fill="#0B0C0E" stroke="#FF7A2F" strokeWidth={1.5 / v.scale} listening={false} />
+              ) : null))}
+            </>
+          )}
+
+          {/* committed keypoints: skeleton edges + dots (dots draggable when the object is selected) */}
+          {L.boxes && p.objects.filter((o) => o.visible && o.keypoints?.points?.length).map((o) => {
+            const pts = o.keypoints!.points;
+            const isSel = o.id === p.selectedId;
+            const col = classColor(o.class_id);
+            return (
+              <Group key={`kp-${o.id}`}>
+                {(p.skeletonEdges ?? []).map(([a, b], ei) => {
+                  const pa = pts[a], pb = pts[b];
+                  if (!pa || !pb || pa[2] <= 0 || pb[2] <= 0) return null;
+                  return <Line key={`e${ei}`} points={[pa[0], pa[1], pb[0], pb[1]]} listening={false}
+                    stroke={col} strokeWidth={1.5 / v.scale} opacity={0.85} />;
+                })}
+                {pts.map((pt, ki) => (pt[2] <= 0 ? null : (
+                  <Circle key={`k${ki}`} x={pt[0]} y={pt[1]} radius={3 / v.scale}
+                    fill={pt[2] === 2 ? "#56D364" : "#E3B341"} stroke="#0B0C0E" strokeWidth={1 / v.scale}
+                    draggable={isSel && p.tool === "select"}
+                    onDragEnd={(e) => {
+                      const next = pts.map((q) => q.slice());
+                      next[ki] = [e.target.x(), e.target.y(), next[ki][2] || 2];
+                      p.onUpdateKeypoints(o.id, next);
+                    }} />
+                )))}
+              </Group>
+            );
+          })}
+
+          {/* in-progress pose: placed points + the skeleton edges that connect them */}
+          {p.tool === "keypoint" && p.keypointDraft && p.keypointDraft.length > 0 && (
+            <Group>
+              {(p.skeletonEdges ?? []).map(([a, b], ei) => {
+                const pa = p.keypointDraft![a], pb = p.keypointDraft![b];
+                if (!pa || !pb) return null;
+                return <Line key={`de${ei}`} points={[pa[0], pa[1], pb[0], pb[1]]} listening={false}
+                  stroke="#FF7A2F" strokeWidth={1.5 / v.scale} opacity={0.7} />;
+              })}
+              {p.keypointDraft.map((pt, ki) => (
+                <Circle key={`dk${ki}`} x={pt[0]} y={pt[1]} radius={3.5 / v.scale} listening={false}
+                  fill="#FF7A2F" stroke="#0B0C0E" strokeWidth={1 / v.scale} />
+              ))}
+            </Group>
+          )}
+
+          {/* measure / ruler: line + distance (px, and metres on a LiDAR BEV) */}
+          {measure && (() => {
+            const dpx = Math.hypot(measure.x1 - measure.x0, measure.y1 - measure.y0);
+            const label = p.mPerPx ? `${(dpx * p.mPerPx).toFixed(2)} m` : `${Math.round(dpx)} px`;
+            return (
+              <Group listening={false}>
+                <Line points={[measure.x0, measure.y0, measure.x1, measure.y1]}
+                  stroke="#58A6FF" strokeWidth={1.5 / v.scale} dash={[5 / v.scale, 4 / v.scale]} />
+                <Circle x={measure.x0} y={measure.y0} radius={2.5 / v.scale} fill="#58A6FF" />
+                <Circle x={measure.x1} y={measure.y1} radius={2.5 / v.scale} fill="#58A6FF" />
+                <KText x={(measure.x0 + measure.x1) / 2 + 6 / v.scale} y={(measure.y0 + measure.y1) / 2 - 8 / v.scale}
+                  text={label} fontSize={13 / v.scale} fill="#58A6FF" />
+              </Group>
+            );
+          })()}
 
           {/* rubber-band while drawing */}
           {draw && (
@@ -251,8 +384,8 @@ export default function EditorCanvas(p: Props) {
           )}
 
           {p.tool === "select" && (
-            <Transformer ref={trRef} rotateEnabled={false} ignoreStroke borderStroke="#FF7A2F"
-              anchorStroke="#FF7A2F" anchorFill="#0B0C0E" anchorSize={8 / v.scale}
+            <Transformer ref={trRef} rotateEnabled rotationSnaps={[0, 90, 180, 270]} ignoreStroke
+              borderStroke="#FF7A2F" anchorStroke="#FF7A2F" anchorFill="#0B0C0E" anchorSize={8 / v.scale}
               boundBoxFunc={(oldB, newB) => (newB.width < 4 || newB.height < 4 ? oldB : newB)} />
           )}
         </Layer>

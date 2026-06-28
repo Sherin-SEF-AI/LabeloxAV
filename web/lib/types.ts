@@ -10,6 +10,9 @@ export type TriageRow = {
   priority: number;
 };
 
+// COCO-style keypoints/skeleton: points are [x, y, v] with v in {0 not-labeled, 1 occluded, 2 visible}.
+export type Keypoints = { skeleton: string; points: number[][] };
+
 export type ObjectDetail = {
   object_id: string;
   frame_id: string;
@@ -28,6 +31,9 @@ export type ObjectDetail = {
   state: string;
   source: string;
   provenance: Record<string, unknown>;
+  version?: number;
+  rot_deg?: number;
+  keypoints?: Keypoints | null;
 };
 
 export type OntologyClass = { id: number; name: string; l0: string; l1: string; india: boolean };
@@ -185,6 +191,9 @@ export type FrameMeta = {
   n_objects: number;
   prev_frame_id: string | null;
   next_frame_id: string | null;
+  is_lidar?: boolean;
+  lidar_points?: number | null;
+  lidar_res?: number | null;
 };
 
 export type FrameObject = {
@@ -196,6 +205,9 @@ export type FrameObject = {
   conf: number;
   state: string;
   mask_polygons: number[][];
+  version?: number;
+  rot_deg?: number;
+  keypoints?: Keypoints | null;
 };
 
 export type TrackItem = {

@@ -185,10 +185,10 @@ export default function TriagePage() {
               className="w-full font-mono text-[11px] border border-line text-ink-2 px-2 py-1 hover:border-accent disabled:opacity-40">
               autolabel this session
             </button>
-            <button onClick={() => autolabel("cloud")} disabled={!session}
-              title="queue this session for the cloud A100 heavy stack (SAM 3.1 PCS + Qwen3-VL + YOLO26)"
-              className="w-full font-mono text-[11px] border border-line text-ink-3 px-2 py-1 hover:border-accent disabled:opacity-40">
-              autolabel on cloud (A100) →
+            <button disabled
+              title="Cloud A100 dispatch (SAM 3.1 PCS + Qwen3-VL + YOLO26) is not configured in this build. Use 'autolabel this session' to run the local stack now."
+              className="w-full font-mono text-[11px] border border-line text-ink-3 px-2 py-1 opacity-40 cursor-not-allowed">
+              autolabel on cloud (A100) - not configured
             </button>
             <button onClick={recognizeSigns} disabled={!session}
               title="type traffic signs into the Indian RTO taxonomy (SigLIP2 zero-shot); route text-bearing to OCR"

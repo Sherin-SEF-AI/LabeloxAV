@@ -3,6 +3,10 @@ const API = process.env.LBX_API_URL || "http://localhost:8000";
 
 const nextConfig = {
   reactStrictMode: true,
+  // react-konva + konva ship as ESM with a non-standard default-export shape; without transpiling them,
+  // next/dynamic's convertModule can receive a bad module and throw "Cannot use 'in' operator to search
+  // for 'default' in Layer" on a (StrictMode) re-mount. Transpiling them fixes the interop.
+  transpilePackages: ["konva", "react-konva"],
   // Proxy /api to the FastAPI backend so the browser stays same-origin (image proxy + fetch).
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${API}/api/:path*` }];

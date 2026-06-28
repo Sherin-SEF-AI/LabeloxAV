@@ -21,7 +21,11 @@ export default function UserPicker() {
     setCur(getUser());
     api.users().then((us) => {
       setUsers(us);
-      if (!getUser() && us.length) pick(us.find((u) => u.role === "admin") ?? us[0]);
+      const cur = getUser();
+      // also re-pick when the cached user is stale (deleted / from a reset DB) so mutations do not 401
+      if ((!cur || !us.some((u) => u.user_id === cur.user_id)) && us.length) {
+        pick(us.find((u) => u.role === "admin") ?? us[0]);
+      }
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

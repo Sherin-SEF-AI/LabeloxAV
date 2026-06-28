@@ -6,19 +6,25 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import type { FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass } from "@/lib/types";
 import { classColor } from "@/lib/colors";
-import { acceptState, getUser } from "@/lib/user";
+import { acceptState, getUser, setUser } from "@/lib/user";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
+import { PERSON_17 } from "@/lib/skeleton";
 import BackButton from "@/components/BackButton";
 import CorrectionModal, { type CorrectionChange } from "@/components/CorrectionModal";
 
 // Frame-centric professional annotation editor. Pan/zoom canvas, draw + edit boxes, SAM-assisted masks,
 // layers panel, class palette, attributes, keyboard-driven, batched save. Operational Materialism tokens.
 
-const EditorCanvas = dynamic(() => import("@/components/editor/EditorCanvas"), { ssr: false });
+// Wrap the import so next/dynamic's convertModule always gets a clean { default } and cannot mistake the
+// module for a react-konva export on a StrictMode re-mount.
+const EditorCanvas = dynamic(() => import("@/components/editor/EditorCanvas").then((m) => ({ default: m.default })), { ssr: false });
 
 const TOOLS: { key: Tool; label: string; hot: string }[] = [
   { key: "select", label: "select", hot: "V" },
   { key: "box", label: "box", hot: "B" },
+  { key: "polygon", label: "polygon", hot: "G" },
+  { key: "keypoint", label: "pose", hot: "K" },
+  { key: "measure", label: "measure", hot: "R" },
   { key: "sam-point", label: "sam pt", hot: "S" },
   { key: "sam-box", label: "sam box", hot: "M" },
 ];
@@ -86,7 +92,8 @@ export default function FrameEditor() {
       setOnto(o);
       const eds: EdObject[] = objs.map((x) => ({
         id: x.object_id, track_id: x.track_id, class_id: x.class_id, class_name: x.class_name, bbox: x.bbox,
-        mask: x.mask_polygons || [], attrs: {}, conf: x.conf, state: x.state, visible: true,
+        mask: x.mask_polygons || [], attrs: {}, conf: x.conf, state: x.state, visible: true, version: x.version,
+        rot: x.rot_deg, keypoints: x.keypoints ?? undefined,
       }));
       dispatch({ t: "load", objects: eds, viewport: { scale: 0, ox: 0, oy: 0 }, selectedId: focus });
       const fc = (focus && eds.find((e) => e.id === focus)) || null;
@@ -119,8 +126,25 @@ export default function FrameEditor() {
     setDrivable(dr && dr.found ? dr.classes ?? null : null);
   }, [id]);
   useEffect(() => { loadLayers(); }, [loadLayers]);
-  const segRoad = useCallback(async () => { flash("segmenting road surface..."); await api.segmentDrivable(id); await loadLayers(); flash("drivable area updated"); }, [id, loadLayers]);
-  const genLanes = useCallback(async () => { const r = await api.proposeLanes(id); await loadLayers(); flash(`proposed ${r.proposed} lanes (${r.model})`); }, [id, loadLayers]);
+  // The editor has its own header (no TopNav/UserPicker), so guarantee a valid identity or every mutation
+  // 401s. Drop a stale/deleted cached user and auto-pick one, mirroring the UserPicker.
+  useEffect(() => {
+    api.users().then((us) => {
+      const cur = getUser();
+      if ((!cur || !us.some((u) => u.user_id === cur.user_id)) && us.length) {
+        setUser(us.find((u) => u.role === "admin") ?? us[0]);
+      }
+    }).catch(() => {});
+  }, []);
+  const segRoad = useCallback(async () => {
+    flash("segmenting road surface...");
+    try { await api.segmentDrivable(id); await loadLayers(); flash("drivable area updated"); }
+    catch (e) { flash("segment road failed: " + String(e)); }
+  }, [id, loadLayers]);
+  const genLanes = useCallback(async () => {
+    try { const r = await api.proposeLanes(id); await loadLayers(); flash(`proposed ${r.proposed} lanes (${r.model})`); }
+    catch (e) { flash("propose lanes failed: " + String(e)); }
+  }, [id, loadLayers]);
 
   // each new selection starts with the compact chip (class name + edit), not the open picker
   useEffect(() => { setEditOpen(false); setEditSearch(""); }, [st.selectedId]);
@@ -232,34 +256,49 @@ export default function FrameEditor() {
   }, [st.tool]);
 
   // ---- save (diff vs server) ----
+  // A synchronous ref mutex (not the async `saving` state) guarantees two saves never overlap. Without
+  // it, the unmount flush or a fast second autosave could re-run before dispatch({t:"saved"}) clears the
+  // isNew flags, creating the same object twice on the server. The idem_key is belt-and-suspenders: the
+  // server de-dupes a create that still slips through (network retry, multi-tab).
+  const savingRef = useRef(false);
   const save = useCallback(async () => {
-    if (!dirty || saving) return;
+    if (!dirty || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     const tgt = acceptState(getUser()?.role);  // annotator -> submitted (QA), reviewer/admin -> accepted
     try {
       for (const oid of st.deleted) await api.deleteObject(oid);
       const remap: Record<string, string> = {};
+      const versions: Record<string, number> = {};
       for (const o of st.objects) {
         if (o.isNew) {
           const created = await api.createObject(id, {
             class_name: o.class_name, bbox: o.bbox, attrs: o.attrs,
-            mask_polygons: o.mask.length ? o.mask : undefined, state: tgt,
+            mask_polygons: o.mask.length ? o.mask : undefined, state: tgt, idem_key: o.id, rot_deg: o.rot ?? 0,
+            keypoints: o.keypoints ?? null,
           });
           remap[o.id] = created.object_id;
+          if (created.version != null) versions[o.id] = created.version;
         } else if (o.dirty) {
-          await api.review(o.id, { action: "adjust_geometry",
-            class_name: o.class_name, bbox: o.bbox, attrs: o.attrs, state: tgt });
-          if (o.mask.length) await api.updateMask(o.id, o.mask, meta?.width, meta?.height);
+          // One atomic request: geometry, mask, rotation, and keypoints persist together (no separate
+          // updateMask that could leave the mask out of sync on a partial failure).
+          const r = await api.review(o.id, { action: "adjust_geometry",
+            class_name: o.class_name, bbox: o.bbox, attrs: o.attrs, state: tgt, expected_version: o.version,
+            rot_deg: o.rot ?? 0, keypoints: o.keypoints ?? null,
+            mask_polygons: o.mask.length ? o.mask : undefined });
+          if (r.version != null) versions[o.id] = r.version;
         }
       }
-      dispatch({ t: "saved", remap });
+      dispatch({ t: "saved", remap, versions });
       flash("saved");
     } catch (e) {
-      flash("save failed: " + String(e));
+      const msg = String(e);
+      flash(msg.includes("409") ? "conflict: another annotator changed this object; reload to continue" : "save failed: " + msg);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
-  }, [dirty, saving, st.deleted, st.objects, id, meta, dispatch]);
+  }, [dirty, st.deleted, st.objects, id, meta, dispatch]);
 
   // ---- autosave: persist edits ~700ms after the last change settles (covers move/resize/relabel/
   // attribute/mask/delete). The debounce waits out an active drag, so we never save mid-gesture. ----
@@ -284,6 +323,37 @@ export default function FrameEditor() {
     router.push(`/frame/${fid}`);
   }, [router, st, save]);
 
+  // ---- keypoint pose tool + object clipboard ----
+  const [kpDraft, setKpDraft] = useState<number[][] | null>(null);
+  const kpDraftRef = useRef<number[][] | null>(null);
+  kpDraftRef.current = kpDraft;
+  const clipboardRef = useRef<EdObject | null>(null);
+  useEffect(() => { if (st.tool !== "keypoint") setKpDraft(null); }, [st.tool]);
+
+  const finishKeypoints = useCallback((pts: number[][]) => {
+    if (!currentClass || !pts.length) { setKpDraft(null); return; }
+    const full = pts.slice(0, PERSON_17.points.length);
+    while (full.length < PERSON_17.points.length) full.push([0, 0, 0]);
+    const vis = full.filter((q) => q[2] > 0);
+    const xs = vis.map((q) => q[0]), ys = vis.map((q) => q[1]);
+    const bbox = vis.length ? [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] : [0, 0, 1, 1];
+    dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox,
+      mask: [], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true,
+      keypoints: { skeleton: PERSON_17.name, points: full } } });
+    setKpDraft(null);
+  }, [currentClass, dispatch]);
+
+  const onPlaceKeypoint = useCallback((pt: number[]) => {
+    const next = [...(kpDraftRef.current ?? []), [pt[0], pt[1], 2]];
+    if (next.length >= PERSON_17.points.length) finishKeypoints(next);
+    else setKpDraft(next);
+  }, [finishKeypoints]);
+
+  const onUpdateKeypoints = useCallback((oid: string, points: number[][]) => {
+    const o = stRef.current.objects.find((x) => x.id === oid);
+    dispatch({ t: "update", id: oid, patch: { keypoints: { skeleton: o?.keypoints?.skeleton ?? PERSON_17.name, points } } });
+  }, [dispatch]);
+
   // ---- keyboard ----
   useEffect(() => {
     const typing = (t: EventTarget | null) => {
@@ -296,18 +366,41 @@ export default function FrameEditor() {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); dispatch(e.shiftKey ? { t: "redo" } : { t: "undo" }); return; }
       if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); save(); return; }
+      if (mod && e.key.toLowerCase() === "c" && st.selectedId) {
+        const o = stRef.current.objects.find((x) => x.id === st.selectedId);
+        if (o) { clipboardRef.current = o; flash("copied object"); }
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "v" && clipboardRef.current) {
+        e.preventDefault();
+        const c = clipboardRef.current; const D = 14;
+        dispatch({ t: "add", obj: { id: tmpId(), class_id: c.class_id, class_name: c.class_name,
+          bbox: [c.bbox[0] + D, c.bbox[1] + D, c.bbox[2] + D, c.bbox[3] + D],
+          mask: c.mask.map((poly) => poly.map((val) => val + D)), rot: c.rot,
+          attrs: { ...c.attrs }, conf: 1, state: "accepted", visible: true, isNew: true,
+          keypoints: c.keypoints ? { skeleton: c.keypoints.skeleton,
+            points: c.keypoints.points.map((pt) => (pt[2] > 0 ? [pt[0] + D, pt[1] + D, pt[2]] : pt)) } : undefined } });
+        flash("pasted object");
+        return;
+      }
       if (mod) return;
       const k = e.key.toLowerCase();
       if (k === "a") dispatch({ t: "acceptAll" });
       else if (k === "v") dispatch({ t: "tool", tool: "select" });
       else if (k === "b") dispatch({ t: "tool", tool: "box" });
+      else if (k === "g") dispatch({ t: "tool", tool: "polygon" });
+      else if (k === "k") dispatch({ t: "tool", tool: "keypoint" });
+      else if (k === "r") dispatch({ t: "tool", tool: "measure" });
       else if (k === "s") dispatch({ t: "tool", tool: "sam-point" });
       else if (k === "m") dispatch({ t: "tool", tool: "sam-box" });
       else if (k === "f") fit();
       else if (e.key === "=" || e.key === "+") zoomBy(1.2);
       else if (e.key === "-") zoomBy(1 / 1.2);
-      else if (e.key === "Enter") acceptCandidate();
-      else if (e.key === "Escape") dispatch({ t: "candidate", polys: null });
+      else if (e.key === "Enter") {
+        if (stRef.current.tool === "keypoint" && kpDraftRef.current?.length) finishKeypoints(kpDraftRef.current);
+        else acceptCandidate();
+      }
+      else if (e.key === "Escape") { dispatch({ t: "candidate", polys: null }); setKpDraft(null); }
       else if ((e.key === "Delete" || e.key === "Backspace") && st.selectedId) dispatch({ t: "delete", id: st.selectedId });
       else if (e.key === "[") gotoFrame(meta?.prev_frame_id ?? null);
       else if (e.key === "]") gotoFrame(meta?.next_frame_id ?? null);
@@ -320,7 +413,7 @@ export default function FrameEditor() {
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onUp); };
-  }, [st.selectedId, selected, onto, meta, dispatch, save, fit, zoomBy, acceptCandidate, gotoFrame, relabelSelected]);
+  }, [st.selectedId, selected, onto, meta, dispatch, save, fit, zoomBy, acceptCandidate, gotoFrame, relabelSelected, finishKeypoints]);
 
   const filteredClasses = useMemo(
     () => (onto ? onto.classes.filter((c) => c.name.includes(search.toLowerCase().replace(/\s/g, "_"))) : []),
@@ -401,11 +494,17 @@ export default function FrameEditor() {
             lanes={lanes} drivable={drivable} layers={layers}
             onViewport={(viewport) => dispatch({ t: "viewport", viewport })}
             onSelect={(oid) => dispatch({ t: "select", id: oid })}
-            onUpdateBbox={(oid, bbox) => dispatch({ t: "update", id: oid, patch: { bbox } })}
+            onUpdateBbox={(oid, bbox, rot) => dispatch({ t: "update", id: oid, patch: rot !== undefined ? { bbox, rot } : { bbox } })}
             onDrawBox={(bbox) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox, mask: [], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
+            onDrawPolygon={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [pts], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
+            keypointDraft={kpDraft} skeletonEdges={PERSON_17.edges as unknown as number[][]}
+            onPlaceKeypoint={onPlaceKeypoint} onUpdateKeypoints={onUpdateKeypoints}
+            mPerPx={meta.lidar_res ?? undefined}
             onSamPoint={(pt, label) => runSam({ points: [pt], labels: [label] })}
             onSamBox={(box) => runSam({ box })}
-            onUpdateMask={(oid, polys) => dispatch({ t: "update", id: oid, patch: { mask: polys } })}
+            onUpdateMask={(oid, polys) =>
+              // Keep the bbox in sync with the edited mask so geometry and segmentation never diverge.
+              dispatch({ t: "update", id: oid, patch: polys.length ? { mask: polys, bbox: bboxOfPolys(polys) } : { mask: polys } })}
             onCursor={setCursor}
           />
           {st.candidate?.length ? (
@@ -483,7 +582,7 @@ export default function FrameEditor() {
             <span>{cursor ? `${Math.round(cursor[0])}, ${Math.round(cursor[1])}` : "-, -"}</span>
             <span>{st.objects.length} objects</span>
             <span className={dirty ? "text-warn" : "text-pass"}>{dirty ? "unsaved" : "saved"}</span>
-            <span className="ml-auto">V select · B box · S sam · M sam-box · space pan · scroll zoom · Del delete · [ ] frame · Cmd+Z undo · Cmd+S save</span>
+            <span className="ml-auto">V select · B box · G polygon · K pose (Enter to finish) · R measure · S sam · M sam-box · Cmd+C/V copy · space pan · Del delete · [ ] frame · Cmd+Z undo · Cmd+S save</span>
           </div>
         </div>
 
@@ -517,6 +616,10 @@ export default function FrameEditor() {
               ))}
             </div>
           </div>
+
+          {/* Everything below the class picker scrolls together, so a long attributes list plus the
+              dynamics and road-segmentation panels stay reachable on short screens. */}
+          <div className="flex-1 min-h-0 overflow-y-auto">
 
           {/* attributes of selected */}
           {selected && (
@@ -578,6 +681,26 @@ export default function FrameEditor() {
             </div>
           )}
 
+          {/* LiDAR BEV: draw oriented boxes on the bird's-eye view, then lift them to metric 3D cuboids */}
+          {meta?.is_lidar && (
+            <div className="border-b hairline p-2">
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-mono text-[10px] uppercase text-ink-3">lidar bev</span>
+                <span className="font-mono text-[10px] text-ink-3">{(meta.lidar_points ?? 0).toLocaleString()} pts</span>
+              </div>
+              <button
+                onClick={async () => {
+                  if (isDirty(st)) await save();
+                  const r = await api.computeLidarCuboids(id);
+                  flash(`lifted ${r.cuboids} oriented box${r.cuboids === 1 ? "" : "es"} to 3D cuboids`);
+                }}
+                title="draw oriented boxes (select + rotate handle), then lift each to a metric 3D cuboid using the enclosed points"
+                className="w-full font-mono text-[10px] border border-line text-ink-2 px-1.5 py-1 hover:border-accent">
+                compute 3D cuboids from boxes &rarr;
+              </button>
+            </div>
+          )}
+
           {/* P4 road segmentation: generate + edit the lane and drivable layers in place */}
           <div className="border-b hairline p-2">
             <div className="flex items-center justify-between mb-1">
@@ -592,7 +715,7 @@ export default function FrameEditor() {
           </div>
 
           {/* layers / object list */}
-          <div className="flex-1 min-h-0 overflow-auto p-2">
+          <div className="p-2">
             <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">objects ({st.objects.length})</div>
             <div className="space-y-0.5">
               {st.objects.map((o) => (
@@ -608,6 +731,7 @@ export default function FrameEditor() {
               ))}
               {!st.objects.length && <div className="text-ink-3 text-center py-4">no objects. draw a box (B).</div>}
             </div>
+          </div>
           </div>
         </aside>
       </div>
