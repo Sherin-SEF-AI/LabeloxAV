@@ -76,6 +76,15 @@ class Cloud:
                        ring=ring, source=meta.get("source", "lidar"), frame=meta.get("frame", "ego"),
                        depth_model=meta.get("depth_model"), calibration_version=meta.get("calibration_version"))
 
+    def take(self, idx: np.ndarray) -> Cloud:
+        """A subset by index or boolean mask, carrying intensity, ring, and provenance. Used by the cleaning
+        passes to derive ground-removed and denoised variants without mutating the raw cloud."""
+        idx = np.asarray(idx)
+        return Cloud(xyz=self.xyz[idx], intensity=self.intensity[idx], ts_ns=self.ts_ns,
+                     ring=self.ring[idx] if self.ring is not None else None, source=self.source,
+                     frame=self.frame, depth_model=self.depth_model,
+                     calibration_version=self.calibration_version)
+
     def decimate(self, max_points: int, seed: int = 0) -> Cloud:
         """A uniform random subsample for interactive rendering. Deterministic given the seed."""
         if self.n <= max_points or max_points <= 0:
