@@ -30,6 +30,17 @@ async def extract_static(cloud_id: uuid.UUID):
     return res
 
 
+@router.post("/lidar/clouds/{cloud_id}/traverse")
+async def traverse(cloud_id: uuid.UUID):
+    """Produce the 3D free-space grid, metric drivable surface, road-surface class, and elevation profile
+    for a cloud (M-L3.1)."""
+    from services.lidar.traverse import traverse_cloud
+    res = await traverse_cloud(cloud_id)
+    if res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
+
+
 @router.get("/lidar/sessions/{session_id}/static_elements")
 async def list_static_elements(session_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
     rows = (await db.execute(select(StaticElement).where(StaticElement.session_id == session_id)
