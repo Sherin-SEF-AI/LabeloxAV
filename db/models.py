@@ -815,3 +815,76 @@ class LidarCalibrationValidation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_lidar_calib_session", "session_id"),)
+
+
+# ---- LiDAR module Phase 2 (3D annotation) ----
+class Track3D(Base):
+    """A 3D track, linked to the M2.0 2D track (track_id) so the 3D and 2D tracks are the same physical
+    object. trajectory holds per-frame 3D centroids; dynamic_state is moving/stopped/parked/turning/braking."""
+    __tablename__ = "track_3d"
+
+    track_3d_id: Mapped[uuid.UUID] = _uuid_pk()
+    track_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("track.track_id", ondelete="SET NULL"))
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    class_id: Mapped[int] = mapped_column(ForeignKey("ontology_class.id"))
+    first_ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    trajectory: Mapped[dict | None] = mapped_column(JSONB)          # per-frame 3D centroids + yaw
+    dynamic_state: Mapped[str | None] = mapped_column(String(16))   # moving|stopped|parked|turning|braking
+
+    __table_args__ = (Index("ix_track_3d_session", "session_id"), Index("ix_track_3d_track", "track_id"))
+
+
+class Object3D(Base):
+    """One 3D cuboid. object_id links it to the 2D Object (the unifying identity, one physical object across
+    its 2D box, mask, 3D cuboid, and multi-camera views). The same governed ontology and gate apply: class_id
+    is an ontology class, conf is calibrated, box_source records lifted vs native, provenance is one walk."""
+    __tablename__ = "object_3d"
+
+    object_3d_id: Mapped[uuid.UUID] = _uuid_pk()
+    cloud_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("point_cloud.cloud_id", ondelete="CASCADE"))
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("frame.frame_id", ondelete="SET NULL"))
+    object_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("object.object_id", ondelete="SET NULL"))
+    track_3d_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("track_3d.track_3d_id", ondelete="SET NULL"))
+    class_id: Mapped[int] = mapped_column(ForeignKey("ontology_class.id"))
+    center: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)   # [x, y, z] ego metres
+    dims: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)     # [L, W, H] metres
+    yaw: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    pitch: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    roll: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    conf: Mapped[float] = mapped_column(Float, nullable=False)                  # calibrated
+    box_source: Mapped[str] = mapped_column(String(8), nullable=False)         # lifted | native
+    is_keyframe: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    interp_source: Mapped[str | None] = mapped_column(String(16))              # linear | slerp
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="fused")  # fused|auto_accept|human
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="review")
+    attrs: Mapped[dict] = mapped_column(JSONB, default=dict)                    # occlusion, dynamics, auto props
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_object_3d_cloud", "cloud_id"),
+        Index("ix_object_3d_frame", "frame_id"),
+        Index("ix_object_3d_object", "object_id"),
+        Index("ix_object_3d_track", "track_3d_id"),
+    )
+
+
+class PointSegmentation(Base):
+    """Per-point semantic and instance labels on a cloud. labels_uri points to the arrays in the object store
+    (semantic class id and instance id per point); low_conf_frac flags how much was uncertain on pseudo-LiDAR,
+    which is surfaced for review rather than trusted blindly."""
+    __tablename__ = "point_segmentation"
+
+    seg_id: Mapped[uuid.UUID] = _uuid_pk()
+    cloud_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("point_cloud.cloud_id", ondelete="CASCADE"))
+    labels_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)              # semantic | panoptic
+    method: Mapped[str | None] = mapped_column(String(32))                     # ptv3 | projected_2d
+    n_points: Mapped[int | None] = mapped_column(Integer)
+    low_conf_frac: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_point_segmentation_cloud", "cloud_id"),)

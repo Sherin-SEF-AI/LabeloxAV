@@ -441,6 +441,20 @@ class LidarSettings(BaseModel):
     calib_drift_ratio: float = 1.5          # residual grown past this multiple of baseline flags drift
     quality_min_points: int = 500           # below this a cloud is sparse / a missing scan
     quality_max_empty_wedge_deg: float = 90.0  # a 360 scan with a wider empty wedge is a partial scan
+    # Phase 2 (3D annotation). The box source: lifted (2D-to-3D, robust on pseudo-LiDAR) is the default for
+    # camera clouds; native (CenterPoint/PV-RCNN++) is for real LiDAR. 'auto' picks by the cloud source.
+    box_source: str = "auto"                # auto | lifted | native
+    lift_min_frustum_points: int = 12       # below this a frustum is too sparse to fit a cuboid
+    lift_depth_gate_m: float = 8.0          # keep frustum points within this depth band of the nearest surface
+    native_detector: str = "centerpoint"    # centerpoint | pv_rcnn_pp | bevfusion (OpenPCDet, via burst)
+    native_ckpt: str = "centerpoint_nuscenes"   # pinned OpenPCDet checkpoint id
+    segmenter: str = "ptv3"                  # ptv3 (Pointcept, via burst) | projected_2d (pseudo-LiDAR fallback)
+    segmenter_ckpt: str = "ptv3-nuscenes-semseg"  # pinned Pointcept checkpoint id
+    seg_low_conf: float = 0.5               # per-point segmentation confidence below this is flagged for review
+    track3d_max_age: int = 5                 # frames a 3D track survives unmatched before termination
+    track3d_min_hits: int = 2                # matches before a tentative 3D track is confirmed
+    track3d_iou_thresh: float = 0.1          # 3D IoU association gate
+    track3d_appearance_w: float = 0.3        # DINOv3 appearance weight in the association cost
 
 
 class Settings(BaseSettings):
