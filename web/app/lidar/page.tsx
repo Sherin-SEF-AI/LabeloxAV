@@ -28,6 +28,8 @@ export default function LidarViewerPage() {
   const [full, setFull] = useState(false);
   const [data, setData] = useState<LidarPoints | null>(null);
   const [measure, setMeasure] = useState<number | null>(null);
+  const [showEgo, setShowEgo] = useState(true);
+  const [trajectory, setTrajectory] = useState<{ x: number; y: number }[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -65,6 +67,9 @@ export default function LidarViewerPage() {
   const pickCloud = (c: LidarCloud) => {
     setSelected(c);
     setVariant(c.variants.includes(variant) ? variant : "raw");
+    api.lidarTrajectory(sessionId.trim(), c.ts_ns)
+      .then((r) => setTrajectory(r.path || []))
+      .catch(() => setTrajectory([]));
   };
 
   const build = async () => {
@@ -165,6 +170,11 @@ export default function LidarViewerPage() {
               </div>
             </div>
 
+            <label className="flex items-center gap-2 text-xs text-neutral-400">
+              <input type="checkbox" checked={showEgo} onChange={(e) => setShowEgo(e.target.checked)} />
+              Ego, sensors, trajectory ({trajectory.length} GNSS pts)
+            </label>
+
             <div>
               <div className="mb-1 flex justify-between text-xs uppercase tracking-wider text-neutral-500">
                 <span>Point budget</span>
@@ -225,6 +235,8 @@ export default function LidarViewerPage() {
               source={data.source}
               mode="perspective"
               onMeasure={setMeasure}
+              showEgo={showEgo}
+              trajectory={trajectory}
             />
           )}
           {!data && !busy && (
@@ -244,6 +256,8 @@ export default function LidarViewerPage() {
               source={data.source}
               mode="bev"
               pointSize={0.5}
+              showEgo={showEgo}
+              trajectory={trajectory}
             />
           )}
         </div>

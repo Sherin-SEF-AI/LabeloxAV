@@ -4,12 +4,14 @@ renders with three.js)."""
 
 from __future__ import annotations
 
+import math
 import uuid
 
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from geoalchemy2 import Geometry
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from compute.worker.jobs.pointcloud_build import (
@@ -21,11 +23,51 @@ from core.logging import get_logger
 from core.storage import get_object_store
 from db.models import Frame, Object, PointCloud, PointCloudDerived
 from services.api.deps import db_session
+from services.hdmap.georef import bearing
 from services.lidar.bev import bev_box_to_cuboid
 from services.lidar.ingest.store import load_cloud
 
 log = get_logger("api_lidar")
 router = APIRouter()
+
+
+@router.get("/lidar/sessions/{session_id}/trajectory")
+async def trajectory(session_id: uuid.UUID, ref_ts_ns: int | None = Query(None),
+                     db: AsyncSession = Depends(db_session)):
+    """The GNSS path expressed in the ego frame at ref_ts_ns (the cloud's timestamp), so it overlays the
+    ego-frame cloud with the vehicle at the origin. x forward, y left, metres."""
+    geom = cast(Frame.gnss, Geometry)
+    rows = (await db.execute(select(Frame.ts_ns, func.ST_Y(geom), func.ST_X(geom))
+            .where(Frame.session_id == session_id, Frame.gnss.isnot(None)).order_by(Frame.ts_ns))).all()
+    seen: set[int] = set()
+    pts: list[tuple[int, float, float]] = []
+    for ts, lat, lon in rows:
+        if int(ts) in seen:
+            continue
+        seen.add(int(ts))
+        pts.append((int(ts), float(lat), float(lon)))
+    if not pts:
+        return {"session_id": str(session_id), "path": [], "reason": "no GNSS frames"}
+
+    ref = ref_ts_ns if ref_ts_ns is not None else pts[0][0]
+    ai = min(range(len(pts)), key=lambda i: abs(pts[i][0] - ref))
+    alat, alon = pts[ai][1], pts[ai][2]
+    if ai + 1 < len(pts):
+        h = bearing(alat, alon, pts[ai + 1][1], pts[ai + 1][2])
+    elif ai > 0:
+        h = bearing(pts[ai - 1][1], pts[ai - 1][2], alat, alon)
+    else:
+        h = 0.0
+    sh, ch = math.sin(h), math.cos(h)
+    mlat = 111320.0
+    mlon = 111320.0 * math.cos(math.radians(alat))
+    path = []
+    for ts, lat, lon in pts:
+        north = (lat - alat) * mlat
+        east = (lon - alon) * mlon
+        path.append({"ts_ns": ts, "x": round(east * sh + north * ch, 3),
+                     "y": round(north * sh - east * ch, 3)})
+    return {"session_id": str(session_id), "anchor_ts_ns": pts[ai][0], "heading_rad": round(h, 5), "path": path}
 
 
 class BuildIn(BaseModel):

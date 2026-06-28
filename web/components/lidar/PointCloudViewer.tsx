@@ -20,6 +20,8 @@ type Props = {
   mode: "perspective" | "bev";
   pointSize?: number;
   onMeasure?: (meters: number | null) => void;
+  showEgo?: boolean;
+  trajectory?: { x: number; y: number }[];
 };
 
 const SOURCE_RGB: Record<string, [number, number, number]> = {
@@ -54,6 +56,7 @@ function buildLUT(colorBy: ColorBy, source: string): Float32Array {
 
 export default function PointCloudViewer({
   points, count, colorBy, intensityRange, source, mode, pointSize = 0.06, onMeasure,
+  showEgo = false, trajectory,
 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<{
@@ -206,6 +209,63 @@ export default function PointCloudViewer({
     }
     st.controls.update();
   }, [points, count, colorBy, intensityRange, source, pointSize, mode]);
+
+  // overlays: the ego vehicle footprint, sensor positions, turning radius, and the GNSS trajectory
+  useEffect(() => {
+    const st = stateRef.current;
+    if (!st) return;
+    const group = new THREE.Group();
+    const z = 0.03;
+
+    if (showEgo) {
+      const L0 = -0.9, L1 = 3.1, wy = 0.85, camH = 1.5;
+      const rect = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(L0, -wy, z), new THREE.Vector3(L1, -wy, z),
+        new THREE.Vector3(L1, wy, z), new THREE.Vector3(L0, wy, z), new THREE.Vector3(L0, -wy, z),
+      ]);
+      group.add(new THREE.Line(rect, new THREE.LineBasicMaterial({ color: 0x4ade80 })));
+      const arrow = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(L1, 0, z), new THREE.Vector3(L1 + 1.6, 0, z),
+      ]);
+      group.add(new THREE.Line(arrow, new THREE.LineBasicMaterial({ color: 0x4ade80 })));
+
+      const mounts: [number, number][] = [[3.0, 0], [1.0, wy], [1.0, -wy], [L0, 0]];
+      const sphere = new THREE.SphereGeometry(0.13, 8, 8);
+      const sensorMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee });
+      for (const [mx, my] of mounts) {
+        const s = new THREE.Mesh(sphere, sensorMat);
+        s.position.set(mx, my, camH);
+        group.add(s);
+      }
+
+      const R = 5;
+      const arc = (sign: number) => {
+        const pts: THREE.Vector3[] = [];
+        for (let a = 0; a <= 40; a++) {
+          const th = (a / 40) * (Math.PI / 2);
+          pts.push(new THREE.Vector3(Math.sin(th) * R, sign * (R - Math.cos(th) * R), z));
+        }
+        return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+          new THREE.LineBasicMaterial({ color: 0x334155 }));
+      };
+      group.add(arc(1), arc(-1));
+    }
+
+    if (trajectory && trajectory.length > 1) {
+      const tp = trajectory.map((p) => new THREE.Vector3(p.x, p.y, 0.06));
+      group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(tp),
+        new THREE.LineBasicMaterial({ color: 0xfbbf24 })));
+    }
+
+    st.scene.add(group);
+    return () => {
+      st.scene.remove(group);
+      group.traverse((o) => {
+        const m = o as THREE.Mesh | THREE.Line;
+        if (m.geometry) m.geometry.dispose();
+      });
+    };
+  }, [showEgo, trajectory, mode]);
 
   // measurement: click two points, report the distance and draw a segment
   useEffect(() => {

@@ -131,6 +131,9 @@ export const api = {
   lidarBuild: (sessionId: string, limit = 1) =>
     post<{ session_id: string; clouds: number; groups_total: number }>(
       `/api/lidar/sessions/${sessionId}/build`, { limit }),
+  lidarTrajectory: (sessionId: string, refTsNs?: number) =>
+    get<{ session_id: string; anchor_ts_ns?: number; heading_rad?: number; path: { x: number; y: number }[] }>(
+      `/api/lidar/sessions/${sessionId}/trajectory${refTsNs != null ? `?ref_ts_ns=${refTsNs}` : ""}`),
   ontology: () => get<Ontology>("/api/ontology"),
   addClass: (name: string) => post<OntologyClass & { existed: boolean }>("/api/ontology/classes", { name }),
   sessions: () => get<SessionRow[]>("/api/sessions"),
