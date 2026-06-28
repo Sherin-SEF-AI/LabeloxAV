@@ -40,6 +40,7 @@ from services.api.routers import (
     multicam,
     objects,
     objects3d,
+    lidar_scene,
     ocr,
     quality,
     relabel,
@@ -233,6 +234,7 @@ app.include_router(discovery.router, prefix="/api", tags=["discovery"])
 app.include_router(lanes.router, prefix="/api", tags=["lanes"])
 app.include_router(lidar.router, prefix="/api", tags=["lidar"])
 app.include_router(objects3d.router, prefix="/api", tags=["lidar"])
+app.include_router(lidar_scene.router, prefix="/api", tags=["lidar"])
 app.include_router(drivable.router, prefix="/api", tags=["drivable"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])

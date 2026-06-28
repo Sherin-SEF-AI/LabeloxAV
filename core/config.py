@@ -455,6 +455,24 @@ class LidarSettings(BaseModel):
     track3d_min_hits: int = 2                # matches before a tentative 3D track is confirmed
     track3d_iou_thresh: float = 0.1          # 3D IoU association gate
     track3d_appearance_w: float = 0.3        # DINOv3 appearance weight in the association cost
+    # Phase 3 (scene intelligence + export).
+    extract_cluster_eps: float = 0.5         # DBSCAN radius for clustering non-ground points (metres)
+    extract_cluster_min_points: int = 10
+    pole_min_height_m: float = 2.0           # a pole is taller than this
+    pole_max_footprint_m: float = 0.9        # and thinner than this (a thin vertical structure)
+    building_min_facade_points: int = 150    # a facade plane needs at least this many points
+    marking_intensity_pct: float = 80.0      # road points above this intensity percentile are markings
+    traverse_grid_res_m: float = 0.5         # occupancy / free-space grid resolution
+    traverse_obstacle_h_m: float = 0.3       # a ground-cell obstacle rises at least this high
+    register_method: str = "gicp"            # icp | ndt | gicp scan alignment
+    register_voxel_m: float = 0.3            # downsample voxel for registration
+    register_min_fitness: float = 0.3        # below this the registration is flagged low-confidence
+    loop_closure_radius_m: float = 8.0       # revisit detection radius for loop closure
+    quality_max_dim_m: float = 25.0          # a box dimension above this is impossible
+    quality_float_gap_m: float = 0.5         # a box bottom this far above the ground is floating
+    quality_below_ground_m: float = 0.5      # a box bottom this far below the ground is below-ground
+    quality_duplicate_iou: float = 0.6       # two boxes overlapping above this 3D IoU are duplicates
+    quality_misalign_fill: float = 0.05      # a box with fewer enclosed points than this is misaligned
 
 
 class Settings(BaseSettings):

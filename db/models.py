@@ -365,6 +365,8 @@ class DatasetCommit(Base):
     parent_id: Mapped[str | None] = mapped_column(String(128))
     slice_spec: Mapped[dict] = mapped_column(JSONB, default=dict)
     object_count: Mapped[int] = mapped_column(Integer, default=0)
+    object_3d_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    cloud_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     ontology_version: Mapped[str] = mapped_column(String(64), nullable=False)
     export_uris: Mapped[dict] = mapped_column(JSONB, default=dict)
     notes: Mapped[str | None] = mapped_column(Text)
@@ -888,3 +890,82 @@ class PointSegmentation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_point_segmentation_cloud", "cloud_id"),)
+
+
+# ---- LiDAR module Phase 3 (3D scene intelligence + export) ----
+class StaticElement(Base):
+    """An extracted persistent 3D map element (pole, road edge, building, vegetation, marking). Geo-referenced
+    into world space and fed to the existing HD map pipeline as a MapElement. Provenance: source clouds, the
+    extraction method, and the calibration that placed it."""
+    __tablename__ = "static_element"
+
+    element_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)   # pole|road_edge|curb|median|building|...
+    geometry: Mapped[str | None] = mapped_column(Geography(srid=4326))   # Point or LineString or Polygon
+    attrs: Mapped[dict] = mapped_column(JSONB, default=dict)
+    source_clouds: Mapped[list[uuid.UUID] | None] = mapped_column(PGARRAY(UUID(as_uuid=True)))
+    method: Mapped[str | None] = mapped_column(String(40))
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    calibration_version: Mapped[str | None] = mapped_column(String(64))
+    map_element_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))   # the fed HD map element
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_static_element_session", "session_id"), Index("ix_static_element_kind", "kind"))
+
+
+class Traversability(Base):
+    """3D free space, drivable surface, road-surface class, and elevation profile for a cloud or an aggregated
+    tile. Grids live in the object store; the surface and elevation summaries are inline."""
+    __tablename__ = "traversability"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    cloud_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("point_cloud.cloud_id", ondelete="CASCADE"))
+    tile_id: Mapped[str | None] = mapped_column(String(64))
+    freespace_uri: Mapped[str | None] = mapped_column(Text)
+    drivable_uri: Mapped[str | None] = mapped_column(Text)
+    surface_class: Mapped[dict] = mapped_column(JSONB, default=dict)
+    elevation_profile: Mapped[dict] = mapped_column(JSONB, default=dict)
+    method: Mapped[str | None] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_traversability_cloud", "cloud_id"),)
+
+
+class AggregatedMap(Base):
+    """A registered multi-scan, multi-drive map: scans aligned and accumulated into a dense cloud, with the
+    pose graph and any loop closures that corrected it."""
+    __tablename__ = "aggregated_map"
+
+    agg_id: Mapped[uuid.UUID] = _uuid_pk()
+    region: Mapped[str | None] = mapped_column(String(64))
+    session_ids: Mapped[list[uuid.UUID] | None] = mapped_column(PGARRAY(UUID(as_uuid=True)))
+    cloud_uri: Mapped[str | None] = mapped_column(Text)
+    pose_graph: Mapped[dict] = mapped_column(JSONB, default=dict)
+    loop_closures: Mapped[dict] = mapped_column(JSONB, default=dict)
+    method: Mapped[str | None] = mapped_column(String(40))
+    n_scans: Mapped[int | None] = mapped_column(Integer)
+    mean_reg_fitness: Mapped[float | None] = mapped_column(Float)   # low -> flagged low-confidence registration
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_aggregated_map_region", "region"),)
+
+
+class QualityFlag3D(Base):
+    """A detected 3D label problem (floating, below ground, impossible dims, duplicate, misaligned, missing
+    neighbour). Feeds the same review and active-learning loop as the 2D quality reviewer."""
+    __tablename__ = "quality_flag_3d"
+
+    flag_id: Mapped[uuid.UUID] = _uuid_pk()
+    object_3d_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("object_3d.object_3d_id", ondelete="CASCADE"))
+    cloud_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("point_cloud.cloud_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)   # floating|below_ground|impossible_dims|...
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")  # open|confirmed|dismissed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_quality_flag_3d_object", "object_3d_id"),
+                      Index("ix_quality_flag_3d_status", "status"))
