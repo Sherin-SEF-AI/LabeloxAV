@@ -5,16 +5,16 @@ Revision ID: 0018_closedloop
 Revises: 0017_spatial
 Create Date: 2026-06-27
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0018_closedloop"
-down_revision: Union[str, None] = "0017_spatial"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "0017_spatial"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 _PK = dict(primary_key=True, server_default=sa.text("gen_random_uuid()"))
 

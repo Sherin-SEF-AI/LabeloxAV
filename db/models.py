@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 
 from geoalchemy2 import Geography
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     ARRAY,
     BigInteger,
@@ -21,10 +22,11 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY as PGARRAY  # noqa: F401  (scenario_candidate.rare_classes)
+from sqlalchemy.dialects.postgresql import (
+    ARRAY as PGARRAY,  # noqa: F401  (scenario_candidate.rare_classes)
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from pgvector.sqlalchemy import Vector
 
 
 class Base(DeclarativeBase):
@@ -43,7 +45,7 @@ class OntologyVersion(Base):
     attributes: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    classes: Mapped[list["OntologyClass"]] = relationship(back_populates="ontology", cascade="all, delete-orphan")
+    classes: Mapped[list[OntologyClass]] = relationship(back_populates="ontology", cascade="all, delete-orphan")
 
 
 class OntologyClass(Base):
@@ -79,7 +81,7 @@ class Session(Base):
     commit_id: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    frames: Mapped[list["Frame"]] = relationship(back_populates="session")
+    frames: Mapped[list[Frame]] = relationship(back_populates="session")
 
     __table_args__ = (Index("ix_session_start_ts", "start_ts_ns"),)
 
@@ -113,8 +115,12 @@ class Frame(Base):
     lane_count: Mapped[int | None] = mapped_column(Integer)
     speed_limit: Mapped[int | None] = mapped_column(Integer)
 
+    # LiDAR BEV frames: img_uri is the rasterized bird's-eye view; this holds the point-cloud uri and the
+    # BEV projection params so an oriented box drawn on the image lifts back to a metric 3D cuboid.
+    lidar: Mapped[dict | None] = mapped_column(JSONB)
+
     session: Mapped[Session] = relationship(back_populates="frames")
-    objects: Mapped[list["Object"]] = relationship(back_populates="frame")
+    objects: Mapped[list[Object]] = relationship(back_populates="frame")
 
     __table_args__ = (
         Index("ix_frame_session_ts", "session_id", "ts_ns"),
@@ -152,6 +158,19 @@ class Object(Base):
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="fused")
     provenance: Mapped[dict] = mapped_column(JSONB, default=dict)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="review")
+    # Optimistic-concurrency version: bumped on every human edit; a stale write is rejected (409) so two
+    # annotators on the same object do not silently overwrite each other (last-write-wins).
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    # Optional 3D cuboid (ego frame, metres): {"center":[x,y,z], "size":[w,l,h], "yaw":rad}. Present only
+    # when a 3D label exists (LiDAR/cuboid tool); enables a real nuScenes/KITTI 3D export.
+    cuboid_3d: Mapped[dict | None] = mapped_column(JSONB)
+    # Oriented-box rotation (degrees, clockwise about the box centre). 0 = axis-aligned. Additive: bbox
+    # stays the unrotated AABB so export/IPM/dynamics are unchanged; consumers that support oriented boxes
+    # use this angle on top of bbox.
+    rot_deg: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    # Optional keypoints/skeleton (COCO-style, image pixels): {"skeleton": str, "points": [[x,y,v],...]}
+    # with v in {0 not-labeled, 1 occluded, 2 visible}. For pedestrian/cyclist pose.
+    keypoints: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Phase 2 perception (additive, nullable):
