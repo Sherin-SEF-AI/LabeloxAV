@@ -25,10 +25,18 @@ from db.models import Frame, Object, PointCloud, PointCloudDerived
 from services.api.deps import db_session
 from services.hdmap.georef import bearing
 from services.lidar.bev import bev_box_to_cuboid
+from services.lidar.calib.validate3d import lidar_session_ok, validate_session
 from services.lidar.ingest.store import load_cloud
 
 log = get_logger("api_lidar")
 router = APIRouter()
+
+
+@router.post("/lidar/sessions/{session_id}/validate")
+async def validate_lidar(session_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
+    """Run the automatic LiDAR validation: cloud quality across the session plus camera coverage
+    consistency. Records a lidar_calibration_validation row; a 'fail' excludes the session from 3D work."""
+    return await validate_session(session_id)
 
 
 @router.get("/lidar/sessions/{session_id}/trajectory")
@@ -82,6 +90,9 @@ async def build_clouds(session_id: uuid.UUID, body: BuildIn | None = None,
     """Build pseudo-LiDAR clouds from a session's camera frames on the local 5080. Bounded to `limit` frame
     groups so the request stays interactive; bulk volume runs through the pointcloud_build burst job."""
     body = body or BuildIn()
+    if not await lidar_session_ok(session_id):
+        raise HTTPException(409, "session excluded from 3D work: it failed LiDAR calibration or cloud quality "
+                                 "validation. Re-validate after fixing.")
     groups = await _frame_groups(session_id, None)
     if not groups:
         raise HTTPException(400, "no camera frame groups in this session")
@@ -167,6 +178,9 @@ async def compute_cuboids(frame_id: uuid.UUID, db: AsyncSession = Depends(db_ses
         raise HTTPException(404, "frame not found")
     if not frame.lidar or not frame.lidar.get("pcd_uri") or not frame.lidar.get("bev"):
         raise HTTPException(400, "not a LiDAR BEV frame")
+    if not await lidar_session_ok(frame.session_id):
+        raise HTTPException(409, "session excluded from 3D work: it failed LiDAR calibration or cloud "
+                                 "quality validation. Re-validate after fixing.")
 
     pts = np.frombuffer(get_object_store().get_bytes(frame.lidar["pcd_uri"]), dtype=np.float32).reshape(-1, 4)
     bev = frame.lidar["bev"]

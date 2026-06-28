@@ -436,6 +436,11 @@ class LidarSettings(BaseModel):
     voxel_size_m: float = 0.05              # voxel downsample for bulk operations
     viewer_max_points: int = 400000         # decimation ceiling for interactive rendering
     cloud_prefix: str = "clouds"            # object-store key prefix for stored clouds
+    calib_reproj_warn_px: float = 2.0       # LiDAR-camera reprojection residual: warn above
+    calib_reproj_fail_px: float = 5.0       # LiDAR-camera reprojection residual: fail and exclude above
+    calib_drift_ratio: float = 1.5          # residual grown past this multiple of baseline flags drift
+    quality_min_points: int = 500           # below this a cloud is sparse / a missing scan
+    quality_max_empty_wedge_deg: float = 90.0  # a 360 scan with a wider empty wedge is a partial scan
 
 
 class Settings(BaseSettings):
