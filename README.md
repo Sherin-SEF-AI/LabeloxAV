@@ -20,9 +20,15 @@ Labeling that data by hand is slow and expensive. The cases that actually matter
 
 ## What it does
 
-**One annotation canvas.** Draw and adjust boxes, run promptable segmentation, edit lane splines and drivable area, toggle layers, and read each object's derived dynamics, all on a single keyboard driven surface. Click a wrong label and fix it in place, or add a brand new class on the fly. Here it is on a real Indian street, with a truck, an autorickshaw, a hatchback, and pedestrians.
+**One surface, every annotation primitive.** Boxes and oriented boxes, manual polygons, promptable SAM masks, pose and keypoint skeletons for pedestrians and cyclists, and 3D cuboids lifted from LiDAR, plus a measure tool and copy paste across frames. Edit lane splines and drivable area, read each object's derived dynamics, fix a wrong label in place, or add a brand new class on the fly. All keyboard driven. Here it is on a real Indian street, with a truck, an autorickshaw, a hatchback, and pedestrians.
 
 ![Annotation canvas on a real Indian street](docs/screenshots/07-annotation-canvas.png)
+
+**Start from raw data.** Drop in a folder of images, a video, or an mcap and it imports into a new session with faces and plates blurred before anything reaches storage, then opens the first frame so you are annotating in seconds. An Open view browses every session with live progress, and sends you straight back to the highest priority frame left to label.
+
+**3D from LiDAR, without a 3D engine.** Point clouds rasterize to a bird's eye view you annotate with oriented boxes, and each box lifts back to a metric 3D cuboid using the points it encloses. It exports as real nuScenes 3D. The shot below is a real KITTI scan, annotated in the same editor.
+
+![LiDAR bird's eye view annotation](docs/screenshots/11-lidar-inapp.png)
 
 **Smart triage, not endless clicking.** Every detection gets a calibrated confidence and a reason. High confidence agrees get auto accepted. The uncertain, rare, and conflicting ones rise to the top of a priority queue. You spend your attention where it matters.
 
@@ -43,13 +49,15 @@ Every automated decision is in an audit log. A drift breach pauses promotion. On
 ## The feature list
 
 - **India first ontology**, 170 classes across vehicles, vulnerable road users, infrastructure, surfaces, and an honest long tail, with per object behavioral attributes (motion, brake, indicator, lane position, occlusion).
+- **A full annotation toolkit**: boxes, oriented boxes, manual polygons, promptable SAM masks, pose and keypoint skeletons, 3D cuboids from LiDAR, a measure tool, and copy paste, with per object undo, optimistic locking so two people never clobber each other, and autosave.
 - **Auto labeling** through a fusion of detection, promptable segmentation, and a vision language verifier, gated by calibrated confidence.
 - **Perception depth**: multi object tracking, lane splines, drivable area segmentation, traffic sign and signal understanding, and license plate privacy that never stores plate text.
+- **3D and LiDAR**: point clouds annotated in a bird's eye view, lifted to metric cuboids from the enclosed points.
 - **Multi sensor and spatial**: camera calibration validation, synchronized multi camera annotation, map assisted labeling from OpenStreetMap, and HD map generation exported to Lanelet2 and OpenDRIVE.
 - **Derived dynamics**: per object distance, speed, heading, time to collision, and a risk level, turning a perception dataset into one that supports planning and prediction.
-- **Self improvement**: active learning, annotation error detection, AI assisted relabeling, champion and challenger promotion, control sample precision, drift detection, and a full audit trail.
-- **Versioning and teamwork**: git style branches, commits, and merges over the dataset, with multi user roles and reviewed merge requests.
-- **Local plus burst compute**: interactive work runs on a single box, the heavy model passes burst to a cloud A100 and tear down to cap cost.
+- **Self improvement**: active learning, annotation error detection, AI assisted relabeling, champion and challenger promotion that actually serves the promoted model, a kill switch that genuinely stops auto accept, control sample precision, drift detection with recovery, and a full audit trail.
+- **Export and import**: COCO, YOLO, KITTI, BDD100K, OpenLABEL, nuScenes (with real 3D when a cuboid exists), and a lossless Parquet round trip.
+- **Secure and versioned**: deny by default API auth with annotator, reviewer, and admin roles, git style branches and reviewed merges over the dataset, and a mandatory privacy gate.
 
 ---
 
@@ -92,7 +100,7 @@ make api      # http://localhost:8000
 make web      # http://localhost:3000
 ```
 
-Open the web app, pick a session, and start in the triage queue.
+Open the web app, click New to upload images or video, or Open to pick an existing session, and start annotating.
 
 ---
 
@@ -110,11 +118,11 @@ The accurate IDD model reaches 0.44 mAP@50, a clear step over the earlier 0.39 b
 
 ## Honest status
 
-This is a from scratch build of the full pipeline, end to end. The engine, the ontology, the closed loop, the governance, and the maps are real and verified.
+This is a from scratch build of the full pipeline, end to end, backed by an automated test suite. The engine, the ontology, the closed loop, the governance, the maps, and the editor are real and verified.
 
-The image corpus shipped here is synthetic placeholder data, so the pixels in the editor are noise rather than real streets. Everything is built and tested on top of it and is ready for real footage the moment it is ingested. Real dashcam ingestion is the next milestone, and it is the one thing that makes all of the above meaningful on actual roads.
+The real data path is proven, not promised. India Driving Dataset frames have been ingested and embedded so search and discovery run on real pixels, and a real KITTI LiDAR scan has been annotated to 3D cuboids and exported as nuScenes. Detectors in the registry are trained on the India Driving Dataset and reach a real baseline.
 
-Detectors in the registry are trained on the India Driving Dataset and reach a real baseline. The roadmap is simple: ingest real fleet drives, let the loop run, and watch the auto accept ceiling climb.
+The original bring up corpus is synthetic placeholder pixels, and the heavy cloud A100 stack is a documented seam rather than a wired path. The remaining milestone is the obvious one: pour in a full fleet of real dashcam drives, let the loop run, and watch the auto accept ceiling climb.
 
 ---
 
