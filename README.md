@@ -98,14 +98,15 @@ Open the web app, pick a session, and start in the triage queue.
 
 ## Models
 
-Detectors are trained on the India Driving Dataset and live in a versioned registry. The current baseline, on the IDD validation split:
+Detectors live in a versioned registry, trained on the India Driving Dataset and a general 8 class set. A fresh size family, trained on a single consumer GPU:
 
-| Model | Backbone | mAP@50 | Precision | Notes |
-| --- | --- | --- | --- | --- |
-| idd-v1 | YOLO11l | 0.39 | 0.77 | 5 epochs, India 15 class |
-| idd-corpus-v1 | YOLO11l | 0.31 | 0.44 | 20 epochs |
+| Model | Backbone | Data | mAP@50 | Precision | Recall |
+| --- | --- | --- | --- | --- | --- |
+| idd-yolo11l | YOLO11l | IDD | 0.44 | 0.67 | 0.39 |
+| idd-yolo11n | YOLO11n | IDD | 0.34 | 0.67 | 0.30 |
+| roadscope-yolo11l | YOLO11l | general | 0.72 | 0.73 | 0.65 |
 
-The model learns the common road agents well (bus, road, sedan, truck, motorcycle, rider, pedestrian all above 0.55 AP) and the rare India specific classes less so, which is exactly the gap the active learning loop is built to close. A size family is training now: YOLO11n for on vehicle edge inference and YOLO11l for accuracy, plus a general detector. Each lands in the registry as it finishes, gated by the champion and challenger promotion above.
+The accurate IDD model reaches 0.44 mAP@50, a clear step over the earlier 0.39 baseline, while the tiny YOLO11n trades accuracy for speed so it can run on the vehicle. The model nails the common road agents and is weaker on the rare India specific long tail, which is exactly the gap the active learning loop is built to close. Every model is promoted only through the champion and challenger gate above.
 
 ## Honest status
 
