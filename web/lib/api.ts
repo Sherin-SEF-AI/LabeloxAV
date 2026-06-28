@@ -210,6 +210,25 @@ export const api = {
       `/api/lidar/clouds/${cloudId}/segment`, {}),
   lidarTrack3d: (sessionId: string) =>
     post<{ session_id: string; tracks: number; detections: number }>(`/api/lidar/sessions/${sessionId}/track3d`, {}),
+  lidarLinkCloud: (cloudId: string) =>
+    post<{ cloud_id: string; linked: number; cuboids: number }>(`/api/lidar/clouds/${cloudId}/link`, {}),
+  lidarObject3dProjection: (id: string, camId = "cam_f", w = 1280, h = 960) =>
+    get<{ corners_uv: number[][]; in_front: boolean[]; in_image: boolean[]; edges: number[][]; any_in_image: boolean }>(
+      `/api/lidar/objects3d/${id}/projection?cam_id=${camId}&w=${w}&h=${h}`),
+  lidarObject3dLinked: (id: string) =>
+    get<{ object_3d_id: string; object_id: string | null; class_id: number;
+      projections: Record<string, number[]>; object_2d: { object_id: string; bbox: number[]; cam_id: string } | null }>(
+      `/api/lidar/objects3d/${id}/linked`),
+  lidarObject3dProperties: (id: string) =>
+    post<{ object_3d_id: string; properties: Record<string, number | null> }>(
+      `/api/lidar/objects3d/${id}/properties`, {}),
+  lidarSimilar3d: (id: string, k = 10) =>
+    get<{ object_3d_id: string; class_id: number;
+      similar: { object_3d_id: string; dims: number[]; dims_dist: number; state: string }[] }>(
+      `/api/lidar/objects3d/${id}/similar?k=${k}`),
+  lidarBatchCorrect: (ids: string[], classId?: number, dims?: number[]) =>
+    post<{ updated: number }>(`/api/lidar/objects3d/batch_correct`,
+      { object_3d_ids: ids, class_id: classId ?? null, dims: dims ?? null }),
   ontology: () => get<Ontology>("/api/ontology"),
   addClass: (name: string) => post<OntologyClass & { existed: boolean }>("/api/ontology/classes", { name }),
   sessions: () => get<SessionRow[]>("/api/sessions"),

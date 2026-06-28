@@ -290,3 +290,81 @@ async def project_object3d(object_3d_id: uuid.UUID, cam_id: str = "cam_f", w: in
         raise HTTPException(404, "object_3d not found")
     proj = project_cuboid(o.center, o.dims, o.yaw, cam_id, w, h, o.pitch, o.roll)
     return {"object_3d_id": str(object_3d_id), "cam_id": cam_id, **proj}
+
+
+# ---- M-L2.4: linked identity, properties, correction ----
+class BatchCorrectIn(BaseModel):
+    object_3d_ids: list[uuid.UUID]
+    class_id: int | None = None
+    dims: list[float] | None = None
+
+
+@router.post("/lidar/clouds/{cloud_id}/link")
+async def link_cloud_objects(cloud_id: uuid.UUID):
+    """Link unlinked 3D cuboids on a cloud to the 2D objects by projection IoU (the unifying identity)."""
+    from services.lidar.link import link_cloud
+    return await link_cloud(cloud_id)
+
+
+@router.get("/lidar/objects3d/{object_3d_id}/linked")
+async def object3d_linked(object_3d_id: uuid.UUID):
+    """The 2D object and the per-camera projections of a 3D object: select it in the cloud, see it in every
+    synchronized camera view."""
+    from services.lidar.link import linked_views
+    res = await linked_views(object_3d_id)
+    if res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@router.get("/lidar/objects2d/{object_id}/linked3d")
+async def object2d_linked3d(object_id: uuid.UUID):
+    """The reverse: the 3D cuboid a 2D object belongs to, and its per-camera projections."""
+    from services.lidar.link import linked_from_2d
+    return await linked_from_2d(object_id)
+
+
+@router.post("/lidar/objects3d/{object_3d_id}/properties")
+async def compute_properties_endpoint(object_3d_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
+    """Auto-compute distance, heading, velocity, acceleration, and occlusion for a 3D object and store them."""
+    from db.models import Track3D
+    from services.lidar.link import compute_object_properties
+    from services.lidar.segment3d import points_in_cuboid
+    o = await db.get(Object3D, object_3d_id)
+    if o is None:
+        raise HTTPException(404, "object_3d not found")
+    pc = await db.get(PointCloud, o.cloud_id)
+    frame = (await db.execute(select(Frame).where(Frame.session_id == pc.session_id,
+             Frame.ts_ns == pc.ts_ns).limit(1))).scalar_one_or_none()
+    traj = None
+    if o.track_3d_id:
+        tr = await db.get(Track3D, o.track_3d_id)
+        traj = (tr.trajectory or {}).get("points") if tr else None
+    w, h, cam = (frame.width, frame.height, frame.cam_id) if frame else (1280, 960, "cam_f")
+    proj = project_cuboid(o.center, o.dims, o.yaw, cam, w, h)
+    in_image_frac = sum(1 for x in proj["in_image"] if x) / 8.0
+    cloud = load_cloud(pc.cloud_uri)
+    nb = int(points_in_cuboid(cloud.xyz, {"center": o.center, "dims": o.dims, "yaw": o.yaw}).sum())
+    props = compute_object_properties(o.center, o.dims, o.yaw, trajectory=traj,
+                                      ego_speed=float(frame.ego_speed or 0.0) if frame else 0.0,
+                                      in_image_frac=in_image_frac, points_in_box=nb)
+    o.attrs = {**(o.attrs or {}), **props}
+    await db.commit()
+    return {"object_3d_id": str(object_3d_id), "properties": props}
+
+
+@router.get("/lidar/objects3d/{object_3d_id}/similar")
+async def similar_objects3d(object_3d_id: uuid.UUID, k: int = Query(10, ge=1, le=100)):
+    """Objects similar to a 3D object (class plus dimensions), the candidates for a batch correction."""
+    from services.lidar.link import find_similar
+    res = await find_similar(object_3d_id, k=k)
+    if res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@router.post("/lidar/objects3d/batch_correct")
+async def batch_correct_objects3d(body: BatchCorrectIn):
+    """Apply a class or dimension correction to a batch of 3D objects as a human edit."""
+    from services.lidar.link import batch_correct
+    return await batch_correct(body.object_3d_ids, class_id=body.class_id, dims=body.dims)
