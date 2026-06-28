@@ -72,7 +72,9 @@ def safe_miou_report(weights: str, data_yaml: str, split: str = "val", imgsz: in
     settings = get_settings()
     onto = get_ontology()
     model = YOLO(weights)
-    res = model.val(data=data_yaml, split=split, imgsz=imgsz, device=settings.gpu.device, verbose=False, plots=False)
+    # plots=True is required: ultralytics only accumulates the confusion matrix when plotting is on,
+    # otherwise res.confusion_matrix.matrix is all zeros and Safe-mIoU reads as undefined.
+    res = model.val(data=data_yaml, split=split, imgsz=imgsz, device=settings.gpu.device, verbose=False, plots=True)
 
     names = dict(res.names if hasattr(res, "names") else model.names)
     nc = len(names)
