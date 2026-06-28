@@ -11,6 +11,17 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 export type ColorBy = "height" | "intensity" | "source";
 
+export type ViewerCuboid = {
+  object_3d_id: string;
+  center: number[];
+  dims: number[];
+  yaw: number;
+  pitch?: number;
+  roll?: number;
+  state: string;
+  class_name?: string;
+};
+
 type Props = {
   points: Float32Array | null; // interleaved [x, y, z, intensity]
   count: number;
@@ -22,12 +33,23 @@ type Props = {
   onMeasure?: (meters: number | null) => void;
   showEgo?: boolean;
   trajectory?: { x: number; y: number }[];
+  cuboids?: ViewerCuboid[];
+  selectedId?: string | null;
+  onSelectCuboid?: (id: string | null) => void;
+  onMoveCuboid?: (id: string, x: number, y: number, commit: boolean) => void;
 };
 
 const SOURCE_RGB: Record<string, [number, number, number]> = {
   pseudo: [0.2, 0.85, 0.95],
   lidar: [0.45, 0.95, 0.55],
   dataset: [0.98, 0.78, 0.32],
+};
+
+const STATE_COLOR: Record<string, number> = {
+  auto_accept: 0x4ade80,
+  accepted: 0x22d3ee,
+  review: 0xfbbf24,
+  annotate: 0xf87171,
 };
 
 function buildLUT(colorBy: ColorBy, source: string): Float32Array {
@@ -56,7 +78,7 @@ function buildLUT(colorBy: ColorBy, source: string): Float32Array {
 
 export default function PointCloudViewer({
   points, count, colorBy, intensityRange, source, mode, pointSize = 0.06, onMeasure,
-  showEgo = false, trajectory,
+  showEgo = false, trajectory, cuboids, selectedId, onSelectCuboid, onMoveCuboid,
 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<{
@@ -64,6 +86,7 @@ export default function PointCloudViewer({
     controls: OrbitControls; cloud: THREE.Points | null; raycaster: THREE.Raycaster;
     measure: THREE.Vector3[]; marks: THREE.Object3D | null; dispose: () => void;
   } | null>(null);
+  const cubeRef = useRef<{ group: THREE.Group; meshes: THREE.Mesh[] } | null>(null);
 
   // mount: renderer, camera, controls, render loop
   useEffect(() => {
@@ -266,6 +289,99 @@ export default function PointCloudViewer({
       });
     };
   }, [showEgo, trajectory, mode]);
+
+  // cuboids: oriented wireframe boxes with a faint fill for picking, the selected one highlighted white
+  useEffect(() => {
+    const st = stateRef.current;
+    if (!st) return;
+    const group = new THREE.Group();
+    const meshes: THREE.Mesh[] = [];
+    for (const cub of cuboids || []) {
+      const [length, width, height] = cub.dims;
+      const geo = new THREE.BoxGeometry(length, width, height);
+      const sel = cub.object_3d_id === selectedId;
+      const color = sel ? 0xffffff : (STATE_COLOR[cub.state] ?? 0x60a5fa);
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo),
+        new THREE.LineBasicMaterial({ color }));
+      const fill = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: sel ? 0.18 : 0.07, depthWrite: false }));
+      fill.userData = { id: cub.object_3d_id };
+      const box = new THREE.Group();
+      box.add(fill);
+      box.add(edges);
+      box.position.set(cub.center[0], cub.center[1], cub.center[2]);
+      box.rotation.set(cub.roll || 0, cub.pitch || 0, cub.yaw);
+      group.add(box);
+      meshes.push(fill);
+    }
+    st.scene.add(group);
+    cubeRef.current = { group, meshes };
+    return () => {
+      st.scene.remove(group);
+      group.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.geometry) m.geometry.dispose();
+        const mat = m.material as THREE.Material | undefined;
+        if (mat && mat.dispose) mat.dispose();
+      });
+      cubeRef.current = null;
+    };
+  }, [cuboids, selectedId]);
+
+  // cuboid selection (both views) and drag-to-move on the ground plane (BEV)
+  useEffect(() => {
+    const st = stateRef.current;
+    const mount = mountRef.current;
+    if (!st || !mount || (!onSelectCuboid && !onMoveCuboid)) return;
+    const ray = new THREE.Raycaster();
+    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    let dragging: string | null = null;
+
+    const ndc = (e: PointerEvent) => {
+      const r = mount.getBoundingClientRect();
+      return new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1,
+        -((e.clientY - r.top) / r.height) * 2 + 1);
+    };
+    const pick = (e: PointerEvent): string | null => {
+      ray.setFromCamera(ndc(e), st.camera as THREE.Camera);
+      const hit = ray.intersectObjects(cubeRef.current?.meshes || [], false)[0];
+      return hit ? (hit.object.userData.id as string) : null;
+    };
+    const groundXY = (e: PointerEvent): [number, number] | null => {
+      ray.setFromCamera(ndc(e), st.camera as THREE.Camera);
+      const p = new THREE.Vector3();
+      return ray.ray.intersectPlane(plane, p) ? [p.x, p.y] : null;
+    };
+    const onDown = (e: PointerEvent) => {
+      const id = pick(e);
+      onSelectCuboid?.(id);
+      if (id && mode === "bev" && onMoveCuboid) {
+        dragging = id;
+        st.controls.enabled = false;
+      }
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!dragging || !onMoveCuboid) return;
+      const xy = groundXY(e);
+      if (xy) onMoveCuboid(dragging, xy[0], xy[1], false);
+    };
+    const onUp = (e: PointerEvent) => {
+      if (dragging && onMoveCuboid) {
+        const xy = groundXY(e);
+        if (xy) onMoveCuboid(dragging, xy[0], xy[1], true);
+      }
+      dragging = null;
+      st.controls.enabled = true;
+    };
+    mount.addEventListener("pointerdown", onDown);
+    mount.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      mount.removeEventListener("pointerdown", onDown);
+      mount.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [mode, onSelectCuboid, onMoveCuboid]);
 
   // measurement: click two points, report the distance and draw a segment
   useEffect(() => {

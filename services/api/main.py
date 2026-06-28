@@ -39,6 +39,7 @@ from services.api.routers import (
     models,
     multicam,
     objects,
+    objects3d,
     ocr,
     quality,
     relabel,
@@ -231,6 +232,7 @@ app.include_router(dynamics.router, prefix="/api", tags=["dynamics"])
 app.include_router(discovery.router, prefix="/api", tags=["discovery"])
 app.include_router(lanes.router, prefix="/api", tags=["lanes"])
 app.include_router(lidar.router, prefix="/api", tags=["lidar"])
+app.include_router(objects3d.router, prefix="/api", tags=["lidar"])
 app.include_router(drivable.router, prefix="/api", tags=["drivable"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])

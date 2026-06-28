@@ -97,6 +97,38 @@ export type LidarPoints = {
   intensityMin: number;
   intensityMax: number;
 };
+export type Cuboid3D = {
+  object_3d_id: string;
+  cloud_id: string;
+  frame_id: string | null;
+  object_id: string | null;
+  track_3d_id: string | null;
+  class_id: number;
+  class_name: string;
+  center: number[];
+  dims: number[];
+  yaw: number;
+  pitch: number;
+  roll: number;
+  conf: number;
+  box_source: string;
+  source: string;
+  state: string;
+  is_keyframe: boolean;
+  attrs: Record<string, unknown>;
+  version: number;
+};
+export type Cuboid3DInput = {
+  class_id: number;
+  center: number[];
+  dims: number[];
+  yaw: number;
+  pitch?: number;
+  roll?: number;
+  attrs?: Record<string, unknown>;
+  object_id?: string | null;
+  ground_snap?: boolean;
+};
 
 // The point stream is a binary ArrayBuffer (Float32 xyzi), not JSON, so it is fetched directly.
 export async function lidarCloudPoints(
@@ -134,6 +166,25 @@ export const api = {
   lidarTrajectory: (sessionId: string, refTsNs?: number) =>
     get<{ session_id: string; anchor_ts_ns?: number; heading_rad?: number; path: { x: number; y: number }[] }>(
       `/api/lidar/sessions/${sessionId}/trajectory${refTsNs != null ? `?ref_ts_ns=${refTsNs}` : ""}`),
+  // 3D cuboid annotation
+  lidarObjects3d: (cloudId: string) =>
+    get<{ cloud_id: string; objects: Cuboid3D[] }>(`/api/lidar/clouds/${cloudId}/objects3d`),
+  lidarCreateCuboid: (cloudId: string, body: Cuboid3DInput) =>
+    post<Cuboid3D>(`/api/lidar/clouds/${cloudId}/objects3d`, body),
+  lidarPatchCuboid: async (id: string, body: Partial<Cuboid3DInput> & { expected_version?: number }) => {
+    const r = await fetch(`/api/lidar/objects3d/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...userHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`PATCH cuboid -> ${r.status}`);
+    return (await r.json()) as Cuboid3D;
+  },
+  lidarDeleteCuboid: (id: string) => del<{ deleted: string }>(`/api/lidar/objects3d/${id}`),
+  lidarLiftFrame: (frameId: string) =>
+    post<{ frame_id: string; cuboids: number; objects: unknown[] }>(`/api/lidar/frames/${frameId}/lift`, {}),
+  lidarLiftCloud: (cloudId: string) =>
+    post<{ frame_id: string; cuboids: number; objects: unknown[] }>(`/api/lidar/clouds/${cloudId}/lift`, {}),
   ontology: () => get<Ontology>("/api/ontology"),
   addClass: (name: string) => post<OntologyClass & { existed: boolean }>("/api/ontology/classes", { name }),
   sessions: () => get<SessionRow[]>("/api/sessions"),
