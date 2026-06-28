@@ -423,7 +423,9 @@ class LidarSettings(BaseModel):
     # 3D LiDAR module. The BluRabbit fleet is camera only, so pseudo-LiDAR (camera depth lift) is the
     # default source; real LiDAR and public datasets normalize to the same internal cloud.
     source_default: str = "pseudo"          # lidar | pseudo | dataset
-    depth_model: str = "depth-anything-v2-metric-hypersim-vitl"  # pinned metric depth checkpoint (pseudo-LiDAR)
+    # Pinned metric depth checkpoint for pseudo-LiDAR. The Outdoor variant is the driving model (metric
+    # depth in metres, trained on VKITTI); Small runs interactively on the local 5080.
+    depth_model: str = "depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf"
     ground_method: str = "ransac"           # patchwork | ransac
     ground_dist_thresh_m: float = 0.2       # RANSAC plane inlier distance
     ground_max_iter: int = 300

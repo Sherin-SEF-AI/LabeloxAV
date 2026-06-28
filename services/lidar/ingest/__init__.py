@@ -8,6 +8,13 @@ from services.lidar.ingest.mcap_pc import (
     write_pointclouds_mcap,
 )
 from services.lidar.ingest.normalize import Cloud
+from services.lidar.ingest.pseudo import (
+    backproject,
+    camera_to_ego,
+    estimate_depth,
+    lift_frame_group,
+    place_in_world,
+)
 from services.lidar.ingest.readers import (
     read_kitti_bin,
     read_las,
@@ -22,5 +29,6 @@ __all__ = [
     "read_point_cloud", "read_kitti_bin", "read_nuscenes_bin", "read_pcd", "read_las",
     "write_pointclouds_mcap", "read_pointclouds_mcap", "POINTS_TOPIC",
     "store_cloud", "load_cloud", "store_derived",
+    "lift_frame_group", "estimate_depth", "backproject", "camera_to_ego", "place_in_world",
     "ingest_lidar_sweep",
 ]
