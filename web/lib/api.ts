@@ -130,6 +130,26 @@ export type Cuboid3DInput = {
   ground_snap?: boolean;
 };
 
+// The segmentation overlay stream is Float32 [x, y, z, semantic_class], decimated with labels aligned.
+export async function lidarSegmentationPoints(
+  cloudId: string,
+  max = 300000,
+): Promise<{ points: Float32Array; count: number; classes: number[]; lowConfFrac: number }> {
+  const r = await fetch(`/api/lidar/clouds/${cloudId}/segmentation/points?max=${max}`, {
+    cache: "no-store",
+    headers: { ...userHeaders() },
+  });
+  if (!r.ok) throw new Error(`GET segmentation points -> ${r.status}`);
+  const buf = await r.arrayBuffer();
+  const classesHeader = r.headers.get("X-Classes") || "";
+  return {
+    points: new Float32Array(buf),
+    count: Number(r.headers.get("X-Point-Count") || 0),
+    classes: classesHeader ? classesHeader.split(",").map(Number) : [],
+    lowConfFrac: Number(r.headers.get("X-Low-Conf-Frac") ?? 0),
+  };
+}
+
 // The point stream is a binary ArrayBuffer (Float32 xyzi), not JSON, so it is fetched directly.
 export async function lidarCloudPoints(
   cloudId: string,
@@ -185,6 +205,11 @@ export const api = {
     post<{ frame_id: string; cuboids: number; objects: unknown[] }>(`/api/lidar/frames/${frameId}/lift`, {}),
   lidarLiftCloud: (cloudId: string) =>
     post<{ frame_id: string; cuboids: number; objects: unknown[] }>(`/api/lidar/clouds/${cloudId}/lift`, {}),
+  lidarSegment: (cloudId: string) =>
+    post<{ seg_id: string; method: string; classes_present: number[]; low_conf_frac: number; n_instances: number }>(
+      `/api/lidar/clouds/${cloudId}/segment`, {}),
+  lidarTrack3d: (sessionId: string) =>
+    post<{ session_id: string; tracks: number; detections: number }>(`/api/lidar/sessions/${sessionId}/track3d`, {}),
   ontology: () => get<Ontology>("/api/ontology"),
   addClass: (name: string) => post<OntologyClass & { existed: boolean }>("/api/ontology/classes", { name }),
   sessions: () => get<SessionRow[]>("/api/sessions"),

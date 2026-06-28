@@ -27,6 +27,7 @@ export default function LidarViewerPage() {
   const [budget, setBudget] = useState(300000);
   const [full, setFull] = useState(false);
   const [data, setData] = useState<LidarPoints | null>(null);
+  const [segData, setSegData] = useState<{ points: Float32Array; count: number; lowConfFrac: number } | null>(null);
   const [measure, setMeasure] = useState<number | null>(null);
   const [showEgo, setShowEgo] = useState(true);
   const [trajectory, setTrajectory] = useState<{ x: number; y: number }[]>([]);
@@ -64,8 +65,27 @@ export default function LidarViewerPage() {
     if (selected) loadPoints(selected, variant, budget, full);
   }, [selected, variant, budget, full, loadPoints]);
 
+  const runSegment = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const { lidarSegmentationPoints } = await import("@/lib/api");
+      await api.lidarSegment(selected.cloud_id);
+      const sp = await lidarSegmentationPoints(selected.cloud_id, budget);
+      setSegData(sp);
+      setColorBy("segment");
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const pickCloud = (c: LidarCloud) => {
     setSelected(c);
+    setSegData(null);
+    if (colorBy === "segment") setColorBy("intensity");
     setVariant(c.variants.includes(variant) ? variant : "raw");
     api.lidarTrajectory(sessionId.trim(), c.ts_ns)
       .then((r) => setTrajectory(r.path || []))
@@ -170,6 +190,18 @@ export default function LidarViewerPage() {
               </div>
             </div>
 
+            <div className="flex items-center gap-2">
+              <button onClick={runSegment} disabled={busy}
+                className="flex-1 rounded bg-violet-800 px-2 py-1 text-xs hover:bg-violet-700 disabled:opacity-40">
+                Segment overlay
+              </button>
+              {segData && (
+                <span className="text-xs text-amber-300">
+                  {Math.round(segData.lowConfFrac * 100)}% low-conf
+                </span>
+              )}
+            </div>
+
             <label className="flex items-center gap-2 text-xs text-neutral-400">
               <input type="checkbox" checked={showEgo} onChange={(e) => setShowEgo(e.target.checked)} />
               Ego, sensors, trajectory ({trajectory.length} GNSS pts)
@@ -228,8 +260,8 @@ export default function LidarViewerPage() {
           <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-neutral-500">3D</div>
           {data && (
             <PointCloudViewer
-              points={data.points}
-              count={data.count}
+              points={colorBy === "segment" && segData ? segData.points : data.points}
+              count={colorBy === "segment" && segData ? segData.count : data.count}
               colorBy={colorBy}
               intensityRange={[data.intensityMin, data.intensityMax]}
               source={data.source}
@@ -249,8 +281,8 @@ export default function LidarViewerPage() {
           <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-neutral-500">BEV</div>
           {data && (
             <PointCloudViewer
-              points={data.points}
-              count={data.count}
+              points={colorBy === "segment" && segData ? segData.points : data.points}
+              count={colorBy === "segment" && segData ? segData.count : data.count}
               colorBy={colorBy}
               intensityRange={[data.intensityMin, data.intensityMax]}
               source={data.source}

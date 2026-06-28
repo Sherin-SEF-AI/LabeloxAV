@@ -9,7 +9,14 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
-export type ColorBy = "height" | "intensity" | "source";
+export type ColorBy = "height" | "intensity" | "source" | "segment";
+
+// a fixed discrete palette for per-point semantic classes (segment overlay); -1 (unlabeled) is dim grey
+const SEG_PALETTE: [number, number, number][] = [
+  [0.90, 0.30, 0.30], [0.30, 0.70, 0.95], [0.45, 0.90, 0.50], [0.98, 0.78, 0.32],
+  [0.75, 0.45, 0.95], [0.95, 0.55, 0.80], [0.40, 0.85, 0.85], [0.85, 0.85, 0.45],
+  [0.55, 0.65, 0.95], [0.95, 0.65, 0.40], [0.60, 0.90, 0.70], [0.90, 0.50, 0.55],
+];
 
 export type ViewerCuboid = {
   object_3d_id: string;
@@ -197,6 +204,13 @@ export default function PointCloudViewer({
     for (let i = 0; i < count; i++) {
       const x = points[i * 4], y = points[i * 4 + 1], z = points[i * 4 + 2], it = points[i * 4 + 3];
       pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+      if (colorBy === "segment") {
+        // the 4th channel is the semantic class id; -1 (unlabeled / low confidence) is dim grey
+        const cls = Math.round(it);
+        const rgb = cls < 0 ? [0.32, 0.34, 0.38] : SEG_PALETTE[cls % SEG_PALETTE.length];
+        col[i * 3] = rgb[0]; col[i * 3 + 1] = rgb[1]; col[i * 3 + 2] = rgb[2];
+        continue;
+      }
       let t: number;
       if (colorBy === "intensity") t = (it - imin) / ispan;
       else if (colorBy === "height") t = (z - zmin) / zspan;

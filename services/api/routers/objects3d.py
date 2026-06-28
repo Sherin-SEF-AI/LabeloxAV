@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+import numpy as np
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
-from db.models import Frame, Object3D, PointCloud, PointCloudDerived, Track3D
+from db.models import Frame, Object3D, PointCloud, PointCloudDerived, PointSegmentation, Track3D
 from services.api.deps import db_session
 from services.autolabel.ontology import get_ontology
 from services.lidar.boxes import project_cuboid, snap_to_ground
@@ -230,6 +231,55 @@ async def interpolate_track(track_3d_id: uuid.UUID, db: AsyncSession = Depends(d
     await db.commit()
     log.info("objects3d.interpolate", track=str(track_3d_id), filled=filled)
     return {"track_3d_id": str(track_3d_id), "filled": filled}
+
+
+@router.post("/lidar/clouds/{cloud_id}/segment")
+async def segment(cloud_id: uuid.UUID):
+    """Segment a cloud into per-point semantic and instance labels (M-L2.3). PTv3 on the burst node, else the
+    projected fallback locally; the low-confidence fraction is recorded for review."""
+    from services.lidar.segment3d import segment_cloud
+    return await segment_cloud(cloud_id)
+
+
+@router.get("/lidar/clouds/{cloud_id}/segmentation")
+async def get_segmentation(cloud_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
+    row = (await db.execute(select(PointSegmentation).where(PointSegmentation.cloud_id == cloud_id)
+           .order_by(PointSegmentation.created_at.desc()).limit(1))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "no segmentation for this cloud")
+    return {"seg_id": str(row.seg_id), "cloud_id": str(cloud_id), "kind": row.kind, "method": row.method,
+            "model_version": row.model_version, "n_points": row.n_points, "low_conf_frac": row.low_conf_frac,
+            "labels_uri": row.labels_uri}
+
+
+@router.get("/lidar/clouds/{cloud_id}/segmentation/points")
+async def segmentation_points(cloud_id: uuid.UUID, max_points: int = Query(300000, alias="max", ge=1000),
+                              db: AsyncSession = Depends(db_session)):
+    """Packed Float32 [x, y, z, semantic_class] for the viewer's segmentation overlay, decimated with the
+    labels aligned to the same points."""
+    from services.lidar.segment3d import load_segmentation
+    pc = await db.get(PointCloud, cloud_id)
+    if pc is None:
+        raise HTTPException(404, "cloud not found")
+    row = (await db.execute(select(PointSegmentation).where(PointSegmentation.cloud_id == cloud_id)
+           .order_by(PointSegmentation.created_at.desc()).limit(1))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "no segmentation for this cloud")
+    cloud = load_cloud(pc.cloud_uri)
+    labels = load_segmentation(row.labels_uri)
+    sem = labels["semantic"].astype(np.float32)
+    n = cloud.n
+    idx = np.arange(n)
+    if n > max_points:
+        idx = np.sort(np.random.default_rng(pc.ts_ns % (2**31)).choice(n, max_points, replace=False))
+    packed = np.empty((len(idx), 4), dtype=np.float32)
+    packed[:, :3] = cloud.xyz[idx]
+    packed[:, 3] = sem[idx]
+    classes = sorted({int(x) for x in np.unique(labels["semantic"]) if x != -1})
+    return Response(content=packed.tobytes(), media_type="application/octet-stream",
+                    headers={"X-Point-Count": str(len(idx)), "X-Classes": ",".join(map(str, classes)),
+                             "X-Low-Conf-Frac": f"{row.low_conf_frac:.4f}",
+                             "Access-Control-Expose-Headers": "X-Point-Count,X-Classes,X-Low-Conf-Frac"})
 
 
 @router.get("/lidar/objects3d/{object_3d_id}/projection")
