@@ -8,6 +8,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,21 @@ from services.api.deps import db_session
 
 log = get_logger("api_lidar_scene")
 router = APIRouter()
+
+
+class AggregateIn(BaseModel):
+    session_ids: list[uuid.UUID]
+    region: str | None = None
+    compute_target: str = "local"
+
+
+@router.post("/lidar/aggregate")
+async def aggregate(body: AggregateIn):
+    """Register, loop-close, and accumulate the clouds across sessions into a dense map (M-L3.2). Local on the
+    box; the A100 burst is the seam for large volumes."""
+    from compute.worker.jobs.lidar_aggregate import LidarAggregateSpec, run_lidar_aggregate
+    return await run_lidar_aggregate(LidarAggregateSpec(session_ids=body.session_ids, region=body.region,
+                                                        compute_target=body.compute_target))
 
 
 @router.post("/lidar/clouds/{cloud_id}/extract")
