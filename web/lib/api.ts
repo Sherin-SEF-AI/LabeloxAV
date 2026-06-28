@@ -77,7 +77,60 @@ async function del<T>(path: string): Promise<T> {
 // training job holds the GPU; callers surface that as a non-blocking notice.
 export type SegmentPrompt = { points?: number[][]; labels?: number[]; box?: number[] };
 
+// LiDAR 3D viewer
+export type LidarBounds = { min: number[]; max: number[]; n: number };
+export type LidarCloud = {
+  cloud_id: string;
+  ts_ns: number;
+  source: string;
+  point_count: number;
+  depth_model: string | null;
+  bounds: LidarBounds | null;
+  variants: string[];
+};
+export type LidarPoints = {
+  points: Float32Array; // interleaved [x, y, z, intensity]
+  count: number;
+  decimated: boolean;
+  source: string;
+  frame: string;
+  intensityMin: number;
+  intensityMax: number;
+};
+
+// The point stream is a binary ArrayBuffer (Float32 xyzi), not JSON, so it is fetched directly.
+export async function lidarCloudPoints(
+  cloudId: string,
+  opts?: { variant?: string; max?: number; full?: boolean },
+): Promise<LidarPoints> {
+  const q = new URLSearchParams();
+  if (opts?.variant && opts.variant !== "raw") q.set("variant", opts.variant);
+  if (opts?.max) q.set("max", String(opts.max));
+  if (opts?.full) q.set("full", "true");
+  const r = await fetch(`/api/lidar/clouds/${cloudId}/points?${q.toString()}`, {
+    cache: "no-store",
+    headers: { ...userHeaders() },
+  });
+  if (!r.ok) throw new Error(`GET points -> ${r.status}`);
+  const buf = await r.arrayBuffer();
+  return {
+    points: new Float32Array(buf),
+    count: Number(r.headers.get("X-Point-Count") || 0),
+    decimated: r.headers.get("X-Decimated") === "True",
+    source: r.headers.get("X-Source") || "",
+    frame: r.headers.get("X-Frame") || "",
+    intensityMin: Number(r.headers.get("X-Intensity-Min") ?? 0),
+    intensityMax: Number(r.headers.get("X-Intensity-Max") ?? 1),
+  };
+}
+
 export const api = {
+  lidarClouds: (sessionId: string) =>
+    get<{ session_id: string; clouds: LidarCloud[] }>(`/api/lidar/sessions/${sessionId}/clouds`),
+  lidarCloudMeta: (cloudId: string) => get<LidarCloud & { calibration_version: string | null }>(`/api/lidar/clouds/${cloudId}`),
+  lidarBuild: (sessionId: string, limit = 1) =>
+    post<{ session_id: string; clouds: number; groups_total: number }>(
+      `/api/lidar/sessions/${sessionId}/build`, { limit }),
   ontology: () => get<Ontology>("/api/ontology"),
   addClass: (name: string) => post<OntologyClass & { existed: boolean }>("/api/ontology/classes", { name }),
   sessions: () => get<SessionRow[]>("/api/sessions"),

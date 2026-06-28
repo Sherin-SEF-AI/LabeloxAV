@@ -16,6 +16,7 @@ const LINKS = [
   { href: "/discovery", label: "DISCOVERY" },
   { href: "/curation", label: "CURATION" },
   { href: "/calibration", label: "CALIBRATION" },
+  { href: "/lidar", label: "LIDAR" },
   { href: "/map", label: "MAP" },
   { href: "/quality", label: "QUALITY" },
   { href: "/training", label: "TRAINING" },
