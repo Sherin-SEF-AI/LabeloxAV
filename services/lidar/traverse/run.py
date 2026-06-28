@@ -41,6 +41,7 @@ async def traverse_cloud(cloud_id: uuid.UUID) -> dict:
     if data is None:
         return {"error": "cloud not found"}
     cloud, plane, semantic, session_id = data["cloud"], data["plane"], data["semantic"], data["session_id"]
+    calib = data.get("calibration_version")
     road_id = road_class_id()
 
     fs = freespace_grid(cloud, plane)
@@ -55,7 +56,7 @@ async def traverse_cloud(cloud_id: uuid.UUID) -> dict:
 
     async with get_sessionmaker()() as db:
         row = Traversability(cloud_id=cloud_id, freespace_uri=fs_uri, drivable_uri=dr_uri,
-                             surface_class=surf, method=METHOD,
+                             surface_class=surf, method=METHOD, calibration_version=calib,
                              elevation_profile={k: v for k, v in elev.items() if k != "profile"} | {
                                  "profile": elev["profile"]})
         db.add(row)

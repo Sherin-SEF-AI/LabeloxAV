@@ -56,6 +56,8 @@ async def extract_cloud(cloud_id: uuid.UUID) -> dict:
     if data is None:
         return {"error": "cloud not found"}
     cloud, plane, semantic, session_id = data["cloud"], data["plane"], data["semantic"], data["session_id"]
+    calib = data.get("calibration_version") or CALIB_VERSION
+    source_frames = data.get("frame_ids") or None
     road_id = road_class_id()
 
     elements: list[dict] = []
@@ -67,7 +69,8 @@ async def extract_cloud(cloud_id: uuid.UUID) -> dict:
 
     lat, lon, heading = await _cloud_pose(session_id, cloud_id)
     async with get_sessionmaker()() as db:
-        res = await store_static_elements(db, session_id, cloud_id, elements, lat, lon, heading, CALIB_VERSION)
+        res = await store_static_elements(db, session_id, cloud_id, elements, lat, lon, heading, calib,
+                                          source_frames=source_frames)
         await db.commit()
 
     by_kind = dict(Counter(e["kind"] for e in elements))

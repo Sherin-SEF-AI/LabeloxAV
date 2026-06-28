@@ -66,15 +66,20 @@ def cluster_stats(xyz: np.ndarray, plane: list[float] | None = None) -> dict:
 
 
 async def load_for_extraction(cloud_id: uuid.UUID) -> dict | None:
-    """Load a cloud, its latest segmentation (semantic + instance arrays), and the ground plane."""
+    """Load a cloud, its latest segmentation (semantic + instance arrays), the ground plane, and the
+    provenance (calibration version and the synchronized camera frames at the cloud's ts_ns)."""
+    from sqlalchemy import select
+
+    from db.models import Frame
     async with get_sessionmaker()() as db:
-        from sqlalchemy import select
         pc = await db.get(PointCloud, cloud_id)
         if pc is None:
             return None
         seg = (await db.execute(select(PointSegmentation).where(PointSegmentation.cloud_id == cloud_id)
                .order_by(PointSegmentation.created_at.desc()).limit(1))).scalar_one_or_none()
-        session_id, cloud_uri = pc.session_id, pc.cloud_uri
+        frame_ids = [str(f) for f in (await db.execute(select(Frame.frame_id).where(
+            Frame.session_id == pc.session_id, Frame.ts_ns == pc.ts_ns))).scalars().all()]
+        session_id, cloud_uri, calib = pc.session_id, pc.cloud_uri, pc.calibration_version
     cloud = load_cloud(cloud_uri)
     _, plane, _ = segment_ground(cloud)
     semantic = None
@@ -82,4 +87,5 @@ async def load_for_extraction(cloud_id: uuid.UUID) -> dict | None:
         labels = load_segmentation(seg.labels_uri)
         if len(labels.get("semantic", [])) == cloud.n:
             semantic = np.asarray(labels["semantic"])
-    return {"cloud": cloud, "plane": plane, "semantic": semantic, "session_id": session_id}
+    return {"cloud": cloud, "plane": plane, "semantic": semantic, "session_id": session_id,
+            "calibration_version": calib, "frame_ids": frame_ids}

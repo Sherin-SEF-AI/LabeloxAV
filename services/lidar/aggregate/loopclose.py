@@ -44,10 +44,11 @@ def optimize_pose_graph(poses: list[np.ndarray], loops: list[tuple[int, int]]) -
     corrected = xys.copy()
     try:
         return _gtsam_optimize(poses, loops)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.info("lidar.loopclose_local_fallback", reason=str(exc))   # GTSAM runs on the burst node only
 
     method = "drift_distribution"
+    drift_before = max((float(np.linalg.norm(xys[j] - xys[i])) for i, j in loops), default=0.0)
     for i, j in loops:
         # the loop says pose i and pose j are the same place; close the gap by spreading the residual
         residual = corrected[j] - corrected[i]
@@ -60,8 +61,8 @@ def optimize_pose_graph(poses: list[np.ndarray], loops: list[tuple[int, int]]) -
         if j + 1 < len(corrected):
             corrected[j + 1:] = corrected[j + 1:] - residual
 
-    drift_before = float(np.linalg.norm(xys[loops[0][1]] - xys[loops[0][0]])) if loops else 0.0
-    drift_after = float(np.linalg.norm(corrected[loops[0][1]] - corrected[loops[0][0]])) if loops else 0.0
+    # the worst residual across ALL loops, before and after, so one bad loop is not hidden
+    drift_after = max((float(np.linalg.norm(corrected[j] - corrected[i])) for i, j in loops), default=0.0)
     log.info("lidar.loopclose", loops=len(loops), method=method,
              drift_before=round(drift_before, 3), drift_after=round(drift_after, 3))
     return {"method": method, "loops": loops, "corrected_xy": corrected.tolist(),

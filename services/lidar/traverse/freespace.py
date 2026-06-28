@@ -15,7 +15,7 @@ UNKNOWN, FREE, OCCUPIED = 0, 1, 2
 
 
 def bev_indices(xyz: np.ndarray, res: float, x_range: tuple[float, float],
-                y_range: tuple[float, float]) -> tuple[np.ndarray, np.ndarray, int, int]:
+                y_range: tuple[float, float]) -> tuple[np.ndarray, np.ndarray, int, int, np.ndarray]:
     nx = max(1, int((x_range[1] - x_range[0]) / res))
     ny = max(1, int((y_range[1] - y_range[0]) / res))
     gx = ((xyz[:, 0] - x_range[0]) / res).astype(np.int64)

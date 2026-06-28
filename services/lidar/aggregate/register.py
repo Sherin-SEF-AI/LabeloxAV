@@ -12,12 +12,14 @@ from core.logging import get_logger
 log = get_logger("lidar_register")
 
 
-def gnss_imu_prior(d_east: float, d_north: float, d_heading: float, d_up: float = 0.0) -> np.ndarray:
-    """A 4x4 initial transform from the GNSS translation and IMU heading change between two scans."""
-    c, s = np.cos(d_heading), np.sin(d_heading)
+def gnss_imu_prior(d_forward: float, d_left: float, d_yaw: float = 0.0, d_up: float = 0.0) -> np.ndarray:
+    """A 4x4 ego-frame relative transform (x forward, y left, z up) from the forward/left displacement and the
+    yaw change between two scans. The caller rotates the GNSS ENU delta into the ego frame by the heading
+    first, so the translation is expressed in the cloud's own frame, not ENU."""
+    c, s = np.cos(d_yaw), np.sin(d_yaw)
     t = np.eye(4)
     t[:3, :3] = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
-    t[:3, 3] = [d_east, d_north, d_up]
+    t[:3, 3] = [d_forward, d_left, d_up]
     return t
 
 

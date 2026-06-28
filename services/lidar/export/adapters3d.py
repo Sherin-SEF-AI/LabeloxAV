@@ -38,8 +38,8 @@ async def fetch_3d_records(spec: Slice3D) -> list[dict]:
     """Materialize the 3D objects in the slice, joined to their cloud and session, with provenance."""
     onto = get_ontology()
     async with get_sessionmaker()() as db:
-        q = (select(Object3D, PointCloud.ts_ns, PointCloud.cloud_uri, PointCloud.source, DbSession.vehicle_id,
-                    DbSession.city)
+        q = (select(Object3D, PointCloud.ts_ns, PointCloud.cloud_uri, PointCloud.source, PointCloud.calibration_version,
+                    DbSession.vehicle_id, DbSession.city)
              .join(PointCloud, Object3D.cloud_id == PointCloud.cloud_id)
              .join(DbSession, PointCloud.session_id == DbSession.session_id)
              .where(Object3D.conf >= spec.min_conf))
@@ -49,12 +49,13 @@ async def fetch_3d_records(spec: Slice3D) -> list[dict]:
             q = q.where(PointCloud.session_id.in_(spec.session_ids))
         rows = (await db.execute(q.order_by(PointCloud.ts_ns))).all()
     recs = []
-    for o, ts_ns, cloud_uri, src, vehicle, city in rows:
+    for o, ts_ns, cloud_uri, src, calib, vehicle, city in rows:
         name = onto.by_id(o.class_id).name
         if spec.class_names and name not in spec.class_names:
             continue
         recs.append({"object_3d_id": str(o.object_3d_id), "cloud_id": str(o.cloud_id), "ts_ns": int(ts_ns),
-                     "cloud_uri": cloud_uri, "cloud_source": src, "vehicle_id": vehicle, "city": city,
+                     "cloud_uri": cloud_uri, "cloud_source": src, "calibration_version": calib,
+                     "vehicle_id": vehicle, "city": city,
                      "class_id": o.class_id, "class_name": name, "center": o.center, "dims": o.dims,
                      "yaw": o.yaw, "pitch": o.pitch, "roll": o.roll, "conf": o.conf, "state": o.state,
                      "box_source": o.box_source, "track_3d_id": str(o.track_3d_id) if o.track_3d_id else None,
@@ -215,9 +216,9 @@ async def export_3d_dataset(spec: Slice3D, formats: list[str] | None = None, out
                                  ontology_version=onto.version, export_uris=export_uris,
                                  notes="lidar 3D export"))
         else:
-            existing.object_3d_count = len(records)
-            existing.cloud_count = len(cloud_ids)
-            existing.export_uris = export_uris
+            # the commit is content-addressed and sealed: the counts are immutable for this object set. Only
+            # merge any newly-written format URIs (re-export to an additional format), never re-seal.
+            existing.export_uris = {**(existing.export_uris or {}), **export_uris}
         await db.commit()
     log.info("lidar.export3d", commit=commit_id, objects=len(records), clouds=len(cloud_ids),
              formats=list(export_uris.keys()))

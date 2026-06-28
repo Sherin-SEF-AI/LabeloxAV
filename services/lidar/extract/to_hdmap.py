@@ -40,8 +40,10 @@ def _geometry_wkt(el: dict, lat: float, lon: float, heading: float) -> str | Non
 
 async def store_static_elements(db: AsyncSession, session_id: uuid.UUID, cloud_id: uuid.UUID,
                                 elements: list[dict], lat: float | None, lon: float | None,
-                                heading: float | None, calibration_version: str) -> dict:
-    """Write static_element rows and, when geo-referenced, mirror each into a MapElement HD map candidate."""
+                                heading: float | None, calibration_version: str,
+                                source_frames: list[str] | None = None) -> dict:
+    """Write static_element rows and, when geo-referenced, mirror each into a MapElement HD map candidate. The
+    MapElement carries source_frames so a LiDAR element has the same frame-level provenance as a 2D element."""
     n_static, n_map = 0, 0
     for el in elements:
         wkt = _geometry_wkt(el, lat, lon, heading) if lat is not None and lon is not None else None
@@ -50,8 +52,8 @@ async def store_static_elements(db: AsyncSession, session_id: uuid.UUID, cloud_i
         map_id = None
         if geom is not None:
             me = MapElement(kind=el["kind"][:16], geometry=geom, attrs=dict(el),
-                            source_sessions=[str(session_id)], calibration_version=calibration_version,
-                            confidence=conf)
+                            source_frames=source_frames or None, source_sessions=[str(session_id)],
+                            calibration_version=calibration_version, confidence=conf)
             db.add(me)
             await db.flush()
             map_id = me.element_id

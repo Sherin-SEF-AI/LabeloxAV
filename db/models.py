@@ -927,6 +927,7 @@ class Traversability(Base):
     surface_class: Mapped[dict] = mapped_column(JSONB, default=dict)
     elevation_profile: Mapped[dict] = mapped_column(JSONB, default=dict)
     method: Mapped[str | None] = mapped_column(String(40))
+    calibration_version: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_traversability_cloud", "cloud_id"),)
@@ -946,6 +947,7 @@ class AggregatedMap(Base):
     method: Mapped[str | None] = mapped_column(String(40))
     n_scans: Mapped[int | None] = mapped_column(Integer)
     mean_reg_fitness: Mapped[float | None] = mapped_column(Float)   # low -> flagged low-confidence registration
+    input_calibrations: Mapped[dict | None] = mapped_column(JSONB)  # cloud_id -> calibration_version provenance
     job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

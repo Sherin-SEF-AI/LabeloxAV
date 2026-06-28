@@ -80,7 +80,7 @@ async def mine_session_3d(session_id: uuid.UUID) -> dict:
             frame = (await db.execute(select(Frame.frame_id).where(Frame.session_id == session_id,
                      Frame.ts_ns == pc.ts_ns).order_by(Frame.cam_id).limit(1))).scalar_one_or_none()
             for cue in mine_3d_cues(cloud, None, plane, cubs, road_id, onto):
-                db.add(ScenarioCandidate(session_id=session_id, frame_id=frame, kind=cue["kind"][:24],
+                db.add(ScenarioCandidate(session_id=session_id, frame_id=frame, kind=cue["kind"],
                                          score=cue["score"], rare_classes=cue.get("classes")))
                 written += 1
                 by_kind[cue["kind"]] = by_kind.get(cue["kind"], 0) + 1
