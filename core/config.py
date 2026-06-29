@@ -271,10 +271,11 @@ class PiiSettings(BaseModel):
     # face-only corpora where plates are provably absent.
     plate_mandatory: bool = True
     # Source for `make pii-models` to fetch a license-plate detector to plate_weights. Override with
-    # LBX_PII__PLATE_URL if this mirror moves; an Ultralytics-loadable .pt is expected.
+    # LBX_PII__PLATE_URL if this mirror moves; an Ultralytics-loadable .pt is expected. Hugging Face now
+    # requires a token even for public files, so run `HF_TOKEN=... make pii-models`.
     plate_url: str = (
-        "https://huggingface.co/morsetechlab/yolov8-license-plate-detection/resolve/main/"
-        "yolov8n-license-plate.pt"
+        "https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/"
+        "license-plate-finetune-v1n.pt"
     )
 
 
