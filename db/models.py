@@ -500,6 +500,30 @@ class AutolabelJob(Base):
     __table_args__ = (Index("ix_autolabel_job_status", "status"),)
 
 
+class CloudSession(Base):
+    # A warm cloud-GPU session: one RunPod pod held up across a work session and torn down on disconnect
+    # (distinct from the ephemeral per-job burst flow). At most one row is in a live state at a time. The
+    # row is the source of truth for the cost meter, the idle/max-session guards, and orphan detection on
+    # app load, so a connected GPU can never silently run: started_at + idle_since drive auto-terminate.
+    __tablename__ = "cloud_session"
+
+    session_id: Mapped[uuid.UUID] = _uuid_pk()
+    pod_id: Mapped[str | None] = mapped_column(Text)
+    mode: Mapped[str] = mapped_column(String(8), nullable=False, default="warm")
+    # disconnected | provisioning | connected | running_job | pausing | terminating
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="provisioning")
+    gpu_type: Mapped[str | None] = mapped_column(String(64))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # when the pod went RUNNING
+    idle_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # null while a job runs
+    gpu_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    est_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    max_session_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_cloud_session_state", "state"),)
+
+
 # ---- Phase 3 Multi-Sensor and Spatial ----
 class CameraRig(Base):
     # The rig layout for a vehicle config: per-camera lens type + intrinsics/extrinsics references.

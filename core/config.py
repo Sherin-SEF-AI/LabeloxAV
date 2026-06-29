@@ -306,6 +306,14 @@ class CloudSettings(BaseModel):
     budget_cap_usd: float = 50.0
     image: str = ""  # pinned once the runbook discovers a CUDA 12.8 devel image
 
+    # Warm-session mode (the user-facing connect/disconnect control): one pod held across a work session,
+    # torn down on disconnect. Cost safety here is a hard requirement, never an optional setting. The
+    # RUNPOD_API_KEY and LBX_RUNPOD_VOLUME_ID come from the environment (as in cloud/runpod_api.py).
+    warm_gpu_type_id: str = "NVIDIA A100 80GB PCIe"  # RunPod gpuTypeId provisioned for the warm session
+    warm_hourly_usd: float = 1.89        # A100 80GB on-demand rate; drives the cost meter and the ack gate
+    warm_idle_minutes: int = 15          # auto-terminate after this long with no job running
+    warm_max_session_hours: float = 4.0  # hard cap; auto-terminate after this regardless of activity
+
 
 class OntologySettings(BaseModel):
     path: str = "ontology/labelox_in_v0.yaml"
