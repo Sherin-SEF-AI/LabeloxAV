@@ -43,6 +43,7 @@ from services.api.routers import (
     lidar_scene,
     ocr,
     quality,
+    recall,
     relabel,
     review,
     search,
@@ -210,6 +211,7 @@ app.include_router(analytics.router, prefix="/api", tags=["analytics"])
 app.include_router(models.router, prefix="/api", tags=["models"])
 app.include_router(export.router, prefix="/api", tags=["export"])
 app.include_router(quality.router, prefix="/api", tags=["quality"])
+app.include_router(recall.router, prefix="/api", tags=["recall"])
 app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(imports.router, prefix="/api", tags=["imports"])
 app.include_router(training.router, prefix="/api", tags=["training"])

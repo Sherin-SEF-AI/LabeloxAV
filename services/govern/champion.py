@@ -19,6 +19,7 @@ from services.autolabel.ontology import get_ontology
 from services.govern.audit import record
 from services.govern.killswitch import get_state
 from services.govern.registry import get_champion, set_champion
+from services.recall.gate import resolve_safety_drop, safety_recall_floor, safety_recall_no_regress
 
 log = get_logger("govern_champion")
 
@@ -36,9 +37,13 @@ def _map(m: dict) -> float:
     return float(m.get("map", m.get("map50", 0.0)) or 0.0)
 
 
-def champion_gate(challenger: dict, champion: dict | None, onto, cfg, safety_class_drop: float = 0.15) -> dict:
-    """Pure promotion decision. Fail-closed: a challenger that cannot prove its safety (no Safe-mIoU)
-    is never promoted, and a safety-class or Safe-mIoU regression always blocks."""
+def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None) -> dict:
+    """Pure promotion decision. Fail-closed: a challenger that cannot prove its safety (no Safe-mIoU,
+    or no safety-class recall) is never promoted, and a safety-class AP, Safe-mIoU, or safety-class
+    recall regression always blocks. rcfg is the recall settings (per-class drop tolerance + the recall
+    floor); it defaults to the configured phase4.recall."""
+    if rcfg is None:
+        rcfg = get_settings().phase4.recall
     map_c, map_ch = _map(challenger), _map(champion or {})
     beats_map = map_c >= map_ch + cfg.min_map_uplift
 
@@ -55,18 +60,26 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, safety_cla
     pc_c = challenger.get("per_class", {}) or {}
     pc_ch = (champion or {}).get("per_class", {}) or {}
     regressed = [cn for cn, ap in pc_ch.items()
-                 if _is_safety_class(cn, onto) and pc_c.get(cn, 0.0) < ap - safety_class_drop]
+                 if _is_safety_class(cn, onto) and pc_c.get(cn, 0.0) < ap - resolve_safety_drop(cn, onto, rcfg)]
     safety_ok = not regressed
 
-    if champion is None:
-        # First champion still must clear the safety floor: require a present Safe-mIoU (fail-closed).
-        promote = sm_c is not None
-        reasons = (["no incumbent; first champion (Safe-mIoU present)"] if promote
-                   else ["no incumbent but challenger lacks Safe-mIoU; refused (fail-closed)"])
-        return {"promote": promote, "beats_map": True, "map_delta": round(map_c, 4), "safe_ok": promote,
-                "safety_ok": True, "regressed_safety": [], "reasons": reasons}
+    # Recall is the metric the recovery layer exists to fix, so it gates promotion the same way Safe-mIoU
+    # does: a safety class below the recall floor, regressed beyond tolerance, or unmeasured, blocks.
+    rec_floor = safety_recall_floor(challenger, onto, rcfg)
+    rec_reg = safety_recall_no_regress(challenger, champion, onto, rcfg)
+    recall_ok = rec_floor["ok"] and rec_reg["ok"]
 
-    promote = bool(beats_map and safe_ok and safety_ok)
+    if champion is None:
+        # First champion still must clear the safety floor: a present Safe-mIoU and the recall floor.
+        promote = bool(sm_c is not None and rec_floor["ok"])
+        reasons = (["no incumbent; first champion (Safe-mIoU present)"] if sm_c is not None
+                   else ["no incumbent but challenger lacks Safe-mIoU; refused (fail-closed)"])
+        reasons += rec_floor["reasons"]
+        return {"promote": promote, "beats_map": True, "map_delta": round(map_c, 4),
+                "safe_ok": sm_c is not None, "safety_ok": True, "regressed_safety": [],
+                "recall_ok": rec_floor["ok"], "reasons": reasons}
+
+    promote = bool(beats_map and safe_ok and safety_ok and recall_ok)
     reasons: list[str] = []
     if not beats_map:
         reasons.append(f"does not beat champion mAP ({map_c:.3f} vs {map_ch:.3f})")
@@ -75,10 +88,12 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, safety_cla
                        else f"Safe-mIoU regressed ({sm_c} vs {sm_ch})")
     if not safety_ok:
         reasons.append(f"safety-class regression: {regressed}")
+    reasons += rec_floor["reasons"] + rec_reg["reasons"]
     if promote:
         reasons.append("beats champion without any safety regression")
     return {"promote": promote, "beats_map": beats_map, "map_delta": round(map_c - map_ch, 4),
-            "safe_ok": safe_ok, "safety_ok": safety_ok, "regressed_safety": regressed, "reasons": reasons}
+            "safe_ok": safe_ok, "safety_ok": safety_ok, "regressed_safety": regressed,
+            "recall_ok": recall_ok, "reasons": reasons}
 
 
 async def evaluate_and_promote(db: AsyncSession, challenger_version: str, task: str = "detection") -> dict:

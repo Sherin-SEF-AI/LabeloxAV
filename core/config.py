@@ -368,6 +368,7 @@ class ActiveLearnSettings(BaseModel):
     w_diversity: float = 0.25
     w_rarity: float = 0.20
     w_error_prone: float = 0.15
+    w_fn: float = 0.6                    # recall-recovery (false-negative) value, so a recovered miss ranks
     uncertainty_lo: float = 0.55         # below this is hopeless, above uncertainty_hi is easy
     uncertainty_hi: float = 0.92
     diversity_knn: int = 5               # near-duplicate suppression neighbourhood
@@ -407,11 +408,38 @@ class GovernSettings(BaseModel):
     controller_lock_key: int = 816       # Postgres advisory-lock id so only one controller daemon runs
 
 
+class RecallSettings(BaseModel):
+    # Recall recovery: source candidate objects from channels that do not depend on the primary
+    # detector's recall, so a missed object can be manufactured, gated, and labeled. Region channel is
+    # the noisy one (SAM everything mode): the area band and the VLM-confidence floor are the only
+    # filters between it and a flooded queue, so keep it behind enable_region_channel.
+    enable_model_channels: bool = True
+    enable_region_channel: bool = True
+    iou_match: float = 0.45              # a proposal at or above this IoU with an existing object is not a miss
+    fuse_iou: float = 0.55               # NMS IoU for collapsing cross-channel proposals onto one candidate
+    max_gap_frames: int = 5              # a track gap longer than this is a likely exit/occlusion, not misses
+    conf_decay: float = 0.9              # per-frame confidence decay across an interpolated gap
+    region_min_area_frac: float = 0.0008  # drop specks below this fraction of frame area
+    region_max_area_frac: float = 0.25    # drop whole-scene planes above this fraction of frame area
+    region_min_vlm_conf: float = 0.45    # drop a region the VLM is not confident about
+    vlm_crop_margin: float = 0.15        # context margin when cropping a region for the VLM
+    sam_everything_weights: str = "sam2.1_b.pt"
+    device: str = "cuda:0"
+    # Recall promotion gate (fail-closed on safety recall, mirrors the Safe-mIoU check):
+    require_safety_recall: bool = True   # a challenger that cannot report safety-class recall is refused
+    safety_recall_floor: float = 0.50    # a safety class below this recall blocks promotion
+    safety_recall_max_drop: float = 0.05  # a safety class may not lose more than this recall vs the incumbent
+    # Per-class safety-AP drop tolerance: a dict held tighter for VRU/animal than the global default, or a
+    # single float for the old global behavior.
+    safety_class_drop: dict = Field(default_factory=lambda: {"vru": 0.10, "animal": 0.10, "_default": 0.15})
+
+
 class Phase4Settings(BaseModel):
     activelearn: ActiveLearnSettings = ActiveLearnSettings()
     lakefs: LakeFSSettings = LakeFSSettings()
     relabel: RelabelSettings = RelabelSettings()
     govern: GovernSettings = GovernSettings()
+    recall: RecallSettings = RecallSettings()
 
 
 class AuthSettings(BaseModel):

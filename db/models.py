@@ -971,3 +971,22 @@ class QualityFlag3D(Base):
 
     __table_args__ = (Index("ix_quality_flag_3d_object", "object_3d_id"),
                       Index("ix_quality_flag_3d_status", "status"))
+
+
+class RecallCandidate(Base):
+    # Recall recovery audit row: one per recovered miss, linking the provisional review-state Object to the
+    # channels that proposed it and the human verdict (status). The verdict recalibrates each channel's
+    # precision prior, closing the recall loop the way the isotonic curve closes the precision loop.
+    __tablename__ = "recall_candidate"
+
+    candidate_id: Mapped[uuid.UUID] = _uuid_pk()
+    object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
+    frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    channels: Mapped[list[str]] = mapped_column(PGARRAY(String(16)))  # trackgap|openvocab|region
+    fn_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    class_id: Mapped[int] = mapped_column(ForeignKey("ontology_class.id"))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")  # pending|confirmed|rejected
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_recall_candidate_status", "status"),
+                      Index("ix_recall_candidate_frame", "frame_id"))

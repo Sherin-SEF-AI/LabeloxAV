@@ -23,6 +23,7 @@ class ObjectSource(str, Enum):
     fused = "fused"
     auto_accept = "auto_accept"
     human = "human"
+    recall = "recall"  # recovered by the recall layer (a detector miss); always persisted in review
 
 
 class MaskEncoding(str, Enum):

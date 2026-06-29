@@ -49,6 +49,9 @@ def evaluate(weights: str, data_yaml: str, split: str = "val", imgsz: int = 960)
         "recall": round(float(res.box.mr), 4),
         "per_class": per_class,
         "per_class_pr": per_class_pr,
+        # Flat class_name -> recall, so the champion recall gate (fail-closed on safety-class recall)
+        # can read it directly from gold_metrics.
+        "per_class_recall": {name: pr["recall"] for name, pr in per_class_pr.items()},
     }
     # Segmentation models also report mask metrics; absent for detect models.
     if getattr(res, "seg", None) is not None:
