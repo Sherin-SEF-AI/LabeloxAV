@@ -1195,6 +1195,20 @@ export default function FrameEditor() {
                 <ConfBar conf={selected.conf} />
                 <StateBadge state={selected.state} />
               </div>
+              {/* provenance: real identity, version, and which geometry this object carries (no fabricated detector names) */}
+              <div className="flex flex-col gap-1.5 bg-bg-2 border border-line rounded p-2 mb-1.5 font-mono text-[10px]">
+                <div className="flex items-center"><span className="text-ink-3 w-16 shrink-0">object</span><span className="text-ink-2 truncate">{selected.isNew ? "new (unsaved)" : selected.id.slice(0, 12)}</span></div>
+                <div className="flex items-center"><span className="text-ink-3 w-16 shrink-0">track</span>{selected.track_id
+                  ? <button onClick={() => router.push(`/track/${selected.track_id}`)} className="text-info hover:text-accent truncate">{selected.track_id.slice(0, 12)} &rarr;</button>
+                  : <span className="text-ink-3">none</span>}</div>
+                <div className="flex items-center"><span className="text-ink-3 w-16 shrink-0">version</span><span className="text-ink-2">{selected.version ?? "-"}</span></div>
+                <div className="flex items-start gap-1"><span className="text-ink-3 w-16 shrink-0 pt-0.5">geometry</span>
+                  <div className="flex flex-wrap gap-1">
+                    {([["box", selected.bbox?.length === 4], ["mask", selected.mask.length > 0], ["polyline", !!selected.polyline?.length], ["pose", !!selected.keypoints], ["3D", !!selected.cuboid_3d], ["rotated", !!selected.rot]] as [string, boolean][])
+                      .filter(([, on]) => on).map(([k]) => <span key={k} className="text-ink-2 bg-line/40 border border-line rounded px-1.5 py-0.5">{k}</span>)}
+                  </div>
+                </div>
+              </div>
               <button
                 disabled={selected.isNew}
                 title={selected.isNew ? "save the frame first, then propagate" : "optical-flow propagate this box across the next 12 frames as a track to confirm"}
