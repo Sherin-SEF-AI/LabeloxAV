@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import Icon from "@/components/shell/Icon";
 
 // Layer visibility is view state, not a tool, so it lives as a small collapsible cluster floating on the
-// canvas instead of competing for a toolbar row. Reads like a layers panel (toggle on/off), keyed off the
-// layers object, so a new layer is one more key with zero toolbar impact.
+// canvas (the design's top-right Layers control) instead of competing for a toolbar row. Reads like a
+// layers panel: an eye toggle per layer keyed off the layers object, so a new layer is one more key with
+// zero toolbar impact.
 
 export default function FloatingLayers({ layers, onToggle, extra }: {
   layers: Record<string, boolean>;
@@ -13,20 +15,26 @@ export default function FloatingLayers({ layers, onToggle, extra }: {
 }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="absolute top-2 right-2 z-20 panel font-mono text-[10px] min-w-[7rem]">
-      <button onClick={() => setOpen((o) => !o)} className="flex items-center justify-between w-full px-2 py-1 text-ink-3 hover:text-ink-2">
-        <span className="uppercase tracking-wide">layers</span><span>{open ? "−" : "+"}</span>
+    <div className="absolute top-3 right-3 z-20 w-[190px] panel overflow-hidden">
+      <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 w-full px-2.5 py-2 border-b hairline">
+        <span className="flex text-ink-3"><Icon name="layers" size={14} /></span>
+        <span className="font-display font-semibold text-[10px] uppercase tracking-wider text-ink-2">Layers</span>
+        <span className="ml-auto font-mono text-[9px] text-ink-3/70">{open ? "view state" : "show"}</span>
       </button>
       {open && (
-        <div className="px-2 pb-2 space-y-0.5">
-          {Object.keys(layers).map((k) => (
-            <button key={k} onClick={() => onToggle(k)}
-              className={`flex items-center gap-1.5 w-full ${layers[k] ? "text-ink" : "text-ink-3"}`}>
-              <span className={`w-2.5 h-2.5 inline-block border ${layers[k] ? "bg-accent border-accent" : "border-line"}`} />
-              {k}
-            </button>
-          ))}
-          {extra && <div className="pt-1.5 mt-1 border-t hairline space-y-1">{extra}</div>}
+        <div className="p-1">
+          {Object.keys(layers).map((k) => {
+            const on = layers[k];
+            return (
+              <button key={k} onClick={() => onToggle(k)}
+                className={`flex items-center gap-2 w-full px-2 py-1 rounded hover:bg-line/40 ${on ? "text-ink-2" : "text-ink-3"}`}>
+                <span className={`flex ${on ? "text-ink-2" : "text-ink-3/60"}`}><Icon name={on ? "eye" : "eyeOff"} size={14} /></span>
+                <span className={`w-2 h-2 rounded-sm ${on ? "bg-accent" : "bg-line"}`} />
+                <span className="flex-1 text-left font-body text-[11.5px]">{k}</span>
+              </button>
+            );
+          })}
+          {extra && <div className="pt-1.5 mt-1 border-t hairline px-1 space-y-1">{extra}</div>}
         </div>
       )}
     </div>

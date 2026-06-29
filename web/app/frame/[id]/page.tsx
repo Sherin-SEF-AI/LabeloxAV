@@ -17,6 +17,7 @@ import ModeRail from "@/components/shell/ModeRail";
 import FloatingLayers from "@/components/shell/FloatingLayers";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import ScoreBar from "@/components/shell/ScoreBar";
+import Icon, { MODE_ICON } from "@/components/shell/Icon";
 import { MODES, type ToolGroup } from "@/lib/editor/registry";
 
 // Frame-centric professional annotation editor. Pan/zoom canvas, draw + edit boxes, SAM-assisted masks,
@@ -747,6 +748,7 @@ export default function FrameEditor() {
           className="font-mono text-[11px] text-ink-3 hover:text-accent border border-line hover:border-accent px-2 py-0.5">find similar</button>
         <div className="ml-2 min-w-0 overflow-x-auto no-scrollbar">
           <ToolStrip groups={MODE_GROUPS[mode] ?? MODE_GROUPS.objects} tool={st.tool}
+            modeIcon={MODE_ICON[mode]} modeLabel={MODES.find((m) => m.key === mode)?.label}
             onSelect={(t) => dispatch({ t: "tool", tool: t as Tool })}
             options={
               <>

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import UserPicker from "./UserPicker";
 import AppSwitcher from "./shell/AppSwitcher";
 import CommandPalette from "./shell/CommandPalette";
+import ShortcutOverlay from "./shell/ShortcutOverlay";
 
 // Shared app navigation. The flat link row (which overflowed once the platform had ~20 destinations) is
 // replaced by a grouped app switcher plus a Cmd+K command palette, so nav grows by organization. The
@@ -23,6 +24,8 @@ export default function TopNav({ active, right }: { active: string; right?: Reac
           className="font-mono text-[11px] text-ink-3 border border-line px-2 py-1 hover:border-accent">
           go to <span className="text-ink-2">Cmd K</span>
         </button>
+        <button onClick={() => window.dispatchEvent(new Event("lbx:shortcuts"))} title="keyboard shortcuts (?)"
+          className="font-mono text-[11px] text-ink-3 border border-line px-2 py-1 hover:border-accent">?</button>
         <span className="font-mono text-xs text-ink-3 truncate">/ {active}</span>
       </div>
       <div className="flex items-center gap-3 font-mono text-xs shrink-0">
@@ -30,6 +33,7 @@ export default function TopNav({ active, right }: { active: string; right?: Reac
         <UserPicker />
       </div>
       <CommandPalette />
+      <ShortcutOverlay />
     </header>
   );
 }
