@@ -23,6 +23,10 @@ import { MODES, type ToolGroup } from "@/lib/editor/registry";
 // Wrap the import so next/dynamic's convertModule always gets a clean { default } and cannot mistake the
 // module for a react-konva export on a StrictMode re-mount.
 const EditorCanvas = dynamic(() => import("@/components/editor/EditorCanvas").then((m) => ({ default: m.default })), { ssr: false });
+// Lanes mode swaps to this fit-to-width Konva stage (the folded-in lane editor). Loaded once, ssr off.
+const LaneCanvas = dynamic(() => import("@/components/lane/LaneCanvas"), { ssr: false });
+const LANE_TYPES = ["solid", "dashed", "double", "road_edge", "implicit", "fallback"];
+const LANE_COLOR: Record<string, string> = { proposed: "#58A6FF", human: "#FF7A2F", propagated: "#E3B341" };
 
 // Editor tools grouped so the strip renders one button per group (not 14 peers in a row). Tool keys match
 // the editor's dispatch keys. The groups are split across modes: switching mode swaps which groups show,
@@ -121,8 +125,13 @@ export default function FrameEditor() {
   // P3 derived dynamics (distance/speed/heading/ttc/risk) keyed by object_id
   const [dynamics, setDynamics] = useState<Record<string, ObjectDynamicsRow>>({});
   // P4 segmentation overlays: lanes (M2.1) + drivable area (M2.2), with per-layer visibility
-  const [lanes, setLanes] = useState<LaneRow[]>([]);
+  const [lanes, setLanes] = useState<(LaneRow & { dirty?: boolean })[]>([]);
   const [drivable, setDrivable] = useState<Record<string, number[][]> | null>(null);
+  // Lanes-mode editing (canvas swap): selected lane, the in-progress add path, the raster image + fit scale
+  const [laneSel, setLaneSel] = useState<string | null>(null);
+  const [laneAdding, setLaneAdding] = useState<number[][] | null>(null);
+  const [laneImg, setLaneImg] = useState<HTMLImageElement | null>(null);
+  const [laneScale, setLaneScale] = useState(1);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [linkFrom, setLinkFrom] = useState<string | null>(null); // active "relate" mode: the source object id
   const [linkKind, setLinkKind] = useState("rider_of");
@@ -291,6 +300,42 @@ export default function FrameEditor() {
     try { const r = await api.proposeLanes(id); await loadLayers(); flash(`proposed ${r.proposed} lanes (${r.model})`); }
     catch (e) { flash("propose lanes failed: " + String(e)); }
   }, [id, loadLayers]);
+
+  // Lanes mode mounts LaneCanvas (a fit-to-width Konva stage), so it needs the raster image and a scale.
+  useEffect(() => {
+    if (mode !== "lanes" || !meta || laneImg) return;
+    const im = new window.Image();
+    im.src = meta.image_url;
+    im.onload = () => setLaneImg(im);
+  }, [mode, meta, laneImg]);
+  useEffect(() => {
+    if (mode !== "lanes" || !meta || !canvasWrapRef.current) return;
+    setLaneScale(canvasWrapRef.current.clientWidth / meta.width);
+  }, [mode, meta, laneImg]);
+
+  const laneToImg = (e: { evt: MouseEvent }): number[] => {
+    const r = canvasWrapRef.current!.getBoundingClientRect();
+    return [(e.evt.clientX - r.left) / laneScale, (e.evt.clientY - r.top) / laneScale];
+  };
+  const laneStageClick = (e: { evt: MouseEvent }) => { if (laneAdding) setLaneAdding([...laneAdding, laneToImg(e)]); };
+  const laneDragPoint = (laneId: string, i: number, x: number, y: number) =>
+    setLanes((ls) => ls.map((l) => l.lane_id === laneId
+      ? { ...l, dirty: true, control_points: l.control_points.map((p, j) => (j === i ? [x, y] : p)) } : l));
+  const saveLanes = async () => {
+    const dirty = lanes.filter((x) => x.dirty);
+    if (!dirty.length) { flash("no lane edits"); return; }
+    for (const l of dirty) await api.updateLane(l.lane_id, { control_points: l.control_points, lane_type: l.lane_type, is_ego: l.is_ego });
+    await loadLayers(); flash(`saved ${dirty.length} lane${dirty.length === 1 ? "" : "s"}`);
+  };
+  const finishAddLane = async (type: string) => {
+    if (!laneAdding || laneAdding.length < 2) { setLaneAdding(null); return; }
+    await api.createLane(id, { control_points: laneAdding, lane_type: type, is_ego: false });
+    setLaneAdding(null); await loadLayers(); flash("lane added");
+  };
+  const setLaneType = (t: string) => { if (laneSel) setLanes((ls) => ls.map((l) => l.lane_id === laneSel ? { ...l, lane_type: t, dirty: true } : l)); };
+  const toggleLaneEgo = () => { if (laneSel) setLanes((ls) => ls.map((l) => ({ ...l, is_ego: l.lane_id === laneSel ? !l.is_ego : l.is_ego, dirty: l.lane_id === laneSel ? true : l.dirty }))); };
+  const delLane = async () => { if (laneSel) { await api.deleteLane(laneSel); setLaneSel(null); await loadLayers(); flash("lane deleted"); } };
+  const propagateLanes = async () => { const r = await api.propagateLanes(id, 8); flash(`propagated to ${r.created} lane-frames`); };
 
   // each new selection starts with the compact chip (class name + edit), not the open picker
   useEffect(() => { setEditOpen(false); setEditSearch(""); }, [st.selectedId]);
@@ -594,15 +639,37 @@ export default function FrameEditor() {
             onSelect={(t) => dispatch({ t: "tool", tool: t as Tool })}
             options={
               <>
-                {st.tool === "adverse" && (
+                {mode === "objects" && st.tool === "adverse" && (
                   <select value={adverseCond} onChange={(e) => setAdverseCond(e.target.value)} title="adverse condition to tag"
                     className="bg-bg border border-accent text-accent px-1 py-1 font-mono text-[11px]">
                     {["glare", "reflection", "shadow", "rain", "fog", "lowlight"].map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 )}
-                {(st.tool === "brush" || st.tool === "eraser") && (
+                {mode === "objects" && (st.tool === "brush" || st.tool === "eraser") && (
                   <input type="range" min={4} max={60} value={brushRadius} title={`brush radius ${brushRadius}px`}
                     onChange={(e) => setBrushRadius(Number(e.target.value))} className="w-20" />
+                )}
+                {mode === "lanes" && (
+                  <div className="flex items-center gap-1 font-mono text-[11px]">
+                    <button onClick={() => setLaneAdding(laneAdding ? null : [])} title="draw a new lane spline (click to add control points)"
+                      className={`border px-2 py-1 ${laneAdding ? "border-accent text-accent" : "border-line text-ink-3 hover:border-accent"}`}>+ lane</button>
+                    {laneAdding ? (
+                      <>
+                        <span className="text-ink-3">{laneAdding.length} pts:</span>
+                        {["solid", "implicit"].map((t) => (
+                          <button key={t} onClick={() => finishAddLane(t)} className="border border-line text-ink-2 px-2 py-1 hover:border-accent">{t}</button>
+                        ))}
+                        <button onClick={() => setLaneAdding(null)} className="text-ink-3 hover:text-block px-1">cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={segRoad} className="border border-line text-ink-3 px-2 py-1 hover:border-accent">drivable</button>
+                        <button onClick={genLanes} className="border border-line text-ink-3 px-2 py-1 hover:border-accent">propose</button>
+                        <button onClick={propagateLanes} className="border border-line text-ink-3 px-2 py-1 hover:border-accent">propagate</button>
+                        <button onClick={saveLanes} className="border border-pass text-pass px-2 py-1 hover:bg-pass/10">save lanes</button>
+                      </>
+                    )}
+                  </div>
                 )}
               </>
             } />
@@ -647,6 +714,13 @@ export default function FrameEditor() {
         <ModeRail mode={mode} onMode={switchMode} />
         {/* canvas */}
         <div ref={canvasWrapRef} className="flex-1 min-w-0 relative">
+          {mode === "lanes" ? (
+            laneImg && meta ? (
+              <LaneCanvas img={laneImg} meta={{ width: meta.width, height: meta.height }} scale={laneScale}
+                lanes={lanes} sel={laneSel} drivable={layers.drivable ? drivable : null} adding={laneAdding}
+                onStageClick={laneStageClick} onSelect={setLaneSel} onDragPoint={laneDragPoint} />
+            ) : <div className="absolute inset-0 grid place-items-center font-mono text-[11px] text-ink-3">loading lanes...</div>
+          ) : (
           <EditorCanvas
             imageUrl={meta.image_url} imgW={meta.width} imgH={meta.height}
             objects={st.objects} selectedId={st.selectedId} tool={st.tool} candidate={st.candidate}
@@ -679,6 +753,7 @@ export default function FrameEditor() {
               dispatch({ t: "update", id: oid, patch: polys.length ? { mask: polys, bbox: bboxOfPolys(polys) } : { mask: polys } })}
             onCursor={setCursor}
           />
+          )}
           <FloatingLayers layers={layers} onToggle={(k) => setLayers((s) => ({ ...s, [k]: !s[k as keyof typeof s] }))}
             extra={
               <>
@@ -699,7 +774,7 @@ export default function FrameEditor() {
           ) : null}
 
           {/* inline edit popup: click a (wrong) annotation to fix its class right where it sits */}
-          {selected && st.tool === "select" && st.viewport.scale > 0 && (() => {
+          {mode !== "lanes" && selected && st.tool === "select" && st.viewport.scale > 0 && (() => {
             const wrap = canvasWrapRef.current;
             const v = st.viewport;
             const sx = selected.bbox[0] * v.scale + v.ox;
@@ -773,6 +848,36 @@ export default function FrameEditor() {
 
         {/* right rail */}
         <aside className="w-72 shrink-0 border-l hairline flex flex-col min-h-0">
+          {/* Lanes mode: the panel routes to lane content (list + selected lane props) instead of objects */}
+          {mode === "lanes" && (
+            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 font-mono text-[11px]">
+              <div className="text-ink-3 uppercase text-[10px]">lanes ({lanes.length})</div>
+              {lanes.map((l) => (
+                <div key={l.lane_id} onClick={() => setLaneSel(l.lane_id)}
+                  className={`flex items-center gap-1.5 cursor-pointer ${l.lane_id === laneSel ? "text-ink" : "text-ink-3 hover:text-ink-2"}`}>
+                  <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: l.is_ego ? "#56D364" : (LANE_COLOR[l.source] || "#A0A6AD") }} />
+                  <span className="truncate flex-1">{l.lane_type}{l.is_ego ? " (ego)" : ""}</span>
+                  <span className="text-ink-3">{l.source[0]}</span>
+                </div>
+              ))}
+              {!lanes.length && <div className="text-ink-3 py-4 text-center">no lanes. propose, or + lane to draw.</div>}
+              {(() => {
+                const sl = lanes.find((l) => l.lane_id === laneSel);
+                if (!sl) return null;
+                return (
+                  <div className="border-t hairline pt-2 space-y-2">
+                    <div className="text-ink-3 uppercase text-[10px]">selected lane</div>
+                    <select value={sl.lane_type} onChange={(e) => setLaneType(e.target.value)} className="w-full bg-bg border border-line px-1 py-0.5 text-ink">
+                      {LANE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <button onClick={toggleLaneEgo} className={`w-full border px-2 py-1 ${sl.is_ego ? "border-pass text-pass" : "border-line text-ink-3"}`}>{sl.is_ego ? "ego lane set" : "mark ego"}</button>
+                    <button onClick={delLane} className="w-full border border-line text-ink-3 px-2 py-1 hover:border-block hover:text-block">delete lane</button>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+          {mode !== "lanes" && (<>
           {/* class palette */}
           <div className="border-b hairline p-2">
             <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">class for new / selected</div>
@@ -977,6 +1082,7 @@ export default function FrameEditor() {
             </div>
           </div>
           </div>
+          </>)}
         </aside>
       </div>
       {activeCorr && (
