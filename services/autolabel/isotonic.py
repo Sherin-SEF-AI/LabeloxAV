@@ -50,7 +50,9 @@ async def _collect_pairs(session_id: str | None = None) -> tuple[np.ndarray, np.
     xs, ys = [], []
     for prov, state in rows:
         rc = (prov or {}).get("raw_conf")
-        if rc is None:
+        # raw_conf is a plain pre-calibration confidence for a normal detection; recall-recovered rows store
+        # a dict there and have no single scalar confidence, so they are not calibration pairs. Skip them.
+        if not isinstance(rc, int | float) or isinstance(rc, bool):
             continue
         xs.append(float(rc))
         ys.append(1.0 if state in _CORRECT else 0.0)
