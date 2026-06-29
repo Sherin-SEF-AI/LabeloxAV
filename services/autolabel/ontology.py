@@ -45,6 +45,8 @@ class Ontology:
     hierarchy_levels: int
     classes: list[OntologyClassDef]
     attributes: dict[str, AttributeDef] = field(default_factory=dict)
+    # Per-subclass (l1) applicable-attribute allowlist. A subclass absent here means all attributes apply.
+    attribute_scope: dict[str, list[str]] = field(default_factory=dict)
 
     _by_id: dict[int, OntologyClassDef] = field(default_factory=dict, repr=False)
     _by_name: dict[str, OntologyClassDef] = field(default_factory=dict, repr=False)
@@ -66,6 +68,14 @@ class Ontology:
     def has_name(self, name: str) -> bool:
         return name in self._by_name
 
+    def attrs_for_class(self, class_id: int) -> list[str] | None:
+        """Attribute names applicable to a class (by its l1 subclass). None means all attributes apply."""
+        try:
+            l1 = self.by_id(class_id).l1
+        except KeyError:
+            return None
+        return self.attribute_scope.get(l1)
+
     def concept_phrases(self, india_first: bool = True) -> list[str]:
         """Ontology names as open-vocab prompts for SAM 3.1 PCS. India/rare classes first."""
         ordered = sorted(self.classes, key=lambda c: (not c.india, c.id)) if india_first else self.classes
@@ -77,12 +87,17 @@ class Ontology:
     def is_fallback(self, class_id: int) -> bool:
         return self.by_id(class_id).l1 == "fallback"
 
-    def validate_attrs(self, attrs: dict) -> list[str]:
-        """Return a list of validation errors; empty means valid."""
+    def validate_attrs(self, attrs: dict, class_id: int | None = None) -> list[str]:
+        """Return a list of validation errors; empty means valid. When class_id is given and its subclass
+        declares an attribute scope, an attribute not in that scope is an error (not applicable to class)."""
+        allowed = self.attrs_for_class(class_id) if class_id is not None else None
         errors: list[str] = []
         for key, val in attrs.items():
             if key not in self.attributes:
                 errors.append(f"unknown attribute '{key}'")
+                continue
+            if allowed is not None and key not in allowed:
+                errors.append(f"attribute '{key}' not applicable to class {class_id}")
                 continue
             spec = self.attributes[key]
             if spec.type == "enum":
@@ -141,11 +156,13 @@ def load_ontology(path: str | Path | None = None) -> Ontology:
         seen_ids.add(c["id"])
         seen_names.add(c["name"])
 
+    scope = {k: list(v) for k, v in (data.get("attribute_scope") or {}).items()}
     return Ontology(
         version=data["version"],
         hierarchy_levels=int(data["hierarchy_levels"]),
         classes=classes,
         attributes=attributes,
+        attribute_scope=scope,
     )
 
 

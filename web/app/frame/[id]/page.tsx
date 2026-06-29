@@ -190,7 +190,7 @@ export default function FrameEditor() {
         const full = o.classes.find((c) => c.id === cls.id) || cls;
         relabelSelected(full as OntologyClass);
         setEditOpen(false); setEditSearch(""); setSearch("");
-        flash(cls.existed ? `class "${cls.name}" already existed — applied` : `added custom class "${cls.name}"`);
+        flash(cls.existed ? `class "${cls.name}" already existed, applied` : `added custom class "${cls.name}"`);
       } catch (e) {
         flash("could not add class: " + String(e));
       }
@@ -509,7 +509,7 @@ export default function FrameEditor() {
           />
           {st.candidate?.length ? (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 font-mono text-[11px] text-ink-2">
-              mask ready — click the next object to keep this one &amp; continue, <span className="text-pass">Enter</span> to finish, <span className="text-ink-3">Esc</span> to discard
+              mask ready, click the next object to keep this one &amp; continue, <span className="text-pass">Enter</span> to finish, <span className="text-ink-3">Esc</span> to discard
             </div>
           ) : null}
 
@@ -642,10 +642,18 @@ export default function FrameEditor() {
                 propagate forward 12 frames →
               </button>
               <div className="space-y-1">
-                {Object.entries(onto.attributes).map(([name, spec]) => (
-                  <AttrControl key={name} name={name} spec={spec} value={selected.attrs[name]}
-                    onChange={(val) => setAttrSelected(name, val)} />
-                ))}
+                {Object.entries(onto.attributes)
+                  .filter(([name]) => {
+                    // show only attributes applicable to the selected object's class (by its l1 subclass);
+                    // a subclass without a scope entry shows all attributes
+                    const l1 = onto.classes.find((c) => c.id === selected.class_id)?.l1;
+                    const allowed = l1 ? onto.attribute_scope?.[l1] : undefined;
+                    return !allowed || allowed.includes(name);
+                  })
+                  .map(([name, spec]) => (
+                    <AttrControl key={name} name={name} spec={spec} value={selected.attrs[name]}
+                      onChange={(val) => setAttrSelected(name, val)} />
+                  ))}
               </div>
             </div>
           )}

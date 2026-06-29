@@ -28,6 +28,20 @@ attributes:
   signal_kind:    { type: enum, values: [vehicle, pedestrian, cyclist] }
   signal_mount:   { type: enum, values: [pole, gantry, wall, portable] }
   pole_id:        { type: int }                 # id of the pole/structure a signal or sign is mounted on
+
+# Per-subclass (L1) applicable-attribute allowlist. An object's class restricts which global attributes
+# apply, so the editor shows only the relevant ones and validation rejects the rest. A subclass not listed
+# here means all attributes apply (backward compatible).
+attribute_scope:
+  two_wheeler:   [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, helmet, passenger_load, overload, static]
+  three_wheeler: [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, passenger_load, overload, livery, static]
+  four_wheeler:  [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, livery, static]
+  heavy:         [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, articulated, overload, livery, static]
+  vru:           [occlusion, occlusion_pct, truncation, direction, motion, lane_position, on_shoulder, helmet]
+  animal:        [occlusion, occlusion_pct, truncation, motion, on_shoulder, static]
+  fixed:         [occlusion, truncation, signal_state, signal_arrow, signal_kind, signal_mount, marking_state, blocks_lane, static, pole_id]
+  temporary:     [occlusion, truncation, blocks_lane, static, on_shoulder]
+  boundary:      [occlusion, truncation, marking_state, blocks_lane]
 classes:
   # L0 OBJECT / L1 two_wheeler
   - { id: 1,  name: motorcycle,        l0: object,  l1: two_wheeler, india: false }

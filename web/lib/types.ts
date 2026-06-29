@@ -42,6 +42,8 @@ export type Ontology = {
   hierarchy_levels: number;
   attributes: Record<string, { type: string; values: unknown[] | null; range: number[] | null }>;
   classes: OntologyClass[];
+  // per-subclass (l1) applicable-attribute allowlist; a subclass absent here means all attributes apply
+  attribute_scope?: Record<string, string[]>;
 };
 
 export type SessionRow = {

@@ -145,7 +145,7 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
     if len(payload.bbox) != 4:
         raise HTTPException(400, "bbox must be [x1,y1,x2,y2]")
     if payload.attrs:
-        errors = onto.validate_attrs(payload.attrs)
+        errors = onto.validate_attrs(payload.attrs, onto.by_name(payload.class_name).id)
         if errors:
             raise HTTPException(400, {"attr_errors": errors})
 

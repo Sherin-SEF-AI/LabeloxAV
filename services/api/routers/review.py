@@ -120,7 +120,7 @@ async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = D
         obj.bbox = payload.bbox
 
     if payload.attrs is not None:
-        errors = onto.validate_attrs(payload.attrs)
+        errors = onto.validate_attrs(payload.attrs, obj.class_id)
         if errors:
             raise HTTPException(400, {"attr_errors": errors})
         merged = dict(obj.attrs or {})
