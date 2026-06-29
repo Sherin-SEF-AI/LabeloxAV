@@ -26,6 +26,7 @@ type Props = {
   panning: boolean;
   lanes?: LaneOverlay[];
   drivable?: Record<string, number[][]> | null;
+  relationships?: { from_object_id: string; to_object_id: string; kind: string }[];
   layers?: LayerFlags;
   onViewport: (v: Viewport) => void;
   onSelect: (id: string | null) => void;
@@ -270,6 +271,18 @@ export default function EditorCanvas(p: Props) {
                 }}
               />
             );
+          })}
+
+          {/* relationship connectors: a thin dashed line between the centres of two related objects */}
+          {p.relationships?.map((r) => {
+            const a = p.objects.find((o) => o.id === r.from_object_id);
+            const b = p.objects.find((o) => o.id === r.to_object_id);
+            if (!a || !b) return null;
+            const ca = [(a.bbox[0] + a.bbox[2]) / 2, (a.bbox[1] + a.bbox[3]) / 2];
+            const cb = [(b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2];
+            return <Line key={`rel-${r.from_object_id}-${r.to_object_id}-${r.kind}`} listening={false}
+              points={[ca[0], ca[1], cb[0], cb[1]]} stroke="#E3B341" strokeWidth={1 / v.scale}
+              dash={[4 / v.scale, 3 / v.scale]} />;
           })}
 
           {/* selected object's mask vertices: drag to move, right-click to delete */}

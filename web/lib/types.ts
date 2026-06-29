@@ -199,6 +199,8 @@ export type FrameMeta = {
   lidar_res?: number | null;
 };
 
+export type Relationship = { relationship_id: string; from_object_id: string; to_object_id: string; kind: string };
+
 export type FrameObject = {
   object_id: string;
   track_id: string | null;

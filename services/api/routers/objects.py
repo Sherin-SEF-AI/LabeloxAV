@@ -15,18 +15,59 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.storage import get_object_store
 from core.timebase import now_ns
-from db.models import Frame, Object, Review
+from db.models import Frame, Object, ObjectRelationship, Review
 from services.api.deps import (
     CreateObjectIn,
     MaskIn,
     ObjectDetail,
+    RelateIn,
     SegmentIn,
     current_user,
     db_session,
+    require_role,
 )
 from services.autolabel.ontology import get_ontology
 
 router = APIRouter()
+
+# Directed relationship kinds the editor offers (the India case is rider_of on a two-wheeler).
+_RELATION_KINDS = {"rider_of", "towed_by", "part_of", "member_of", "occludes"}
+
+
+@router.post("/objects/{object_id}/relate", dependencies=[Depends(require_role("reviewer"))])
+async def relate_object(object_id: str, payload: RelateIn, db: AsyncSession = Depends(db_session)):
+    """Create a directed relationship from this object to another on the same frame."""
+    if payload.kind not in _RELATION_KINDS:
+        raise HTTPException(400, f"unknown relation kind '{payload.kind}'")
+    if object_id == payload.to_object_id:
+        raise HTTPException(400, "cannot relate an object to itself")
+    frm = await db.get(Object, UUID(object_id))
+    to = await db.get(Object, UUID(payload.to_object_id))
+    if frm is None or to is None:
+        raise HTTPException(404, "object not found")
+    rel = ObjectRelationship(from_object_id=frm.object_id, to_object_id=to.object_id,
+                             frame_id=frm.frame_id, kind=payload.kind)
+    db.add(rel)
+    await db.commit()
+    return {"relationship_id": str(rel.relationship_id), "from_object_id": object_id,
+            "to_object_id": payload.to_object_id, "kind": payload.kind}
+
+
+@router.delete("/relationships/{relationship_id}", dependencies=[Depends(require_role("reviewer"))])
+async def delete_relationship(relationship_id: str, db: AsyncSession = Depends(db_session)):
+    rel = await db.get(ObjectRelationship, UUID(relationship_id))
+    if rel is not None:
+        await db.delete(rel)
+        await db.commit()
+    return {"deleted": relationship_id}
+
+
+@router.get("/frames/{frame_id}/relationships")
+async def frame_relationships(frame_id: str, db: AsyncSession = Depends(db_session)):
+    rows = (await db.execute(select(ObjectRelationship)
+            .where(ObjectRelationship.frame_id == UUID(frame_id)))).scalars().all()
+    return [{"relationship_id": str(r.relationship_id), "from_object_id": str(r.from_object_id),
+             "to_object_id": str(r.to_object_id), "kind": r.kind} for r in rows]
 
 
 def _mask_polygons(mask_uri: str | None) -> list[list[float]]:

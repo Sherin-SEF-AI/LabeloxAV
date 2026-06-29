@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import type { FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass } from "@/lib/types";
+import type { FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, Relationship } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
@@ -29,6 +29,9 @@ const TOOLS: { key: Tool; label: string; hot: string }[] = [
   { key: "sam-point", label: "sam pt", hot: "S" },
   { key: "sam-box", label: "sam box", hot: "M" },
 ];
+
+// directed object-relationship kinds offered in the editor (rider_of is the India two-wheeler case)
+const RELATION_KINDS = ["rider_of", "towed_by", "part_of", "member_of", "occludes"];
 
 // client-side mirror of the server's class-name normalization (snake_case, ascii)
 const normClass = (s: string) => s.trim().toLowerCase().replace(/[\s-]+/g, "_").replace(/[^a-z0-9_]/g, "");
@@ -78,6 +81,9 @@ export default function FrameEditor() {
   // P4 segmentation overlays: lanes (M2.1) + drivable area (M2.2), with per-layer visibility
   const [lanes, setLanes] = useState<LaneRow[]>([]);
   const [drivable, setDrivable] = useState<Record<string, number[][]> | null>(null);
+  const [relationships, setRelationships] = useState<Relationship[]>([]);
+  const [linkFrom, setLinkFrom] = useState<string | null>(null); // active "relate" mode: the source object id
+  const [linkKind, setLinkKind] = useState("rider_of");
   const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true });
 
   const flash = (m: string) => {
@@ -106,6 +112,25 @@ export default function FrameEditor() {
   const selected = st.objects.find((o) => o.id === st.selectedId) || null;
   const dirty = isDirty(st);
 
+  // object relationships: in link mode, the next clicked object becomes the target of the relationship
+  const relate = async (toId: string) => {
+    if (!linkFrom || toId === linkFrom) { setLinkFrom(null); return; }
+    try {
+      await api.relateObject(linkFrom, { to_object_id: toId, kind: linkKind });
+      setRelationships(await api.frameRelationships(id).catch(() => []));
+      flash(`linked: ${linkKind}`);
+    } catch (e) { flash("link failed: " + String(e)); }
+    setLinkFrom(null);
+  };
+  const doSelect = (oid: string | null) => {
+    if (linkFrom && oid && oid !== linkFrom) { relate(oid); return; }
+    dispatch({ t: "select", id: oid });
+  };
+  const delRelationship = async (rid: string) => {
+    await api.deleteRelationship(rid).catch(() => {});
+    setRelationships(await api.frameRelationships(id).catch(() => []));
+  };
+
   // P3 derived dynamics: fetch this frame's readout, and a recompute over the session
   const loadDynamics = useCallback(async () => {
     const r = await api.frameDynamics(id).catch(() => null);
@@ -122,9 +147,10 @@ export default function FrameEditor() {
 
   // P4 layers: fetch lane + drivable overlays, and inline generators
   const loadLayers = useCallback(async () => {
-    const [ls, dr] = await Promise.all([api.framesLanes(id).catch(() => []), api.getDrivable(id).catch(() => null)]);
+    const [ls, dr, rel] = await Promise.all([api.framesLanes(id).catch(() => []), api.getDrivable(id).catch(() => null), api.frameRelationships(id).catch(() => [])]);
     setLanes(ls);
     setDrivable(dr && dr.found ? dr.classes ?? null : null);
+    setRelationships(rel);
   }, [id]);
   useEffect(() => { loadLayers(); }, [loadLayers]);
   // The editor has its own header (no TopNav/UserPicker), so guarantee a valid identity or every mutation
@@ -495,7 +521,8 @@ export default function FrameEditor() {
             viewport={st.viewport} panning={panning}
             lanes={lanes} drivable={drivable} layers={layers}
             onViewport={(viewport) => dispatch({ t: "viewport", viewport })}
-            onSelect={(oid) => dispatch({ t: "select", id: oid })}
+            onSelect={doSelect}
+            relationships={relationships}
             onUpdateBbox={(oid, bbox, rot) => dispatch({ t: "update", id: oid, patch: rot !== undefined ? { bbox, rot } : { bbox } })}
             onDrawBox={(bbox) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox, mask: [], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
             onDrawPolygon={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [pts], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
@@ -644,6 +671,25 @@ export default function FrameEditor() {
                 className="w-full mb-1 font-mono text-[10px] border border-line text-ink-2 px-1.5 py-1 hover:border-accent disabled:opacity-40">
                 propagate forward 12 frames →
               </button>
+              {/* relationships / grouping: pick a kind, click "link", then click the target object */}
+              <div className="mb-1 space-y-1">
+                <div className="flex items-center gap-1">
+                  <select value={linkKind} onChange={(e) => setLinkKind(e.target.value)}
+                    className="flex-1 bg-bg border border-line px-1 py-0.5 font-mono text-[10px] text-ink">
+                    {RELATION_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                  <button onClick={() => setLinkFrom(linkFrom === selected.id ? null : selected.id)}
+                    className={`font-mono text-[10px] border px-1.5 py-0.5 ${linkFrom === selected.id ? "border-accent text-accent" : "border-line text-ink-2 hover:border-accent"}`}>
+                    {linkFrom === selected.id ? "click target" : "link"}
+                  </button>
+                </div>
+                {relationships.filter((r) => r.from_object_id === selected.id || r.to_object_id === selected.id).map((r) => (
+                  <div key={r.relationship_id} className="flex items-center gap-1 font-mono text-[10px] text-ink-3">
+                    <span className="flex-1 truncate">{r.from_object_id === selected.id ? `${r.kind} ${r.to_object_id.slice(0, 8)}` : `${r.from_object_id.slice(0, 8)} ${r.kind}`}</span>
+                    <button onClick={() => delRelationship(r.relationship_id)} className="hover:text-block" title="remove">x</button>
+                  </div>
+                ))}
+              </div>
               <div className="space-y-1">
                 {Object.entries(onto.attributes)
                   .filter(([name]) => {

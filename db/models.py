@@ -197,6 +197,23 @@ class Object(Base):
     )
 
 
+class ObjectRelationship(Base):
+    # A directed relationship between two objects on a frame: the join hub for grouping that track_id
+    # cannot express (rider on a two-wheeler, trailer to truck, parent-child, herd/group membership).
+    __tablename__ = "object_relationship"
+
+    relationship_id: Mapped[uuid.UUID] = _uuid_pk()
+    from_object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
+    to_object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
+    frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)  # rider_of|towed_by|part_of|member_of|occludes
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_object_relationship_from", "from_object_id"),
+                      Index("ix_object_relationship_to", "to_object_id"),
+                      Index("ix_object_relationship_frame", "frame_id"))
+
+
 class Lane(Base):
     # M2.1: a lane line per frame (linked across frames by track_ref). Bezier/B-spline control points in
     # image coordinates; never a raster mask. Implicit/fallback lanes are hand-drawn on unmarked roads.

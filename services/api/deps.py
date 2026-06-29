@@ -140,6 +140,11 @@ class MaskIn(BaseModel):
     height: int | None = None
 
 
+class RelateIn(BaseModel):
+    to_object_id: str                              # the target object this one relates to
+    kind: str                                      # rider_of|towed_by|part_of|member_of|occludes
+
+
 class RelabelTrackIn(BaseModel):
     class_name: str
     state: str = "accepted"

@@ -21,7 +21,7 @@ from sqlalchemy import select
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
 from core.storage import get_object_store
-from db.models import DatasetCommit, Frame, Object
+from db.models import DatasetCommit, Frame, Object, ObjectRelationship
 from db.models import Session as DbSession
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
@@ -76,6 +76,14 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
             stmt = stmt.limit(spec.limit)
 
         rows = (await db.execute(stmt)).all()
+        # attach each object's outgoing relationships (rider_of, towed_by, member_of, ...) for export
+        rel_map: dict[str, list] = {}
+        if rows:
+            rel_rows = (await db.execute(select(ObjectRelationship).where(
+                ObjectRelationship.from_object_id.in_([o.object_id for o, _, _ in rows])))).scalars().all()
+            for r in rel_rows:
+                rel_map.setdefault(str(r.from_object_id), []).append(
+                    {"to_object_id": str(r.to_object_id), "kind": r.kind})
 
     records: list[ExportRecord] = []
     for obj, frame, sess in rows:
@@ -106,6 +114,7 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
                 rot_deg=obj.rot_deg or 0.0,
                 keypoints=obj.keypoints,
                 polyline=obj.polyline,
+                relationships=rel_map.get(str(obj.object_id), []),
             )
         )
     return records

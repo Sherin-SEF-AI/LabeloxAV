@@ -7,6 +7,7 @@ import type {
   GovState,
   MergeRequestRow,
   RegistryRow,
+  Relationship,
   CalibDetail,
   CalibSession,
   Confusions,
@@ -284,6 +285,13 @@ export const api = {
   updateMask: (object_id: string, polygons: number[][], width?: number, height?: number) =>
     put<{ object_id: string }>(`/api/objects/${object_id}/mask`, { polygons, width, height }),
   deleteObject: (object_id: string) => del<{ deleted: string }>(`/api/objects/${object_id}`),
+  // object relationships / grouping (rider_of, towed_by, part_of, member_of, occludes)
+  relateObject: (object_id: string, body: { to_object_id: string; kind: string }) =>
+    post<{ relationship_id: string }>(`/api/objects/${object_id}/relate`, body),
+  deleteRelationship: (relationship_id: string) =>
+    del<{ deleted: string }>(`/api/relationships/${relationship_id}`),
+  frameRelationships: (frame_id: string) =>
+    get<Relationship[]>(`/api/frames/${frame_id}/relationships`),
   // M2.1 lanes
   framesLanes: (frameId: string) => get<LaneRow[]>(`/api/frames/${frameId}/lanes`),
   proposeLanes: (frameId: string) => post<{ proposed: number; lanes: LaneRow[]; model: string }>(`/api/frames/${frameId}/lanes/propose`, {}),
