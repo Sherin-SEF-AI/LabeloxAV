@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, lidarCloudPoints, type Cuboid3D, type LidarCloud, type LidarPoints } from "@/lib/api";
+import type { ColorBy } from "@/components/lidar/PointCloudViewer";
 import type { AdverseRegion, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, ProjectedCuboid, Relationship } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
@@ -25,7 +26,13 @@ import { MODES, type ToolGroup } from "@/lib/editor/registry";
 const EditorCanvas = dynamic(() => import("@/components/editor/EditorCanvas").then((m) => ({ default: m.default })), { ssr: false });
 // Lanes mode swaps to this fit-to-width Konva stage (the folded-in lane editor). Loaded once, ssr off.
 const LaneCanvas = dynamic(() => import("@/components/lane/LaneCanvas"), { ssr: false });
+// 3D and LiDAR mode swaps to the three.js point cloud (the folded-in cuboid workspace). Loaded once, ssr off.
+const PointCloudViewer = dynamic(() => import("@/components/lidar/PointCloudViewer"), { ssr: false });
 const LANE_TYPES = ["solid", "dashed", "double", "road_edge", "implicit", "fallback"];
+const CUBOID_DIMS: Record<string, number[]> = {
+  sedan: [4.2, 1.8, 1.5], suv: [4.6, 1.9, 1.7], truck: [7.0, 2.5, 3.0], bus: [11.0, 2.6, 3.2],
+  motorcycle: [2.0, 0.8, 1.4], pedestrian: [0.6, 0.6, 1.7], autorickshaw: [2.6, 1.4, 1.8],
+};
 const LANE_COLOR: Record<string, string> = { proposed: "#58A6FF", human: "#FF7A2F", propagated: "#E3B341" };
 
 // Editor tools grouped so the strip renders one button per group (not 14 peers in a row). Tool keys match
@@ -132,6 +139,13 @@ export default function FrameEditor() {
   const [laneAdding, setLaneAdding] = useState<number[][] | null>(null);
   const [laneImg, setLaneImg] = useState<HTMLImageElement | null>(null);
   const [laneScale, setLaneScale] = useState(1);
+  // 3D and LiDAR mode (canvas swap): the cloud nearest this frame, its points, the 3D cuboids, edit state
+  const [cloud3d, setCloud3d] = useState<LidarCloud | null>(null);
+  const [pts3d, setPts3d] = useState<LidarPoints | null>(null);
+  const [cub3d, setCub3d] = useState<Cuboid3D[]>([]);
+  const [cubSel, setCubSel] = useState<string | null>(null);
+  const [colorBy3d, setColorBy3d] = useState<ColorBy>("height");
+  const [lidarMsg, setLidarMsg] = useState<string | null>(null);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [linkFrom, setLinkFrom] = useState<string | null>(null); // active "relate" mode: the source object id
   const [linkKind, setLinkKind] = useState("rider_of");
@@ -336,6 +350,57 @@ export default function FrameEditor() {
   const toggleLaneEgo = () => { if (laneSel) setLanes((ls) => ls.map((l) => ({ ...l, is_ego: l.lane_id === laneSel ? !l.is_ego : l.is_ego, dirty: l.lane_id === laneSel ? true : l.dirty }))); };
   const delLane = async () => { if (laneSel) { await api.deleteLane(laneSel); setLaneSel(null); await loadLayers(); flash("lane deleted"); } };
   const propagateLanes = async () => { const r = await api.propagateLanes(id, 8); flash(`propagated to ${r.created} lane-frames`); };
+
+  // 3D mode: load the session cloud nearest this frame's timestamp, then its points and 3D cuboids.
+  useEffect(() => {
+    if (mode !== "lidar3d" || !meta || cloud3d) return;
+    let cancelled = false;
+    (async () => {
+      setLidarMsg("loading point cloud...");
+      try {
+        const r = await api.lidarClouds(meta.session_id);
+        if (!r.clouds.length) { if (!cancelled) setLidarMsg("no point cloud for this session"); return; }
+        const near = r.clouds.reduce((a, b) => (Math.abs(b.ts_ns - meta.ts_ns) < Math.abs(a.ts_ns - meta.ts_ns) ? b : a));
+        const [pts, objs] = await Promise.all([lidarCloudPoints(near.cloud_id, { variant: "raw", max: 300000 }), api.lidarObjects3d(near.cloud_id)]);
+        if (cancelled) return;
+        setCloud3d(near); setPts3d(pts); setCub3d(objs.objects); setLidarMsg(null);
+      } catch (e) { if (!cancelled) setLidarMsg("cloud load failed: " + String(e)); }
+    })();
+    return () => { cancelled = true; };
+  }, [mode, meta, cloud3d]);
+
+  const cubSelected = cub3d.find((c) => c.object_3d_id === cubSel) || null;
+  const patchCub = (cid: string, patch: Partial<Cuboid3D>) => setCub3d((cs) => cs.map((c) => (c.object_3d_id === cid ? { ...c, ...patch } : c)));
+  const saveCub = async (cid: string, fields: Partial<Cuboid3D>) => {
+    const cur = cub3d.find((c) => c.object_3d_id === cid); if (!cur) return;
+    try {
+      const saved = await api.lidarPatchCuboid(cid, {
+        class_id: (fields.class_id as number) ?? cur.class_id, center: (fields.center as number[]) ?? cur.center,
+        dims: (fields.dims as number[]) ?? cur.dims, yaw: (fields.yaw as number) ?? cur.yaw,
+        ground_snap: Boolean(fields.attrs && (fields.attrs as Record<string, unknown>).ground_snap), expected_version: cur.version,
+      });
+      patchCub(cid, saved);
+    } catch (e) { setLidarMsg("save failed: " + String(e)); }
+  };
+  const moveCub = (cid: string, x: number, y: number, commit: boolean) => {
+    const cur = cub3d.find((c) => c.object_3d_id === cid); if (!cur) return;
+    const center = [x, y, cur.center[2]]; patchCub(cid, { center }); if (commit) saveCub(cid, { center });
+  };
+  const addCub = async () => {
+    if (!cloud3d || !onto) return;
+    const cls = onto.classes.find((c) => c.name === "sedan") || onto.classes[0]; if (!cls) return;
+    try {
+      const created = await api.lidarCreateCuboid(cloud3d.cloud_id, { class_id: cls.id, center: [12, 0, 1], dims: CUBOID_DIMS[cls.name] || [4, 1.8, 1.5], yaw: 0, ground_snap: true });
+      setCub3d((cs) => [...cs, created]); setCubSel(created.object_3d_id);
+    } catch (e) { setLidarMsg("add failed: " + String(e)); }
+  };
+  const delCub = async (cid: string) => { try { await api.lidarDeleteCuboid(cid); setCub3d((cs) => cs.filter((c) => c.object_3d_id !== cid)); setCubSel(null); } catch (e) { setLidarMsg("delete failed: " + String(e)); } };
+  const aiLift3d = async () => {
+    if (!cloud3d) return;
+    setLidarMsg("lifting 2D objects to 3D...");
+    try { const r = await api.lidarLiftCloud(cloud3d.cloud_id); const objs = await api.lidarObjects3d(cloud3d.cloud_id); setCub3d(objs.objects); setLidarMsg(r.cuboids ? `lifted ${r.cuboids} cuboids` : "no 2D objects to lift"); }
+    catch (e) { setLidarMsg("lift failed: " + String(e)); }
+  };
 
   // each new selection starts with the compact chip (class name + edit), not the open picker
   useEffect(() => { setEditOpen(false); setEditSearch(""); }, [st.selectedId]);
@@ -720,6 +785,23 @@ export default function FrameEditor() {
                 lanes={lanes} sel={laneSel} drivable={layers.drivable ? drivable : null} adding={laneAdding}
                 onStageClick={laneStageClick} onSelect={setLaneSel} onDragPoint={laneDragPoint} />
             ) : <div className="absolute inset-0 grid place-items-center font-mono text-[11px] text-ink-3">loading lanes...</div>
+          ) : mode === "lidar3d" ? (
+            pts3d ? (
+              <div className="absolute inset-0 flex flex-col">
+                <div className="relative flex-1 min-h-0">
+                  <span className="absolute left-2 top-1 z-10 font-mono text-[10px] text-ink-3 uppercase">3d</span>
+                  <PointCloudViewer points={pts3d.points} count={pts3d.count} colorBy={colorBy3d}
+                    intensityRange={[pts3d.intensityMin, pts3d.intensityMax]} source={pts3d.source} mode="perspective"
+                    cuboids={cub3d} selectedId={cubSel} onSelectCuboid={setCubSel} />
+                </div>
+                <div className="relative h-2/5 min-h-[200px] border-t hairline">
+                  <span className="absolute left-2 top-1 z-10 font-mono text-[10px] text-ink-3 uppercase">bev (drag to move)</span>
+                  <PointCloudViewer points={pts3d.points} count={pts3d.count} colorBy={colorBy3d}
+                    intensityRange={[pts3d.intensityMin, pts3d.intensityMax]} source={pts3d.source} mode="bev" pointSize={0.4}
+                    cuboids={cub3d} selectedId={cubSel} onSelectCuboid={setCubSel} onMoveCuboid={moveCub} />
+                </div>
+              </div>
+            ) : <div className="absolute inset-0 grid place-items-center font-mono text-[11px] text-ink-3">{lidarMsg ?? "loading point cloud..."}</div>
           ) : (
           <EditorCanvas
             imageUrl={meta.image_url} imgW={meta.width} imgH={meta.height}
@@ -754,7 +836,7 @@ export default function FrameEditor() {
             onCursor={setCursor}
           />
           )}
-          <FloatingLayers layers={layers} onToggle={(k) => setLayers((s) => ({ ...s, [k]: !s[k as keyof typeof s] }))}
+          {mode !== "lidar3d" && <FloatingLayers layers={layers} onToggle={(k) => setLayers((s) => ({ ...s, [k]: !s[k as keyof typeof s] }))}
             extra={
               <>
                 <select value={segKind} onChange={(e) => setSegKind(e.target.value as "semantic" | "panoptic")}
@@ -766,7 +848,7 @@ export default function FrameEditor() {
                   onClick={async () => { flash("segmenting..."); try { const r = await api.autoSegment(id, segKind); setSegUrl(`/api/frames/${id}/segment/overlay?kind=${segKind}&t=${Date.now()}`); flash(`segmented ${segKind} (${Object.keys(r.coverage).length} classes${r.n_instances ? ", " + r.n_instances + " instances" : ""})`); } catch (e) { flash("segment failed: " + String(e)); } }}
                   className="w-full border border-line px-1 py-0.5 text-ink-3 hover:border-accent">auto-seg</button>
               </>
-            } />
+            } />}
           {st.candidate?.length ? (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 font-mono text-[11px] text-ink-2">
               mask ready, click the next object to keep this one &amp; continue, <span className="text-pass">Enter</span> to finish, <span className="text-ink-3">Esc</span> to discard
@@ -774,7 +856,7 @@ export default function FrameEditor() {
           ) : null}
 
           {/* inline edit popup: click a (wrong) annotation to fix its class right where it sits */}
-          {mode !== "lanes" && selected && st.tool === "select" && st.viewport.scale > 0 && (() => {
+          {mode !== "lanes" && mode !== "lidar3d" && selected && st.tool === "select" && st.viewport.scale > 0 && (() => {
             const wrap = canvasWrapRef.current;
             const v = st.viewport;
             const sx = selected.bbox[0] * v.scale + v.ox;
@@ -877,7 +959,61 @@ export default function FrameEditor() {
               })()}
             </div>
           )}
-          {mode !== "lanes" && (<>
+          {/* 3D and LiDAR mode: the panel routes to the cuboid list plus selected-cuboid geometry */}
+          {mode === "lidar3d" && (
+            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 font-mono text-[11px]">
+              <div className="flex items-center justify-between">
+                <span className="text-ink-3 uppercase text-[10px]">cuboids ({cub3d.length})</span>
+                <button onClick={addCub} disabled={!cloud3d} className="border border-line text-ink-3 px-1.5 py-0.5 hover:border-accent disabled:opacity-40">+ box</button>
+              </div>
+              <button onClick={aiLift3d} disabled={!cloud3d} className="w-full border border-line text-ink-2 px-2 py-1 hover:border-accent disabled:opacity-40">AI lift 2D to 3D</button>
+              {cub3d.map((c) => (
+                <div key={c.object_3d_id} onClick={() => setCubSel(c.object_3d_id)}
+                  className={`flex items-center justify-between gap-1.5 cursor-pointer ${c.object_3d_id === cubSel ? "text-ink" : "text-ink-3 hover:text-ink-2"}`}>
+                  <span className="truncate flex-1">{c.class_name}</span>
+                  <span className="text-ink-3">{c.state} {c.box_source}</span>
+                </div>
+              ))}
+              {!cub3d.length && <div className="text-ink-3 py-4 text-center">{lidarMsg ?? "no cuboids. lift or + box."}</div>}
+              {cubSelected && (
+                <div className="border-t hairline pt-2 space-y-2">
+                  <div className="text-ink-3 uppercase text-[10px]">selected ({cubSelected.source})</div>
+                  <select value={cubSelected.class_id}
+                    onChange={(e) => { const cid = Number(e.target.value); patchCub(cubSelected.object_3d_id, { class_id: cid, class_name: onto?.classes.find((x) => x.id === cid)?.name }); saveCub(cubSelected.object_3d_id, { class_id: cid }); }}
+                    className="w-full bg-bg border border-line px-1 py-0.5 text-ink">
+                    {onto?.classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  {["L", "W", "H"].map((lab, i) => (
+                    <label key={lab} className="flex items-center gap-2">
+                      <span className="w-3 text-ink-3">{lab}</span>
+                      <input type="range" min={0.3} max={14} step={0.1} value={cubSelected.dims[i]}
+                        onChange={(e) => patchCub(cubSelected.object_3d_id, { dims: cubSelected.dims.map((d, j) => (j === i ? Number(e.target.value) : d)) })}
+                        onMouseUp={() => saveCub(cubSelected.object_3d_id, { dims: cubSelected.dims })} className="flex-1" />
+                      <span className="w-9 text-right text-ink-3">{cubSelected.dims[i].toFixed(1)}</span>
+                    </label>
+                  ))}
+                  <label className="flex items-center gap-2">
+                    <span className="w-3 text-ink-3">yaw</span>
+                    <input type="range" min={-3.14159} max={3.14159} step={0.01} value={cubSelected.yaw}
+                      onChange={(e) => patchCub(cubSelected.object_3d_id, { yaw: Number(e.target.value) })}
+                      onMouseUp={() => saveCub(cubSelected.object_3d_id, { yaw: cubSelected.yaw })} className="flex-1" />
+                    <span className="w-9 text-right text-ink-3">{(cubSelected.yaw * 57.3).toFixed(0)}</span>
+                  </label>
+                  <div className="flex items-center gap-1 pt-0.5">
+                    {(["height", "intensity", "source", "segment"] as ColorBy[]).map((kb) => (
+                      <button key={kb} onClick={() => setColorBy3d(kb)} className={`px-1.5 py-0.5 border ${colorBy3d === kb ? "border-accent text-accent" : "border-line text-ink-3"}`}>{kb}</button>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => saveCub(cubSelected.object_3d_id, { attrs: { ground_snap: true } })} className="flex-1 border border-line text-ink-2 px-2 py-1 hover:border-accent">ground snap</button>
+                    <button onClick={() => delCub(cubSelected.object_3d_id)} className="border border-line text-ink-3 px-2 py-1 hover:border-block hover:text-block">delete</button>
+                  </div>
+                  <div className="text-ink-3">drag the box in the BEV view to move it.</div>
+                </div>
+              )}
+            </div>
+          )}
+          {mode !== "lanes" && mode !== "lidar3d" && (<>
           {/* class palette */}
           <div className="border-b hairline p-2">
             <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">class for new / selected</div>
