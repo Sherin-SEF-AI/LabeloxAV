@@ -131,7 +131,8 @@ async def _import_raw(spec: ImportSpec, job_id, root: Path) -> dict:
         mc = next((p for p in root.rglob("*.mcap")), None)
         if mc is None:
             raise FileNotFoundError("no .mcap file found in the source")
-        frame_iter, raw_uri, mcap_uri = read_mcap(str(mc)), None, spec.source_uri
+        frame_iter, raw_uri, mcap_uri = (read_mcap(str(mc), get_settings().ingest.target_fps), None,
+                                         spec.source_uri)
 
     result = await ingest(
         frame_iter=frame_iter, vehicle=spec.target_vehicle, city=spec.city,
