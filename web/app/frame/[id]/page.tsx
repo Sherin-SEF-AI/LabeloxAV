@@ -13,6 +13,7 @@ import BackButton from "@/components/BackButton";
 import CorrectionModal, { type CorrectionChange } from "@/components/CorrectionModal";
 import ToolStrip from "@/components/shell/ToolStrip";
 import FloatingLayers from "@/components/shell/FloatingLayers";
+import { StateBadge, ConfBar } from "@/components/StateBadge";
 import type { ToolGroup } from "@/lib/editor/registry";
 
 // Frame-centric professional annotation editor. Pan/zoom canvas, draw + edit boxes, SAM-assisted masks,
@@ -120,6 +121,8 @@ export default function FrameEditor() {
   const [brushRadius, setBrushRadius] = useState(14);
   const [segUrl, setSegUrl] = useState<string | null>(null); // dense-segmentation overlay png url
   const [segKind, setSegKind] = useState<"semantic" | "panoptic">("semantic");
+  const [objSearch, setObjSearch] = useState("");
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true });
 
   const flash = (m: string) => {
@@ -788,8 +791,15 @@ export default function FrameEditor() {
                 <span className="font-mono text-[10px] uppercase text-ink-3">attributes</span>
                 {selected.track_id && (
                   <button onClick={() => router.push(`/track/${selected.track_id}`)}
-                    className="font-mono text-[10px] text-info hover:text-accent">view track →</button>
+                    className="font-mono text-[10px] text-info hover:text-accent">view track &rarr;</button>
                 )}
+              </div>
+              {/* the selected object's identity at a glance: class, calibrated confidence, state */}
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(selected.class_id) }} />
+                <span className="font-mono text-[11px] text-ink truncate flex-1">{selected.class_name}</span>
+                <ConfBar conf={selected.conf} />
+                <StateBadge state={selected.state} />
               </div>
               <button
                 disabled={selected.isNew}
@@ -901,22 +911,47 @@ export default function FrameEditor() {
             </div>
           </div>
 
-          {/* layers / object list */}
+          {/* object list: grouped by class, searchable, collapsible, with a confidence bar per row. Scales
+              to many objects without a flat scroll; selection is bidirectional with the canvas. */}
           <div className="p-2">
-            <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">objects ({st.objects.length})</div>
-            <div className="space-y-0.5">
-              {st.objects.map((o) => (
-                <div key={o.id} onClick={() => dispatch({ t: "select", id: o.id })}
-                  className={`flex items-center gap-1.5 px-1 py-0.5 cursor-pointer font-mono text-[11px] ${o.id === st.selectedId ? "bg-line text-ink" : "text-ink-3 hover:text-ink-2"}`}>
-                  <button onClick={(e) => { e.stopPropagation(); dispatch({ t: "update", id: o.id, patch: { visible: !o.visible } }); }}
-                    className={o.visible ? "text-ink-2" : "text-ink-3"}>{o.visible ? "●" : "○"}</button>
-                  <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(o.class_id) }} />
-                  <span className="truncate flex-1">{o.class_name}{o.isNew ? " *" : ""}</span>
-                  {o.mask.length > 0 && <span className="text-info" title="has mask">◆</span>}
-                  <button onClick={(e) => { e.stopPropagation(); dispatch({ t: "delete", id: o.id }); }} className="text-ink-3 hover:text-block">x</button>
-                </div>
-              ))}
-              {!st.objects.length && <div className="text-ink-3 text-center py-4">no objects. draw a box (B).</div>}
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-mono text-[10px] uppercase text-ink-3">objects ({st.objects.length})</span>
+            </div>
+            <input value={objSearch} onChange={(e) => setObjSearch(e.target.value)} placeholder="search objects..."
+              className="w-full bg-bg border border-line px-1.5 py-1 font-mono text-[11px] text-ink mb-1" />
+            <div className="space-y-1">
+              {(() => {
+                const q = objSearch.toLowerCase();
+                const filtered = st.objects.filter((o) => !q || o.class_name.toLowerCase().includes(q) || o.id.toLowerCase().includes(q));
+                if (!filtered.length) return <div className="text-ink-3 text-center py-4 font-mono text-[11px]">no objects. draw a box (B).</div>;
+                const groups: Record<string, EdObject[]> = {};
+                for (const o of filtered) (groups[o.class_name] ??= []).push(o);
+                return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0])).map(([cls, objs]) => {
+                  const collapsed = collapsedGroups.has(cls);
+                  return (
+                    <div key={cls}>
+                      <button onClick={() => setCollapsedGroups((s) => { const n = new Set(s); if (n.has(cls)) n.delete(cls); else n.add(cls); return n; })}
+                        className="flex items-center gap-1.5 w-full font-mono text-[10px] text-ink-3 hover:text-ink-2 py-0.5">
+                        <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(objs[0].class_id) }} />
+                        <span className="flex-1 text-left truncate uppercase">{cls}</span>
+                        <span>{objs.length}</span>
+                        <span className="w-3 text-right">{collapsed ? "+" : "−"}</span>
+                      </button>
+                      {!collapsed && objs.map((o) => (
+                        <div key={o.id} onClick={() => dispatch({ t: "select", id: o.id })}
+                          className={`flex items-center gap-1.5 pl-3 pr-1 py-0.5 cursor-pointer font-mono text-[11px] ${o.id === st.selectedId ? "bg-line text-ink" : "text-ink-3 hover:text-ink-2"}`}>
+                          <button onClick={(e) => { e.stopPropagation(); dispatch({ t: "update", id: o.id, patch: { visible: !o.visible } }); }}
+                            className={o.visible ? "text-ink-2" : "text-ink-3"}>{o.visible ? "●" : "○"}</button>
+                          <span className="truncate flex-1">{o.id.startsWith("tmp-") ? "new" : o.id.slice(0, 8)}{o.isNew ? " *" : ""}</span>
+                          <ConfBar conf={o.conf} />
+                          {o.mask.length > 0 && <span className="text-info" title="has mask">&#9670;</span>}
+                          <button onClick={(e) => { e.stopPropagation(); dispatch({ t: "delete", id: o.id }); }} className="text-ink-3 hover:text-block">x</button>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                });
+              })()}
             </div>
           </div>
           </div>
