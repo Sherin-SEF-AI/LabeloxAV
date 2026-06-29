@@ -30,10 +30,25 @@ const TOOLS: { key: Tool; label: string; hot: string }[] = [
   { key: "measure", label: "measure", hot: "R" },
   { key: "sam-point", label: "sam pt", hot: "S" },
   { key: "sam-box", label: "sam box", hot: "M" },
+  { key: "magic-wand", label: "wand", hot: "W" },
+  { key: "brush", label: "brush", hot: "P" },
+  { key: "eraser", label: "eraser", hot: "E" },
+  { key: "superpixel", label: "cells", hot: "U" },
 ];
 
 // directed object-relationship kinds offered in the editor (rider_of is the India two-wheeler case)
 const RELATION_KINDS = ["rider_of", "towed_by", "part_of", "member_of", "occludes"];
+
+// ray-casting point-in-polygon for a flattened [x,y,x,y,...] polygon, used to pick a clicked superpixel
+function pointInPoly(pt: number[], poly: number[]): boolean {
+  let inside = false;
+  const n = poly.length / 2;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = poly[2 * i], yi = poly[2 * i + 1], xj = poly[2 * j], yj = poly[2 * j + 1];
+    if (((yi > pt[1]) !== (yj > pt[1])) && (pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi || 1e-9) + xi)) inside = !inside;
+  }
+  return inside;
+}
 
 // client-side mirror of the server's class-name normalization (snake_case, ascii)
 const normClass = (s: string) => s.trim().toLowerCase().replace(/[\s-]+/g, "_").replace(/[^a-z0-9_]/g, "");
@@ -89,6 +104,8 @@ export default function FrameEditor() {
   const [adverse, setAdverse] = useState<AdverseRegion[]>([]);
   const [adverseCond, setAdverseCond] = useState("glare");
   const [cuboids, setCuboids] = useState<ProjectedCuboid[]>([]);
+  const [superpixels, setSuperpixels] = useState<number[][]>([]);
+  const [brushRadius, setBrushRadius] = useState(14);
   const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true });
 
   const flash = (m: string) => {
@@ -147,6 +164,45 @@ export default function FrameEditor() {
         conf: 1, state: "accepted", visible: true, isNew: true } });
     } catch (e) { flash("could not place cuboid: " + String(e)); }
   };
+  // magic-wand: a single SAM point click that auto-creates (or refines) the object, no accept step
+  const runMagicWand = async (pt: number[]) => {
+    try {
+      const r = await api.segmentPrompt(id, { points: [pt], labels: [1] });
+      if (!r.polygons.length) { flash("magic-wand found nothing here"); return; }
+      const box = bboxOfPolys(r.polygons);
+      if (selected && overlapFrac(box, selected.bbox) > 0.5) {
+        dispatch({ t: "update", id: selected.id, patch: { mask: r.polygons, bbox: box } });
+      } else if (currentClass) {
+        dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
+          bbox: box, mask: r.polygons, attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
+      }
+    } catch (e) { flash(String(e).includes("503") ? "GPU busy (training)" : "magic-wand failed"); }
+  };
+  // brush/eraser: compose the stroke stamps into the selected object's mask (or a new object)
+  const onBrushStroke = async (ops: { op: string; center: number[]; radius: number }[]) => {
+    if (!meta) return;
+    try {
+      const r = await api.composeMask({ polygons: selected?.mask ?? [], ops, width: meta.width, height: meta.height });
+      if (selected) {
+        dispatch({ t: "update", id: selected.id, patch: { mask: r.polygons, bbox: r.polygons.length ? bboxOfPolys(r.polygons) : selected.bbox } });
+      } else if (currentClass && r.polygons.length) {
+        dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
+          bbox: bboxOfPolys(r.polygons), mask: r.polygons, attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
+      }
+    } catch (e) { flash("brush failed: " + String(e)); }
+  };
+  // superpixel: add the clicked SLIC cell to the active mask
+  const pickSuperpixel = (pt: number[]) => {
+    const poly = superpixels.find((pp) => pointInPoly(pt, pp));
+    if (!poly) return;
+    if (selected) {
+      const next = [...selected.mask, poly];
+      dispatch({ t: "update", id: selected.id, patch: { mask: next, bbox: bboxOfPolys(next) } });
+    } else if (currentClass) {
+      dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
+        bbox: bboxOfPolys([poly]), mask: [poly], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
+    }
+  };
 
   // P3 derived dynamics: fetch this frame's readout, and a recompute over the session
   const loadDynamics = useCallback(async () => {
@@ -172,6 +228,12 @@ export default function FrameEditor() {
     setCuboids(cub);
   }, [id]);
   useEffect(() => { loadLayers(); }, [loadLayers]);
+  // fetch SLIC superpixels lazily, the first time the superpixel tool is used on this frame
+  useEffect(() => {
+    if (st.tool === "superpixel" && !superpixels.length) {
+      api.superpixels(id).then((r) => setSuperpixels(r.superpixels)).catch(() => flash("superpixels unavailable"));
+    }
+  }, [st.tool, id, superpixels.length]);
   // The editor has its own header (no TopNav/UserPicker), so guarantee a valid identity or every mutation
   // 401s. Drop a stale/deleted cached user and auto-pick one, mirroring the UserPicker.
   useEffect(() => {
@@ -443,6 +505,10 @@ export default function FrameEditor() {
       else if (k === "r") dispatch({ t: "tool", tool: "measure" });
       else if (k === "s") dispatch({ t: "tool", tool: "sam-point" });
       else if (k === "m") dispatch({ t: "tool", tool: "sam-box" });
+      else if (k === "w") dispatch({ t: "tool", tool: "magic-wand" });
+      else if (k === "p") dispatch({ t: "tool", tool: "brush" });
+      else if (k === "e") dispatch({ t: "tool", tool: "eraser" });
+      else if (k === "u") dispatch({ t: "tool", tool: "superpixel" });
       else if (k === "f") fit();
       else if (e.key === "=" || e.key === "+") zoomBy(1.2);
       else if (e.key === "-") zoomBy(1 / 1.2);
@@ -495,6 +561,10 @@ export default function FrameEditor() {
               className="bg-bg border border-accent text-accent px-1 py-1 font-mono text-[11px]">
               {["glare", "reflection", "shadow", "rain", "fog", "lowlight"].map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
+          )}
+          {(st.tool === "brush" || st.tool === "eraser") && (
+            <input type="range" min={4} max={60} value={brushRadius} title={`brush radius ${brushRadius}px`}
+              onChange={(e) => setBrushRadius(Number(e.target.value))} className="w-20" />
           )}
         </div>
         <div className="flex items-center gap-1 ml-2 font-mono text-[11px]">
@@ -559,6 +629,11 @@ export default function FrameEditor() {
             onDrawAdverse={async (pts) => { try { await api.createAdverse(id, { geometry: pts, condition: adverseCond }); setAdverse(await api.listAdverse(id).catch(() => [])); flash(`tagged ${adverseCond}`); } catch (e) { flash("region failed: " + String(e)); } }}
             cuboids={layers.cuboids ? cuboids : []}
             onPlaceCuboid={placeCuboid}
+            onMagicWand={runMagicWand}
+            brushRadius={brushRadius}
+            onBrushStroke={onBrushStroke}
+            superpixels={superpixels}
+            onPickSuperpixel={pickSuperpixel}
             keypointDraft={kpDraft} skeletonEdges={PERSON_17.edges as unknown as number[][]}
             onPlaceKeypoint={onPlaceKeypoint} onUpdateKeypoints={onUpdateKeypoints}
             mPerPx={meta.lidar_res ?? undefined}

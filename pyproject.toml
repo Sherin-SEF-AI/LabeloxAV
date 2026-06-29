@@ -65,6 +65,7 @@ ml = [
     "scikit-learn==1.6.0",       # isotonic calibration fit (Gate B / M9); serve-time uses np.interp
     "hdbscan==0.8.40",           # density clustering for rare-scenario discovery (M1.5)
     "umap-learn==0.5.12",        # 2D projection for the analytics cluster map (M1.7)
+    "scikit-image==0.24.0",      # SLIC superpixels for interactive region-fill (Plane 1 B3)
 ]
 dev = [
     "pytest==8.3.4",

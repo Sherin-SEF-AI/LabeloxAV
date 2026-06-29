@@ -48,6 +48,7 @@ from services.api.routers import (
     relabel,
     review,
     search,
+    segment_assist,
     signs,
     tracks,
     training,
@@ -214,6 +215,7 @@ app.include_router(export.router, prefix="/api", tags=["export"])
 app.include_router(quality.router, prefix="/api", tags=["quality"])
 app.include_router(recall.router, prefix="/api", tags=["recall"])
 app.include_router(adverse.router, prefix="/api", tags=["adverse"])
+app.include_router(segment_assist.router, prefix="/api", tags=["segment"])
 app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(imports.router, prefix="/api", tags=["imports"])
 app.include_router(training.router, prefix="/api", tags=["training"])

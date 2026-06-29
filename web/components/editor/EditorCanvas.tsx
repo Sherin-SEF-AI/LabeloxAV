@@ -40,6 +40,11 @@ type Props = {
   onDrawPolyline: (points: number[]) => void;  // open polyline (curb/road_edge/barrier), not closed
   onDrawAdverse: (points: number[]) => void;   // adverse-condition region polygon (glare/shadow/...)
   onPlaceCuboid: (pt: number[]) => void;       // cuboid tool: lift this ground pixel and drop a 3D box
+  onMagicWand: (pt: number[]) => void;         // SAM point at this pixel, auto-create the object
+  brushRadius?: number;                        // brush/eraser stamp radius in image px
+  onBrushStroke: (ops: { op: string; center: number[]; radius: number }[]) => void;
+  superpixels?: number[][];                    // SLIC superpixel polygons (flattened) for the superpixel tool
+  onPickSuperpixel: (pt: number[]) => void;    // click a superpixel to add it to the active mask
   keypointDraft?: number[][] | null;           // in-progress pose points [[x,y,v],...] (placed so far)
   skeletonEdges?: number[][];                  // index pairs connecting keypoints, for rendering
   onPlaceKeypoint: (pt: number[]) => void;     // keypoint tool: drop the next skeleton point
@@ -64,6 +69,7 @@ export default function EditorCanvas(p: Props) {
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [draw, setDraw] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [poly, setPoly] = useState<number[]>([]); // in-progress manual polygon, flattened [x,y,...]
+  const [stroke, setStroke] = useState<number[][] | null>(null); // active brush/eraser stroke stamp centres
   const [measure, setMeasure] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const trRef = useRef<Konva.Transformer>(null);
@@ -138,6 +144,12 @@ export default function EditorCanvas(p: Props) {
       p.onPlaceKeypoint([x, y]); // each click drops the next skeleton point
     } else if (p.tool === "cuboid") {
       p.onPlaceCuboid([x, y]); // single click on the ground drops a 3D box
+    } else if (p.tool === "magic-wand") {
+      p.onMagicWand([x, y]); // SAM point -> auto-create
+    } else if (p.tool === "superpixel") {
+      p.onPickSuperpixel([x, y]); // add the clicked superpixel to the active mask
+    } else if (p.tool === "brush" || p.tool === "eraser") {
+      setStroke([[x, y]]); // begin a stroke; stamps accumulate on move, commit on up
     } else if (p.tool === "sam-point") {
       p.onSamPoint([x, y], e.evt.shiftKey ? 0 : 1);
     } else if (p.tool === "select" && e.target === e.target.getStage()) {
@@ -163,15 +175,23 @@ export default function EditorCanvas(p: Props) {
     if (p.tool !== "polygon" && p.tool !== "polyline" && p.tool !== "adverse") setPoly([]);
   }, [p.tool]);
   useEffect(() => { if (p.tool !== "measure") setMeasure(null); }, [p.tool]);
+  useEffect(() => { if (p.tool !== "brush" && p.tool !== "eraser") setStroke(null); }, [p.tool]);
 
   function onMove() {
     const [x, y] = toImg();
     p.onCursor([x, y]);
     if (draw) setDraw((d) => (d ? { ...d, x1: x, y1: y } : d));
     if (measure) setMeasure((m) => (m ? { ...m, x1: x, y1: y } : m));
+    if (stroke && (p.tool === "brush" || p.tool === "eraser")) setStroke((s) => (s ? [...s, [x, y]] : s));
   }
 
   function onUp() {
+    if (stroke) {
+      const r = p.brushRadius ?? 12;
+      const op = p.tool === "eraser" ? "erase" : "add";
+      p.onBrushStroke(stroke.map((c) => ({ op, center: c, radius: r })));
+      setStroke(null);
+    }
     if (measure) {
       // ruler is ephemeral: keep the last segment on screen until the next drag or tool change
       const tiny = Math.hypot(measure.x1 - measure.x0, measure.y1 - measure.y0) < 2;
@@ -364,6 +384,18 @@ export default function EditorCanvas(p: Props) {
           {p.candidate?.map((poly, i) => (
             <Line key={`cand${i}`} points={poly} closed listening={false}
               stroke="#56D364" strokeWidth={2 / v.scale} fill="rgba(86,211,100,0.25)" />
+          ))}
+
+          {/* superpixels (faint), shown while the superpixel tool is active so the annotator can click one */}
+          {p.tool === "superpixel" && p.superpixels?.map((poly, i) => (
+            <Line key={`sp${i}`} points={poly} closed listening={false}
+              stroke="rgba(88,166,255,0.5)" strokeWidth={0.75 / v.scale} fill="rgba(88,166,255,0.06)" />
+          ))}
+
+          {/* brush/eraser stroke preview: a stamp circle per sampled point along the stroke */}
+          {(p.tool === "brush" || p.tool === "eraser") && stroke?.map((c, i) => (
+            <Circle key={`bs${i}`} x={c[0]} y={c[1]} radius={p.brushRadius ?? 12} listening={false}
+              fill={p.tool === "eraser" ? "rgba(248,81,73,0.25)" : "rgba(86,211,100,0.25)"} />
           ))}
 
           {/* in-progress manual polygon/polyline: open line + vertex dots; double-click commits */}

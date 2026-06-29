@@ -303,6 +303,11 @@ export const api = {
   frameCuboids: (frame_id: string) => get<ProjectedCuboid[]>(`/api/frames/${frame_id}/cuboids`),
   liftGround: (frame_id: string, u: number, v: number) =>
     get<{ ego: number[] }>(`/api/frames/${frame_id}/lift_ground?u=${u}&v=${v}`),
+  // pixel-assist: brush/eraser mask composition + SLIC superpixels
+  composeMask: (body: { polygons: number[][]; ops: { op: string; center: number[]; radius: number }[]; width: number; height: number }) =>
+    post<{ polygons: number[][] }>(`/api/mask/compose`, body),
+  superpixels: (frame_id: string, n = 300) =>
+    post<{ superpixels: number[][] }>(`/api/superpixels/${frame_id}?n=${n}`, {}),
   // M2.1 lanes
   framesLanes: (frameId: string) => get<LaneRow[]>(`/api/frames/${frameId}/lanes`),
   proposeLanes: (frameId: string) => post<{ proposed: number; lanes: LaneRow[]; model: string }>(`/api/frames/${frameId}/lanes/propose`, {}),
