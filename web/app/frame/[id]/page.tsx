@@ -167,6 +167,7 @@ export default function FrameEditor() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState("objects");
   const [scaleNoteOpen, setScaleNoteOpen] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
   // switching mode swaps the tool strip; reset the active tool to the mode's first tool if it does not carry over
   const switchMode = (m: string) => {
     setMode(m);
@@ -986,8 +987,23 @@ export default function FrameEditor() {
         </div>
         </div>
 
-        {/* right rail */}
-        <aside className="w-72 shrink-0 border-l hairline flex flex-col min-h-0">
+        {/* right rail: contextual properties panel, collapsible to give the canvas the full width */}
+        {rightCollapsed ? (
+          <div className="w-8 shrink-0 border-l hairline flex flex-col items-center pt-2 bg-bg">
+            <button onClick={() => setRightCollapsed(false)} title="expand panel"
+              className="w-6 h-6 flex items-center justify-center rounded text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="chevL" size={14} /></button>
+            <span className="mt-2 [writing-mode:vertical-rl] font-display text-[10px] uppercase tracking-wider text-ink-3">Properties</span>
+          </div>
+        ) : (
+        <aside className="w-[340px] shrink-0 border-l hairline flex flex-col min-h-0">
+          <div className="h-[38px] shrink-0 flex items-center gap-2 px-3 border-b hairline">
+            <span className="font-display font-semibold text-[12.5px] text-ink">
+              {selected ? selected.class_name : mode === "review" ? "Review" : mode === "lanes" ? "Lanes" : mode === "lidar3d" ? "Cuboids" : "Properties"}
+            </span>
+            <span className="font-mono text-[10px] text-ink-3">{mode === "lanes" ? `${lanes.length} lanes` : mode === "lidar3d" ? `${cub3d.length} cuboids` : `${st.objects.length} objects`}</span>
+            <button onClick={() => setRightCollapsed(true)} title="collapse panel"
+              className="ml-auto w-6 h-6 flex items-center justify-center rounded text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="chevR" size={14} /></button>
+          </div>
           {/* Lanes mode: the panel routes to lane content (list + selected lane props) instead of objects */}
           {mode === "lanes" && (
             <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 font-mono text-[11px]">
@@ -1335,6 +1351,7 @@ export default function FrameEditor() {
           </div>
           </>)}
         </aside>
+        )}
       </div>
 
       {/* BOTTOM BAR: zoom, shortcut hints, counts, save status (the design's 28px bottom bar) */}
