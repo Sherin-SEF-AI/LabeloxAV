@@ -61,6 +61,16 @@ export function tmpId(): string {
 
 const snap = (s: EditorState): Snapshot => ({ objects: s.objects, deleted: s.deleted });
 
+// An object id is unique by construction, so editor state must never hold two objects with the same
+// id. A collision can arise when an idempotent server create returns an id already in the list (a temp
+// id remapped onto an existing object after undo/redo): collapse to the most recent so the Konva layer
+// never renders two children with the same key.
+function uniqById(objs: EdObject[]): EdObject[] {
+  const byId = new Map<string, EdObject>();
+  for (const o of objs) byId.set(o.id, o);
+  return Array.from(byId.values());
+}
+
 const HISTORY_CAP = 100;
 
 // wrap a mutating result: push current snapshot to history (capped), clear redo
@@ -88,7 +98,7 @@ function restore(s: EditorState, target: Snapshot): Snapshot {
     return differs(cur, o) ? { ...o, dirty: true } : o;
   });
   const gone = s.objects.filter((o) => !o.isNew && !targetIds.has(o.id)).map((o) => o.id);
-  return { objects, deleted: Array.from(new Set([...target.deleted, ...gone])) };
+  return { objects: uniqById(objects), deleted: Array.from(new Set([...target.deleted, ...gone])) };
 }
 
 export function isDirty(s: EditorState): boolean {
@@ -99,7 +109,7 @@ function reducer(s: EditorState, a: Action): EditorState {
   switch (a.t) {
     case "load":
       return {
-        objects: a.objects,
+        objects: uniqById(a.objects),
         deleted: [],
         selectedId: a.selectedId ?? null,
         tool: "select",
@@ -118,7 +128,7 @@ function reducer(s: EditorState, a: Action): EditorState {
     case "candidate":
       return { ...s, candidate: a.polys };
     case "add":
-      return { ...mutate(s, { objects: [...s.objects, a.obj], deleted: s.deleted }), selectedId: a.obj.id };
+      return { ...mutate(s, { objects: uniqById([...s.objects, a.obj]), deleted: s.deleted }), selectedId: a.obj.id };
     case "update":
       return {
         ...mutate(s, {
@@ -164,10 +174,10 @@ function reducer(s: EditorState, a: Action): EditorState {
       return {
         ...s,
         deleted: [],
-        objects: s.objects.map((o) => ({
+        objects: uniqById(s.objects.map((o) => ({
           ...o, id: a.remap[o.id] ?? o.id, isNew: false, dirty: false,
           version: a.versions?.[o.id] ?? o.version,
-        })),
+        }))),
         // Keep the undo history across autosaves: remap temp ids, mark snapshot objects saved, and drop
         // pending deletes (restore() recomputes them). Without this, autosave wipes undo/redo entirely.
         past: s.past.map((sn) => ({ objects: sn.objects.map(remap), deleted: [] })),
