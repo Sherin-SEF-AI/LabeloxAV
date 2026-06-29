@@ -24,7 +24,7 @@ export default function ToolStrip({ groups, tool, onSelect, options, modeIcon, m
       {modeLabel && (
         <div className="flex items-center gap-1.5 h-[30px] pr-3 mr-0.5 border-r hairline shrink-0">
           <span className="flex text-accent"><Icon name={modeIcon ?? "box"} size={16} /></span>
-          <span className="font-display font-semibold text-[12.5px] text-ink">{modeLabel}</span>
+          <span className="hidden lg:inline font-display font-semibold text-[12.5px] text-ink">{modeLabel}</span>
         </div>
       )}
       {groups.map((g) => {
@@ -39,8 +39,8 @@ export default function ToolStrip({ groups, tool, onSelect, options, modeIcon, m
               title={`${g.label} (${shown.hotkey})`}
               className={`flex items-center gap-1.5 h-8 px-2.5 rounded-md border ${on ? "border-accent/40 bg-accent/10 text-accent" : "border-transparent text-ink-2 hover:bg-line/40"}`}>
               <span className="flex"><Icon name={TOOL_ICON[shown.key] ?? "dot"} size={16} /></span>
-              <span className="font-body text-[12px]">{single ? g.tools[0].label : active ? active.label : g.label}</span>
-              <span className={`font-mono text-[9px] leading-none px-1 py-0.5 rounded border ${on ? "border-accent/30" : "border-line text-ink-3"}`}>{shown.hotkey}</span>
+              <span className="hidden lg:inline font-body text-[12px]">{single ? g.tools[0].label : active ? active.label : g.label}</span>
+              <span className={`hidden lg:inline-block font-mono text-[9px] leading-none px-1 py-0.5 rounded border ${on ? "border-accent/30" : "border-line text-ink-3"}`}>{shown.hotkey}</span>
               {!single && <span className="flex text-ink-3"><Icon name="chevD" size={13} /></span>}
             </button>
             {!single && open === g.key && (

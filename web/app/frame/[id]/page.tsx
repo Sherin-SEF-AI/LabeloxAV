@@ -168,6 +168,9 @@ export default function FrameEditor() {
   const [mode, setMode] = useState("objects");
   const [scaleNoteOpen, setScaleNoteOpen] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  // Responsive: on a narrow screen the properties panel collapses first (the design's degradation order),
+  // giving the canvas and tool strip room. One-time on mount; the user can expand it manually after.
+  useEffect(() => { if (typeof window !== "undefined" && window.innerWidth < 1100) setRightCollapsed(true); }, []);
   // switching mode swaps the tool strip; reset the active tool to the mode's first tool if it does not carry over
   const switchMode = (m: string) => {
     setMode(m);
