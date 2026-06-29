@@ -10,11 +10,14 @@ import BackButton from "@/components/BackButton";
 // M2.1 lane spline editor: propose lanes (CLRerNet on pod / classical local), edit as draggable control
 // points, draw implicit lanes on unmarked roads, pick lane type, mark ego, propagate across frames.
 
-const Stage = dynamic(() => import("react-konva").then((m) => m.Stage), { ssr: false });
-const Layer = dynamic(() => import("react-konva").then((m) => m.Layer), { ssr: false });
-const KImage = dynamic(() => import("react-konva").then((m) => m.Image), { ssr: false });
-const Line = dynamic(() => import("react-konva").then((m) => m.Line), { ssr: false });
-const Circle = dynamic(() => import("react-konva").then((m) => m.Circle), { ssr: false });
+// next/dynamic's convertModule does `'default' in mod`, so each loader must resolve to a module
+// shape ({ default: Component }), not the raw react-konva component. Returning the bare component
+// (m.Layer) throws "Cannot use 'in' operator to search for 'default' in Layer".
+const Stage = dynamic(() => import("react-konva").then((m) => ({ default: m.Stage })), { ssr: false });
+const Layer = dynamic(() => import("react-konva").then((m) => ({ default: m.Layer })), { ssr: false });
+const KImage = dynamic(() => import("react-konva").then((m) => ({ default: m.Image })), { ssr: false });
+const Line = dynamic(() => import("react-konva").then((m) => ({ default: m.Line })), { ssr: false });
+const Circle = dynamic(() => import("react-konva").then((m) => ({ default: m.Circle })), { ssr: false });
 
 const TYPES = ["solid", "dashed", "double", "road_edge", "implicit", "fallback"];
 const COLOR: Record<string, string> = { proposed: "#58A6FF", human: "#FF7A2F", propagated: "#E3B341" };
