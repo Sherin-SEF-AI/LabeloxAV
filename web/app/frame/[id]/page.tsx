@@ -11,6 +11,9 @@ import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/component
 import { PERSON_17 } from "@/lib/skeleton";
 import BackButton from "@/components/BackButton";
 import CorrectionModal, { type CorrectionChange } from "@/components/CorrectionModal";
+import ToolStrip from "@/components/shell/ToolStrip";
+import FloatingLayers from "@/components/shell/FloatingLayers";
+import type { ToolGroup } from "@/lib/editor/registry";
 
 // Frame-centric professional annotation editor. Pan/zoom canvas, draw + edit boxes, SAM-assisted masks,
 // layers panel, class palette, attributes, keyboard-driven, batched save. Operational Materialism tokens.
@@ -19,21 +22,30 @@ import CorrectionModal, { type CorrectionChange } from "@/components/CorrectionM
 // module for a react-konva export on a StrictMode re-mount.
 const EditorCanvas = dynamic(() => import("@/components/editor/EditorCanvas").then((m) => ({ default: m.default })), { ssr: false });
 
-const TOOLS: { key: Tool; label: string; hot: string }[] = [
-  { key: "select", label: "select", hot: "V" },
-  { key: "box", label: "box", hot: "B" },
-  { key: "polygon", label: "polygon", hot: "G" },
-  { key: "polyline", label: "polyline", hot: "L" },
-  { key: "adverse", label: "adverse", hot: "D" },
-  { key: "cuboid", label: "cuboid", hot: "C" },
-  { key: "keypoint", label: "pose", hot: "K" },
-  { key: "measure", label: "measure", hot: "R" },
-  { key: "sam-point", label: "sam pt", hot: "S" },
-  { key: "sam-box", label: "sam box", hot: "M" },
-  { key: "magic-wand", label: "wand", hot: "W" },
-  { key: "brush", label: "brush", hot: "P" },
-  { key: "eraser", label: "eraser", hot: "E" },
-  { key: "superpixel", label: "cells", hot: "U" },
+// Editor tools grouped so the strip renders one button per group (not 14 peers in a row). Tool keys match
+// the editor's dispatch keys. Variants live in a flyout, cycled by their hotkey. When the mode rail lands
+// (phase 3), these split across modes; for now one Objects-centric strip holds them all without wrapping.
+const EDITOR_GROUPS: ToolGroup[] = [
+  { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
+  { key: "draw", label: "Draw", tools: [
+    { key: "box", label: "box", hotkey: "B" },
+    { key: "polygon", label: "polygon", hotkey: "G" },
+    { key: "polyline", label: "polyline", hotkey: "L" },
+  ] },
+  { key: "ai", label: "AI assist", tools: [
+    { key: "sam-point", label: "sam point", hotkey: "S" },
+    { key: "sam-box", label: "sam box", hotkey: "M" },
+    { key: "magic-wand", label: "wand", hotkey: "W" },
+  ] },
+  { key: "mask", label: "Mask edit", tools: [
+    { key: "brush", label: "brush", hotkey: "P" },
+    { key: "eraser", label: "eraser", hotkey: "E" },
+    { key: "superpixel", label: "cells", hotkey: "U" },
+  ] },
+  { key: "pose", label: "Pose", tools: [{ key: "keypoint", label: "pose", hotkey: "K" }] },
+  { key: "region", label: "Region", tools: [{ key: "adverse", label: "adverse", hotkey: "D" }] },
+  { key: "cuboid", label: "3D", tools: [{ key: "cuboid", label: "cuboid", hotkey: "C" }] },
+  { key: "measure", label: "Measure", tools: [{ key: "measure", label: "measure", hotkey: "R" }] },
 ];
 
 // directed object-relationship kinds offered in the editor (rider_of is the India two-wheeler case)
@@ -553,44 +565,29 @@ export default function FrameEditor() {
         <span className="font-mono text-[11px] text-ink-3">/ FRAME <span className="text-ink-2">{String(id).slice(0, 8)}</span></span>
         <button onClick={() => router.push(`/search?frame=${id}`)} title="find visually similar frames (DINOv3)"
           className="font-mono text-[11px] text-ink-3 hover:text-accent border border-line hover:border-accent px-2 py-0.5">find similar</button>
-        <div className="flex items-center gap-1 ml-2">
-          {TOOLS.map((t) => (
-            <button key={t.key} onClick={() => dispatch({ t: "tool", tool: t.key })} title={`${t.label} (${t.hot})`}
-              className={`font-mono text-[11px] px-2 py-1 border ${st.tool === t.key ? "border-accent text-ink" : "border-line text-ink-3"}`}>
-              {t.label}
-            </button>
-          ))}
-          {st.tool === "adverse" && (
-            <select value={adverseCond} onChange={(e) => setAdverseCond(e.target.value)} title="adverse condition to tag"
-              className="bg-bg border border-accent text-accent px-1 py-1 font-mono text-[11px]">
-              {["glare", "reflection", "shadow", "rain", "fog", "lowlight"].map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          )}
-          {(st.tool === "brush" || st.tool === "eraser") && (
-            <input type="range" min={4} max={60} value={brushRadius} title={`brush radius ${brushRadius}px`}
-              onChange={(e) => setBrushRadius(Number(e.target.value))} className="w-20" />
-          )}
+        <div className="ml-2 min-w-0 overflow-x-auto no-scrollbar">
+          <ToolStrip groups={EDITOR_GROUPS} tool={st.tool}
+            onSelect={(t) => dispatch({ t: "tool", tool: t as Tool })}
+            options={
+              <>
+                {st.tool === "adverse" && (
+                  <select value={adverseCond} onChange={(e) => setAdverseCond(e.target.value)} title="adverse condition to tag"
+                    className="bg-bg border border-accent text-accent px-1 py-1 font-mono text-[11px]">
+                    {["glare", "reflection", "shadow", "rain", "fog", "lowlight"].map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                )}
+                {(st.tool === "brush" || st.tool === "eraser") && (
+                  <input type="range" min={4} max={60} value={brushRadius} title={`brush radius ${brushRadius}px`}
+                    onChange={(e) => setBrushRadius(Number(e.target.value))} className="w-20" />
+                )}
+              </>
+            } />
         </div>
         <div className="flex items-center gap-1 ml-2 font-mono text-[11px]">
           <button onClick={() => zoomBy(1 / 1.2)} className="border border-line px-2 py-1 hover:border-accent">-</button>
           <span className="w-12 text-center text-ink-2">{Math.round(st.viewport.scale * 100) || ""}%</span>
           <button onClick={() => zoomBy(1.2)} className="border border-line px-2 py-1 hover:border-accent">+</button>
           <button onClick={fit} className="border border-line px-2 py-1 hover:border-accent">fit</button>
-        </div>
-        {/* P4 layer visibility toggles: show that the road IS segmented (lanes + drivable + masks) */}
-        <div className="flex items-center gap-1 ml-1 font-mono text-[11px]" title="toggle annotation layers">
-          {(["boxes", "masks", "lanes", "drivable", "adverse", "cuboids", "seg"] as const).map((k) => (
-            <button key={k} onClick={() => setLayers((s) => ({ ...s, [k]: !s[k] }))}
-              className={`px-1.5 py-1 border ${layers[k] ? "border-accent text-ink" : "border-line text-ink-3"}`}>{k}</button>
-          ))}
-          <select value={segKind} onChange={(e) => setSegKind(e.target.value as "semantic" | "panoptic")}
-            title="dense segmentation kind" className="bg-bg border border-line px-1 py-1 text-ink-3">
-            <option value="semantic">semantic</option>
-            <option value="panoptic">panoptic</option>
-          </select>
-          <button title="run dense segmentation (SAM-everything + VLM) on this frame"
-            onClick={async () => { flash("segmenting..."); try { const r = await api.autoSegment(id, segKind); setSegUrl(`/api/frames/${id}/segment/overlay?kind=${segKind}&t=${Date.now()}`); flash(`segmented ${segKind} (${Object.keys(r.coverage).length} classes${r.n_instances ? ", " + r.n_instances + " instances" : ""})`); } catch (e) { flash("segment failed: " + String(e)); } }}
-            className="px-1.5 py-1 border border-line text-ink-3 hover:border-accent">auto-seg</button>
         </div>
         <div className="flex items-center gap-1 font-mono text-[11px]">
           <button onClick={() => dispatch({ t: "undo" })} disabled={!st.past.length} className="border border-line px-2 py-1 disabled:opacity-40 hover:border-accent">undo</button>
@@ -657,6 +654,19 @@ export default function FrameEditor() {
               dispatch({ t: "update", id: oid, patch: polys.length ? { mask: polys, bbox: bboxOfPolys(polys) } : { mask: polys } })}
             onCursor={setCursor}
           />
+          <FloatingLayers layers={layers} onToggle={(k) => setLayers((s) => ({ ...s, [k]: !s[k as keyof typeof s] }))}
+            extra={
+              <>
+                <select value={segKind} onChange={(e) => setSegKind(e.target.value as "semantic" | "panoptic")}
+                  title="dense segmentation kind" className="w-full bg-bg border border-line px-1 py-0.5 text-ink-3">
+                  <option value="semantic">semantic</option>
+                  <option value="panoptic">panoptic</option>
+                </select>
+                <button title="run dense segmentation (SAM-everything + VLM) on this frame"
+                  onClick={async () => { flash("segmenting..."); try { const r = await api.autoSegment(id, segKind); setSegUrl(`/api/frames/${id}/segment/overlay?kind=${segKind}&t=${Date.now()}`); flash(`segmented ${segKind} (${Object.keys(r.coverage).length} classes${r.n_instances ? ", " + r.n_instances + " instances" : ""})`); } catch (e) { flash("segment failed: " + String(e)); } }}
+                  className="w-full border border-line px-1 py-0.5 text-ink-3 hover:border-accent">auto-seg</button>
+              </>
+            } />
           {st.candidate?.length ? (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 font-mono text-[11px] text-ink-2">
               mask ready, click the next object to keep this one &amp; continue, <span className="text-pass">Enter</span> to finish, <span className="text-ink-3">Esc</span> to discard
