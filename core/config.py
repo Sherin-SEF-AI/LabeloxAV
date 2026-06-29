@@ -318,6 +318,27 @@ class CloudSettings(BaseModel):
 class OntologySettings(BaseModel):
     path: str = "ontology/labelox_in_v0.yaml"
 
+    # M-Q.0 ontology pullback. The open-vocab models (Path B concept prompts, Path C VLM shortlist) are
+    # prompted ONLY with the supported core plus the fallback classes, never with the ungrounded long tail,
+    # so the model literally cannot invent bus_shelter / water_bottles / vintage_car when those are not in
+    # its prompt set. The supported core is the IDD-anchored road actors and safety primitives we have
+    # verified instances for; a class beyond it re-enters only by earning promotion_min_instances verified
+    # (gate-accepted) instances. Everything else folds into object_fallback / vehicle_fallback honestly.
+    supported_core: list[str] = Field(default_factory=lambda: [
+        # vehicles (IDD-anchored + the India primitives we actually see)
+        "sedan", "hatchback", "suv", "small_suv", "minivan", "pickup", "lcv", "truck", "tempo",
+        "bus", "school_bus", "mini_bus", "tractor", "water_tanker",
+        "motorcycle", "scooter", "moped", "cycle",
+        "autorickshaw", "e_auto", "e_rickshaw",
+        # vulnerable road users (safety, always prompted even while the corpus is small)
+        "pedestrian", "child", "rider", "cyclist", "person",
+        # animals
+        "cattle", "dog", "buffalo", "goat",
+        # the real, common road infrastructure (IDD has sign/light; pole and barrier are everywhere)
+        "traffic_sign", "traffic_signal", "pole", "barrier", "road_divider", "speed_bump",
+    ])
+    promotion_min_instances: int = 50  # verified (gate-accepted) instances a class must earn to re-enter
+
 
 class PathsSettings(BaseModel):
     scratch: str = ".scratch"

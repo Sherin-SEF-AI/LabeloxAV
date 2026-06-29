@@ -99,13 +99,15 @@ EST_PATHB_MB = 3500
 
 
 class StagedRunner:
-    def __init__(self, yolo_weights: str | None = None) -> None:
+    def __init__(self, yolo_weights: str | None = None, supported_ids: set[int] | None = None) -> None:
         self.settings = get_settings()
         self.guard = VramGuard()
         self.yolo: YoloPath | None = None
         self.sam: Sam3Path | None = None
         # When set, Path A loads the governance champion's weights instead of the config default.
         self.yolo_weights = yolo_weights
+        # M-Q.0: the grounded supported set restricts Path B's open-vocab concept prompts.
+        self.supported_ids = supported_ids
 
     def open_stage1(self) -> None:
         self.guard.reset_peak()
@@ -113,7 +115,7 @@ class StagedRunner:
         self.yolo = YoloPath(self.yolo_weights)
         self.yolo.load()
         self.guard.require(EST_PATHB_MB, "path_b_openvocab")
-        self.sam = Sam3Path()
+        self.sam = Sam3Path(self.supported_ids)
         self.sam.load()
         log.info("stage1.open", free_mb=round(self.guard.free_mb()))
 
@@ -206,6 +208,7 @@ async def process_session(
     limit: int | None,
     on_frame: Callable[[FrameDetections], Awaitable[None]],
     yolo_weights: str | None = None,
+    supported_ids: set[int] | None = None,
 ) -> dict:
     """Stream a session's frames through Stage 1, invoking on_frame per frame. The callback is the
     plug point for fusion + gate + persistence (M3) and the VLM pass (M4)."""
@@ -213,7 +216,7 @@ async def process_session(
     if not frames:
         raise RuntimeError(f"no frames for session {session_id}")
 
-    runner = StagedRunner(yolo_weights)
+    runner = StagedRunner(yolo_weights, supported_ids)
     runner.open_stage1()
     n_a = 0
     n_b = 0
@@ -251,6 +254,7 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
     """
     from services.autolabel.fusion import FusionEngine
     from services.autolabel.gate import gate_object, needs_vlm
+    from services.autolabel.grounding import supported_concept_ids
     from services.autolabel.ontology import get_ontology
     from services.autolabel.paths.path_c_qwen3vl import VlmVerifier, apply_vlm, make_vlm_client
     from services.autolabel.persist import persist_frame_objects
@@ -260,6 +264,9 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
     store.ensure_bucket()
     onto = get_ontology()
     engine = FusionEngine(settings, onto)
+    # M-Q.0: only prompt the open-vocab models (Path B concepts, Path C shortlist) with the grounded
+    # supported set, so they cannot invent ungrounded classes.
+    supported_ids = await supported_concept_ids()
     maker = get_sessionmaker()
     bus = EventBus()
     await bus.start()
@@ -267,7 +274,7 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
     verifier = None
     if settings.models.vlm.enabled:
         client = vlm_client or make_vlm_client(settings)
-        verifier = VlmVerifier(client, onto, settings)
+        verifier = VlmVerifier(client, onto, settings, supported_ids=supported_ids)
 
     totals = {"objects": 0, "by_state": {}, "vlm_calls": 0, "vlm_eligible": 0}
     budget = settings.models.vlm.max_calls_per_session
@@ -310,7 +317,8 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
                 totals["by_state"][k] = totals["by_state"].get(k, 0) + v
 
         try:
-            summary = await process_session(session_id, limit, on_frame, yolo_weights=champion_weights)
+            summary = await process_session(session_id, limit, on_frame, yolo_weights=champion_weights,
+                                            supported_ids=supported_ids)
             await db.commit()
         finally:
             await bus.stop()

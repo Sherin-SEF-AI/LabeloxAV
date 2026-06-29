@@ -26,13 +26,18 @@ log = get_logger("path_b")
 class Sam3Path:
     name = "path_b_sam3"
 
-    def __init__(self) -> None:
+    def __init__(self, supported_ids: set[int] | None = None) -> None:
         self.settings = get_settings()
         self.onto = get_ontology()
         self._world = None
         self._sam = None
+        # M-Q.0: prompt only with the grounded supported set. An ungrounded class name in the open-vocab
+        # concept list is the hallucination source (the model finds water_bottles because it is asked to),
+        # so anything outside the set is dropped here and folds to fallback downstream. None means all
+        # classes (back-compat for callers that do not pass the grounded set).
+        classes = self.onto.classes if supported_ids is None else [c for c in self.onto.classes if c.id in supported_ids]
         # India/rare classes first so the open-vocab budget favors where Path A is weakest.
-        self._classes = sorted(self.onto.classes, key=lambda c: (not c.india, c.id))
+        self._classes = sorted(classes, key=lambda c: (not c.india, c.id))
         self._phrases = [c.name.replace("_", " ") for c in self._classes]
         self.model_version = (
             f"{self.settings.models.openvocab.detector_weights}+{self.settings.models.openvocab.seg_weights}"
