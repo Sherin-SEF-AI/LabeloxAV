@@ -70,6 +70,11 @@ class RegionAdapter:
         return self._sam
 
     def propose(self, image_bgr) -> list[tuple]:
+        return [bb for _, bb in self.propose_masks(image_bgr)]
+
+    def propose_masks(self, image_bgr) -> list[tuple]:
+        """Area-filtered SAM-everything regions as (mask_bool, bbox) pairs. Dense semantic/panoptic needs
+        the masks (not just boxes), so this is the variant the segment2d service consumes."""
         from services.autolabel.paths.base import mask_to_bbox
 
         cfg = self.settings.phase4.recall
@@ -81,7 +86,7 @@ class RegionAdapter:
         masks = res[0].masks if res else None
         if masks is None or masks.data is None:
             return []
-        boxes: list[tuple] = []
+        out: list[tuple] = []
         for m in masks.data.cpu().numpy().astype(bool):
             bb = mask_to_bbox(m)
             if bb is None:
@@ -90,8 +95,8 @@ class RegionAdapter:
             frac = area / frame_area if frame_area > 0 else 0.0
             if frac < cfg.region_min_area_frac or frac > cfg.region_max_area_frac:
                 continue
-            boxes.append(tuple(float(v) for v in bb))
-        return boxes
+            out.append((m, tuple(float(v) for v in bb)))
+        return out
 
 
 class VlmClassifyAdapter:

@@ -1027,3 +1027,25 @@ class AdverseRegion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_adverse_region_frame", "frame_id"),)
+
+
+class FrameSegmentation(Base):
+    # Full-frame dense segmentation: a per-pixel class-id raster (semantic) plus an optional per-pixel
+    # instance-id raster (panoptic). Rasters live in MinIO; this row holds the uris, the colored display
+    # overlay, per-class coverage, and lineage. One row per frame per kind (semantic|panoptic).
+    __tablename__ = "frame_segmentation"
+
+    seg_id: Mapped[uuid.UUID] = _uuid_pk()
+    frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # semantic|panoptic
+    labels_uri: Mapped[str] = mapped_column(Text, nullable=False)  # class-id per pixel (npz)
+    instance_uri: Mapped[str | None] = mapped_column(Text)         # instance-id per pixel (npz), panoptic only
+    overlay_uri: Mapped[str | None] = mapped_column(Text)          # colored RGBA png for display
+    coverage: Mapped[dict] = mapped_column(JSONB, default=dict)    # {class_name: pixel_fraction}
+    segments: Mapped[dict] = mapped_column(JSONB, default=dict)    # panoptic: instance_id -> {class_id, object_id}
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="proposed")  # proposed|human
+    model_version: Mapped[str | None] = mapped_column(String(64))
+    ontology_version: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_frame_segmentation_frame_kind", "frame_id", "kind"),)

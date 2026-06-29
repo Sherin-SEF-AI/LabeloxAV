@@ -308,6 +308,11 @@ export const api = {
     post<{ polygons: number[][] }>(`/api/mask/compose`, body),
   superpixels: (frame_id: string, n = 300) =>
     post<{ superpixels: number[][] }>(`/api/superpixels/${frame_id}?n=${n}`, {}),
+  // dense semantic/panoptic segmentation: run auto, fetch metadata (the overlay is an image URL)
+  autoSegment: (frame_id: string, kind = "semantic") =>
+    post<{ kind: string; coverage: Record<string, number>; n_instances: number }>(`/api/frames/${frame_id}/segment?kind=${kind}`, {}),
+  getSegment: (frame_id: string, kind = "semantic") =>
+    get<{ found: boolean; coverage?: Record<string, number>; has_overlay?: boolean }>(`/api/frames/${frame_id}/segment?kind=${kind}`),
   // M2.1 lanes
   framesLanes: (frameId: string) => get<LaneRow[]>(`/api/frames/${frameId}/lanes`),
   proposeLanes: (frameId: string) => post<{ proposed: number; lanes: LaneRow[]; model: string }>(`/api/frames/${frameId}/lanes/propose`, {}),

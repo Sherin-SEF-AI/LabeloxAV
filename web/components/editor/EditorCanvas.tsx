@@ -12,7 +12,7 @@ import { classColor, classFill } from "@/lib/colors";
 import type { EdObject, Tool, Viewport } from "./useEditor";
 
 type LaneOverlay = { lane_id: string; control_points: number[][]; lane_type: string; is_ego: boolean; source: string };
-export type LayerFlags = { boxes: boolean; masks: boolean; lanes: boolean; drivable: boolean; adverse: boolean; cuboids: boolean };
+export type LayerFlags = { boxes: boolean; masks: boolean; lanes: boolean; drivable: boolean; adverse: boolean; cuboids: boolean; seg: boolean };
 type AdverseOverlay = { region_id: string; geometry: number[]; condition: string };
 type CuboidOverlay = { object_id: string; corners_uv: number[][]; edges: number[][] };
 
@@ -31,6 +31,7 @@ type Props = {
   relationships?: { from_object_id: string; to_object_id: string; kind: string }[];
   adverse?: AdverseOverlay[];
   cuboids?: CuboidOverlay[];
+  segOverlayUrl?: string | null;               // colored dense-segmentation overlay png to draw over the frame
   layers?: LayerFlags;
   onViewport: (v: Viewport) => void;
   onSelect: (id: string | null) => void;
@@ -70,6 +71,7 @@ export default function EditorCanvas(p: Props) {
   const [draw, setDraw] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [poly, setPoly] = useState<number[]>([]); // in-progress manual polygon, flattened [x,y,...]
   const [stroke, setStroke] = useState<number[][] | null>(null); // active brush/eraser stroke stamp centres
+  const [segImg, setSegImg] = useState<HTMLImageElement | null>(null); // dense-segmentation overlay png
   const [measure, setMeasure] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const trRef = useRef<Konva.Transformer>(null);
@@ -94,6 +96,16 @@ export default function EditorCanvas(p: Props) {
     im.onerror = () => setImg(null); // a missing frame image (404) must not leave the viewport unfit
   }, [p.imageUrl]);
 
+  // load the dense-segmentation overlay png (a separate raster drawn over the frame at reduced opacity)
+  useEffect(() => {
+    if (!p.segOverlayUrl) { setSegImg(null); return; }
+    const im = new window.Image();
+    im.crossOrigin = "anonymous";
+    im.src = p.segOverlayUrl;
+    im.onload = () => setSegImg(im);
+    im.onerror = () => setSegImg(null);
+  }, [p.segOverlayUrl]);
+
   // fit from the known frame dimensions (viewport.scale === 0 is the "fit pending" sentinel). This must not
   // wait for the image to load, or a missing image leaves scale at 0 and every stroke/radius becomes Infinity.
   useEffect(() => {
@@ -113,7 +125,7 @@ export default function EditorCanvas(p: Props) {
   }, [p.selectedId, p.tool, p.objects]);
 
   const v = p.viewport;
-  const L = p.layers ?? { boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true };
+  const L = p.layers ?? { boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true };
   const toImg = (): number[] => {
     const pt = stageRef.current?.getRelativePointerPosition();
     return pt ? [pt.x, pt.y] : [0, 0];
@@ -231,6 +243,8 @@ export default function EditorCanvas(p: Props) {
       >
         <Layer>
           {img && <KImage image={img} width={p.imgW} height={p.imgH} listening={false} />}
+          {/* dense-segmentation overlay (semantic/panoptic), drawn over the frame at reduced opacity */}
+          {L.seg && segImg && <KImage image={segImg} width={p.imgW} height={p.imgH} opacity={0.5} listening={false} />}
 
           {/* drivable-area segmentation (M2.2), drawn behind everything */}
           {L.drivable && p.drivable && Object.entries(p.drivable).flatMap(([cls, polys]) =>

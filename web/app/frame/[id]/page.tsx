@@ -106,7 +106,8 @@ export default function FrameEditor() {
   const [cuboids, setCuboids] = useState<ProjectedCuboid[]>([]);
   const [superpixels, setSuperpixels] = useState<number[][]>([]);
   const [brushRadius, setBrushRadius] = useState(14);
-  const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true });
+  const [segUrl, setSegUrl] = useState<string | null>(null); // dense-segmentation overlay png url
+  const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true });
 
   const flash = (m: string) => {
     setNotice(m);
@@ -226,6 +227,8 @@ export default function FrameEditor() {
     setRelationships(rel);
     setAdverse(adv);
     setCuboids(cub);
+    const seg = await api.getSegment(id, "semantic").catch(() => ({ found: false, has_overlay: false }));
+    setSegUrl(seg.found && seg.has_overlay ? `/api/frames/${id}/segment/overlay?kind=semantic&t=${Date.now()}` : null);
   }, [id]);
   useEffect(() => { loadLayers(); }, [loadLayers]);
   // fetch SLIC superpixels lazily, the first time the superpixel tool is used on this frame
@@ -575,10 +578,13 @@ export default function FrameEditor() {
         </div>
         {/* P4 layer visibility toggles: show that the road IS segmented (lanes + drivable + masks) */}
         <div className="flex items-center gap-1 ml-1 font-mono text-[11px]" title="toggle annotation layers">
-          {(["boxes", "masks", "lanes", "drivable", "adverse", "cuboids"] as const).map((k) => (
+          {(["boxes", "masks", "lanes", "drivable", "adverse", "cuboids", "seg"] as const).map((k) => (
             <button key={k} onClick={() => setLayers((s) => ({ ...s, [k]: !s[k] }))}
               className={`px-1.5 py-1 border ${layers[k] ? "border-accent text-ink" : "border-line text-ink-3"}`}>{k}</button>
           ))}
+          <button title="run dense semantic segmentation (SAM-everything + VLM) on this frame"
+            onClick={async () => { flash("segmenting..."); try { const r = await api.autoSegment(id, "semantic"); setSegUrl(`/api/frames/${id}/segment/overlay?kind=semantic&t=${Date.now()}`); flash(`segmented (${Object.keys(r.coverage).length} classes)`); } catch (e) { flash("segment failed: " + String(e)); } }}
+            className="px-1.5 py-1 border border-line text-ink-3 hover:border-accent">auto-seg</button>
         </div>
         <div className="flex items-center gap-1 font-mono text-[11px]">
           <button onClick={() => dispatch({ t: "undo" })} disabled={!st.past.length} className="border border-line px-2 py-1 disabled:opacity-40 hover:border-accent">undo</button>
@@ -634,6 +640,7 @@ export default function FrameEditor() {
             onBrushStroke={onBrushStroke}
             superpixels={superpixels}
             onPickSuperpixel={pickSuperpixel}
+            segOverlayUrl={layers.seg ? segUrl : null}
             keypointDraft={kpDraft} skeletonEdges={PERSON_17.edges as unknown as number[][]}
             onPlaceKeypoint={onPlaceKeypoint} onUpdateKeypoints={onUpdateKeypoints}
             mPerPx={meta.lidar_res ?? undefined}
