@@ -22,23 +22,29 @@ from sqlalchemy import select
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
 from core.storage import get_object_store
-from db.models import Frame, Object
+from db.models import Frame, Object, Review
 from db.session import get_sessionmaker
 
 log = get_logger("isotonic")
 
 _CORRECT = {"accepted"}
 _INCORRECT = {"rejected"}
+# Reviewers that are not a human verdict: the gate, relabel, and QA bots. A human verdict is the only
+# ground truth we calibrate against.
+_SYSTEM_REVIEWERS = ("system", "relabel", "gate", "autolabel", "error-detect", "vlm-qa")
 
 
 async def _collect_pairs(session_id: str | None = None) -> tuple[np.ndarray, np.ndarray]:
     maker = get_sessionmaker()
     async with maker() as db:
-        # Train only on human-verified labels (a review sets source="human"). Unreviewed auto_accepts
-        # must not count as "correct" -- that would teach the curve to predict its own gate decisions and
-        # report a falsely low calibration error.
+        # Train only on auto-labeled objects a human REVIEWED: raw_conf is the model score, the human
+        # verdict (accepted vs rejected) is the ground truth. Key off the Review audit trail by a real
+        # user, not the object's source: a review does not flip source to human, and unreviewed
+        # auto_accepts must not count (that would calibrate the curve to the gate's own decisions and
+        # report a falsely low error). Both verdicts are kept so the curve is not degenerate.
+        human_reviewed = select(Review.object_id).where(Review.reviewer.notin_(_SYSTEM_REVIEWERS))
         stmt = select(Object.provenance, Object.state).where(
-            Object.source == "human",
+            Object.object_id.in_(human_reviewed),
             Object.state.in_(list(_CORRECT | _INCORRECT)),
         )
         if session_id:
