@@ -73,6 +73,7 @@ def _detail(obj: Object, frame: Frame, onto) -> ObjectDetail:
         version=obj.version,
         rot_deg=obj.rot_deg or 0.0,
         keypoints=obj.keypoints,
+        polyline=obj.polyline,
     )
 
 
@@ -104,6 +105,7 @@ async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
             "version": o.version,
             "rot_deg": o.rot_deg or 0.0,
             "keypoints": o.keypoints,
+            "polyline": o.polyline,
         }
         for o in rows
     ]
@@ -168,6 +170,7 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         object_id=oid, frame_id=frame.frame_id, class_id=onto.by_name(payload.class_name).id,
         bbox=payload.bbox, mask_uri=mask_uri, mask_encoding=mask_encoding, attrs=payload.attrs or {},
         conf=1.0, source="human", state=payload.state, rot_deg=payload.rot_deg, keypoints=payload.keypoints,
+        polyline=payload.polyline,
         provenance={"created_by": "human-annotation", "idem_key": payload.idem_key},
     )
     db.add(obj)

@@ -23,6 +23,7 @@ const TOOLS: { key: Tool; label: string; hot: string }[] = [
   { key: "select", label: "select", hot: "V" },
   { key: "box", label: "box", hot: "B" },
   { key: "polygon", label: "polygon", hot: "G" },
+  { key: "polyline", label: "polyline", hot: "L" },
   { key: "keypoint", label: "pose", hot: "K" },
   { key: "measure", label: "measure", hot: "R" },
   { key: "sam-point", label: "sam pt", hot: "S" },
@@ -93,7 +94,7 @@ export default function FrameEditor() {
       const eds: EdObject[] = objs.map((x) => ({
         id: x.object_id, track_id: x.track_id, class_id: x.class_id, class_name: x.class_name, bbox: x.bbox,
         mask: x.mask_polygons || [], attrs: {}, conf: x.conf, state: x.state, visible: true, version: x.version,
-        rot: x.rot_deg, keypoints: x.keypoints ?? undefined,
+        rot: x.rot_deg, keypoints: x.keypoints ?? undefined, polyline: x.polyline ?? undefined,
       }));
       dispatch({ t: "load", objects: eds, viewport: { scale: 0, ox: 0, oy: 0 }, selectedId: focus });
       const fc = (focus && eds.find((e) => e.id === focus)) || null;
@@ -275,7 +276,7 @@ export default function FrameEditor() {
           const created = await api.createObject(id, {
             class_name: o.class_name, bbox: o.bbox, attrs: o.attrs,
             mask_polygons: o.mask.length ? o.mask : undefined, state: tgt, idem_key: o.id, rot_deg: o.rot ?? 0,
-            keypoints: o.keypoints ?? null,
+            keypoints: o.keypoints ?? null, polyline: o.polyline,
           });
           remap[o.id] = created.object_id;
           if (created.version != null) versions[o.id] = created.version;
@@ -284,7 +285,7 @@ export default function FrameEditor() {
           // updateMask that could leave the mask out of sync on a partial failure).
           const r = await api.review(o.id, { action: "adjust_geometry",
             class_name: o.class_name, bbox: o.bbox, attrs: o.attrs, state: tgt, expected_version: o.version,
-            rot_deg: o.rot ?? 0, keypoints: o.keypoints ?? null,
+            rot_deg: o.rot ?? 0, keypoints: o.keypoints ?? null, polyline: o.polyline,
             mask_polygons: o.mask.length ? o.mask : undefined });
           if (r.version != null) versions[o.id] = r.version;
         }
@@ -389,6 +390,7 @@ export default function FrameEditor() {
       else if (k === "v") dispatch({ t: "tool", tool: "select" });
       else if (k === "b") dispatch({ t: "tool", tool: "box" });
       else if (k === "g") dispatch({ t: "tool", tool: "polygon" });
+      else if (k === "l") dispatch({ t: "tool", tool: "polyline" });
       else if (k === "k") dispatch({ t: "tool", tool: "keypoint" });
       else if (k === "r") dispatch({ t: "tool", tool: "measure" });
       else if (k === "s") dispatch({ t: "tool", tool: "sam-point" });
@@ -497,6 +499,7 @@ export default function FrameEditor() {
             onUpdateBbox={(oid, bbox, rot) => dispatch({ t: "update", id: oid, patch: rot !== undefined ? { bbox, rot } : { bbox } })}
             onDrawBox={(bbox) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox, mask: [], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
             onDrawPolygon={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [pts], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
+            onDrawPolyline={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [], polyline: Array.from({ length: pts.length / 2 }, (_, i) => [pts[2 * i], pts[2 * i + 1]]), attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
             keypointDraft={kpDraft} skeletonEdges={PERSON_17.edges as unknown as number[][]}
             onPlaceKeypoint={onPlaceKeypoint} onUpdateKeypoints={onUpdateKeypoints}
             mPerPx={meta.lidar_res ?? undefined}

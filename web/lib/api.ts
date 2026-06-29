@@ -279,7 +279,7 @@ export const api = {
     post<SegmentResult>("/api/segment", { frame_id, ...p }),
   createObject: (
     frame_id: string,
-    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null },
+    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][] },
   ) => post<ObjectDetail>(`/api/frames/${frame_id}/objects`, body),
   updateMask: (object_id: string, polygons: number[][], width?: number, height?: number) =>
     put<{ object_id: string }>(`/api/objects/${object_id}/mask`, { polygons, width, height }),
@@ -381,6 +381,7 @@ export const api = {
       rot_deg?: number;
       keypoints?: Keypoints | null;
       mask_polygons?: number[][];
+      polyline?: number[][];
     },
   ) => post<ObjectDetail & { version?: number; rot_deg?: number }>(`/api/objects/${id}/review`, payload),
   scenarios: (params: Record<string, string>) =>

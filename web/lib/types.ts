@@ -34,6 +34,7 @@ export type ObjectDetail = {
   version?: number;
   rot_deg?: number;
   keypoints?: Keypoints | null;
+  polyline?: number[][] | null;
 };
 
 export type OntologyClass = { id: number; name: string; l0: string; l1: string; india: boolean };
@@ -210,6 +211,7 @@ export type FrameObject = {
   version?: number;
   rot_deg?: number;
   keypoints?: Keypoints | null;
+  polyline?: number[][] | null;
 };
 
 export type TrackItem = {

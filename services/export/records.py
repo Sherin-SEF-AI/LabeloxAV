@@ -33,3 +33,4 @@ class ExportRecord:
     cuboid_3d: dict | None = None  # ego-frame {center,size,yaw} when a 3D label exists
     rot_deg: float = 0.0           # oriented-box rotation about the box centre (0 = axis-aligned)
     keypoints: dict | None = None  # COCO-style {"skeleton","points":[[x,y,v],...]} pose, when present
+    polyline: list | None = None   # open linear feature [[x,y],...] (curb/road_edge/barrier), when present

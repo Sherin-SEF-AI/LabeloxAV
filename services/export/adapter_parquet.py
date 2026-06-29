@@ -21,7 +21,7 @@ def write_parquet(records: list[ExportRecord], out_dir: Path, filename: str = "o
         "vehicle_id": [], "city": [], "class_id": [], "class_name": [],
         "bbox_x1": [], "bbox_y1": [], "bbox_x2": [], "bbox_y2": [],
         "conf": [], "state": [], "source": [], "mask_uri": [], "mask_encoding": [],
-        "rot_deg": [], "keypoints_json": [], "attrs_json": [], "provenance_json": [],
+        "rot_deg": [], "keypoints_json": [], "polyline_json": [], "attrs_json": [], "provenance_json": [],
     }
     for r in records:
         cols["object_id"].append(str(r.object_id))
@@ -48,6 +48,7 @@ def write_parquet(records: list[ExportRecord], out_dir: Path, filename: str = "o
         cols["mask_encoding"].append(r.mask_encoding)
         cols["rot_deg"].append(float(r.rot_deg or 0.0))
         cols["keypoints_json"].append(json.dumps(r.keypoints) if r.keypoints else None)
+        cols["polyline_json"].append(json.dumps(r.polyline) if r.polyline else None)
         cols["attrs_json"].append(json.dumps(r.attrs))
         cols["provenance_json"].append(json.dumps(r.provenance))
 

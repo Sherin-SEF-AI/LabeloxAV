@@ -105,6 +105,7 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
                 cuboid_3d=obj.cuboid_3d,
                 rot_deg=obj.rot_deg or 0.0,
                 keypoints=obj.keypoints,
+                polyline=obj.polyline,
             )
         )
     return records

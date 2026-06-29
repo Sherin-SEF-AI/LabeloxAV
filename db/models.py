@@ -171,6 +171,9 @@ class Object(Base):
     # Optional keypoints/skeleton (COCO-style, image pixels): {"skeleton": str, "points": [[x,y,v],...]}
     # with v in {0 not-labeled, 1 occluded, 2 visible}. For pedestrian/cyclist pose.
     keypoints: Mapped[dict | None] = mapped_column(JSONB)
+    # Open polyline geometry (ordered [[x,y],...], image pixels) for linear features (curb, road_edge,
+    # barrier). When present, bbox is the points AABB so export/gate stay consistent (like rot_deg).
+    polyline: Mapped[list | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Phase 2 perception (additive, nullable):

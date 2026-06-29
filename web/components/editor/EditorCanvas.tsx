@@ -32,6 +32,7 @@ type Props = {
   onUpdateBbox: (id: string, bbox: number[], rot?: number) => void;
   onDrawBox: (bbox: number[]) => void;
   onDrawPolygon: (points: number[]) => void;   // manual polygon: flattened [x,y,...], no GPU/SAM needed
+  onDrawPolyline: (points: number[]) => void;  // open polyline (curb/road_edge/barrier), not closed
   keypointDraft?: number[][] | null;           // in-progress pose points [[x,y,v],...] (placed so far)
   skeletonEdges?: number[][];                  // index pairs connecting keypoints, for rendering
   onPlaceKeypoint: (pt: number[]) => void;     // keypoint tool: drop the next skeleton point
@@ -121,8 +122,8 @@ export default function EditorCanvas(p: Props) {
       setDraw({ x0: x, y0: y, x1: x, y1: y });
     } else if (p.tool === "measure") {
       setMeasure({ x0: x, y0: y, x1: x, y1: y });
-    } else if (p.tool === "polygon") {
-      setPoly((pp) => [...pp, x, y]); // each click drops a vertex; double-click closes
+    } else if (p.tool === "polygon" || p.tool === "polyline") {
+      setPoly((pp) => [...pp, x, y]); // each click drops a vertex; double-click closes/commits
     } else if (p.tool === "keypoint") {
       p.onPlaceKeypoint([x, y]); // each click drops the next skeleton point
     } else if (p.tool === "sam-point") {
@@ -133,13 +134,17 @@ export default function EditorCanvas(p: Props) {
   }
 
   function onDblClick() {
-    if (p.tool !== "polygon") return;
-    if (poly.length >= 6) p.onDrawPolygon(poly); // at least 3 vertices
-    setPoly([]);
+    if (p.tool === "polygon") {
+      if (poly.length >= 6) p.onDrawPolygon(poly); // at least 3 vertices, closed
+      setPoly([]);
+    } else if (p.tool === "polyline") {
+      if (poly.length >= 4) p.onDrawPolyline(poly); // at least 2 vertices, open
+      setPoly([]);
+    }
   }
 
-  // abandon a half-drawn polygon when the tool changes
-  useEffect(() => { if (p.tool !== "polygon") setPoly([]); }, [p.tool]);
+  // abandon a half-drawn polygon/polyline when the tool changes
+  useEffect(() => { if (p.tool !== "polygon" && p.tool !== "polyline") setPoly([]); }, [p.tool]);
   useEffect(() => { if (p.tool !== "measure") setMeasure(null); }, [p.tool]);
 
   function onMove() {
@@ -215,8 +220,17 @@ export default function EditorCanvas(p: Props) {
               strokeWidth={2.5 / v.scale} dash={ln.lane_type === "dashed" ? [10 / v.scale, 8 / v.scale] : undefined} />
           ))}
 
-          {/* boxes (rendered around their centre so rotation is about the centre; bbox stays the AABB) */}
-          {L.boxes && p.objects.filter((o) => o.visible).map((o) => {
+          {/* open polylines (curb/road_edge/barrier): an open line, no fill, no AABB box */}
+          {L.boxes && p.objects.filter((o) => o.visible && o.polyline && o.polyline.length >= 2).map((o) => (
+            <Line key={`pl${o.id}`} points={o.polyline!.flat()} listening={p.tool === "select"}
+              stroke={classColor(o.class_id)} strokeWidth={(o.id === p.selectedId ? 2.5 : 1.5) / v.scale}
+              hitStrokeWidth={10 / v.scale}
+              onMouseDown={(e) => { if (p.tool === "select") { e.cancelBubble = true; p.onSelect(o.id); } }} />
+          ))}
+
+          {/* boxes (rendered around their centre so rotation is about the centre; bbox stays the AABB).
+              Polyline objects render as the open line above, not as a box. */}
+          {L.boxes && p.objects.filter((o) => o.visible && !(o.polyline && o.polyline.length >= 2)).map((o) => {
             const w = o.bbox[2] - o.bbox[0];
             const h = o.bbox[3] - o.bbox[1];
             const cx = o.bbox[0] + w / 2;
@@ -306,8 +320,8 @@ export default function EditorCanvas(p: Props) {
               stroke="#56D364" strokeWidth={2 / v.scale} fill="rgba(86,211,100,0.25)" />
           ))}
 
-          {/* in-progress manual polygon: open polyline + vertex dots; double-click closes it */}
-          {p.tool === "polygon" && poly.length >= 2 && (
+          {/* in-progress manual polygon/polyline: open line + vertex dots; double-click commits */}
+          {(p.tool === "polygon" || p.tool === "polyline") && poly.length >= 2 && (
             <>
               <Line points={poly} listening={false} stroke="#FF7A2F" strokeWidth={1.5 / v.scale}
                 dash={[6 / v.scale, 4 / v.scale]} />

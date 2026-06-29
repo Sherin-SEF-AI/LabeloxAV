@@ -97,6 +97,7 @@ class ObjectDetail(BaseModel):
     version: int = 1
     rot_deg: float = 0.0
     keypoints: dict | None = None
+    polyline: list[list[float]] | None = None
 
 
 class ReviewIn(BaseModel):
@@ -111,6 +112,7 @@ class ReviewIn(BaseModel):
     rot_deg: float | None = None         # oriented-box rotation (only updated when provided)
     keypoints: dict | None = None        # keypoints/skeleton (only updated when provided)
     mask_polygons: list[list[float]] | None = None  # write the mask in the same request (atomic save)
+    polyline: list[list[float]] | None = None       # open polyline points (only updated when provided)
 
 
 class SegmentIn(BaseModel):
@@ -129,6 +131,7 @@ class CreateObjectIn(BaseModel):
     idem_key: str | None = None                    # client temp id; de-dupes a retried/raced create
     rot_deg: float = 0.0                           # oriented-box rotation about the box centre
     keypoints: dict | None = None                  # {"skeleton": str, "points": [[x,y,v],...]} image px
+    polyline: list[list[float]] | None = None      # open polyline points [[x,y],...] for linear features
 
 
 class MaskIn(BaseModel):
