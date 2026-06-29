@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { SessionRow, TriageRow } from "@/lib/types";
 import { ConfBar, StateBadge } from "@/components/StateBadge";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
 import CorrectionModal from "@/components/CorrectionModal";
 import { acceptState, getUser } from "@/lib/user";
 
@@ -136,21 +136,18 @@ export default function TriagePage() {
   );
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav
-        active="TRIAGE"
-        right={
-          <>
-            <span className="text-ink-2">
-              {header ? `${header.vehicle_id} · ${header.city ?? ""}` : "ALL SESSIONS"}
-            </span>
-            <span className="border border-line px-2 py-0.5">QUEUE {rows.length}</span>
-            <span className={`w-2 h-2 rounded-full ${loading ? "bg-warn" : "bg-pass"}`} />
-          </>
-        }
-      />
-
-      <div className="flex flex-1 min-h-0">
+    <PageShell
+      active="TRIAGE"
+      subtitle={header ? `${header.vehicle_id} · ${header.city ?? ""}` : "ALL SESSIONS"}
+      right={
+        <>
+          <span className="border border-line px-2 py-0.5">QUEUE {rows.length}</span>
+          <span className={`w-2 h-2 rounded-full ${loading ? "bg-warn" : "bg-pass"}`} />
+        </>
+      }
+    >
+      <div className="h-full flex flex-col">
+        <div className="flex flex-1 min-h-0">
         <aside className="w-56 border-r hairline p-3 space-y-4 text-sm">
           <div>
             {BANDS.map((b) => (
@@ -284,11 +281,12 @@ export default function TriagePage() {
         </main>
       </div>
 
-      <footer className="h-8 border-t hairline flex items-center px-4 gap-4 font-mono text-[11px] text-ink-3">
-        <span>J/K next/prev</span>
-        <span>ENTER open</span>
-        <span className="ml-auto">ranked by uncertainty x rarity</span>
-      </footer>
+        <footer className="h-8 border-t hairline flex items-center px-4 gap-4 font-mono text-[11px] text-ink-3 shrink-0">
+          <span>J/K next/prev</span>
+          <span>ENTER open</span>
+          <span className="ml-auto">ranked by uncertainty x rarity</span>
+        </footer>
+      </div>
       {corr && (
         <CorrectionModal
           objectId={corr.objectId}
@@ -298,6 +296,6 @@ export default function TriagePage() {
           onApplied={(n) => { setMsg(`corrected ${n} similar objects`); setCorr(null); setSel(new Set()); load(); }}
         />
       )}
-    </div>
+    </PageShell>
   );
 }

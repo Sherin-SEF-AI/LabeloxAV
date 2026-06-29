@@ -10,6 +10,9 @@ import dynamic from "next/dynamic";
 import { api, lidarCloudPoints, type Cuboid3D, type LidarCloud, type LidarPoints } from "@/lib/api";
 import type { OntologyClass } from "@/lib/types";
 import type { ColorBy } from "@/components/lidar/PointCloudViewer";
+import PageShell from "@/components/shell/PageShell";
+import Inspector from "@/components/shell/Inspector";
+import { StateBadge } from "@/components/StateBadge";
 
 const PointCloudViewer = dynamic(() => import("@/components/lidar/PointCloudViewer"), { ssr: false });
 
@@ -159,9 +162,10 @@ export default function CuboidAnnotatePage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] bg-[#0a0e14] text-neutral-200">
-      <aside className="flex w-80 shrink-0 flex-col gap-3 overflow-y-auto border-r border-neutral-800 p-4">
-        <div className="text-xs uppercase tracking-wider text-neutral-500">Cuboid annotation</div>
+    <PageShell active="CUBOID ANNOTATE" right="AI lift 2D to 3D">
+      <div className="flex h-full bg-[#0a0e14] text-neutral-200">
+        <Inspector title="Cuboid annotation" side="left" width="w-80">
+          <div className="flex flex-col gap-3 p-4">
         <form onSubmit={(e) => { e.preventDefault(); loadClouds(sessionId); }} className="flex gap-2">
           <input value={sessionId} onChange={(e) => setSessionId(e.target.value)} placeholder="session id"
             className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs" />
@@ -200,7 +204,10 @@ export default function CuboidAnnotatePage() {
                   className={`flex justify-between rounded border px-2 py-1 text-left text-xs ${
                     selectedId === c.object_3d_id ? "border-white bg-neutral-800" : "border-neutral-800 bg-neutral-900"}`}>
                   <span>{c.class_name}</span>
-                  <span className="text-neutral-500">{c.state} | {c.box_source}</span>
+                  <span className="flex items-center gap-1.5">
+                    <StateBadge state={c.state} />
+                    <span className="text-neutral-500">{c.box_source}</span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -209,7 +216,10 @@ export default function CuboidAnnotatePage() {
 
         {selected && (
           <div className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-2 text-xs">
-            <div className="text-neutral-400">Selected ({selected.source})</div>
+            <div className="flex items-center gap-2 text-neutral-400">
+              <span>Selected</span>
+              <StateBadge state={selected.state} />
+            </div>
             <label className="flex items-center justify-between gap-2">
               class
               <select value={selected.class_id}
@@ -247,7 +257,8 @@ export default function CuboidAnnotatePage() {
         )}
 
         {err && <div className="rounded border border-red-900 bg-red-950 p-2 text-xs text-red-300">{err}</div>}
-      </aside>
+          </div>
+        </Inspector>
 
       <main className="flex flex-1 flex-col">
         <div className="relative flex-1 border-b border-neutral-800">
@@ -274,6 +285,7 @@ export default function CuboidAnnotatePage() {
           )}
         </div>
       </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }

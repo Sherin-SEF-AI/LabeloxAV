@@ -5,7 +5,9 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { api } from "@/lib/api";
 import type { MapCommitRow, MapProvenance } from "@/lib/types";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
+import Inspector from "@/components/shell/Inspector";
+import { StateBadge, ConfBar } from "@/components/StateBadge";
 
 // M3.3 HD map viewer: render a fused map_commit (lanes + signs) on a MapLibre basemap; click an element to
 // trace its provenance (source frames, calibration version, fusion run). OSM raster basemap, no token.
@@ -68,42 +70,42 @@ export default function MapPage() {
   const commit = commits.find((c) => c.commit_id === sel);
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="MAP" />
-      <div className="px-3 h-10 flex items-center gap-3 border-b hairline font-mono text-[11px]">
+    <PageShell active="HD MAP" filters={(
+      <>
         <span className="text-ink-3">commit</span>
         <select value={sel} onChange={(e) => setSel(e.target.value)} className="bg-bg border border-line px-2 py-1 text-ink">
           {commits.map((c) => <option key={c.commit_id} value={c.commit_id}>{c.commit_id} · {c.element_count} elem · {c.region}</option>)}
         </select>
         {commit && (
-          <span className="text-ink-3 flex gap-2">
-            {Object.entries(commit.formats).map(([k, uri]) => <span key={k} className="text-info" title={uri}>{k}</span>)}
+          <span className="text-ink-3 flex items-center gap-2">
+            {Object.entries(commit.formats).map(([k, uri]) => <span key={k} title={uri}><StateBadge state={k} /></span>)}
             <span>calib {commit.calibration_version}</span>
           </span>
         )}
         {!commits.length && <span className="text-warn">no map commits yet (run hdmap fuse on a georef'd session)</span>}
-      </div>
-
-      <div className="flex flex-1 min-h-0">
+      </>
+    )}>
+      <div className="flex h-full min-h-0">
         <div ref={wrap} className="flex-1" />
-        <aside className="w-72 border-l hairline p-3 font-mono text-[11px] overflow-auto">
-          <div className="text-ink-3 uppercase text-[10px] mb-2">element provenance</div>
-          {prov?.found ? (
-            <div className="space-y-1.5">
-              <div className="text-ink-2">{prov.kind} <span className="text-ink-3">{prov.element_id?.slice(0, 8)}</span></div>
-              <div className="text-ink-3">confidence {prov.confidence?.toFixed(2)}</div>
-              <div className="text-ink-3">calibration {prov.calibration_version}</div>
-              <div className="text-ink-3">commit {prov.commit_id}</div>
-              <div className="text-ink-3">fusion job {prov.fusion_job_id?.slice(0, 8)}</div>
-              <div className="text-ink-3 pt-1">attrs: {JSON.stringify(prov.attrs)}</div>
-              <div className="text-ink-3 uppercase text-[10px] pt-2">source frames ({prov.source_frames?.length})</div>
-              {prov.source_frames?.map((f) => (
-                <a key={f.frame_id} href={`/frame/${f.frame_id}`} className="block text-info hover:text-accent truncate">{f.vehicle_id} · {f.cam_id} · {f.frame_id.slice(0, 8)}</a>
-              ))}
-            </div>
-          ) : <div className="text-ink-3">click a lane or sign to trace it to its source frames + calibration.</div>}
-        </aside>
+        <Inspector title="element provenance" side="right">
+          <div className="p-3 font-mono text-[11px]">
+            {prov?.found ? (
+              <div className="space-y-1.5">
+                <div className="text-ink-2">{prov.kind} <span className="text-ink-3">{prov.element_id?.slice(0, 8)}</span></div>
+                <div className="text-ink-3 flex items-center gap-2">confidence {typeof prov.confidence === "number" ? <ConfBar conf={prov.confidence} /> : "-"}</div>
+                <div className="text-ink-3">calibration {prov.calibration_version}</div>
+                <div className="text-ink-3">commit {prov.commit_id}</div>
+                <div className="text-ink-3">fusion job {prov.fusion_job_id?.slice(0, 8)}</div>
+                <div className="text-ink-3 pt-1">attrs: {JSON.stringify(prov.attrs)}</div>
+                <div className="text-ink-3 uppercase text-[10px] pt-2">source frames ({prov.source_frames?.length})</div>
+                {prov.source_frames?.map((f) => (
+                  <a key={f.frame_id} href={`/frame/${f.frame_id}`} className="block text-info hover:text-accent truncate">{f.vehicle_id} · {f.cam_id} · {f.frame_id.slice(0, 8)}</a>
+                ))}
+              </div>
+            ) : <div className="text-ink-3">click a lane or sign to trace it to its source frames + calibration.</div>}
+          </div>
+        </Inspector>
       </div>
-    </div>
+    </PageShell>
   );
 }

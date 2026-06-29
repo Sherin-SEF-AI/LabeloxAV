@@ -4,13 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { getUser } from "@/lib/user";
 import type { AssignmentRow, MergeRequestRow } from "@/lib/types";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
+import { StateBadge } from "@/components/StateBadge";
 
 // M4.3 collaboration console: lakeFS branches, annotator assignments, and merge requests. Annotators work
 // on isolated branches; reviewers approve, merge to main, and can revert a bad merge. Color is earned: a
 // merged MR is pass-green, reverted is block-red, open is info-blue.
-
-const ST: Record<string, string> = { merged: "text-pass", reverted: "text-block", approved: "text-info", open: "text-ink-2" };
 
 export default function CollaboratePage() {
   const [branches, setBranches] = useState<string[]>([]);
@@ -37,13 +36,15 @@ export default function CollaboratePage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="COLLABORATE" />
-      <main className="flex-1 overflow-auto p-4 space-y-4 font-mono text-[11px]">
+    <PageShell
+      active="COLLABORATE"
+      title="Collaboration Console"
+      right={msg ? <span className="font-mono text-[11px] text-warn">{msg}</span> : undefined}
+    >
+      <div className="p-4 space-y-4 font-mono text-[11px]">
         <div className="flex items-center gap-2 text-ink-3">
           <span>actor: <span className="text-ink-2">{me ? `${me.name} (${me.role})` : "none"}</span></span>
           {!canReview && <span className="text-warn">reviewer or admin role needed to approve/merge</span>}
-          {msg && <span className="ml-auto text-warn">{msg}</span>}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -78,7 +79,7 @@ export default function CollaboratePage() {
                 <div key={m.mr_id} className="border-b hairline pb-2">
                   <div className="flex items-center gap-2">
                     <span className="text-ink-2 truncate flex-1">{m.title}</span>
-                    <span className={ST[m.status] || "text-ink-3"}>{m.status}</span>
+                    <StateBadge state={m.status} />
                   </div>
                   <div className="text-ink-3 truncate">{m.source_branch} → {m.target_branch}</div>
                   {canReview && (
@@ -93,7 +94,7 @@ export default function CollaboratePage() {
             </div>
           </section>
         </div>
-      </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }

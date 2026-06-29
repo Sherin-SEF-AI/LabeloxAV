@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { CurationSummary } from "@/lib/types";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
 
 // Active-learning curation: label the RIGHT frames. Novel frames (far from everything = coverage gaps)
 // are worth labeling; near-duplicates are worth skipping. Powered by DINOv2 frame embeddings.
@@ -62,13 +62,16 @@ export default function CurationPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="CURATION" right={
+    <PageShell
+      active="CURATION"
+      title="Curation"
+      primaryAction={
         <button onClick={embed} disabled={busy} className="border border-line px-2 py-0.5 hover:border-accent disabled:opacity-50">
           {busy ? "..." : "compute embeddings"}
         </button>
-      } />
-      <main className="flex-1 overflow-auto p-4 space-y-4">
+      }
+    >
+      <div className="p-4 space-y-4">
         {msg && <div className="panel px-3 py-1.5 font-mono text-[11px] text-warn">{msg}</div>}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -117,7 +120,7 @@ export default function CurationPage() {
             </Section>
           </>
         )}
-      </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }

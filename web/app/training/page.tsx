@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, type ModelLine, type TrainingJob } from "@/lib/api";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
+import { StateBadge, ConfBar } from "@/components/StateBadge";
 
 // In-app training platform: submit a training job (a "purpose" = dataset filters + hparams), watch it
 // run on the GPU worker (status / stage / epoch / map50), and browse the model registry. The API only
@@ -20,14 +21,6 @@ function Section({ title, right, children }: { title: string; right?: React.Reac
     </section>
   );
 }
-
-const STATUS_COLOR: Record<string, string> = {
-  done: "text-pass",
-  error: "text-block",
-  canceled: "text-ink-3",
-  running: "text-warn",
-  pending: "text-info",
-};
 
 export default function TrainingPage() {
   const router = useRouter();
@@ -91,10 +84,18 @@ export default function TrainingPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="TRAINING" right={<span className="text-ink-3">worker required: <span className="text-ink-2">make train-worker</span></span>} />
-
-      <main className="flex-1 overflow-auto p-4 space-y-4 max-w-5xl w-full mx-auto">
+    <PageShell
+      active="TRAINING"
+      title="Training"
+      right={<span className="text-ink-3">worker required: <span className="text-ink-2">make train-worker</span></span>}
+      primaryAction={
+        <button onClick={onSubmit}
+          className="font-mono text-xs border border-line px-3 py-1 hover:border-accent">
+          queue training job
+        </button>
+      }
+    >
+      <div className="p-4 space-y-4 max-w-5xl w-full mx-auto">
         <Section title="new training job">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 font-mono text-xs">
             <label className="flex flex-col gap-1">
@@ -152,9 +153,6 @@ export default function TrainingPage() {
               queue training job
             </button>
             {err && <span className="font-mono text-[11px] text-block">{err}</span>}
-            <span className="font-mono text-[11px] text-ink-3 ml-auto">
-              worker required: <span className="text-ink-2">make train-worker</span>
-            </span>
           </div>
         </Section>
 
@@ -171,10 +169,10 @@ export default function TrainingPage() {
                     <span className={`w-12 ${j.compute_target === "cloud" ? "text-info" : "text-ink-3"}`}>
                       {j.compute_target}
                     </span>
-                    <span className={`w-16 ${STATUS_COLOR[j.status] ?? "text-ink-3"}`}>{j.status}</span>
+                    <span className="w-20"><StateBadge state={j.status} /></span>
                     <span className="w-16 text-ink-3">{j.stage ?? "-"}</span>
-                    <div className="flex-1 h-2 bg-line relative">
-                      <div className="absolute left-0 top-0 h-full bg-accent" style={{ width: `${(j.progress || 0) * 100}%` }} />
+                    <div className="flex-1 flex justify-center">
+                      <ConfBar conf={j.progress || 0} />
                     </div>
                     <span className="w-28 text-right text-ink-3">
                       {tot ? `ep ${ep}/${tot}` : ""} {live?.map50 != null ? `· map50 ${live.map50}` : ""}
@@ -220,7 +218,7 @@ export default function TrainingPage() {
             <div className="font-mono text-xs text-ink-3 py-4 text-center">no models trained yet</div>
           )}
         </Section>
-      </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }

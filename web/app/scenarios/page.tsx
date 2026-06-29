@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { Scenario } from "@/lib/types";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
+import ScoreBar from "@/components/shell/ScoreBar";
 
 // Scenario mining surface (the second moat): NL search over behaviourally-defined scenarios,
 // ranked by criticality (TTC/PET-derived).
@@ -17,18 +18,6 @@ const TYPE_COLOR: Record<string, string> = {
   illegal_park: "text-ink-2 border-line",
   congestion: "text-ink-2 border-line",
 };
-
-function Crit({ c }: { c: number }) {
-  const color = c >= 0.66 ? "bg-block" : c >= 0.33 ? "bg-warn" : "bg-pass";
-  return (
-    <span className="inline-flex items-center gap-2 font-mono text-xs">
-      <span className="w-16 h-1.5 bg-line relative">
-        <span className={`absolute left-0 top-0 h-full ${color}`} style={{ width: `${c * 100}%` }} />
-      </span>
-      {c.toFixed(2)}
-    </span>
-  );
-}
 
 export default function ScenariosPage() {
   const router = useRouter();
@@ -56,45 +45,46 @@ export default function ScenariosPage() {
   }, []); // initial
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="SCENARIOS" right={
+    <PageShell
+      active="SCENARIOS"
+      right={
         <>
           <span className="border border-line px-2 py-0.5">{rows.length} found</span>
           <span className={`w-2 h-2 rounded-full ${loading ? "bg-warn" : "bg-pass"}`} />
         </>
-      } />
-
-      <div className="p-4">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            load();
-          }}
-          className="flex gap-2"
-        >
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder='e.g. "wrong-side autorickshaw cutting in at night on wet road"'
-            className="flex-1 bg-panel border hairline text-ink text-sm px-3 py-2 font-mono"
-          />
-          <button className="border border-accent text-accent px-4 text-sm font-mono hover:bg-accent/10">
-            search
-          </button>
-        </form>
-        <div className="flex items-center justify-between mt-1">
-          <div className="font-mono text-[11px] text-ink-3">
-            parsed into structured filters over the scenario index (type, actor class, light, surface)
+      }
+      filters={
+        <div className="w-full">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              load();
+            }}
+            className="flex gap-2"
+          >
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder='e.g. "wrong-side autorickshaw cutting in at night on wet road"'
+              className="flex-1 bg-panel border hairline text-ink text-sm px-3 py-2 font-mono"
+            />
+            <button className="border border-accent text-accent px-4 text-sm font-mono hover:bg-accent/10">
+              search
+            </button>
+          </form>
+          <div className="flex items-center justify-between mt-1">
+            <div className="font-mono text-[11px] text-ink-3">
+              parsed into structured filters over the scenario index (type, actor class, light, surface)
+            </div>
+            <label className="font-mono text-[11px] text-ink-2 flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" checked={semantic} onChange={(e) => setSemantic(e.target.checked)} />
+              semantic (CLIP)
+            </label>
           </div>
-          <label className="font-mono text-[11px] text-ink-2 flex items-center gap-1.5 cursor-pointer">
-            <input type="checkbox" checked={semantic} onChange={(e) => setSemantic(e.target.checked)} />
-            semantic (CLIP)
-          </label>
         </div>
-      </div>
-
-      <main className="flex-1 overflow-auto">
-        <table className="w-full text-sm">
+      }
+    >
+      <table className="w-full text-sm">
           <thead className="text-ink-3 font-mono text-[11px] uppercase border-b hairline sticky top-0 bg-bg">
             <tr>
               <th className="text-left font-normal px-3 py-2 w-40">type</th>
@@ -113,7 +103,7 @@ export default function ScenariosPage() {
                   </span>
                 </td>
                 <td className="px-3 py-2">
-                  <Crit c={s.criticality} />
+                  <ScoreBar value={s.criticality} tone="warn" />
                 </td>
                 <td className="px-3 py-2 font-mono text-xs text-ink-2">
                   {(s.meta?.actor_classes as string[] | undefined)?.join(", ") ||
@@ -136,7 +126,6 @@ export default function ScenariosPage() {
             )}
           </tbody>
         </table>
-      </main>
-    </div>
+    </PageShell>
   );
 }

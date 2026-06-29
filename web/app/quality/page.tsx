@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, type GoldSetRow, type QualitySheet } from "@/lib/api";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
+import { StateBadge } from "@/components/StateBadge";
 
 // Gate B (M9): the quality sheet. Per-class precision/recall against a sealed gold set, Safe-mIoU,
 // and calibration ECE. Seal a gold set + fit isotonic calibration from here. Measurement (GPU) runs
@@ -81,8 +82,9 @@ export default function QualityPage() {
   const prRows = Object.entries(pr).sort((a, b) => a[1].ap50 - b[1].ap50);
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="QUALITY" right={
+    <PageShell
+      active="QUALITY"
+      primaryAction={
         <>
           <button onClick={onSeal} disabled={busy !== null}
             className="border border-line px-2 py-0.5 hover:border-accent disabled:opacity-50">
@@ -93,9 +95,9 @@ export default function QualityPage() {
             {busy === "fit" ? "fitting..." : "fit calibration"}
           </button>
         </>
-      } />
-
-      <main className="flex-1 overflow-auto p-4 space-y-4">
+      }
+    >
+      <div className="p-4 space-y-4">
         <Section title={`gold sets (${goldSets.length})`}>
           {goldSets.length ? (
             <div className="flex flex-wrap gap-2">
@@ -109,9 +111,7 @@ export default function QualityPage() {
                   title={g.gold_id}
                 >
                   {g.name} · {g.n_objects} obj · {g.n_frames} fr{" "}
-                  <span className={g.measured ? "text-pass" : "text-warn"}>
-                    {g.measured ? "measured" : "unmeasured"}
-                  </span>
+                  <StateBadge state={g.measured ? "measured" : "unmeasured"} />
                 </button>
               ))}
             </div>
@@ -180,7 +180,7 @@ export default function QualityPage() {
               : "select or seal a gold set"}
           </div>
         )}
-      </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { AuditRow, GovState, RegistryRow } from "@/lib/types";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
+import { StateBadge, ConfBar } from "@/components/StateBadge";
 
 // M4.4 governance console: champion status, control-sample precision, drift, the audit log, and the kill
 // switch. The one place a governor watches the unattended loop. Color is earned: green when healthy, warn
@@ -32,24 +33,26 @@ export default function GovernPage() {
   const champion = registry.find((r) => r.is_champion);
   const paused = state && (!state.loop_enabled || !state.auto_promote_enabled);
 
+  const primaryAction = (
+    <div className="flex gap-2 font-mono text-[11px]">
+      <button onClick={() => act(() => api.governDriftScan(), "drift scan")} className="border border-line px-2 py-1 hover:border-accent">drift scan</button>
+      <button onClick={() => act(() => api.governTick(), "controller tick")} className="border border-line px-2 py-1 hover:border-accent">controller tick</button>
+      {state?.loop_enabled
+        ? <button onClick={() => act(() => api.governKill("manual kill switch"), "kill")} className="border border-block text-block px-2 py-1 hover:bg-block/10">KILL SWITCH</button>
+        : <button onClick={() => act(() => api.governRelease(), "release")} className="border border-pass text-pass px-2 py-1 hover:bg-pass/10">release</button>}
+    </div>
+  );
+
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="GOVERN" />
-      <main className="flex-1 overflow-auto p-4 space-y-4 font-mono text-[11px]">
-        {/* state banner + kill switch */}
+    <PageShell active="GOVERN" title="GOVERN" primaryAction={primaryAction}>
+      <div className="p-4 space-y-4 font-mono text-[11px]">
+        {/* state banner */}
         <div className={`panel p-3 flex items-center gap-3 ${paused ? "border-warn" : ""}`}>
           <span className={`w-2.5 h-2.5 rounded-full ${state?.loop_enabled ? "bg-pass" : "bg-block"}`} />
           <span className="text-ink-2">loop {state?.loop_enabled ? "ENABLED" : "PAUSED"}</span>
           <span className="text-ink-3">auto-accept {state?.auto_accept_enabled ? "on" : "off"}</span>
           <span className="text-ink-3">auto-promote {state?.auto_promote_enabled ? "on" : "off"}</span>
           {state?.paused_reason && <span className="text-warn">{state.paused_reason}</span>}
-          <div className="ml-auto flex gap-2">
-            <button onClick={() => act(() => api.governDriftScan(), "drift scan")} className="border border-line px-2 py-1 hover:border-accent">drift scan</button>
-            <button onClick={() => act(() => api.governTick(), "controller tick")} className="border border-line px-2 py-1 hover:border-accent">controller tick</button>
-            {state?.loop_enabled
-              ? <button onClick={() => act(() => api.governKill("manual kill switch"), "kill")} className="border border-block text-block px-2 py-1 hover:bg-block/10">KILL SWITCH</button>
-              : <button onClick={() => act(() => api.governRelease(), "release")} className="border border-pass text-pass px-2 py-1 hover:bg-pass/10">release</button>}
-          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -60,8 +63,8 @@ export default function GovernPage() {
             {champion && <div className="text-ink-3">promoted from {champion.promoted_from || "(first)"}</div>}
             {champion && <div className="text-ink-3">safe-mIoU {String((champion.gold_metrics as Record<string, unknown>)?.safe_miou ?? "-")}</div>}
             <div className="uppercase text-[10px] text-ink-3 pt-2">true auto-accept precision</div>
-            <div className={`text-lg ${prec?.precision != null && prec.precision < 0.97 ? "text-block" : "text-pass"}`}>
-              {prec?.precision != null ? `${(prec.precision * 100).toFixed(1)}%` : "n/a"}
+            <div className="text-lg">
+              {prec?.precision != null ? <ConfBar conf={prec.precision} /> : "n/a"}
             </div>
             <div className="text-ink-3">{prec ? `${prec.incorrect}/${prec.reviewed} controls incorrect` : ""}</div>
           </section>
@@ -79,7 +82,7 @@ export default function GovernPage() {
                       <td className="px-3 py-1 text-ink-2 truncate max-w-[160px]">{r.model_version}</td>
                       <td className="text-ink-3">{(m?.map ?? m?.map50 ?? 0).toFixed?.(2) ?? "-"}</td>
                       <td className="text-ink-3">{m?.safe_miou ?? "-"}</td>
-                      <td className={r.is_champion ? "text-pass" : "text-ink-3"}>{r.is_champion ? "champion" : "challenger"}</td>
+                      <td><StateBadge state={r.is_champion ? "champion" : "challenger"} /></td>
                       <td className="text-right pr-3">{!r.is_champion && <button onClick={() => act(() => api.governPromote(r.model_version), "promote")} className="text-info hover:text-accent">evaluate</button>}</td>
                     </tr>
                   );
@@ -97,7 +100,7 @@ export default function GovernPage() {
             {audit.map((a) => (
               <div key={a.audit_id} className="flex items-center gap-2">
                 <span className="text-ink-3 w-24 shrink-0">{a.actor}</span>
-                <span className={a.decision.includes("promote") && !a.decision.includes("paused") ? "text-pass" : a.decision.includes("reject") || a.decision.includes("engage") ? "text-block" : a.decision.includes("pause") ? "text-warn" : "text-ink-2"}>{a.decision}</span>
+                <StateBadge state={a.decision} />
                 <span className="text-ink-3 truncate flex-1">{a.subject || ""}</span>
                 <span className="text-ink-3 shrink-0">{a.created_at?.slice(11, 19)}</span>
               </div>
@@ -105,7 +108,7 @@ export default function GovernPage() {
             {!audit.length && <div className="text-ink-3 text-center py-4">no decisions yet</div>}
           </div>
         </section>
-      </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }

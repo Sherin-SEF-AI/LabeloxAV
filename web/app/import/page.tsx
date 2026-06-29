@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, type ImportJob } from "@/lib/api";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
+import { StateBadge, ConfBar } from "@/components/StateBadge";
 
 // Upload a dataset (any size) straight to storage, then import it. The file goes browser -> MinIO via
 // presigned multipart; the API only signs and runs the import as a background job. PII (Gate A) runs
@@ -81,10 +82,8 @@ export default function ImportPage() {
   const busy = phase !== "idle";
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="IMPORT" />
-
-      <main className="flex-1 overflow-auto p-4 space-y-4 max-w-4xl w-full mx-auto">
+    <PageShell active="IMPORT" title="Import Dataset">
+      <div className="p-4 space-y-4 max-w-4xl w-full mx-auto">
         <Section title="upload a dataset (any format, any size)">
           <div
             onDragOver={(e) => {
@@ -185,22 +184,9 @@ export default function ImportPage() {
               {jobs.map((j) => (
                 <div key={j.job_id} className="flex items-center gap-2 font-mono text-[11px]">
                   <span className="w-16 truncate text-ink-2">{j.format}</span>
-                  <span
-                    className={`w-16 ${
-                      j.status === "done"
-                        ? "text-pass"
-                        : j.status === "error"
-                          ? "text-block"
-                          : "text-warn"
-                    }`}
-                  >
-                    {j.status}
-                  </span>
-                  <div className="flex-1 h-2 bg-line relative">
-                    <div
-                      className="absolute left-0 top-0 h-full bg-accent"
-                      style={{ width: `${(j.progress || 0) * 100}%` }}
-                    />
+                  <StateBadge state={j.status} />
+                  <div className="flex-1 flex justify-center">
+                    <ConfBar conf={j.progress || 0} />
                   </div>
                   <span className="w-40 text-right text-ink-3 truncate">
                     {j.counts?.frames ?? 0}fr / {j.counts?.objects ?? 0}obj
@@ -221,7 +207,7 @@ export default function ImportPage() {
             <div className="font-mono text-xs text-ink-3 py-4 text-center">no imports yet</div>
           )}
         </Section>
-      </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }

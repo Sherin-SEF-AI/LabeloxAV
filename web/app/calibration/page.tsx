@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { CalibDetail, CalibSession, SessionRow } from "@/lib/types";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
+import Inspector from "@/components/shell/Inspector";
+import { StateBadge } from "@/components/StateBadge";
 
 // M3.0 calibration validation report viewer: per-camera reprojection + FOV check + time offset, with a
 // clear pass/fail. A failing session is excluded from 3D and multi-camera work.
-
-const STATUS: Record<string, string> = { pass: "text-pass", warn: "text-warn", fail: "text-block" };
 
 export default function CalibrationPage() {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
@@ -39,23 +39,24 @@ export default function CalibrationPage() {
 
   const open = async (sid: string) => setDetail(await api.calibrationDetail(sid));
 
-  return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="CALIBRATION" />
-      <main className="flex-1 overflow-auto p-4 space-y-4">
-        <div className="panel p-3 flex items-center gap-2 flex-wrap font-mono text-[11px]">
-          <span className="text-ink-3">validate calibration on</span>
-          <select value={pick} onChange={(e) => setPick(e.target.value)} className="bg-bg border border-line px-2 py-1 text-ink max-w-xs">
-            {sessions.map((s) => <option key={s.session_id} value={s.session_id}>{s.vehicle_id} / {s.session_id.slice(0, 8)}</option>)}
-          </select>
-          <button onClick={validate} disabled={busy || !pick} className="border border-accent text-accent px-2 py-1 hover:bg-accent/10 disabled:opacity-50">{busy ? "..." : "validate"}</button>
-          <span className="ml-auto text-ink-3">a failing session is excluded from 3D + multi-camera work</span>
-        </div>
+  const validateAction = (
+    <button onClick={validate} disabled={busy || !pick} className="border border-accent text-accent px-2 py-1 font-mono text-[11px] hover:bg-accent/10 disabled:opacity-50">{busy ? "..." : "validate"}</button>
+  );
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <section className="panel">
-            <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">validated sessions</div>
-            <div className="p-2 font-mono text-[11px] space-y-1">
+  return (
+    <PageShell active="CALIBRATION" title="Calibration" primaryAction={validateAction}>
+      <div className="flex h-full min-h-0">
+        <Inspector side="left" title="Sessions">
+          <div className="p-2 space-y-3 font-mono text-[11px]">
+            <div className="space-y-1">
+              <span className="block text-ink-3">validate calibration on</span>
+              <select value={pick} onChange={(e) => setPick(e.target.value)} className="w-full bg-bg border border-line px-2 py-1 text-ink">
+                {sessions.map((s) => <option key={s.session_id} value={s.session_id}>{s.vehicle_id} / {s.session_id.slice(0, 8)}</option>)}
+              </select>
+              <span className="block text-ink-3">a failing session is excluded from 3D + multi-camera work</span>
+            </div>
+            <div className="space-y-1">
+              <div className="uppercase text-ink-3 border-b hairline pb-1">validated sessions</div>
               {validated.length ? validated.map((s) => (
                 <button key={s.session_id} onClick={() => open(s.session_id)} className="w-full flex items-center gap-2 px-1 py-0.5 hover:bg-line text-left">
                   <span className={`w-2 h-2 rounded-full ${s.overall === "fail" ? "bg-block" : "bg-pass"}`} />
@@ -64,11 +65,13 @@ export default function CalibrationPage() {
                 </button>
               )) : <div className="text-ink-3 text-center py-4">none validated yet</div>}
             </div>
-          </section>
+          </div>
+        </Inspector>
 
-          <section className="panel lg:col-span-2">
-            <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
-              report {detail && <span className={STATUS[detail.overall] || "text-ink-2"}>· {detail.overall.toUpperCase()}</span>}
+        <section className="flex-1 min-h-0 overflow-auto p-4">
+          <div className="panel">
+            <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2 flex items-center gap-2">
+              report {detail && <StateBadge state={detail.overall} />}
             </div>
             {detail ? (
               <table className="w-full font-mono text-[11px]">
@@ -82,7 +85,7 @@ export default function CalibrationPage() {
                       <td className={c.fov_check.ok ? "text-ink-3" : "text-block"}>{c.fov_check.implied_fov_deg}&deg;</td>
                       <td className="text-ink-3">{c.fov_check.expected_fov_deg ?? "-"}&deg;</td>
                       <td className="text-ink-3">{c.time_offset_ns != null ? `${(c.time_offset_ns / 1e6).toFixed(2)} ms` : "-"}</td>
-                      <td className={`text-right pr-3 ${STATUS[c.status] || "text-ink-2"}`}>{c.status}</td>
+                      <td className="text-right pr-3"><StateBadge state={c.status} /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -90,9 +93,9 @@ export default function CalibrationPage() {
             ) : (
               <div className="font-mono text-xs text-ink-3 py-10 text-center">validate a session, or pick one from the list.</div>
             )}
-          </section>
-        </div>
-      </main>
-    </div>
+          </div>
+        </section>
+      </div>
+    </PageShell>
   );
 }
