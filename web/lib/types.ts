@@ -35,6 +35,7 @@ export type ObjectDetail = {
   rot_deg?: number;
   keypoints?: Keypoints | null;
   polyline?: number[][] | null;
+  cuboid_3d?: { center: number[]; size: number[]; yaw: number } | null;
 };
 
 export type OntologyClass = { id: number; name: string; l0: string; l1: string; india: boolean };
@@ -201,6 +202,7 @@ export type FrameMeta = {
 
 export type Relationship = { relationship_id: string; from_object_id: string; to_object_id: string; kind: string };
 export type AdverseRegion = { region_id: string; frame_id: string; geometry: number[]; condition: string; source: string; confidence: number };
+export type ProjectedCuboid = { object_id: string; corners_uv: number[][]; edges: number[][]; any_in_image: boolean };
 
 export type FrameObject = {
   object_id: string;
@@ -215,6 +217,7 @@ export type FrameObject = {
   rot_deg?: number;
   keypoints?: Keypoints | null;
   polyline?: number[][] | null;
+  cuboid_3d?: { center: number[]; size: number[]; yaw: number } | null;
 };
 
 export type TrackItem = {

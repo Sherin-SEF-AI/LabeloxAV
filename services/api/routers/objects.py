@@ -70,6 +70,48 @@ async def frame_relationships(frame_id: str, db: AsyncSession = Depends(db_sessi
              "to_object_id": str(r.to_object_id), "kind": r.kind} for r in rows]
 
 
+@router.get("/frames/{frame_id}/cuboids")
+async def frame_cuboids(frame_id: str, db: AsyncSession = Depends(db_session)):
+    """Project every cuboid_3d on the frame onto the camera image, so the 3D box is visible (and editable)
+    in the 2D editor. Uses the configured rig + nominal intrinsics, so it works without LiDAR calibration."""
+    from services.lidar.boxes import project_cuboid
+
+    frame = await db.get(Frame, UUID(frame_id))
+    if frame is None:
+        raise HTTPException(404, "frame not found")
+    rows = (await db.execute(select(Object).where(
+        Object.frame_id == frame.frame_id, Object.cuboid_3d.isnot(None)))).scalars().all()
+    out = []
+    for o in rows:
+        c = o.cuboid_3d or {}
+        center, size, yaw = c.get("center"), c.get("size"), float(c.get("yaw", 0.0))
+        if not center or not size:
+            continue
+        dims = [size[1], size[0], size[2]]  # cuboid_3d size is [w,l,h]; project_cuboid wants [length,width,height]
+        proj = project_cuboid(center, dims, yaw, frame.cam_id, frame.width, frame.height)
+        out.append({"object_id": str(o.object_id), "corners_uv": proj["corners_uv"], "edges": proj["edges"],
+                    "any_in_image": proj["any_in_image"]})
+    return out
+
+
+@router.get("/frames/{frame_id}/lift_ground")
+async def lift_ground(frame_id: str, u: float, v: float, db: AsyncSession = Depends(db_session)):
+    """The ego ground point (z=0) a pixel sees, for placing a cuboid on the road from an image click."""
+    from services.lidar.project import camera_ray_to_ego
+
+    frame = await db.get(Frame, UUID(frame_id))
+    if frame is None:
+        raise HTTPException(404, "frame not found")
+    ray = camera_ray_to_ego(u, v, frame.cam_id, frame.width, frame.height)
+    o, dvec = ray["origin"], ray["direction"]
+    if abs(float(dvec[2])) < 1e-6:
+        raise HTTPException(400, "ray is parallel to the ground")
+    t = -float(o[2]) / float(dvec[2])
+    if t <= 0:
+        raise HTTPException(400, "pixel does not look at the ground ahead")
+    return {"ego": [round(float(o[0] + t * dvec[0]), 3), round(float(o[1] + t * dvec[1]), 3), 0.0]}
+
+
 def _mask_polygons(mask_uri: str | None) -> list[list[float]]:
     if not mask_uri:
         return []
@@ -115,6 +157,7 @@ def _detail(obj: Object, frame: Frame, onto) -> ObjectDetail:
         rot_deg=obj.rot_deg or 0.0,
         keypoints=obj.keypoints,
         polyline=obj.polyline,
+        cuboid_3d=obj.cuboid_3d,
     )
 
 
@@ -147,6 +190,7 @@ async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
             "rot_deg": o.rot_deg or 0.0,
             "keypoints": o.keypoints,
             "polyline": o.polyline,
+            "cuboid_3d": o.cuboid_3d,
         }
         for o in rows
     ]
@@ -211,7 +255,7 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         object_id=oid, frame_id=frame.frame_id, class_id=onto.by_name(payload.class_name).id,
         bbox=payload.bbox, mask_uri=mask_uri, mask_encoding=mask_encoding, attrs=payload.attrs or {},
         conf=1.0, source="human", state=payload.state, rot_deg=payload.rot_deg, keypoints=payload.keypoints,
-        polyline=payload.polyline,
+        polyline=payload.polyline, cuboid_3d=payload.cuboid_3d,
         provenance={"created_by": "human-annotation", "idem_key": payload.idem_key},
     )
     db.add(obj)

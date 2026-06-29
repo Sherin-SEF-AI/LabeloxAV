@@ -12,8 +12,9 @@ import { classColor, classFill } from "@/lib/colors";
 import type { EdObject, Tool, Viewport } from "./useEditor";
 
 type LaneOverlay = { lane_id: string; control_points: number[][]; lane_type: string; is_ego: boolean; source: string };
-export type LayerFlags = { boxes: boolean; masks: boolean; lanes: boolean; drivable: boolean; adverse: boolean };
+export type LayerFlags = { boxes: boolean; masks: boolean; lanes: boolean; drivable: boolean; adverse: boolean; cuboids: boolean };
 type AdverseOverlay = { region_id: string; geometry: number[]; condition: string };
+type CuboidOverlay = { object_id: string; corners_uv: number[][]; edges: number[][] };
 
 type Props = {
   imageUrl: string;
@@ -29,6 +30,7 @@ type Props = {
   drivable?: Record<string, number[][]> | null;
   relationships?: { from_object_id: string; to_object_id: string; kind: string }[];
   adverse?: AdverseOverlay[];
+  cuboids?: CuboidOverlay[];
   layers?: LayerFlags;
   onViewport: (v: Viewport) => void;
   onSelect: (id: string | null) => void;
@@ -37,6 +39,7 @@ type Props = {
   onDrawPolygon: (points: number[]) => void;   // manual polygon: flattened [x,y,...], no GPU/SAM needed
   onDrawPolyline: (points: number[]) => void;  // open polyline (curb/road_edge/barrier), not closed
   onDrawAdverse: (points: number[]) => void;   // adverse-condition region polygon (glare/shadow/...)
+  onPlaceCuboid: (pt: number[]) => void;       // cuboid tool: lift this ground pixel and drop a 3D box
   keypointDraft?: number[][] | null;           // in-progress pose points [[x,y,v],...] (placed so far)
   skeletonEdges?: number[][];                  // index pairs connecting keypoints, for rendering
   onPlaceKeypoint: (pt: number[]) => void;     // keypoint tool: drop the next skeleton point
@@ -104,7 +107,7 @@ export default function EditorCanvas(p: Props) {
   }, [p.selectedId, p.tool, p.objects]);
 
   const v = p.viewport;
-  const L = p.layers ?? { boxes: true, masks: true, lanes: true, drivable: true, adverse: true };
+  const L = p.layers ?? { boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true };
   const toImg = (): number[] => {
     const pt = stageRef.current?.getRelativePointerPosition();
     return pt ? [pt.x, pt.y] : [0, 0];
@@ -133,6 +136,8 @@ export default function EditorCanvas(p: Props) {
       setPoly((pp) => [...pp, x, y]); // each click drops a vertex; double-click closes/commits
     } else if (p.tool === "keypoint") {
       p.onPlaceKeypoint([x, y]); // each click drops the next skeleton point
+    } else if (p.tool === "cuboid") {
+      p.onPlaceCuboid([x, y]); // single click on the ground drops a 3D box
     } else if (p.tool === "sam-point") {
       p.onSamPoint([x, y], e.evt.shiftKey ? 0 : 1);
     } else if (p.tool === "select" && e.target === e.target.getStage()) {
@@ -302,6 +307,16 @@ export default function EditorCanvas(p: Props) {
               points={[ca[0], ca[1], cb[0], cb[1]]} stroke="#E3B341" strokeWidth={1 / v.scale}
               dash={[4 / v.scale, 3 / v.scale]} />;
           })}
+
+          {/* in-image 3D cuboids: the projected wireframe of each cuboid_3d, highlighted when selected */}
+          {p.cuboids?.flatMap((c) => c.edges.map((edge, i) => {
+            const a = c.corners_uv[edge[0]];
+            const b = c.corners_uv[edge[1]];
+            if (!a || !b) return null;
+            const sel = c.object_id === p.selectedId;
+            return <Line key={`cub-${c.object_id}-${i}`} points={[a[0], a[1], b[0], b[1]]} listening={false}
+              stroke={sel ? "#FF7A2F" : "#58A6FF"} strokeWidth={(sel ? 2 : 1.25) / v.scale} />;
+          }))}
 
           {/* selected object's mask vertices: drag to move, right-click to delete */}
           {sel && p.tool === "select" && sel.mask.map((poly, pi) =>

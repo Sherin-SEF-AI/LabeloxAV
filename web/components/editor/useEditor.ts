@@ -6,7 +6,7 @@
 
 import { useReducer } from "react";
 
-export type Tool = "select" | "box" | "polygon" | "polyline" | "adverse" | "keypoint" | "measure" | "sam-point" | "sam-box";
+export type Tool = "select" | "box" | "polygon" | "polyline" | "adverse" | "cuboid" | "keypoint" | "measure" | "sam-point" | "sam-box";
 
 export type EdObject = {
   id: string; // server object_id, or "tmp-N" for locally-created
@@ -25,6 +25,7 @@ export type EdObject = {
   rot?: number; // oriented-box rotation in degrees about the box centre (0 = axis-aligned)
   keypoints?: { skeleton: string; points: number[][] }; // COCO-style pose [[x,y,v],...]
   polyline?: number[][]; // open linear feature (curb/road_edge/barrier) as ordered [[x,y],...]
+  cuboid_3d?: { center: number[]; size: number[]; yaw: number } | null; // ego-frame 3D box (size [w,l,h])
 };
 
 export type Viewport = { scale: number; ox: number; oy: number };

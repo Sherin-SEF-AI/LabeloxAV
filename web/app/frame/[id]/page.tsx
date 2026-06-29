@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import type { AdverseRegion, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, Relationship } from "@/lib/types";
+import type { AdverseRegion, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, ProjectedCuboid, Relationship } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
@@ -25,6 +25,7 @@ const TOOLS: { key: Tool; label: string; hot: string }[] = [
   { key: "polygon", label: "polygon", hot: "G" },
   { key: "polyline", label: "polyline", hot: "L" },
   { key: "adverse", label: "adverse", hot: "D" },
+  { key: "cuboid", label: "cuboid", hot: "C" },
   { key: "keypoint", label: "pose", hot: "K" },
   { key: "measure", label: "measure", hot: "R" },
   { key: "sam-point", label: "sam pt", hot: "S" },
@@ -87,7 +88,8 @@ export default function FrameEditor() {
   const [linkKind, setLinkKind] = useState("rider_of");
   const [adverse, setAdverse] = useState<AdverseRegion[]>([]);
   const [adverseCond, setAdverseCond] = useState("glare");
-  const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true, adverse: true });
+  const [cuboids, setCuboids] = useState<ProjectedCuboid[]>([]);
+  const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true });
 
   const flash = (m: string) => {
     setNotice(m);
@@ -104,6 +106,7 @@ export default function FrameEditor() {
         id: x.object_id, track_id: x.track_id, class_id: x.class_id, class_name: x.class_name, bbox: x.bbox,
         mask: x.mask_polygons || [], attrs: {}, conf: x.conf, state: x.state, visible: true, version: x.version,
         rot: x.rot_deg, keypoints: x.keypoints ?? undefined, polyline: x.polyline ?? undefined,
+        cuboid_3d: x.cuboid_3d ?? undefined,
       }));
       dispatch({ t: "load", objects: eds, viewport: { scale: 0, ox: 0, oy: 0 }, selectedId: focus });
       const fc = (focus && eds.find((e) => e.id === focus)) || null;
@@ -133,6 +136,17 @@ export default function FrameEditor() {
     await api.deleteRelationship(rid).catch(() => {});
     setRelationships(await api.frameRelationships(id).catch(() => []));
   };
+  // cuboid tool: click the ground in the image, lift to an ego ground point, drop a default 3D box there
+  const placeCuboid = async (pt: number[]) => {
+    if (!currentClass) return;
+    try {
+      const { ego } = await api.liftGround(id, pt[0], pt[1]);
+      const cub = { center: [ego[0], ego[1], 0.75], size: [1.8, 4.2, 1.5], yaw: 0 };
+      dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
+        bbox: [pt[0] - 40, pt[1] - 40, pt[0] + 40, pt[1] + 40], mask: [], cuboid_3d: cub, attrs: {},
+        conf: 1, state: "accepted", visible: true, isNew: true } });
+    } catch (e) { flash("could not place cuboid: " + String(e)); }
+  };
 
   // P3 derived dynamics: fetch this frame's readout, and a recompute over the session
   const loadDynamics = useCallback(async () => {
@@ -150,11 +164,12 @@ export default function FrameEditor() {
 
   // P4 layers: fetch lane + drivable overlays, and inline generators
   const loadLayers = useCallback(async () => {
-    const [ls, dr, rel, adv] = await Promise.all([api.framesLanes(id).catch(() => []), api.getDrivable(id).catch(() => null), api.frameRelationships(id).catch(() => []), api.listAdverse(id).catch(() => [])]);
+    const [ls, dr, rel, adv, cub] = await Promise.all([api.framesLanes(id).catch(() => []), api.getDrivable(id).catch(() => null), api.frameRelationships(id).catch(() => []), api.listAdverse(id).catch(() => []), api.frameCuboids(id).catch(() => [])]);
     setLanes(ls);
     setDrivable(dr && dr.found ? dr.classes ?? null : null);
     setRelationships(rel);
     setAdverse(adv);
+    setCuboids(cub);
   }, [id]);
   useEffect(() => { loadLayers(); }, [loadLayers]);
   // The editor has its own header (no TopNav/UserPicker), so guarantee a valid identity or every mutation
@@ -306,7 +321,7 @@ export default function FrameEditor() {
           const created = await api.createObject(id, {
             class_name: o.class_name, bbox: o.bbox, attrs: o.attrs,
             mask_polygons: o.mask.length ? o.mask : undefined, state: tgt, idem_key: o.id, rot_deg: o.rot ?? 0,
-            keypoints: o.keypoints ?? null, polyline: o.polyline,
+            keypoints: o.keypoints ?? null, polyline: o.polyline, cuboid_3d: o.cuboid_3d ?? undefined,
           });
           remap[o.id] = created.object_id;
           if (created.version != null) versions[o.id] = created.version;
@@ -315,13 +330,14 @@ export default function FrameEditor() {
           // updateMask that could leave the mask out of sync on a partial failure).
           const r = await api.review(o.id, { action: "adjust_geometry",
             class_name: o.class_name, bbox: o.bbox, attrs: o.attrs, state: tgt, expected_version: o.version,
-            rot_deg: o.rot ?? 0, keypoints: o.keypoints ?? null, polyline: o.polyline,
+            rot_deg: o.rot ?? 0, keypoints: o.keypoints ?? null, polyline: o.polyline, cuboid_3d: o.cuboid_3d ?? undefined,
             mask_polygons: o.mask.length ? o.mask : undefined });
           if (r.version != null) versions[o.id] = r.version;
         }
       }
       dispatch({ t: "saved", remap, versions });
       flash("saved");
+      setCuboids(await api.frameCuboids(id).catch(() => [])); // refresh projected cuboid wireframes
     } catch (e) {
       const msg = String(e);
       flash(msg.includes("409") ? "conflict: another annotator changed this object; reload to continue" : "save failed: " + msg);
@@ -422,6 +438,7 @@ export default function FrameEditor() {
       else if (k === "g") dispatch({ t: "tool", tool: "polygon" });
       else if (k === "l") dispatch({ t: "tool", tool: "polyline" });
       else if (k === "d") dispatch({ t: "tool", tool: "adverse" });
+      else if (k === "c") dispatch({ t: "tool", tool: "cuboid" });
       else if (k === "k") dispatch({ t: "tool", tool: "keypoint" });
       else if (k === "r") dispatch({ t: "tool", tool: "measure" });
       else if (k === "s") dispatch({ t: "tool", tool: "sam-point" });
@@ -488,7 +505,7 @@ export default function FrameEditor() {
         </div>
         {/* P4 layer visibility toggles: show that the road IS segmented (lanes + drivable + masks) */}
         <div className="flex items-center gap-1 ml-1 font-mono text-[11px]" title="toggle annotation layers">
-          {(["boxes", "masks", "lanes", "drivable", "adverse"] as const).map((k) => (
+          {(["boxes", "masks", "lanes", "drivable", "adverse", "cuboids"] as const).map((k) => (
             <button key={k} onClick={() => setLayers((s) => ({ ...s, [k]: !s[k] }))}
               className={`px-1.5 py-1 border ${layers[k] ? "border-accent text-ink" : "border-line text-ink-3"}`}>{k}</button>
           ))}
@@ -540,6 +557,8 @@ export default function FrameEditor() {
             onDrawPolyline={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [], polyline: Array.from({ length: pts.length / 2 }, (_, i) => [pts[2 * i], pts[2 * i + 1]]), attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
             adverse={adverse}
             onDrawAdverse={async (pts) => { try { await api.createAdverse(id, { geometry: pts, condition: adverseCond }); setAdverse(await api.listAdverse(id).catch(() => [])); flash(`tagged ${adverseCond}`); } catch (e) { flash("region failed: " + String(e)); } }}
+            cuboids={layers.cuboids ? cuboids : []}
+            onPlaceCuboid={placeCuboid}
             keypointDraft={kpDraft} skeletonEdges={PERSON_17.edges as unknown as number[][]}
             onPlaceKeypoint={onPlaceKeypoint} onUpdateKeypoints={onUpdateKeypoints}
             mPerPx={meta.lidar_res ?? undefined}

@@ -98,6 +98,7 @@ class ObjectDetail(BaseModel):
     rot_deg: float = 0.0
     keypoints: dict | None = None
     polyline: list[list[float]] | None = None
+    cuboid_3d: dict | None = None
 
 
 class ReviewIn(BaseModel):
@@ -113,6 +114,7 @@ class ReviewIn(BaseModel):
     keypoints: dict | None = None        # keypoints/skeleton (only updated when provided)
     mask_polygons: list[list[float]] | None = None  # write the mask in the same request (atomic save)
     polyline: list[list[float]] | None = None       # open polyline points (only updated when provided)
+    cuboid_3d: dict | None = None                    # ego-frame {center,size,yaw} (only when provided)
 
 
 class SegmentIn(BaseModel):
@@ -132,6 +134,7 @@ class CreateObjectIn(BaseModel):
     rot_deg: float = 0.0                           # oriented-box rotation about the box centre
     keypoints: dict | None = None                  # {"skeleton": str, "points": [[x,y,v],...]} image px
     polyline: list[list[float]] | None = None      # open polyline points [[x,y],...] for linear features
+    cuboid_3d: dict | None = None                  # ego-frame {center:[x,y,z], size:[w,l,h], yaw:rad}
 
 
 class MaskIn(BaseModel):

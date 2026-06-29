@@ -133,6 +133,8 @@ async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = D
         obj.keypoints = payload.keypoints
     if payload.polyline is not None:
         obj.polyline = payload.polyline
+    if payload.cuboid_3d is not None:
+        obj.cuboid_3d = payload.cuboid_3d
     if payload.mask_polygons is not None:
         # Write the mask blob in the same request so geometry + mask persist atomically (one transaction),
         # instead of a separate updateMask call that can leave them out of sync on a partial failure.

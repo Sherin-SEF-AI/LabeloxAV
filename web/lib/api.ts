@@ -9,6 +9,7 @@ import type {
   RegistryRow,
   Relationship,
   AdverseRegion,
+  ProjectedCuboid,
   CalibDetail,
   CalibSession,
   Confusions,
@@ -281,7 +282,7 @@ export const api = {
     post<SegmentResult>("/api/segment", { frame_id, ...p }),
   createObject: (
     frame_id: string,
-    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][] },
+    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][]; cuboid_3d?: { center: number[]; size: number[]; yaw: number } },
   ) => post<ObjectDetail>(`/api/frames/${frame_id}/objects`, body),
   updateMask: (object_id: string, polygons: number[][], width?: number, height?: number) =>
     put<{ object_id: string }>(`/api/objects/${object_id}/mask`, { polygons, width, height }),
@@ -298,6 +299,10 @@ export const api = {
     post<AdverseRegion>(`/api/frames/${frame_id}/adverse`, body),
   listAdverse: (frame_id: string) => get<AdverseRegion[]>(`/api/frames/${frame_id}/adverse`),
   deleteAdverse: (region_id: string) => del<{ deleted: string }>(`/api/adverse/${region_id}`),
+  // in-image cuboids: projected wireframes + lift a pixel to the ego ground point
+  frameCuboids: (frame_id: string) => get<ProjectedCuboid[]>(`/api/frames/${frame_id}/cuboids`),
+  liftGround: (frame_id: string, u: number, v: number) =>
+    get<{ ego: number[] }>(`/api/frames/${frame_id}/lift_ground?u=${u}&v=${v}`),
   // M2.1 lanes
   framesLanes: (frameId: string) => get<LaneRow[]>(`/api/frames/${frameId}/lanes`),
   proposeLanes: (frameId: string) => post<{ proposed: number; lanes: LaneRow[]; model: string }>(`/api/frames/${frameId}/lanes/propose`, {}),
@@ -396,6 +401,7 @@ export const api = {
       keypoints?: Keypoints | null;
       mask_polygons?: number[][];
       polyline?: number[][];
+      cuboid_3d?: { center: number[]; size: number[]; yaw: number };
     },
   ) => post<ObjectDetail & { version?: number; rot_deg?: number }>(`/api/objects/${id}/review`, payload),
   scenarios: (params: Record<string, string>) =>
