@@ -12,9 +12,10 @@ import { PERSON_17 } from "@/lib/skeleton";
 import BackButton from "@/components/BackButton";
 import CorrectionModal, { type CorrectionChange } from "@/components/CorrectionModal";
 import ToolStrip from "@/components/shell/ToolStrip";
+import ModeRail from "@/components/shell/ModeRail";
 import FloatingLayers from "@/components/shell/FloatingLayers";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
-import type { ToolGroup } from "@/lib/editor/registry";
+import { MODES, type ToolGroup } from "@/lib/editor/registry";
 
 // Frame-centric professional annotation editor. Pan/zoom canvas, draw + edit boxes, SAM-assisted masks,
 // layers panel, class palette, attributes, keyboard-driven, batched save. Operational Materialism tokens.
@@ -24,30 +25,41 @@ import type { ToolGroup } from "@/lib/editor/registry";
 const EditorCanvas = dynamic(() => import("@/components/editor/EditorCanvas").then((m) => ({ default: m.default })), { ssr: false });
 
 // Editor tools grouped so the strip renders one button per group (not 14 peers in a row). Tool keys match
-// the editor's dispatch keys. Variants live in a flyout, cycled by their hotkey. When the mode rail lands
-// (phase 3), these split across modes; for now one Objects-centric strip holds them all without wrapping.
-const EDITOR_GROUPS: ToolGroup[] = [
-  { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
-  { key: "draw", label: "Draw", tools: [
+// the editor's dispatch keys. The groups are split across modes: switching mode swaps which groups show,
+// so each mode's strip stays short and one row. A new tool is one entry in a group's flyout.
+const G = {
+  select: { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
+  draw: { key: "draw", label: "Draw", tools: [
     { key: "box", label: "box", hotkey: "B" },
     { key: "polygon", label: "polygon", hotkey: "G" },
     { key: "polyline", label: "polyline", hotkey: "L" },
   ] },
-  { key: "ai", label: "AI assist", tools: [
+  ai: { key: "ai", label: "AI assist", tools: [
     { key: "sam-point", label: "sam point", hotkey: "S" },
     { key: "sam-box", label: "sam box", hotkey: "M" },
     { key: "magic-wand", label: "wand", hotkey: "W" },
   ] },
-  { key: "mask", label: "Mask edit", tools: [
+  mask: { key: "mask", label: "Mask edit", tools: [
     { key: "brush", label: "brush", hotkey: "P" },
     { key: "eraser", label: "eraser", hotkey: "E" },
     { key: "superpixel", label: "cells", hotkey: "U" },
   ] },
-  { key: "pose", label: "Pose", tools: [{ key: "keypoint", label: "pose", hotkey: "K" }] },
-  { key: "region", label: "Region", tools: [{ key: "adverse", label: "adverse", hotkey: "D" }] },
-  { key: "cuboid", label: "3D", tools: [{ key: "cuboid", label: "cuboid", hotkey: "C" }] },
-  { key: "measure", label: "Measure", tools: [{ key: "measure", label: "measure", hotkey: "R" }] },
-];
+  pose: { key: "pose", label: "Pose", tools: [{ key: "keypoint", label: "pose", hotkey: "K" }] },
+  region: { key: "region", label: "Region", tools: [{ key: "adverse", label: "adverse", hotkey: "D" }] },
+  cuboid: { key: "cuboid", label: "3D box", tools: [{ key: "cuboid", label: "cuboid", hotkey: "C" }] },
+  measure: { key: "measure", label: "Measure", tools: [{ key: "measure", label: "measure", hotkey: "R" }] },
+} satisfies Record<string, ToolGroup>;
+
+// Per-mode tool strips. The mode rail picks one; the strip renders only that mode's groups.
+const MODE_GROUPS: Record<string, ToolGroup[]> = {
+  objects: [G.select, G.draw, G.ai, G.mask, G.region, G.measure],
+  pose: [G.select, G.pose, G.measure],
+  lidar3d: [G.select, G.cuboid, G.measure],
+  lanes: [G.select, G.measure],
+  review: [G.select],
+};
+const MODE_TOOLS: Record<string, string[]> = Object.fromEntries(
+  Object.entries(MODE_GROUPS).map(([m, gs]) => [m, gs.flatMap((g) => g.tools.map((t) => t.key))]));
 
 // directed object-relationship kinds offered in the editor (rider_of is the India two-wheeler case)
 const RELATION_KINDS = ["rider_of", "towed_by", "part_of", "member_of", "occludes"];
@@ -123,6 +135,13 @@ export default function FrameEditor() {
   const [segKind, setSegKind] = useState<"semantic" | "panoptic">("semantic");
   const [objSearch, setObjSearch] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [mode, setMode] = useState("objects");
+  // switching mode swaps the tool strip; reset the active tool to the mode's first tool if it does not carry over
+  const switchMode = (m: string) => {
+    setMode(m);
+    const tools = MODE_TOOLS[m] ?? [];
+    if (!tools.includes(st.tool)) dispatch({ t: "tool", tool: (tools[0] ?? "select") as Tool });
+  };
   const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true });
 
   const flash = (m: string) => {
@@ -512,6 +531,8 @@ export default function FrameEditor() {
         return;
       }
       if (mod) return;
+      // Shift+1..5 switches mode (plain 1..9 stays the quick-relabel shortcut)
+      if (e.shiftKey && /^Digit[1-5]$/.test(e.code)) { e.preventDefault(); switchMode(MODES[Number(e.code.slice(5)) - 1].key); return; }
       const k = e.key.toLowerCase();
       if (k === "a") dispatch({ t: "acceptAll" });
       else if (k === "v") dispatch({ t: "tool", tool: "select" });
@@ -569,7 +590,7 @@ export default function FrameEditor() {
         <button onClick={() => router.push(`/search?frame=${id}`)} title="find visually similar frames (DINOv3)"
           className="font-mono text-[11px] text-ink-3 hover:text-accent border border-line hover:border-accent px-2 py-0.5">find similar</button>
         <div className="ml-2 min-w-0 overflow-x-auto no-scrollbar">
-          <ToolStrip groups={EDITOR_GROUPS} tool={st.tool}
+          <ToolStrip groups={MODE_GROUPS[mode] ?? MODE_GROUPS.objects} tool={st.tool}
             onSelect={(t) => dispatch({ t: "tool", tool: t as Tool })}
             options={
               <>
@@ -623,6 +644,7 @@ export default function FrameEditor() {
       </header>
 
       <div className="flex-1 flex min-h-0">
+        <ModeRail mode={mode} onMode={switchMode} />
         {/* canvas */}
         <div ref={canvasWrapRef} className="flex-1 min-w-0 relative">
           <EditorCanvas
