@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from uuid import UUID
 
@@ -19,6 +20,7 @@ from services.api.routers import (
     analytics,
     autolabel,
     calibration,
+    cloud,
     collaborate,
     corrections,
     curation,
@@ -61,12 +63,38 @@ from services.api.routers import (
 log = get_logger("api")
 
 
+async def _cloud_watchdog():
+    """Enforce the warm-session idle / max-session guards even when no UI is polling status, so a connected
+    cloud GPU cannot linger past its limits while the operator is away. refresh() is a no-op when there is
+    no live session and safe when RUNPOD_API_KEY is unset."""
+    from compute.runpod.session import get_manager
+
+    while True:
+        try:
+            await get_manager().refresh()
+        except Exception as exc:  # noqa: BLE001
+            log.error("cloud.watchdog_error", error=str(exc))
+        await asyncio.sleep(30)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(get_settings().log_level)
     log.info("api.startup")
-    yield
-    log.info("api.shutdown")
+    watchdog = asyncio.create_task(_cloud_watchdog())
+    try:
+        yield
+    finally:
+        watchdog.cancel()
+        # mandatory teardown on shutdown: terminate any live warm pod so a connected GPU can never linger
+        # past the app (no-op when nothing is connected).
+        try:
+            from compute.runpod.session import get_manager
+
+            await get_manager().disconnect(terminate=True)
+        except Exception as exc:  # noqa: BLE001
+            log.error("cloud.shutdown_teardown_error", error=str(exc))
+        log.info("api.shutdown")
 
 
 app = FastAPI(title="LabeloxAV", version="0.1.0", lifespan=lifespan)
@@ -211,6 +239,7 @@ app.include_router(review.router, prefix="/api", tags=["review"])
 app.include_router(intelligence.router, prefix="/api", tags=["intelligence"])
 app.include_router(search.router, prefix="/api", tags=["search"])
 app.include_router(analytics.router, prefix="/api", tags=["analytics"])
+app.include_router(cloud.router, prefix="/api", tags=["cloud"])
 app.include_router(models.router, prefix="/api", tags=["models"])
 app.include_router(export.router, prefix="/api", tags=["export"])
 app.include_router(quality.router, prefix="/api", tags=["quality"])

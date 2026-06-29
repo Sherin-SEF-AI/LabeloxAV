@@ -23,9 +23,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 
 from compute.runpod import cost
-from compute.runpod.orchestrator import Orchestrator, PodInfo, RunpodError
+from compute.runpod.orchestrator import Orchestrator, PodInfo, RunpodError, RunpodOrchestrator
+from core.config import get_settings
 from core.logging import get_logger
 from db.models import CloudSession
+from db.session import get_sessionmaker
 
 log = get_logger("cloud_warm")
 
@@ -285,3 +287,12 @@ class WarmSessionManager:
     async def terminate_pod(self, pod_id: str) -> None:
         """Terminate a specific pod (used to kill an orphan from the UI)."""
         await self._safe_terminate(pod_id)
+
+
+def get_manager() -> WarmSessionManager:
+    """The process's warm-session manager: the real RunPod orchestrator plus the configured cost guards.
+    Stateless (the cloud_session row is the source of truth), so a fresh instance per call is fine and
+    picks up RUNPOD_API_KEY / config changes without a restart."""
+    s = get_settings()
+    return WarmSessionManager(
+        RunpodOrchestrator(), cost.CostConfig.from_settings(s.cloud), s.cloud, get_sessionmaker())
