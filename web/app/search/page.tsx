@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import type { SimilarResponse } from "@/lib/types";
@@ -9,7 +9,17 @@ import PageShell from "@/components/shell/PageShell";
 // M1.2 similarity search: find visually (DINOv3) or semantically (SigLIP 2) similar frames by uploading
 // an image or opening a frame. M1.4 adds natural-language text search to this surface.
 
+// useSearchParams (the "frame" query param) must sit inside a Suspense boundary, else the production build
+// cannot prerender this static route. The body is split out and wrapped below.
 export default function SearchPage() {
+  return (
+    <Suspense fallback={null}>
+      <SearchBody />
+    </Suspense>
+  );
+}
+
+function SearchBody() {
   const router = useRouter();
   const frameParam = useSearchParams().get("frame");
   const [res, setRes] = useState<SimilarResponse | null>(null);
