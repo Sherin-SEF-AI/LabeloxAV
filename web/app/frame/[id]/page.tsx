@@ -18,6 +18,7 @@ import FloatingLayers from "@/components/shell/FloatingLayers";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import ScoreBar from "@/components/shell/ScoreBar";
 import Icon, { MODE_ICON } from "@/components/shell/Icon";
+import ShortcutOverlay from "@/components/shell/ShortcutOverlay";
 import { MODES, type ToolGroup } from "@/lib/editor/registry";
 
 // Frame-centric professional annotation editor. Pan/zoom canvas, draw + edit boxes, SAM-assisted masks,
@@ -165,6 +166,7 @@ export default function FrameEditor() {
   const [objSearch, setObjSearch] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState("objects");
+  const [scaleNoteOpen, setScaleNoteOpen] = useState(false);
   // switching mode swaps the tool strip; reset the active tool to the mode's first tool if it does not carry over
   const switchMode = (m: string) => {
     setMode(m);
@@ -737,16 +739,53 @@ export default function FrameEditor() {
 
   return (
     <div className="h-screen flex flex-col">
-      {/* header / toolbar */}
-      <header className="flex items-center gap-3 px-3 h-11 border-b hairline shrink-0">
+      {/* TOP BAR: identity, frame context, global actions, confirm (the design's 46px top bar) */}
+      <header className="flex items-center gap-3 px-3 h-[46px] border-b hairline shrink-0">
         <BackButton />
-        <button onClick={() => router.push("/")} className="font-display font-bold text-sm" title="home (triage)">
-          Labelox<span className="text-accent">AV</span>
+        <button onClick={() => router.push("/")} className="flex items-baseline gap-px" title="home (triage)">
+          <span className="font-display font-bold text-[15px] tracking-tight text-ink">Labelox</span>
+          <span className="font-mono font-semibold text-[12px] text-accent tracking-tight">AV</span>
         </button>
-        <span className="font-mono text-[11px] text-ink-3">/ FRAME <span className="text-ink-2">{String(id).slice(0, 8)}</span></span>
+        <span className="w-px h-5 bg-line" />
+        <div className="flex flex-col leading-tight">
+          <span className="font-mono text-[11px] text-ink">FRAME {String(id).slice(0, 8)}</span>
+          <span className="font-mono text-[9.5px] text-ink-3">{st.objects.length} objects{meta.is_lidar ? " · lidar" : ""}</span>
+        </div>
         <button onClick={() => router.push(`/search?frame=${id}`)} title="find visually similar frames (DINOv3)"
-          className="font-mono text-[11px] text-ink-3 hover:text-accent border border-line hover:border-accent px-2 py-0.5">find similar</button>
-        <div className="ml-2 min-w-0 overflow-x-auto no-scrollbar">
+          className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="search" size={16} /></button>
+
+        <div className="ml-auto flex items-center gap-1.5">
+          <button onClick={() => gotoFrame(meta.prev_frame_id)} disabled={!meta.prev_frame_id} title="previous frame ( [ )"
+            className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink disabled:opacity-30"><Icon name="prev" size={18} /></button>
+          <button onClick={() => gotoFrame(meta.next_frame_id)} disabled={!meta.next_frame_id} title="next frame ( ] )"
+            className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink disabled:opacity-30"><Icon name="next" size={18} /></button>
+          <span className="w-px h-5 bg-line mx-0.5" />
+          <button onClick={() => dispatch({ t: "undo" })} disabled={!st.past.length} title="undo (Cmd Z)"
+            className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink disabled:opacity-30"><Icon name="undo" size={17} /></button>
+          <button onClick={() => dispatch({ t: "redo" })} disabled={!st.future.length} title="redo (Cmd Shift Z)"
+            className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink disabled:opacity-30"><Icon name="redo" size={17} /></button>
+          <button onClick={save} disabled={!dirty || saving} title="save now (Cmd S)"
+            className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink disabled:opacity-30"><Icon name="save" size={17} /></button>
+          <button onClick={() => setAutosave((v) => !v)} title="autosave: persist edits a moment after you stop"
+            className="flex items-center gap-1.5 px-1.5 h-[30px]">
+            <span className={`w-1.5 h-1.5 rounded-full ${saving ? "bg-warn" : dirty ? "bg-ink-3" : "bg-pass"}`} />
+            <span className="font-mono text-[10px] text-ink-3">{saving ? "saving" : dirty ? (autosave ? "autosave on" : "unsaved") : "saved"}</span>
+          </button>
+          <span className="w-px h-5 bg-line mx-0.5" />
+          <button onClick={() => setScaleNoteOpen(true)} title="how this layout scales"
+            className="flex items-center gap-1.5 h-[30px] px-2.5 rounded-md border border-line text-ink-2 hover:bg-line/50 hover:text-ink text-[11.5px]"><Icon name="info" size={15} /><span>How it scales</span></button>
+          <button onClick={() => window.dispatchEvent(new Event("lbx:shortcuts"))} title="keyboard shortcuts ( ? )"
+            className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink"><Icon name="keyboard" size={17} /></button>
+          <button onClick={() => dispatch({ t: "acceptAll" })} disabled={!st.objects.length} title="confirm every object as human-verified gold (A)"
+            className="flex items-center gap-1.5 h-[30px] px-3.5 rounded-md bg-accent text-bg font-display font-semibold text-[12.5px] hover:bg-accent/90 disabled:opacity-40"><Icon name="confirm" size={15} /><span>Confirm frame</span></button>
+        </div>
+      </header>
+
+      <div className="flex-1 flex min-h-0">
+        <ModeRail mode={mode} onMode={switchMode} />
+        {/* CENTER: tool strip row above the canvas */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
+          <div className="h-[50px] shrink-0 flex items-center gap-1.5 px-2.5 border-b hairline overflow-x-auto no-scrollbar">
           <ToolStrip groups={MODE_GROUPS[mode] ?? MODE_GROUPS.objects} tool={st.tool}
             modeIcon={MODE_ICON[mode]} modeLabel={MODES.find((m) => m.key === mode)?.label}
             onSelect={(t) => dispatch({ t: "tool", tool: t as Tool })}
@@ -786,46 +825,7 @@ export default function FrameEditor() {
                 )}
               </>
             } />
-        </div>
-        <div className="flex items-center gap-1 ml-2 font-mono text-[11px]">
-          <button onClick={() => zoomBy(1 / 1.2)} className="border border-line px-2 py-1 hover:border-accent">-</button>
-          <span className="w-12 text-center text-ink-2">{Math.round(st.viewport.scale * 100) || ""}%</span>
-          <button onClick={() => zoomBy(1.2)} className="border border-line px-2 py-1 hover:border-accent">+</button>
-          <button onClick={fit} className="border border-line px-2 py-1 hover:border-accent">fit</button>
-        </div>
-        <div className="flex items-center gap-1 font-mono text-[11px]">
-          <button onClick={() => dispatch({ t: "undo" })} disabled={!st.past.length} className="border border-line px-2 py-1 disabled:opacity-40 hover:border-accent">undo</button>
-          <button onClick={() => dispatch({ t: "redo" })} disabled={!st.future.length} className="border border-line px-2 py-1 disabled:opacity-40 hover:border-accent">redo</button>
-        </div>
-        <div className="ml-auto flex items-center gap-2 font-mono text-[11px]">
-          <button onClick={() => gotoFrame(meta.prev_frame_id)} disabled={!meta.prev_frame_id} className="border border-line px-2 py-1 disabled:opacity-40 hover:border-accent">[ prev</button>
-          <button onClick={() => gotoFrame(meta.next_frame_id)} disabled={!meta.next_frame_id} className="border border-line px-2 py-1 disabled:opacity-40 hover:border-accent">next ]</button>
-          <button onClick={() => dispatch({ t: "acceptAll" })} disabled={!st.objects.length}
-            title="confirm every object as human-verified gold (A)"
-            className="border border-pass text-pass px-2 py-1 disabled:opacity-40 hover:bg-pass/10">
-            confirm frame (A)
-          </button>
-          <button onClick={() => setAutosave((v) => !v)}
-            title="autosave: persist every edit automatically a moment after you stop"
-            className={`border px-2 py-1 ${autosave ? "border-accent text-accent" : "border-line text-ink-3"}`}>
-            autosave {autosave ? "on" : "off"}
-          </button>
-          <span className="w-16 text-center" title="save status">
-            {saving ? <span className="text-warn">saving…</span>
-              : dirty ? <span className="text-ink-3">{autosave ? "editing…" : "unsaved"}</span>
-              : <span className="text-pass">✓ saved</span>}
-          </span>
-          <button onClick={save} disabled={!dirty || saving}
-            title="save now (Cmd/Ctrl+S)"
-            className={`px-3 py-1 border ${dirty ? "border-pass text-pass" : "border-line text-ink-3"} disabled:opacity-50`}>
-            save
-          </button>
-        </div>
-      </header>
-
-      <div className="flex-1 flex min-h-0">
-        <ModeRail mode={mode} onMode={switchMode} />
-        {/* canvas */}
+          </div>
         <div ref={canvasWrapRef} className="flex-1 min-w-0 relative">
           {mode === "lanes" ? (
             laneImg && meta ? (
@@ -976,14 +976,14 @@ export default function FrameEditor() {
           {notice && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 font-mono text-[11px] text-warn">{notice}</div>
           )}
-          {/* status bar */}
-          <div className="absolute bottom-0 left-0 right-0 h-6 bg-bg/80 border-t hairline flex items-center gap-4 px-3 font-mono text-[10px] text-ink-3">
-            <span>{Math.round(st.viewport.scale * 100)}%</span>
-            <span>{cursor ? `${Math.round(cursor[0])}, ${Math.round(cursor[1])}` : "-, -"}</span>
-            <span>{st.objects.length} objects</span>
-            <span className={dirty ? "text-warn" : "text-pass"}>{dirty ? "unsaved" : "saved"}</span>
-            <span className="ml-auto">V select · B box · G polygon · K pose (Enter to finish) · R measure · S sam · M sam-box · Cmd+C/V copy · space pan · Del delete · [ ] frame · Cmd+Z undo · Cmd+S save</span>
-          </div>
+          {/* HUD: frame time and camera, a quiet overlay top-left (the design's HUD) */}
+          {meta && (
+            <div className="absolute top-3 left-3 z-10 flex flex-col gap-1 pointer-events-none">
+              <span className="font-mono text-[11px] text-ink-2 bg-bg/60 px-1.5 py-0.5 rounded w-fit">{new Date(Number(meta.ts_ns) / 1e6).toISOString().replace("T", " ").replace("Z", "")}</span>
+              <span className="font-mono text-[11px] text-ink-3 bg-bg/60 px-1.5 py-0.5 rounded w-fit">cam {meta.cam_id}{meta.is_lidar ? " · lidar" : ""}{cursor ? `  ·  ${Math.round(cursor[0])}, ${Math.round(cursor[1])}` : ""}</span>
+            </div>
+          )}
+        </div>
         </div>
 
         {/* right rail */}
@@ -1336,6 +1336,53 @@ export default function FrameEditor() {
           </>)}
         </aside>
       </div>
+
+      {/* BOTTOM BAR: zoom, shortcut hints, counts, save status (the design's 28px bottom bar) */}
+      <footer className="h-7 shrink-0 flex items-center border-t hairline font-mono text-[10.5px] text-ink-3">
+        <div className="flex items-center h-full border-r hairline px-1">
+          <button onClick={() => zoomBy(1 / 1.2)} title="zoom out" className="w-6 h-5 flex items-center justify-center rounded text-ink-2 hover:bg-line/50"><Icon name="zoomOut" size={14} /></button>
+          <span className="min-w-[38px] text-center text-ink-2">{Math.round(st.viewport.scale * 100) || 0}%</span>
+          <button onClick={() => zoomBy(1.2)} title="zoom in" className="w-6 h-5 flex items-center justify-center rounded text-ink-2 hover:bg-line/50"><Icon name="zoomIn" size={14} /></button>
+          <button onClick={fit} title="fit to view" className="w-6 h-5 flex items-center justify-center rounded text-ink-2 hover:bg-line/50 ml-0.5"><Icon name="fit" size={14} /></button>
+        </div>
+        <div className="flex-1 px-3 overflow-hidden whitespace-nowrap text-ink-3/80">
+          <span className="text-ink-2">V</span> select &middot; <span className="text-ink-2">B</span> box &middot; <span className="text-ink-2">G</span> polygon &middot; <span className="text-ink-2">K</span> pose &middot; <span className="text-ink-2">R</span> measure &middot; <span className="text-ink-2">[ ]</span> frame &middot; <span className="text-ink-2">Cmd Z</span> undo &middot; <span className="text-ink-2">?</span> shortcuts
+        </div>
+        <div className="flex items-center gap-1.5 h-full border-l hairline px-3">
+          <span className="text-ink-2">{st.objects.length} objects</span>
+          <span className="text-line">&middot;</span>
+          <span className="text-pass">{st.objects.filter((o) => o.state === "accepted").length} confirmed</span>
+        </div>
+        <div className="flex items-center gap-1.5 h-full border-l hairline px-3">
+          <span className={`w-1.5 h-1.5 rounded-full ${dirty ? "bg-warn" : "bg-pass"}`} />
+          <span>{dirty ? "unsaved" : "saved"}</span>
+        </div>
+      </footer>
+
+      {/* "How it scales": the add-a-feature explainer, the layout absorbs features by grouping and mode */}
+      {scaleNoteOpen && (
+        <div className="fixed inset-0 z-50 bg-bg/60 flex items-center justify-center" onClick={() => setScaleNoteOpen(false)}>
+          <div className="w-[360px] panel" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 px-4 py-3 border-b hairline">
+              <span className="flex text-accent"><Icon name="plus" size={16} /></span>
+              <span className="font-display font-semibold text-[13.5px] text-ink">Adding a capability, by organization</span>
+              <button onClick={() => setScaleNoteOpen(false)} className="ml-auto flex text-ink-3 hover:text-ink"><Icon name="close" size={16} /></button>
+            </div>
+            <div className="p-4 flex flex-col gap-3 text-[12.5px] text-ink-2 leading-relaxed">
+              <p>A new detector does not get a new toolbar button. It joins a tool group as one more flyout item, or a new mode is one rail icon. The layout absorbs features through grouping and mode, never by widening a row.</p>
+              <div className="flex flex-col gap-1.5 bg-bg-2 border border-line rounded-md p-3 text-[11.5px]">
+                <div className="flex items-center gap-2"><span className="flex text-pass"><Icon name="check" size={14} /></span>Tool strip stays one row. No wrap, no clip.</div>
+                <div className="flex items-center gap-2"><span className="flex text-pass"><Icon name="check" size={14} /></span>Left rail width unchanged. No new mode needed.</div>
+                <div className="flex items-center gap-2"><span className="flex text-pass"><Icon name="check" size={14} /></span>A 3D tool slots into the 3D mode the same way.</div>
+              </div>
+              <p className="text-[11.5px] text-ink-3">That is the whole rule: no region grows unbounded.</p>
+              <button onClick={() => setScaleNoteOpen(false)} className="self-start h-7 px-3 rounded-md border border-line bg-bg-2 text-ink hover:bg-line text-[11.5px]">Got it</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <ShortcutOverlay />
+
       {activeCorr && (
         <CorrectionModal
           objectId={activeCorr.objectId}
