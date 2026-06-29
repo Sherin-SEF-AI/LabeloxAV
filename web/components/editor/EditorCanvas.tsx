@@ -74,11 +74,13 @@ export default function EditorCanvas(p: Props) {
     im.crossOrigin = "anonymous";
     im.src = p.imageUrl;
     im.onload = () => setImg(im);
+    im.onerror = () => setImg(null); // a missing frame image (404) must not leave the viewport unfit
   }, [p.imageUrl]);
 
-  // fit on first ready (viewport.scale === 0 is the "fit pending" sentinel)
+  // fit from the known frame dimensions (viewport.scale === 0 is the "fit pending" sentinel). This must not
+  // wait for the image to load, or a missing image leaves scale at 0 and every stroke/radius becomes Infinity.
   useEffect(() => {
-    if (img && p.viewport.scale === 0 && size.w > 1) {
+    if (p.viewport.scale === 0 && size.w > 1 && p.imgW > 0 && p.imgH > 0) {
       const s = Math.min(size.w / p.imgW, size.h / p.imgH) * 0.96;
       p.onViewport({ scale: s, ox: (size.w - p.imgW * s) / 2, oy: (size.h - p.imgH * s) / 2 });
     }

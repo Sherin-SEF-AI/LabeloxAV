@@ -216,7 +216,10 @@ async def frame_image(frame_id: str, db: AsyncSession = Depends(db_session)):
     frame = await db.get(Frame, UUID(frame_id))
     if frame is None:
         raise HTTPException(404, "frame not found")
-    data = get_object_store().get_bytes(frame.img_uri)
+    try:
+        data = get_object_store().get_bytes(frame.img_uri)
+    except Exception as exc:  # noqa: BLE001  (missing/unreadable blob -> 404, never a 500 that breaks the editor)
+        raise HTTPException(404, "frame image unavailable") from exc
     return Response(content=data, media_type="image/jpeg")
 
 
@@ -227,10 +230,13 @@ async def object_crop(object_id: str, pad: float = 0.15, db: AsyncSession = Depe
     if obj is None:
         raise HTTPException(404, "object not found")
     frame = await db.get(Frame, obj.frame_id)
-    buf = np.frombuffer(get_object_store().get_bytes(frame.img_uri), dtype=np.uint8)
+    try:
+        buf = np.frombuffer(get_object_store().get_bytes(frame.img_uri), dtype=np.uint8)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "frame image unavailable") from exc
     img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
     if img is None:
-        raise HTTPException(500, "failed to decode frame image")
+        raise HTTPException(404, "failed to decode frame image")
     h, w = img.shape[:2]
     x1, y1, x2, y2 = obj.bbox
     px, py = (x2 - x1) * pad, (y2 - y1) * pad
