@@ -92,7 +92,10 @@ async def score_candidates(db: AsyncSession, session_id: str | None = None, pool
         # recall-recovery value: a recovered miss carries its fn_value in provenance; this term only
         # orders the pool so a trackgap recovery outranks a speculative region crop (it already entered
         # the pool via source != "human" and state="review").
-        fn = float((prov.get("raw_conf") or {}).get("fn_value", 0.0))
+        # raw_conf is a dict for recall-recovered objects but a bare scalar for older/imported ones, so
+        # only read fn_value when it is actually a dict (else this term is 0).
+        rc = prov.get("raw_conf")
+        fn = float(rc.get("fn_value", 0.0)) if isinstance(rc, dict) else 0.0
         items.append({"object_id": str(oid), "frame_id": str(fid), "class_id": cid,
                       "class_name": onto.by_id(cid).name, "conf": float(conf or 0.0),
                       "_u": u, "_r": rare, "_n": float(novelty[i]), "_e": err_scores.get(str(oid), 0.0), "_f": fn})
