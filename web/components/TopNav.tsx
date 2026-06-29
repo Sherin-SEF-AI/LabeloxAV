@@ -5,6 +5,7 @@ import UserPicker from "./UserPicker";
 import AppSwitcher from "./shell/AppSwitcher";
 import CommandPalette from "./shell/CommandPalette";
 import ShortcutOverlay from "./shell/ShortcutOverlay";
+import CloudControl from "./shell/CloudControl";
 
 // Shared app navigation. The flat link row (which overflowed once the platform had ~20 destinations) is
 // replaced by a grouped app switcher plus a Cmd+K command palette, so nav grows by organization. The
@@ -30,6 +31,7 @@ export default function TopNav({ active, right }: { active: string; right?: Reac
       </div>
       <div className="flex items-center gap-3 font-mono text-xs shrink-0">
         {right}
+        <CloudControl />
         <UserPicker />
       </div>
       <CommandPalette />

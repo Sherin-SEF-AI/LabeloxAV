@@ -257,3 +257,21 @@ export type Scenario = {
   city: string | null;
   vehicle_id: string | null;
 };
+
+// Warm cloud-GPU session (the connect/disconnect control). Mirrors the backend status snapshot.
+export type CloudStatus = {
+  state: string;            // disconnected | provisioning | connected | running_job | pausing | terminating
+  connected: boolean;
+  pod_id: string | null;
+  gpu_type: string | null;
+  uptime_s: number;
+  gpu_seconds: number;
+  est_cost: number;
+  hourly_usd: number;
+  idle_remaining_s: number | null;
+  session_remaining_s: number | null;
+  last_job_id: string | null;
+  cold_start_s: number;
+  configured: boolean;      // is RUNPOD_API_KEY set on the backend
+};
+export type CloudOrphan = { pod_id: string; gpu_type: string | null; uptime_s: number; est_cost: number };

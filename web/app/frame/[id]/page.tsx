@@ -19,6 +19,7 @@ import { StateBadge, ConfBar } from "@/components/StateBadge";
 import ScoreBar from "@/components/shell/ScoreBar";
 import Icon, { MODE_ICON } from "@/components/shell/Icon";
 import ShortcutOverlay from "@/components/shell/ShortcutOverlay";
+import CloudControl from "@/components/shell/CloudControl";
 import { MODES, type ToolGroup } from "@/lib/editor/registry";
 
 // Frame-centric professional annotation editor. Pan/zoom canvas, draw + edit boxes, SAM-assisted masks,
@@ -783,6 +784,8 @@ export default function FrameEditor() {
             <span className={`w-1.5 h-1.5 rounded-full ${saving ? "bg-warn" : dirty ? "bg-ink-3" : "bg-pass"}`} />
             <span className="font-mono text-[10px] text-ink-3">{saving ? "saving" : dirty ? (autosave ? "autosave on" : "unsaved") : "saved"}</span>
           </button>
+          <span className="w-px h-5 bg-line mx-0.5" />
+          <CloudControl />
           <span className="w-px h-5 bg-line mx-0.5" />
           <button onClick={() => setScaleNoteOpen(true)} title="how this layout scales"
             className="flex items-center gap-1.5 h-[30px] px-2.5 rounded-md border border-line text-ink-2 hover:bg-line/50 hover:text-ink text-[11.5px]"><Icon name="info" size={15} /><span>How it scales</span></button>

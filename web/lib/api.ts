@@ -38,6 +38,8 @@ import type {
   Track,
   TriageRow,
   UserRow,
+  CloudStatus,
+  CloudOrphan,
 } from "./types";
 
 // Same-origin: next.config rewrites /api/* to the FastAPI backend. Every request carries the current
@@ -467,6 +469,13 @@ export const api = {
   listTraining: () => get<TrainingJob[]>("/api/training"),
   cancelTraining: (jobId: string) => post<TrainingJob>(`/api/training/${jobId}/cancel`, {}),
   trainingRegistry: () => get<ModelLine[]>("/api/training/registry"),
+
+  // Warm cloud-GPU control. connect carries the acknowledged hourly rate (the backend rejects a mismatch).
+  cloudStatus: () => get<CloudStatus>("/api/cloud/status"),
+  cloudConnect: (ackHourlyUsd: number) => post<CloudStatus>("/api/cloud/connect", { ack_hourly_usd: ackHourlyUsd }),
+  cloudDisconnect: (pause = false) => post<CloudStatus>("/api/cloud/disconnect", { pause }),
+  cloudOrphans: () => get<{ orphans: CloudOrphan[] }>("/api/cloud/orphans"),
+  cloudTerminateOrphan: (podId: string) => post<{ terminated: string }>("/api/cloud/orphans/terminate", { pod_id: podId }),
 };
 
 export type TrainingJob = {
