@@ -1010,3 +1010,20 @@ class RecallCandidate(Base):
 
     __table_args__ = (Index("ix_recall_candidate_status", "status"),
                       Index("ix_recall_candidate_frame", "frame_id"))
+
+
+class AdverseRegion(Base):
+    # A tagged image region affected by an adverse condition (glare, reflection, shadow, rain, fog,
+    # lowlight). Frame-level and multi-region (unlike the single drivable mask), each a polygon plus a
+    # condition label, so a model knows which pixels to distrust.
+    __tablename__ = "adverse_region"
+
+    region_id: Mapped[uuid.UUID] = _uuid_pk()
+    frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    geometry: Mapped[list] = mapped_column(JSONB)  # polygon, flattened [x,y,x,y,...] image pixels
+    condition: Mapped[str] = mapped_column(String(16), nullable=False)  # glare|reflection|shadow|rain|fog|lowlight
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="human")  # human|proposed
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_adverse_region_frame", "frame_id"),)

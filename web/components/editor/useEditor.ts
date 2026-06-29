@@ -6,7 +6,7 @@
 
 import { useReducer } from "react";
 
-export type Tool = "select" | "box" | "polygon" | "polyline" | "keypoint" | "measure" | "sam-point" | "sam-box";
+export type Tool = "select" | "box" | "polygon" | "polyline" | "adverse" | "keypoint" | "measure" | "sam-point" | "sam-box";
 
 export type EdObject = {
   id: string; // server object_id, or "tmp-N" for locally-created

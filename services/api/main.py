@@ -15,6 +15,7 @@ from core.logging import get_logger, setup_logging
 from services.api.deps import role_rank
 from services.api.routers import (
     activelearn,
+    adverse,
     analytics,
     autolabel,
     calibration,
@@ -34,13 +35,13 @@ from services.api.routers import (
     jobs,
     lanes,
     lidar,
+    lidar_scene,
     mapassist,
     meta,
     models,
     multicam,
     objects,
     objects3d,
-    lidar_scene,
     ocr,
     quality,
     recall,
@@ -212,6 +213,7 @@ app.include_router(models.router, prefix="/api", tags=["models"])
 app.include_router(export.router, prefix="/api", tags=["export"])
 app.include_router(quality.router, prefix="/api", tags=["quality"])
 app.include_router(recall.router, prefix="/api", tags=["recall"])
+app.include_router(adverse.router, prefix="/api", tags=["adverse"])
 app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(imports.router, prefix="/api", tags=["imports"])
 app.include_router(training.router, prefix="/api", tags=["training"])

@@ -12,7 +12,8 @@ import { classColor, classFill } from "@/lib/colors";
 import type { EdObject, Tool, Viewport } from "./useEditor";
 
 type LaneOverlay = { lane_id: string; control_points: number[][]; lane_type: string; is_ego: boolean; source: string };
-export type LayerFlags = { boxes: boolean; masks: boolean; lanes: boolean; drivable: boolean };
+export type LayerFlags = { boxes: boolean; masks: boolean; lanes: boolean; drivable: boolean; adverse: boolean };
+type AdverseOverlay = { region_id: string; geometry: number[]; condition: string };
 
 type Props = {
   imageUrl: string;
@@ -27,6 +28,7 @@ type Props = {
   lanes?: LaneOverlay[];
   drivable?: Record<string, number[][]> | null;
   relationships?: { from_object_id: string; to_object_id: string; kind: string }[];
+  adverse?: AdverseOverlay[];
   layers?: LayerFlags;
   onViewport: (v: Viewport) => void;
   onSelect: (id: string | null) => void;
@@ -34,6 +36,7 @@ type Props = {
   onDrawBox: (bbox: number[]) => void;
   onDrawPolygon: (points: number[]) => void;   // manual polygon: flattened [x,y,...], no GPU/SAM needed
   onDrawPolyline: (points: number[]) => void;  // open polyline (curb/road_edge/barrier), not closed
+  onDrawAdverse: (points: number[]) => void;   // adverse-condition region polygon (glare/shadow/...)
   keypointDraft?: number[][] | null;           // in-progress pose points [[x,y,v],...] (placed so far)
   skeletonEdges?: number[][];                  // index pairs connecting keypoints, for rendering
   onPlaceKeypoint: (pt: number[]) => void;     // keypoint tool: drop the next skeleton point
@@ -48,6 +51,9 @@ type Props = {
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 20;
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+const ADVERSE_COLOR: Record<string, string> = {
+  glare: "#E3B341", reflection: "#58A6FF", shadow: "#8B5CF6", rain: "#56D364", fog: "#A0A6AD", lowlight: "#F85149",
+};
 
 export default function EditorCanvas(p: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -98,7 +104,7 @@ export default function EditorCanvas(p: Props) {
   }, [p.selectedId, p.tool, p.objects]);
 
   const v = p.viewport;
-  const L = p.layers ?? { boxes: true, masks: true, lanes: true, drivable: true };
+  const L = p.layers ?? { boxes: true, masks: true, lanes: true, drivable: true, adverse: true };
   const toImg = (): number[] => {
     const pt = stageRef.current?.getRelativePointerPosition();
     return pt ? [pt.x, pt.y] : [0, 0];
@@ -123,7 +129,7 @@ export default function EditorCanvas(p: Props) {
       setDraw({ x0: x, y0: y, x1: x, y1: y });
     } else if (p.tool === "measure") {
       setMeasure({ x0: x, y0: y, x1: x, y1: y });
-    } else if (p.tool === "polygon" || p.tool === "polyline") {
+    } else if (p.tool === "polygon" || p.tool === "polyline" || p.tool === "adverse") {
       setPoly((pp) => [...pp, x, y]); // each click drops a vertex; double-click closes/commits
     } else if (p.tool === "keypoint") {
       p.onPlaceKeypoint([x, y]); // each click drops the next skeleton point
@@ -141,11 +147,16 @@ export default function EditorCanvas(p: Props) {
     } else if (p.tool === "polyline") {
       if (poly.length >= 4) p.onDrawPolyline(poly); // at least 2 vertices, open
       setPoly([]);
+    } else if (p.tool === "adverse") {
+      if (poly.length >= 6) p.onDrawAdverse(poly); // at least 3 vertices, closed region
+      setPoly([]);
     }
   }
 
-  // abandon a half-drawn polygon/polyline when the tool changes
-  useEffect(() => { if (p.tool !== "polygon" && p.tool !== "polyline") setPoly([]); }, [p.tool]);
+  // abandon a half-drawn polygon/polyline/region when the tool changes
+  useEffect(() => {
+    if (p.tool !== "polygon" && p.tool !== "polyline" && p.tool !== "adverse") setPoly([]);
+  }, [p.tool]);
   useEffect(() => { if (p.tool !== "measure") setMeasure(null); }, [p.tool]);
 
   function onMove() {
@@ -204,6 +215,13 @@ export default function EditorCanvas(p: Props) {
                 stroke={cls === "drivable" ? "#56D364" : cls === "fallback" ? "#E3B341" : "#F85149"} strokeWidth={1 / v.scale} />
             )),
           )}
+
+          {/* adverse-condition regions (glare/reflection/shadow/...), tinted by condition */}
+          {L.adverse && p.adverse?.map((a) => (
+            <Line key={`adv-${a.region_id}`} points={a.geometry} closed listening={false}
+              stroke={ADVERSE_COLOR[a.condition] ?? "#A0A6AD"} strokeWidth={1 / v.scale}
+              fill={(ADVERSE_COLOR[a.condition] ?? "#A0A6AD") + "33"} />
+          ))}
 
           {/* masks */}
           {L.masks && p.objects.filter((o) => o.visible).flatMap((o) =>
@@ -334,7 +352,7 @@ export default function EditorCanvas(p: Props) {
           ))}
 
           {/* in-progress manual polygon/polyline: open line + vertex dots; double-click commits */}
-          {(p.tool === "polygon" || p.tool === "polyline") && poly.length >= 2 && (
+          {(p.tool === "polygon" || p.tool === "polyline" || p.tool === "adverse") && poly.length >= 2 && (
             <>
               <Line points={poly} listening={false} stroke="#FF7A2F" strokeWidth={1.5 / v.scale}
                 dash={[6 / v.scale, 4 / v.scale]} />

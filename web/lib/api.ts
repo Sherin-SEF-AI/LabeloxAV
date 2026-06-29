@@ -8,6 +8,7 @@ import type {
   MergeRequestRow,
   RegistryRow,
   Relationship,
+  AdverseRegion,
   CalibDetail,
   CalibSession,
   Confusions,
@@ -292,6 +293,11 @@ export const api = {
     del<{ deleted: string }>(`/api/relationships/${relationship_id}`),
   frameRelationships: (frame_id: string) =>
     get<Relationship[]>(`/api/frames/${frame_id}/relationships`),
+  // adverse-condition region tags (glare, reflection, shadow, rain, fog, lowlight)
+  createAdverse: (frame_id: string, body: { geometry: number[]; condition: string }) =>
+    post<AdverseRegion>(`/api/frames/${frame_id}/adverse`, body),
+  listAdverse: (frame_id: string) => get<AdverseRegion[]>(`/api/frames/${frame_id}/adverse`),
+  deleteAdverse: (region_id: string) => del<{ deleted: string }>(`/api/adverse/${region_id}`),
   // M2.1 lanes
   framesLanes: (frameId: string) => get<LaneRow[]>(`/api/frames/${frameId}/lanes`),
   proposeLanes: (frameId: string) => post<{ proposed: number; lanes: LaneRow[]; model: string }>(`/api/frames/${frameId}/lanes/propose`, {}),

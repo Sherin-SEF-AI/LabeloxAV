@@ -200,6 +200,7 @@ export type FrameMeta = {
 };
 
 export type Relationship = { relationship_id: string; from_object_id: string; to_object_id: string; kind: string };
+export type AdverseRegion = { region_id: string; frame_id: string; geometry: number[]; condition: string; source: string; confidence: number };
 
 export type FrameObject = {
   object_id: string;

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import type { FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, Relationship } from "@/lib/types";
+import type { AdverseRegion, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, Relationship } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
@@ -24,6 +24,7 @@ const TOOLS: { key: Tool; label: string; hot: string }[] = [
   { key: "box", label: "box", hot: "B" },
   { key: "polygon", label: "polygon", hot: "G" },
   { key: "polyline", label: "polyline", hot: "L" },
+  { key: "adverse", label: "adverse", hot: "D" },
   { key: "keypoint", label: "pose", hot: "K" },
   { key: "measure", label: "measure", hot: "R" },
   { key: "sam-point", label: "sam pt", hot: "S" },
@@ -84,7 +85,9 @@ export default function FrameEditor() {
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [linkFrom, setLinkFrom] = useState<string | null>(null); // active "relate" mode: the source object id
   const [linkKind, setLinkKind] = useState("rider_of");
-  const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true });
+  const [adverse, setAdverse] = useState<AdverseRegion[]>([]);
+  const [adverseCond, setAdverseCond] = useState("glare");
+  const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true, adverse: true });
 
   const flash = (m: string) => {
     setNotice(m);
@@ -147,10 +150,11 @@ export default function FrameEditor() {
 
   // P4 layers: fetch lane + drivable overlays, and inline generators
   const loadLayers = useCallback(async () => {
-    const [ls, dr, rel] = await Promise.all([api.framesLanes(id).catch(() => []), api.getDrivable(id).catch(() => null), api.frameRelationships(id).catch(() => [])]);
+    const [ls, dr, rel, adv] = await Promise.all([api.framesLanes(id).catch(() => []), api.getDrivable(id).catch(() => null), api.frameRelationships(id).catch(() => []), api.listAdverse(id).catch(() => [])]);
     setLanes(ls);
     setDrivable(dr && dr.found ? dr.classes ?? null : null);
     setRelationships(rel);
+    setAdverse(adv);
   }, [id]);
   useEffect(() => { loadLayers(); }, [loadLayers]);
   // The editor has its own header (no TopNav/UserPicker), so guarantee a valid identity or every mutation
@@ -417,6 +421,7 @@ export default function FrameEditor() {
       else if (k === "b") dispatch({ t: "tool", tool: "box" });
       else if (k === "g") dispatch({ t: "tool", tool: "polygon" });
       else if (k === "l") dispatch({ t: "tool", tool: "polyline" });
+      else if (k === "d") dispatch({ t: "tool", tool: "adverse" });
       else if (k === "k") dispatch({ t: "tool", tool: "keypoint" });
       else if (k === "r") dispatch({ t: "tool", tool: "measure" });
       else if (k === "s") dispatch({ t: "tool", tool: "sam-point" });
@@ -468,6 +473,12 @@ export default function FrameEditor() {
               {t.label}
             </button>
           ))}
+          {st.tool === "adverse" && (
+            <select value={adverseCond} onChange={(e) => setAdverseCond(e.target.value)} title="adverse condition to tag"
+              className="bg-bg border border-accent text-accent px-1 py-1 font-mono text-[11px]">
+              {["glare", "reflection", "shadow", "rain", "fog", "lowlight"].map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
         </div>
         <div className="flex items-center gap-1 ml-2 font-mono text-[11px]">
           <button onClick={() => zoomBy(1 / 1.2)} className="border border-line px-2 py-1 hover:border-accent">-</button>
@@ -477,7 +488,7 @@ export default function FrameEditor() {
         </div>
         {/* P4 layer visibility toggles: show that the road IS segmented (lanes + drivable + masks) */}
         <div className="flex items-center gap-1 ml-1 font-mono text-[11px]" title="toggle annotation layers">
-          {(["boxes", "masks", "lanes", "drivable"] as const).map((k) => (
+          {(["boxes", "masks", "lanes", "drivable", "adverse"] as const).map((k) => (
             <button key={k} onClick={() => setLayers((s) => ({ ...s, [k]: !s[k] }))}
               className={`px-1.5 py-1 border ${layers[k] ? "border-accent text-ink" : "border-line text-ink-3"}`}>{k}</button>
           ))}
@@ -527,6 +538,8 @@ export default function FrameEditor() {
             onDrawBox={(bbox) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox, mask: [], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
             onDrawPolygon={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [pts], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
             onDrawPolyline={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [], polyline: Array.from({ length: pts.length / 2 }, (_, i) => [pts[2 * i], pts[2 * i + 1]]), attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
+            adverse={adverse}
+            onDrawAdverse={async (pts) => { try { await api.createAdverse(id, { geometry: pts, condition: adverseCond }); setAdverse(await api.listAdverse(id).catch(() => [])); flash(`tagged ${adverseCond}`); } catch (e) { flash("region failed: " + String(e)); } }}
             keypointDraft={kpDraft} skeletonEdges={PERSON_17.edges as unknown as number[][]}
             onPlaceKeypoint={onPlaceKeypoint} onUpdateKeypoints={onUpdateKeypoints}
             mPerPx={meta.lidar_res ?? undefined}
