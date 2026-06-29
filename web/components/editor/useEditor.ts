@@ -51,6 +51,7 @@ export type Action =
   | { t: "add"; obj: EdObject }
   | { t: "update"; id: string; patch: Partial<EdObject> }
   | { t: "acceptAll" }
+  | { t: "reviewed"; id: string; state: string; version?: number }
   | { t: "delete"; id: string }
   | { t: "undo" }
   | { t: "redo" }
@@ -147,6 +148,14 @@ function reducer(s: EditorState, a: Action): EditorState {
           o.isNew || !s.touched.includes(o.id) ? o : { ...o, state: "accepted", dirty: true }),
         deleted: s.deleted,
       });
+    case "reviewed":
+      // A review (accept/reject) already persisted to the server via api.review with an explicit state, so
+      // set the object's state and new version WITHOUT marking it dirty (dirty would make autosave re-write
+      // it with the role's default accept-state, clobbering an explicit reject). Not an undoable edit.
+      return {
+        ...s,
+        objects: s.objects.map((o) => (o.id === a.id ? { ...o, state: a.state, version: a.version ?? o.version, dirty: false } : o)),
+      };
     case "delete": {
       const obj = s.objects.find((o) => o.id === a.id);
       const deleted = obj && !obj.isNew ? [...s.deleted, a.id] : s.deleted;

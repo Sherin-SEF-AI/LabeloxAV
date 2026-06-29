@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { api, lidarCloudPoints, type Cuboid3D, type LidarCloud, type LidarPoints } from "@/lib/api";
 import type { ColorBy } from "@/components/lidar/PointCloudViewer";
-import type { AdverseRegion, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, ProjectedCuboid, Relationship } from "@/lib/types";
+import type { AdverseRegion, AlItem, ErrorCandidateRow, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, ProjectedCuboid, Relationship } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
@@ -16,6 +16,7 @@ import ToolStrip from "@/components/shell/ToolStrip";
 import ModeRail from "@/components/shell/ModeRail";
 import FloatingLayers from "@/components/shell/FloatingLayers";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
+import ScoreBar from "@/components/shell/ScoreBar";
 import { MODES, type ToolGroup } from "@/lib/editor/registry";
 
 // Frame-centric professional annotation editor. Pan/zoom canvas, draw + edit boxes, SAM-assisted masks,
@@ -146,6 +147,10 @@ export default function FrameEditor() {
   const [cubSel, setCubSel] = useState<string | null>(null);
   const [colorBy3d, setColorBy3d] = useState<ColorBy>("height");
   const [lidarMsg, setLidarMsg] = useState<string | null>(null);
+  // Review mode (canvas stays Konva, the rail becomes the value queue): highest-value items + error candidates
+  const [alItems, setAlItems] = useState<AlItem[]>([]);
+  const [errItems, setErrItems] = useState<ErrorCandidateRow[]>([]);
+  const [reviewLoaded, setReviewLoaded] = useState(false);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [linkFrom, setLinkFrom] = useState<string | null>(null); // active "relate" mode: the source object id
   const [linkKind, setLinkKind] = useState("rider_of");
@@ -402,6 +407,42 @@ export default function FrameEditor() {
     catch (e) { setLidarMsg("lift failed: " + String(e)); }
   };
 
+  // Review mode: lazily load the value queue (this frame's items ranked first) and the error candidates.
+  useEffect(() => {
+    if (mode !== "review" || !meta || reviewLoaded) return;
+    setReviewLoaded(true);
+    (async () => {
+      const [al, ec] = await Promise.all([
+        api.alScore(meta.session_id, 80).then((r) => r.items).catch(() => [] as AlItem[]),
+        api.errorCandidates("pending", 80).catch(() => [] as ErrorCandidateRow[]),
+      ]);
+      al.sort((a, b) => (a.frame_id === id ? 0 : 1) - (b.frame_id === id ? 0 : 1) || b.value - a.value);
+      setAlItems(al);
+      setErrItems(ec);
+    })();
+  }, [mode, meta, reviewLoaded, id]);
+
+  // Accept or reject the selected object (persisted directly with an explicit state), then advance the queue.
+  const reviewObject = async (newState: "accepted" | "rejected") => {
+    const o = selected;
+    if (!o) { flash("select an object to review"); return; }
+    if (o.isNew) { flash("save the new object first"); return; }
+    try {
+      const r = await api.review(o.id, { action: newState === "accepted" ? "accept" : "reject", state: newState, expected_version: o.version });
+      dispatch({ t: "reviewed", id: o.id, state: newState, version: r.version });
+      flash(newState);
+      advanceReview(o.id);
+    } catch (e) { flash("review failed: " + String(e)); }
+  };
+  // Move to the next value-queue item: select it if it is on this frame, else navigate to its frame.
+  const advanceReview = (currentObjId: string) => {
+    const here = alItems.filter((it) => it.frame_id === id);
+    const idx = here.findIndex((it) => it.object_id === currentObjId);
+    const next = here[idx + 1] ?? here.find((it) => it.object_id !== currentObjId);
+    if (next) doSelect(next.object_id);
+    else { const off = alItems.find((it) => it.frame_id !== id); if (off) gotoFrame(off.frame_id); }
+  };
+
   // each new selection starts with the compact chip (class name + edit), not the open picker
   useEffect(() => { setEditOpen(false); setEditSearch(""); }, [st.selectedId]);
   const editClasses = useMemo(
@@ -644,6 +685,11 @@ export default function FrameEditor() {
       // Shift+1..5 switches mode (plain 1..9 stays the quick-relabel shortcut)
       if (e.shiftKey && /^Digit[1-5]$/.test(e.code)) { e.preventDefault(); switchMode(MODES[Number(e.code.slice(5)) - 1].key); return; }
       const k = e.key.toLowerCase();
+      // Review mode rebinds a/x to accept/reject the selected object (and advance the queue).
+      if (mode === "review") {
+        if (k === "a") { reviewObject("accepted"); return; }
+        if (k === "x") { reviewObject("rejected"); return; }
+      }
       if (k === "a") dispatch({ t: "acceptAll" });
       else if (k === "v") dispatch({ t: "tool", tool: "select" });
       else if (k === "b") dispatch({ t: "tool", tool: "box" });
@@ -679,7 +725,7 @@ export default function FrameEditor() {
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onUp); };
-  }, [st.selectedId, selected, onto, meta, dispatch, save, fit, zoomBy, acceptCandidate, gotoFrame, relabelSelected, finishKeypoints]);
+  }, [st.selectedId, selected, onto, meta, dispatch, save, fit, zoomBy, acceptCandidate, gotoFrame, relabelSelected, finishKeypoints, mode, alItems]);
 
   const filteredClasses = useMemo(
     () => (onto ? onto.classes.filter((c) => c.name.includes(search.toLowerCase().replace(/\s/g, "_"))) : []),
@@ -849,6 +895,16 @@ export default function FrameEditor() {
                   className="w-full border border-line px-1 py-0.5 text-ink-3 hover:border-accent">auto-seg</button>
               </>
             } />}
+          {/* Review mode: a quiet bottom-center action bar so the reviewer accepts/rejects without leaving the canvas */}
+          {mode === "review" && selected && (
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 panel px-3 py-1.5 flex items-center gap-3 font-mono text-[11px]">
+              <span className="text-ink-2">{selected.class_name}</span>
+              <ConfBar conf={selected.conf} />
+              <button onClick={() => reviewObject("accepted")} className="border border-pass text-pass px-2 py-0.5 hover:bg-pass/10">accept (A)</button>
+              <button onClick={() => reviewObject("rejected")} className="border border-block text-block px-2 py-0.5 hover:bg-block/10">reject (X)</button>
+              <button onClick={() => advanceReview(selected.id)} className="text-ink-3 hover:text-ink">skip</button>
+            </div>
+          )}
           {st.candidate?.length ? (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 font-mono text-[11px] text-ink-2">
               mask ready, click the next object to keep this one &amp; continue, <span className="text-pass">Enter</span> to finish, <span className="text-ink-3">Esc</span> to discard
@@ -1013,7 +1069,64 @@ export default function FrameEditor() {
               )}
             </div>
           )}
-          {mode !== "lanes" && mode !== "lidar3d" && (<>
+          {/* Review mode: the panel becomes the value queue (highest-value items + error candidates) with
+              per-object accept/reject. Canvas stays Konva; reviewer pans/zooms and clicks objects. */}
+          {mode === "review" && (
+            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 font-mono text-[11px]">
+              {selected ? (
+                <div className="border-b hairline pb-2 space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(selected.class_id) }} />
+                    <span className="truncate flex-1">{selected.class_name}</span>
+                    <StateBadge state={selected.state} />
+                  </div>
+                  <ConfBar conf={selected.conf} />
+                  <div className="flex gap-1">
+                    <button onClick={() => reviewObject("accepted")} className="flex-1 border border-pass text-pass px-2 py-1 hover:bg-pass/10">accept (A)</button>
+                    <button onClick={() => reviewObject("rejected")} className="flex-1 border border-block text-block px-2 py-1 hover:bg-block/10">reject (X)</button>
+                  </div>
+                </div>
+              ) : <div className="text-ink-3 border-b hairline pb-2">click an object on the canvas to accept or reject it.</div>}
+              <div className="text-ink-3 uppercase text-[10px]">value queue ({alItems.length})</div>
+              {alItems.slice(0, 60).map((it) => (
+                <button key={it.object_id} onClick={() => (it.frame_id === id ? doSelect(it.object_id) : gotoFrame(it.frame_id))}
+                  className={`block w-full text-left border-b hairline pb-1.5 ${it.object_id === st.selectedId ? "text-ink" : "text-ink-3 hover:text-ink-2"}`}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate flex-1">{it.class_name}</span>
+                    {it.frame_id !== id && <span className="text-info text-[10px]">other frame</span>}
+                    <span className="text-accent">{it.value.toFixed(3)}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                    <ConfBar conf={it.conf} />
+                    <ScoreBar label="u" value={it.scores.uncertainty} showValue={false} />
+                    <ScoreBar label="d" value={it.scores.diversity} showValue={false} />
+                    <ScoreBar label="r" value={it.scores.rarity} showValue={false} />
+                    <ScoreBar label="e" value={it.scores.error_prone} showValue={false} tone="warn" />
+                  </div>
+                </button>
+              ))}
+              {!alItems.length && <div className="text-ink-3 py-2 text-center">{reviewLoaded ? "value queue empty" : "loading value queue..."}</div>}
+              {errItems.length > 0 && (
+                <>
+                  <div className="text-ink-3 uppercase text-[10px] pt-1">error candidates ({errItems.length})</div>
+                  {errItems.slice(0, 40).map((ec) => (
+                    <div key={ec.candidate_id} className="border-b hairline pb-1.5 space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate flex-1">{ec.kind}</span>
+                        <span className="text-info">{ec.proposed_label?.class_name || "(review)"}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <ScoreBar value={ec.score} tone="warn" />
+                        <button onClick={async () => { await api.errorConfirm(ec.candidate_id); setErrItems((s) => s.filter((x) => x.candidate_id !== ec.candidate_id)); flash("confirmed error"); }} className="text-block hover:text-accent">confirm</button>
+                        <button onClick={async () => { await api.errorDismiss(ec.candidate_id); setErrItems((s) => s.filter((x) => x.candidate_id !== ec.candidate_id)); }} className="text-ink-3 hover:text-ink">dismiss</button>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+          {mode !== "lanes" && mode !== "lidar3d" && mode !== "review" && (<>
           {/* class palette */}
           <div className="border-b hairline p-2">
             <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">class for new / selected</div>
