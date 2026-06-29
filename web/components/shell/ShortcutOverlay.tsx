@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MODES } from "@/lib/editor/registry";
 
 // A searchable keyboard-shortcut reference. Opens on "?" (or a window "lbx:shortcuts" event from a button),
-// closes on Escape. The per-mode tool shortcuts are read from the registry, so a new tool shows up here
-// automatically with zero extra work; the global and editor keys are listed once. Discoverability without
-// cluttering the canvas: the keys exist, this is where you find them.
+// closes on Escape. Lists the global keys and the editor tool keys exactly as the frame editor's keyboard
+// handler binds them (the tool keys are global: the same letter selects the same tool in every mode, though
+// a tool may be inert on a swapped canvas). Discoverability without cluttering the canvas.
 
 const GLOBAL: { keys: string; label: string }[] = [
   { keys: "?", label: "this shortcut help" },
@@ -25,6 +24,24 @@ const GLOBAL: { keys: string; label: string }[] = [
   { keys: "X", label: "reject selected (Review mode)" },
   { keys: "Enter", label: "finish the AI mask in progress" },
   { keys: "Esc", label: "discard the AI mask / close overlays" },
+];
+
+// The editor tool keys, exactly as the frame editor's keyboard handler binds them (global across modes).
+const TOOLS: { keys: string; label: string }[] = [
+  { keys: "V", label: "select" },
+  { keys: "B", label: "box" },
+  { keys: "G", label: "polygon" },
+  { keys: "L", label: "polyline" },
+  { keys: "S", label: "SAM point" },
+  { keys: "M", label: "SAM box" },
+  { keys: "W", label: "magic wand" },
+  { keys: "P", label: "brush" },
+  { keys: "E", label: "eraser" },
+  { keys: "U", label: "superpixels (cells)" },
+  { keys: "K", label: "keypoint (pose)" },
+  { keys: "D", label: "adverse region" },
+  { keys: "C", label: "cuboid (3D box on image)" },
+  { keys: "R", label: "measure" },
 ];
 
 export default function ShortcutOverlay() {
@@ -52,10 +69,7 @@ export default function ShortcutOverlay() {
 
   const sections = [
     { title: "global", rows: GLOBAL.filter((r) => match(r.label, r.keys)) },
-    ...MODES.map((m) => ({
-      title: `${m.label} tools`,
-      rows: m.groups.flatMap((g) => g.tools.map((t) => ({ keys: t.hotkey, label: t.label }))).filter((r) => match(r.label, r.keys)),
-    })),
+    { title: "tools", rows: TOOLS.filter((r) => match(r.label, r.keys)) },
   ].filter((s) => s.rows.length);
 
   return (

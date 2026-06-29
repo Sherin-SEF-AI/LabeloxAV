@@ -100,7 +100,13 @@ export default function GovernPage() {
             {audit.map((a) => (
               <div key={a.audit_id} className="flex items-center gap-2">
                 <span className="text-ink-3 w-24 shrink-0">{a.actor}</span>
-                <StateBadge state={a.decision} />
+                {/* audit decisions are free-form multi-word strings; color by substring (StateBadge only
+                    matches an exact vocabulary), so a kill-engage / reject still reads red at a glance. */}
+                <span className={`font-mono text-[11px] uppercase tracking-wide border px-1.5 py-0.5 ${
+                  a.decision.includes("promote") && !a.decision.includes("paused") ? "text-pass border-pass"
+                    : a.decision.includes("reject") || a.decision.includes("engage") || a.decision.includes("kill") ? "text-block border-block"
+                    : a.decision.includes("pause") ? "text-warn border-warn"
+                    : "text-ink-2 border-line"}`}>{a.decision}</span>
                 <span className="text-ink-3 truncate flex-1">{a.subject || ""}</span>
                 <span className="text-ink-3 shrink-0">{a.created_at?.slice(11, 19)}</span>
               </div>

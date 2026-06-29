@@ -36,6 +36,13 @@ const STATE_COLOR: Record<string, string> = {
   error: "text-block border-block",
   reverted: "text-block border-block",
   reject: "text-block border-block",
+  // job kinds (the unified jobs stream colors its kind column with this chip)
+  import: "text-info border-info",
+  training: "text-accent border-accent",
+  autolabel: "text-pass border-pass",
+  // model registry roles
+  champion: "text-pass border-pass",
+  challenger: "text-info border-info",
 };
 
 export function StateBadge({ state }: { state: string }) {

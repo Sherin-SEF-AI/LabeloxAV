@@ -65,11 +65,15 @@ const G = {
 } satisfies Record<string, ToolGroup>;
 
 // Per-mode tool strips. The mode rail picks one; the strip renders only that mode's groups.
+// Each mode lists only tools its canvas actually honors. Objects/Pose/Review use the Konva EditorCanvas
+// (select, draw, AI, mask, region, the 2D cuboid placement, measure, keypoint all work there). Lanes
+// (LaneCanvas) and 3D (PointCloudViewer) are driven by their panel/options controls, not st.tool, so their
+// strip is just Select; showing draw/measure/cuboid there would be inert buttons.
 const MODE_GROUPS: Record<string, ToolGroup[]> = {
-  objects: [G.select, G.draw, G.ai, G.mask, G.region, G.measure],
+  objects: [G.select, G.draw, G.ai, G.mask, G.region, G.cuboid, G.measure],
   pose: [G.select, G.pose, G.measure],
-  lidar3d: [G.select, G.cuboid, G.measure],
-  lanes: [G.select, G.measure],
+  lidar3d: [G.select],
+  lanes: [G.select],
   review: [G.select],
 };
 const MODE_TOOLS: Record<string, string[]> = Object.fromEntries(
@@ -175,7 +179,7 @@ export default function FrameEditor() {
   const switchMode = (m: string) => {
     setMode(m);
     const tools = MODE_TOOLS[m] ?? [];
-    if (!tools.includes(st.tool)) dispatch({ t: "tool", tool: (tools[0] ?? "select") as Tool });
+    if (!tools.includes(stRef.current.tool)) dispatch({ t: "tool", tool: (tools[0] ?? "select") as Tool });
   };
   const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true });
 
@@ -434,20 +438,24 @@ export default function FrameEditor() {
     const o = selected;
     if (!o) { flash("select an object to review"); return; }
     if (o.isNew) { flash("save the new object first"); return; }
+    // api.review carries only the state, not geometry, and the reviewed reducer clears dirty; reviewing on
+    // top of unsaved edits would silently drop them, so require an explicit save first.
+    if (o.dirty) { flash("save your edits first (Cmd S), then accept or reject"); return; }
     try {
       const r = await api.review(o.id, { action: newState === "accepted" ? "accept" : "reject", state: newState, expected_version: o.version });
       dispatch({ t: "reviewed", id: o.id, state: newState, version: r.version });
+      setAlItems((s) => s.filter((it) => it.object_id !== o.id)); // drop the handled item so the queue advances
       flash(newState);
       advanceReview(o.id);
     } catch (e) { flash("review failed: " + String(e)); }
   };
-  // Move to the next value-queue item: select it if it is on this frame, else navigate to its frame.
+  // Move to the next value-queue item (excluding the one just handled): select it if it is on this frame,
+  // else jump to its frame. Never re-selects an already-reviewed item.
   const advanceReview = (currentObjId: string) => {
-    const here = alItems.filter((it) => it.frame_id === id);
-    const idx = here.findIndex((it) => it.object_id === currentObjId);
-    const next = here[idx + 1] ?? here.find((it) => it.object_id !== currentObjId);
-    if (next) doSelect(next.object_id);
-    else { const off = alItems.find((it) => it.frame_id !== id); if (off) gotoFrame(off.frame_id); }
+    const rest = alItems.filter((it) => it.object_id !== currentObjId);
+    const onFrame = rest.find((it) => it.frame_id === id);
+    if (onFrame) doSelect(onFrame.object_id);
+    else { const off = rest.find((it) => it.frame_id !== id); if (off) gotoFrame(off.frame_id); }
   };
 
   // each new selection starts with the compact chip (class name + edit), not the open picker
