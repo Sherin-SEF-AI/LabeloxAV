@@ -132,6 +132,31 @@ async def segment_labelids(frame_id: str, kind: str = "semantic", db: AsyncSessi
     return Response(content=buf.tobytes(), media_type="image/png")
 
 
+@router.get("/frames/{frame_id}/segment/panoptic.png")
+async def segment_panoptic_png(frame_id: str, db: AsyncSession = Depends(db_session)):
+    """COCO-panoptic id-encoded PNG: each pixel's RGB encodes its segment id (id = R + 256*G + 256^2*B).
+    Pair it with the segments map from GET /segment (category id + linked object id per segment)."""
+    import cv2
+    import numpy as np
+
+    row = (await db.execute(select(FrameSegmentation).where(
+        FrameSegmentation.frame_id == UUID(frame_id), FrameSegmentation.kind == "panoptic"))).scalars().first()
+    if row is None or not row.instance_uri:
+        raise HTTPException(404, "no panoptic segmentation")
+    inst = _load_npz(get_object_store(), row.instance_uri)
+    if inst is None:
+        raise HTTPException(404, "instance raster unavailable")
+    inst = inst.astype(np.int64)
+    rgb = np.zeros((*inst.shape, 3), dtype=np.uint8)
+    rgb[..., 0] = (inst % 256).astype(np.uint8)            # R
+    rgb[..., 1] = ((inst // 256) % 256).astype(np.uint8)   # G
+    rgb[..., 2] = ((inst // 65536) % 256).astype(np.uint8)  # B
+    ok, buf = cv2.imencode(".png", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+    if not ok:
+        raise HTTPException(500, "could not encode panoptic png")
+    return Response(content=buf.tobytes(), media_type="image/png")
+
+
 @router.get("/frames/{frame_id}/segment/overlay")
 async def segment_overlay(frame_id: str, kind: str = "semantic", db: AsyncSession = Depends(db_session)):
     row = (await db.execute(select(FrameSegmentation).where(
