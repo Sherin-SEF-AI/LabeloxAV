@@ -99,8 +99,13 @@ def test_vlm_confirm_boosts_then_regate():
     )
     apply_vlm(o, res, onto, "qwen2.5vl:7b")
     assert o.conf >= 0.88  # confirm boosts confidence
-    # still rare -> gate keeps it in review (rare forces review even when confident)
-    assert gate_object(o, onto, cfg) == GateState.review
+    # M-Q.4: a rare class (autorickshaw) now earns auto-accept once it has cross-path agreement AND a VLM
+    # confirmation and clears its calibrated threshold; the VLM confirm supplies exactly that.
+    assert any(p.path == "path_c_qwen3vl" and p.verdict == "confirm" for p in o.provenance.proposals)
+    assert gate_object(o, onto, cfg) == GateState.auto_accept
+    # but with the strict escape hatch on, a rare class still never auto-accepts
+    strict = cfg.model_copy(update={"force_review_on_rare": True})
+    assert gate_object(o, onto, strict) == GateState.review
 
 
 # --- real Ollama backend smoke test ------------------------------------------

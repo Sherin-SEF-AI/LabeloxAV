@@ -88,6 +88,9 @@ class Provenance(BaseModel):
     calibrated_from: float | None = None
     ontology_version: str | None = None
     notes: list[str] = Field(default_factory=list)
+    # M-Q.4 quality reviewer demotion reasons (above_horizon, impossible_size, part_of_vehicle, ...). Empty
+    # when the object passed; persisted so confirmed demotions feed the correction and retrain loop.
+    quality_flags: list[str] = Field(default_factory=list)
 
 
 class UnifiedObject(BaseModel):

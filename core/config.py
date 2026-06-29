@@ -179,10 +179,32 @@ class CalibrateSettings(BaseModel):
 
 
 class GateSettings(BaseModel):
-    auto_accept: float = 0.95
+    auto_accept: float = 0.95          # benign default; calibrated, so this is a precision floor
+    safety_auto_accept: float = 0.99   # M-Q.4: safety-critical classes (VRU, animal) must be near-certain
     review_low: float = 0.60
-    force_review_on_rare: bool = True
+    # Strict escape hatch: rare/fallback classes never auto-accept. Off by default in favour of the smarter
+    # agreement+VLM rule below; flip on to fully freeze the long tail (e.g. a fresh ontology).
+    force_review_on_rare: bool = False
     force_review_on_mask_box_disagree: bool = True
+    # M-Q.4: a rare/fallback class earns auto-accept only with cross-path agreement AND VLM confirmation,
+    # never on one model's output. Off -> a rare class auto-accepts on agreement alone like a common class.
+    rare_needs_agreement_and_vlm: bool = True
+
+
+class QualitySettings(BaseModel):
+    # M-Q.4 quality reviewer: geometric/contextual checks that demote nonsense before the auto-accept queue.
+    # Each threshold backs a rule that catches a real live error (sky boxes, impossible sizes, tyre-as-
+    # vehicle, duplicates, pedestrian-in-car). Deterministic and model-free, so it runs on every object.
+    enabled: bool = True
+    horizon_frac: float = 0.45     # a ground object whose box sits entirely above this frame fraction is sky
+    dup_iou: float = 0.85          # IoU above which two boxes are the same detection (keep the higher conf)
+    part_contain: float = 0.80     # a small vehicle box this contained in a much larger one is a part (wheel)
+    vru_contain: float = 0.70      # a VRU box this contained in a four-wheeler/heavy box is implausible
+    # per-superclass (l1) plausible area as a fraction of the frame; outside is an impossible size
+    size_bounds: dict[str, list[float]] = Field(default_factory=lambda: {
+        "two_wheeler": [0.0004, 0.45], "three_wheeler": [0.0008, 0.55], "four_wheeler": [0.0008, 0.75],
+        "heavy": [0.0025, 0.92], "vru": [0.0002, 0.55], "animal": [0.0004, 0.55],
+    })
 
 
 class TrackerSettings(BaseModel):
@@ -554,6 +576,7 @@ class Settings(BaseSettings):
     fusion: FusionSettings = FusionSettings()
     calibrate: CalibrateSettings = CalibrateSettings()
     gate: GateSettings = GateSettings()
+    quality: QualitySettings = QualitySettings()
     intelligence: IntelligenceSettings = IntelligenceSettings()
     intel: IntelSettings = IntelSettings()  # Data Intelligence Layer (Phase 1)
     rig: RigSettings = RigSettings()        # Phase 3 camera rig layout + nominal intrinsics

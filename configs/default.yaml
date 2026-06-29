@@ -102,10 +102,19 @@ calibrate:
   isotonic_uri: null         # set to s3://.../isotonic.json (from make calibrate) + method=isotonic
 
 gate:
-  auto_accept: 0.95
+  auto_accept: 0.95              # benign default; calibrated, so a precision floor
+  safety_auto_accept: 0.99       # M-Q.4: VRU and animals must be near-certain to auto-accept
   review_low: 0.60
-  force_review_on_rare: true
+  force_review_on_rare: false    # strict escape hatch; off in favour of the agreement+VLM rule below
+  rare_needs_agreement_and_vlm: true  # M-Q.4: a rare class auto-accepts only with agreement AND a VLM confirm
   force_review_on_mask_box_disagree: true
+
+quality:                         # M-Q.4 quality reviewer (geometric/contextual demotion before auto-accept)
+  enabled: true
+  horizon_frac: 0.45
+  dup_iou: 0.85
+  part_contain: 0.80
+  vru_contain: 0.70
 
 intelligence:
   tracker:
