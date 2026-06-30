@@ -81,6 +81,19 @@ async def list_objects3d(cloud_id: uuid.UUID, db: AsyncSession = Depends(db_sess
     return {"cloud_id": str(cloud_id), "objects": [_serialize(o) for o in rows]}
 
 
+@router.get("/lidar/clouds/{cloud_id}/bev-labels")
+async def cloud_bev_labels(cloud_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
+    """Milestone F: the unified BEV label surface for a cloud, rasterizing its annotated cuboid footprints
+    onto a top-down metric class grid (reads alongside the drivable and occupancy grids)."""
+    from services.lidar.bev_labels import rasterize_label_bev
+    rows = (await db.execute(select(Object3D).where(Object3D.cloud_id == cloud_id))).scalars().all()
+    cubs = [{"center": o.center, "dims": o.dims, "yaw": o.yaw or 0.0, "class_id": o.class_id} for o in rows]
+    res = rasterize_label_bev(cubs)
+    onto = get_ontology()
+    res["class_names"] = {onto.by_id(cid).name: n for cid, n in res["class_cell_counts"].items()}
+    return {"cloud_id": str(cloud_id), "n_cuboids": len(cubs), **res}
+
+
 @router.post("/lidar/frames/{frame_id}/lift")
 async def lift_frame_objects(frame_id: uuid.UUID):
     """AI-assist: lift the frame's 2D objects into ground-snapped 3D cuboids (M-L2.0), seeding the workspace
