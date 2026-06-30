@@ -119,6 +119,14 @@ async def resolved(session_id: UUID):
     return await resolved_session_calibration(session_id)
 
 
+@router.post("/calibration/{session_id}/extrinsics")
+async def check_extrinsics(session_id: UUID):
+    """Cross-camera extrinsic consistency: score the epipolar (Sampson) residual of objects seen in two rig
+    cameras under their resolved calibration. Single-camera sessions report no overlapping pair."""
+    from services.calibration.extrinsics_check import check_session_extrinsics
+    return await check_session_extrinsics(session_id)
+
+
 @router.get("/calibration/{session_id}")
 async def get_validation(session_id: UUID, db: AsyncSession = Depends(db_session)):
     rows = (await db.execute(

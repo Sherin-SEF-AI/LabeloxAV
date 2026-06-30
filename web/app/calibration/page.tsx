@@ -54,6 +54,13 @@ export default function CalibrationPage() {
     ...(focalMode === "fov" ? { hfov_deg: Number(focalVal) } : { fx: Number(focalVal) }),
     height_m: Number(heightVal), pitch_deg: Number(pitchVal) } }, "measured"), "set spec");
   const runEstimate = () => ingest(() => api.calibrationEstimate(pick), "estimate");
+  const runExtrinsics = async () => {
+    setIng("extrinsics...");
+    try {
+      const r = await api.calibrationExtrinsics(pick);
+      setIng(r.checked ? `extrinsics: worst ${r.worst_sampson_px ?? "-"} px Sampson` : `extrinsics: ${r.reason}`);
+    } catch (e) { setIng("extrinsics failed: " + String(e)); }
+  };
   const runImport = () => ingest(() => api.calibrationImport(pick, { cam_id: impCam, format: "kitti", calib_text: impText }), "import");
 
   const SRC_DOT: Record<string, string> = { measured: "bg-pass", dataset: "bg-info", estimated: "bg-warn", nominal: "bg-ink-3" };
@@ -167,6 +174,7 @@ export default function CalibrationPage() {
               <button onClick={applySpec} disabled={!pick || !specCam} className="w-full border border-accent text-accent py-1 hover:bg-accent/10 disabled:opacity-50">apply to session</button>
             </div>
             <button onClick={runEstimate} disabled={!pick} className="w-full border border-line text-ink-2 py-1 hover:border-accent disabled:opacity-50">estimate from road lines</button>
+            <button onClick={runExtrinsics} disabled={!pick} className="w-full border border-line text-ink-2 py-1 hover:border-accent disabled:opacity-50">check extrinsics (multi-cam)</button>
             <div className="space-y-1.5 border-t hairline pt-2">
               <div className="uppercase text-ink-3">import KITTI calib (dataset)</div>
               <input value={impCam} onChange={(e) => setImpCam(e.target.value)} placeholder="cam_id" className="w-full bg-bg border border-line px-2 py-1 text-ink" />

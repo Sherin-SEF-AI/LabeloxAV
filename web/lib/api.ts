@@ -394,6 +394,7 @@ export const api = {
   calibrationSetSpec: (sid: string, camSpecs: Record<string, Record<string, number>>, source = "measured") =>
     post<Record<string, unknown>>(`/api/calibration/${sid}/calibrate`, { cam_specs: camSpecs, source }),
   calibrationEstimate: (sid: string) => post<Record<string, unknown>>(`/api/calibration/${sid}/estimate`, {}),
+  calibrationExtrinsics: (sid: string) => post<{ checked: boolean; reason?: string; worst_sampson_px?: number | null }>(`/api/calibration/${sid}/extrinsics`, {}),
   calibrationImport: (sid: string, body: { cam_id: string; format: string; ref_width?: number; calib_text?: string; camera_intrinsic?: number[][]; translation?: number[] }) =>
     post<Record<string, unknown>>(`/api/calibration/${sid}/import`, body),
   // M3.1 multi-camera
