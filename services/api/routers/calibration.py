@@ -26,6 +26,17 @@ class SetCalibIn(BaseModel):
     ref_height: int = 1080
 
 
+class ImportCalibIn(BaseModel):
+    cam_id: str
+    format: str                               # kitti | nuscenes
+    ref_width: int = 1920
+    ref_height: int = 1080
+    calib_text: str | None = None             # kitti calib.txt contents
+    camera_intrinsic: list | None = None      # nuscenes 3x3 K
+    translation: list | None = None           # nuscenes sensor->ego xyz
+    dist: list | None = None
+
+
 @router.post("/calibration/validate")
 async def validate(session_id: str):
     from services.calibration.report import validate_session
@@ -55,6 +66,25 @@ async def estimate_session(session_id: UUID):
     a session's cameras, stored as source=estimated. Upgrades a session off nominal without a calib file."""
     from services.calibration.estimate import estimate_session_calibration
     return await estimate_session_calibration(session_id)
+
+
+@router.post("/calibration/{session_id}/import")
+async def import_calib(session_id: UUID, body: ImportCalibIn):
+    """Import dataset intrinsics (KITTI P2 or nuScenes camera_intrinsic) for one camera, stored as
+    source=dataset. Exact focal and principal point, a real win over the nominal lens."""
+    from fastapi import HTTPException
+    from services.calibration.import_calib import import_calibration, parse_kitti_calib, parse_nuscenes_calib
+    if body.format == "kitti":
+        if not body.calib_text:
+            raise HTTPException(422, "kitti import needs calib_text")
+        intr = parse_kitti_calib(body.calib_text)
+    elif body.format == "nuscenes":
+        if not body.camera_intrinsic:
+            raise HTTPException(422, "nuscenes import needs camera_intrinsic")
+        intr = parse_nuscenes_calib(body.camera_intrinsic, body.translation, body.dist)
+    else:
+        raise HTTPException(422, f"unknown calib format {body.format}")
+    return await import_calibration(session_id, body.cam_id, intr, body.ref_width, body.ref_height)
 
 
 @router.get("/calibration/sessions")
