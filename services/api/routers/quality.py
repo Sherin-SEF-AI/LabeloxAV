@@ -7,6 +7,7 @@ The sheet is served from cached metrics (no GPU in the request). Measuring is do
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from services.analytics.quality import list_gold_sets, quality_sheet
 from services.api.deps import CalibrateFitIn, GoldSealIn
@@ -14,6 +15,20 @@ from services.autolabel.isotonic import fit_isotonic
 from services.training.gold import GoldSpec, seal_gold
 
 router = APIRouter()
+
+
+class IaaIn(BaseModel):
+    set_a: list                     # [{bbox:[x1,y1,x2,y2], class_name}]
+    set_b: list
+    iou_thresh: float = 0.5
+
+
+@router.post("/quality/iaa")
+async def inter_annotator_agreement(body: IaaIn):
+    """Milestone I: inter-annotator agreement between two independent label sets on a frame: detection
+    agreement, class agreement, mean IoU, and Cohen's kappa."""
+    from services.quality.iaa import iaa_score
+    return iaa_score(body.set_a, body.set_b, body.iou_thresh)
 
 
 @router.get("/quality/gold-sets")
