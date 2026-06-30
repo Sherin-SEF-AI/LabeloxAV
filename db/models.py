@@ -554,6 +554,32 @@ class CalibrationValidation(Base):
     __table_args__ = (Index("ix_calib_session", "session_id"),)
 
 
+class CameraCalibration(Base):
+    # M-CAL.1: the resolved per-session, per-camera calibration the 3D pipeline reads. Intrinsics are stored
+    # at ref_width and scaled to the actual image; extrinsics are the full 6-DOF camera->ego mount pose
+    # (rpy + xyz), generalizing the nominal yaw + height. source records how it was obtained (measured |
+    # dataset | estimated | nominal) so a cuboid's trust follows its calibration. Absent -> nominal fallback.
+    __tablename__ = "camera_calibration"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    cam_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(16), nullable=False)             # pinhole | fisheye
+    fx: Mapped[float] = mapped_column(Float, nullable=False)
+    fy: Mapped[float] = mapped_column(Float, nullable=False)
+    cx: Mapped[float] = mapped_column(Float, nullable=False)
+    cy: Mapped[float] = mapped_column(Float, nullable=False)
+    dist: Mapped[list] = mapped_column(JSONB, default=list)                    # distortion coefficients
+    ref_width: Mapped[int] = mapped_column(Integer, nullable=False)            # image width the intrinsics fit
+    rpy_deg: Mapped[list] = mapped_column(JSONB, default=list)                 # [roll, pitch, yaw] ego->cam
+    xyz_m: Mapped[list] = mapped_column(JSONB, default=list)                   # camera mount position in ego
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="nominal")
+    quality: Mapped[float] = mapped_column(Float, nullable=False, default=0.3)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_camera_calibration_session_cam", "session_id", "cam_id", unique=True),)
+
+
 class MapCommit(Base):
     # A fused, versioned HD-map output (content-addressed, like DatasetCommit).
     __tablename__ = "map_commit"

@@ -129,6 +129,9 @@ export type CalibFovCheck = { implied_fov_deg: number; expected_fov_deg: number 
 export type CalibCamera = { cam_id: string; model: string; lens?: string; reproj_error_px: number | null; fov_check: CalibFovCheck; time_offset_ns: number | null; status: string };
 export type CalibDetail = { session_id: string; cameras_in_session: string[]; validations: CalibCamera[]; overall: string };
 export type CalibSession = { session_id: string; vehicle_id: string; cameras: number; fail: number; overall: string };
+export type ResolvedCalibCam = { cam_id: string; source: string; quality: number; fx: number; fy: number; cx: number; cy: number; pitch_deg: number; yaw_deg: number; height_m: number };
+export type CalibTrust = { level: string; mean_quality: number; n_cameras: number };
+export type CalibResolved = { session_id: string; cameras: ResolvedCalibCam[]; trust: CalibTrust };
 
 export type LaneRow = {
   lane_id: string;

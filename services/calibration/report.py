@@ -62,7 +62,9 @@ async def validate_session(session_id: UUID, imu_ts_ns: list[int] | None = None)
         await db.commit()
 
     overall = "fail" if any(r["status"] == "fail" for r in results) else "pass"
-    out = {"session_id": str(session_id), "vehicle_id": sess.vehicle_id, "cameras": results, "overall": overall}
+    # Match the GET /calibration/{id} shape and the CalibDetail type: the per-camera array is "validations".
+    out = {"session_id": str(session_id), "vehicle_id": sess.vehicle_id,
+           "cameras_in_session": list(cam_entries.keys()), "validations": results, "overall": overall}
     log.info("calibration.validated", session_id=str(session_id), overall=overall, n_cameras=len(results))
     return out
 
