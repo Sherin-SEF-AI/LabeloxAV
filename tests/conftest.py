@@ -17,6 +17,37 @@ os.environ.setdefault("LBX_AUTH__ENABLED", "false")
 # is relaxed here. test_pii_gate.py constructs PiiSettings(plate_mandatory=True) explicitly to verify it.
 os.environ.setdefault("LBX_PII__PLATE_MANDATORY", "false")
 
+# ISOLATION: the suite seeds synthetic sessions/frames/objects and commits them. Point it at a dedicated
+# test database so it never writes to the production corpus (which had accumulated ~1600 synthetic noise
+# sessions from prior runs against the live DB). Override LBX_POSTGRES__DB in CI to change the name.
+os.environ.setdefault("LBX_POSTGRES__DB", "labeloxav_test")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _provision_test_db():
+    """Create the isolated test database (if missing) and bring it to the head schema once per session, so
+    tests run against a real-schema DB that is never the production corpus. Refuses unless the target db
+    name looks like a test db: a guard against accidentally pointing the suite at production."""
+    import subprocess
+
+    import psycopg
+
+    from core.config import get_settings
+    get_settings.cache_clear()
+    pg = get_settings().postgres
+    if "test" not in pg.db.lower():
+        raise RuntimeError(f"refusing to run the suite against non-test database '{pg.db}'. "
+                           "Set LBX_POSTGRES__DB to a *_test database.")
+    admin = psycopg.connect(host=pg.host, port=pg.port, user=pg.user, password=pg.password,
+                            dbname="postgres", autocommit=True)
+    with admin.cursor() as cur:
+        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (pg.db,))
+        if cur.fetchone() is None:
+            cur.execute(f'CREATE DATABASE "{pg.db}"')
+    admin.close()
+    subprocess.run([".venv/bin/alembic", "upgrade", "head"], check=True, cwd=REPO_ROOT, env={**os.environ})
+    yield
+
 
 @pytest.fixture(autouse=True)
 def _reset_db_caches():
