@@ -311,6 +311,26 @@ class AggLabelIn(BaseModel):
     class_id: int
 
 
+@router.post("/lidar/clouds/{cloud_id}/occupancy")
+async def cloud_occupancy(cloud_id: uuid.UUID, voxel_size: float = 0.5, db: AsyncSession = Depends(db_session)):
+    """Milestone F: an occupancy / voxel grid (occupied, free, unknown) from a cloud's geometry, ray-carved
+    from the ego origin. Works on pseudo-LiDAR the same as real LiDAR."""
+    from db.models import PointCloud
+    from services.lidar.ingest.store import load_cloud
+    from services.lidar.occupancy import voxelize_occupancy
+    pc = await db.get(PointCloud, cloud_id)
+    if pc is None:
+        raise HTTPException(404, "cloud not found")
+    cloud = load_cloud(pc.cloud_uri)
+    xyz = cloud.xyz
+    lo = xyz.min(axis=0)
+    hi = xyz.max(axis=0)
+    bounds = [float(lo[0]), float(lo[1]), float(lo[2]), float(hi[0]), float(hi[1]), float(hi[2])]
+    res = voxelize_occupancy(xyz, origin=[0.0, 0.0, 0.0], bounds=bounds, voxel_size=voxel_size)
+    res.pop("occupied_voxels", None)   # the counts + dims are the summary; the full set stays server-side
+    return {"cloud_id": str(cloud_id), **res}
+
+
 @router.post("/lidar/aggregate/{agg_id}/label")
 async def aggregate_label(agg_id: uuid.UUID, body: AggLabelIn):
     """One-shot 4D label: a cuboid drawn once in the aggregated scene propagates to every clip frame as a 3D
