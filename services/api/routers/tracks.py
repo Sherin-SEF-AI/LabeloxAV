@@ -155,6 +155,15 @@ async def attribute_timeline(track_id: UUID, key: str, db: AsyncSession = Depend
     return await track_attribute_timeline(track_id, key)
 
 
+@router.get("/tracks/{track_id}/seg4d-consistency")
+async def seg4d_consistency(track_id: UUID, window: int = 2, db: AsyncSession = Depends(db_session)):
+    """Milestone G 4D semantic seg: temporal consistency of the track's per-frame class, with the count of
+    isolated flickers a temporal majority filter would correct (proposed, not auto-applied)."""
+    from services.temporal.seg4d import track_class_consistency
+
+    return await track_class_consistency(track_id, window)
+
+
 @router.post("/objects/{object_id}/keyframe")
 async def set_keyframe(object_id: UUID, value: bool = True, db: AsyncSession = Depends(db_session)):
     from services.temporal.keyframes import mark_keyframe
