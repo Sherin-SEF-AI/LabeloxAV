@@ -11,6 +11,7 @@ import type {
   AdverseRegion,
   ProjectedCuboid,
   CalibDetail,
+  CalibResolved,
   CalibSession,
   Confusions,
   CorrectionCoverage,
@@ -388,6 +389,13 @@ export const api = {
   calibrationValidate: (sid: string) => post<CalibDetail>(`/api/calibration/validate?session_id=${sid}`, {}),
   calibrationSessions: () => get<CalibSession[]>("/api/calibration/sessions"),
   calibrationDetail: (sid: string) => get<CalibDetail>(`/api/calibration/${sid}`),
+  // M-CAL.3 real-calibration ingestion + the resolved/trust surface
+  calibrationResolved: (sid: string) => get<CalibResolved>(`/api/calibration/${sid}/resolved`),
+  calibrationSetSpec: (sid: string, camSpecs: Record<string, Record<string, number>>, source = "measured") =>
+    post<Record<string, unknown>>(`/api/calibration/${sid}/calibrate`, { cam_specs: camSpecs, source }),
+  calibrationEstimate: (sid: string) => post<Record<string, unknown>>(`/api/calibration/${sid}/estimate`, {}),
+  calibrationImport: (sid: string, body: { cam_id: string; format: string; ref_width?: number; calib_text?: string; camera_intrinsic?: number[][]; translation?: number[] }) =>
+    post<Record<string, unknown>>(`/api/calibration/${sid}/import`, body),
   // M3.1 multi-camera
   multicamGroups: (sid: string) => get<MulticamGroups>(`/api/multicam/groups?session_id=${sid}`),
   multicamAssociate: (sid: string) => post<{ associated: number; rig_tracks: number; cameras: string[]; reason?: string }>(`/api/multicam/associate?session_id=${sid}`, {}),

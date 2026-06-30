@@ -103,3 +103,31 @@ async def resolve_calibration(session_id, cam_id: str, img_w: int, img_h: int) -
     if row is None:
         return nominal_calibration(cam_id, img_w, img_h)
     return calibration_from_row(row, img_w, img_h)
+
+
+async def resolved_session_calibration(session_id) -> dict:
+    """Every camera's resolved calibration for a session plus an overall trust level (the weakest source and
+    mean quality). The calibration-trust surface: which sessions to trust for metric 3D, and the data the
+    ingestion UI renders."""
+    from sqlalchemy import select
+
+    from db.models import Frame
+    from db.session import get_sessionmaker
+    async with get_sessionmaker()() as db:
+        rows = (await db.execute(select(Frame.cam_id, Frame.width, Frame.height)
+                                 .where(Frame.session_id == session_id).distinct())).all()
+    seen: dict = {}
+    for cam, w, h in rows:
+        seen.setdefault(cam, (int(w), int(h)))
+    cams = []
+    for cam, (w, h) in seen.items():
+        c = await resolve_calibration(session_id, cam, w, h)
+        cams.append({"cam_id": cam, "source": c.source, "quality": round(c.quality, 3),
+                     "fx": round(c.fx, 1), "fy": round(c.fy, 1), "cx": round(c.cx, 1), "cy": round(c.cy, 1),
+                     "pitch_deg": round(c.rpy_deg[1], 2), "yaw_deg": round(c.rpy_deg[2], 2),
+                     "height_m": round(c.xyz_m[2], 3)})
+    rank = {"nominal": 0, "estimated": 1, "dataset": 2, "measured": 3}
+    level = min((c["source"] for c in cams), key=lambda s: rank.get(s, 0)) if cams else "nominal"
+    mean_q = round(sum(c["quality"] for c in cams) / len(cams), 3) if cams else SOURCE_QUALITY["nominal"]
+    return {"session_id": str(session_id), "cameras": cams,
+            "trust": {"level": level, "mean_quality": mean_q, "n_cameras": len(cams)}}

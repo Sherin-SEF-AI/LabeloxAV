@@ -73,7 +73,12 @@ async def import_calib(session_id: UUID, body: ImportCalibIn):
     """Import dataset intrinsics (KITTI P2 or nuScenes camera_intrinsic) for one camera, stored as
     source=dataset. Exact focal and principal point, a real win over the nominal lens."""
     from fastapi import HTTPException
-    from services.calibration.import_calib import import_calibration, parse_kitti_calib, parse_nuscenes_calib
+
+    from services.calibration.import_calib import (
+        import_calibration,
+        parse_kitti_calib,
+        parse_nuscenes_calib,
+    )
     if body.format == "kitti":
         if not body.calib_text:
             raise HTTPException(422, "kitti import needs calib_text")
@@ -104,6 +109,14 @@ async def list_sessions(db: AsyncSession = Depends(db_session)):
         s["overall"] = "fail" if s["fail"] else "pass"
         out.append(s)
     return out
+
+
+@router.get("/calibration/{session_id}/resolved")
+async def resolved(session_id: UUID):
+    """Every camera's resolved calibration (stored real or nominal) plus the session trust level. Drives the
+    ingestion UI and the calibration-trust surface."""
+    from services.calibration.resolve import resolved_session_calibration
+    return await resolved_session_calibration(session_id)
 
 
 @router.get("/calibration/{session_id}")
