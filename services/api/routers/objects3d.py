@@ -331,6 +331,17 @@ async def cloud_occupancy(cloud_id: uuid.UUID, voxel_size: float = 0.5, db: Asyn
     return {"cloud_id": str(cloud_id), **res}
 
 
+@router.get("/lidar/clouds/{cloud_id}/ground-qa")
+async def cloud_ground_qa(cloud_id: uuid.UUID):
+    """Milestone F: ground-plane labeling review. Flags whether the auto ground fit is ok / tilted / sparse /
+    absent so an annotator labels the surface by hand only on the clouds that need it."""
+    from services.lidar.clean.ground_qa import flag_ground_for_review
+    res = await flag_ground_for_review(cloud_id)
+    if res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
+
+
 @router.post("/lidar/aggregate/{agg_id}/label")
 async def aggregate_label(agg_id: uuid.UUID, body: AggLabelIn):
     """One-shot 4D label: a cuboid drawn once in the aggregated scene propagates to every clip frame as a 3D
