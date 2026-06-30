@@ -526,6 +526,8 @@ class LidarSettings(BaseModel):
     box_source: str = "auto"                # auto | lifted | native
     lift_min_frustum_points: int = 12       # below this a frustum is too sparse to fit a cuboid
     lift_depth_gate_m: float = 8.0          # keep frustum points within this depth band of the nearest surface
+    lift_max_tilt_rad: float = 0.35         # clamp estimated 9-DOF pitch/roll (~20 deg); noisy ground -> wild normals
+    lift_ground_band_m: float = 0.2         # thickness of the contact-ground band used to estimate slope tilt
     native_detector: str = "centerpoint"    # centerpoint | pv_rcnn_pp | bevfusion (OpenPCDet, via burst)
     native_ckpt: str = "centerpoint_nuscenes"   # pinned OpenPCDet checkpoint id
     segmenter: str = "ptv3"                  # ptv3 (Pointcept, via burst) | projected_2d (pseudo-LiDAR fallback)

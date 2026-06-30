@@ -52,6 +52,30 @@ def _plane_z(plane: list[float], x: float, y: float) -> float:
     return -(a * x + b * y + d) / c
 
 
+def ground_tilt(ground_pts: np.ndarray, yaw: float, max_tilt: float) -> tuple[float, float]:
+    """The pitch and roll (radians) a body resting on the ground inherits from the surface it sits on, for the
+    9-DOF box. The surface normal is the smallest-variance axis of the local contact points (PCA); expressed
+    in the box's yaw frame it gives pitch (tilt along the box length, an up/down ramp) and roll (tilt across
+    the width, a side bank). Flat ground -> (0, 0). Clamped to +/- max_tilt because sparse or noisy
+    pseudo-LiDAR ground can produce a wild normal, and a hallucinated tilt is worse than none."""
+    if len(ground_pts) < 8:
+        return 0.0, 0.0
+    centered = ground_pts - ground_pts.mean(axis=0)
+    # the plane normal is the right-singular vector of least variance (PCA on the contact points)
+    _, _, vt = np.linalg.svd(centered, full_matrices=False)
+    n = vt[-1]
+    if n[2] < 0:
+        n = -n                                   # orient up (z up in the ego frame)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    nbx = cy * n[0] + sy * n[1]                  # normal rotated into the box-aligned frame (Rz(-yaw) n)
+    nby = -sy * n[0] + cy * n[1]
+    nbz = n[2] if abs(n[2]) > 1e-6 else 1e-6
+    pitch = math.atan2(nbx, nbz)
+    roll = math.atan2(nby, nbz)
+    clamp = lambda v: max(-max_tilt, min(max_tilt, v))  # noqa: E731
+    return clamp(pitch), clamp(roll)
+
+
 def fit_cuboid(points_ego: np.ndarray, ground_plane: list[float] | None = None,
                depth_gate: float | None = None, min_points: int | None = None) -> dict | None:
     """Fit an oriented cuboid to frustum points: a minimum-area rectangle in the BEV gives the centre, L, W
@@ -86,12 +110,19 @@ def fit_cuboid(points_ego: np.ndarray, ground_plane: list[float] | None = None,
     height = max(z_top - ground_z, 0.3)
     center_z = ground_z + height / 2.0
 
+    # 9-DOF: the contact surface is the lowest band of the frustum points (the ground the object rests on,
+    # be it level road or a ramp); its normal gives the pitch and roll the object inherits. Estimated from
+    # the local band rather than the scene plane so a vehicle on a ramp tilts with the ramp.
+    z_floor = float(np.percentile(pts[:, 2], 5))
+    contact = pts[pts[:, 2] <= z_floor + cfg.lift_ground_band_m]
+    pitch, roll = ground_tilt(contact, yaw, cfg.lift_max_tilt_rad)
+
     # fill is how densely the points occupy the fitted footprint, a fit-quality signal for the gate
     footprint = max(length * width, 1e-3)
     fill = min(1.0, len(fit_pts) / (footprint * 80.0))
     return {"center": [round(float(cx), 3), round(float(cy), 3), round(center_z, 3)],
             "dims": [round(float(length), 3), round(float(width), 3), round(float(height), 3)],
-            "yaw": round(float(yaw), 4), "pitch": 0.0, "roll": 0.0,
+            "yaw": round(float(yaw), 4), "pitch": round(pitch, 4), "roll": round(roll, 4),
             "n_points": int(len(fit_pts)), "fill": round(float(fill), 3),
             "ground_z": round(float(ground_z), 3)}
 
