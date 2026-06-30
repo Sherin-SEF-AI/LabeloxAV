@@ -69,12 +69,12 @@ def _iou_2d(a: list[float], b: list[float]) -> float:
     return inter / union if union > 1e-6 else 0.0
 
 
-def _projected_aabb(cuboid: dict, cam_id: str, w: int, h: int) -> list[float] | None:
+def _projected_aabb(cuboid: dict, cam_id: str, w: int, h: int, calib=None) -> list[float] | None:
     """The axis-aligned 2D box of a cuboid's in-front corners projected into a camera, or None when the
-    cuboid does not land in that image."""
+    cuboid does not land in that image. calib is a resolved Calibration; None uses the nominal rig default."""
     from services.lidar.boxes import project_cuboid
     proj = project_cuboid(cuboid["center"], cuboid["dims"], cuboid["yaw"], cam_id, w, h,
-                          cuboid.get("pitch", 0.0), cuboid.get("roll", 0.0))
+                          cuboid.get("pitch", 0.0), cuboid.get("roll", 0.0), calib)
     uv = [c for c, infront in zip(proj["corners_uv"], proj["in_front"], strict=False) if infront]
     if len(uv) < 2 or not proj["any_in_image"]:
         return None
@@ -95,17 +95,22 @@ def check_2d3d_consistency(cuboid: dict, views: list[dict], min_iou: float) -> d
     for v in views:
         if v.get("bbox_2d") is None:
             continue
-        pb = _projected_aabb(cuboid, v["cam_id"], int(v["w"]), int(v["h"]))
+        calib = v.get("calib")
+        pb = _projected_aabb(cuboid, v["cam_id"], int(v["w"]), int(v["h"]), calib)
         if pb is None:
             continue
-        per_cam.append({"cam_id": v["cam_id"], "iou": round(_iou_2d(pb, v["bbox_2d"]), 3)})
+        per_cam.append({"cam_id": v["cam_id"], "iou": round(_iou_2d(pb, v["bbox_2d"]), 3),
+                        "calib_source": getattr(calib, "source", "nominal")})
     if not per_cam:
         return None                                  # never jointly visible with a 2D box: nothing to check
     best = max(c["iou"] for c in per_cam)
     if best >= min_iou:
         return None                                  # at least one camera agrees -> consistent
+    # the calibration source travels with the flag: a mismatch on nominal calibration is far weaker evidence
+    # of a real labeling error than one on measured calibration.
+    sources = sorted({c["calib_source"] for c in per_cam})
     return {"kind": "box_2d3d_inconsistent", "score": round(1.0 - best, 2),
-            "detail": {"best_iou": best, "min_iou": min_iou, "per_cam": per_cam}}
+            "detail": {"best_iou": best, "min_iou": min_iou, "per_cam": per_cam, "calib_sources": sources}}
 
 
 async def check_object_consistency(object_3d_id: uuid.UUID, write: bool = True) -> dict:
@@ -136,7 +141,14 @@ async def check_object_consistency(object_3d_id: uuid.UUID, write: bool = True) 
             fr = await db.get(Frame, obj.frame_id)
             if fr is None:
                 continue
-            views.append({"cam_id": fr.cam_id, "w": fr.width, "h": fr.height, "bbox_2d": list(obj.bbox)})
+            views.append({"cam_id": fr.cam_id, "w": fr.width, "h": fr.height, "bbox_2d": list(obj.bbox),
+                          "session_id": fr.session_id})
+
+    # resolve each camera's calibration (stored real, else nominal) so the projection uses real calibration
+    # when the session has it; the source is recorded with the verdict.
+    from services.calibration.resolve import resolve_calibration
+    for v in views:
+        v["calib"] = await resolve_calibration(v["session_id"], v["cam_id"], int(v["w"]), int(v["h"]))
 
     flag = check_2d3d_consistency(cuboid, views, cfg.quality_2d3d_min_iou)
     if flag and write:

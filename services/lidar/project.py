@@ -51,17 +51,15 @@ def ego_to_camera(ego_xyz: np.ndarray, cam_id: str) -> np.ndarray:
     return shifted @ m
 
 
-def project_to_camera(ego_xyz: np.ndarray, cam_id: str, img_w: int, img_h: int) -> dict:
-    """Project ego-frame points to pixels. Returns uv, the in-front and in-image masks, and the optical
-    depth, so a caller can paint the cloud onto the image or pick the points a camera actually sees."""
-    k, fx, fy, cx, cy = _intrinsics(cam_id, img_w, img_h)
-    cam = ego_to_camera(ego_xyz, cam_id)
+def _project_cam_points(cam: np.ndarray, fx: float, fy: float, cx: float, cy: float, model: str,
+                        dist, img_w: int, img_h: int) -> dict:
+    """Shared pinhole/fisheye projection of camera-optical-frame points to pixels."""
     z = cam[:, 2]
     in_front = z > 1e-3
     uv = np.full((cam.shape[0], 2), -1.0, dtype=np.float32)
-    if k.model == "fisheye" and np.any(in_front):
+    if model == "fisheye" and np.any(in_front):
         km = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
-        d = np.array((list(k.dist) + [0, 0, 0, 0])[:4], dtype=np.float64).reshape(4, 1)
+        d = np.array((list(dist) + [0, 0, 0, 0])[:4], dtype=np.float64).reshape(4, 1)
         pts = cam[in_front].astype(np.float64).reshape(-1, 1, 3)
         proj, _ = cv2.fisheye.projectPoints(pts, np.zeros(3), np.zeros(3), km, d)
         uv[in_front] = proj.reshape(-1, 2).astype(np.float32)
@@ -71,6 +69,21 @@ def project_to_camera(ego_xyz: np.ndarray, cam_id: str, img_w: int, img_h: int) 
         uv[:, 1] = cam[:, 1] / safe_z * fy + cy
     in_image = in_front & (uv[:, 0] >= 0) & (uv[:, 0] < img_w) & (uv[:, 1] >= 0) & (uv[:, 1] < img_h)
     return {"uv": uv, "in_front": in_front, "in_image": in_image, "depth": z}
+
+
+def project_to_camera(ego_xyz: np.ndarray, cam_id: str, img_w: int, img_h: int, calib=None) -> dict:
+    """Project ego-frame points to pixels. Returns uv, the in-front and in-image masks, and the optical depth.
+    calib is a resolved Calibration (M-CAL.1); when None the nominal rig calibration is used, reproducing the
+    legacy projection exactly. Pass a session-resolved calib to project through real calibration."""
+    if calib is None:
+        k, fx, fy, cx, cy = _intrinsics(cam_id, img_w, img_h)
+        cam = ego_to_camera(ego_xyz, cam_id)
+        model, dist = k.model, k.dist
+    else:
+        fx, fy, cx, cy = calib.fx, calib.fy, calib.cx, calib.cy
+        cam = (ego_xyz.astype(np.float32) - calib.t()) @ calib.R()
+        model, dist = calib.model, calib.dist
+    return _project_cam_points(cam, fx, fy, cx, cy, model, dist, img_w, img_h)
 
 
 def camera_ray_to_ego(u: float, v: float, cam_id: str, img_w: int, img_h: int) -> dict:

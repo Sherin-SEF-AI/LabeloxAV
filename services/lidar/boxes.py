@@ -51,11 +51,12 @@ def snap_to_ground(center, dims, plane) -> list[float]:
 
 
 def project_cuboid(center, dims, yaw: float, cam_id: str, img_w: int, img_h: int,
-                   pitch: float = 0.0, roll: float = 0.0) -> dict:
+                   pitch: float = 0.0, roll: float = 0.0, calib=None) -> dict:
     """Project a cuboid's corners onto a camera image. Returns the 8 corner pixels, which are in front and in
-    image, and the edges, so the cuboid can be drawn over the 2D frame (the linked-annotation foundation)."""
+    image, and the edges, so the cuboid can be drawn over the 2D frame (the linked-annotation foundation).
+    calib is a resolved Calibration (M-CAL.1); None uses the nominal rig calibration."""
     corners = cuboid_corners(center, dims, yaw, pitch, roll)
-    proj = project_to_camera(corners, cam_id, img_w, img_h)
+    proj = project_to_camera(corners, cam_id, img_w, img_h, calib)
     return {"corners_uv": [[round(float(u), 1), round(float(v), 1)] for u, v in proj["uv"]],
             "in_front": [bool(x) for x in proj["in_front"]], "in_image": [bool(x) for x in proj["in_image"]],
             "edges": BOX_EDGES, "any_in_image": bool(proj["in_image"].any())}
