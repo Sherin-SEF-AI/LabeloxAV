@@ -77,7 +77,7 @@ export default function CalibrationPage() {
               <table className="w-full font-mono text-[11px]">
                 <thead><tr className="text-ink-3 text-left border-b hairline"><th className="px-3 py-1">camera</th><th>model</th><th>reproj px</th><th>implied FOV</th><th>expected</th><th>time offset</th><th className="text-right pr-3">status</th></tr></thead>
                 <tbody>
-                  {detail.validations.map((c) => (
+                  {(detail.validations ?? []).map((c) => (
                     <tr key={c.cam_id} className="border-b hairline">
                       <td className="px-3 py-1 text-ink-2">{c.cam_id}</td>
                       <td className="text-ink-3">{c.model}</td>
