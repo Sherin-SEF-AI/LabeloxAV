@@ -10,11 +10,9 @@ import BackButton from "@/components/BackButton";
 // M2.1 lane spline editor: propose lanes (CLRerNet on pod / classical local), edit as draggable control
 // points, draw implicit lanes on unmarked roads, pick lane type, mark ego, propagate across frames.
 
-const Stage = dynamic(() => import("react-konva").then((m) => m.Stage), { ssr: false });
-const Layer = dynamic(() => import("react-konva").then((m) => m.Layer), { ssr: false });
-const KImage = dynamic(() => import("react-konva").then((m) => m.Image), { ssr: false });
-const Line = dynamic(() => import("react-konva").then((m) => m.Line), { ssr: false });
-const Circle = dynamic(() => import("react-konva").then((m) => m.Circle), { ssr: false });
+// react-konva's reconciler cannot render lazy element types, so the whole Konva tree is one component
+// loaded via next/dynamic(ssr:false), not per-primitive dynamic imports.
+const LaneCanvas = dynamic(() => import("@/components/lane/LaneCanvas"), { ssr: false });
 
 const TYPES = ["solid", "dashed", "double", "road_edge", "implicit", "fallback"];
 const COLOR: Record<string, string> = { proposed: "#58A6FF", human: "#FF7A2F", propagated: "#E3B341" };
@@ -123,27 +121,8 @@ export default function LaneEditor() {
       <div className="flex flex-1 min-h-0">
         <div ref={wrapRef} className="flex-1 overflow-hidden bg-bg-2">
           {img && meta && (
-            <Stage width={meta.width * scale} height={meta.height * scale} scaleX={scale} scaleY={scale} onMouseDown={onStageClick}>
-              <Layer>
-                <KImage image={img} width={meta.width} height={meta.height} listening={false} />
-                {drivable && Object.entries(drivable).flatMap(([cls, polys]) =>
-                  polys.map((poly, i) => (
-                    <Line key={`dr-${cls}-${i}`} points={poly} closed listening={false}
-                      fill={cls === "drivable" ? "rgba(86,211,100,0.22)" : cls === "fallback" ? "rgba(227,179,65,0.22)" : "rgba(248,81,73,0.16)"}
-                      stroke={cls === "drivable" ? "#56D364" : cls === "fallback" ? "#E3B341" : "#F85149"} strokeWidth={1 / scale} />
-                  )))}
-                {lanes.map((l) => (
-                  <Line key={l.lane_id} points={l.control_points.flat()} stroke={l.is_ego ? "#56D364" : (COLOR[l.source] || "#A0A6AD")}
-                    strokeWidth={(l.lane_id === sel ? 4 : 2.5) / scale} dash={l.lane_type === "dashed" ? [10 / scale, 8 / scale] : undefined}
-                    tension={0.3} onClick={() => setSel(l.lane_id)} hitStrokeWidth={14 / scale} />
-                ))}
-                {selLane?.control_points.map((p, i) => (
-                  <Circle key={i} x={p[0]} y={p[1]} radius={6 / scale} fill="#FF7A2F" draggable
-                    onDragMove={(e) => dragPoint(selLane.lane_id, i, e.target.x(), e.target.y())} />
-                ))}
-                {adding?.length ? <Line points={adding.flat()} stroke="#FF7A2F" strokeWidth={2 / scale} dash={[6 / scale, 4 / scale]} /> : null}
-              </Layer>
-            </Stage>
+            <LaneCanvas img={img} meta={meta} scale={scale} lanes={lanes} sel={sel} drivable={drivable}
+              adding={adding} onStageClick={onStageClick} onSelect={setSel} onDragPoint={dragPoint} />
           )}
         </div>
 

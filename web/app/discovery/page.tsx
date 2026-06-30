@@ -4,16 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { DiscoveryCandidate, SessionRow } from "@/lib/types";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
+import { StateBadge } from "@/components/StateBadge";
+import ScoreBar from "@/components/shell/ScoreBar";
 
 // M1.5 rare-scenario discovery queue: unusual frames surfaced by embedding novelty (outlier / sparse
 // cluster) or rare classes, ranked by score, for a human to confirm/dismiss/tag. Feeds active learning.
-
-const KIND_COLOR: Record<string, string> = {
-  embedding_outlier: "text-warn",
-  sparse_cluster: "text-info",
-  rare_class: "text-accent",
-};
 
 export default function DiscoveryPage() {
   const router = useRouter();
@@ -52,21 +48,23 @@ export default function DiscoveryPage() {
     setItems((xs) => xs.filter((x) => x.candidate_id !== c.candidate_id));
   };
 
+  const primaryAction = (
+    <div className="flex items-center gap-2 font-mono text-[11px]">
+      <span className="text-ink-3">run discovery on</span>
+      <select value={session} onChange={(e) => setSession(e.target.value)}
+        className="bg-bg border border-line px-2 py-1 text-ink max-w-xs">
+        {sessions.map((s) => <option key={s.session_id} value={s.session_id}>{s.vehicle_id} / {s.session_id.slice(0, 8)}</option>)}
+      </select>
+      <button onClick={run} disabled={busy || !session}
+        className="border border-accent text-accent px-2 py-1 hover:bg-accent/10 disabled:opacity-50">{busy ? "..." : "run"}</button>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="DISCOVERY" />
-      <main className="flex-1 overflow-auto p-4 space-y-4">
-        <div className="panel p-3 flex items-center gap-2 flex-wrap font-mono text-[11px]">
-          <span className="text-ink-3">run discovery on</span>
-          <select value={session} onChange={(e) => setSession(e.target.value)}
-            className="bg-bg border border-line px-2 py-1 text-ink max-w-xs">
-            {sessions.map((s) => <option key={s.session_id} value={s.session_id}>{s.vehicle_id} / {s.session_id.slice(0, 8)}</option>)}
-          </select>
-          <button onClick={run} disabled={busy || !session}
-            className="border border-accent text-accent px-2 py-1 hover:bg-accent/10 disabled:opacity-50">{busy ? "..." : "run"}</button>
-          <span className="ml-auto text-ink-3">{items.length} pending</span>
-          {msg && <span className="text-warn w-full">{msg}</span>}
-        </div>
+    <PageShell active="DISCOVERY" title="Discovery" primaryAction={primaryAction}
+      right={<span className="font-mono text-[11px] text-ink-3">{items.length} pending</span>}>
+      <div className="p-4 space-y-4">
+        {msg && <div className="panel p-2 font-mono text-[11px] text-warn">{msg}</div>}
 
         {items.length ? (
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
@@ -76,9 +74,9 @@ export default function DiscoveryPage() {
                 <img src={c.image_url} alt="" onClick={() => router.push(`/frame/${c.frame_id}`)}
                   className="w-full h-28 object-cover bg-bg-2 cursor-pointer" />
                 <div className="p-2 space-y-1 font-mono text-[10px]">
-                  <div className="flex items-center justify-between">
-                    <span className={KIND_COLOR[c.kind] || "text-ink-2"}>{c.kind.replace("_", " ")}</span>
-                    <span className="text-ink-3">{c.score.toFixed(2)}</span>
+                  <div className="flex items-center justify-between gap-1">
+                    <StateBadge state={c.kind.replace("_", " ")} />
+                    <ScoreBar value={c.score} tone="info" />
                   </div>
                   {c.rare_classes.length > 0 && <div className="text-accent truncate">{c.rare_classes.join(", ")}</div>}
                   <div className="text-ink-3">{c.vehicle_id}</div>
@@ -97,7 +95,7 @@ export default function DiscoveryPage() {
             no pending candidates. Pick a session and click run to surface unusual frames.
           </div>
         )}
-      </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }

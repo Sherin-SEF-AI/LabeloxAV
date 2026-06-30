@@ -49,6 +49,9 @@ def evaluate(weights: str, data_yaml: str, split: str = "val", imgsz: int = 960)
         "recall": round(float(res.box.mr), 4),
         "per_class": per_class,
         "per_class_pr": per_class_pr,
+        # Flat class_name -> recall, so the champion recall gate (fail-closed on safety-class recall)
+        # can read it directly from gold_metrics.
+        "per_class_recall": {name: pr["recall"] for name, pr in per_class_pr.items()},
     }
     # Segmentation models also report mask metrics; absent for detect models.
     if getattr(res, "seg", None) is not None:
@@ -66,7 +69,7 @@ def safe_miou_report(weights: str, data_yaml: str, split: str = "val", imgsz: in
     from ultralytics import YOLO
 
     from services.autolabel.ontology import get_ontology
-    from services.training.safe_miou import safe_miou
+    from services.training.safe_miou import BACKGROUND_ID, safe_miou
 
     settings = get_settings()
     onto = get_ontology()
@@ -87,9 +90,13 @@ def safe_miou_report(weights: str, data_yaml: str, split: str = "val", imgsz: in
 
     try:
         matrix = res.confusion_matrix.matrix  # (nc+1, nc+1), last index is background
-        sub = matrix[:nc, :nc]               # drop background row/col -> class-vs-class only
-        score = safe_miou(sub, class_ids, onto, settings.m9.safety_weight)
-        offdiag = float(sub.sum() - sum(sub[i][i] for i in range(nc)))
+        # Keep the background row/col so a missed VRU (true class predicted nothing) and a false positive
+        # (background predicted as a class) are scored, not discarded. Dropping them is exactly why a weak
+        # detector that misses everything read as undefined; the spec wants "pedestrian versus background".
+        k = matrix.shape[0]
+        ids_bg = (class_ids + [BACKGROUND_ID])[:k]
+        score = safe_miou(matrix, ids_bg, onto, settings.m9.safety_weight)
+        offdiag = float(matrix.sum() - sum(matrix[i][i] for i in range(k)))
     except Exception as exc:  # noqa: BLE001
         log.warning("safe_miou.failed", error=str(exc))
         return {"safe_miou": None, "n_classes": nc, "offdiag_mass": None}

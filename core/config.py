@@ -179,10 +179,32 @@ class CalibrateSettings(BaseModel):
 
 
 class GateSettings(BaseModel):
-    auto_accept: float = 0.95
+    auto_accept: float = 0.95          # benign default; calibrated, so this is a precision floor
+    safety_auto_accept: float = 0.99   # M-Q.4: safety-critical classes (VRU, animal) must be near-certain
     review_low: float = 0.60
-    force_review_on_rare: bool = True
+    # Strict escape hatch: rare/fallback classes never auto-accept. Off by default in favour of the smarter
+    # agreement+VLM rule below; flip on to fully freeze the long tail (e.g. a fresh ontology).
+    force_review_on_rare: bool = False
     force_review_on_mask_box_disagree: bool = True
+    # M-Q.4: a rare/fallback class earns auto-accept only with cross-path agreement AND VLM confirmation,
+    # never on one model's output. Off -> a rare class auto-accepts on agreement alone like a common class.
+    rare_needs_agreement_and_vlm: bool = True
+
+
+class QualitySettings(BaseModel):
+    # M-Q.4 quality reviewer: geometric/contextual checks that demote nonsense before the auto-accept queue.
+    # Each threshold backs a rule that catches a real live error (sky boxes, impossible sizes, tyre-as-
+    # vehicle, duplicates, pedestrian-in-car). Deterministic and model-free, so it runs on every object.
+    enabled: bool = True
+    horizon_frac: float = 0.45     # a ground object whose box sits entirely above this frame fraction is sky
+    dup_iou: float = 0.85          # IoU above which two boxes are the same detection (keep the higher conf)
+    part_contain: float = 0.80     # a small vehicle box this contained in a much larger one is a part (wheel)
+    vru_contain: float = 0.70      # a VRU box this contained in a four-wheeler/heavy box is implausible
+    # per-superclass (l1) plausible area as a fraction of the frame; outside is an impossible size
+    size_bounds: dict[str, list[float]] = Field(default_factory=lambda: {
+        "two_wheeler": [0.0004, 0.45], "three_wheeler": [0.0008, 0.55], "four_wheeler": [0.0008, 0.75],
+        "heavy": [0.0025, 0.92], "vru": [0.0002, 0.55], "animal": [0.0004, 0.55],
+    })
 
 
 class TrackerSettings(BaseModel):
@@ -271,10 +293,11 @@ class PiiSettings(BaseModel):
     # face-only corpora where plates are provably absent.
     plate_mandatory: bool = True
     # Source for `make pii-models` to fetch a license-plate detector to plate_weights. Override with
-    # LBX_PII__PLATE_URL if this mirror moves; an Ultralytics-loadable .pt is expected.
+    # LBX_PII__PLATE_URL if this mirror moves; an Ultralytics-loadable .pt is expected. Hugging Face now
+    # requires a token even for public files, so run `HF_TOKEN=... make pii-models`.
     plate_url: str = (
-        "https://huggingface.co/morsetechlab/yolov8-license-plate-detection/resolve/main/"
-        "yolov8n-license-plate.pt"
+        "https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/"
+        "license-plate-finetune-v1n.pt"
     )
 
 
@@ -305,9 +328,38 @@ class CloudSettings(BaseModel):
     budget_cap_usd: float = 50.0
     image: str = ""  # pinned once the runbook discovers a CUDA 12.8 devel image
 
+    # Warm-session mode (the user-facing connect/disconnect control): one pod held across a work session,
+    # torn down on disconnect. Cost safety here is a hard requirement, never an optional setting. The
+    # RUNPOD_API_KEY and LBX_RUNPOD_VOLUME_ID come from the environment (as in cloud/runpod_api.py).
+    warm_gpu_type_id: str = "NVIDIA A100 80GB PCIe"  # RunPod gpuTypeId provisioned for the warm session
+    warm_hourly_usd: float = 1.89        # A100 80GB on-demand rate; drives the cost meter and the ack gate
+    warm_idle_minutes: int = 15          # auto-terminate after this long with no job running
+    warm_max_session_hours: float = 4.0  # hard cap; auto-terminate after this regardless of activity
+
 
 class OntologySettings(BaseModel):
     path: str = "ontology/labelox_in_v0.yaml"
+
+    # M-Q.0 ontology pullback. The open-vocab models (Path B concept prompts, Path C VLM shortlist) are
+    # prompted ONLY with the supported core plus the fallback classes, never with the ungrounded long tail,
+    # so the model literally cannot invent bus_shelter / water_bottles / vintage_car when those are not in
+    # its prompt set. The supported core is the IDD-anchored road actors and safety primitives we have
+    # verified instances for; a class beyond it re-enters only by earning promotion_min_instances verified
+    # (gate-accepted) instances. Everything else folds into object_fallback / vehicle_fallback honestly.
+    supported_core: list[str] = Field(default_factory=lambda: [
+        # vehicles (IDD-anchored + the India primitives we actually see)
+        "sedan", "hatchback", "suv", "small_suv", "minivan", "pickup", "lcv", "truck", "tempo",
+        "bus", "school_bus", "mini_bus", "tractor", "water_tanker",
+        "motorcycle", "scooter", "moped", "cycle",
+        "autorickshaw", "e_auto", "e_rickshaw",
+        # vulnerable road users (safety, always prompted even while the corpus is small)
+        "pedestrian", "child", "rider", "cyclist", "person",
+        # animals
+        "cattle", "dog", "buffalo", "goat",
+        # the real, common road infrastructure (IDD has sign/light; pole and barrier are everywhere)
+        "traffic_sign", "traffic_signal", "pole", "barrier", "road_divider", "speed_bump",
+    ])
+    promotion_min_instances: int = 50  # verified (gate-accepted) instances a class must earn to re-enter
 
 
 class PathsSettings(BaseModel):
@@ -367,6 +419,7 @@ class ActiveLearnSettings(BaseModel):
     w_diversity: float = 0.25
     w_rarity: float = 0.20
     w_error_prone: float = 0.15
+    w_fn: float = 0.6                    # recall-recovery (false-negative) value, so a recovered miss ranks
     uncertainty_lo: float = 0.55         # below this is hopeless, above uncertainty_hi is easy
     uncertainty_hi: float = 0.92
     diversity_knn: int = 5               # near-duplicate suppression neighbourhood
@@ -406,17 +459,100 @@ class GovernSettings(BaseModel):
     controller_lock_key: int = 816       # Postgres advisory-lock id so only one controller daemon runs
 
 
+class RecallSettings(BaseModel):
+    # Recall recovery: source candidate objects from channels that do not depend on the primary
+    # detector's recall, so a missed object can be manufactured, gated, and labeled. Region channel is
+    # the noisy one (SAM everything mode): the area band and the VLM-confidence floor are the only
+    # filters between it and a flooded queue, so keep it behind enable_region_channel.
+    enable_model_channels: bool = True
+    enable_region_channel: bool = True
+    iou_match: float = 0.45              # a proposal at or above this IoU with an existing object is not a miss
+    fuse_iou: float = 0.55               # NMS IoU for collapsing cross-channel proposals onto one candidate
+    max_gap_frames: int = 5              # a track gap longer than this is a likely exit/occlusion, not misses
+    conf_decay: float = 0.9              # per-frame confidence decay across an interpolated gap
+    region_min_area_frac: float = 0.0008  # drop specks below this fraction of frame area
+    region_max_area_frac: float = 0.25    # drop whole-scene planes above this fraction of frame area
+    region_min_vlm_conf: float = 0.45    # drop a region the VLM is not confident about
+    vlm_crop_margin: float = 0.15        # context margin when cropping a region for the VLM
+    sam_everything_weights: str = "sam2.1_b.pt"
+    device: str = "cuda:0"
+    # Recall promotion gate (fail-closed on safety recall, mirrors the Safe-mIoU check):
+    require_safety_recall: bool = True   # a challenger that cannot report safety-class recall is refused
+    safety_recall_floor: float = 0.50    # a safety class below this recall blocks promotion
+    safety_recall_max_drop: float = 0.05  # a safety class may not lose more than this recall vs the incumbent
+    # Per-class safety-AP drop tolerance: a dict held tighter for VRU/animal than the global default, or a
+    # single float for the old global behavior.
+    safety_class_drop: dict = Field(default_factory=lambda: {"vru": 0.10, "animal": 0.10, "_default": 0.15})
+
+
 class Phase4Settings(BaseModel):
     activelearn: ActiveLearnSettings = ActiveLearnSettings()
     lakefs: LakeFSSettings = LakeFSSettings()
     relabel: RelabelSettings = RelabelSettings()
     govern: GovernSettings = GovernSettings()
+    recall: RecallSettings = RecallSettings()
 
 
 class AuthSettings(BaseModel):
     # Deny-by-default API auth. When enabled, every mutating /api request needs a known X-Lbx-User-Id,
     # and role floors gate destructive/governance routes. Reads stay open. Disable only for unit tests.
     enabled: bool = True
+
+
+class LidarSettings(BaseModel):
+    # 3D LiDAR module. The BluRabbit fleet is camera only, so pseudo-LiDAR (camera depth lift) is the
+    # default source; real LiDAR and public datasets normalize to the same internal cloud.
+    source_default: str = "pseudo"          # lidar | pseudo | dataset
+    # Pinned metric depth checkpoint for pseudo-LiDAR. The Outdoor variant is the driving model (metric
+    # depth in metres, trained on VKITTI); Small runs interactively on the local 5080.
+    depth_model: str = "depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf"
+    ground_method: str = "ransac"           # patchwork | ransac
+    ground_dist_thresh_m: float = 0.2       # RANSAC plane inlier distance
+    ground_max_iter: int = 300
+    denoise_nb_neighbors: int = 20          # statistical outlier removal neighbourhood
+    denoise_std_ratio: float = 2.0          # statistical outlier removal std multiplier
+    denoise_radius_m: float = 0.5           # radius outlier removal radius
+    denoise_min_points: int = 8             # radius outlier removal minimum neighbours
+    voxel_size_m: float = 0.05              # voxel downsample for bulk operations
+    viewer_max_points: int = 400000         # decimation ceiling for interactive rendering
+    cloud_prefix: str = "clouds"            # object-store key prefix for stored clouds
+    calib_reproj_warn_px: float = 2.0       # LiDAR-camera reprojection residual: warn above
+    calib_reproj_fail_px: float = 5.0       # LiDAR-camera reprojection residual: fail and exclude above
+    calib_drift_ratio: float = 1.5          # residual grown past this multiple of baseline flags drift
+    quality_min_points: int = 500           # below this a cloud is sparse / a missing scan
+    quality_max_empty_wedge_deg: float = 90.0  # a 360 scan with a wider empty wedge is a partial scan
+    # Phase 2 (3D annotation). The box source: lifted (2D-to-3D, robust on pseudo-LiDAR) is the default for
+    # camera clouds; native (CenterPoint/PV-RCNN++) is for real LiDAR. 'auto' picks by the cloud source.
+    box_source: str = "auto"                # auto | lifted | native
+    lift_min_frustum_points: int = 12       # below this a frustum is too sparse to fit a cuboid
+    lift_depth_gate_m: float = 8.0          # keep frustum points within this depth band of the nearest surface
+    native_detector: str = "centerpoint"    # centerpoint | pv_rcnn_pp | bevfusion (OpenPCDet, via burst)
+    native_ckpt: str = "centerpoint_nuscenes"   # pinned OpenPCDet checkpoint id
+    segmenter: str = "ptv3"                  # ptv3 (Pointcept, via burst) | projected_2d (pseudo-LiDAR fallback)
+    segmenter_ckpt: str = "ptv3-nuscenes-semseg"  # pinned Pointcept checkpoint id
+    seg_low_conf: float = 0.5               # per-point segmentation confidence below this is flagged for review
+    track3d_max_age: int = 5                 # frames a 3D track survives unmatched before termination
+    track3d_min_hits: int = 2                # matches before a tentative 3D track is confirmed
+    track3d_iou_thresh: float = 0.1          # 3D IoU association gate
+    track3d_appearance_w: float = 0.3        # DINOv3 appearance weight in the association cost
+    # Phase 3 (scene intelligence + export).
+    extract_cluster_eps: float = 0.5         # DBSCAN radius for clustering non-ground points (metres)
+    extract_cluster_min_points: int = 10
+    pole_min_height_m: float = 2.0           # a pole is taller than this
+    pole_max_footprint_m: float = 0.9        # and thinner than this (a thin vertical structure)
+    building_min_facade_points: int = 150    # a facade plane needs at least this many points
+    marking_intensity_pct: float = 80.0      # road points above this intensity percentile are markings
+    traverse_grid_res_m: float = 0.5         # occupancy / free-space grid resolution
+    traverse_obstacle_h_m: float = 0.3       # a ground-cell obstacle rises at least this high
+    register_method: str = "gicp"            # icp | ndt | gicp scan alignment
+    register_voxel_m: float = 0.3            # downsample voxel for registration
+    register_min_fitness: float = 0.3        # below this the registration is flagged low-confidence
+    loop_closure_radius_m: float = 8.0       # revisit detection radius for loop closure
+    quality_max_dim_m: float = 25.0          # a box dimension above this is impossible
+    quality_float_gap_m: float = 0.5         # a box bottom this far above the ground is floating
+    quality_below_ground_m: float = 0.5      # a box bottom this far below the ground is below-ground
+    quality_duplicate_iou: float = 0.6       # two boxes overlapping above this 3D IoU are duplicates
+    quality_misalign_fill: float = 0.05      # a box with fewer enclosed points than this is misaligned
 
 
 class Settings(BaseSettings):
@@ -440,6 +576,7 @@ class Settings(BaseSettings):
     fusion: FusionSettings = FusionSettings()
     calibrate: CalibrateSettings = CalibrateSettings()
     gate: GateSettings = GateSettings()
+    quality: QualitySettings = QualitySettings()
     intelligence: IntelligenceSettings = IntelligenceSettings()
     intel: IntelSettings = IntelSettings()  # Data Intelligence Layer (Phase 1)
     rig: RigSettings = RigSettings()        # Phase 3 camera rig layout + nominal intrinsics
@@ -452,6 +589,7 @@ class Settings(BaseSettings):
     paths: PathsSettings = PathsSettings()
     phase4: Phase4Settings = Phase4Settings()  # Phase 4 closed loop + governance
     auth: AuthSettings = AuthSettings()        # deny-by-default API auth
+    lidar: LidarSettings = LidarSettings()     # 3D LiDAR module (ingestion, clean, viewer)
 
     @classmethod
     def settings_customise_sources(

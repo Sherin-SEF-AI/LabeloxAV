@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { SessionRow } from "@/lib/types";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
+import { StateBadge } from "@/components/StateBadge";
 
 // The "open annotation" browser: every capture session as a card with review progress and a
 // state breakdown. "open" jumps to the first frame; "resume queue" jumps to the highest-priority
@@ -20,13 +21,13 @@ type SessionStats = {
   progress: number;
 };
 
-// Each by_state key maps to a chip color/label. accepted and auto_accept both read as "done" (pass).
-const CHIPS: { key: string; label: string; color: string }[] = [
-  { key: "review", label: "review", color: "#E3B341" },
-  { key: "annotate", label: "annotate", color: "#FF7A2F" },
-  { key: "accepted", label: "accepted", color: "#56D364" },
-  { key: "auto_accept", label: "auto", color: "#56D364" },
-  { key: "rejected", label: "rejected", color: "#F85149" },
+// Ordered by_state keys to surface as StateBadge chips. StateBadge owns each state's signal color.
+const CHIPS: { key: string }[] = [
+  { key: "review" },
+  { key: "annotate" },
+  { key: "accepted" },
+  { key: "auto_accept" },
+  { key: "rejected" },
 ];
 
 function ProgressBar({ progress }: { progress: number }) {
@@ -71,15 +72,12 @@ function SessionCard({
         <div className="font-mono text-[11px] text-ink-3">...</div>
       )}
 
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         {stats &&
           CHIPS.filter((c) => (stats.by_state[c.key] ?? 0) > 0).map((c) => (
-            <span
-              key={c.key}
-              className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-line"
-              style={{ color: c.color }}
-            >
-              {c.label} {stats.by_state[c.key]}
+            <span key={c.key} className="inline-flex items-center gap-1">
+              <StateBadge state={c.key} />
+              <span className="font-mono text-[10px] text-ink-3">{stats.by_state[c.key]}</span>
             </span>
           ))}
       </div>
@@ -163,23 +161,24 @@ export default function AnnotationsPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="OPEN" />
-      <main className="flex-1 overflow-auto p-4 space-y-4">
-        {msg && (
-          <div className="panel px-3 py-1.5 font-mono text-[11px] text-warn">{msg}</div>
-        )}
-
-        <div className="flex items-center justify-between gap-4">
-          <h1 className="font-display text-lg text-ink">annotations</h1>
-          <Link
-            href="/annotate/new"
-            className="font-mono text-xs border border-accent text-accent px-3 py-1 hover:bg-accent/10"
-          >
-            + new annotation
-          </Link>
-        </div>
-
+    <PageShell
+      active="ANNOTATIONS"
+      title="annotations"
+      right={
+        msg ? (
+          <span className="panel px-3 py-1.5 font-mono text-[11px] text-warn">{msg}</span>
+        ) : undefined
+      }
+      primaryAction={
+        <Link
+          href="/annotate/new"
+          className="font-mono text-xs border border-accent text-accent px-3 py-1 hover:bg-accent/10"
+        >
+          + new annotation
+        </Link>
+      }
+    >
+      <div className="p-4 space-y-4">
         {sessions.length === 0 ? (
           <div className="panel px-3 py-10 text-center space-y-3">
             <div className="font-mono text-xs text-ink-3">
@@ -207,7 +206,7 @@ export default function AnnotationsPage() {
             ))}
           </div>
         )}
-      </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }

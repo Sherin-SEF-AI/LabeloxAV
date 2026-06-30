@@ -89,20 +89,29 @@ async def score_candidates(db: AsyncSession, session_id: str | None = None, pool
         rare = max(rare, 1.0 - class_counts.get(cid, 0) / max_count)
         if fid in rare_frames:
             rare = min(1.0, rare + 0.25)
+        # recall-recovery value: a recovered miss carries its fn_value in provenance; this term only
+        # orders the pool so a trackgap recovery outranks a speculative region crop (it already entered
+        # the pool via source != "human" and state="review").
+        # raw_conf is a dict for recall-recovered objects but a bare scalar for older/imported ones, so
+        # only read fn_value when it is actually a dict (else this term is 0).
+        rc = prov.get("raw_conf")
+        fn = float(rc.get("fn_value", 0.0)) if isinstance(rc, dict) else 0.0
         items.append({"object_id": str(oid), "frame_id": str(fid), "class_id": cid,
                       "class_name": onto.by_id(cid).name, "conf": float(conf or 0.0),
-                      "_u": u, "_r": rare, "_n": float(novelty[i]), "_e": err_scores.get(str(oid), 0.0)})
+                      "_u": u, "_r": rare, "_n": float(novelty[i]), "_e": err_scores.get(str(oid), 0.0), "_f": fn})
 
     u = _norm([it["_u"] for it in items])
     r = _norm([it["_r"] for it in items])
     n = _norm([it["_n"] for it in items])
     e = _norm([it["_e"] for it in items])
+    f = _norm([it["_f"] for it in items])
     for i, it in enumerate(items):
         it["scores"] = {"uncertainty": round(float(u[i]), 4), "diversity": round(float(n[i]), 4),
-                        "rarity": round(float(r[i]), 4), "error_prone": round(float(e[i]), 4)}
+                        "rarity": round(float(r[i]), 4), "error_prone": round(float(e[i]), 4),
+                        "fn": round(float(f[i]), 4)}
         it["value"] = round(float(cfg.w_uncertainty * u[i] + cfg.w_diversity * n[i]
-                                  + cfg.w_rarity * r[i] + cfg.w_error_prone * e[i]), 5)
-        for k in ("_u", "_r", "_n", "_e"):
+                                  + cfg.w_rarity * r[i] + cfg.w_error_prone * e[i] + cfg.w_fn * f[i]), 5)
+        for k in ("_u", "_r", "_n", "_e", "_f"):
             it.pop(k)
     items.sort(key=lambda x: x["value"], reverse=True)
     log.info("al.scored", pool=len(items), session_id=session_id)

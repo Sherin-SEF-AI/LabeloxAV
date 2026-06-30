@@ -34,6 +34,8 @@ export type ObjectDetail = {
   version?: number;
   rot_deg?: number;
   keypoints?: Keypoints | null;
+  polyline?: number[][] | null;
+  cuboid_3d?: { center: number[]; size: number[]; yaw: number } | null;
 };
 
 export type OntologyClass = { id: number; name: string; l0: string; l1: string; india: boolean };
@@ -42,6 +44,8 @@ export type Ontology = {
   hierarchy_levels: number;
   attributes: Record<string, { type: string; values: unknown[] | null; range: number[] | null }>;
   classes: OntologyClass[];
+  // per-subclass (l1) applicable-attribute allowlist; a subclass absent here means all attributes apply
+  attribute_scope?: Record<string, string[]>;
 };
 
 export type SessionRow = {
@@ -196,6 +200,10 @@ export type FrameMeta = {
   lidar_res?: number | null;
 };
 
+export type Relationship = { relationship_id: string; from_object_id: string; to_object_id: string; kind: string };
+export type AdverseRegion = { region_id: string; frame_id: string; geometry: number[]; condition: string; source: string; confidence: number };
+export type ProjectedCuboid = { object_id: string; corners_uv: number[][]; edges: number[][]; any_in_image: boolean };
+
 export type FrameObject = {
   object_id: string;
   track_id: string | null;
@@ -208,6 +216,8 @@ export type FrameObject = {
   version?: number;
   rot_deg?: number;
   keypoints?: Keypoints | null;
+  polyline?: number[][] | null;
+  cuboid_3d?: { center: number[]; size: number[]; yaw: number } | null;
 };
 
 export type TrackItem = {
@@ -247,3 +257,21 @@ export type Scenario = {
   city: string | null;
   vehicle_id: string | null;
 };
+
+// Warm cloud-GPU session (the connect/disconnect control). Mirrors the backend status snapshot.
+export type CloudStatus = {
+  state: string;            // disconnected | provisioning | connected | running_job | pausing | terminating
+  connected: boolean;
+  pod_id: string | null;
+  gpu_type: string | null;
+  uptime_s: number;
+  gpu_seconds: number;
+  est_cost: number;
+  hourly_usd: number;
+  idle_remaining_s: number | null;
+  session_remaining_s: number | null;
+  last_job_id: string | null;
+  cold_start_s: number;
+  configured: boolean;      // is RUNPOD_API_KEY set on the backend
+};
+export type CloudOrphan = { pod_id: string; gpu_type: string | null; uptime_s: number; est_cost: number };

@@ -171,6 +171,9 @@ class Object(Base):
     # Optional keypoints/skeleton (COCO-style, image pixels): {"skeleton": str, "points": [[x,y,v],...]}
     # with v in {0 not-labeled, 1 occluded, 2 visible}. For pedestrian/cyclist pose.
     keypoints: Mapped[dict | None] = mapped_column(JSONB)
+    # Open polyline geometry (ordered [[x,y],...], image pixels) for linear features (curb, road_edge,
+    # barrier). When present, bbox is the points AABB so export/gate stay consistent (like rot_deg).
+    polyline: Mapped[list | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Phase 2 perception (additive, nullable):
@@ -192,6 +195,23 @@ class Object(Base):
         Index("ix_object_class", "class_id"),
         Index("ix_object_track", "track_id"),
     )
+
+
+class ObjectRelationship(Base):
+    # A directed relationship between two objects on a frame: the join hub for grouping that track_id
+    # cannot express (rider on a two-wheeler, trailer to truck, parent-child, herd/group membership).
+    __tablename__ = "object_relationship"
+
+    relationship_id: Mapped[uuid.UUID] = _uuid_pk()
+    from_object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
+    to_object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
+    frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)  # rider_of|towed_by|part_of|member_of|occludes
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_object_relationship_from", "from_object_id"),
+                      Index("ix_object_relationship_to", "to_object_id"),
+                      Index("ix_object_relationship_frame", "frame_id"))
 
 
 class Lane(Base):
@@ -365,6 +385,8 @@ class DatasetCommit(Base):
     parent_id: Mapped[str | None] = mapped_column(String(128))
     slice_spec: Mapped[dict] = mapped_column(JSONB, default=dict)
     object_count: Mapped[int] = mapped_column(Integer, default=0)
+    object_3d_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    cloud_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     ontology_version: Mapped[str] = mapped_column(String(64), nullable=False)
     export_uris: Mapped[dict] = mapped_column(JSONB, default=dict)
     notes: Mapped[str | None] = mapped_column(Text)
@@ -476,6 +498,30 @@ class AutolabelJob(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (Index("ix_autolabel_job_status", "status"),)
+
+
+class CloudSession(Base):
+    # A warm cloud-GPU session: one RunPod pod held up across a work session and torn down on disconnect
+    # (distinct from the ephemeral per-job burst flow). At most one row is in a live state at a time. The
+    # row is the source of truth for the cost meter, the idle/max-session guards, and orphan detection on
+    # app load, so a connected GPU can never silently run: started_at + idle_since drive auto-terminate.
+    __tablename__ = "cloud_session"
+
+    session_id: Mapped[uuid.UUID] = _uuid_pk()
+    pod_id: Mapped[str | None] = mapped_column(Text)
+    mode: Mapped[str] = mapped_column(String(8), nullable=False, default="warm")
+    # disconnected | provisioning | connected | running_job | pausing | terminating
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="provisioning")
+    gpu_type: Mapped[str | None] = mapped_column(String(64))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # when the pod went RUNNING
+    idle_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # null while a job runs
+    gpu_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    est_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    max_session_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_cloud_session_state", "state"),)
 
 
 # ---- Phase 3 Multi-Sensor and Spatial ----
@@ -763,3 +809,267 @@ class ObjectDynamics(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_object_dynamics_track", "track_id"), Index("ix_object_dynamics_frame", "frame_id"))
+
+
+# ---- LiDAR module (3D) ----
+class PointCloud(Base):
+    """One row per scan (real LiDAR) or per synthesized cloud (pseudo-LiDAR), from any source. ts_ns is on
+    the PPS base, so a cloud and the camera frames captured at the same ts_ns in the session are one query."""
+    __tablename__ = "point_cloud"
+
+    cloud_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)        # lidar | pseudo | dataset
+    cloud_uri: Mapped[str] = mapped_column(Text, nullable=False)            # compressed npz in the object store
+    point_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    depth_model: Mapped[str | None] = mapped_column(String(96))             # pinned checkpoint, for pseudo-LiDAR
+    calibration_version: Mapped[str | None] = mapped_column(String(64))
+    bounds: Mapped[dict | None] = mapped_column(JSONB)                      # 3D extent {min,max,n}
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_point_cloud_session_ts", "session_id", "ts_ns"),)
+
+
+class PointCloudDerived(Base):
+    """A cleaned or ground-removed variant of a cloud. Raw is immutable: derived variants never overwrite it."""
+    __tablename__ = "point_cloud_derived"
+
+    derived_id: Mapped[uuid.UUID] = _uuid_pk()
+    cloud_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("point_cloud.cloud_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)          # ground_removed | denoised | ground_plane
+    uri: Mapped[str] = mapped_column(Text, nullable=False)
+    method: Mapped[str] = mapped_column(String(48), nullable=False)
+    params: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_point_cloud_derived_cloud", "cloud_id"),)
+
+
+class LidarCalibrationValidation(Base):
+    """Extends the Phase 3 calibration concept to the LiDAR triple. A failing session is flagged and excluded
+    from 3D work until fixed, exactly as the 2D calibration validation does."""
+    __tablename__ = "lidar_calibration_validation"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    pair: Mapped[str] = mapped_column(String(24), nullable=False)          # lidar_camera | lidar_imu | lidar_radar
+    reproj_error: Mapped[float | None] = mapped_column(Float)
+    consistency: Mapped[dict] = mapped_column(JSONB, default=dict)
+    drift_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(8), nullable=False, default="pass")  # pass | warn | fail
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_lidar_calib_session", "session_id"),)
+
+
+# ---- LiDAR module Phase 2 (3D annotation) ----
+class Track3D(Base):
+    """A 3D track, linked to the M2.0 2D track (track_id) so the 3D and 2D tracks are the same physical
+    object. trajectory holds per-frame 3D centroids; dynamic_state is moving/stopped/parked/turning/braking."""
+    __tablename__ = "track_3d"
+
+    track_3d_id: Mapped[uuid.UUID] = _uuid_pk()
+    track_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("track.track_id", ondelete="SET NULL"))
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    class_id: Mapped[int] = mapped_column(ForeignKey("ontology_class.id"))
+    first_ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    trajectory: Mapped[dict | None] = mapped_column(JSONB)          # per-frame 3D centroids + yaw
+    dynamic_state: Mapped[str | None] = mapped_column(String(16))   # moving|stopped|parked|turning|braking
+
+    __table_args__ = (Index("ix_track_3d_session", "session_id"), Index("ix_track_3d_track", "track_id"))
+
+
+class Object3D(Base):
+    """One 3D cuboid. object_id links it to the 2D Object (the unifying identity, one physical object across
+    its 2D box, mask, 3D cuboid, and multi-camera views). The same governed ontology and gate apply: class_id
+    is an ontology class, conf is calibrated, box_source records lifted vs native, provenance is one walk."""
+    __tablename__ = "object_3d"
+
+    object_3d_id: Mapped[uuid.UUID] = _uuid_pk()
+    cloud_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("point_cloud.cloud_id", ondelete="CASCADE"))
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("frame.frame_id", ondelete="SET NULL"))
+    object_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("object.object_id", ondelete="SET NULL"))
+    track_3d_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("track_3d.track_3d_id", ondelete="SET NULL"))
+    class_id: Mapped[int] = mapped_column(ForeignKey("ontology_class.id"))
+    center: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)   # [x, y, z] ego metres
+    dims: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)     # [L, W, H] metres
+    yaw: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    pitch: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    roll: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    conf: Mapped[float] = mapped_column(Float, nullable=False)                  # calibrated
+    box_source: Mapped[str] = mapped_column(String(8), nullable=False)         # lifted | native
+    is_keyframe: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    interp_source: Mapped[str | None] = mapped_column(String(16))              # linear | slerp
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="fused")  # fused|auto_accept|human
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="review")
+    attrs: Mapped[dict] = mapped_column(JSONB, default=dict)                    # occlusion, dynamics, auto props
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_object_3d_cloud", "cloud_id"),
+        Index("ix_object_3d_frame", "frame_id"),
+        Index("ix_object_3d_object", "object_id"),
+        Index("ix_object_3d_track", "track_3d_id"),
+    )
+
+
+class PointSegmentation(Base):
+    """Per-point semantic and instance labels on a cloud. labels_uri points to the arrays in the object store
+    (semantic class id and instance id per point); low_conf_frac flags how much was uncertain on pseudo-LiDAR,
+    which is surfaced for review rather than trusted blindly."""
+    __tablename__ = "point_segmentation"
+
+    seg_id: Mapped[uuid.UUID] = _uuid_pk()
+    cloud_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("point_cloud.cloud_id", ondelete="CASCADE"))
+    labels_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)              # semantic | panoptic
+    method: Mapped[str | None] = mapped_column(String(32))                     # ptv3 | projected_2d
+    n_points: Mapped[int | None] = mapped_column(Integer)
+    low_conf_frac: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_point_segmentation_cloud", "cloud_id"),)
+
+
+# ---- LiDAR module Phase 3 (3D scene intelligence + export) ----
+class StaticElement(Base):
+    """An extracted persistent 3D map element (pole, road edge, building, vegetation, marking). Geo-referenced
+    into world space and fed to the existing HD map pipeline as a MapElement. Provenance: source clouds, the
+    extraction method, and the calibration that placed it."""
+    __tablename__ = "static_element"
+
+    element_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)   # pole|road_edge|curb|median|building|...
+    geometry: Mapped[str | None] = mapped_column(Geography(srid=4326))   # Point or LineString or Polygon
+    attrs: Mapped[dict] = mapped_column(JSONB, default=dict)
+    source_clouds: Mapped[list[uuid.UUID] | None] = mapped_column(PGARRAY(UUID(as_uuid=True)))
+    method: Mapped[str | None] = mapped_column(String(40))
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    calibration_version: Mapped[str | None] = mapped_column(String(64))
+    map_element_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))   # the fed HD map element
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_static_element_session", "session_id"), Index("ix_static_element_kind", "kind"))
+
+
+class Traversability(Base):
+    """3D free space, drivable surface, road-surface class, and elevation profile for a cloud or an aggregated
+    tile. Grids live in the object store; the surface and elevation summaries are inline."""
+    __tablename__ = "traversability"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    cloud_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("point_cloud.cloud_id", ondelete="CASCADE"))
+    tile_id: Mapped[str | None] = mapped_column(String(64))
+    freespace_uri: Mapped[str | None] = mapped_column(Text)
+    drivable_uri: Mapped[str | None] = mapped_column(Text)
+    surface_class: Mapped[dict] = mapped_column(JSONB, default=dict)
+    elevation_profile: Mapped[dict] = mapped_column(JSONB, default=dict)
+    method: Mapped[str | None] = mapped_column(String(40))
+    calibration_version: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_traversability_cloud", "cloud_id"),)
+
+
+class AggregatedMap(Base):
+    """A registered multi-scan, multi-drive map: scans aligned and accumulated into a dense cloud, with the
+    pose graph and any loop closures that corrected it."""
+    __tablename__ = "aggregated_map"
+
+    agg_id: Mapped[uuid.UUID] = _uuid_pk()
+    region: Mapped[str | None] = mapped_column(String(64))
+    session_ids: Mapped[list[uuid.UUID] | None] = mapped_column(PGARRAY(UUID(as_uuid=True)))
+    cloud_uri: Mapped[str | None] = mapped_column(Text)
+    pose_graph: Mapped[dict] = mapped_column(JSONB, default=dict)
+    loop_closures: Mapped[dict] = mapped_column(JSONB, default=dict)
+    method: Mapped[str | None] = mapped_column(String(40))
+    n_scans: Mapped[int | None] = mapped_column(Integer)
+    mean_reg_fitness: Mapped[float | None] = mapped_column(Float)   # low -> flagged low-confidence registration
+    input_calibrations: Mapped[dict | None] = mapped_column(JSONB)  # cloud_id -> calibration_version provenance
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_aggregated_map_region", "region"),)
+
+
+class QualityFlag3D(Base):
+    """A detected 3D label problem (floating, below ground, impossible dims, duplicate, misaligned, missing
+    neighbour). Feeds the same review and active-learning loop as the 2D quality reviewer."""
+    __tablename__ = "quality_flag_3d"
+
+    flag_id: Mapped[uuid.UUID] = _uuid_pk()
+    object_3d_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("object_3d.object_3d_id", ondelete="CASCADE"))
+    cloud_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("point_cloud.cloud_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)   # floating|below_ground|impossible_dims|...
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")  # open|confirmed|dismissed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_quality_flag_3d_object", "object_3d_id"),
+                      Index("ix_quality_flag_3d_status", "status"))
+
+
+class RecallCandidate(Base):
+    # Recall recovery audit row: one per recovered miss, linking the provisional review-state Object to the
+    # channels that proposed it and the human verdict (status). The verdict recalibrates each channel's
+    # precision prior, closing the recall loop the way the isotonic curve closes the precision loop.
+    __tablename__ = "recall_candidate"
+
+    candidate_id: Mapped[uuid.UUID] = _uuid_pk()
+    object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
+    frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    channels: Mapped[list[str]] = mapped_column(PGARRAY(String(16)))  # trackgap|openvocab|region
+    fn_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    class_id: Mapped[int] = mapped_column(ForeignKey("ontology_class.id"))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")  # pending|confirmed|rejected
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_recall_candidate_status", "status"),
+                      Index("ix_recall_candidate_frame", "frame_id"))
+
+
+class AdverseRegion(Base):
+    # A tagged image region affected by an adverse condition (glare, reflection, shadow, rain, fog,
+    # lowlight). Frame-level and multi-region (unlike the single drivable mask), each a polygon plus a
+    # condition label, so a model knows which pixels to distrust.
+    __tablename__ = "adverse_region"
+
+    region_id: Mapped[uuid.UUID] = _uuid_pk()
+    frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    geometry: Mapped[list] = mapped_column(JSONB)  # polygon, flattened [x,y,x,y,...] image pixels
+    condition: Mapped[str] = mapped_column(String(16), nullable=False)  # glare|reflection|shadow|rain|fog|lowlight
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="human")  # human|proposed
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_adverse_region_frame", "frame_id"),)
+
+
+class FrameSegmentation(Base):
+    # Full-frame dense segmentation: a per-pixel class-id raster (semantic) plus an optional per-pixel
+    # instance-id raster (panoptic). Rasters live in MinIO; this row holds the uris, the colored display
+    # overlay, per-class coverage, and lineage. One row per frame per kind (semantic|panoptic).
+    __tablename__ = "frame_segmentation"
+
+    seg_id: Mapped[uuid.UUID] = _uuid_pk()
+    frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # semantic|panoptic
+    labels_uri: Mapped[str] = mapped_column(Text, nullable=False)  # class-id per pixel (npz)
+    instance_uri: Mapped[str | None] = mapped_column(Text)         # instance-id per pixel (npz), panoptic only
+    overlay_uri: Mapped[str | None] = mapped_column(Text)          # colored RGBA png for display
+    coverage: Mapped[dict] = mapped_column(JSONB, default=dict)    # {class_name: pixel_fraction}
+    segments: Mapped[dict] = mapped_column(JSONB, default=dict)    # panoptic: instance_id -> {class_id, object_id}
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="proposed")  # proposed|human
+    model_version: Mapped[str | None] = mapped_column(String(64))
+    ontology_version: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_frame_segmentation_frame_kind", "frame_id", "kind"),)

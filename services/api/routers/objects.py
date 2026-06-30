@@ -15,18 +15,101 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.storage import get_object_store
 from core.timebase import now_ns
-from db.models import Frame, Object, Review
+from db.models import Frame, Object, ObjectRelationship, Review
 from services.api.deps import (
     CreateObjectIn,
     MaskIn,
     ObjectDetail,
+    RelateIn,
     SegmentIn,
     current_user,
     db_session,
+    require_role,
 )
 from services.autolabel.ontology import get_ontology
 
 router = APIRouter()
+
+# Directed relationship kinds the editor offers (the India case is rider_of on a two-wheeler).
+_RELATION_KINDS = {"rider_of", "towed_by", "part_of", "member_of", "occludes"}
+
+
+@router.post("/objects/{object_id}/relate", dependencies=[Depends(require_role("reviewer"))])
+async def relate_object(object_id: str, payload: RelateIn, db: AsyncSession = Depends(db_session)):
+    """Create a directed relationship from this object to another on the same frame."""
+    if payload.kind not in _RELATION_KINDS:
+        raise HTTPException(400, f"unknown relation kind '{payload.kind}'")
+    if object_id == payload.to_object_id:
+        raise HTTPException(400, "cannot relate an object to itself")
+    frm = await db.get(Object, UUID(object_id))
+    to = await db.get(Object, UUID(payload.to_object_id))
+    if frm is None or to is None:
+        raise HTTPException(404, "object not found")
+    rel = ObjectRelationship(from_object_id=frm.object_id, to_object_id=to.object_id,
+                             frame_id=frm.frame_id, kind=payload.kind)
+    db.add(rel)
+    await db.commit()
+    return {"relationship_id": str(rel.relationship_id), "from_object_id": object_id,
+            "to_object_id": payload.to_object_id, "kind": payload.kind}
+
+
+@router.delete("/relationships/{relationship_id}", dependencies=[Depends(require_role("reviewer"))])
+async def delete_relationship(relationship_id: str, db: AsyncSession = Depends(db_session)):
+    rel = await db.get(ObjectRelationship, UUID(relationship_id))
+    if rel is not None:
+        await db.delete(rel)
+        await db.commit()
+    return {"deleted": relationship_id}
+
+
+@router.get("/frames/{frame_id}/relationships")
+async def frame_relationships(frame_id: str, db: AsyncSession = Depends(db_session)):
+    rows = (await db.execute(select(ObjectRelationship)
+            .where(ObjectRelationship.frame_id == UUID(frame_id)))).scalars().all()
+    return [{"relationship_id": str(r.relationship_id), "from_object_id": str(r.from_object_id),
+             "to_object_id": str(r.to_object_id), "kind": r.kind} for r in rows]
+
+
+@router.get("/frames/{frame_id}/cuboids")
+async def frame_cuboids(frame_id: str, db: AsyncSession = Depends(db_session)):
+    """Project every cuboid_3d on the frame onto the camera image, so the 3D box is visible (and editable)
+    in the 2D editor. Uses the configured rig + nominal intrinsics, so it works without LiDAR calibration."""
+    from services.lidar.boxes import project_cuboid
+
+    frame = await db.get(Frame, UUID(frame_id))
+    if frame is None:
+        raise HTTPException(404, "frame not found")
+    rows = (await db.execute(select(Object).where(
+        Object.frame_id == frame.frame_id, Object.cuboid_3d.isnot(None)))).scalars().all()
+    out = []
+    for o in rows:
+        c = o.cuboid_3d or {}
+        center, size, yaw = c.get("center"), c.get("size"), float(c.get("yaw", 0.0))
+        if not center or not size:
+            continue
+        dims = [size[1], size[0], size[2]]  # cuboid_3d size is [w,l,h]; project_cuboid wants [length,width,height]
+        proj = project_cuboid(center, dims, yaw, frame.cam_id, frame.width, frame.height)
+        out.append({"object_id": str(o.object_id), "corners_uv": proj["corners_uv"], "edges": proj["edges"],
+                    "any_in_image": proj["any_in_image"]})
+    return out
+
+
+@router.get("/frames/{frame_id}/lift_ground")
+async def lift_ground(frame_id: str, u: float, v: float, db: AsyncSession = Depends(db_session)):
+    """The ego ground point (z=0) a pixel sees, for placing a cuboid on the road from an image click."""
+    from services.lidar.project import camera_ray_to_ego
+
+    frame = await db.get(Frame, UUID(frame_id))
+    if frame is None:
+        raise HTTPException(404, "frame not found")
+    ray = camera_ray_to_ego(u, v, frame.cam_id, frame.width, frame.height)
+    o, dvec = ray["origin"], ray["direction"]
+    if abs(float(dvec[2])) < 1e-6:
+        raise HTTPException(400, "ray is parallel to the ground")
+    t = -float(o[2]) / float(dvec[2])
+    if t <= 0:
+        raise HTTPException(400, "pixel does not look at the ground ahead")
+    return {"ego": [round(float(o[0] + t * dvec[0]), 3), round(float(o[1] + t * dvec[1]), 3), 0.0]}
 
 
 def _mask_polygons(mask_uri: str | None) -> list[list[float]]:
@@ -73,6 +156,8 @@ def _detail(obj: Object, frame: Frame, onto) -> ObjectDetail:
         version=obj.version,
         rot_deg=obj.rot_deg or 0.0,
         keypoints=obj.keypoints,
+        polyline=obj.polyline,
+        cuboid_3d=obj.cuboid_3d,
     )
 
 
@@ -104,6 +189,8 @@ async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
             "version": o.version,
             "rot_deg": o.rot_deg or 0.0,
             "keypoints": o.keypoints,
+            "polyline": o.polyline,
+            "cuboid_3d": o.cuboid_3d,
         }
         for o in rows
     ]
@@ -145,7 +232,7 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
     if len(payload.bbox) != 4:
         raise HTTPException(400, "bbox must be [x1,y1,x2,y2]")
     if payload.attrs:
-        errors = onto.validate_attrs(payload.attrs)
+        errors = onto.validate_attrs(payload.attrs, onto.by_name(payload.class_name).id)
         if errors:
             raise HTTPException(400, {"attr_errors": errors})
 
@@ -168,6 +255,7 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         object_id=oid, frame_id=frame.frame_id, class_id=onto.by_name(payload.class_name).id,
         bbox=payload.bbox, mask_uri=mask_uri, mask_encoding=mask_encoding, attrs=payload.attrs or {},
         conf=1.0, source="human", state=payload.state, rot_deg=payload.rot_deg, keypoints=payload.keypoints,
+        polyline=payload.polyline, cuboid_3d=payload.cuboid_3d,
         provenance={"created_by": "human-annotation", "idem_key": payload.idem_key},
     )
     db.add(obj)
@@ -216,7 +304,10 @@ async def frame_image(frame_id: str, db: AsyncSession = Depends(db_session)):
     frame = await db.get(Frame, UUID(frame_id))
     if frame is None:
         raise HTTPException(404, "frame not found")
-    data = get_object_store().get_bytes(frame.img_uri)
+    try:
+        data = get_object_store().get_bytes(frame.img_uri)
+    except Exception as exc:  # noqa: BLE001  (missing/unreadable blob -> 404, never a 500 that breaks the editor)
+        raise HTTPException(404, "frame image unavailable") from exc
     return Response(content=data, media_type="image/jpeg")
 
 
@@ -227,10 +318,13 @@ async def object_crop(object_id: str, pad: float = 0.15, db: AsyncSession = Depe
     if obj is None:
         raise HTTPException(404, "object not found")
     frame = await db.get(Frame, obj.frame_id)
-    buf = np.frombuffer(get_object_store().get_bytes(frame.img_uri), dtype=np.uint8)
+    try:
+        buf = np.frombuffer(get_object_store().get_bytes(frame.img_uri), dtype=np.uint8)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "frame image unavailable") from exc
     img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
     if img is None:
-        raise HTTPException(500, "failed to decode frame image")
+        raise HTTPException(404, "failed to decode frame image")
     h, w = img.shape[:2]
     x1, y1, x2, y2 = obj.bbox
     px, py = (x2 - x1) * pad, (y2 - y1) * pad

@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { AlItem, ErrorCandidateRow } from "@/lib/types";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
+import ScoreBar from "@/components/shell/ScoreBar";
+import { ConfBar } from "@/components/StateBadge";
 
 // M4.0 + M4.1 unified review queue: the highest-value active-learning items to label, and the
 // error candidates flagged on already-accepted data. The human governor spends touches here, on the
@@ -29,20 +31,17 @@ export default function ReviewQueuePage() {
   const dismiss = async (id: string) => { await api.errorDismiss(id); await load(); };
   const runDetect = async () => { const r = await api.errorRun(); setMsg(`detected ${r.persisted}`); await load(); };
 
-  const bar = (v: number) => (
-    <span className="inline-block h-1.5 bg-accent" style={{ width: `${Math.round(v * 40)}px` }} />
-  );
-
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="REVIEW" />
-      <main className="flex-1 overflow-auto p-4 space-y-3 font-mono text-[11px]">
-        <div className="flex items-center gap-2">
+    <PageShell active="REVIEW" title="Review Queue"
+      right={msg ? <span className="text-warn">{msg}</span> : undefined}
+      primaryAction={
+        <>
           <button onClick={() => setTab("value")} className={`px-2 py-1 border ${tab === "value" ? "border-accent text-accent" : "border-line text-ink-3"}`}>value queue ({items.length})</button>
           <button onClick={() => setTab("errors")} className={`px-2 py-1 border ${tab === "errors" ? "border-accent text-accent" : "border-line text-ink-3"}`}>error candidates ({errs.length})</button>
           {tab === "errors" && <button onClick={runDetect} className="border border-line px-2 py-1 hover:border-accent">re-run detection</button>}
-          {msg && <span className="ml-auto text-warn">{msg}</span>}
-        </div>
+        </>
+      }>
+      <div className="p-4 space-y-3 font-mono text-[11px]">
 
         {tab === "value" ? (
           <table className="w-full">
@@ -51,12 +50,12 @@ export default function ReviewQueuePage() {
               {items.map((it) => (
                 <tr key={it.object_id} className="border-b hairline hover:bg-line">
                   <td className="px-2 py-1 text-ink-2">{it.class_name}</td>
-                  <td className="text-ink-3">{it.conf.toFixed(2)}</td>
+                  <td><ConfBar conf={it.conf} /></td>
                   <td className="text-accent">{it.value.toFixed(3)}</td>
-                  <td>{bar(it.scores.uncertainty)}</td>
-                  <td>{bar(it.scores.diversity)}</td>
-                  <td>{bar(it.scores.rarity)}</td>
-                  <td>{bar(it.scores.error_prone)}</td>
+                  <td><ScoreBar value={it.scores.uncertainty} showValue={false} /></td>
+                  <td><ScoreBar value={it.scores.diversity} showValue={false} /></td>
+                  <td><ScoreBar value={it.scores.rarity} showValue={false} /></td>
+                  <td><ScoreBar value={it.scores.error_prone} showValue={false} tone="warn" /></td>
                   <td className="text-right pr-2"><button onClick={() => router.push(`/frame/${it.frame_id}`)} className="text-info hover:text-accent">label →</button></td>
                 </tr>
               ))}
@@ -69,7 +68,7 @@ export default function ReviewQueuePage() {
               {errs.map((e) => (
                 <tr key={e.candidate_id} className="border-b hairline">
                   <td className="px-2 py-1 text-ink-2">{e.kind}</td>
-                  <td className="text-ink-3">{e.score.toFixed(2)}</td>
+                  <td><ScoreBar value={e.score} tone="warn" /></td>
                   <td className="text-info">{e.proposed_label?.class_name || "(review)"}</td>
                   <td className="text-ink-3 truncate max-w-[280px]">{JSON.stringify(e.detail)}</td>
                   <td className="text-right pr-2 space-x-2">
@@ -82,7 +81,7 @@ export default function ReviewQueuePage() {
             </tbody>
           </table>
         )}
-      </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }

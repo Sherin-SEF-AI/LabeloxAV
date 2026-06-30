@@ -89,6 +89,10 @@ def write_openlabel(
                 {"name": "mask", "val": poly, "mode": "MODE_POLY2D_ABSOLUTE", "closed": True}
                 for poly in polys
             ]
+        if rec.polyline and len(rec.polyline) >= 2:
+            object_data.setdefault("poly2d", []).append(
+                {"name": "polyline", "val": [c for pt in rec.polyline for c in pt],
+                 "mode": "MODE_POLY2D_ABSOLUTE", "closed": False})
         frames[str(fi)]["objects"][uid] = {"object_data": object_data}
 
         if uid not in objects_global:

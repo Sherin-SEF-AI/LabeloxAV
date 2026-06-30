@@ -12,7 +12,9 @@ import { classColor, classFill } from "@/lib/colors";
 import type { EdObject, Tool, Viewport } from "./useEditor";
 
 type LaneOverlay = { lane_id: string; control_points: number[][]; lane_type: string; is_ego: boolean; source: string };
-export type LayerFlags = { boxes: boolean; masks: boolean; lanes: boolean; drivable: boolean };
+export type LayerFlags = { boxes: boolean; masks: boolean; lanes: boolean; drivable: boolean; adverse: boolean; cuboids: boolean; seg: boolean };
+type AdverseOverlay = { region_id: string; geometry: number[]; condition: string };
+type CuboidOverlay = { object_id: string; corners_uv: number[][]; edges: number[][] };
 
 type Props = {
   imageUrl: string;
@@ -26,12 +28,24 @@ type Props = {
   panning: boolean;
   lanes?: LaneOverlay[];
   drivable?: Record<string, number[][]> | null;
+  relationships?: { from_object_id: string; to_object_id: string; kind: string }[];
+  adverse?: AdverseOverlay[];
+  cuboids?: CuboidOverlay[];
+  segOverlayUrl?: string | null;               // colored dense-segmentation overlay png to draw over the frame
   layers?: LayerFlags;
   onViewport: (v: Viewport) => void;
   onSelect: (id: string | null) => void;
   onUpdateBbox: (id: string, bbox: number[], rot?: number) => void;
   onDrawBox: (bbox: number[]) => void;
   onDrawPolygon: (points: number[]) => void;   // manual polygon: flattened [x,y,...], no GPU/SAM needed
+  onDrawPolyline: (points: number[]) => void;  // open polyline (curb/road_edge/barrier), not closed
+  onDrawAdverse: (points: number[]) => void;   // adverse-condition region polygon (glare/shadow/...)
+  onPlaceCuboid: (pt: number[]) => void;       // cuboid tool: lift this ground pixel and drop a 3D box
+  onMagicWand: (pt: number[]) => void;         // SAM point at this pixel, auto-create the object
+  brushRadius?: number;                        // brush/eraser stamp radius in image px
+  onBrushStroke: (ops: { op: string; center: number[]; radius: number }[]) => void;
+  superpixels?: number[][];                    // SLIC superpixel polygons (flattened) for the superpixel tool
+  onPickSuperpixel: (pt: number[]) => void;    // click a superpixel to add it to the active mask
   keypointDraft?: number[][] | null;           // in-progress pose points [[x,y,v],...] (placed so far)
   skeletonEdges?: number[][];                  // index pairs connecting keypoints, for rendering
   onPlaceKeypoint: (pt: number[]) => void;     // keypoint tool: drop the next skeleton point
@@ -46,6 +60,9 @@ type Props = {
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 20;
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+const ADVERSE_COLOR: Record<string, string> = {
+  glare: "#E3B341", reflection: "#58A6FF", shadow: "#8B5CF6", rain: "#56D364", fog: "#A0A6AD", lowlight: "#F85149",
+};
 
 export default function EditorCanvas(p: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -53,6 +70,8 @@ export default function EditorCanvas(p: Props) {
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [draw, setDraw] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [poly, setPoly] = useState<number[]>([]); // in-progress manual polygon, flattened [x,y,...]
+  const [stroke, setStroke] = useState<number[][] | null>(null); // active brush/eraser stroke stamp centres
+  const [segImg, setSegImg] = useState<HTMLImageElement | null>(null); // dense-segmentation overlay png
   const [measure, setMeasure] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const trRef = useRef<Konva.Transformer>(null);
@@ -74,11 +93,23 @@ export default function EditorCanvas(p: Props) {
     im.crossOrigin = "anonymous";
     im.src = p.imageUrl;
     im.onload = () => setImg(im);
+    im.onerror = () => setImg(null); // a missing frame image (404) must not leave the viewport unfit
   }, [p.imageUrl]);
 
-  // fit on first ready (viewport.scale === 0 is the "fit pending" sentinel)
+  // load the dense-segmentation overlay png (a separate raster drawn over the frame at reduced opacity)
   useEffect(() => {
-    if (img && p.viewport.scale === 0 && size.w > 1) {
+    if (!p.segOverlayUrl) { setSegImg(null); return; }
+    const im = new window.Image();
+    im.crossOrigin = "anonymous";
+    im.src = p.segOverlayUrl;
+    im.onload = () => setSegImg(im);
+    im.onerror = () => setSegImg(null);
+  }, [p.segOverlayUrl]);
+
+  // fit from the known frame dimensions (viewport.scale === 0 is the "fit pending" sentinel). This must not
+  // wait for the image to load, or a missing image leaves scale at 0 and every stroke/radius becomes Infinity.
+  useEffect(() => {
+    if (p.viewport.scale === 0 && size.w > 1 && p.imgW > 0 && p.imgH > 0) {
       const s = Math.min(size.w / p.imgW, size.h / p.imgH) * 0.96;
       p.onViewport({ scale: s, ox: (size.w - p.imgW * s) / 2, oy: (size.h - p.imgH * s) / 2 });
     }
@@ -94,7 +125,7 @@ export default function EditorCanvas(p: Props) {
   }, [p.selectedId, p.tool, p.objects]);
 
   const v = p.viewport;
-  const L = p.layers ?? { boxes: true, masks: true, lanes: true, drivable: true };
+  const L = p.layers ?? { boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true };
   const toImg = (): number[] => {
     const pt = stageRef.current?.getRelativePointerPosition();
     return pt ? [pt.x, pt.y] : [0, 0];
@@ -119,10 +150,18 @@ export default function EditorCanvas(p: Props) {
       setDraw({ x0: x, y0: y, x1: x, y1: y });
     } else if (p.tool === "measure") {
       setMeasure({ x0: x, y0: y, x1: x, y1: y });
-    } else if (p.tool === "polygon") {
-      setPoly((pp) => [...pp, x, y]); // each click drops a vertex; double-click closes
+    } else if (p.tool === "polygon" || p.tool === "polyline" || p.tool === "adverse") {
+      setPoly((pp) => [...pp, x, y]); // each click drops a vertex; double-click closes/commits
     } else if (p.tool === "keypoint") {
       p.onPlaceKeypoint([x, y]); // each click drops the next skeleton point
+    } else if (p.tool === "cuboid") {
+      p.onPlaceCuboid([x, y]); // single click on the ground drops a 3D box
+    } else if (p.tool === "magic-wand") {
+      p.onMagicWand([x, y]); // SAM point -> auto-create
+    } else if (p.tool === "superpixel") {
+      p.onPickSuperpixel([x, y]); // add the clicked superpixel to the active mask
+    } else if (p.tool === "brush" || p.tool === "eraser") {
+      setStroke([[x, y]]); // begin a stroke; stamps accumulate on move, commit on up
     } else if (p.tool === "sam-point") {
       p.onSamPoint([x, y], e.evt.shiftKey ? 0 : 1);
     } else if (p.tool === "select" && e.target === e.target.getStage()) {
@@ -131,23 +170,40 @@ export default function EditorCanvas(p: Props) {
   }
 
   function onDblClick() {
-    if (p.tool !== "polygon") return;
-    if (poly.length >= 6) p.onDrawPolygon(poly); // at least 3 vertices
-    setPoly([]);
+    if (p.tool === "polygon") {
+      if (poly.length >= 6) p.onDrawPolygon(poly); // at least 3 vertices, closed
+      setPoly([]);
+    } else if (p.tool === "polyline") {
+      if (poly.length >= 4) p.onDrawPolyline(poly); // at least 2 vertices, open
+      setPoly([]);
+    } else if (p.tool === "adverse") {
+      if (poly.length >= 6) p.onDrawAdverse(poly); // at least 3 vertices, closed region
+      setPoly([]);
+    }
   }
 
-  // abandon a half-drawn polygon when the tool changes
-  useEffect(() => { if (p.tool !== "polygon") setPoly([]); }, [p.tool]);
+  // abandon a half-drawn polygon/polyline/region when the tool changes
+  useEffect(() => {
+    if (p.tool !== "polygon" && p.tool !== "polyline" && p.tool !== "adverse") setPoly([]);
+  }, [p.tool]);
   useEffect(() => { if (p.tool !== "measure") setMeasure(null); }, [p.tool]);
+  useEffect(() => { if (p.tool !== "brush" && p.tool !== "eraser") setStroke(null); }, [p.tool]);
 
   function onMove() {
     const [x, y] = toImg();
     p.onCursor([x, y]);
     if (draw) setDraw((d) => (d ? { ...d, x1: x, y1: y } : d));
     if (measure) setMeasure((m) => (m ? { ...m, x1: x, y1: y } : m));
+    if (stroke && (p.tool === "brush" || p.tool === "eraser")) setStroke((s) => (s ? [...s, [x, y]] : s));
   }
 
   function onUp() {
+    if (stroke) {
+      const r = p.brushRadius ?? 12;
+      const op = p.tool === "eraser" ? "erase" : "add";
+      p.onBrushStroke(stroke.map((c) => ({ op, center: c, radius: r })));
+      setStroke(null);
+    }
     if (measure) {
       // ruler is ephemeral: keep the last segment on screen until the next drag or tool change
       const tiny = Math.hypot(measure.x1 - measure.x0, measure.y1 - measure.y0) < 2;
@@ -187,6 +243,8 @@ export default function EditorCanvas(p: Props) {
       >
         <Layer>
           {img && <KImage image={img} width={p.imgW} height={p.imgH} listening={false} />}
+          {/* dense-segmentation overlay (semantic/panoptic), drawn over the frame at reduced opacity */}
+          {L.seg && segImg && <KImage image={segImg} width={p.imgW} height={p.imgH} opacity={0.5} listening={false} />}
 
           {/* drivable-area segmentation (M2.2), drawn behind everything */}
           {L.drivable && p.drivable && Object.entries(p.drivable).flatMap(([cls, polys]) =>
@@ -196,6 +254,13 @@ export default function EditorCanvas(p: Props) {
                 stroke={cls === "drivable" ? "#56D364" : cls === "fallback" ? "#E3B341" : "#F85149"} strokeWidth={1 / v.scale} />
             )),
           )}
+
+          {/* adverse-condition regions (glare/reflection/shadow/...), tinted by condition */}
+          {L.adverse && p.adverse?.map((a) => (
+            <Line key={`adv-${a.region_id}`} points={a.geometry} closed listening={false}
+              stroke={ADVERSE_COLOR[a.condition] ?? "#A0A6AD"} strokeWidth={1 / v.scale}
+              fill={(ADVERSE_COLOR[a.condition] ?? "#A0A6AD") + "33"} />
+          ))}
 
           {/* masks */}
           {L.masks && p.objects.filter((o) => o.visible).flatMap((o) =>
@@ -213,8 +278,17 @@ export default function EditorCanvas(p: Props) {
               strokeWidth={2.5 / v.scale} dash={ln.lane_type === "dashed" ? [10 / v.scale, 8 / v.scale] : undefined} />
           ))}
 
-          {/* boxes (rendered around their centre so rotation is about the centre; bbox stays the AABB) */}
-          {L.boxes && p.objects.filter((o) => o.visible).map((o) => {
+          {/* open polylines (curb/road_edge/barrier): an open line, no fill, no AABB box */}
+          {L.boxes && p.objects.filter((o) => o.visible && o.polyline && o.polyline.length >= 2).map((o) => (
+            <Line key={`pl${o.id}`} points={o.polyline!.flat()} listening={p.tool === "select"}
+              stroke={classColor(o.class_id)} strokeWidth={(o.id === p.selectedId ? 2.5 : 1.5) / v.scale}
+              hitStrokeWidth={10 / v.scale}
+              onMouseDown={(e) => { if (p.tool === "select") { e.cancelBubble = true; p.onSelect(o.id); } }} />
+          ))}
+
+          {/* boxes (rendered around their centre so rotation is about the centre; bbox stays the AABB).
+              Polyline objects render as the open line above, not as a box. */}
+          {L.boxes && p.objects.filter((o) => o.visible && !(o.polyline && o.polyline.length >= 2)).map((o) => {
             const w = o.bbox[2] - o.bbox[0];
             const h = o.bbox[3] - o.bbox[1];
             const cx = o.bbox[0] + w / 2;
@@ -255,6 +329,28 @@ export default function EditorCanvas(p: Props) {
               />
             );
           })}
+
+          {/* relationship connectors: a thin dashed line between the centres of two related objects */}
+          {p.relationships?.map((r) => {
+            const a = p.objects.find((o) => o.id === r.from_object_id);
+            const b = p.objects.find((o) => o.id === r.to_object_id);
+            if (!a || !b) return null;
+            const ca = [(a.bbox[0] + a.bbox[2]) / 2, (a.bbox[1] + a.bbox[3]) / 2];
+            const cb = [(b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2];
+            return <Line key={`rel-${r.from_object_id}-${r.to_object_id}-${r.kind}`} listening={false}
+              points={[ca[0], ca[1], cb[0], cb[1]]} stroke="#E3B341" strokeWidth={1 / v.scale}
+              dash={[4 / v.scale, 3 / v.scale]} />;
+          })}
+
+          {/* in-image 3D cuboids: the projected wireframe of each cuboid_3d, highlighted when selected */}
+          {p.cuboids?.flatMap((c) => c.edges.map((edge, i) => {
+            const a = c.corners_uv[edge[0]];
+            const b = c.corners_uv[edge[1]];
+            if (!a || !b) return null;
+            const sel = c.object_id === p.selectedId;
+            return <Line key={`cub-${c.object_id}-${i}`} points={[a[0], a[1], b[0], b[1]]} listening={false}
+              stroke={sel ? "#FF7A2F" : "#58A6FF"} strokeWidth={(sel ? 2 : 1.25) / v.scale} />;
+          }))}
 
           {/* selected object's mask vertices: drag to move, right-click to delete */}
           {sel && p.tool === "select" && sel.mask.map((poly, pi) =>
@@ -304,8 +400,20 @@ export default function EditorCanvas(p: Props) {
               stroke="#56D364" strokeWidth={2 / v.scale} fill="rgba(86,211,100,0.25)" />
           ))}
 
-          {/* in-progress manual polygon: open polyline + vertex dots; double-click closes it */}
-          {p.tool === "polygon" && poly.length >= 2 && (
+          {/* superpixels (faint), shown while the superpixel tool is active so the annotator can click one */}
+          {p.tool === "superpixel" && p.superpixels?.map((poly, i) => (
+            <Line key={`sp${i}`} points={poly} closed listening={false}
+              stroke="rgba(88,166,255,0.5)" strokeWidth={0.75 / v.scale} fill="rgba(88,166,255,0.06)" />
+          ))}
+
+          {/* brush/eraser stroke preview: a stamp circle per sampled point along the stroke */}
+          {(p.tool === "brush" || p.tool === "eraser") && stroke?.map((c, i) => (
+            <Circle key={`bs${i}`} x={c[0]} y={c[1]} radius={p.brushRadius ?? 12} listening={false}
+              fill={p.tool === "eraser" ? "rgba(248,81,73,0.25)" : "rgba(86,211,100,0.25)"} />
+          ))}
+
+          {/* in-progress manual polygon/polyline: open line + vertex dots; double-click commits */}
+          {(p.tool === "polygon" || p.tool === "polyline" || p.tool === "adverse") && poly.length >= 2 && (
             <>
               <Line points={poly} listening={false} stroke="#FF7A2F" strokeWidth={1.5 / v.scale}
                 dash={[6 / v.scale, 4 / v.scale]} />

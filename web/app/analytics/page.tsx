@@ -14,7 +14,8 @@ import {
   type ReviewAgreement,
   type ScenarioCoverage,
 } from "@/lib/analytics-api";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
+import ScoreBar from "@/components/shell/ScoreBar";
 import { api } from "@/lib/api";
 import type { Confusions } from "@/lib/types";
 
@@ -111,16 +112,19 @@ export default function AnalyticsPage() {
   const mix = overview?.source_mix;
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="ANALYTICS" right={
+    <PageShell
+      active="ANALYTICS"
+      primaryAction={
+        <button onClick={exportReport} className="border border-line px-2 py-0.5 hover:border-accent" title="export the quality sheet as JSON">export report</button>
+      }
+      right={
         <>
-          <button onClick={exportReport} className="border border-line px-2 py-0.5 hover:border-accent" title="export the quality sheet as JSON">export report</button>
           <span className="border border-line px-2 py-0.5">{overview ? `${overview.objects} objects` : "..."}</span>
           <span className={`w-2 h-2 rounded-full ${loading ? "bg-warn" : "bg-pass"}`} />
         </>
-      } />
-
-      <main className="flex-1 overflow-auto p-4 space-y-4">
+      }
+    >
+      <div className="p-4 space-y-4">
         {/* Top stat cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <Stat label="frames" value={overview ? String(overview.frames) : "-"} />
@@ -191,15 +195,9 @@ export default function AnalyticsPage() {
                     title={`human ${mix.human_touched_pct}%`}
                   />
                 </div>
-                <div className="flex items-center gap-4 font-mono text-xs">
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 bg-pass inline-block" /> auto-accepted{" "}
-                    {mix.auto_accepted_pct}%
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 bg-warn inline-block" /> human-touched{" "}
-                    {mix.human_touched_pct}%
-                  </span>
+                <div className="flex flex-wrap items-center gap-4">
+                  <ScoreBar label="auto-accepted" value={mix.auto_accepted_pct / 100} tone="info" />
+                  <ScoreBar label="human-touched" value={mix.human_touched_pct / 100} tone="warn" />
                 </div>
                 <div className="font-mono text-[11px] text-ink-3 grid grid-cols-2 gap-x-6 gap-y-0.5">
                   {Object.entries(mix.by_state).map(([k, v]) => (
@@ -265,15 +263,9 @@ export default function AnalyticsPage() {
                     title={`reclassified ${agreement.reclassified_pct}%`}
                   />
                 </div>
-                <div className="flex items-center gap-4 font-mono text-xs">
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 bg-pass inline-block" /> confirmed{" "}
-                    {agreement.confirmed_pct}%
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 bg-block inline-block" /> reclassified{" "}
-                    {agreement.reclassified_pct}%
-                  </span>
+                <div className="flex flex-wrap items-center gap-4">
+                  <ScoreBar label="confirmed" value={agreement.confirmed_pct / 100} tone="info" />
+                  <ScoreBar label="reclassified" value={agreement.reclassified_pct / 100} tone="warn" />
                 </div>
                 <div className="font-mono text-[11px] text-ink-3">
                   {agreement.total_reviews} reviews, mean {agreement.mean_time_spent_ms}ms each
@@ -345,13 +337,10 @@ export default function AnalyticsPage() {
                   title={`unprotected ${(100 - pii.coverage_pct).toFixed(1)}%`}
                 />
               </div>
-              <div className="flex items-center gap-4 font-mono text-xs">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 bg-pass inline-block" /> anonymized{" "}
-                  {pii.coverage_pct}% ({pii.frames_anonymized}/{pii.total_frames})
-                </span>
+              <div className="flex flex-wrap items-center gap-4 font-mono text-xs">
+                <ScoreBar label="anonymized" value={pii.coverage_pct / 100} tone="info" />
                 <span className="text-ink-3">
-                  {pii.faces_blurred} faces, {pii.plates_blurred} plates blurred
+                  {pii.frames_anonymized}/{pii.total_frames} frames, {pii.faces_blurred} faces, {pii.plates_blurred} plates blurred
                 </span>
               </div>
               <div className="font-mono text-[11px] text-ink-3 space-y-0.5 pt-1 border-t hairline">
@@ -437,8 +426,8 @@ export default function AnalyticsPage() {
             <div className="font-mono text-xs text-ink-3 py-8 text-center">computing projection…</div>
           )}
         </Section>
-      </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }
 

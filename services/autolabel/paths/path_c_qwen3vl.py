@@ -169,10 +169,14 @@ class VlmVerifier:
     ontology, and reports the class/attrs to merge back. Pure of DB and GPU so it is unit-testable.
     """
 
-    def __init__(self, client: VlmClient, ontology: Ontology | None = None, settings: Settings | None = None) -> None:
+    def __init__(self, client: VlmClient, ontology: Ontology | None = None, settings: Settings | None = None,
+                 supported_ids: set[int] | None = None) -> None:
         self.client = client
         self.onto = ontology or get_ontology()
         self.settings = settings or get_settings()
+        # M-Q.0: when the grounded set is provided, the shortlist offered to the VLM is restricted to it, so
+        # the VLM cannot "confirm" an ungrounded class (e.g. a fixed-class sibling like bus_shelter).
+        self.supported_ids = supported_ids
 
     # Cross-superclass road actors a detection is most likely to actually be (India-weighted). Always
     # offered to the VLM so it can fix gross mislabels across superclasses, e.g. autorickshaw read as
@@ -186,11 +190,17 @@ class VlmVerifier:
 
     def _shortlist(self, class_id: int) -> list[str]:
         c = self.onto.by_id(class_id)
+
+        def grounded(name: str) -> bool:
+            # with the grounded set, only supported names (plus the object's own class) are offered
+            return self.supported_ids is None or not self.onto.has_name(name) or self.onto.by_name(name).id in self.supported_ids
+
         # current class first, then the cross-superclass anchors (guaranteed presence), then L1
-        # siblings for fine within-superclass refinement, then the fallback.
+        # siblings for fine within-superclass refinement, then the fallback. All restricted to the
+        # grounded set so the VLM cannot confirm an ungrounded class.
         ordered = [c.name]
-        ordered += [n for n in self.CROSS_ANCHORS if self.onto.has_name(n)]
-        ordered += [k.name for k in self.onto.classes if k.l1 == c.l1]
+        ordered += [n for n in self.CROSS_ANCHORS if self.onto.has_name(n) and grounded(n)]
+        ordered += [k.name for k in self.onto.classes if k.l1 == c.l1 and grounded(k.name)]
         ordered.append("object_fallback")
         names = list(dict.fromkeys(ordered))  # dedup, preserve order
         return names[: self.settings.models.vlm.shortlist_size]

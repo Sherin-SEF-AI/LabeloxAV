@@ -7,6 +7,9 @@ import type {
   GovState,
   MergeRequestRow,
   RegistryRow,
+  Relationship,
+  AdverseRegion,
+  ProjectedCuboid,
   CalibDetail,
   CalibSession,
   Confusions,
@@ -35,6 +38,8 @@ import type {
   Track,
   TriageRow,
   UserRow,
+  CloudStatus,
+  CloudOrphan,
 } from "./types";
 
 // Same-origin: next.config rewrites /api/* to the FastAPI backend. Every request carries the current
@@ -77,7 +82,158 @@ async function del<T>(path: string): Promise<T> {
 // training job holds the GPU; callers surface that as a non-blocking notice.
 export type SegmentPrompt = { points?: number[][]; labels?: number[]; box?: number[] };
 
+// LiDAR 3D viewer
+export type LidarBounds = { min: number[]; max: number[]; n: number };
+export type LidarCloud = {
+  cloud_id: string;
+  ts_ns: number;
+  source: string;
+  point_count: number;
+  depth_model: string | null;
+  bounds: LidarBounds | null;
+  variants: string[];
+};
+export type LidarPoints = {
+  points: Float32Array; // interleaved [x, y, z, intensity]
+  count: number;
+  decimated: boolean;
+  source: string;
+  frame: string;
+  intensityMin: number;
+  intensityMax: number;
+};
+export type Cuboid3D = {
+  object_3d_id: string;
+  cloud_id: string;
+  frame_id: string | null;
+  object_id: string | null;
+  track_3d_id: string | null;
+  class_id: number;
+  class_name: string;
+  center: number[];
+  dims: number[];
+  yaw: number;
+  pitch: number;
+  roll: number;
+  conf: number;
+  box_source: string;
+  source: string;
+  state: string;
+  is_keyframe: boolean;
+  attrs: Record<string, unknown>;
+  version: number;
+};
+export type Cuboid3DInput = {
+  class_id: number;
+  center: number[];
+  dims: number[];
+  yaw: number;
+  pitch?: number;
+  roll?: number;
+  attrs?: Record<string, unknown>;
+  object_id?: string | null;
+  ground_snap?: boolean;
+};
+
+// The segmentation overlay stream is Float32 [x, y, z, semantic_class], decimated with labels aligned.
+export async function lidarSegmentationPoints(
+  cloudId: string,
+  max = 300000,
+): Promise<{ points: Float32Array; count: number; classes: number[]; lowConfFrac: number }> {
+  const r = await fetch(`/api/lidar/clouds/${cloudId}/segmentation/points?max=${max}`, {
+    cache: "no-store",
+    headers: { ...userHeaders() },
+  });
+  if (!r.ok) throw new Error(`GET segmentation points -> ${r.status}`);
+  const buf = await r.arrayBuffer();
+  const classesHeader = r.headers.get("X-Classes") || "";
+  return {
+    points: new Float32Array(buf),
+    count: Number(r.headers.get("X-Point-Count") || 0),
+    classes: classesHeader ? classesHeader.split(",").map(Number) : [],
+    lowConfFrac: Number(r.headers.get("X-Low-Conf-Frac") ?? 0),
+  };
+}
+
+// The point stream is a binary ArrayBuffer (Float32 xyzi), not JSON, so it is fetched directly.
+export async function lidarCloudPoints(
+  cloudId: string,
+  opts?: { variant?: string; max?: number; full?: boolean },
+): Promise<LidarPoints> {
+  const q = new URLSearchParams();
+  if (opts?.variant && opts.variant !== "raw") q.set("variant", opts.variant);
+  if (opts?.max) q.set("max", String(opts.max));
+  if (opts?.full) q.set("full", "true");
+  const r = await fetch(`/api/lidar/clouds/${cloudId}/points?${q.toString()}`, {
+    cache: "no-store",
+    headers: { ...userHeaders() },
+  });
+  if (!r.ok) throw new Error(`GET points -> ${r.status}`);
+  const buf = await r.arrayBuffer();
+  return {
+    points: new Float32Array(buf),
+    count: Number(r.headers.get("X-Point-Count") || 0),
+    decimated: r.headers.get("X-Decimated") === "True",
+    source: r.headers.get("X-Source") || "",
+    frame: r.headers.get("X-Frame") || "",
+    intensityMin: Number(r.headers.get("X-Intensity-Min") ?? 0),
+    intensityMax: Number(r.headers.get("X-Intensity-Max") ?? 1),
+  };
+}
+
 export const api = {
+  lidarClouds: (sessionId: string) =>
+    get<{ session_id: string; clouds: LidarCloud[] }>(`/api/lidar/sessions/${sessionId}/clouds`),
+  lidarCloudMeta: (cloudId: string) => get<LidarCloud & { calibration_version: string | null }>(`/api/lidar/clouds/${cloudId}`),
+  lidarBuild: (sessionId: string, limit = 1) =>
+    post<{ session_id: string; clouds: number; groups_total: number }>(
+      `/api/lidar/sessions/${sessionId}/build`, { limit }),
+  lidarTrajectory: (sessionId: string, refTsNs?: number) =>
+    get<{ session_id: string; anchor_ts_ns?: number; heading_rad?: number; path: { x: number; y: number }[] }>(
+      `/api/lidar/sessions/${sessionId}/trajectory${refTsNs != null ? `?ref_ts_ns=${refTsNs}` : ""}`),
+  // 3D cuboid annotation
+  lidarObjects3d: (cloudId: string) =>
+    get<{ cloud_id: string; objects: Cuboid3D[] }>(`/api/lidar/clouds/${cloudId}/objects3d`),
+  lidarCreateCuboid: (cloudId: string, body: Cuboid3DInput) =>
+    post<Cuboid3D>(`/api/lidar/clouds/${cloudId}/objects3d`, body),
+  lidarPatchCuboid: async (id: string, body: Partial<Cuboid3DInput> & { expected_version?: number }) => {
+    const r = await fetch(`/api/lidar/objects3d/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...userHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`PATCH cuboid -> ${r.status}`);
+    return (await r.json()) as Cuboid3D;
+  },
+  lidarDeleteCuboid: (id: string) => del<{ deleted: string }>(`/api/lidar/objects3d/${id}`),
+  lidarLiftFrame: (frameId: string) =>
+    post<{ frame_id: string; cuboids: number; objects: unknown[] }>(`/api/lidar/frames/${frameId}/lift`, {}),
+  lidarLiftCloud: (cloudId: string) =>
+    post<{ frame_id: string; cuboids: number; objects: unknown[] }>(`/api/lidar/clouds/${cloudId}/lift`, {}),
+  lidarSegment: (cloudId: string) =>
+    post<{ seg_id: string; method: string; classes_present: number[]; low_conf_frac: number; n_instances: number }>(
+      `/api/lidar/clouds/${cloudId}/segment`, {}),
+  lidarTrack3d: (sessionId: string) =>
+    post<{ session_id: string; tracks: number; detections: number }>(`/api/lidar/sessions/${sessionId}/track3d`, {}),
+  lidarLinkCloud: (cloudId: string) =>
+    post<{ cloud_id: string; linked: number; cuboids: number }>(`/api/lidar/clouds/${cloudId}/link`, {}),
+  lidarObject3dProjection: (id: string, camId = "cam_f", w = 1280, h = 960) =>
+    get<{ corners_uv: number[][]; in_front: boolean[]; in_image: boolean[]; edges: number[][]; any_in_image: boolean }>(
+      `/api/lidar/objects3d/${id}/projection?cam_id=${camId}&w=${w}&h=${h}`),
+  lidarObject3dLinked: (id: string) =>
+    get<{ object_3d_id: string; object_id: string | null; class_id: number;
+      projections: Record<string, number[]>; object_2d: { object_id: string; bbox: number[]; cam_id: string } | null }>(
+      `/api/lidar/objects3d/${id}/linked`),
+  lidarObject3dProperties: (id: string) =>
+    post<{ object_3d_id: string; properties: Record<string, number | null> }>(
+      `/api/lidar/objects3d/${id}/properties`, {}),
+  lidarSimilar3d: (id: string, k = 10) =>
+    get<{ object_3d_id: string; class_id: number;
+      similar: { object_3d_id: string; dims: number[]; dims_dist: number; state: string }[] }>(
+      `/api/lidar/objects3d/${id}/similar?k=${k}`),
+  lidarBatchCorrect: (ids: string[], classId?: number, dims?: number[]) =>
+    post<{ updated: number }>(`/api/lidar/objects3d/batch_correct`,
+      { object_3d_ids: ids, class_id: classId ?? null, dims: dims ?? null }),
   ontology: () => get<Ontology>("/api/ontology"),
   addClass: (name: string) => post<OntologyClass & { existed: boolean }>("/api/ontology/classes", { name }),
   sessions: () => get<SessionRow[]>("/api/sessions"),
@@ -128,11 +284,37 @@ export const api = {
     post<SegmentResult>("/api/segment", { frame_id, ...p }),
   createObject: (
     frame_id: string,
-    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null },
+    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][]; cuboid_3d?: { center: number[]; size: number[]; yaw: number } },
   ) => post<ObjectDetail>(`/api/frames/${frame_id}/objects`, body),
   updateMask: (object_id: string, polygons: number[][], width?: number, height?: number) =>
     put<{ object_id: string }>(`/api/objects/${object_id}/mask`, { polygons, width, height }),
   deleteObject: (object_id: string) => del<{ deleted: string }>(`/api/objects/${object_id}`),
+  // object relationships / grouping (rider_of, towed_by, part_of, member_of, occludes)
+  relateObject: (object_id: string, body: { to_object_id: string; kind: string }) =>
+    post<{ relationship_id: string }>(`/api/objects/${object_id}/relate`, body),
+  deleteRelationship: (relationship_id: string) =>
+    del<{ deleted: string }>(`/api/relationships/${relationship_id}`),
+  frameRelationships: (frame_id: string) =>
+    get<Relationship[]>(`/api/frames/${frame_id}/relationships`),
+  // adverse-condition region tags (glare, reflection, shadow, rain, fog, lowlight)
+  createAdverse: (frame_id: string, body: { geometry: number[]; condition: string }) =>
+    post<AdverseRegion>(`/api/frames/${frame_id}/adverse`, body),
+  listAdverse: (frame_id: string) => get<AdverseRegion[]>(`/api/frames/${frame_id}/adverse`),
+  deleteAdverse: (region_id: string) => del<{ deleted: string }>(`/api/adverse/${region_id}`),
+  // in-image cuboids: projected wireframes + lift a pixel to the ego ground point
+  frameCuboids: (frame_id: string) => get<ProjectedCuboid[]>(`/api/frames/${frame_id}/cuboids`),
+  liftGround: (frame_id: string, u: number, v: number) =>
+    get<{ ego: number[] }>(`/api/frames/${frame_id}/lift_ground?u=${u}&v=${v}`),
+  // pixel-assist: brush/eraser mask composition + SLIC superpixels
+  composeMask: (body: { polygons: number[][]; ops: { op: string; center: number[]; radius: number }[]; width: number; height: number }) =>
+    post<{ polygons: number[][] }>(`/api/mask/compose`, body),
+  superpixels: (frame_id: string, n = 300) =>
+    post<{ superpixels: number[][] }>(`/api/superpixels/${frame_id}?n=${n}`, {}),
+  // dense semantic/panoptic segmentation: run auto, fetch metadata (the overlay is an image URL)
+  autoSegment: (frame_id: string, kind = "semantic") =>
+    post<{ kind: string; coverage: Record<string, number>; n_instances: number }>(`/api/frames/${frame_id}/segment?kind=${kind}`, {}),
+  getSegment: (frame_id: string, kind = "semantic") =>
+    get<{ found: boolean; coverage?: Record<string, number>; has_overlay?: boolean }>(`/api/frames/${frame_id}/segment?kind=${kind}`),
   // M2.1 lanes
   framesLanes: (frameId: string) => get<LaneRow[]>(`/api/frames/${frameId}/lanes`),
   proposeLanes: (frameId: string) => post<{ proposed: number; lanes: LaneRow[]; model: string }>(`/api/frames/${frameId}/lanes/propose`, {}),
@@ -230,6 +412,8 @@ export const api = {
       rot_deg?: number;
       keypoints?: Keypoints | null;
       mask_polygons?: number[][];
+      polyline?: number[][];
+      cuboid_3d?: { center: number[]; size: number[]; yaw: number };
     },
   ) => post<ObjectDetail & { version?: number; rot_deg?: number }>(`/api/objects/${id}/review`, payload),
   scenarios: (params: Record<string, string>) =>
@@ -285,6 +469,13 @@ export const api = {
   listTraining: () => get<TrainingJob[]>("/api/training"),
   cancelTraining: (jobId: string) => post<TrainingJob>(`/api/training/${jobId}/cancel`, {}),
   trainingRegistry: () => get<ModelLine[]>("/api/training/registry"),
+
+  // Warm cloud-GPU control. connect carries the acknowledged hourly rate (the backend rejects a mismatch).
+  cloudStatus: () => get<CloudStatus>("/api/cloud/status"),
+  cloudConnect: (ackHourlyUsd: number) => post<CloudStatus>("/api/cloud/connect", { ack_hourly_usd: ackHourlyUsd }),
+  cloudDisconnect: (pause = false) => post<CloudStatus>("/api/cloud/disconnect", { pause }),
+  cloudOrphans: () => get<{ orphans: CloudOrphan[] }>("/api/cloud/orphans"),
+  cloudTerminateOrphan: (podId: string) => post<{ terminated: string }>("/api/cloud/orphans/terminate", { pod_id: podId }),
 };
 
 export type TrainingJob = {

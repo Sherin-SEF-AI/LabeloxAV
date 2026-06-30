@@ -52,6 +52,9 @@ async def ontology():
         },
         "classes": [OntologyClassOut(id=c.id, name=c.name, l0=c.l0, l1=c.l1, india=c.india).model_dump()
                     for c in sorted(onto.classes, key=lambda c: c.id)],
+        # Per-subclass (l1) applicable-attribute allowlist, so the editor shows only the relevant attributes
+        # for an object's class. A subclass absent here means all attributes apply.
+        "attribute_scope": onto.attribute_scope,
     }
 
 

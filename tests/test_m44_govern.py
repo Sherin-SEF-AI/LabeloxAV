@@ -27,20 +27,24 @@ def _infra_up() -> bool:
 
 requires_infra = pytest.mark.skipif(not _infra_up(), reason="infra not up (make up)")
 
-CHAMP = {"map": 0.70, "safe_miou": 0.90, "per_class": {"pedestrian": 0.80, "child": 0.78, "motorcycle": 0.65}}
+CHAMP = {"map": 0.70, "safe_miou": 0.90, "per_class": {"pedestrian": 0.80, "child": 0.78, "motorcycle": 0.65},
+         "per_class_recall": {"pedestrian": 0.80, "child": 0.78, "motorcycle": 0.65}}
 
 
 def test_champion_gate_blocks_safety_regression():
     onto, cfg = get_ontology(), get_settings().phase4.govern
     # beats mAP, no safety regression -> promote
-    good = {"map": 0.74, "safe_miou": 0.91, "per_class": {"pedestrian": 0.82, "child": 0.79, "motorcycle": 0.70}}
+    good = {"map": 0.74, "safe_miou": 0.91, "per_class": {"pedestrian": 0.82, "child": 0.79, "motorcycle": 0.70},
+            "per_class_recall": {"pedestrian": 0.82, "child": 0.79, "motorcycle": 0.70}}
     assert champion_gate(good, CHAMP, onto, cfg)["promote"] is True
     # higher overall mAP BUT a VRU class collapses -> never promote
-    unsafe = {"map": 0.80, "safe_miou": 0.91, "per_class": {"pedestrian": 0.50, "child": 0.79, "motorcycle": 0.95}}
+    unsafe = {"map": 0.80, "safe_miou": 0.91, "per_class": {"pedestrian": 0.50, "child": 0.79, "motorcycle": 0.95},
+              "per_class_recall": {"pedestrian": 0.79, "child": 0.79, "motorcycle": 0.95}}
     g = champion_gate(unsafe, CHAMP, onto, cfg)
     assert g["promote"] is False and "pedestrian" in g["regressed_safety"]
     # Safe-mIoU regression alone blocks promotion
-    sm = {"map": 0.80, "safe_miou": 0.80, "per_class": {"pedestrian": 0.82, "child": 0.79, "motorcycle": 0.9}}
+    sm = {"map": 0.80, "safe_miou": 0.80, "per_class": {"pedestrian": 0.82, "child": 0.79, "motorcycle": 0.9},
+          "per_class_recall": {"pedestrian": 0.82, "child": 0.79, "motorcycle": 0.9}}
     assert champion_gate(sm, CHAMP, onto, cfg)["promote"] is False
     # first model (no incumbent) is promoted
     assert champion_gate(good, None, onto, cfg)["promote"] is True
@@ -59,8 +63,10 @@ def test_governance_end_to_end():
     tag = uuid.uuid4().hex[:6]
     task = f"det-{tag}"  # isolate from any real registered champion (hermetic per run)
     v_champ, v_unsafe, v_good, v_paused = (f"m-champ-{tag}", f"m-unsafe-{tag}", f"m-good-{tag}", f"m-paused-{tag}")
-    good = {"map": 0.74, "safe_miou": 0.91, "per_class": {"pedestrian": 0.82, "child": 0.79, "motorcycle": 0.70}}
-    unsafe = {"map": 0.80, "safe_miou": 0.91, "per_class": {"pedestrian": 0.50, "child": 0.79, "motorcycle": 0.95}}
+    good = {"map": 0.74, "safe_miou": 0.91, "per_class": {"pedestrian": 0.82, "child": 0.79, "motorcycle": 0.70},
+            "per_class_recall": {"pedestrian": 0.82, "child": 0.79, "motorcycle": 0.70}}
+    unsafe = {"map": 0.80, "safe_miou": 0.91, "per_class": {"pedestrian": 0.50, "child": 0.79, "motorcycle": 0.95},
+              "per_class_recall": {"pedestrian": 0.79, "child": 0.79, "motorcycle": 0.95}}
 
     async def run():
         maker = get_sessionmaker()
@@ -110,7 +116,8 @@ def test_governance_end_to_end():
 
             # a further good challenger is now PAUSED, not promoted
             await register(db, v_paused, task,
-                           {"map": 0.9, "safe_miou": 0.95, "per_class": {"pedestrian": 0.9, "child": 0.9, "motorcycle": 0.9}})
+                           {"map": 0.9, "safe_miou": 0.95, "per_class": {"pedestrian": 0.9, "child": 0.9, "motorcycle": 0.9},
+                            "per_class_recall": {"pedestrian": 0.9, "child": 0.9, "motorcycle": 0.9}})
             r3 = await evaluate_and_promote(db, v_paused, task)
             assert r3["promoted"] is False and r3.get("paused") is True
 

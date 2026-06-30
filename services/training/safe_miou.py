@@ -12,11 +12,23 @@ from services.autolabel.ontology import Ontology
 
 _VRU_ANIMAL = {"vru", "animal"}
 
+# Sentinel for the confusion matrix's background row/col. A real class confused with background is a miss
+# (true class predicted nothing) or a false positive (background predicted as a class); for a vulnerable
+# road user that is the "pedestrian versus background" case the spec calls out as maximally unsafe.
+BACKGROUND_ID = -1
+
 
 def affinity_cost(onto: Ontology, a: int, b: int) -> float:
     """Safety cost of confusing class a for class b, in [0, 1]. 0 = same class; 1 = maximally unsafe."""
     if a == b:
         return 0.0
+    if a == BACKGROUND_ID or b == BACKGROUND_ID:
+        # one side is background: missing or inventing a VRU is the worst case, a benign miss is moderate
+        real = b if a == BACKGROUND_ID else a
+        try:
+            return 1.0 if onto.by_id(real).l1 in _VRU_ANIMAL else 0.5
+        except KeyError:
+            return 0.5
     ca, cb = onto.by_id(a), onto.by_id(b)
     a_vru = ca.l1 in _VRU_ANIMAL
     b_vru = cb.l1 in _VRU_ANIMAL

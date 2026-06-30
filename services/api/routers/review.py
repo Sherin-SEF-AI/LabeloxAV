@@ -120,7 +120,7 @@ async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = D
         obj.bbox = payload.bbox
 
     if payload.attrs is not None:
-        errors = onto.validate_attrs(payload.attrs)
+        errors = onto.validate_attrs(payload.attrs, obj.class_id)
         if errors:
             raise HTTPException(400, {"attr_errors": errors})
         merged = dict(obj.attrs or {})
@@ -131,6 +131,10 @@ async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = D
         obj.rot_deg = payload.rot_deg
     if payload.keypoints is not None:
         obj.keypoints = payload.keypoints
+    if payload.polyline is not None:
+        obj.polyline = payload.polyline
+    if payload.cuboid_3d is not None:
+        obj.cuboid_3d = payload.cuboid_3d
     if payload.mask_polygons is not None:
         # Write the mask blob in the same request so geometry + mask persist atomically (one transaction),
         # instead of a separate updateMask call that can leave them out of sync on a partial failure.

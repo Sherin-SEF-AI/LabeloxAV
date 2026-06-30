@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from uuid import UUID
 
@@ -15,9 +16,11 @@ from core.logging import get_logger, setup_logging
 from services.api.deps import role_rank
 from services.api.routers import (
     activelearn,
+    adverse,
     analytics,
     autolabel,
     calibration,
+    cloud,
     collaborate,
     corrections,
     curation,
@@ -34,16 +37,21 @@ from services.api.routers import (
     jobs,
     lanes,
     lidar,
+    lidar_scene,
     mapassist,
     meta,
     models,
     multicam,
     objects,
+    objects3d,
     ocr,
     quality,
+    recall,
     relabel,
     review,
     search,
+    segment_assist,
+    segmentation,
     signs,
     tracks,
     training,
@@ -55,12 +63,38 @@ from services.api.routers import (
 log = get_logger("api")
 
 
+async def _cloud_watchdog():
+    """Enforce the warm-session idle / max-session guards even when no UI is polling status, so a connected
+    cloud GPU cannot linger past its limits while the operator is away. refresh() is a no-op when there is
+    no live session and safe when RUNPOD_API_KEY is unset."""
+    from compute.runpod.session import get_manager
+
+    while True:
+        try:
+            await get_manager().refresh()
+        except Exception as exc:  # noqa: BLE001
+            log.error("cloud.watchdog_error", error=str(exc))
+        await asyncio.sleep(30)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(get_settings().log_level)
     log.info("api.startup")
-    yield
-    log.info("api.shutdown")
+    watchdog = asyncio.create_task(_cloud_watchdog())
+    try:
+        yield
+    finally:
+        watchdog.cancel()
+        # mandatory teardown on shutdown: terminate any live warm pod so a connected GPU can never linger
+        # past the app (no-op when nothing is connected).
+        try:
+            from compute.runpod.session import get_manager
+
+            await get_manager().disconnect(terminate=True)
+        except Exception as exc:  # noqa: BLE001
+            log.error("cloud.shutdown_teardown_error", error=str(exc))
+        log.info("api.shutdown")
 
 
 app = FastAPI(title="LabeloxAV", version="0.1.0", lifespan=lifespan)
@@ -205,9 +239,14 @@ app.include_router(review.router, prefix="/api", tags=["review"])
 app.include_router(intelligence.router, prefix="/api", tags=["intelligence"])
 app.include_router(search.router, prefix="/api", tags=["search"])
 app.include_router(analytics.router, prefix="/api", tags=["analytics"])
+app.include_router(cloud.router, prefix="/api", tags=["cloud"])
 app.include_router(models.router, prefix="/api", tags=["models"])
 app.include_router(export.router, prefix="/api", tags=["export"])
 app.include_router(quality.router, prefix="/api", tags=["quality"])
+app.include_router(recall.router, prefix="/api", tags=["recall"])
+app.include_router(adverse.router, prefix="/api", tags=["adverse"])
+app.include_router(segment_assist.router, prefix="/api", tags=["segment"])
+app.include_router(segmentation.router, prefix="/api", tags=["segmentation"])
 app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(imports.router, prefix="/api", tags=["imports"])
 app.include_router(training.router, prefix="/api", tags=["training"])
@@ -231,6 +270,8 @@ app.include_router(dynamics.router, prefix="/api", tags=["dynamics"])
 app.include_router(discovery.router, prefix="/api", tags=["discovery"])
 app.include_router(lanes.router, prefix="/api", tags=["lanes"])
 app.include_router(lidar.router, prefix="/api", tags=["lidar"])
+app.include_router(objects3d.router, prefix="/api", tags=["lidar"])
+app.include_router(lidar_scene.router, prefix="/api", tags=["lidar"])
 app.include_router(drivable.router, prefix="/api", tags=["drivable"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])

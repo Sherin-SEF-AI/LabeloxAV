@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
 
 // New Annotation: upload a folder of images (zip), a video, or an mcap; import it into a fresh
 // session, then jump straight into the frame editor on the first frame. The bytes go browser ->
@@ -164,11 +164,25 @@ export default function NewAnnotationPage() {
 
   const busy = phase !== "idle";
 
-  return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="NEW" />
+  const primaryAction = (
+    <button
+      onClick={onGo}
+      disabled={!file || busy}
+      className="font-mono text-xs border border-line px-3 py-1 hover:border-accent disabled:opacity-50"
+    >
+      {phase === "uploading"
+        ? `uploading ${(uploadFrac * 100).toFixed(0)}%`
+        : phase === "importing"
+          ? "importing..."
+          : phase === "opening"
+            ? "opening..."
+            : "Create annotation"}
+    </button>
+  );
 
-      <main className="flex-1 overflow-auto p-4">
+  return (
+    <PageShell active="NEW" title="New Annotation" primaryAction={primaryAction}>
+      <div className="p-4">
         <div className="max-w-2xl w-full mx-auto space-y-4">
           <Section title="new annotation - upload images, video, or mcap">
             <div
@@ -241,19 +255,6 @@ export default function NewAnnotationPage() {
             </div>
 
             <div className="flex items-center gap-3 mt-3">
-              <button
-                onClick={onGo}
-                disabled={!file || busy}
-                className="font-mono text-xs border border-line px-3 py-1 hover:border-accent disabled:opacity-50"
-              >
-                {phase === "uploading"
-                  ? `uploading ${(uploadFrac * 100).toFixed(0)}%`
-                  : phase === "importing"
-                    ? "importing..."
-                    : phase === "opening"
-                      ? "opening..."
-                      : "Create annotation"}
-              </button>
               {(phase === "uploading" || phase === "importing") && (
                 <div className="flex-1 h-2 bg-line relative">
                   <div
@@ -297,7 +298,7 @@ export default function NewAnnotationPage() {
             </button>
           </div>
         </div>
-      </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }

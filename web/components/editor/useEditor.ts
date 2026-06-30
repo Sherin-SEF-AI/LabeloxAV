@@ -6,7 +6,7 @@
 
 import { useReducer } from "react";
 
-export type Tool = "select" | "box" | "polygon" | "keypoint" | "measure" | "sam-point" | "sam-box";
+export type Tool = "select" | "box" | "polygon" | "polyline" | "adverse" | "cuboid" | "keypoint" | "measure" | "sam-point" | "sam-box" | "magic-wand" | "brush" | "eraser" | "superpixel";
 
 export type EdObject = {
   id: string; // server object_id, or "tmp-N" for locally-created
@@ -24,6 +24,8 @@ export type EdObject = {
   version?: number; // optimistic-lock version from the server; sent back on save to detect stale writes
   rot?: number; // oriented-box rotation in degrees about the box centre (0 = axis-aligned)
   keypoints?: { skeleton: string; points: number[][] }; // COCO-style pose [[x,y,v],...]
+  polyline?: number[][]; // open linear feature (curb/road_edge/barrier) as ordered [[x,y],...]
+  cuboid_3d?: { center: number[]; size: number[]; yaw: number } | null; // ego-frame 3D box (size [w,l,h])
 };
 
 export type Viewport = { scale: number; ox: number; oy: number };
@@ -49,6 +51,7 @@ export type Action =
   | { t: "add"; obj: EdObject }
   | { t: "update"; id: string; patch: Partial<EdObject> }
   | { t: "acceptAll" }
+  | { t: "reviewed"; id: string; state: string; version?: number }
   | { t: "delete"; id: string }
   | { t: "undo" }
   | { t: "redo" }
@@ -60,6 +63,16 @@ export function tmpId(): string {
 }
 
 const snap = (s: EditorState): Snapshot => ({ objects: s.objects, deleted: s.deleted });
+
+// An object id is unique by construction, so editor state must never hold two objects with the same
+// id. A collision can arise when an idempotent server create returns an id already in the list (a temp
+// id remapped onto an existing object after undo/redo): collapse to the most recent so the Konva layer
+// never renders two children with the same key.
+function uniqById(objs: EdObject[]): EdObject[] {
+  const byId = new Map<string, EdObject>();
+  for (const o of objs) byId.set(o.id, o);
+  return Array.from(byId.values());
+}
 
 const HISTORY_CAP = 100;
 
@@ -88,7 +101,7 @@ function restore(s: EditorState, target: Snapshot): Snapshot {
     return differs(cur, o) ? { ...o, dirty: true } : o;
   });
   const gone = s.objects.filter((o) => !o.isNew && !targetIds.has(o.id)).map((o) => o.id);
-  return { objects, deleted: Array.from(new Set([...target.deleted, ...gone])) };
+  return { objects: uniqById(objects), deleted: Array.from(new Set([...target.deleted, ...gone])) };
 }
 
 export function isDirty(s: EditorState): boolean {
@@ -99,7 +112,7 @@ function reducer(s: EditorState, a: Action): EditorState {
   switch (a.t) {
     case "load":
       return {
-        objects: a.objects,
+        objects: uniqById(a.objects),
         deleted: [],
         selectedId: a.selectedId ?? null,
         tool: "select",
@@ -118,7 +131,7 @@ function reducer(s: EditorState, a: Action): EditorState {
     case "candidate":
       return { ...s, candidate: a.polys };
     case "add":
-      return { ...mutate(s, { objects: [...s.objects, a.obj], deleted: s.deleted }), selectedId: a.obj.id };
+      return { ...mutate(s, { objects: uniqById([...s.objects, a.obj]), deleted: s.deleted }), selectedId: a.obj.id };
     case "update":
       return {
         ...mutate(s, {
@@ -135,6 +148,14 @@ function reducer(s: EditorState, a: Action): EditorState {
           o.isNew || !s.touched.includes(o.id) ? o : { ...o, state: "accepted", dirty: true }),
         deleted: s.deleted,
       });
+    case "reviewed":
+      // A review (accept/reject) already persisted to the server via api.review with an explicit state, so
+      // set the object's state and new version WITHOUT marking it dirty (dirty would make autosave re-write
+      // it with the role's default accept-state, clobbering an explicit reject). Not an undoable edit.
+      return {
+        ...s,
+        objects: s.objects.map((o) => (o.id === a.id ? { ...o, state: a.state, version: a.version ?? o.version, dirty: false } : o)),
+      };
     case "delete": {
       const obj = s.objects.find((o) => o.id === a.id);
       const deleted = obj && !obj.isNew ? [...s.deleted, a.id] : s.deleted;
@@ -164,10 +185,10 @@ function reducer(s: EditorState, a: Action): EditorState {
       return {
         ...s,
         deleted: [],
-        objects: s.objects.map((o) => ({
+        objects: uniqById(s.objects.map((o) => ({
           ...o, id: a.remap[o.id] ?? o.id, isNew: false, dirty: false,
           version: a.versions?.[o.id] ?? o.version,
-        })),
+        }))),
         // Keep the undo history across autosaves: remap temp ids, mark snapshot objects saved, and drop
         // pending deletes (restore() recomputes them). Without this, autosave wipes undo/redo entirely.
         past: s.past.map((sn) => ({ objects: sn.objects.map(remap), deleted: [] })),

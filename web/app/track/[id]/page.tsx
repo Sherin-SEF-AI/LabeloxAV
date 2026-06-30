@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import type { Ontology, Track } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import BackButton from "@/components/BackButton";
+import PageHeaderBar from "@/components/shell/PageHeaderBar";
 
 // Tracklet editor: scan a track across frames as a strip, spot class flips (the cells that disagree
 // with the dominant class glow red), and fix the whole track in one action. One relabel corrects every
@@ -80,25 +81,32 @@ export default function TrackEditor() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="flex items-center gap-3 px-4 h-12 border-b hairline">
+      <div className="flex items-center gap-3 px-4 h-11 border-b hairline shrink-0">
         <BackButton />
         <button onClick={() => router.push("/")} className="font-display font-bold" title="home (triage)">
           Labelox<span className="text-accent">AV</span>
         </button>
         <span className="font-mono text-xs text-ink-3">/ TRACK <span className="text-ink-2">{id.slice(0, 8)}</span></span>
-        <div className="ml-auto flex items-center gap-3 font-mono text-[11px]">
-          <span className="text-ink-3">{track.n_frames} frames</span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 inline-block" style={{ background: classColor(track.items[0]?.class_id ?? 0) }} />
-            {track.dominant}
-          </span>
-          {track.flips ? (
-            <span className="text-block">class flips: {Object.keys(track.classes).length} classes</span>
-          ) : (
-            <span className="text-pass">consistent</span>
-          )}
-        </div>
-      </header>
+      </div>
+
+      <PageHeaderBar
+        title="Track"
+        subtitle={id.slice(0, 8)}
+        meta={
+          <>
+            <span className="text-ink-3">{track.n_frames} frames</span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 inline-block" style={{ background: classColor(track.items[0]?.class_id ?? 0) }} />
+              {track.dominant}
+            </span>
+            {track.flips ? (
+              <span className="text-block">class flips: {Object.keys(track.classes).length} classes</span>
+            ) : (
+              <span className="text-pass">consistent</span>
+            )}
+          </>
+        }
+      />
 
       <main className="flex-1 overflow-auto p-4 space-y-4">
         {msg && <div className="panel px-3 py-1.5 font-mono text-[11px] text-warn">{msg}</div>}

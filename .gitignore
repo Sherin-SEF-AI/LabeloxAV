@@ -22,3 +22,4 @@ AUDIT.md
 *.bin
 *.pcd
 !docs/screenshots/*.png
+web/.design-ref/

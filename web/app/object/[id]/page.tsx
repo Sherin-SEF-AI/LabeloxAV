@@ -5,8 +5,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, type SimilarObject } from "@/lib/api";
 import type { ObjectDetail, Ontology } from "@/lib/types";
-import { StateBadge } from "@/components/StateBadge";
+import { StateBadge, ConfBar } from "@/components/StateBadge";
 import BackButton from "@/components/BackButton";
+import PageHeaderBar from "@/components/shell/PageHeaderBar";
+import Inspector from "@/components/shell/Inspector";
 
 const AnnotationCanvas = dynamic(() => import("@/components/AnnotationCanvas"), { ssr: false });
 
@@ -86,24 +88,29 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
 
   return (
     <div className={`min-h-screen flex flex-col ${flash ? "confirm-flash" : ""}`}>
-      <header className="flex items-center justify-between px-4 h-12 border-b hairline font-mono text-xs">
-        <div className="flex items-center gap-3">
-          <BackButton />
-          <button onClick={() => router.push("/")} className="font-display font-bold" title="home (triage)">
-            Labelox<span className="text-accent">AV</span>
-          </button>
-          <span className="text-ink-3">/ OBJECT</span>
-          <span>{obj.object_id.slice(0, 8)}</span>
-          <span className="text-ink-3">
-            {obj.cam_id} · ts {String(obj.ts_ns).slice(0, 13)}
-          </span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-ink-3">conf</span>
-          <span>{obj.conf.toFixed(2)}</span>
-          <StateBadge state={obj.state} />
-        </div>
-      </header>
+      <PageHeaderBar
+        title="Object"
+        subtitle={obj.object_id.slice(0, 8)}
+        meta={
+          <>
+            <BackButton />
+            <span>{obj.cam_id} · ts {String(obj.ts_ns).slice(0, 13)}</span>
+            <span className="text-ink-3">{cls}</span>
+            <ConfBar conf={obj.conf} />
+            <StateBadge state={obj.state} />
+          </>
+        }
+        primaryAction={
+          <div className="flex gap-2">
+            <button onClick={save} className="border border-pass text-pass px-3 py-1 font-mono hover:bg-pass/10">
+              SAVE ⏎
+            </button>
+            <button onClick={() => router.push("/")} className="border border-line text-ink-2 px-3 py-1 font-mono hover:text-ink">
+              SKIP ␣
+            </button>
+          </div>
+        }
+      />
 
       <div className="flex flex-1 min-h-0">
         <main className="flex-1 min-w-0 p-4 overflow-auto bg-bg-2">
@@ -122,7 +129,8 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
           </div>
         </main>
 
-        <aside className="w-72 border-l hairline p-4 space-y-5 overflow-auto">
+        <Inspector title="object" side="right">
+          <div className="p-4 space-y-5">
           <section>
             <div className="font-mono text-[11px] text-ink-3 uppercase mb-2">class</div>
             <div className="space-y-1">
@@ -211,16 +219,8 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
               </div>
             )}
           </section>
-
-          <div className="flex gap-2 pt-2">
-            <button onClick={save} className="flex-1 border border-pass text-pass text-sm py-1.5 font-mono hover:bg-pass/10">
-              SAVE ⏎
-            </button>
-            <button onClick={() => router.push("/")} className="flex-1 border border-line text-ink-2 text-sm py-1.5 font-mono hover:text-ink">
-              SKIP ␣
-            </button>
           </div>
-        </aside>
+        </Inspector>
       </div>
     </div>
   );

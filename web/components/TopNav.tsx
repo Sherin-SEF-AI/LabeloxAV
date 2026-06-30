@@ -2,30 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import UserPicker from "./UserPicker";
+import AppSwitcher from "./shell/AppSwitcher";
+import CommandPalette from "./shell/CommandPalette";
+import ShortcutOverlay from "./shell/ShortcutOverlay";
+import CloudControl from "./shell/CloudControl";
 
-// Shared app navigation. One header across every workspace page, with the active page in accent.
-// Operational Materialism: color is earned; nav is grey, the current page is the only accent.
-
-const LINKS = [
-  { href: "/", label: "TRIAGE" },
-  { href: "/annotate/new", label: "NEW" },
-  { href: "/annotations", label: "OPEN" },
-  { href: "/scenarios", label: "SCENARIOS" },
-  { href: "/analytics", label: "ANALYTICS" },
-  { href: "/search", label: "SEARCH" },
-  { href: "/discovery", label: "DISCOVERY" },
-  { href: "/curation", label: "CURATION" },
-  { href: "/calibration", label: "CALIBRATION" },
-  { href: "/map", label: "MAP" },
-  { href: "/quality", label: "QUALITY" },
-  { href: "/training", label: "TRAINING" },
-  { href: "/import", label: "IMPORT" },
-  { href: "/datasets", label: "DATASETS" },
-  { href: "/review/queue", label: "REVIEW" },
-  { href: "/govern", label: "GOVERN" },
-  { href: "/collaborate", label: "COLLABORATE" },
-  { href: "/jobs", label: "JOBS" },
-];
+// Shared app navigation. The flat link row (which overflowed once the platform had ~20 destinations) is
+// replaced by a grouped app switcher plus a Cmd+K command palette, so nav grows by organization. The
+// {active, right} interface is preserved, so every page that renders TopNav keeps working unchanged; the
+// active label now reads as a quiet breadcrumb.
 
 export default function TopNav({ active, right }: { active: string; right?: React.ReactNode }) {
   const router = useRouter();
@@ -35,21 +20,22 @@ export default function TopNav({ active, right }: { active: string; right?: Reac
         <button onClick={() => router.push("/")} className="font-display font-bold shrink-0" title="home (triage)">
           Labelox<span className="text-accent">AV</span>
         </button>
-        <nav className="flex items-center gap-3 overflow-x-auto no-scrollbar">
-          {LINKS.map((l) => (
-            <button key={l.href} onClick={() => router.push(l.href)}
-              className={`font-mono text-xs whitespace-nowrap border-b-2 -mb-px pb-px ${
-                active === l.label ? "text-accent border-accent" : "text-ink-3 border-transparent hover:text-ink-2"
-              }`}>
-              {l.label}
-            </button>
-          ))}
-        </nav>
+        <AppSwitcher />
+        <button onClick={() => window.dispatchEvent(new Event("lbx:palette"))} title="command palette (Cmd+K)"
+          className="font-mono text-[11px] text-ink-3 border border-line px-2 py-1 hover:border-accent">
+          go to <span className="text-ink-2">Cmd K</span>
+        </button>
+        <button onClick={() => window.dispatchEvent(new Event("lbx:shortcuts"))} title="keyboard shortcuts (?)"
+          className="font-mono text-[11px] text-ink-3 border border-line px-2 py-1 hover:border-accent">?</button>
+        <span className="font-mono text-xs text-ink-3 truncate">/ {active}</span>
       </div>
       <div className="flex items-center gap-3 font-mono text-xs shrink-0">
         {right}
+        <CloudControl />
         <UserPicker />
       </div>
+      <CommandPalette />
+      <ShortcutOverlay />
     </header>
   );
 }

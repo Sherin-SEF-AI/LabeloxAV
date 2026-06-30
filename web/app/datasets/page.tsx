@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { DatasetDetail, DatasetRow } from "@/lib/types";
-import TopNav from "@/components/TopNav";
+import PageShell from "@/components/shell/PageShell";
 
 // Datasets + delivery: seal a versioned dataset (a background export job) and download the formats.
 // This is the "product out" surface - how labeled data leaves the engine.
@@ -62,9 +62,12 @@ export default function DatasetsPage() {
   const toggleFmt = (f: string) => setFmts((s) => (s.includes(f) ? s.filter((x) => x !== f) : [...s, f]));
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopNav active="DATASETS" right={<span className="text-ink-3">{rows.length} sealed</span>} />
-      <main className="flex-1 overflow-auto p-4 space-y-4 max-w-4xl w-full mx-auto">
+    <PageShell
+      active="DATASETS"
+      title="Sealed Datasets"
+      right={<span className="text-ink-3">{rows.length} sealed</span>}
+    >
+      <div className="p-4 space-y-4 max-w-4xl w-full mx-auto">
         <Section title="new export (seal a versioned dataset)">
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 font-mono text-xs">
             <label className="flex flex-col gap-1">
@@ -131,7 +134,7 @@ export default function DatasetsPage() {
             <div className="font-mono text-xs text-ink-3 py-4 text-center">no datasets sealed yet</div>
           )}
         </Section>
-      </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }
