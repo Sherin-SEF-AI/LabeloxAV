@@ -31,6 +31,16 @@ async def inter_annotator_agreement(body: IaaIn):
     return iaa_score(body.set_a, body.set_b, body.iou_thresh)
 
 
+@router.get("/quality/attr-audit/{session_id}")
+async def attr_audit(session_id: str):
+    """Milestone I: scan a session's objects for attribute-schema violations against each object's current
+    class (surfaces labels invalidated by a class change or written before validation)."""
+    from uuid import UUID
+
+    from services.quality.attr_audit import session_attr_audit
+    return await session_attr_audit(UUID(session_id))
+
+
 @router.get("/quality/gold-sets")
 async def gold_sets():
     return await list_gold_sets()

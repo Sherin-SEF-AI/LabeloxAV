@@ -150,6 +150,9 @@ async def edit_object3d(object_3d_id: uuid.UUID, body: Cuboid3DEdit, db: AsyncSe
     if body.center is not None:
         o.center = body.center
     if body.attrs is not None:
+        errors = get_ontology().validate_attrs(body.attrs, o.class_id)   # gate bad attrs at write time
+        if errors:
+            raise HTTPException(422, {"attr_errors": errors})
         o.attrs = body.attrs
     if body.ground_snap:
         pc = await db.get(PointCloud, o.cloud_id)
