@@ -108,6 +108,15 @@ async def smooth_track_path(track_id: UUID, window: int = 5, db: AsyncSession = 
     return await smooth_track(track_id, window)
 
 
+@router.get("/tracks/{track_id}/attribute-timeline")
+async def attribute_timeline(track_id: UUID, key: str, db: AsyncSession = Depends(db_session)):
+    """M-4D / Milestone G: the transition timeline of one attribute across a track (e.g. signal_state,
+    brake, indicator), as contiguous value segments so the change points are explicit."""
+    from services.temporal.attributes import track_attribute_timeline
+
+    return await track_attribute_timeline(track_id, key)
+
+
 @router.post("/objects/{object_id}/keyframe")
 async def set_keyframe(object_id: UUID, value: bool = True, db: AsyncSession = Depends(db_session)):
     from services.temporal.keyframes import mark_keyframe
