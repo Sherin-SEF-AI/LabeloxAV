@@ -603,6 +603,25 @@ class TimelineEvent(Base):
     __table_args__ = (Index("ix_timeline_event_session_t", "session_id", "t_start_ns"),)
 
 
+class SpeechSegment(Base):
+    # Milestone D: a detected human-speech region on a session's audio, the third DPDPA modality alongside
+    # face and plate. is_personal defaults True (speech is personal until confirmed otherwise); redacted is
+    # False until the audio is masked. The unified export gate refuses any clip with a personal, un-redacted
+    # speech segment, the same fail-closed posture as un-redacted faces and plates.
+    __tablename__ = "speech_segment"
+
+    segment_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    t_start_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    t_end_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    is_personal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    redacted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    method_version: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_speech_segment_session", "session_id"),)
+
+
 class MapCommit(Base):
     # A fused, versioned HD-map output (content-addressed, like DatasetCommit).
     __tablename__ = "map_commit"

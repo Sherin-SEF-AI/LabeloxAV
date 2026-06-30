@@ -161,6 +161,10 @@ async def test_export_openlabel_and_nuscenes_through_driver():
                          city="BLR", sensors={}, ontology_version="labelox-in-0.1.0"))
         db.add(Frame(frame_id=fid, session_id=sid, ts_ns=start, cam_id="cam_f", img_uri=f"s3://x/{fid}.jpg",
                      width=640, height=480, quality=0.9))
+        # anonymized at ingest (0 PII), so the DPDPA export gate passes
+        from db.models import PiiAudit
+        db.add(PiiAudit(frame_id=fid, session_id=sid, n_faces=0, n_plates=0, regions=[],
+                        method_version="test", ts_ns=start))
         db.add(Object(object_id=oid, frame_id=fid, class_id=6, bbox=[100, 100, 200, 200], conf=0.97,
                       mask_uri=mask_uri, mask_encoding="polygon", attrs={"overload": True},
                       source="auto_accept", state="auto_accept", provenance={"agreement": True}))
