@@ -107,6 +107,10 @@ backfill-embeddings: ## Backfill DINOv3 + SigLIP2 embeddings (frames + crops). U
 embed-worker: ## Run the frame.ready embedding consumer (embeds new frames automatically)
 	$(RUN) python -m services.intelligence.embed.consumer
 
+.PHONY: cloud-perception
+cloud-perception: ## Drivable segmentation on the pod, then auto-stop. Usage: make cloud-perception ARGS="--corpus --limit 200 --batches 12"
+	$(RUN) python -m services.perception.cloud $(ARGS)
+
 .PHONY: cloud-autolabel
 cloud-autolabel: ## Heavy autolabel (SAM3.1+Qwen3-VL+YOLO26) on the A100 pod. Needs the pod up.
 	@echo "Cloud autolabel dispatch (contract: services/autolabel/cloud.py):"

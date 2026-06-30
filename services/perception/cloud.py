@@ -1,12 +1,15 @@
-"""Local orchestrator for the pod perception sweep (drivable via SAM 3.1 PCS, lanes via CLRerNet).
+"""Local orchestrator for the pod perception sweep (drivable semantic segmentation; lanes when wired).
 
-Exports a session's frames from MinIO to a temp dir, starts the existing pod (runpodctl start), waits for
-ssh, pushes the frames + cloud/perception_pod.py, runs it, pulls perception.jsonl, and ingests the results
-into DrivableMask + Lane. Mirrors the proven scp/ssh path in cloud/provision_runpod.sh. The pod is stopped
-by the caller (make target) to cap billing. Drivable uses the smoke-verified SAM 3.1 PCS loader; lanes are
-guarded on the pod so a CLRerNet failure never blocks drivable.
+Exports frames from MinIO to a temp dir, starts the pod, pushes the frames + cloud/perception_pod.py, runs
+it, pulls perception.jsonl, and ingests into DrivableMask + Lane, mirroring the proven scp/ssh path in
+cloud/provision_runpod.sh. The pod is ALWAYS stopped after the run (finally) to cap billing, unless
+--keep-pod. Sweeps default to clean real frames only (>=1280 wide, selected=true), so quarantined synthetic
+noise is never sent to the GPU. Drivable uses SegFormer-Cityscapes (public); gated models read HF_TOKEN from
+the pod env.
 
-Run: .venv/bin/python -m services.perception.cloud --session <id> --limit 20 [--lanes] [--keep-pod]
+Run: python -m services.perception.cloud --session <id> --limit 50          # one session, clean frames
+     python -m services.perception.cloud --corpus --limit 200 --batches 12   # whole corpus, batched
+     python -m services.perception.cloud --frames <id,id,...>                # specific frames
 """
 
 from __future__ import annotations
@@ -42,7 +45,7 @@ def _api(*args: str) -> dict:
 
 def start_pod_and_wait() -> tuple[str, str]:
     """Start the pod if stopped and poll pod-status for a public ssh endpoint (ip, port)."""
-    subprocess.run(["runpodctl", "start", "pod", POD_ID], capture_output=True, text=True)
+    subprocess.run(["runpodctl", "pod", "start", POD_ID], capture_output=True, text=True)
     for _ in range(36):                                       # up to 6 min
         st = _api("pod-status", POD_ID)
         ssh = st.get("ssh")
@@ -53,6 +56,15 @@ def start_pod_and_wait() -> tuple[str, str]:
     raise RuntimeError("pod did not expose ssh within 6 min")
 
 
+def stop_pod() -> None:
+    """Stop the pod to cap billing. Best-effort: never raises, so it is safe in a finally block."""
+    try:
+        _api("stop-pod", POD_ID)
+        log.info("perception.pod_stopped", pod=POD_ID)
+    except Exception as exc:  # noqa: BLE001  cost-safety must not mask the real error
+        log.warning("perception.pod_stop_failed", error=str(exc)[:120])
+
+
 def _scp(port: str, src: list[str], dst: str) -> None:
     subprocess.run(["scp", *SSHO, "-P", port, "-r", *src, dst], check=True)
 
@@ -61,23 +73,30 @@ def _ssh(ip: str, port: str, cmd: str) -> int:
     return subprocess.run(["ssh", *SSHO, "-p", port, f"root@{ip}", cmd]).returncode
 
 
-async def export_frames(session_id: UUID, limit: int, local_dir: Path,
-                        frame_ids: list[str] | None = None) -> list[dict]:
+async def export_frames(session_id: UUID | None, limit: int, local_dir: Path,
+                        frame_ids: list[str] | None = None, clean_only: bool = True) -> list[dict]:
     """Download frame images from MinIO to local_dir and build the pod manifest. frame_ids targets specific
-    frames (e.g. the one a reviewer flagged); otherwise sweep the session in time order up to limit."""
-    from sqlalchemy import select
+    frames; else sweep a session (or the whole corpus if session_id is None) in time order up to limit.
+    clean_only restricts a sweep to real, selected dashcam frames (>=1280 wide, selected=true), so the pod
+    never wastes GPU time on quarantined synthetic noise frames."""
+    from sqlalchemy import and_, select
 
     from db.models import Frame
     from db.session import get_sessionmaker
     store = get_object_store()
     local_dir.mkdir(parents=True, exist_ok=True)
+    real = and_(Frame.img_uri.like("s3://labeloxav%"), Frame.width >= 1280, Frame.selected.is_(True))
     async with get_sessionmaker()() as db:
         if frame_ids:
             rows = (await db.execute(select(Frame.frame_id, Frame.img_uri)
                     .where(Frame.frame_id.in_([UUID(f) for f in frame_ids])))).all()
         else:
-            rows = (await db.execute(select(Frame.frame_id, Frame.img_uri)
-                    .where(Frame.session_id == session_id).order_by(Frame.ts_ns).limit(limit))).all()
+            stmt = select(Frame.frame_id, Frame.img_uri).order_by(Frame.ts_ns).limit(limit)
+            if session_id is not None:
+                stmt = stmt.where(Frame.session_id == session_id)
+            if clean_only:
+                stmt = stmt.where(real)
+            rows = (await db.execute(stmt)).all()
     manifest = []
     for fid, uri in rows:
         name = f"{fid}.jpg"
@@ -90,7 +109,7 @@ async def export_frames(session_id: UUID, limit: int, local_dir: Path,
 
 async def ingest(result_path: Path) -> dict:
     """Write perception.jsonl into DrivableMask + Lane (proposed)."""
-    from sqlalchemy import delete, select
+    from sqlalchemy import delete
 
     from db.models import DrivableMask, Frame, Lane
     from db.session import get_sessionmaker
@@ -130,39 +149,67 @@ async def ingest(result_path: Path) -> dict:
     return {"drivable": n_dr, "lanes": n_lane, "errors": n_err}
 
 
+def _run_sweep_on_pod(root: Path, work: Path, lanes: bool) -> None:
+    """Start the pod, push the runtime + frames, run perception, pull the result. Always stops the pod in a
+    finally so a crash mid-sweep cannot leave a billing GPU running (override with --keep-pod)."""
+    ip, port = start_pod_and_wait()
+    try:
+        target = f"root@{ip}"
+        _ssh(ip, port, "mkdir -p /workspace/percep_in")
+        push = [str(root / "cloud" / "perception_pod.py")]
+        if lanes:
+            push.append(str(root / "cloud" / "setup_perception.sh"))
+        _scp(port, push, f"{target}:/workspace/")
+        _scp(port, [str(p) for p in work.glob("*.jpg")] + [str(work / "manifest.jsonl")],
+             f"{target}:/workspace/percep_in/")
+        if lanes:
+            _ssh(ip, port, "bash /workspace/setup_perception.sh || echo '[lanes] setup failed (drivable unaffected)'")
+        lanes_flag = "--lanes" if lanes else ""
+        # HF_TOKEN (for gated models) is read from the pod env if set; the default SegFormer-Cityscapes is public.
+        rc = _ssh(ip, port, f"cd /workspace && .venv/bin/python perception_pod.py "
+                            f"--manifest percep_in/manifest.jsonl --out percep_out.jsonl {lanes_flag}")
+        if rc != 0:
+            raise RuntimeError("pod perception run failed (see ssh output)")
+        _scp(port, [f"{target}:/workspace/percep_out.jsonl"], str(work / "percep_out.jsonl"))
+    finally:
+        if os.environ.get("LBX_KEEP_POD") != "1":
+            stop_pod()
+
+
 async def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--session", default=None)
+    ap.add_argument("--session", default=None, help="sweep one session (omit with --corpus for all sessions)")
+    ap.add_argument("--corpus", action="store_true", help="sweep across all sessions (clean frames only)")
     ap.add_argument("--frames", default=None, help="comma-separated frame ids to target instead of a sweep")
-    ap.add_argument("--limit", type=int, default=20)
+    ap.add_argument("--limit", type=int, default=20, help="max frames per run (batch size for a corpus sweep)")
+    ap.add_argument("--batches", type=int, default=1, help="number of --limit-sized batches to process")
+    ap.add_argument("--all-frames", action="store_true", help="include quarantined synthetic frames (default: clean only)")
     ap.add_argument("--lanes", action="store_true")
+    ap.add_argument("--keep-pod", action="store_true", help="do not stop the pod after the run")
     args = ap.parse_args()
+    if args.keep_pod:
+        os.environ["LBX_KEEP_POD"] = "1"
 
     root = Path(__file__).resolve().parents[2]
     work = root / ".perception_work"
     frame_ids = [f.strip() for f in args.frames.split(",")] if args.frames else None
     sid = UUID(args.session) if args.session else None
-    await export_frames(sid, args.limit, work, frame_ids)
+    clean_only = not args.all_frames
 
-    ip, port = start_pod_and_wait()
-    target = f"root@{ip}"
-    _ssh(ip, port, "mkdir -p /workspace/percep_in")
-    push = [str(root / "cloud" / "perception_pod.py")]
-    if args.lanes:
-        push.append(str(root / "cloud" / "setup_perception.sh"))
-    _scp(port, push, f"{target}:/workspace/")
-    _scp(port, [str(p) for p in work.glob("*.jpg")] + [str(work / "manifest.jsonl")],
-         f"{target}:/workspace/percep_in/")
-    if args.lanes:
-        _ssh(ip, port, "bash /workspace/setup_perception.sh || echo '[lanes] CLRerNet setup failed (drivable unaffected)'")
-    lanes_flag = "--lanes" if args.lanes else ""
-    rc = _ssh(ip, port, f"cd /workspace && .venv/bin/python perception_pod.py "
-                        f"--manifest percep_in/manifest.jsonl --out percep_out.jsonl {lanes_flag}")
-    if rc != 0:
-        raise RuntimeError("pod perception run failed (see ssh output)")
-    _scp(port, [f"{target}:/workspace/percep_out.jsonl"], str(work / "percep_out.jsonl"))
-    res = await ingest(work / "percep_out.jsonl")
-    print(json.dumps({"session": args.session, **res}))
+    totals = {"drivable": 0, "lanes": 0, "errors": 0, "frames": 0}
+    for b in range(max(1, args.batches)):
+        manifest = await export_frames(sid, args.limit, work, frame_ids, clean_only=clean_only)
+        if not manifest:
+            log.info("perception.no_frames", batch=b)
+            break
+        _run_sweep_on_pod(root, work, args.lanes)
+        res = await ingest(work / "percep_out.jsonl")
+        for k in ("drivable", "lanes", "errors"):
+            totals[k] += res.get(k, 0)
+        totals["frames"] += len(manifest)
+        if frame_ids:                     # explicit frame list is a single pass
+            break
+    print(json.dumps({"session": args.session, "corpus": args.corpus, **totals}))
 
 
 if __name__ == "__main__":
