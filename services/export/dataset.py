@@ -196,10 +196,12 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
     async with maker() as db:
         existing = await db.get(DatasetCommit, commit_id)
         if existing is None:
+            from services.export.snapshots import resolve_parent
+            parent_id = await resolve_parent(db, spec.name, commit_id)   # chain lineage to the prior snapshot
             db.add(
                 DatasetCommit(
                     commit_id=commit_id,
-                    parent_id=None,
+                    parent_id=parent_id,
                     slice_spec=spec.model_dump(),
                     object_count=len(records),
                     ontology_version=onto.version,

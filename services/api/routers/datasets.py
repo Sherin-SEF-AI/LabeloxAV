@@ -72,6 +72,26 @@ async def list_datasets(limit: int = 100, db: AsyncSession = Depends(db_session)
     ]
 
 
+@router.get("/datasets/{commit_id}/lineage")
+async def dataset_lineage(commit_id: str):
+    """Milestone I: walk a snapshot's parent chain back to its root (the slice's version history)."""
+    from services.export.snapshots import lineage
+    res = await lineage(commit_id)
+    if res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@router.get("/datasets/{a_id}/diff/{b_id}")
+async def dataset_diff(a_id: str, b_id: str):
+    """Milestone I: what changed between two snapshots (count deltas, ontology change, slice-spec changes)."""
+    from services.export.snapshots import compare_commits
+    res = await compare_commits(a_id, b_id)
+    if res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
+
+
 @router.get("/datasets/{commit_id}")
 async def dataset_detail(commit_id: str, db: AsyncSession = Depends(db_session)):
     d = await db.get(DatasetCommit, commit_id)
