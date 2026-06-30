@@ -7,13 +7,14 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from db.models import TrainingJob
 from services.analytics.curation import curation_summary, diverse_sample
-from services.api.deps import db_session
+from services.api.deps import db_session, require_role
 
 log = get_logger("api_curation")
 router = APIRouter()
@@ -22,6 +23,39 @@ router = APIRouter()
 @router.get("/curation/summary")
 async def summary(session_id: str | None = None):
     return await curation_summary(session_id)
+
+
+class SliceIn(BaseModel):
+    name: str
+    predicate: dict = {}
+    description: str | None = None
+
+
+@router.post("/curation/slices", dependencies=[Depends(require_role("reviewer"))])
+async def create_curation_slice(body: SliceIn):
+    """Milestone I: define a named, reusable dataset cohort (scene + class/state/geo/conf predicate)."""
+    from services.curation.slices import create_slice
+    return await create_slice(body.name, body.predicate, body.description)
+
+
+@router.get("/curation/slices")
+async def list_curation_slices(db: AsyncSession = Depends(db_session)):
+    from db.models import CurationSlice
+    rows = (await db.execute(select(CurationSlice).order_by(CurationSlice.created_at.desc()))).scalars().all()
+    return [{"slice_id": str(s.slice_id), "name": s.name, "description": s.description,
+             "predicate": s.predicate, "version": s.version} for s in rows]
+
+
+@router.get("/curation/slices/{slice_id}/materialize")
+async def materialize_curation_slice(slice_id: str, sample: int = 20):
+    """The cohort size and a sample of matching frames, so a curator sees the slice before exporting it."""
+    from uuid import UUID
+
+    from services.curation.slices import materialize_slice
+    res = await materialize_slice(UUID(slice_id), sample)
+    if res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
 
 
 @router.post("/curation/extract")

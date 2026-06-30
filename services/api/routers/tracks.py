@@ -8,6 +8,7 @@ from collections import Counter
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,6 +71,43 @@ async def relabel_track(track_id: UUID, payload: RelabelTrackIn, db: AsyncSessio
     return {"track_id": str(track_id), "relabeled": len(rows), "class_name": payload.class_name}
 
 
+class MergeTrackIn(BaseModel):
+    from_track_id: UUID
+    force: bool = False
+
+
+class SplitTrackIn(BaseModel):
+    at_ts_ns: int
+
+
+@router.post("/tracks/{track_id}/merge")
+async def merge_track_ep(track_id: UUID, body: MergeTrackIn, db: AsyncSession = Depends(db_session),
+                         user=Depends(current_user)):
+    """Milestone G re-ID: merge a fragmented track (from_track_id) into this one. Refuses with 409 if the two
+    tracks share a frame (they coexist, so they are not the same object) unless force is set."""
+    from services.temporal.reid import merge_tracks
+
+    res = await merge_tracks(track_id, body.from_track_id, user.name if user else "annotator", force=body.force)
+    if res.get("error"):
+        raise HTTPException(400, res["error"])
+    if res.get("conflict"):
+        raise HTTPException(409, res)
+    return res
+
+
+@router.post("/tracks/{track_id}/split")
+async def split_track_ep(track_id: UUID, body: SplitTrackIn, db: AsyncSession = Depends(db_session),
+                         user=Depends(current_user)):
+    """Milestone G re-ID: split a track that collapsed two objects, at a frame timestamp. Objects at or after
+    the boundary move to a new track; objects before stay."""
+    from services.temporal.reid import split_track
+
+    res = await split_track(track_id, body.at_ts_ns, user.name if user else "annotator")
+    if res.get("error"):
+        raise HTTPException(400, res["error"])
+    return res
+
+
 @router.delete("/tracks/{track_id}")
 async def delete_track(track_id: UUID, db: AsyncSession = Depends(db_session)):
     rows = (await db.execute(select(Object).where(Object.track_id == track_id))).scalars().all()
@@ -106,6 +144,15 @@ async def smooth_track_path(track_id: UUID, window: int = 5, db: AsyncSession = 
     from services.temporal.trajectory import smooth_track
 
     return await smooth_track(track_id, window)
+
+
+@router.get("/tracks/{track_id}/attribute-timeline")
+async def attribute_timeline(track_id: UUID, key: str, db: AsyncSession = Depends(db_session)):
+    """M-4D / Milestone G: the transition timeline of one attribute across a track (e.g. signal_state,
+    brake, indicator), as contiguous value segments so the change points are explicit."""
+    from services.temporal.attributes import track_attribute_timeline
+
+    return await track_attribute_timeline(track_id, key)
 
 
 @router.post("/objects/{object_id}/keyframe")

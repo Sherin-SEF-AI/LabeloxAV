@@ -580,6 +580,63 @@ class CameraCalibration(Base):
     __table_args__ = (Index("ix_camera_calibration_session_cam", "session_id", "cam_id", unique=True),)
 
 
+class TimelineEvent(Base):
+    # Milestone B: a human or auto event on the canonical session timeline. modality is which signal it lives
+    # on (imu, audio, scene, geo, crossmodal); a crossmodal event binds an inertial spike, a frame, and an
+    # audio region at one instant. source=auto events are unconfirmed candidates (state=review), never
+    # auto-accepted. Optimistic concurrency via version, the same as Object.
+    __tablename__ = "timeline_event"
+
+    event_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    modality: Mapped[str] = mapped_column(String(16), nullable=False)        # imu|audio|scene|geo|crossmodal
+    t_start_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    t_end_ns: Mapped[int | None] = mapped_column(BigInteger)                 # null = a point event
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="human")  # human|auto|correlated
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="review")  # review|confirmed|rejected
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_timeline_event_session_t", "session_id", "t_start_ns"),)
+
+
+class SpeechSegment(Base):
+    # Milestone D: a detected human-speech region on a session's audio, the third DPDPA modality alongside
+    # face and plate. is_personal defaults True (speech is personal until confirmed otherwise); redacted is
+    # False until the audio is masked. The unified export gate refuses any clip with a personal, un-redacted
+    # speech segment, the same fail-closed posture as un-redacted faces and plates.
+    __tablename__ = "speech_segment"
+
+    segment_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    t_start_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    t_end_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    is_personal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    redacted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    method_version: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_speech_segment_session", "session_id"),)
+
+
+class CurationSlice(Base):
+    # Milestone I: a named, persisted dataset cohort. predicate is a query over the SigLIP2 scene axes
+    # (weather, time_of_day, road_type, density) plus class / state / city / confidence, so a cohort like
+    # "rare-class at night in rain" is defined once and reused for export, training, and review instead of
+    # re-typing an ad-hoc export SliceSpec each time. version carries optimistic concurrency.
+    __tablename__ = "curation_slice"
+
+    slice_id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(String(240))
+    predicate: Mapped[dict] = mapped_column(JSONB, default=dict)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class MapCommit(Base):
     # A fused, versioned HD-map output (content-addressed, like DatasetCommit).
     __tablename__ = "map_commit"

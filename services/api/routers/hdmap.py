@@ -9,12 +9,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from geoalchemy2 import Geometry
+from pydantic import BaseModel
 from sqlalchemy import cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Frame, MapCommit, MapElement
 from db.models import Session as DbSession
-from services.api.deps import db_session
+from services.api.deps import db_session, require_role
 
 router = APIRouter()
 
@@ -24,6 +25,28 @@ async def georef(session_id: str, height_m: float | None = None):
     from services.hdmap.georef import georef_session
 
     return await georef_session(UUID(session_id), height_m)
+
+
+class MetricElementIn(BaseModel):
+    kind: str                                 # lane|road_edge|stop_line|crosswalk|crossing
+    points_ego: list                          # [[x_forward, y_left], ...] metres
+    ref_lat: float
+    ref_lon: float
+    heading_rad: float = 0.0
+
+
+@router.post("/hdmap/elements/metric", dependencies=[Depends(require_role("annotator"))])
+async def create_metric_element_ep(session_id: str, body: MetricElementIn):
+    """Milestone F: a 3D metric polyline (lane boundary, stop line, crosswalk) drawn in the ego/BEV frame,
+    georeferenced into a world-space MapElement."""
+    from fastapi import HTTPException
+
+    from services.hdmap.metric_vector import create_metric_element
+    res = await create_metric_element(UUID(session_id), body.kind, body.points_ego, body.ref_lat,
+                                      body.ref_lon, body.heading_rad)
+    if res.get("error"):
+        raise HTTPException(422, res["error"])
+    return res
 
 
 @router.post("/hdmap/fuse")

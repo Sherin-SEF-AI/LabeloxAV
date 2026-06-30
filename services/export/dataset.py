@@ -138,6 +138,29 @@ def _upload_dir(store, prefix: str, root: Path) -> dict[str, str]:
     return uris
 
 
+class DpdpaRefusal(Exception):
+    """Raised when the unified DPDPA pre-sale gate refuses an export (un-redacted face, plate, or speech)."""
+
+
+async def _dpdpa_pre_sale_gate(records) -> None:
+    """The single fail-closed compliance gate in the export path. Refuses, does not warn."""
+    from collections import defaultdict
+    from uuid import UUID
+
+    from services.anonymize.compliance import dpdpa_export_gate
+    by_session: dict = defaultdict(set)
+    for r in records:
+        if r.session_id and r.frame_id:
+            by_session[str(r.session_id)].add(r.frame_id)
+    refused = []
+    for sid, fids in by_session.items():
+        verdict = await dpdpa_export_gate(UUID(sid), list(fids))
+        if not verdict["pass"]:
+            refused.append({"session_id": sid, "blockers": verdict["blockers"]})
+    if refused:
+        raise DpdpaRefusal({"detail": "DPDPA pre-sale gate refused export", "refused": refused})
+
+
 async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
     settings = get_settings()
     onto = get_ontology()
@@ -145,6 +168,7 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
     store.ensure_bucket()
 
     records = await fetch_records(spec)
+    await _dpdpa_pre_sale_gate(records)   # fail-closed: refuse any clip with un-redacted face, plate, or speech
     commit_id = seal_commit_id(spec, records, onto.version)
     out_dir = (out_root or settings.scratch_path() / "exports") / spec.name / commit_id
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -172,10 +196,12 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
     async with maker() as db:
         existing = await db.get(DatasetCommit, commit_id)
         if existing is None:
+            from services.export.snapshots import resolve_parent
+            parent_id = await resolve_parent(db, spec.name, commit_id)   # chain lineage to the prior snapshot
             db.add(
                 DatasetCommit(
                     commit_id=commit_id,
-                    parent_id=None,
+                    parent_id=parent_id,
                     slice_spec=spec.model_dump(),
                     object_count=len(records),
                     ontology_version=onto.version,

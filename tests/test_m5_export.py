@@ -45,6 +45,10 @@ async def _seed_objects() -> uuid.UUID:
                          ontology_version="labelox-in-0.1.0"))
         db.add(Frame(frame_id=fid, session_id=sid, ts_ns=start, cam_id="cam_f",
                      img_uri=f"s3://x/frames/{sid}/cam_f/{start}.jpg", width=640, height=480, quality=0.9))
+        # the frame was anonymized at ingest (0 faces/plates here), so the DPDPA export gate passes
+        from db.models import PiiAudit
+        db.add(PiiAudit(frame_id=fid, session_id=sid, n_faces=0, n_plates=0, regions=[],
+                        method_version="test", ts_ns=start))
         # one masked autorickshaw, one box-only sedan, both auto_accept
         oid = uuid.uuid4()
         mask_uri = store.put_bytes(

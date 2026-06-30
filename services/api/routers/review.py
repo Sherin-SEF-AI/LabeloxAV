@@ -76,6 +76,9 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
         if cid is not None:
             obj.class_id = cid
         if payload.attrs:
+            errors = onto.validate_attrs(payload.attrs, obj.class_id)   # against the effective (possibly new) class
+            if errors:
+                raise HTTPException(400, {"attr_errors": errors, "object_id": oid})
             merged = dict(obj.attrs or {})
             merged.update(payload.attrs)
             obj.attrs = merged

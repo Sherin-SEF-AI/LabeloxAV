@@ -150,6 +150,9 @@ async def edit_object3d(object_3d_id: uuid.UUID, body: Cuboid3DEdit, db: AsyncSe
     if body.center is not None:
         o.center = body.center
     if body.attrs is not None:
+        errors = get_ontology().validate_attrs(body.attrs, o.class_id)   # gate bad attrs at write time
+        if errors:
+            raise HTTPException(422, {"attr_errors": errors})
         o.attrs = body.attrs
     if body.ground_snap:
         pc = await db.get(PointCloud, o.cloud_id)
@@ -309,6 +312,45 @@ class AggLabelIn(BaseModel):
     dims: list[float]                         # [L, W, H] metres, the one size used across the whole track
     yaw: float = 0.0
     class_id: int
+
+
+@router.post("/lidar/clouds/{cloud_id}/occupancy")
+async def cloud_occupancy(cloud_id: uuid.UUID, voxel_size: float = 0.5, db: AsyncSession = Depends(db_session)):
+    """Milestone F: an occupancy / voxel grid (occupied, free, unknown) from a cloud's geometry, ray-carved
+    from the ego origin. Works on pseudo-LiDAR the same as real LiDAR."""
+    from db.models import PointCloud
+    from services.lidar.ingest.store import load_cloud
+    from services.lidar.occupancy import voxelize_occupancy
+    pc = await db.get(PointCloud, cloud_id)
+    if pc is None:
+        raise HTTPException(404, "cloud not found")
+    cloud = load_cloud(pc.cloud_uri)
+    xyz = cloud.xyz
+    lo = xyz.min(axis=0)
+    hi = xyz.max(axis=0)
+    bounds = [float(lo[0]), float(lo[1]), float(lo[2]), float(hi[0]), float(hi[1]), float(hi[2])]
+    res = voxelize_occupancy(xyz, origin=[0.0, 0.0, 0.0], bounds=bounds, voxel_size=voxel_size)
+    res.pop("occupied_voxels", None)   # the counts + dims are the summary; the full set stays server-side
+    return {"cloud_id": str(cloud_id), **res}
+
+
+@router.get("/lidar/clouds/{cloud_id}/ground-qa")
+async def cloud_ground_qa(cloud_id: uuid.UUID):
+    """Milestone F: ground-plane labeling review. Flags whether the auto ground fit is ok / tilted / sparse /
+    absent so an annotator labels the surface by hand only on the clouds that need it."""
+    from services.lidar.clean.ground_qa import flag_ground_for_review
+    res = await flag_ground_for_review(cloud_id)
+    if res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@router.get("/sessions/{session_id}/static-dynamic")
+async def session_static_dynamic(session_id: uuid.UUID):
+    """Milestone G: partition the session's 3D tracks into static (parked, label once) and dynamic (label
+    per frame), so a parked car or pole is labeled once instead of frame by frame."""
+    from services.temporal.static_dynamic import session_static_dynamic_split
+    return await session_static_dynamic_split(session_id)
 
 
 @router.post("/lidar/aggregate/{agg_id}/label")
