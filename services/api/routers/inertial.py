@@ -11,6 +11,14 @@ from fastapi import APIRouter
 router = APIRouter()
 
 
+@router.get("/sessions/{session_id}/timeline")
+async def timeline(session_id: UUID):
+    """The canonical multimodal timeline (Milestone A): modalities present, ts range, and the sync method +
+    accumulated-error estimate. The single axis the synchronized workspace scrubs."""
+    from services.intelligence.timeline import session_timeline
+    return await session_timeline(session_id)
+
+
 @router.get("/sessions/{session_id}/egostate")
 async def ego_state(session_id: UUID):
     """The derived ego-state series for a session (source=derived). Drives the inertial timeline."""
