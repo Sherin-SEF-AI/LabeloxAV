@@ -474,7 +474,7 @@ class RecallSettings(BaseModel):
     region_max_area_frac: float = 0.25    # drop whole-scene planes above this fraction of frame area
     region_min_vlm_conf: float = 0.45    # drop a region the VLM is not confident about
     vlm_crop_margin: float = 0.15        # context margin when cropping a region for the VLM
-    sam_everything_weights: str = "sam2.1_b.pt"
+    sam_everything_weights: str = "sam2_b.pt"   # SAM2 base; this ultralytics build has no sam2.1 key
     device: str = "cuda:0"
     # Recall promotion gate (fail-closed on safety recall, mirrors the Safe-mIoU check):
     require_safety_recall: bool = True   # a challenger that cannot report safety-class recall is refused
