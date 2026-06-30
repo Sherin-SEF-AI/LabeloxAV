@@ -108,6 +108,14 @@ async def persist_scene_events_ep(session_id: UUID):
     return await persist_scene_events(session_id)
 
 
+@router.get("/sessions/{session_id}/qa/consistency")
+async def qa_consistency(session_id: UUID):
+    """Milestone C: the worst-first cross-modal QA queue - the 2D-3D reprojection-inconsistency flags ranked
+    by severity plus the timestamp-seam flags (events with no aligned camera frame)."""
+    from services.intelligence.consistency_qa import consistency_qa_queue
+    return await consistency_qa_queue(session_id)
+
+
 @router.post("/sessions/{session_id}/events/correlate", dependencies=[Depends(require_role("annotator"))])
 async def correlate_timeline_event(session_id: UUID, ts_ns: int, window_ns: int = 250_000_000):
     """Bind the inertial spike, the frame, and the audio region at ts into one crossmodal event."""
