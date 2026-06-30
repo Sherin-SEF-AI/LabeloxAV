@@ -142,7 +142,7 @@ async def ingest(result_path: Path) -> dict:
                 await db.execute(delete(Lane).where(Lane.frame_id == fid, Lane.source == "proposed"))
                 for i, pts in enumerate(lanes):
                     db.add(Lane(frame_id=fid, session_id=frame.session_id, control_points=pts,
-                           lane_type="solid", is_ego=False, source="proposed", model_version="clrernet:pod"))
+                           lane_type="solid", is_ego=False, source="proposed", model_version="mapillary-marking:pod"))
                     n_lane += 1
         await db.commit()
     log.info("perception.ingested", drivable=n_dr, lanes=n_lane, errors=n_err)
@@ -156,17 +156,15 @@ def _run_sweep_on_pod(root: Path, work: Path, lanes: bool) -> None:
     try:
         target = f"root@{ip}"
         _ssh(ip, port, "mkdir -p /workspace/percep_in")
-        push = [str(root / "cloud" / "perception_pod.py")]
-        if lanes:
-            push.append(str(root / "cloud" / "setup_perception.sh"))
-        _scp(port, push, f"{target}:/workspace/")
+        _scp(port, [str(root / "cloud" / "perception_pod.py")], f"{target}:/workspace/")
         _scp(port, [str(p) for p in work.glob("*.jpg")] + [str(work / "manifest.jsonl")],
              f"{target}:/workspace/percep_in/")
-        if lanes:
-            _ssh(ip, port, "bash /workspace/setup_perception.sh || echo '[lanes] setup failed (drivable unaffected)'")
+        # Lanes are derived from the lane-marking class, so they need no extra install, but they require a
+        # model that HAS that class (Mapillary). --lanes therefore switches the run to the Mapillary model
+        # for both drivable and lanes; drivable-only stays on the default (public SegFormer-Cityscapes).
+        env = "PERCEPTION_SEG_MODEL=facebook/mask2former-swin-large-mapillary-vistas-semantic " if lanes else ""
         lanes_flag = "--lanes" if lanes else ""
-        # HF_TOKEN (for gated models) is read from the pod env if set; the default SegFormer-Cityscapes is public.
-        rc = _ssh(ip, port, f"cd /workspace && .venv/bin/python perception_pod.py "
+        rc = _ssh(ip, port, f"cd /workspace && {env}.venv/bin/python perception_pod.py "
                             f"--manifest percep_in/manifest.jsonl --out percep_out.jsonl {lanes_flag}")
         if rc != 0:
             raise RuntimeError("pod perception run failed (see ssh output)")
