@@ -5,7 +5,8 @@ terrain classes ARE the ternary drivable surface (drivable / non_drivable / fall
 diverse (developing-country roads included), so it covers Indian dashcam roads far better than Cityscapes,
 which under-segmented them. SAM 3.1 PCS was ruled out first: it segments object concepts, not stuff ("road"
 returns nothing). The surface mapping is built from the model's own id2label, so it adapts to the label set.
-Lanes: CLRerNet (mmdet) -> per-lane point lists, guarded so a lane failure never blocks drivable.
+Lanes: derived from the Mapillary lane-marking class in the same pass (CLRerNet is blocked on the pod's
+torch 2.11/cu128), clustered into per-line control-point polylines. No separate model or install.
 
 Reads a manifest (one JSON object per line: {frame_id, path}) and writes perception.jsonl (one object per
 line: {frame_id, drivable:{classes,coverage,width,height}, lanes:[[ [x,y], ... ]], lane_error?}). The local
