@@ -101,6 +101,13 @@ async def persist_auto_events(session_id: UUID):
     return await persist_auto_inertial_events(session_id)
 
 
+@router.post("/sessions/{session_id}/events/scene", dependencies=[Depends(require_role("annotator"))])
+async def persist_scene_events_ep(session_id: UUID):
+    """Segment adverse-condition runs (rain, fog, night, dusk) from frame.scene into unconfirmed scene events."""
+    from services.intelligence.scene_events import persist_scene_events
+    return await persist_scene_events(session_id)
+
+
 @router.post("/sessions/{session_id}/events/correlate", dependencies=[Depends(require_role("annotator"))])
 async def correlate_timeline_event(session_id: UUID, ts_ns: int, window_ns: int = 250_000_000):
     """Bind the inertial spike, the frame, and the audio region at ts into one crossmodal event."""
