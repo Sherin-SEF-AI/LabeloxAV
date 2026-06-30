@@ -16,3 +16,11 @@ async def ego_state(session_id: UUID):
     """The derived ego-state series for a session (source=derived). Drives the inertial timeline."""
     from services.intelligence.egostate import session_ego_state
     return await session_ego_state(session_id)
+
+
+@router.get("/sessions/{session_id}/inertial_events")
+async def inertial_events(session_id: UUID):
+    """Tagged inertial events (hard brake, hard accel, swerve, impact), anomaly pre-marks, and maneuver
+    segments for a session, computed from the ego-state series."""
+    from services.intelligence.inertial_events import session_inertial_events
+    return await session_inertial_events(session_id)
