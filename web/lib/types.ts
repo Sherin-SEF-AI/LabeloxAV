@@ -132,6 +132,13 @@ export type CalibSession = { session_id: string; vehicle_id: string; cameras: nu
 export type ResolvedCalibCam = { cam_id: string; source: string; quality: number; fx: number; fy: number; cx: number; cy: number; pitch_deg: number; yaw_deg: number; height_m: number };
 export type CalibTrust = { level: string; mean_quality: number; n_cameras: number };
 export type CalibResolved = { session_id: string; cameras: ResolvedCalibCam[]; trust: CalibTrust };
+// Plane-4 inertial (M-IMU.1/.3/.4)
+export type EgoSample = { ts_ns: number; speed_mps: number | null; heading_deg: number | null; yaw_rate: number | null; long_accel: number | null; lat_accel: number | null; jerk: number | null };
+export type EgoState = { session_id: string; source: string; n_samples: number; n_with_motion: number; series: EgoSample[] };
+export type InertialEvent = { kind: string; t_in_ns: number; t_out_ns: number; peak: number; severity: number };
+export type InertialAnomaly = { ts_ns: number; metric: string; value: number; z: number; status: string };
+export type Maneuver = { kind: string; t_in_ns: number; t_out_ns: number };
+export type InertialEvents = { session_id: string; source: string; n_samples: number; events: InertialEvent[]; anomalies: InertialAnomaly[]; maneuvers: Maneuver[] };
 
 export type LaneRow = {
   lane_id: string;
