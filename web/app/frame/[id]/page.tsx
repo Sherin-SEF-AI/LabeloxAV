@@ -581,7 +581,13 @@ export default function FrameEditor() {
     setSaving(true);
     const tgt = acceptState(getUser()?.role);  // annotator -> submitted (QA), reviewer/admin -> accepted
     try {
-      for (const oid of st.deleted) await api.deleteObject(oid);
+      // Delete is idempotent: a 404 means the object is already gone, which is the desired end state. Without
+      // this, deleting an already-removed object throws, aborts the save before the "saved" dispatch clears
+      // st.deleted, and the autosave effect retries the same failing delete every 700ms forever.
+      for (const oid of st.deleted) {
+        try { await api.deleteObject(oid); }
+        catch (e) { if (!String(e).includes("404")) throw e; }
+      }
       const remap: Record<string, string> = {};
       const versions: Record<string, number> = {};
       for (const o of st.objects) {
