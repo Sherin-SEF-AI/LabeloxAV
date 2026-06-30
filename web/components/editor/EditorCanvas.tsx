@@ -125,6 +125,10 @@ export default function EditorCanvas(p: Props) {
   }, [p.selectedId, p.tool, p.objects]);
 
   const v = p.viewport;
+  // Screen-constant strokes/radii are sized as `px / scale`. viewport.scale === 0 is the "fit pending"
+  // sentinel (see the fit effect above), so guard the divisor: a zero or non-finite scale would make every
+  // strokeWidth/radius/anchorSize Infinity and flood Konva with warnings until the first fit lands.
+  const s = v.scale > 0 && Number.isFinite(v.scale) ? v.scale : 1;
   const L = p.layers ?? { boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true };
   const toImg = (): number[] => {
     const pt = stageRef.current?.getRelativePointerPosition();
@@ -137,8 +141,8 @@ export default function EditorCanvas(p: Props) {
     if (!stage) return;
     const pointer = stage.getPointerPosition();
     if (!pointer) return;
-    const mx = (pointer.x - v.ox) / v.scale;
-    const my = (pointer.y - v.oy) / v.scale;
+    const mx = (pointer.x - v.ox) / s;
+    const my = (pointer.y - v.oy) / s;
     const newScale = clamp(v.scale * (e.evt.deltaY > 0 ? 0.9 : 1.1), MIN_SCALE, MAX_SCALE);
     p.onViewport({ scale: newScale, ox: pointer.x - mx * newScale, oy: pointer.y - my * newScale });
   }
@@ -226,8 +230,8 @@ export default function EditorCanvas(p: Props) {
         ref={stageRef}
         width={size.w}
         height={size.h}
-        scaleX={v.scale}
-        scaleY={v.scale}
+        scaleX={s}
+        scaleY={s}
         x={v.ox}
         y={v.oy}
         draggable={p.panning}
@@ -251,14 +255,14 @@ export default function EditorCanvas(p: Props) {
             polys.map((poly, i) => (
               <Line key={`dr-${cls}-${i}`} points={poly} closed listening={false}
                 fill={cls === "drivable" ? "rgba(86,211,100,0.18)" : cls === "fallback" ? "rgba(227,179,65,0.18)" : "rgba(248,81,73,0.14)"}
-                stroke={cls === "drivable" ? "#56D364" : cls === "fallback" ? "#E3B341" : "#F85149"} strokeWidth={1 / v.scale} />
+                stroke={cls === "drivable" ? "#56D364" : cls === "fallback" ? "#E3B341" : "#F85149"} strokeWidth={1 / s} />
             )),
           )}
 
           {/* adverse-condition regions (glare/reflection/shadow/...), tinted by condition */}
           {L.adverse && p.adverse?.map((a) => (
             <Line key={`adv-${a.region_id}`} points={a.geometry} closed listening={false}
-              stroke={ADVERSE_COLOR[a.condition] ?? "#A0A6AD"} strokeWidth={1 / v.scale}
+              stroke={ADVERSE_COLOR[a.condition] ?? "#A0A6AD"} strokeWidth={1 / s}
               fill={(ADVERSE_COLOR[a.condition] ?? "#A0A6AD") + "33"} />
           ))}
 
@@ -266,7 +270,7 @@ export default function EditorCanvas(p: Props) {
           {L.masks && p.objects.filter((o) => o.visible).flatMap((o) =>
             o.mask.map((poly, i) => (
               <Line key={`m${o.id}-${i}`} points={poly} closed listening={false}
-                stroke={classColor(o.class_id)} strokeWidth={1.5 / v.scale}
+                stroke={classColor(o.class_id)} strokeWidth={1.5 / s}
                 fill={classFill(o.class_id, o.id === p.selectedId ? 0.3 : 0.16)} />
             )),
           )}
@@ -275,14 +279,14 @@ export default function EditorCanvas(p: Props) {
           {L.lanes && p.lanes?.map((ln) => (
             <Line key={ln.lane_id} points={ln.control_points.flat()} listening={false} tension={0.3}
               stroke={ln.is_ego ? "#56D364" : ln.source === "human" ? "#FF7A2F" : ln.source === "propagated" ? "#E3B341" : "#58A6FF"}
-              strokeWidth={2.5 / v.scale} dash={ln.lane_type === "dashed" ? [10 / v.scale, 8 / v.scale] : undefined} />
+              strokeWidth={2.5 / s} dash={ln.lane_type === "dashed" ? [10 / s, 8 / s] : undefined} />
           ))}
 
           {/* open polylines (curb/road_edge/barrier): an open line, no fill, no AABB box */}
           {L.boxes && p.objects.filter((o) => o.visible && o.polyline && o.polyline.length >= 2).map((o) => (
             <Line key={`pl${o.id}`} points={o.polyline!.flat()} listening={p.tool === "select"}
-              stroke={classColor(o.class_id)} strokeWidth={(o.id === p.selectedId ? 2.5 : 1.5) / v.scale}
-              hitStrokeWidth={10 / v.scale}
+              stroke={classColor(o.class_id)} strokeWidth={(o.id === p.selectedId ? 2.5 : 1.5) / s}
+              hitStrokeWidth={10 / s}
               onMouseDown={(e) => { if (p.tool === "select") { e.cancelBubble = true; p.onSelect(o.id); } }} />
           ))}
 
@@ -299,8 +303,8 @@ export default function EditorCanvas(p: Props) {
                 key={o.id}
                 ref={isSel ? selRectRef : undefined}
                 x={cx} y={cy} offsetX={w / 2} offsetY={h / 2} width={w} height={h} rotation={o.rot ?? 0}
-                stroke={classColor(o.class_id)} strokeWidth={(isSel ? 2.5 : 1.5) / v.scale}
-                dash={o.isNew ? [6 / v.scale, 4 / v.scale] : undefined}
+                stroke={classColor(o.class_id)} strokeWidth={(isSel ? 2.5 : 1.5) / s}
+                dash={o.isNew ? [6 / s, 4 / s] : undefined}
                 draggable={isSel && p.tool === "select"}
                 onMouseDown={(e) => {
                   if (p.tool === "select") {
@@ -338,8 +342,8 @@ export default function EditorCanvas(p: Props) {
             const ca = [(a.bbox[0] + a.bbox[2]) / 2, (a.bbox[1] + a.bbox[3]) / 2];
             const cb = [(b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2];
             return <Line key={`rel-${r.from_object_id}-${r.to_object_id}-${r.kind}`} listening={false}
-              points={[ca[0], ca[1], cb[0], cb[1]]} stroke="#E3B341" strokeWidth={1 / v.scale}
-              dash={[4 / v.scale, 3 / v.scale]} />;
+              points={[ca[0], ca[1], cb[0], cb[1]]} stroke="#E3B341" strokeWidth={1 / s}
+              dash={[4 / s, 3 / s]} />;
           })}
 
           {/* in-image 3D cuboids: the projected wireframe of each cuboid_3d, highlighted when selected */}
@@ -349,15 +353,15 @@ export default function EditorCanvas(p: Props) {
             if (!a || !b) return null;
             const sel = c.object_id === p.selectedId;
             return <Line key={`cub-${c.object_id}-${i}`} points={[a[0], a[1], b[0], b[1]]} listening={false}
-              stroke={sel ? "#FF7A2F" : "#58A6FF"} strokeWidth={(sel ? 2 : 1.25) / v.scale} />;
+              stroke={sel ? "#FF7A2F" : "#58A6FF"} strokeWidth={(sel ? 2 : 1.25) / s} />;
           }))}
 
           {/* selected object's mask vertices: drag to move, right-click to delete */}
           {sel && p.tool === "select" && sel.mask.map((poly, pi) =>
             poly.map((_, k) =>
               k % 2 === 0 ? (
-                <Circle key={`v${pi}-${k}`} x={poly[k]} y={poly[k + 1]} radius={3.5 / v.scale}
-                  fill="#0B0C0E" stroke={classColor(sel.class_id)} strokeWidth={1.5 / v.scale} draggable
+                <Circle key={`v${pi}-${k}`} x={poly[k]} y={poly[k + 1]} radius={3.5 / s}
+                  fill="#0B0C0E" stroke={classColor(sel.class_id)} strokeWidth={1.5 / s} draggable
                   onDragEnd={(e) => {
                     const next = sel.mask.map((pp) => pp.slice());
                     next[pi][k] = e.target.x();
@@ -383,8 +387,8 @@ export default function EditorCanvas(p: Props) {
               const bx = poly[2 * ((j + 1) % n)], by = poly[2 * ((j + 1) % n) + 1];
               const mx = (ax + bx) / 2, my = (ay + by) / 2;
               return (
-                <Circle key={`mid${pi}-${j}`} x={mx} y={my} radius={2.5 / v.scale}
-                  fill="rgba(255,122,47,0.55)" stroke="#0B0C0E" strokeWidth={1 / v.scale}
+                <Circle key={`mid${pi}-${j}`} x={mx} y={my} radius={2.5 / s}
+                  fill="rgba(255,122,47,0.55)" stroke="#0B0C0E" strokeWidth={1 / s}
                   onClick={() => {
                     const next = sel.mask.map((pp) => pp.slice());
                     next[pi].splice(2 * j + 2, 0, mx, my);
@@ -397,13 +401,13 @@ export default function EditorCanvas(p: Props) {
           {/* SAM candidate */}
           {p.candidate?.map((poly, i) => (
             <Line key={`cand${i}`} points={poly} closed listening={false}
-              stroke="#56D364" strokeWidth={2 / v.scale} fill="rgba(86,211,100,0.25)" />
+              stroke="#56D364" strokeWidth={2 / s} fill="rgba(86,211,100,0.25)" />
           ))}
 
           {/* superpixels (faint), shown while the superpixel tool is active so the annotator can click one */}
           {p.tool === "superpixel" && p.superpixels?.map((poly, i) => (
             <Line key={`sp${i}`} points={poly} closed listening={false}
-              stroke="rgba(88,166,255,0.5)" strokeWidth={0.75 / v.scale} fill="rgba(88,166,255,0.06)" />
+              stroke="rgba(88,166,255,0.5)" strokeWidth={0.75 / s} fill="rgba(88,166,255,0.06)" />
           ))}
 
           {/* brush/eraser stroke preview: a stamp circle per sampled point along the stroke */}
@@ -415,11 +419,11 @@ export default function EditorCanvas(p: Props) {
           {/* in-progress manual polygon/polyline: open line + vertex dots; double-click commits */}
           {(p.tool === "polygon" || p.tool === "polyline" || p.tool === "adverse") && poly.length >= 2 && (
             <>
-              <Line points={poly} listening={false} stroke="#FF7A2F" strokeWidth={1.5 / v.scale}
-                dash={[6 / v.scale, 4 / v.scale]} />
+              <Line points={poly} listening={false} stroke="#FF7A2F" strokeWidth={1.5 / s}
+                dash={[6 / s, 4 / s]} />
               {poly.map((_, k) => (k % 2 === 0 ? (
-                <Circle key={`pp${k}`} x={poly[k]} y={poly[k + 1]} radius={3 / v.scale}
-                  fill="#0B0C0E" stroke="#FF7A2F" strokeWidth={1.5 / v.scale} listening={false} />
+                <Circle key={`pp${k}`} x={poly[k]} y={poly[k + 1]} radius={3 / s}
+                  fill="#0B0C0E" stroke="#FF7A2F" strokeWidth={1.5 / s} listening={false} />
               ) : null))}
             </>
           )}
@@ -435,11 +439,11 @@ export default function EditorCanvas(p: Props) {
                   const pa = pts[a], pb = pts[b];
                   if (!pa || !pb || pa[2] <= 0 || pb[2] <= 0) return null;
                   return <Line key={`e${ei}`} points={[pa[0], pa[1], pb[0], pb[1]]} listening={false}
-                    stroke={col} strokeWidth={1.5 / v.scale} opacity={0.85} />;
+                    stroke={col} strokeWidth={1.5 / s} opacity={0.85} />;
                 })}
                 {pts.map((pt, ki) => (pt[2] <= 0 ? null : (
-                  <Circle key={`k${ki}`} x={pt[0]} y={pt[1]} radius={3 / v.scale}
-                    fill={pt[2] === 2 ? "#56D364" : "#E3B341"} stroke="#0B0C0E" strokeWidth={1 / v.scale}
+                  <Circle key={`k${ki}`} x={pt[0]} y={pt[1]} radius={3 / s}
+                    fill={pt[2] === 2 ? "#56D364" : "#E3B341"} stroke="#0B0C0E" strokeWidth={1 / s}
                     draggable={isSel && p.tool === "select"}
                     onDragEnd={(e) => {
                       const next = pts.map((q) => q.slice());
@@ -458,11 +462,11 @@ export default function EditorCanvas(p: Props) {
                 const pa = p.keypointDraft![a], pb = p.keypointDraft![b];
                 if (!pa || !pb) return null;
                 return <Line key={`de${ei}`} points={[pa[0], pa[1], pb[0], pb[1]]} listening={false}
-                  stroke="#FF7A2F" strokeWidth={1.5 / v.scale} opacity={0.7} />;
+                  stroke="#FF7A2F" strokeWidth={1.5 / s} opacity={0.7} />;
               })}
               {p.keypointDraft.map((pt, ki) => (
-                <Circle key={`dk${ki}`} x={pt[0]} y={pt[1]} radius={3.5 / v.scale} listening={false}
-                  fill="#FF7A2F" stroke="#0B0C0E" strokeWidth={1 / v.scale} />
+                <Circle key={`dk${ki}`} x={pt[0]} y={pt[1]} radius={3.5 / s} listening={false}
+                  fill="#FF7A2F" stroke="#0B0C0E" strokeWidth={1 / s} />
               ))}
             </Group>
           )}
@@ -474,11 +478,11 @@ export default function EditorCanvas(p: Props) {
             return (
               <Group listening={false}>
                 <Line points={[measure.x0, measure.y0, measure.x1, measure.y1]}
-                  stroke="#58A6FF" strokeWidth={1.5 / v.scale} dash={[5 / v.scale, 4 / v.scale]} />
-                <Circle x={measure.x0} y={measure.y0} radius={2.5 / v.scale} fill="#58A6FF" />
-                <Circle x={measure.x1} y={measure.y1} radius={2.5 / v.scale} fill="#58A6FF" />
-                <KText x={(measure.x0 + measure.x1) / 2 + 6 / v.scale} y={(measure.y0 + measure.y1) / 2 - 8 / v.scale}
-                  text={label} fontSize={13 / v.scale} fill="#58A6FF" />
+                  stroke="#58A6FF" strokeWidth={1.5 / s} dash={[5 / s, 4 / s]} />
+                <Circle x={measure.x0} y={measure.y0} radius={2.5 / s} fill="#58A6FF" />
+                <Circle x={measure.x1} y={measure.y1} radius={2.5 / s} fill="#58A6FF" />
+                <KText x={(measure.x0 + measure.x1) / 2 + 6 / s} y={(measure.y0 + measure.y1) / 2 - 8 / s}
+                  text={label} fontSize={13 / s} fill="#58A6FF" />
               </Group>
             );
           })()}
@@ -487,13 +491,13 @@ export default function EditorCanvas(p: Props) {
           {draw && (
             <Rect x={Math.min(draw.x0, draw.x1)} y={Math.min(draw.y0, draw.y1)}
               width={Math.abs(draw.x1 - draw.x0)} height={Math.abs(draw.y1 - draw.y0)} listening={false}
-              stroke={p.tool === "sam-box" ? "#56D364" : "#FF7A2F"} strokeWidth={1.5 / v.scale}
-              dash={[6 / v.scale, 4 / v.scale]} />
+              stroke={p.tool === "sam-box" ? "#56D364" : "#FF7A2F"} strokeWidth={1.5 / s}
+              dash={[6 / s, 4 / s]} />
           )}
 
           {p.tool === "select" && (
             <Transformer ref={trRef} rotateEnabled rotationSnaps={[0, 90, 180, 270]} ignoreStroke
-              borderStroke="#FF7A2F" anchorStroke="#FF7A2F" anchorFill="#0B0C0E" anchorSize={8 / v.scale}
+              borderStroke="#FF7A2F" anchorStroke="#FF7A2F" anchorFill="#0B0C0E" anchorSize={8 / s}
               boundBoxFunc={(oldB, newB) => (newB.width < 4 || newB.height < 4 ? oldB : newB)} />
           )}
         </Layer>
