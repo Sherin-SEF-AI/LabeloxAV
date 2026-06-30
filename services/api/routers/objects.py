@@ -299,6 +299,16 @@ async def propagate_object(object_id: str, frames: int = 12, db: AsyncSession = 
     return await propagate_forward(UUID(object_id), frames)
 
 
+@router.post("/objects/{object_id}/sam_propagate", dependencies=[Depends(require_role("annotator"))])
+async def sam_propagate(object_id: str, frames: int = 12, direction: str = "both", refine: bool = True,
+                        db: AsyncSession = Depends(db_session)):
+    """Label once, carry both ways: propagate this keyframe object's box forward AND backward with optical
+    flow, refining each into a mask with a SAM box prompt (interp_source=sam_propagated). Routed to review."""
+    from services.temporal.sam_propagate import sam_propagate_object
+
+    return await sam_propagate_object(UUID(object_id), frames, direction, refine)
+
+
 @router.get("/frames/{frame_id}/image")
 async def frame_image(frame_id: str, db: AsyncSession = Depends(db_session)):
     frame = await db.get(Frame, UUID(frame_id))
