@@ -575,6 +575,12 @@ export default function FrameEditor() {
   // isNew flags, creating the same object twice on the server. The idem_key is belt-and-suspenders: the
   // server de-dupes a create that still slips through (network retry, multi-tab).
   const savingRef = useRef(false);
+  // Signature of the pending (deleted + new/dirty) set that last failed to save. Autosave will not retry the
+  // exact same set, so a persistent per-object error (a malformed object, a stale id) cannot become an
+  // infinite 700ms retry storm; any real edit changes the signature and resumes autosave.
+  const lastFailRef = useRef("");
+  const pendingSig = () => JSON.stringify([st.deleted,
+    st.objects.filter((o) => o.isNew || o.dirty).map((o) => `${o.id}:${o.version ?? 0}`)]);
   const save = useCallback(async () => {
     if (!dirty || savingRef.current) return;
     savingRef.current = true;
@@ -591,7 +597,10 @@ export default function FrameEditor() {
       const remap: Record<string, string> = {};
       const versions: Record<string, number> = {};
       for (const o of st.objects) {
-        if (o.isNew) {
+        // A tmp- id is a client-only object never persisted, so it must be CREATED, never reviewed: sending
+        // a tmp id to /objects/{id}/review is a 422 (not a UUID), and if it loops it floods like the delete
+        // case did. createObject de-dupes via idem_key, so a redundant create is safe.
+        if (o.isNew || o.id.startsWith("tmp-")) {
           const created = await api.createObject(id, {
             class_name: o.class_name, bbox: o.bbox, attrs: o.attrs,
             mask_polygons: o.mask.length ? o.mask : undefined, state: tgt, idem_key: o.id, rot_deg: o.rot ?? 0,
@@ -610,10 +619,12 @@ export default function FrameEditor() {
         }
       }
       dispatch({ t: "saved", remap, versions });
+      lastFailRef.current = "";                  // succeeded: clear the no-retry guard
       flash("saved");
       setCuboids(await api.frameCuboids(id).catch(() => [])); // refresh projected cuboid wireframes
     } catch (e) {
       const msg = String(e);
+      lastFailRef.current = pendingSig();         // do not auto-retry this exact set until something changes
       flash(msg.includes("409") ? "conflict: another annotator changed this object; reload to continue" : "save failed: " + msg);
     } finally {
       savingRef.current = false;
@@ -629,6 +640,7 @@ export default function FrameEditor() {
   stRef.current = st;
   useEffect(() => {
     if (!autosave || !loadedRef.current || !dirty || saving) return;
+    if (pendingSig() === lastFailRef.current) return;  // this exact set already failed; wait for a real edit
     const t = setTimeout(() => saveRef.current(), 700);
     return () => clearTimeout(t);
   }, [autosave, dirty, saving, st.objects, st.deleted]);
