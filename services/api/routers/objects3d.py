@@ -292,6 +292,18 @@ async def project_object3d(object_3d_id: uuid.UUID, cam_id: str = "cam_f", w: in
     return {"object_3d_id": str(object_3d_id), "cam_id": cam_id, **proj}
 
 
+@router.post("/lidar/objects3d/{object_3d_id}/consistency")
+async def object3d_consistency(object_3d_id: uuid.UUID):
+    """Cross-sensor 2D-3D consistency: reproject the cuboid into every camera that has a 2D detection of the
+    same object and score the box agreement. A gross mismatch writes a quality_flag_3d that routes the cuboid
+    to review, the same loop as the geometric checks."""
+    from services.lidar.quality3d.checker import check_object_consistency
+    res = await check_object_consistency(object_3d_id)
+    if res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
+
+
 # ---- M-L2.4: linked identity, properties, correction ----
 class BatchCorrectIn(BaseModel):
     object_3d_ids: list[uuid.UUID]

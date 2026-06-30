@@ -554,6 +554,8 @@ class LidarSettings(BaseModel):
     quality_float_gap_m: float = 0.5         # a box bottom this far above the ground is floating
     quality_below_ground_m: float = 0.5      # a box bottom this far below the ground is below-ground
     quality_duplicate_iou: float = 0.6       # two boxes overlapping above this 3D IoU are duplicates
+    quality_2d3d_min_iou: float = 0.3        # a cuboid's projection must reach this 2D IoU with its box in
+                                             # at least one camera; below it the 3D and 2D boxes disagree
     quality_misalign_fill: float = 0.05      # a box with fewer enclosed points than this is misaligned
 
 
