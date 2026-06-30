@@ -49,6 +49,14 @@ async def calibrate_session(session_id: UUID, body: SetCalibIn):
     return await set_session_calibration(session_id, body.cam_specs, body.source, body.ref_width, body.ref_height)
 
 
+@router.post("/calibration/{session_id}/estimate")
+async def estimate_session(session_id: UUID):
+    """Monocular estimation: recover the camera pitch from road lines (and focal from EXIF when present) for
+    a session's cameras, stored as source=estimated. Upgrades a session off nominal without a calib file."""
+    from services.calibration.estimate import estimate_session_calibration
+    return await estimate_session_calibration(session_id)
+
+
 @router.get("/calibration/sessions")
 async def list_sessions(db: AsyncSession = Depends(db_session)):
     """Sessions that have been validated, with their overall verdict (the report-viewer index)."""
