@@ -622,6 +622,21 @@ class SpeechSegment(Base):
     __table_args__ = (Index("ix_speech_segment_session", "session_id"),)
 
 
+class CurationSlice(Base):
+    # Milestone I: a named, persisted dataset cohort. predicate is a query over the SigLIP2 scene axes
+    # (weather, time_of_day, road_type, density) plus class / state / city / confidence, so a cohort like
+    # "rare-class at night in rain" is defined once and reused for export, training, and review instead of
+    # re-typing an ad-hoc export SliceSpec each time. version carries optimistic concurrency.
+    __tablename__ = "curation_slice"
+
+    slice_id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(String(240))
+    predicate: Mapped[dict] = mapped_column(JSONB, default=dict)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class MapCommit(Base):
     # A fused, versioned HD-map output (content-addressed, like DatasetCommit).
     __tablename__ = "map_commit"
