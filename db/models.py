@@ -580,6 +580,29 @@ class CameraCalibration(Base):
     __table_args__ = (Index("ix_camera_calibration_session_cam", "session_id", "cam_id", unique=True),)
 
 
+class TimelineEvent(Base):
+    # Milestone B: a human or auto event on the canonical session timeline. modality is which signal it lives
+    # on (imu, audio, scene, geo, crossmodal); a crossmodal event binds an inertial spike, a frame, and an
+    # audio region at one instant. source=auto events are unconfirmed candidates (state=review), never
+    # auto-accepted. Optimistic concurrency via version, the same as Object.
+    __tablename__ = "timeline_event"
+
+    event_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    modality: Mapped[str] = mapped_column(String(16), nullable=False)        # imu|audio|scene|geo|crossmodal
+    t_start_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    t_end_ns: Mapped[int | None] = mapped_column(BigInteger)                 # null = a point event
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="human")  # human|auto|correlated
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="review")  # review|confirmed|rejected
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_timeline_event_session_t", "session_id", "t_start_ns"),)
+
+
 class MapCommit(Base):
     # A fused, versioned HD-map output (content-addressed, like DatasetCommit).
     __tablename__ = "map_commit"
