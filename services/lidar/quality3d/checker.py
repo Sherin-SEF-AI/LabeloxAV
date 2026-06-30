@@ -59,6 +59,97 @@ def check_cuboid(cuboid: dict, cloud_xyz: np.ndarray, plane: list[float],
     return flags
 
 
+def _iou_2d(a: list[float], b: list[float]) -> float:
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    ua = max(0.0, a[2] - a[0]) * max(0.0, a[3] - a[1])
+    ub = max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+    union = ua + ub - inter
+    return inter / union if union > 1e-6 else 0.0
+
+
+def _projected_aabb(cuboid: dict, cam_id: str, w: int, h: int) -> list[float] | None:
+    """The axis-aligned 2D box of a cuboid's in-front corners projected into a camera, or None when the
+    cuboid does not land in that image."""
+    from services.lidar.boxes import project_cuboid
+    proj = project_cuboid(cuboid["center"], cuboid["dims"], cuboid["yaw"], cam_id, w, h,
+                          cuboid.get("pitch", 0.0), cuboid.get("roll", 0.0))
+    uv = [c for c, infront in zip(proj["corners_uv"], proj["in_front"], strict=False) if infront]
+    if len(uv) < 2 or not proj["any_in_image"]:
+        return None
+    xs, ys = [p[0] for p in uv], [p[1] for p in uv]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def check_2d3d_consistency(cuboid: dict, views: list[dict], min_iou: float) -> dict | None:
+    """Cross-sensor consistency: a 3D cuboid must reproject onto the 2D box of the same object in the cameras
+    that see it. views is [{cam_id, w, h, bbox_2d}] for each camera with a 2D detection of this object. We
+    project the cuboid into each and take the best 2D IoU; below min_iou in every camera the 3D and 2D boxes
+    disagree (a bad lift or a wrong link), and we flag it. Returns a flag dict or None when consistent.
+
+    Deliberately conservative (flag only when NO camera agrees): the fleet runs on nominal calibration, so a
+    strict per-camera test would fire on projection noise. Tighten once real extrinsics land (the M-CALIB gap).
+    """
+    per_cam = []
+    for v in views:
+        if v.get("bbox_2d") is None:
+            continue
+        pb = _projected_aabb(cuboid, v["cam_id"], int(v["w"]), int(v["h"]))
+        if pb is None:
+            continue
+        per_cam.append({"cam_id": v["cam_id"], "iou": round(_iou_2d(pb, v["bbox_2d"]), 3)})
+    if not per_cam:
+        return None                                  # never jointly visible with a 2D box: nothing to check
+    best = max(c["iou"] for c in per_cam)
+    if best >= min_iou:
+        return None                                  # at least one camera agrees -> consistent
+    return {"kind": "box_2d3d_inconsistent", "score": round(1.0 - best, 2),
+            "detail": {"best_iou": best, "min_iou": min_iou, "per_cam": per_cam}}
+
+
+async def check_object_consistency(object_3d_id: uuid.UUID, write: bool = True) -> dict:
+    """Assemble the 2D views of a cuboid's linked object (its own camera plus any cross-camera views) and run
+    the 2D-3D consistency check, optionally writing a QualityFlag3D. Returns the per-camera report."""
+    from db.models import Frame, Object
+    cfg = get_settings().lidar
+    async with get_sessionmaker()() as db:
+        o3d = await db.get(Object3D, object_3d_id)
+        if o3d is None:
+            return {"error": "object_3d not found"}
+        cuboid = {"center": o3d.center, "dims": o3d.dims, "yaw": o3d.yaw, "pitch": o3d.pitch, "roll": o3d.roll}
+        if o3d.object_id is None:
+            return {"object_3d_id": str(object_3d_id), "checked": False, "reason": "no linked 2D object"}
+
+        # the linked 2D object plus the same object in other rig cameras (cross_cam_links.views)
+        object_ids = [o3d.object_id]
+        link = (await db.get(Object, o3d.object_id))
+        if link is not None and link.cross_cam_links:
+            for oid in (link.cross_cam_links.get("views") or {}).values():
+                if oid:
+                    object_ids.append(uuid.UUID(str(oid)))
+        views = []
+        for oid in dict.fromkeys(object_ids):        # dedupe, keep order
+            obj = await db.get(Object, oid)
+            if obj is None:
+                continue
+            fr = await db.get(Frame, obj.frame_id)
+            if fr is None:
+                continue
+            views.append({"cam_id": fr.cam_id, "w": fr.width, "h": fr.height, "bbox_2d": list(obj.bbox)})
+
+    flag = check_2d3d_consistency(cuboid, views, cfg.quality_2d3d_min_iou)
+    if flag and write:
+        async with get_sessionmaker()() as db:
+            db.add(QualityFlag3D(object_3d_id=object_3d_id, cloud_id=o3d.cloud_id, kind=flag["kind"],
+                                 score=flag["score"], detail=flag["detail"]))
+            await db.commit()
+    log.info("lidar.consistency", object_3d=str(object_3d_id), cameras=len(views),
+             flagged=bool(flag))
+    return {"object_3d_id": str(object_3d_id), "checked": True, "cameras": len(views),
+            "consistent": flag is None, "flag": flag}
+
+
 def find_missing_neighbors(cloud_xyz: np.ndarray, plane: list[float], cuboids: list[dict],
                            min_cluster: int = 60) -> list[dict]:
     """Dense non-ground clusters with no cuboid over them: a likely missed object."""
@@ -106,8 +197,19 @@ async def check_cloud(cloud_id: uuid.UUID) -> dict:
                                  detail=f["detail"]))
             written += 1
         await db.commit()
-    log.info("lidar.quality3d", cloud=str(cloud_id), objects=len(objs), flags=written)
-    return {"cloud_id": str(cloud_id), "objects": len(objs), "flags": written}
+
+    # cross-sensor 2D-3D consistency reads the 2D views (frames and linked objects), not the cloud, so it
+    # runs as its own pass over the linked objects rather than inside the geometry loop.
+    consistency = 0
+    for o in objs:
+        if o.object_id is not None:
+            res = await check_object_consistency(o.object_3d_id, write=True)
+            if res.get("flag"):
+                consistency += 1
+    written += consistency
+
+    log.info("lidar.quality3d", cloud=str(cloud_id), objects=len(objs), flags=written, consistency=consistency)
+    return {"cloud_id": str(cloud_id), "objects": len(objs), "flags": written, "consistency_flags": consistency}
 
 
 async def confirm_flag(flag_id: uuid.UUID) -> dict:

@@ -394,6 +394,7 @@ export default function FrameEditor() {
       const saved = await api.lidarPatchCuboid(cid, {
         class_id: (fields.class_id as number) ?? cur.class_id, center: (fields.center as number[]) ?? cur.center,
         dims: (fields.dims as number[]) ?? cur.dims, yaw: (fields.yaw as number) ?? cur.yaw,
+        pitch: (fields.pitch as number) ?? cur.pitch, roll: (fields.roll as number) ?? cur.roll,
         ground_snap: Boolean(fields.attrs && (fields.attrs as Record<string, unknown>).ground_snap), expected_version: cur.version,
       });
       patchCub(cid, saved);
@@ -574,17 +575,32 @@ export default function FrameEditor() {
   // isNew flags, creating the same object twice on the server. The idem_key is belt-and-suspenders: the
   // server de-dupes a create that still slips through (network retry, multi-tab).
   const savingRef = useRef(false);
+  // Signature of the pending (deleted + new/dirty) set that last failed to save. Autosave will not retry the
+  // exact same set, so a persistent per-object error (a malformed object, a stale id) cannot become an
+  // infinite 700ms retry storm; any real edit changes the signature and resumes autosave.
+  const lastFailRef = useRef("");
+  const pendingSig = () => JSON.stringify([st.deleted,
+    st.objects.filter((o) => o.isNew || o.dirty).map((o) => `${o.id}:${o.version ?? 0}`)]);
   const save = useCallback(async () => {
     if (!dirty || savingRef.current) return;
     savingRef.current = true;
     setSaving(true);
     const tgt = acceptState(getUser()?.role);  // annotator -> submitted (QA), reviewer/admin -> accepted
     try {
-      for (const oid of st.deleted) await api.deleteObject(oid);
+      // Delete is idempotent: a 404 means the object is already gone, which is the desired end state. Without
+      // this, deleting an already-removed object throws, aborts the save before the "saved" dispatch clears
+      // st.deleted, and the autosave effect retries the same failing delete every 700ms forever.
+      for (const oid of st.deleted) {
+        try { await api.deleteObject(oid); }
+        catch (e) { if (!String(e).includes("404")) throw e; }
+      }
       const remap: Record<string, string> = {};
       const versions: Record<string, number> = {};
       for (const o of st.objects) {
-        if (o.isNew) {
+        // A tmp- id is a client-only object never persisted, so it must be CREATED, never reviewed: sending
+        // a tmp id to /objects/{id}/review is a 422 (not a UUID), and if it loops it floods like the delete
+        // case did. createObject de-dupes via idem_key, so a redundant create is safe.
+        if (o.isNew || o.id.startsWith("tmp-")) {
           const created = await api.createObject(id, {
             class_name: o.class_name, bbox: o.bbox, attrs: o.attrs,
             mask_polygons: o.mask.length ? o.mask : undefined, state: tgt, idem_key: o.id, rot_deg: o.rot ?? 0,
@@ -603,10 +619,12 @@ export default function FrameEditor() {
         }
       }
       dispatch({ t: "saved", remap, versions });
+      lastFailRef.current = "";                  // succeeded: clear the no-retry guard
       flash("saved");
       setCuboids(await api.frameCuboids(id).catch(() => [])); // refresh projected cuboid wireframes
     } catch (e) {
       const msg = String(e);
+      lastFailRef.current = pendingSig();         // do not auto-retry this exact set until something changes
       flash(msg.includes("409") ? "conflict: another annotator changed this object; reload to continue" : "save failed: " + msg);
     } finally {
       savingRef.current = false;
@@ -622,6 +640,7 @@ export default function FrameEditor() {
   stRef.current = st;
   useEffect(() => {
     if (!autosave || !loadedRef.current || !dirty || saving) return;
+    if (pendingSig() === lastFailRef.current) return;  // this exact set already failed; wait for a real edit
     const t = setTimeout(() => saveRef.current(), 700);
     return () => clearTimeout(t);
   }, [autosave, dirty, saving, st.objects, st.deleted]);
@@ -1087,6 +1106,17 @@ export default function FrameEditor() {
                       onMouseUp={() => saveCub(cubSelected.object_3d_id, { yaw: cubSelected.yaw })} className="flex-1" />
                     <span className="w-9 text-right text-ink-3">{(cubSelected.yaw * 57.3).toFixed(0)}</span>
                   </label>
+                  {/* 9-DOF: pitch (up/down a ramp) and roll (side bank). Auto-estimated from the ground on
+                      lift; editable here for slopes the estimator clamped or missed. */}
+                  {([["pitch", cubSelected.pitch ?? 0], ["roll", cubSelected.roll ?? 0]] as const).map(([axis, val]) => (
+                    <label key={axis} className="flex items-center gap-2">
+                      <span className="w-3 text-ink-3" title={axis === "pitch" ? "tilt up/down a ramp" : "side bank"}>{axis === "pitch" ? "pit" : "rol"}</span>
+                      <input type="range" min={-0.6} max={0.6} step={0.01} value={val}
+                        onChange={(e) => patchCub(cubSelected.object_3d_id, { [axis]: Number(e.target.value) })}
+                        onMouseUp={() => saveCub(cubSelected.object_3d_id, { [axis]: axis === "pitch" ? cubSelected.pitch : cubSelected.roll })} className="flex-1" />
+                      <span className="w-9 text-right text-ink-3">{(val * 57.3).toFixed(0)}</span>
+                    </label>
+                  ))}
                   <div className="flex items-center gap-1 pt-0.5">
                     {(["height", "intensity", "source", "segment"] as ColorBy[]).map((kb) => (
                       <button key={kb} onClick={() => setColorBy3d(kb)} className={`px-1.5 py-0.5 border ${colorBy3d === kb ? "border-accent text-accent" : "border-line text-ink-3"}`}>{kb}</button>
