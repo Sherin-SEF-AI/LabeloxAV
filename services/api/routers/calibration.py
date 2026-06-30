@@ -6,6 +6,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,11 +17,36 @@ from services.api.deps import db_session
 router = APIRouter()
 
 
+class SetCalibIn(BaseModel):
+    # cam_specs: {cam_id: {fx|hfov_deg, fy?, cx?, cy?, dist?, model?, yaw_deg?, pitch_deg?, roll_deg?,
+    # height_m?, x_m?, y_m?, ref_width?, ref_height?}}. source in measured|dataset|estimated.
+    cam_specs: dict
+    source: str = "measured"
+    ref_width: int = 1920
+    ref_height: int = 1080
+
+
 @router.post("/calibration/validate")
 async def validate(session_id: str):
     from services.calibration.report import validate_session
 
     return await validate_session(UUID(session_id))
+
+
+@router.post("/calibration/vehicle/{vehicle_id}/calibrate")
+async def calibrate_vehicle(vehicle_id: str, body: SetCalibIn):
+    """Stamp one known rig spec onto every session of a vehicle (the per-vehicle real-calibration path)."""
+    from services.calibration.store import apply_vehicle_calibration
+    specs = {c: {**s, "ref_width": s.get("ref_width", body.ref_width),
+                 "ref_height": s.get("ref_height", body.ref_height)} for c, s in body.cam_specs.items()}
+    return await apply_vehicle_calibration(vehicle_id, specs, body.source)
+
+
+@router.post("/calibration/{session_id}/calibrate")
+async def calibrate_session(session_id: UUID, body: SetCalibIn):
+    """Set real calibration for one session's cameras from a rig spec (focal/FOV, mount height, pitch)."""
+    from services.calibration.store import set_session_calibration
+    return await set_session_calibration(session_id, body.cam_specs, body.source, body.ref_width, body.ref_height)
 
 
 @router.get("/calibration/sessions")
