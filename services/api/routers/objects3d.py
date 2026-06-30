@@ -304,6 +304,24 @@ async def object3d_consistency(object_3d_id: uuid.UUID):
     return res
 
 
+class AggLabelIn(BaseModel):
+    center: list[float]                       # [x, y, z] in the aggregated-map frame
+    dims: list[float]                         # [L, W, H] metres, the one size used across the whole track
+    yaw: float = 0.0
+    class_id: int
+
+
+@router.post("/lidar/aggregate/{agg_id}/label")
+async def aggregate_label(agg_id: uuid.UUID, body: AggLabelIn):
+    """One-shot 4D label: a cuboid drawn once in the aggregated scene propagates to every clip frame as a 3D
+    track with one consistent size, each box transformed into that frame's ego pose. Routed to review."""
+    from services.lidar.aggregate.label_propagate import propagate_aggregate_label
+    res = await propagate_aggregate_label(agg_id, body.center, body.dims, body.yaw, body.class_id)
+    if res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
+
+
 # ---- M-L2.4: linked identity, properties, correction ----
 class BatchCorrectIn(BaseModel):
     object_3d_ids: list[uuid.UUID]

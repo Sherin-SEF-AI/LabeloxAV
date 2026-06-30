@@ -99,6 +99,15 @@ async def interpolate_keyframed(track_id: UUID, method: str = "linear", db: Asyn
     return await interpolate_track_keyframed(track_id, method)
 
 
+@router.post("/tracks/{track_id}/smooth")
+async def smooth_track_path(track_id: UUID, window: int = 5, db: AsyncSession = Depends(db_session)):
+    """M-4D.2: smooth the track's motion path, shifting each box to its low-pass-filtered centroid (jitter
+    and velocity discontinuities removed) while keeping box sizes and the true endpoints."""
+    from services.temporal.trajectory import smooth_track
+
+    return await smooth_track(track_id, window)
+
+
 @router.post("/objects/{object_id}/keyframe")
 async def set_keyframe(object_id: UUID, value: bool = True, db: AsyncSession = Depends(db_session)):
     from services.temporal.keyframes import mark_keyframe

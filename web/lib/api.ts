@@ -13,6 +13,8 @@ import type {
   CalibDetail,
   CalibResolved,
   CalibSession,
+  EgoState,
+  InertialEvents,
   Confusions,
   CorrectionCoverage,
   CorrectionSuggestion,
@@ -391,6 +393,9 @@ export const api = {
   calibrationDetail: (sid: string) => get<CalibDetail>(`/api/calibration/${sid}`),
   // M-CAL.3 real-calibration ingestion + the resolved/trust surface
   calibrationResolved: (sid: string) => get<CalibResolved>(`/api/calibration/${sid}/resolved`),
+  // M-IMU Plane-4 inertial
+  egoState: (sid: string) => get<EgoState>(`/api/sessions/${sid}/egostate`),
+  inertialEvents: (sid: string) => get<InertialEvents>(`/api/sessions/${sid}/inertial_events`),
   calibrationSetSpec: (sid: string, camSpecs: Record<string, Record<string, number>>, source = "measured") =>
     post<Record<string, unknown>>(`/api/calibration/${sid}/calibrate`, { cam_specs: camSpecs, source }),
   calibrationEstimate: (sid: string) => post<Record<string, unknown>>(`/api/calibration/${sid}/estimate`, {}),
