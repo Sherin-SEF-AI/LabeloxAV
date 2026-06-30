@@ -342,6 +342,14 @@ async def cloud_ground_qa(cloud_id: uuid.UUID):
     return res
 
 
+@router.get("/sessions/{session_id}/static-dynamic")
+async def session_static_dynamic(session_id: uuid.UUID):
+    """Milestone G: partition the session's 3D tracks into static (parked, label once) and dynamic (label
+    per frame), so a parked car or pole is labeled once instead of frame by frame."""
+    from services.temporal.static_dynamic import session_static_dynamic_split
+    return await session_static_dynamic_split(session_id)
+
+
 @router.post("/lidar/aggregate/{agg_id}/label")
 async def aggregate_label(agg_id: uuid.UUID, body: AggLabelIn):
     """One-shot 4D label: a cuboid drawn once in the aggregated scene propagates to every clip frame as a 3D
