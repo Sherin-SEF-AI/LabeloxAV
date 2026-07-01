@@ -11,6 +11,7 @@ import { SkeletonRows, Spinner } from "@/components/Spinner";
 import { ObjectSourceBadge } from "@/components/SourceBadge";
 import { objectSource, sessionOrigin } from "@/lib/source";
 import { acceptState, getUser } from "@/lib/user";
+import Icon from "@/components/shell/Icon";
 
 const BANDS = [
   { key: "review,annotate", label: "My queue", hint: "everything assigned to you" },
@@ -19,12 +20,13 @@ const BANDS = [
   { key: "submitted", label: "QA queue", hint: "submitted work awaiting approval" },
 ];
 
-// A compact overview number (sessions, queue size, datasets ...).
-function Stat({ label, value, sub, loading }: { label: string; value: number | string; sub?: string; loading?: boolean }) {
+// A compact overview number (sessions, queue size, datasets ...). accent draws the eye to the one that
+// represents work waiting on you.
+function Stat({ label, value, sub, loading, accent }: { label: string; value: number | string; sub?: string; loading?: boolean; accent?: boolean }) {
   return (
-    <div className="panel px-4 py-3">
+    <div className={`panel px-4 py-3 ${accent ? "border-accent/40" : ""}`}>
       <div className="font-mono text-[10px] uppercase tracking-wide text-ink-3">{label}</div>
-      <div className="font-mono text-2xl text-ink mt-1 tabular-nums">
+      <div className={`font-mono text-2xl mt-1 tabular-nums ${accent ? "text-accent" : "text-ink"}`}>
         {loading ? <span className="text-ink-3 animate-pulse">···</span> : value}
       </div>
       {sub ? <div className="font-mono text-[11px] text-ink-3 mt-0.5">{sub}</div> : null}
@@ -32,19 +34,39 @@ function Stat({ label, value, sub, loading }: { label: string; value: number | s
   );
 }
 
-// A big, obvious entry point into one of the platform's workflows.
-function ActionCard({ title, desc, onClick }: { title: string; desc: string; onClick: () => void }) {
+// A big, obvious entry point into one of the platform's workflows. primary marks the recommended next step.
+function ActionCard({ title, desc, icon, onClick, primary }: { title: string; desc: string; icon: string; onClick: () => void; primary?: boolean }) {
   return (
     <button
       onClick={onClick}
-      className="panel text-left px-4 py-3 hover:border-accent transition-colors group focus:outline-none focus:border-accent"
+      className={`panel text-left px-4 py-3 transition-colors group focus:outline-none focus:border-accent ${primary ? "border-accent/50 hover:border-accent" : "hover:border-accent"}`}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2.5">
+        <span className={`flex transition-colors ${primary ? "text-accent" : "text-ink-3 group-hover:text-accent"}`}><Icon name={icon} size={16} /></span>
         <span className="text-ink font-medium">{title}</span>
-        <span className="text-ink-3 group-hover:text-accent transition-colors">&rarr;</span>
+        <span className="ml-auto text-ink-3 group-hover:text-accent transition-colors">&rarr;</span>
       </div>
       <div className="text-ink-3 text-xs mt-1 leading-snug">{desc}</div>
     </button>
+  );
+}
+
+// The "why it needs you" reasons as scannable colored chips instead of one run-on line: conflicts read red,
+// low confidence amber, rare classes blue, mask/box disagreement accent.
+function WhyChips({ why }: { why: string }) {
+  if (!why) return null;
+  const tone = (t: string) =>
+    /conflict/.test(t) ? "text-block border-block/40"
+      : /low conf/.test(t) ? "text-warn border-warn/40"
+      : /rare/.test(t) ? "text-info border-info/40"
+      : /mask/.test(t) ? "text-accent border-accent/40"
+      : "text-ink-3 border-line";
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {why.split(/,\s*/).filter(Boolean).map((t, i) => (
+        <span key={i} className={`font-mono text-[9.5px] leading-none px-1.5 py-0.5 rounded border ${tone(t)}`}>{t}</span>
+      ))}
+    </div>
   );
 }
 
@@ -218,18 +240,29 @@ export default function HomePage() {
             </div>
           ) : null}
 
-          {/* Welcome + orientation */}
-          <div>
-            <h1 className="text-xl text-ink font-semibold">Welcome to LabeloxAV</h1>
-            <p className="text-ink-3 text-sm mt-1">
-              Multimodal annotation for autonomous driving. Start from your review queue below, or jump into a workflow.
-            </p>
+          {/* Welcome + the one action that matters: pick up where the queue left off */}
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h1 className="text-xl text-ink font-semibold">Welcome back{role ? `, ${role}` : ""}</h1>
+              <p className="text-ink-3 text-sm mt-1 max-w-xl">
+                Multimodal annotation for autonomous driving. Pick up your review queue, or jump into a workflow.
+              </p>
+            </div>
+            <button
+              onClick={() => open(shownRows[0] ?? rows[0])}
+              disabled={!rows.length}
+              className="flex items-center gap-2 bg-accent text-bg font-medium text-sm px-4 py-2.5 rounded hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+            >
+              <Icon name="confirm" size={16} />
+              {rows.length ? "Continue reviewing" : "Queue is clear"}
+              {rows.length ? <span className="font-mono text-[11px] opacity-80 tabular-nums">{rows.length} queued</span> : null}
+            </button>
           </div>
 
           {/* At-a-glance stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Stat label="In your queue" value={rows.length} sub={activeBand?.label.toLowerCase()} loading={loading} accent />
             <Stat label="Sessions" value={sessions.length} sub={`${cities} cit${cities === 1 ? "y" : "ies"}`} loading={!sessions.length && loading} />
-            <Stat label="In your queue" value={rows.length} sub={activeBand?.label.toLowerCase()} loading={loading} />
             <Stat label="Datasets" value={datasets.length} sub={datasets.length ? "sealed exports" : "none yet"} />
             <Stat label="Your role" value={role ?? "annotator"} sub="what you can approve" />
           </div>
@@ -240,12 +273,12 @@ export default function HomePage() {
               <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3">Jump to a workflow</h2>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <ActionCard title="Review queue" desc="Work through model proposals ranked by what matters most." onClick={() => document.getElementById("queue")?.scrollIntoView({ behavior: "smooth" })} />
-              <ActionCard title="Import data" desc="Bring in dashcam video or sensor logs to annotate." onClick={() => router.push("/import")} />
-              <ActionCard title="Analytics" desc="See labeling progress, agreement, and coverage." onClick={() => router.push("/analytics")} />
-              <ActionCard title="Datasets" desc="Seal and export a versioned dataset (COCO, YOLO, ...)." onClick={() => router.push("/datasets")} />
-              <ActionCard title="Jobs" desc="Watch autolabel, training, and import jobs live." onClick={() => router.push("/jobs")} />
-              <ActionCard title="Curation" desc="Find the highest-value frames to label next." onClick={() => router.push("/curation")} />
+              <ActionCard primary icon="review" title="Review queue" desc="Work through model proposals ranked by what matters most." onClick={() => document.getElementById("queue")?.scrollIntoView({ behavior: "smooth" })} />
+              <ActionCard icon="plus" title="Import data" desc="Bring in dashcam video or sensor logs to annotate." onClick={() => router.push("/import")} />
+              <ActionCard icon="activity" title="Analytics" desc="See labeling progress, agreement, and coverage." onClick={() => router.push("/analytics")} />
+              <ActionCard icon="layers" title="Datasets" desc="Seal and export a versioned dataset (COCO, YOLO, ...)." onClick={() => router.push("/datasets")} />
+              <ActionCard icon="route" title="Jobs" desc="Watch autolabel, training, and import jobs live." onClick={() => router.push("/jobs")} />
+              <ActionCard icon="target" title="Curation" desc="Find the highest-value frames to label next." onClick={() => router.push("/curation")} />
             </div>
           </div>
 
@@ -337,7 +370,7 @@ export default function HomePage() {
 
             {/* Table */}
             {loading && !rows.length ? (
-              <SkeletonRows rows={8} cols="grid-cols-[32px_40px_1fr_1fr_130px_110px]" />
+              <SkeletonRows rows={8} cols="grid-cols-[32px_40px_1fr_150px_110px]" />
             ) : rows.length ? (
               <table className="w-full text-sm">
                 <thead className="text-ink-3 font-mono text-[11px] uppercase border-b hairline">
@@ -345,8 +378,7 @@ export default function HomePage() {
                     <th className="px-3 py-2 w-8"><input type="checkbox" checked={allSelected} onChange={selectAll} /></th>
                     <th className="text-left font-normal px-3 py-2 w-10">#</th>
                     <th className="text-left font-normal px-3 py-2">object &middot; why it needs you</th>
-                    <th className="text-left font-normal px-3 py-2">proposed class</th>
-                    <th className="text-left font-normal px-3 py-2 w-32">confidence</th>
+                    <th className="text-left font-normal px-3 py-2 w-36">confidence</th>
                     <th className="text-left font-normal px-3 py-2 w-28">state</th>
                   </tr>
                 </thead>
@@ -354,24 +386,23 @@ export default function HomePage() {
                   {shownRows.map((r, i) => (
                     <tr key={r.object_id} onClick={() => { setCursor(i); open(r); }} onMouseEnter={() => setCursor(i)}
                       className={`border-b hairline cursor-pointer ${sel.has(r.object_id) ? "bg-bg-2" : i === cursor ? "bg-panel" : "hover:bg-bg-2"}`}>
-                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}>
                         <input type="checkbox" checked={sel.has(r.object_id)} onChange={() => toggle(r.object_id)} />
                       </td>
-                      <td className="px-3 py-2 font-mono text-ink-3">{String(i + 1).padStart(2, "0")}</td>
+                      <td className="px-3 py-2 font-mono text-ink-3 align-top">{String(i + 1).padStart(2, "0")}</td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-ink-2">{r.class_name}</span>
+                          <span className="font-mono text-ink">{r.class_name}</span>
                           <ObjectSourceBadge source={r.source} importFormat={r.import_format} />
                         </div>
-                        <div className="text-ink-3 text-xs">{r.why}</div>
+                        <WhyChips why={r.why} />
                       </td>
-                      <td className="px-3 py-2 font-mono">{r.class_name}</td>
-                      <td className="px-3 py-2"><ConfBar conf={r.conf} /></td>
-                      <td className="px-3 py-2"><StateBadge state={r.state} /></td>
+                      <td className="px-3 py-2 align-top"><ConfBar conf={r.conf} /></td>
+                      <td className="px-3 py-2 align-top"><StateBadge state={r.state} /></td>
                     </tr>
                   ))}
                   {!shownRows.length ? (
-                    <tr><td colSpan={6} className="px-3 py-8 text-center text-ink-3 text-sm">
+                    <tr><td colSpan={5} className="px-3 py-8 text-center text-ink-3 text-sm">
                       No {srcFilter === "imported" ? "imported" : srcFilter === "app" ? "in-app" : ""} items in this band. Try another source or band.
                     </td></tr>
                   ) : null}
