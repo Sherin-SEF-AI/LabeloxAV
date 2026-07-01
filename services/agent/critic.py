@@ -23,9 +23,10 @@ from dataclasses import dataclass, field
 _TWO_WHEELERS = {"motorcycle", "scooter", "moped", "cycle", "bicycle", "delivery_rider_bike", "autorickshaw"}
 _VRU = {"pedestrian", "rider", "cyclist", "motorcyclist", "bicyclist"}
 _ANIMALS = {"cattle", "dog", "cow", "buffalo", "goat", "animal_fallback"}
-# Things that must rest on the road (so the horizon check applies). Elevated things (signs, lights,
-# hoardings, traffic signals) are intentionally excluded -- they are legitimately above the horizon.
-_GROUND_L1 = {"vehicle"}
+# Things that must rest on the road (so the horizon + LiDAR checks apply). These are the ontology's actual
+# vehicle l1 categories; elevated things (signs, lights, hoardings) are intentionally excluded -- they are
+# legitimately above the horizon.
+_GROUND_L1 = {"two_wheeler", "three_wheeler", "four_wheeler", "heavy"}
 _MAX_VRU_KMH = 45.0        # a person/cyclist above this is almost certainly a bad label or track
 _MAX_ANY_KMH = 220.0       # nothing on an Indian road plausibly exceeds this; a track glitch if it does
 _TELEPORT_FRAC = 0.6       # centroid jump > 60% of the frame diagonal between consecutive frames = teleport
