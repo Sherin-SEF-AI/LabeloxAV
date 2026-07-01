@@ -106,6 +106,11 @@ async function del<T>(path: string): Promise<T> {
 // training job holds the GPU; callers surface that as a non-blocking notice.
 export type SegmentPrompt = { points?: number[][]; labels?: number[]; box?: number[]; precise?: boolean };
 
+export type AgentPolicy = { auto_accept_conf?: number; review_low?: number; require_agreement?: boolean };
+export type AgentCounts = { total: number; auto_accept: number; review: number; annotate: number; unchanged: number; demoted_by_critic: number };
+export type AgentPlanItem = { object_id: string; class_name: string; conf: number; current_state: string; action: string; changes_state: boolean; reason: string; tier: string; critic_ok: boolean; critic_reasons: string[] };
+export type AgentPlan = { frame_id: string; policy: AgentPolicy; counts: AgentCounts; critic_flags: Record<string, number>; items: AgentPlanItem[] };
+
 // LiDAR 3D viewer
 export type LidarBounds = { min: number[]; max: number[]; n: number };
 export type LidarCloud = {
@@ -331,6 +336,13 @@ export const api = {
   frameCuboids: (frame_id: string) => get<ProjectedCuboid[]>(`/api/frames/${frame_id}/cuboids`),
   liftGround: (frame_id: string, u: number, v: number) =>
     get<{ ego: number[] | null; reason?: string }>(`/api/frames/${frame_id}/lift_ground?u=${u}&v=${v}`),
+  // annotation agent: dry-run plan, reversible commit, revert
+  agentPlan: (frame_id: string, policy: AgentPolicy = {}) =>
+    post<AgentPlan>(`/api/agent/frames/${frame_id}/plan`, policy),
+  agentRun: (frame_id: string, policy: AgentPolicy = {}) =>
+    post<{ run_id: string; applied: number; counts: AgentCounts; policy: AgentPolicy }>(`/api/agent/frames/${frame_id}/run`, policy),
+  agentRevert: (run_id: string) =>
+    post<{ run_id: string; reverted: number; skipped: number }>(`/api/agent/runs/${run_id}/revert`, {}),
   // pixel-assist: brush/eraser mask composition + SLIC superpixels
   composeMask: (body: { polygons: number[][]; ops: { op: string; center: number[]; radius: number }[]; width: number; height: number }) =>
     post<{ polygons: number[][] }>(`/api/mask/compose`, body),
