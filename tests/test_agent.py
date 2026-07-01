@@ -371,6 +371,48 @@ def test_agent_never_touches_human():
 
 
 @requires_infra
+def test_reconcile_relabel_is_reversible():
+    """A reconcile relabel (class change) must revert to the original class + state, like any agent run."""
+    import uuid as _uuid
+
+    from db.models import AgentRun, Object
+    from db.session import get_sessionmaker
+    from services.agent.runs import revert_run
+
+    cid_a, cid_b = _vehicle_ids(2)
+    _sid, fid, oids = run_async(_seed_frame_with_objects([
+        {"class_id": cid_a, "conf": 0.8, "state": "auto_accept", "source": "fused",
+         "provenance": {"agreement": True}, "bbox": [10, 300, 60, 460]},
+    ]))
+    oid = oids[0]
+    run_id = _uuid.uuid4()
+
+    async def _flow():
+        # simulate an applied relabel: class_a -> class_b, routed to review, recorded reversibly
+        async with get_sessionmaker()() as db:
+            o = await db.get(Object, oid)
+            db.add(AgentRun(run_id=run_id, kind="reconcile", scope={"frame_id": str(fid)}, status="committed",
+                            policy={}, counts={"relabeled": 1},
+                            changes={str(oid): {"from_class": cid_a, "to_class": cid_b,
+                                                "from_state": "auto_accept", "to_state": "review",
+                                                "from_source": "fused", "to_source": "fused"}},
+                            critic={}, created_by="t"))
+            o.class_id = cid_b
+            o.state = "review"
+            o.provenance = {**(o.provenance or {}), "agent_run_id": str(run_id)}
+            await db.commit()
+        async with get_sessionmaker()() as db:
+            assert (await db.get(Object, oid)).class_id == cid_b
+            rev = await revert_run(db, run_id)
+            assert rev["reverted"] == 1
+        async with get_sessionmaker()() as db:
+            o = await db.get(Object, oid)
+            assert o.class_id == cid_a and o.state == "auto_accept"
+
+    run_async(_flow())
+
+
+@requires_infra
 def test_temporal_critic_on_real_track():
     """A real track that flips class across two frames must be flagged by the DB-backed temporal check."""
     import cv2

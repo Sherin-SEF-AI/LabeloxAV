@@ -45,8 +45,14 @@ def reconcile_crop(crop_bgr, current_class_id: int, *, min_conf: float = 0.40) -
     return {"verdict": "unsure", "conf": round(float(top["conf"]), 3), "alternatives": preds}
 
 
-async def reconcile_frame(db: AsyncSession, frame_id: uuid.UUID, object_ids: list[str] | None = None) -> dict:
-    """Reconcile a frame's objects (or a given subset) against the independent model. Read-only."""
+async def reconcile_frame(db: AsyncSession, frame_id: uuid.UUID, object_ids: list[str] | None = None,
+                          *, apply: bool = False, apply_min_conf: float = 0.55,
+                          created_by: str | None = None) -> dict:
+    """Reconcile a frame's objects (or a given subset) against the independent model. Read-only by default.
+
+    With apply=True, a strong 'correct' verdict (conf >= apply_min_conf) is applied as a relabel: the class
+    changes to the suggested one and the object is routed to review so a human confirms it. Every relabel is
+    recorded in one reversible AgentRun (revert restores the original class and state)."""
     from core.storage import get_object_store
     from services.autolabel.ontology import get_ontology
     from services.recall.backends import load_image_bgr
@@ -66,6 +72,8 @@ async def reconcile_frame(db: AsyncSession, frame_id: uuid.UUID, object_ids: lis
     onto = get_ontology()
     items: list[dict] = []
     tally = {"confirm": 0, "correct": 0, "unsure": 0}
+    changes: dict[str, dict] = {}
+    run_id = uuid.uuid4()
     for o in objs:
         x1, y1, x2, y2 = (int(round(float(v))) for v in o.bbox)
         x1, y1 = max(0, x1), max(0, y1)
@@ -79,6 +87,29 @@ async def reconcile_frame(db: AsyncSession, frame_id: uuid.UUID, object_ids: lis
             cur = onto.by_id(int(o.class_id)).name
         except Exception:  # noqa: BLE001
             cur = str(o.class_id)
-        items.append({"object_id": str(o.object_id), "current_class": cur, **r})
-    log.info("agent.reconcile", frame_id=str(frame_id), **tally)
-    return {"frame_id": str(frame_id), "reconciled": len(items), "verdicts": tally, "items": items}
+        applied = False
+        if apply and r["verdict"] == "correct" and float(r["conf"]) >= apply_min_conf:
+            changes[str(o.object_id)] = {"from_class": int(o.class_id), "to_class": int(r["suggested_class_id"]),
+                                         "from_state": o.state, "to_state": "review",
+                                         "from_source": o.source, "to_source": o.source}
+            o.class_id = int(r["suggested_class_id"])
+            o.state = "review"
+            o.version = (o.version or 0) + 1
+            prov = dict(o.provenance or {})
+            prov["agent_run_id"] = str(run_id)
+            prov.setdefault("agent_reconcile", []).append(f"{cur} -> {r['suggested_class_name']} ({r['conf']})")
+            o.provenance = prov
+            applied = True
+        items.append({"object_id": str(o.object_id), "current_class": cur, "applied": applied, **r})
+
+    run_out = None
+    if apply and changes:
+        from db.models import AgentRun
+        db.add(AgentRun(run_id=run_id, kind="reconcile", scope={"frame_id": str(frame_id)},
+                        status="committed", policy={"apply_min_conf": apply_min_conf},
+                        counts={"relabeled": len(changes)}, changes=changes, critic={}, created_by=created_by))
+        run_out = str(run_id)
+    await db.commit()
+    log.info("agent.reconcile", frame_id=str(frame_id), applied=len(changes), **tally)
+    return {"frame_id": str(frame_id), "reconciled": len(items), "verdicts": tally,
+            "relabeled": len(changes), "run_id": run_out, "items": items}

@@ -48,6 +48,8 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
             continue
         obj.state = ch["from_state"]
         obj.source = ch["from_source"]
+        if "from_class" in ch:            # a reconcile relabel: restore the original class too
+            obj.class_id = ch["from_class"]
         obj.version = (obj.version or 0) + 1
         prov = dict(prov)
         prov.pop("agent_run_id", None)

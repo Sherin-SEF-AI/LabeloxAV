@@ -112,14 +112,25 @@ async def command(body: CommandIn, db: AsyncSession = Depends(db_session), user=
 
 class ReconcileIn(BaseModel):
     object_ids: list[str] | None = None  # None = the whole frame's machine objects
+    apply: bool = False                  # apply strong 'correct' verdicts as reversible relabels
+    apply_min_conf: float = 0.55
 
 
 @router.post("/agent/frames/{frame_id}/reconcile", dependencies=[Depends(require_role("annotator"))])
-async def reconcile(frame_id: str, body: ReconcileIn | None = None, db: AsyncSession = Depends(db_session)):
+async def reconcile(frame_id: str, body: ReconcileIn | None = None,
+                    db: AsyncSession = Depends(db_session), user=Depends(current_user)):
     """Adjudicate the frame's objects with an independent model (SigLIP 2 zero-shot): confirm / correct /
-    unsure per object. Read-only -- returns opinions and suggested relabels, never mutates."""
+    unsure per object. Read-only unless apply=True, which relabels the strong 'correct' verdicts as one
+    reversible AgentRun (reviewer role required to apply)."""
+    from services.api.deps import role_rank
+
+    body = body or ReconcileIn()
+    if body.apply and not (user and role_rank(user.role) >= role_rank("reviewer")):
+        raise HTTPException(403, "applying relabels requires reviewer role")
     try:
-        return await reconcile_frame(db, uuid.UUID(frame_id), body.object_ids if body else None)
+        return await reconcile_frame(db, uuid.UUID(frame_id), body.object_ids, apply=body.apply,
+                                     apply_min_conf=body.apply_min_conf,
+                                     created_by=str(user.user_id) if user else None)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
 
