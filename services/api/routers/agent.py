@@ -5,6 +5,7 @@ recorded in one AgentRun; revert restores the exact prior state. Auto-accept is 
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import AgentRun
+from services.agent.flywheel import run_flywheel
 from services.agent.frame_agent import commit_frame, plan_frame
 from services.agent.policy import PolicyThresholds
 from services.agent.runs import list_runs, revert_run, run_dict
@@ -55,6 +57,35 @@ async def run(frame_id: str, body: AgentPolicyIn | None = None,
                                   created_by=str(user.user_id) if user else None)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+class FlywheelIn(AgentPolicyIn):
+    ticks: int = 1
+    max_frames: int = 25
+    session_id: str | None = None
+    dry_run: bool = True  # default: report what it would auto-accept without writing
+
+
+@router.post("/agent/flywheel", dependencies=[Depends(require_role("reviewer"))])
+async def flywheel(body: FlywheelIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Launch the autonomous loop in the background: mine by value, auto-accept the sure ones / route the
+    rest, then retrain if enough corrections have accumulated. Poll GET /agent/runs/{run_id} for progress.
+    dry_run (default) plans only and writes nothing."""
+    run_id = uuid.uuid4()
+    run = AgentRun(
+        run_id=run_id, kind="flywheel",
+        scope={"ticks": body.ticks, "max_frames": body.max_frames, "session_id": body.session_id},
+        status="running", policy=_thresholds(body).to_dict(), counts={}, changes={}, critic={},
+        created_by=str(user.user_id) if user else "flywheel",
+    )
+    db.add(run)
+    await db.commit()
+    asyncio.create_task(run_flywheel(
+        run_id, ticks=max(1, body.ticks), max_frames=max(1, body.max_frames),
+        policy=_thresholds(body), session_id=body.session_id, dry_run=body.dry_run,
+        created_by=str(user.user_id) if user else "flywheel",
+    ))
+    return {"run_id": str(run_id), "status": "running", "dry_run": body.dry_run}
 
 
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
