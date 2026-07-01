@@ -306,8 +306,18 @@ export default function EditorCanvas(p: Props) {
           ))}
 
           {/* boxes (rendered around their centre so rotation is about the centre; bbox stays the AABB).
-              Polyline objects render as the open line above, not as a box. */}
-          {L.boxes && p.objects.filter((o) => o.visible && !(o.polyline && o.polyline.length >= 2)).map((o) => {
+              Polyline objects render as the open line above, not as a box.
+              Order matters for hit-testing: draw the largest boxes first so the smallest one sits on top,
+              and a click inside a dense cluster selects the tightest object rather than the big one behind
+              it. The selected box is forced to the very top so its transform handles are never occluded. */}
+          {L.boxes && [...p.objects.filter((o) => o.visible && !(o.polyline && o.polyline.length >= 2))]
+            .sort((a, b) => {
+              if (a.id === p.selectedId) return 1;
+              if (b.id === p.selectedId) return -1;
+              const area = (o: typeof a) => (o.bbox[2] - o.bbox[0]) * (o.bbox[3] - o.bbox[1]);
+              return area(b) - area(a);
+            })
+            .map((o) => {
             const w = o.bbox[2] - o.bbox[0];
             const h = o.bbox[3] - o.bbox[1];
             const cx = o.bbox[0] + w / 2;
@@ -319,6 +329,10 @@ export default function EditorCanvas(p: Props) {
                 ref={isSel ? selRectRef : undefined}
                 x={cx} y={cy} offsetX={w / 2} offsetY={h / 2} width={w} height={h} rotation={o.rot ?? 0}
                 stroke={classColor(o.class_id)} strokeWidth={(isSel ? 2.5 : 1.5) / s}
+                // a hit-only transparent fill makes the whole interior selectable (an unfilled Konva shape
+                // is clickable on its 1px stroke only); the wide hitStrokeWidth makes tiny boxes catchable.
+                fill="transparent"
+                hitStrokeWidth={12 / s}
                 dash={o.isNew ? [6 / s, 4 / s] : undefined}
                 draggable={isSel && p.tool === "select"}
                 onMouseDown={(e) => {
