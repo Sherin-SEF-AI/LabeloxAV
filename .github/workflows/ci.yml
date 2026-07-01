@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+# One run per ref; cancel superseded runs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Create venv + install dev deps (no GPU wheels)
+        run: make install
+
+      - name: Start infra (postgis+pgvector, minio, redis, redpanda)
+        run: make up
+
+      - name: Run the suite against an isolated test database
+        # conftest.py provisions labeloxav_test and refuses any non-test db, so CI never touches a real
+        # corpus. This is the durable guard against the test-pollution that corrupted the dev database.
+        env:
+          LBX_POSTGRES__DB: labeloxav_test
+        run: make test
+
+      - name: Lint
+        run: .venv/bin/ruff check .
+
+      - name: Infra logs on failure
+        if: failure()
+        run: docker compose logs --tail=80 postgres minio redis

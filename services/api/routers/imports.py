@@ -22,6 +22,38 @@ from services.imports.run import ALL_FORMATS, run_import_guarded
 router = APIRouter()
 
 
+@router.get("/ingest/progress")
+async def ingest_progress():
+    """Live progress of the dashcam batch ingest (scripts/ingest_dashcam_batch.sh), read from its log +
+    done-list, plus the count of real frames landed. Returns active=false when no batch is running."""
+    import re
+    import time
+    from pathlib import Path
+
+    from sqlalchemy import func
+
+    from db.models import Frame
+    from db.models import Session as DbSession
+    root = Path(__file__).resolve().parents[3]
+    log = root / ".perception_work" / "ingest_batch.log"
+    done_file = root / ".perception_work" / "ingested_videos.txt"
+    if not log.exists():
+        return {"active": False, "done": 0, "total": 0, "frames": 0}
+    text = log.read_text()
+    marks = re.findall(r"\[(\d+)/(\d+)\]", text)
+    total = int(marks[-1][1]) if marks else 0
+    done = len([ln for ln in done_file.read_text().splitlines() if ln.strip()]) if done_file.exists() else 0
+    cur = re.findall(r"ingesting (\S+)", text)
+    finished = "BATCH DONE" in text
+    active = (not finished) and (time.time() - log.stat().st_mtime) < 120     # log touched in the last 2 min
+    async with get_sessionmaker()() as db:
+        frames = (await db.execute(
+            select(func.count(Frame.frame_id)).join(DbSession, Frame.session_id == DbSession.session_id)
+            .where(DbSession.vehicle_id == "DASHCAM-01"))).scalar()
+    return {"active": active, "finished": finished, "done": done, "total": total,
+            "current": cur[-1] if cur else None, "frames": int(frames or 0)}
+
+
 def _job_dict(j: ImportJob) -> dict:
     return {
         "job_id": str(j.job_id), "status": j.status, "format": j.format,

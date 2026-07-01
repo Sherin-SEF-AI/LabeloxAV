@@ -348,6 +348,7 @@ export const api = {
   startExport: (body: { name: string; states?: string[]; class_names?: string[]; cities?: string[]; session_id?: string; formats: string[] }) =>
     post<{ job_id: string; status: string }>("/api/datasets/export", body),
   jobs: () => get<JobRow[]>("/api/jobs"),
+  ingestProgress: () => get<{ active: boolean; finished: boolean; done: number; total: number; current: string | null; frames: number }>("/api/ingest/progress"),
   bulkReview: (object_ids: string[], action: string, class_name?: string, state?: string, attrs?: Record<string, unknown>) =>
     post<{ updated: number }>("/api/objects/bulk-review", { object_ids, action, class_name, state, attrs }),
   // Interactive AI correction: correct one -> find similar -> bulk apply

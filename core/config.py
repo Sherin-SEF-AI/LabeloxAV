@@ -66,6 +66,10 @@ class RedpandaSettings(BaseModel):
 class IngestSettings(BaseModel):
     target_fps: float = 3.0
     blur_threshold: float = 60.0
+    # Upper bound on variance-of-Laplacian: a real image is sharp at hundreds to low thousands; random noise
+    # (a corrupted/garbage frame) is tens of thousands. Above this the frame is rejected as noise, not kept
+    # as "maximally sharp". Validated against the corpus: real frames < 2000, noise frames 27000+.
+    noise_blur_threshold: float = 8000.0
     exposure_low: float = 12.0
     exposure_high: float = 243.0
     clip_fraction_max: float = 0.45

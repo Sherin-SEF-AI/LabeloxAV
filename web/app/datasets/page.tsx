@@ -121,7 +121,9 @@ export default function DatasetsPage() {
                             {f.path.split("/").slice(-2).join("/")}
                           </a>
                         ) : (
-                          <span key={f.path} className="text-ink-3 truncate">{f.path}</span>
+                          <span key={f.path} className="text-ink-3 truncate" title={`${f.path} (file not found in storage)`}>
+                            {f.path.split("/").slice(-2).join("/")} <span className="text-block">(missing)</span>
+                          </span>
                         )
                       ))}
                       {!detail.files.length && <span className="text-ink-3">no files</span>}

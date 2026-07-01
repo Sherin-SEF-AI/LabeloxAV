@@ -39,10 +39,11 @@ export default function ImportPage() {
   const [format, setFormat] = useState("coco");
   const [vehicle, setVehicle] = useState("IMPORT-01");
   const [city, setCity] = useState("BLR");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [drag, setDrag] = useState(false);
   const [phase, setPhase] = useState<"idle" | "uploading" | "importing">("idle");
   const [uploadFrac, setUploadFrac] = useState(0);
+  const [batchIdx, setBatchIdx] = useState(0);
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -62,16 +63,21 @@ export default function ImportPage() {
   }, []);
 
   async function onGo() {
-    if (!file) return;
+    if (!files.length) return;
     setErr(null);
     try {
-      setPhase("uploading");
-      setUploadFrac(0);
-      const uri = await api.uploadMultipart(file, setUploadFrac);
-      setPhase("importing");
-      await api.startImport({ format, source_uri: uri, target_vehicle: vehicle, city });
+      // Upload + start an import per file, so a folder of videos becomes one session each.
+      for (let i = 0; i < files.length; i++) {
+        setBatchIdx(i);
+        setPhase("uploading");
+        setUploadFrac(0);
+        const uri = await api.uploadMultipart(files[i], setUploadFrac);
+        setPhase("importing");
+        await api.startImport({ format, source_uri: uri, target_vehicle: vehicle, city });
+        refresh();
+      }
       setPhase("idle");
-      setFile(null);
+      setFiles([]);
       refresh();
     } catch (e) {
       setErr(String(e));
@@ -94,7 +100,7 @@ export default function ImportPage() {
             onDrop={(e) => {
               e.preventDefault();
               setDrag(false);
-              if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+              if (e.dataTransfer.files.length) setFiles(Array.from(e.dataTransfer.files));
             }}
             onClick={() => inputRef.current?.click()}
             className={`border border-dashed ${
@@ -104,16 +110,27 @@ export default function ImportPage() {
             <input
               ref={inputRef}
               type="file"
+              multiple
               className="hidden"
-              onChange={(e) => e.target.files?.[0] && setFile(e.target.files[0])}
+              onChange={(e) => e.target.files?.length && setFiles(Array.from(e.target.files))}
             />
-            {file ? (
+            {files.length === 1 ? (
               <span className="text-ink">
-                {file.name}{" "}
-                <span className="text-ink-3">({(file.size / 1e6).toFixed(1)} MB)</span>
+                {files[0].name}{" "}
+                <span className="text-ink-3">({(files[0].size / 1e6).toFixed(1)} MB)</span>
+              </span>
+            ) : files.length > 1 ? (
+              <span className="text-ink">
+                {files.length} files{" "}
+                <span className="text-ink-3">
+                  ({(files.reduce((s, f) => s + f.size, 0) / 1e6).toFixed(0)} MB total)
+                </span>
+                <span className="block text-ink-3 text-[10px] mt-1 truncate">
+                  {files.slice(0, 4).map((f) => f.name).join(", ")}{files.length > 4 ? ` +${files.length - 4} more` : ""}
+                </span>
               </span>
             ) : (
-              "drag a .zip / .mp4 / .mcap / .parquet here, or click to browse"
+              "drag .zip / .mp4 / .mcap / .parquet here (multiple allowed), or click to browse"
             )}
           </div>
 
@@ -153,14 +170,14 @@ export default function ImportPage() {
           <div className="flex items-center gap-3 mt-3">
             <button
               onClick={onGo}
-              disabled={!file || busy}
+              disabled={!files.length || busy}
               className="font-mono text-xs border border-line px-3 py-1 hover:border-accent disabled:opacity-50"
             >
               {phase === "uploading"
-                ? `uploading ${(uploadFrac * 100).toFixed(0)}%`
+                ? `uploading ${files.length > 1 ? `${batchIdx + 1}/${files.length} · ` : ""}${(uploadFrac * 100).toFixed(0)}%`
                 : phase === "importing"
-                  ? "starting import..."
-                  : "upload + import"}
+                  ? `starting import${files.length > 1 ? ` ${batchIdx + 1}/${files.length}` : ""}...`
+                  : `upload + import${files.length > 1 ? ` (${files.length})` : ""}`}
             </button>
             {phase === "uploading" && (
               <div className="flex-1 h-2 bg-line relative">

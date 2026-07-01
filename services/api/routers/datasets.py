@@ -100,10 +100,15 @@ async def dataset_detail(commit_id: str, db: AsyncSession = Depends(db_session))
     store = get_object_store()
     files = []
     for path, uri in (d.export_uris or {}).items():
+        # Only hand back a download link for an object that actually exists, so a stale commit (e.g. one
+        # whose files were written to a since-deleted temp dir) shows the file as missing instead of a
+        # broken presigned URL that 404s.
         try:
-            files.append({"path": path, "url": store.presigned_get(uri)})
+            present = store.exists(uri)
+            files.append({"path": path, "url": store.presigned_get(uri) if present else None,
+                          "missing": not present})
         except Exception:  # noqa: BLE001
-            files.append({"path": path, "url": None})
+            files.append({"path": path, "url": None, "missing": True})
     return {
         "commit_id": d.commit_id, "name": (d.slice_spec or {}).get("name"),
         "object_count": d.object_count, "formats": (d.slice_spec or {}).get("formats", []),

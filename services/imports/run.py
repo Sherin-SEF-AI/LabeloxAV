@@ -126,7 +126,8 @@ async def _import_raw(spec: ImportSpec, job_id, root: Path) -> dict:
         vid = next((p for p in root.rglob("*") if p.suffix.lower() in (".mp4", ".mov", ".mkv", ".avi")), None)
         if vid is None:
             raise FileNotFoundError("no video file found in the source")
-        frame_iter, raw_uri, mcap_uri = read_video(str(vid)), spec.source_uri, None
+        frame_iter = read_video(str(vid), "cam_front", now_ns(), get_settings().ingest.target_fps)
+        raw_uri, mcap_uri = spec.source_uri, None
     else:  # mcap
         mc = next((p for p in root.rglob("*.mcap")), None)
         if mc is None:
