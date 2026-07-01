@@ -6,7 +6,7 @@
 // image pixels; the stage transform maps to screen. getRelativePointerPosition() returns image coords.
 
 import { useEffect, useRef, useState } from "react";
-import { Circle, Group, Image as KImage, Layer, Line, Rect, Stage, Text as KText, Transformer } from "react-konva";
+import { Circle, Group, Image as KImage, Layer, Line, Rect, Shape, Stage, Text as KText, Transformer } from "react-konva";
 import type Konva from "konva";
 import { classColor, classFill } from "@/lib/colors";
 import type { EdObject, Tool, Viewport } from "./useEditor";
@@ -266,14 +266,25 @@ export default function EditorCanvas(p: Props) {
               fill={(ADVERSE_COLOR[a.condition] ?? "#A0A6AD") + "33"} />
           ))}
 
-          {/* masks */}
-          {L.masks && p.objects.filter((o) => o.visible).flatMap((o) =>
-            o.mask.map((poly, i) => (
-              <Line key={`m${o.id}-${i}`} points={poly} closed listening={false}
-                stroke={classColor(o.class_id)} strokeWidth={1.5 / s}
-                fill={classFill(o.class_id, o.id === p.selectedId ? 0.3 : 0.16)} />
-            )),
-          )}
+          {/* masks: one even-odd Shape per object, so a ring nested inside another (an erased or
+              occlusion-cut region) renders as a hole instead of a second filled blob */}
+          {L.masks && p.objects.filter((o) => o.visible && o.mask.length).map((o) => (
+            <Shape key={`m${o.id}`} listening={false}
+              sceneFunc={(ctx) => {
+                ctx.beginPath();
+                for (const poly of o.mask) {
+                  if (poly.length < 6) continue;
+                  ctx.moveTo(poly[0], poly[1]);
+                  for (let i = 2; i < poly.length; i += 2) ctx.lineTo(poly[i], poly[i + 1]);
+                  ctx.closePath();
+                }
+                ctx.fillStyle = classFill(o.class_id, o.id === p.selectedId ? 0.3 : 0.16);
+                ctx.fill("evenodd");
+                ctx.strokeStyle = classColor(o.class_id);
+                ctx.lineWidth = 1.5 / s;
+                ctx.stroke();
+              }} />
+          ))}
 
           {/* lane splines (M2.1), drawn above masks */}
           {L.lanes && p.lanes?.map((ln) => (

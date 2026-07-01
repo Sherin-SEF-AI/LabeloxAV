@@ -116,10 +116,17 @@ class Sam3Path:
         return m.data.cpu().numpy().astype(bool)
 
 
-def polygons_from_mask(mask: np.ndarray, epsilon_frac: float = 0.005) -> list[list[float]]:
-    """Compact polygon encoding for persistence. Largest external contours, flattened [x,y,...]."""
+def polygons_from_mask(mask: np.ndarray, epsilon_frac: float = 0.005, keep_holes: bool = False) -> list[list[float]]:
+    """Compact polygon encoding for persistence, flattened [x,y,...] per ring.
+
+    Default (keep_holes=False) keeps only external contours, which is right for a solid object. With
+    keep_holes=True the interior contours are returned too, so a mask with a hole (an erased region, or a
+    stuff region cut by an occluding vehicle) round-trips: consumers interpret the ring list with the
+    even-odd rule, so a ring nested inside another reads as a hole rather than a second filled blob.
+    """
     m = (mask.astype(np.uint8)) * 255
-    contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    mode = cv2.RETR_CCOMP if keep_holes else cv2.RETR_EXTERNAL
+    contours, _ = cv2.findContours(m, mode, cv2.CHAIN_APPROX_SIMPLE)
     polys: list[list[float]] = []
     for c in contours:
         if cv2.contourArea(c) < 4:
