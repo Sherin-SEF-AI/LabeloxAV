@@ -169,6 +169,9 @@ export default function FrameEditor() {
   const [brushRadius, setBrushRadius] = useState(14);
   const [segUrl, setSegUrl] = useState<string | null>(null); // dense-segmentation overlay png url
   const [segKind, setSegKind] = useState<"semantic" | "panoptic">("semantic");
+  // provenance of the machine-produced overlays (drivable/seg), so the layers panel can show who made each
+  const [drivableMeta, setDrivableMeta] = useState<{ source: string; model?: string | null } | null>(null);
+  const [segMeta, setSegMeta] = useState<{ source: string; model?: string | null } | null>(null);
   const [objSearch, setObjSearch] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState("objects");
@@ -315,13 +318,34 @@ export default function FrameEditor() {
     const [ls, dr, rel, adv, cub] = await Promise.all([api.framesLanes(id).catch(() => []), api.getDrivable(id).catch(() => null), api.frameRelationships(id).catch(() => []), api.listAdverse(id).catch(() => []), api.frameCuboids(id).catch(() => [])]);
     setLanes(ls);
     setDrivable(dr && dr.found ? dr.classes ?? null : null);
+    setDrivableMeta(dr && dr.found ? { source: dr.source ?? "", model: dr.model_version } : null);
     setRelationships(rel);
     setAdverse(adv);
     setCuboids(cub);
-    const seg = await api.getSegment(id, segKind).catch(() => ({ found: false, has_overlay: false }));
+    const seg = await api.getSegment(id, segKind).catch(() => ({ found: false, has_overlay: false, source: "", model_version: null }));
     setSegUrl(seg.found && seg.has_overlay ? `/api/frames/${id}/segment/overlay?kind=${segKind}&t=${Date.now()}` : null);
+    setSegMeta(seg.found ? { source: seg.source ?? "", model: seg.model_version } : null);
   }, [id, segKind]);
   useEffect(() => { loadLayers(); }, [loadLayers]);
+  // Compact provenance per overlay layer ("proposed - mask2former-mapillary"), so the layers panel shows
+  // who produced each overlay: a model on the pod, a human, or an import. Object layers (boxes/masks/
+  // cuboids) already carry per-object source badges in the object list, so they are not repeated here.
+  const layerMeta = useMemo(() => {
+    const clean = (m?: string | null) => (m ? m.split(":")[0] : ""); // drop the ":pod"/":local" runtime tag
+    const fmt = (source?: string, model?: string | null) => [source || "", clean(model)].filter(Boolean).join(" · ");
+    const out: Record<string, string> = {};
+    if (lanes.length) {
+      const srcs = Array.from(new Set(lanes.map((l) => l.source)));
+      out.lanes = srcs.length === 1 ? fmt(srcs[0], lanes.find((l) => l.model_version)?.model_version) : "mixed sources";
+    }
+    if (drivableMeta) out.drivable = fmt(drivableMeta.source, drivableMeta.model);
+    if (adverse.length) {
+      const srcs = Array.from(new Set(adverse.map((a) => a.source)));
+      out.adverse = srcs.length === 1 ? srcs[0] || "" : "mixed sources";
+    }
+    if (segMeta) out.seg = fmt(segMeta.source, segMeta.model);
+    return out;
+  }, [lanes, drivableMeta, adverse, segMeta]);
   // fetch SLIC superpixels lazily, the first time the superpixel tool is used on this frame
   useEffect(() => {
     if (st.tool === "superpixel" && !superpixels.length) {
@@ -943,7 +967,7 @@ export default function FrameEditor() {
             onCursor={setCursor}
           />
           )}
-          {mode !== "lidar3d" && <FloatingLayers layers={layers} onToggle={(k) => setLayers((s) => ({ ...s, [k]: !s[k as keyof typeof s] }))}
+          {mode !== "lidar3d" && <FloatingLayers layers={layers} meta={layerMeta} onToggle={(k) => setLayers((s) => ({ ...s, [k]: !s[k as keyof typeof s] }))}
             extra={
               <>
                 <select value={segKind} onChange={(e) => setSegKind(e.target.value as "semantic" | "panoptic")}

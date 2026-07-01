@@ -340,7 +340,7 @@ export const api = {
   autoSegment: (frame_id: string, kind = "semantic") =>
     post<{ kind: string; coverage: Record<string, number>; n_instances: number }>(`/api/frames/${frame_id}/segment?kind=${kind}`, {}),
   getSegment: (frame_id: string, kind = "semantic") =>
-    get<{ found: boolean; coverage?: Record<string, number>; has_overlay?: boolean }>(`/api/frames/${frame_id}/segment?kind=${kind}`),
+    get<{ found: boolean; coverage?: Record<string, number>; has_overlay?: boolean; source?: string; model_version?: string | null }>(`/api/frames/${frame_id}/segment?kind=${kind}`),
   // M2.1 lanes
   framesLanes: (frameId: string) => get<LaneRow[]>(`/api/frames/${frameId}/lanes`),
   proposeLanes: (frameId: string) => post<{ proposed: number; lanes: LaneRow[]; model: string }>(`/api/frames/${frameId}/lanes/propose`, {}),
@@ -352,7 +352,7 @@ export const api = {
   propagateLanes: (frameId: string, frames = 8) => post<{ created: number; to_frames: number }>(`/api/frames/${frameId}/lanes/propagate?frames=${frames}`, {}),
   // M2.2 drivable
   segmentDrivable: (frameId: string) => post<{ coverage: Record<string, number>; model: string }>(`/api/frames/${frameId}/drivable`, {}),
-  getDrivable: (frameId: string) => get<{ found: boolean; classes?: Record<string, number[][]>; coverage?: Record<string, number> }>(`/api/frames/${frameId}/drivable`),
+  getDrivable: (frameId: string) => get<{ found: boolean; classes?: Record<string, number[][]>; coverage?: Record<string, number>; source?: string; model_version?: string | null }>(`/api/frames/${frameId}/drivable`),
   propagateObject: (object_id: string, frames = 12) =>
     post<{ created: number; track_id?: string; object_ids?: string[]; reason?: string }>(
       `/api/objects/${object_id}/propagate?frames=${frames}`, {}),
