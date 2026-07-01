@@ -252,11 +252,17 @@ export default function HomePage() {
                 ))}
               </div>
               <select value={session} onChange={(e) => setSession(e.target.value)}
-                className="bg-panel border hairline text-ink text-xs px-2 py-1 max-w-[180px]">
-                <option value="">all sessions</option>
-                {sessions.map((s) => (
-                  <option key={s.session_id} value={s.session_id}>{s.vehicle_id} &middot; {s.city ?? "?"}</option>
-                ))}
+                className="bg-panel border hairline text-ink text-xs px-2 py-1 max-w-[240px]">
+                <option value="">all sessions ({sessions.length})</option>
+                {[...sessions]
+                  .sort((a, b) => (b.route ?? "").localeCompare(a.route ?? "") || b.start_ts_ns - a.start_ts_ns)
+                  .map((s) => (
+                    <option key={s.session_id} value={s.session_id}>
+                      {s.route
+                        ? `${s.route}${s.city ? ` · ${s.city}` : ""}`
+                        : `${s.vehicle_id} · ${s.city ?? "?"} · #${s.session_id.slice(0, 4)}`}
+                    </option>
+                  ))}
               </select>
             </div>
 
