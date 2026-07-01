@@ -16,6 +16,7 @@ from db.models import AgentRun
 from services.agent.flywheel import run_flywheel
 from services.agent.frame_agent import commit_frame, plan_frame
 from services.agent.policy import PolicyThresholds
+from services.agent.reconcile import reconcile_frame
 from services.agent.runs import list_runs, revert_run, run_dict
 from services.api.deps import current_user, db_session, require_role
 
@@ -86,6 +87,20 @@ async def flywheel(body: FlywheelIn, db: AsyncSession = Depends(db_session), use
         created_by=str(user.user_id) if user else "flywheel",
     ))
     return {"run_id": str(run_id), "status": "running", "dry_run": body.dry_run}
+
+
+class ReconcileIn(BaseModel):
+    object_ids: list[str] | None = None  # None = the whole frame's machine objects
+
+
+@router.post("/agent/frames/{frame_id}/reconcile", dependencies=[Depends(require_role("annotator"))])
+async def reconcile(frame_id: str, body: ReconcileIn | None = None, db: AsyncSession = Depends(db_session)):
+    """Adjudicate the frame's objects with an independent model (SigLIP 2 zero-shot): confirm / correct /
+    unsure per object. Read-only -- returns opinions and suggested relabels, never mutates."""
+    try:
+        return await reconcile_frame(db, uuid.UUID(frame_id), body.object_ids if body else None)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
