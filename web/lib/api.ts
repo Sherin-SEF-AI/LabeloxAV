@@ -330,7 +330,7 @@ export const api = {
   // in-image cuboids: projected wireframes + lift a pixel to the ego ground point
   frameCuboids: (frame_id: string) => get<ProjectedCuboid[]>(`/api/frames/${frame_id}/cuboids`),
   liftGround: (frame_id: string, u: number, v: number) =>
-    get<{ ego: number[] }>(`/api/frames/${frame_id}/lift_ground?u=${u}&v=${v}`),
+    get<{ ego: number[] | null; reason?: string }>(`/api/frames/${frame_id}/lift_ground?u=${u}&v=${v}`),
   // pixel-assist: brush/eraser mask composition + SLIC superpixels
   composeMask: (body: { polygons: number[][]; ops: { op: string; center: number[]; radius: number }[]; width: number; height: number }) =>
     post<{ polygons: number[][] }>(`/api/mask/compose`, body),

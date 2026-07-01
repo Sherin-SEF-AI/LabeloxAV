@@ -105,11 +105,14 @@ async def lift_ground(frame_id: str, u: float, v: float, db: AsyncSession = Depe
         raise HTTPException(404, "frame not found")
     ray = camera_ray_to_ego(u, v, frame.cam_id, frame.width, frame.height)
     o, dvec = ray["origin"], ray["direction"]
+    # A pixel above the horizon (or a ray parallel to the road) simply has no ground point. That is a
+    # normal answer for a valid query, not a client error, so return ego=null with a reason instead of a
+    # 400 the browser logs on every hover/click near the skyline.
     if abs(float(dvec[2])) < 1e-6:
-        raise HTTPException(400, "ray is parallel to the ground")
+        return {"ego": None, "reason": "ray is parallel to the ground"}
     t = -float(o[2]) / float(dvec[2])
     if t <= 0:
-        raise HTTPException(400, "pixel does not look at the ground ahead")
+        return {"ego": None, "reason": "pixel is above the horizon (no ground ahead)"}
     return {"ego": [round(float(o[0] + t * dvec[0]), 3), round(float(o[1] + t * dvec[1]), 3), 0.0]}
 
 

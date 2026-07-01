@@ -237,7 +237,8 @@ export default function FrameEditor() {
   const placeCuboid = async (pt: number[]) => {
     if (!currentClass) return;
     try {
-      const { ego } = await api.liftGround(id, pt[0], pt[1]);
+      const { ego, reason } = await api.liftGround(id, pt[0], pt[1]);
+      if (!ego) { flash(reason || "click on the road ahead to place a cuboid"); return; }
       const cub = { center: [ego[0], ego[1], 0.75], size: [1.8, 4.2, 1.5], yaw: 0 };
       dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
         bbox: [pt[0] - 40, pt[1] - 40, pt[0] + 40, pt[1] + 40], mask: [], cuboid_3d: cub, attrs: {},
