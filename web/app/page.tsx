@@ -34,19 +34,18 @@ function Stat({ label, value, sub, loading, accent }: { label: string; value: nu
   );
 }
 
-// A big, obvious entry point into one of the platform's workflows. primary marks the recommended next step.
+// A compact launcher tile into one of the platform's workflows. Single row so the six of them form a slim
+// strip (the full description rides in the tooltip); primary marks the recommended next step.
 function ActionCard({ title, desc, icon, onClick, primary }: { title: string; desc: string; icon: string; onClick: () => void; primary?: boolean }) {
   return (
     <button
       onClick={onClick}
-      className={`panel text-left px-4 py-3 transition-colors group focus:outline-none focus:border-accent ${primary ? "border-accent/50 hover:border-accent" : "hover:border-accent"}`}
+      title={desc}
+      className={`panel flex items-center gap-2 px-3 py-2.5 transition-colors group focus:outline-none focus:border-accent ${primary ? "border-accent/50 hover:border-accent" : "hover:border-accent"}`}
     >
-      <div className="flex items-center gap-2.5">
-        <span className={`flex transition-colors ${primary ? "text-accent" : "text-ink-3 group-hover:text-accent"}`}><Icon name={icon} size={16} /></span>
-        <span className="text-ink font-medium">{title}</span>
-        <span className="ml-auto text-ink-3 group-hover:text-accent transition-colors">&rarr;</span>
-      </div>
-      <div className="text-ink-3 text-xs mt-1 leading-snug">{desc}</div>
+      <span className={`flex shrink-0 transition-colors ${primary ? "text-accent" : "text-ink-3 group-hover:text-accent"}`}><Icon name={icon} size={16} /></span>
+      <span className="text-ink text-[13px] font-medium truncate">{title}</span>
+      <span className="ml-auto text-ink-3 group-hover:text-accent transition-colors text-xs">&rarr;</span>
     </button>
   );
 }
@@ -211,11 +210,11 @@ export default function HomePage() {
       subtitle="HOME"
       right={loading ? <Spinner label="loading" /> : <span className="border border-line px-2 py-0.5">{rows.length} in queue</span>}
     >
-      <div className="h-full overflow-auto">
-        <div className="max-w-6xl mx-auto p-6 space-y-6">
+      <div className="h-full flex flex-col">
+        <div className="max-w-6xl mx-auto w-full px-6 py-4 flex flex-col gap-3 flex-1 min-h-0">
           {/* Live ingest progress (dashcam batch) */}
           {ingest && (ingest.active || (ingest.done > 0 && ingest.done < ingest.total)) ? (
-            <div className="panel px-4 py-3 border-accent/40">
+            <div className="panel px-4 py-3 border-accent/40 shrink-0">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <span className="inline-block w-3.5 h-3.5 rounded-full border-2 border-line border-t-accent animate-spin" aria-hidden />
@@ -234,14 +233,14 @@ export default function HomePage() {
               ) : null}
             </div>
           ) : ingest?.finished && ingest.frames > 0 ? (
-            <div className="panel px-4 py-2.5 border-pass/40 flex items-center gap-2">
+            <div className="panel px-4 py-2 border-pass/40 flex items-center gap-2 shrink-0">
               <span className="w-2 h-2 rounded-full bg-pass" />
               <span className="text-ink text-sm">Ingested {ingest.done} dashcam videos &middot; {ingest.frames.toLocaleString()} frames ready</span>
             </div>
           ) : null}
 
           {/* Welcome + the one action that matters: pick up where the queue left off */}
-          <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-wrap items-end justify-between gap-4 shrink-0">
             <div>
               <h1 className="text-xl text-ink font-semibold">Welcome back{role ? `, ${role}` : ""}</h1>
               <p className="text-ink-3 text-sm mt-1 max-w-xl">
@@ -260,21 +259,19 @@ export default function HomePage() {
           </div>
 
           {/* At-a-glance stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
             <Stat label="In your queue" value={rows.length} sub={activeBand?.label.toLowerCase()} loading={loading} accent />
             <Stat label="Sessions" value={sessions.length} sub={`${cities} cit${cities === 1 ? "y" : "ies"}`} loading={!sessions.length && loading} />
             <Stat label="Datasets" value={datasets.length} sub={datasets.length ? "sealed exports" : "none yet"} />
             <Stat label="Your role" value={role ?? "annotator"} sub="what you can approve" />
           </div>
 
-          {/* Quick actions */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3">Jump to a workflow</h2>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <ActionCard primary icon="review" title="Review queue" desc="Work through model proposals ranked by what matters most." onClick={() => document.getElementById("queue")?.scrollIntoView({ behavior: "smooth" })} />
-              <ActionCard icon="plus" title="Import data" desc="Bring in dashcam video or sensor logs to annotate." onClick={() => router.push("/import")} />
+          {/* Workflow launcher: a slim single-row strip */}
+          <div className="shrink-0">
+            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-1.5">Jump to a workflow</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+              <ActionCard primary icon="review" title="Review" desc="Work through model proposals ranked by what matters most." onClick={() => document.getElementById("queue")?.scrollIntoView({ behavior: "smooth" })} />
+              <ActionCard icon="plus" title="Import" desc="Bring in dashcam video or sensor logs to annotate." onClick={() => router.push("/import")} />
               <ActionCard icon="activity" title="Analytics" desc="See labeling progress, agreement, and coverage." onClick={() => router.push("/analytics")} />
               <ActionCard icon="layers" title="Datasets" desc="Seal and export a versioned dataset (COCO, YOLO, ...)." onClick={() => router.push("/datasets")} />
               <ActionCard icon="route" title="Jobs" desc="Watch autolabel, training, and import jobs live." onClick={() => router.push("/jobs")} />
@@ -283,7 +280,7 @@ export default function HomePage() {
           </div>
 
           {/* Review queue */}
-          <div id="queue" className="panel">
+          <div id="queue" className="panel flex-1 min-h-0 flex flex-col overflow-hidden">
             <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b hairline">
               <div>
                 <div className="text-ink font-medium">Your review queue</div>
@@ -368,12 +365,13 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* Table */}
+            {/* Table (scrolls inside the panel so the page itself stays fit-to-screen) */}
+            <div className="flex-1 min-h-0 overflow-auto">
             {loading && !rows.length ? (
               <SkeletonRows rows={8} cols="grid-cols-[32px_40px_1fr_150px_110px]" />
             ) : rows.length ? (
               <table className="w-full text-sm">
-                <thead className="text-ink-3 font-mono text-[11px] uppercase border-b hairline">
+                <thead className="text-ink-3 font-mono text-[11px] uppercase border-b hairline sticky top-0 bg-panel z-10">
                   <tr>
                     <th className="px-3 py-2 w-8"><input type="checkbox" checked={allSelected} onChange={selectAll} /></th>
                     <th className="text-left font-normal px-3 py-2 w-10">#</th>
@@ -420,10 +418,14 @@ export default function HomePage() {
                 </button>
               </div>
             )}
-          </div>
+            </div>
 
-          <div className="font-mono text-[11px] text-ink-3 text-center">
-            J / K to move &middot; Enter to open &middot; queue ranked by uncertainty x rarity
+            {/* Thin footer with the keyboard hint, pinned inside the panel */}
+            <div className="shrink-0 border-t hairline px-4 py-1.5 font-mono text-[10px] text-ink-3 flex items-center gap-3">
+              <span><span className="text-ink-2">J / K</span> move</span>
+              <span><span className="text-ink-2">Enter</span> open</span>
+              <span className="ml-auto text-ink-3/70">ranked by uncertainty &times; rarity</span>
+            </div>
           </div>
         </div>
       </div>
