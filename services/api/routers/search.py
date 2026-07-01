@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.embeddings import frame_neighbors, object_neighbors
+from core.embeddings import frame_neighbors, fused_frame_neighbors, object_neighbors
 from db.models import Frame, FrameEmbedding, Object, ObjectEmbedding
 from services.api.deps import db_session
 from services.autolabel.ontology import get_ontology
@@ -25,7 +25,7 @@ class SimilarIn(BaseModel):
     frame_id: str | None = None
     object_id: str | None = None
     image_b64: str | None = None
-    mode: str = "visual"  # visual (DINOv3) | semantic (SigLIP 2)
+    mode: str = "visual"  # visual (DINOv3) | semantic (SigLIP 2) | fused (both, blended)
     k: int = 24
 
 
@@ -60,13 +60,17 @@ async def search_similar(body: SimilarIn, db: AsyncSession = Depends(db_session)
         nbrs = await object_neighbors(db, emb.dino_vec, k=body.k, exclude_object_id=UUID(body.object_id))
         return {"kind": "object", "mode": "visual", "results": await _decorate_objects(db, get_ontology(), nbrs)}
 
+    fused = body.mode == "fused"
     space = "siglip" if body.mode == "semantic" else "dino"
     if body.frame_id:
         emb = await db.get(FrameEmbedding, UUID(body.frame_id))
         if emb is None:
             return {"kind": "frame", "results": [], "reason": "frame not embedded yet"}
-        qv = emb.siglip_vec if space == "siglip" else emb.dino_vec
-        nbrs = await frame_neighbors(db, qv, space=space, k=body.k, exclude_frame_id=UUID(body.frame_id))
+        if fused and emb.dino_vec is not None and emb.siglip_vec is not None:
+            nbrs = await fused_frame_neighbors(db, emb.dino_vec, emb.siglip_vec, k=body.k, exclude_frame_id=UUID(body.frame_id))
+        else:
+            qv = emb.siglip_vec if space == "siglip" else emb.dino_vec
+            nbrs = await frame_neighbors(db, qv, space=space, k=body.k, exclude_frame_id=UUID(body.frame_id))
     elif body.image_b64:
         import base64
 
@@ -78,11 +82,14 @@ async def search_similar(body: SimilarIn, db: AsyncSession = Depends(db_session)
         img = cv2.imdecode(np.frombuffer(base64.b64decode(body.image_b64), np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             raise HTTPException(400, "could not decode image")
-        qv = (siglip2.encode_image(img) if space == "siglip" else dinov3.encode_image(img)).tolist()
-        nbrs = await frame_neighbors(db, qv, space=space, k=body.k)
+        if fused:
+            nbrs = await fused_frame_neighbors(db, dinov3.encode_image(img).tolist(), siglip2.encode_image(img).tolist(), k=body.k)
+        else:
+            qv = (siglip2.encode_image(img) if space == "siglip" else dinov3.encode_image(img)).tolist()
+            nbrs = await frame_neighbors(db, qv, space=space, k=body.k)
     else:
         raise HTTPException(400, "provide frame_id, object_id, or image_b64")
-    return {"kind": "frame", "mode": space, "results": await _decorate_frames(db, nbrs)}
+    return {"kind": "frame", "mode": body.mode if fused else space, "results": await _decorate_frames(db, nbrs)}
 
 
 @router.post("/embeddings/compute")

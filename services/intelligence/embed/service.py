@@ -19,6 +19,7 @@ from db.models import Frame, FrameEmbedding, Object, ObjectEmbedding
 from db.session import get_sessionmaker
 from services.autolabel.paths.path_c_qwen3vl import crop_object
 from services.intelligence.embed import dinov3, siglip2
+from services.intelligence.embed.prep import square_letterbox
 
 log = get_logger("embed_service")
 
@@ -88,7 +89,7 @@ async def embed_objects(session_id: UUID | None = None, limit: int | None = None
                 last_uri, last_img = uri, _decode(store, uri)
             if last_img is None:
                 continue
-            crops.append(crop_object(last_img, tuple(bbox), cfg.crop_margin))
+            crops.append(square_letterbox(crop_object(last_img, tuple(bbox), cfg.crop_margin)))
             oids.append(oid)
         if not crops:
             continue
