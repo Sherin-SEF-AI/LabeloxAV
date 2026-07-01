@@ -110,6 +110,27 @@ async def command(body: CommandIn, db: AsyncSession = Depends(db_session), user=
         raise HTTPException(404, str(exc)) from exc
 
 
+class FreshIn(AgentPolicyIn):
+    commit: bool = False  # also apply the agent decision; False plans over the freshly-detected objects
+
+
+@router.post("/agent/frames/{frame_id}/fresh", dependencies=[Depends(require_role("reviewer"))])
+async def fresh(frame_id: str, body: FreshIn | None = None,
+                db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Fresh-inference: detect the frame (Path A/B + fuse + gate + persist) then run the agent on the new
+    objects in one shot. commit applies the decision; otherwise it plans. GPU-bound (reviewer role)."""
+    from services.agent.fresh import label_and_decide
+
+    body = body or FreshIn()
+    try:
+        return await label_and_decide(db, uuid.UUID(frame_id), commit=body.commit, policy=_thresholds(body),
+                                      created_by=str(user.user_id) if user else None)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
 class ReconcileIn(BaseModel):
     object_ids: list[str] | None = None  # None = the whole frame's machine objects
     apply: bool = False                  # apply strong 'correct' verdicts as reversible relabels
