@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -394,3 +395,35 @@ async def segment(payload: SegmentIn, db: AsyncSession = Depends(db_session)):
             raise HTTPException(503, "GPU busy (a training job is using the GPU). Interactive "
                                      "segmentation is unavailable until it finishes; box review still works.")
         raise
+
+
+class ClassifyIn(BaseModel):
+    frame_id: str
+    box: list[float]                     # [x1, y1, x2, y2] in image pixels
+
+
+@router.post("/objects/classify")
+async def classify_object(payload: ClassifyIn, db: AsyncSession = Depends(db_session)):
+    """Zero-shot: what class is the object in this box? Crops the region and scores it against the ontology
+    with SigLIP 2, so a SAM box or wand click can auto-detect the class instead of the annotator picking it.
+    Returns the top-k class suggestions with confidence; the first is the auto-assigned class."""
+    frame = await db.get(Frame, UUID(payload.frame_id))
+    if frame is None:
+        raise HTTPException(404, "frame not found")
+    if len(payload.box) != 4:
+        raise HTTPException(400, "box must be [x1,y1,x2,y2]")
+    img = cv2.imdecode(np.frombuffer(get_object_store().get_bytes(frame.img_uri), np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        raise HTTPException(500, "failed to decode frame image")
+    from services.autolabel.classify_crop import classify_crop
+    from services.autolabel.paths.path_c_qwen3vl import crop_object
+    crop = crop_object(img, tuple(payload.box), 0.08)
+    if crop is None or crop.size == 0:
+        raise HTTPException(400, "empty crop")
+    try:
+        preds = classify_crop(crop)
+    except Exception as exc:  # noqa: BLE001
+        if "CUDA" in str(exc) or "OutOfMemory" in type(exc).__name__:
+            raise HTTPException(503, "GPU busy; auto-classify unavailable right now") from exc
+        raise
+    return {"predictions": preds}

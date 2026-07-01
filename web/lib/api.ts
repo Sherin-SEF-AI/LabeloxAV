@@ -306,6 +306,8 @@ export const api = {
   computeLidarCuboids: (frameId: string) => post<{ frame_id: string; cuboids: number; objects: { object_id: string; cuboid_3d: Record<string, unknown> }[] }>(`/api/lidar/cuboids/${frameId}`, {}),
   segmentPrompt: (frame_id: string, p: SegmentPrompt) =>
     post<SegmentResult>("/api/segment", { frame_id, ...p }),
+  classifyObject: (frame_id: string, box: number[]) =>
+    post<{ predictions: { class_id: number; class_name: string; conf: number }[] }>("/api/objects/classify", { frame_id, box }),
   createObject: (
     frame_id: string,
     body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][]; cuboid_3d?: { center: number[]; size: number[]; yaw: number } },
