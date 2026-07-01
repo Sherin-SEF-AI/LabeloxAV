@@ -183,7 +183,13 @@ export: ## Seal + export a dataset. Usage: make export ARGS="--name demo --state
 	$(RUN) python -m services.export.dataset $(ARGS)
 
 .PHONY: api
-api: ## Run the FastAPI backend
+api: ## Run the FastAPI backend (GPU features work: autolabel, VLM QA, ...)
+	# No --reload: uvicorn's reload subprocess breaks torch CUDA in the worker, so the autolabel plane
+	# fails with "CUDA not available" even though the GPU is free. Use api-reload for GPU-free UI work.
+	$(RUN) uvicorn services.api.main:app --host 0.0.0.0 --port 8000
+
+.PHONY: api-reload
+api-reload: ## Run the backend with hot-reload (frontend/API iteration only; GPU features will fail)
 	$(RUN) uvicorn services.api.main:app --host 0.0.0.0 --port 8000 --reload
 
 .PHONY: web
