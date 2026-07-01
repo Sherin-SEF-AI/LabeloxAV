@@ -74,16 +74,19 @@ def _ssh(ip: str, port: str, cmd: str) -> int:
 
 
 async def export_frames(session_id: UUID | None, limit: int, local_dir: Path,
-                        frame_ids: list[str] | None = None, clean_only: bool = True) -> list[dict]:
+                        frame_ids: list[str] | None = None, clean_only: bool = True,
+                        offset: int = 0) -> list[dict]:
     """Download frame images from MinIO to local_dir and build the pod manifest. frame_ids targets specific
-    frames; else sweep a session (or the whole corpus if session_id is None) in time order up to limit.
-    clean_only restricts a sweep to real, selected dashcam frames (>=1280 wide, selected=true), so the pod
-    never wastes GPU time on quarantined synthetic noise frames."""
+    frames; else sweep a session (or the whole corpus if session_id is None) in time order, limit per batch
+    from offset (so batched corpus sweeps advance instead of re-fetching the same frames). clean_only
+    restricts a sweep to real, selected dashcam frames (>=1280 wide, selected=true)."""
     from sqlalchemy import and_, select
 
     from db.models import Frame
     from db.session import get_sessionmaker
     store = get_object_store()
+    for old in local_dir.glob("*.jpg"):     # clear the previous batch's images so scp only sends this batch
+        old.unlink()
     local_dir.mkdir(parents=True, exist_ok=True)
     real = and_(Frame.img_uri.like("s3://labeloxav%"), Frame.width >= 1280, Frame.selected.is_(True))
     async with get_sessionmaker()() as db:
@@ -91,7 +94,7 @@ async def export_frames(session_id: UUID | None, limit: int, local_dir: Path,
             rows = (await db.execute(select(Frame.frame_id, Frame.img_uri)
                     .where(Frame.frame_id.in_([UUID(f) for f in frame_ids])))).all()
         else:
-            stmt = select(Frame.frame_id, Frame.img_uri).order_by(Frame.ts_ns).limit(limit)
+            stmt = select(Frame.frame_id, Frame.img_uri).order_by(Frame.ts_ns).offset(offset).limit(limit)
             if session_id is not None:
                 stmt = stmt.where(Frame.session_id == session_id)
             if clean_only:
@@ -196,7 +199,8 @@ async def main() -> None:
 
     totals = {"drivable": 0, "lanes": 0, "errors": 0, "frames": 0}
     for b in range(max(1, args.batches)):
-        manifest = await export_frames(sid, args.limit, work, frame_ids, clean_only=clean_only)
+        manifest = await export_frames(sid, args.limit, work, frame_ids, clean_only=clean_only,
+                                       offset=b * args.limit)
         if not manifest:
             log.info("perception.no_frames", batch=b)
             break
@@ -205,6 +209,7 @@ async def main() -> None:
         for k in ("drivable", "lanes", "errors"):
             totals[k] += res.get(k, 0)
         totals["frames"] += len(manifest)
+        log.info("perception.batch_done", batch=b, **{k: totals[k] for k in totals})
         if frame_ids:                     # explicit frame list is a single pass
             break
     print(json.dumps({"session": args.session, "corpus": args.corpus, **totals}))
