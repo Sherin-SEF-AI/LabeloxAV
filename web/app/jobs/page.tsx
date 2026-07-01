@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import type { JobRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
+import { Spinner, SkeletonRows } from "@/components/Spinner";
 
 // Unified jobs dashboard: import, training, and autolabel jobs in one live stream. The single place
 // to watch everything the engine is doing.
@@ -14,9 +15,10 @@ export default function JobsPage() {
   const router = useRouter();
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [kind, setKind] = useState<string>("all");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const refresh = () => api.jobs().then(setJobs).catch(() => {});
+    const refresh = () => api.jobs().then((j) => { setJobs(j); setLoading(false); }).catch(() => setLoading(false));
     refresh();
     const t = setInterval(refresh, 2000);
     return () => clearInterval(t);
@@ -40,7 +42,7 @@ export default function JobsPage() {
   return (
     <PageShell
       active="JOBS"
-      right={<span className="text-ink-3">{active} active</span>}
+      right={loading ? <Spinner label="loading jobs" /> : <span className="text-ink-3">{active} active</span>}
       filters={filters}
     >
       <div className="p-4">
@@ -62,7 +64,9 @@ export default function JobsPage() {
               <button onClick={() => router.push(j.link)} className="border border-line px-1.5 py-0.5 text-ink-3 hover:border-accent">open</button>
             </div>
           ))}
-          {!shown.length && <div className="px-3 py-6 text-center font-mono text-xs text-ink-3">no jobs</div>}
+          {loading && !shown.length
+            ? <SkeletonRows rows={8} cols="grid-cols-[80px_1fr_90px_1fr_140px_70px]" />
+            : !shown.length && <div className="px-3 py-6 text-center font-mono text-xs text-ink-3">no jobs</div>}
         </div>
       </div>
     </PageShell>
