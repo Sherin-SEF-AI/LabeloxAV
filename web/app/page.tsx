@@ -62,6 +62,7 @@ export default function HomePage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [role, setRole] = useState<string | undefined>(undefined);
   const [showActions, setShowActions] = useState(false);
+  const [ingest, setIngest] = useState<{ active: boolean; finished: boolean; done: number; total: number; current: string | null; frames: number } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,6 +81,12 @@ export default function HomePage() {
     api.datasets().then(setDatasets).catch(() => {});
     api.ontology().then((o) => setClasses(o.classes.map((c) => c.name))).catch(() => {});
     setRole(getUser()?.role);
+  }, []);
+  useEffect(() => {
+    const f = () => api.ingestProgress().then(setIngest).catch(() => {});
+    f();
+    const t = setInterval(f, 3000);
+    return () => clearInterval(t);
   }, []);
   useEffect(() => {
     load();
@@ -171,6 +178,33 @@ export default function HomePage() {
     >
       <div className="h-full overflow-auto">
         <div className="max-w-6xl mx-auto p-6 space-y-6">
+          {/* Live ingest progress (dashcam batch) */}
+          {ingest && (ingest.active || (ingest.done > 0 && ingest.done < ingest.total)) ? (
+            <div className="panel px-4 py-3 border-accent/40">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="inline-block w-3.5 h-3.5 rounded-full border-2 border-line border-t-accent animate-spin" aria-hidden />
+                  <span className="text-ink font-medium">Ingesting dashcam videos</span>
+                </div>
+                <span className="font-mono text-[11px] text-ink-3 tabular-nums">
+                  {ingest.done}/{ingest.total} videos &middot; {ingest.frames.toLocaleString()} frames
+                </span>
+              </div>
+              <div className="h-1.5 bg-bg-2 rounded overflow-hidden">
+                <div className="h-full bg-accent transition-all duration-500"
+                  style={{ width: `${ingest.total ? Math.round((ingest.done / ingest.total) * 100) : 0}%` }} />
+              </div>
+              {ingest.current ? (
+                <div className="font-mono text-[10px] text-ink-3 mt-1 truncate">now: {ingest.current}</div>
+              ) : null}
+            </div>
+          ) : ingest?.finished && ingest.frames > 0 ? (
+            <div className="panel px-4 py-2.5 border-pass/40 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-pass" />
+              <span className="text-ink text-sm">Ingested {ingest.done} dashcam videos &middot; {ingest.frames.toLocaleString()} frames ready</span>
+            </div>
+          ) : null}
+
           {/* Welcome + orientation */}
           <div>
             <h1 className="text-xl text-ink font-semibold">Welcome to LabeloxAV</h1>
