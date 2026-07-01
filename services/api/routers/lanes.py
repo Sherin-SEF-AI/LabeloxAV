@@ -87,6 +87,7 @@ async def update_lane(lane_id: UUID, body: LaneIn, db: AsyncSession = Depends(db
     if lane is None:
         raise HTTPException(404, "lane not found")
     lane.control_points, lane.lane_type, lane.is_ego, lane.source = body.control_points, body.lane_type, body.is_ego, "human"
+    lane.model_version = None  # a human now owns this lane; drop the stale proposing-model tag so provenance is not "human - clrernet"
     await db.commit()
     return _row(lane)
 

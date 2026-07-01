@@ -332,7 +332,11 @@ export default function FrameEditor() {
   // cuboids) already carry per-object source badges in the object list, so they are not repeated here.
   const layerMeta = useMemo(() => {
     const clean = (m?: string | null) => (m ? m.split(":")[0] : ""); // drop the ":pod"/":local" runtime tag
-    const fmt = (source?: string, model?: string | null) => [source || "", clean(model)].filter(Boolean).join(" · ");
+    // The model is only meaningful for machine-produced overlays; a human-owned layer reads plainly as
+    // "human" (showing a stale proposing-model there was misleading, e.g. "human - clrernet").
+    const MACHINE = new Set(["proposed", "propagated", "fused", "auto_accept", "interpolated"]);
+    const fmt = (source?: string, model?: string | null) =>
+      [source || "", source && MACHINE.has(source) ? clean(model) : ""].filter(Boolean).join(" · ");
     const out: Record<string, string> = {};
     if (lanes.length) {
       const srcs = Array.from(new Set(lanes.map((l) => l.source)));
