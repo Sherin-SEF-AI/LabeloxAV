@@ -182,6 +182,36 @@ def test_critic_cross_modal(monkeypatch):
     assert v["c2"].checks["cross_modal"] == "pass"
 
 
+def test_critic_cross_modal_real_projection():
+    """Exercise the ACTUAL LiDAR projection (project_to_camera + frustum_indices, not monkeypatched): a
+    vehicle box over real points passes; a big vehicle box over empty space flags. The corpus has no camera
+    frame paired with a cloud, so this constructs a realistic one to run the real geometry the critic uses."""
+    from services.agent.critic import critique_frame
+    from services.lidar.detect3d.lift import frustum_indices
+    from services.lidar.project import project_to_camera
+
+    cam, W, H = "cam_front", 1920, 1080
+    rng = np.random.default_rng(0)
+    cloud = np.column_stack([rng.uniform(10, 14, 200), rng.uniform(-2, 0, 200), rng.uniform(-1.2, 0.4, 200)])
+    proj = project_to_camera(cloud, cam, W, H)
+    uv = np.asarray(proj["uv"])[np.asarray(proj["in_image"]) & np.asarray(proj["in_front"])]
+    if len(uv) < 5:
+        pytest.skip("calibration for cam_front did not project the test cloud into the image")
+    x1, y1 = uv.min(0)
+    x2, y2 = uv.max(0)
+    over_points = _Obj("c1", 1, [float(x1) - 5, float(y1) - 5, float(x2) + 5, float(y2) + 5])
+    big_empty = _Obj("c2", 1, [10.0, 10.0, 700.0, 700.0])  # >2% of frame, away from the cluster
+    ctx = _ctx([over_points, big_empty])
+    ctx.cam_id = cam
+    ctx.width, ctx.height = W, H
+    ctx.cloud_xyz = cloud
+    v = critique_frame(ctx)
+    assert v["c1"].checks["cross_modal"] == "pass"   # real points inside the box
+    assert v["c2"].checks["cross_modal"] == "flag"   # real projection finds nothing in a big vehicle box
+    # sanity: the real frustum helper actually returned points for the cluster box
+    assert len(frustum_indices(cloud, list(over_points.bbox), cam, W, H)) > 0
+
+
 def test_critic_skips_without_inputs():
     from services.agent.critic import critique_frame
 
