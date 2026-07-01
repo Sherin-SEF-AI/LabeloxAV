@@ -73,6 +73,8 @@ class TriageRow(BaseModel):
     state: str
     why: str
     priority: float
+    source: str = "human"                       # imported | fused | human | auto_accept | interpolated
+    import_format: str | None = None            # mapillary | idd | bdd | ... when source == imported
 
 
 class ObjectDetail(BaseModel):

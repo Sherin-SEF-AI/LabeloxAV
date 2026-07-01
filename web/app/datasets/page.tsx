@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { DatasetDetail, DatasetRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
+import { SkeletonRows } from "@/components/Spinner";
 
 // Datasets + delivery: seal a versioned dataset (a background export job) and download the formats.
 // This is the "product out" surface - how labeled data leaves the engine.
@@ -21,6 +22,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function DatasetsPage() {
   const [rows, setRows] = useState<DatasetRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<string | null>(null);
   const [detail, setDetail] = useState<DatasetDetail | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -35,6 +37,8 @@ export default function DatasetsPage() {
       setRows(await api.datasets());
     } catch {
       /* ignore */
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -132,8 +136,12 @@ export default function DatasetsPage() {
                 </div>
               ))}
             </div>
+          ) : loading ? (
+            <SkeletonRows rows={6} cols="grid-cols-[160px_1fr_80px_120px]" />
           ) : (
-            <div className="font-mono text-xs text-ink-3 py-4 text-center">no datasets sealed yet</div>
+            <div className="font-mono text-xs text-ink-3 py-6 text-center">
+              No datasets sealed yet. Seal one above to export your labeled data.
+            </div>
           )}
         </Section>
       </div>

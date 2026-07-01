@@ -82,6 +82,8 @@ async def triage(
                 state=obj.state,
                 why=why,
                 priority=priority,
+                source=obj.source,
+                import_format=(obj.provenance or {}).get("import_format"),
             )
         )
     out.sort(key=lambda r: r.priority, reverse=True)

@@ -6,6 +6,10 @@ It takes raw fleet footage, auto labels it with a calibrated confidence gate, mi
 
 One ontology, 170 classes, tuned for the chaos that global datasets never saw: autorickshaws, cattle on the carriageway, overloaded two wheelers, hand carts, street vendors, and the long tail of everything else.
 
+![The home dashboard with a real fleet ingested](docs/screenshots/00-home.png)
+
+*The home dashboard: a full fleet of real dashcam drives ingested and ready (186 trips, 32,455 frames from Indian roads), with the review queue surfacing the long tail the models struggle on, police vans, vendor handcarts, autorickshaws, ranked by uncertainty and rarity so attention goes where it matters.*
+
 ![Fleet analytics](docs/screenshots/01-analytics.png)
 
 ---
@@ -24,7 +28,7 @@ Labeling that data by hand is slow and expensive. The cases that actually matter
 
 ![Annotation canvas on a real Indian street](docs/screenshots/07-annotation-canvas.png)
 
-**Start from raw data.** Drop in a folder of images, a video, or an mcap and it imports into a new session with faces and plates blurred before anything reaches storage, then opens the first frame so you are annotating in seconds. An Open view browses every session with live progress, and sends you straight back to the highest priority frame left to label.
+**Start from raw data.** Drop in a folder of images, a whole batch of dashcam videos, or an mcap and it imports each into its own session with faces and plates blurred before anything reaches storage, then opens the first frame so you are annotating in seconds. The home shows live ingest progress across the batch, and sends you straight back to the highest priority frame left to label.
 
 **3D from LiDAR, without a 3D engine.** Point clouds rasterize to a bird's eye view you annotate with oriented boxes, and each box lifts back to a metric 3D cuboid using the points it encloses. It exports as real nuScenes 3D. The shot below is a real KITTI scan, annotated in the same editor.
 
@@ -120,9 +124,9 @@ The accurate IDD model reaches 0.44 mAP@50, a clear step over the earlier 0.39 b
 
 This is a from scratch build of the full pipeline, end to end, backed by an automated test suite. The engine, the ontology, the closed loop, the governance, the maps, and the editor are real and verified.
 
-The real data path is proven, not promised. India Driving Dataset frames have been ingested and embedded so search and discovery run on real pixels, and a real KITTI LiDAR scan has been annotated to 3D cuboids and exported as nuScenes. Detectors in the registry are trained on the India Driving Dataset and reach a real baseline.
+The real data path is proven and now populated. A full fleet of real dashcam drives has been ingested: 186 trips and 32,455 frames from Indian roads, with faces and plates blurred before anything reaches storage. Real semantic segmentation models run the drivable surface and lane geometry across that corpus through the cloud GPU seam, which is now a wired dispatch that starts a pod, runs the sweep, ingests the result, and stops the pod to cap billing, rather than a promise. India Driving Dataset frames are embedded so search and discovery run on real pixels, a real KITTI LiDAR scan is annotated to 3D cuboids and exported as nuScenes, and detectors in the registry are trained on the India Driving Dataset and reach a real baseline.
 
-The original bring up corpus is synthetic placeholder pixels, and the heavy cloud A100 stack is a documented seam rather than a wired path. The remaining milestone is the obvious one: pour in a full fleet of real dashcam drives, let the loop run, and watch the auto accept ceiling climb.
+The test suite once wrote to the same database as production and left synthetic frames behind; that is now fixed at the source (isolated test database, CI, and an ingest gate that rejects corrupt frames), and the residue was quarantined. What is left is to run the full closed loop on the new corpus at scale: autolabel every drive, mine the hard cases, retrain, and watch the auto accept ceiling climb. The pixels are real now, and the loop runs on them.
 
 ---
 

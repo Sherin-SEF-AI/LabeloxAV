@@ -11,6 +11,7 @@ import { acceptState, getUser, setUser } from "@/lib/user";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
 import { PERSON_17 } from "@/lib/skeleton";
 import BackButton from "@/components/BackButton";
+import { ObjectSourceBadge } from "@/components/SourceBadge";
 import CorrectionModal, { type CorrectionChange } from "@/components/CorrectionModal";
 import ToolStrip from "@/components/shell/ToolStrip";
 import ModeRail from "@/components/shell/ModeRail";
@@ -240,6 +241,19 @@ export default function FrameEditor() {
         conf: 1, state: "accepted", visible: true, isNew: true } });
     } catch (e) { flash("could not place cuboid: " + String(e)); }
   };
+  // Auto-detect the class of a freshly-drawn object from its crop (SigLIP2 zero-shot over the ontology), so
+  // a SAM box or wand click picks the class for you. Overrides the palette class; you can still relabel.
+  const autoClassify = async (objId: string, box: number[]) => {
+    if (box.length !== 4) return;
+    try {
+      const { predictions } = await api.classifyObject(id, box);
+      const top = predictions?.[0];
+      if (top && top.conf >= 0.15) {
+        dispatch({ t: "update", id: objId, patch: { class_id: top.class_id, class_name: top.class_name } });
+        flash(`detected ${top.class_name} (${Math.round(top.conf * 100)}%)`);
+      }
+    } catch { /* keep the palette class if classification is unavailable */ }
+  };
   // magic-wand: a single SAM point click that auto-creates (or refines) the object, no accept step
   const runMagicWand = async (pt: number[]) => {
     try {
@@ -249,8 +263,10 @@ export default function FrameEditor() {
       if (selected && overlapFrac(box, selected.bbox) > 0.5) {
         dispatch({ t: "update", id: selected.id, patch: { mask: r.polygons, bbox: box } });
       } else if (currentClass) {
-        dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
+        const nid = tmpId();
+        dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name,
           bbox: box, mask: r.polygons, attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
+        autoClassify(nid, box);
       }
     } catch (e) { flash(String(e).includes("503") ? "GPU busy (training)" : "magic-wand failed"); }
   };
@@ -540,12 +556,14 @@ export default function FrameEditor() {
     if (selected && overlapFrac(box, selected.bbox) > 0.5) {
       dispatch({ t: "update", id: selected.id, patch: { mask: st.candidate, bbox: selected.bbox.length === 4 ? selected.bbox : box } });
     } else if (currentClass) {
-      dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
+      const nid = tmpId();
+      dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name,
         bbox: box, mask: st.candidate, attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
+      autoClassify(nid, box);
       if (selected) dispatch({ t: "select", id: null }); // moved off the old object -> keep creating new
     }
     dispatch({ t: "candidate", polys: null });
-  }, [st.candidate, selected, currentClass, dispatch]);
+  }, [st.candidate, selected, currentClass, dispatch]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const runSam = useCallback(
     async (prompt: { points?: number[][]; labels?: number[]; box?: number[] }) => {
@@ -783,6 +801,13 @@ export default function FrameEditor() {
           <span className="font-mono text-[11px] text-ink">FRAME {String(id).slice(0, 8)}</span>
           <span className="font-mono text-[9.5px] text-ink-3">{st.objects.length} objects{meta.is_lidar ? " · lidar" : ""}</span>
         </div>
+        {meta.annotation_source ? (
+          <span title={meta.annotation_source === "imported"
+            ? "these labels were imported from a public dataset, not created in this app"
+            : "these labels were produced in this app"}>
+            <ObjectSourceBadge source={meta.annotation_source} importFormat={meta.import_format} />
+          </span>
+        ) : null}
         <button onClick={() => router.push(`/search?frame=${id}`)} title="find visually similar frames (DINOv3)"
           className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="search" size={16} /></button>
 
@@ -894,8 +919,8 @@ export default function FrameEditor() {
             onSelect={doSelect}
             relationships={relationships}
             onUpdateBbox={(oid, bbox, rot) => dispatch({ t: "update", id: oid, patch: rot !== undefined ? { bbox, rot } : { bbox } })}
-            onDrawBox={(bbox) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox, mask: [], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
-            onDrawPolygon={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [pts], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
+            onDrawBox={(bbox) => { if (currentClass) { const nid = tmpId(); dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox, mask: [], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } }); autoClassify(nid, bbox); } }}
+            onDrawPolygon={(pts) => { if (currentClass) { const nid = tmpId(); const bb = bboxOfPolys([pts]); dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox: bb, mask: [pts], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } }); autoClassify(nid, bb); } }}
             onDrawPolyline={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [], polyline: Array.from({ length: pts.length / 2 }, (_, i) => [pts[2 * i], pts[2 * i + 1]]), attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
             adverse={adverse}
             onDrawAdverse={async (pts) => { try { await api.createAdverse(id, { geometry: pts, condition: adverseCond }); setAdverse(await api.listAdverse(id).catch(() => [])); flash(`tagged ${adverseCond}`); } catch (e) { flash("region failed: " + String(e)); } }}

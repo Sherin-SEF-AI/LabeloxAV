@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import GlobalLoadingBar from "@/components/GlobalLoadingBar";
 
 const display = Space_Grotesk({ subsets: ["latin"], variable: "--font-display" });
 const body = Inter({ subsets: ["latin"], variable: "--font-body" });
@@ -14,7 +15,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
-      <body className="font-body bg-bg text-ink antialiased">{children}</body>
+      <body className="font-body bg-bg text-ink antialiased">
+        <GlobalLoadingBar />
+        {children}
+      </body>
     </html>
   );
 }

@@ -67,3 +67,17 @@ button:not(:disabled) {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* Global top loading bar: an indeterminate sweep shown while the app is fetching. */
+@keyframes lbx-progress {
+  0%   { left: -35%; width: 35%; }
+  50%  { left: 30%;  width: 45%; }
+  100% { left: 100%; width: 35%; }
+}
+.lbx-progress-bar {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: #f5a623;
+  animation: lbx-progress 1.1s ease-in-out infinite;
+}

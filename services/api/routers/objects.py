@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -210,10 +211,22 @@ async def get_frame(frame_id: str, db: AsyncSession = Depends(db_session)):
         select(Frame.frame_id).where(Frame.session_id == frame.session_id, Frame.ts_ns > frame.ts_ns)
         .order_by(Frame.ts_ns.asc()).limit(1))).scalar_one_or_none()
     n = (await db.execute(select(func.count()).select_from(Object).where(Object.frame_id == frame.frame_id))).scalar_one()
+    # The dominant annotation source on this frame, so the editor can say plainly whether these labels are
+    # imported from a public dataset (Mapillary / IDD / BDD) or produced in-app.
+    src_rows = (await db.execute(
+        select(Object.source, func.count()).where(Object.frame_id == frame.frame_id)
+        .group_by(Object.source).order_by(func.count().desc()))).all()
+    annotation_source = src_rows[0][0] if src_rows else None
+    import_format = None
+    if annotation_source == "imported":
+        prov = (await db.execute(select(Object.provenance).where(
+            Object.frame_id == frame.frame_id, Object.source == "imported").limit(1))).scalar()
+        import_format = (prov or {}).get("import_format")
     return {
         "frame_id": str(frame.frame_id), "session_id": str(frame.session_id),
         "width": frame.width, "height": frame.height, "ts_ns": frame.ts_ns, "cam_id": frame.cam_id,
         "image_url": f"/api/frames/{frame.frame_id}/image", "n_objects": int(n),
+        "annotation_source": annotation_source, "import_format": import_format,
         "prev_frame_id": str(prev) if prev else None, "next_frame_id": str(nxt) if nxt else None,
         "is_lidar": bool(frame.lidar), "lidar_points": (frame.lidar or {}).get("n_points"),
         "lidar_res": ((frame.lidar or {}).get("bev") or {}).get("res"),  # metres per pixel, for the ruler
@@ -382,3 +395,35 @@ async def segment(payload: SegmentIn, db: AsyncSession = Depends(db_session)):
             raise HTTPException(503, "GPU busy (a training job is using the GPU). Interactive "
                                      "segmentation is unavailable until it finishes; box review still works.")
         raise
+
+
+class ClassifyIn(BaseModel):
+    frame_id: str
+    box: list[float]                     # [x1, y1, x2, y2] in image pixels
+
+
+@router.post("/objects/classify")
+async def classify_object(payload: ClassifyIn, db: AsyncSession = Depends(db_session)):
+    """Zero-shot: what class is the object in this box? Crops the region and scores it against the ontology
+    with SigLIP 2, so a SAM box or wand click can auto-detect the class instead of the annotator picking it.
+    Returns the top-k class suggestions with confidence; the first is the auto-assigned class."""
+    frame = await db.get(Frame, UUID(payload.frame_id))
+    if frame is None:
+        raise HTTPException(404, "frame not found")
+    if len(payload.box) != 4:
+        raise HTTPException(400, "box must be [x1,y1,x2,y2]")
+    img = cv2.imdecode(np.frombuffer(get_object_store().get_bytes(frame.img_uri), np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        raise HTTPException(500, "failed to decode frame image")
+    from services.autolabel.classify_crop import classify_crop
+    from services.autolabel.paths.path_c_qwen3vl import crop_object
+    crop = crop_object(img, tuple(payload.box), 0.08)
+    if crop is None or crop.size == 0:
+        raise HTTPException(400, "empty crop")
+    try:
+        preds = classify_crop(crop)
+    except Exception as exc:  # noqa: BLE001
+        if "CUDA" in str(exc) or "OutOfMemory" in type(exc).__name__:
+            raise HTTPException(503, "GPU busy; auto-classify unavailable right now") from exc
+        raise
+    return {"predictions": preds}

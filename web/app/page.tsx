@@ -8,6 +8,8 @@ import { ConfBar, StateBadge } from "@/components/StateBadge";
 import PageShell from "@/components/shell/PageShell";
 import CorrectionModal from "@/components/CorrectionModal";
 import { SkeletonRows, Spinner } from "@/components/Spinner";
+import { ObjectSourceBadge } from "@/components/SourceBadge";
+import { objectSource, sessionOrigin } from "@/lib/source";
 import { acceptState, getUser } from "@/lib/user";
 
 const BANDS = [
@@ -63,6 +65,7 @@ export default function HomePage() {
   const [role, setRole] = useState<string | undefined>(undefined);
   const [showActions, setShowActions] = useState(false);
   const [ingest, setIngest] = useState<{ active: boolean; finished: boolean; done: number; total: number; current: string | null; frames: number } | null>(null);
+  const [srcFilter, setSrcFilter] = useState<"all" | "app" | "imported">("all");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -169,6 +172,16 @@ export default function HomePage() {
 
   const cities = useMemo(() => new Set(sessions.map((s) => s.city).filter(Boolean)).size, [sessions]);
   const activeBand = BANDS.find((b) => b.key === states);
+  const shownRows = useMemo(
+    () => (srcFilter === "all" ? rows : rows.filter((r) => objectSource(r.source, r.import_format).kind === srcFilter)),
+    [rows, srcFilter],
+  );
+  const importedCount = useMemo(() => rows.filter((r) => r.source === "imported").length, [rows]);
+  const SRC_FILTERS: { key: "all" | "app" | "imported"; label: string }[] = [
+    { key: "all", label: "all" },
+    { key: "app", label: "your work" },
+    { key: "imported", label: "imported" },
+  ];
 
   return (
     <PageShell
@@ -258,12 +271,27 @@ export default function HomePage() {
                   .sort((a, b) => (b.route ?? "").localeCompare(a.route ?? "") || b.start_ts_ns - a.start_ts_ns)
                   .map((s) => (
                     <option key={s.session_id} value={s.session_id}>
+                      {s.origin === "imported" ? "[imported] " : ""}
                       {s.route
                         ? `${s.route}${s.city ? ` · ${s.city}` : ""}`
                         : `${s.vehicle_id} · ${s.city ?? "?"} · #${s.session_id.slice(0, 4)}`}
                     </option>
                   ))}
               </select>
+            </div>
+
+            {/* Source filter: separate imported public-dataset labels from your own work */}
+            <div className="px-4 py-2 border-b hairline flex flex-wrap items-center gap-2 font-mono text-[11px]">
+              <span className="text-ink-3 uppercase text-[10px]">source</span>
+              {SRC_FILTERS.map((sf) => (
+                <button key={sf.key} onClick={() => setSrcFilter(sf.key)}
+                  className={`px-2 py-0.5 border ${srcFilter === sf.key ? "border-accent text-ink" : "border-line text-ink-3 hover:text-ink"}`}>
+                  {sf.label}
+                </button>
+              ))}
+              {importedCount > 0 ? (
+                <span className="text-ink-3 ml-1">{importedCount} of {rows.length} in view are imported (Mapillary / IDD / BDD), not your annotations</span>
+              ) : null}
             </div>
 
             {/* AI helpers for the selected session (secondary, tucked away) */}
@@ -323,7 +351,7 @@ export default function HomePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r, i) => (
+                  {shownRows.map((r, i) => (
                     <tr key={r.object_id} onClick={() => { setCursor(i); open(r); }} onMouseEnter={() => setCursor(i)}
                       className={`border-b hairline cursor-pointer ${sel.has(r.object_id) ? "bg-bg-2" : i === cursor ? "bg-panel" : "hover:bg-bg-2"}`}>
                       <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
@@ -331,7 +359,10 @@ export default function HomePage() {
                       </td>
                       <td className="px-3 py-2 font-mono text-ink-3">{String(i + 1).padStart(2, "0")}</td>
                       <td className="px-3 py-2">
-                        <div className="text-ink-2">{r.class_name}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-ink-2">{r.class_name}</span>
+                          <ObjectSourceBadge source={r.source} importFormat={r.import_format} />
+                        </div>
                         <div className="text-ink-3 text-xs">{r.why}</div>
                       </td>
                       <td className="px-3 py-2 font-mono">{r.class_name}</td>
@@ -339,6 +370,11 @@ export default function HomePage() {
                       <td className="px-3 py-2"><StateBadge state={r.state} /></td>
                     </tr>
                   ))}
+                  {!shownRows.length ? (
+                    <tr><td colSpan={6} className="px-3 py-8 text-center text-ink-3 text-sm">
+                      No {srcFilter === "imported" ? "imported" : srcFilter === "app" ? "in-app" : ""} items in this band. Try another source or band.
+                    </td></tr>
+                  ) : null}
                 </tbody>
               </table>
             ) : (

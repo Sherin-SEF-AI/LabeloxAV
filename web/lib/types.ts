@@ -8,6 +8,8 @@ export type TriageRow = {
   state: string;
   why: string;
   priority: number;
+  source?: string;
+  import_format?: string | null;
 };
 
 // COCO-style keypoints/skeleton: points are [x, y, v] with v in {0 not-labeled, 1 occluded, 2 visible}.
@@ -55,6 +57,7 @@ export type SessionRow = {
   route: string | null;
   start_ts_ns: number;
   end_ts_ns: number;
+  origin?: string;
 };
 
 export type SegmentResult = { polygons: number[][]; bbox: number[] | null };
@@ -203,6 +206,8 @@ export type FrameMeta = {
   cam_id: string;
   image_url: string;
   n_objects: number;
+  annotation_source?: string | null;
+  import_format?: string | null;
   prev_frame_id: string | null;
   next_frame_id: string | null;
   is_lidar?: boolean;
