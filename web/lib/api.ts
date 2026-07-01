@@ -343,6 +343,8 @@ export const api = {
     post<{ run_id: string; applied: number; counts: AgentCounts; policy: AgentPolicy }>(`/api/agent/frames/${frame_id}/run`, policy),
   agentRevert: (run_id: string) =>
     post<{ run_id: string; reverted: number; skipped: number }>(`/api/agent/runs/${run_id}/revert`, {}),
+  agentCommand: (frame_id: string, text: string) =>
+    post<{ intent: { action: string; classes: string[] | string; conf_min: number | null }; result: unknown; summary: string; blocked?: boolean }>(`/api/agent/command`, { text, frame_id }),
   // pixel-assist: brush/eraser mask composition + SLIC superpixels
   composeMask: (body: { polygons: number[][]; ops: { op: string; center: number[]; radius: number }[]; width: number; height: number }) =>
     post<{ polygons: number[][] }>(`/api/mask/compose`, body),

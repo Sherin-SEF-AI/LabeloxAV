@@ -13,6 +13,19 @@ export default function AgentPanel({ frameId, onApplied }: { frameId: string; on
   const [busy, setBusy] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [cmd, setCmd] = useState("");
+
+  const doCommand = async () => {
+    const text = cmd.trim();
+    if (!text) return;
+    setBusy("cmd"); setMsg(null);
+    try {
+      const r = await api.agentCommand(frameId, text);
+      setMsg(r.summary);
+      if (["accept", "revert"].includes(r.intent.action) && !r.blocked) onApplied?.();
+    } catch (e) { setMsg("command failed: " + String(e)); }
+    finally { setBusy(null); }
+  };
 
   const doPlan = async () => {
     setBusy("plan"); setMsg(null); setRunId(null);
@@ -91,6 +104,17 @@ export default function AgentPanel({ frameId, onApplied }: { frameId: string; on
           </button>
         </div>
       )}
+
+      <div className="px-1 pt-1.5 flex items-center gap-1">
+        <input value={cmd} onChange={(e) => setCmd(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") doCommand(); }}
+          placeholder="tell the agent, e.g. accept two-wheelers above 0.9"
+          className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-1.5 py-1 font-mono text-[10px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
+        <button onClick={doCommand} disabled={!!busy || !cmd.trim()}
+          className="font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+          {busy === "cmd" ? "…" : "ask"}
+        </button>
+      </div>
 
       {runId && (
         <div className="px-1 pt-1.5">

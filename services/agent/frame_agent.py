@@ -26,10 +26,14 @@ from services.agent.policy import Decision, PolicyThresholds, decide
 log = get_logger("agent.frame")
 
 
-async def _load_objects(db: AsyncSession, frame_id: uuid.UUID) -> list[Object]:
-    # Only machine objects are in scope; human-owned labels are never touched by the agent.
-    rows = await db.execute(select(Object).where(Object.frame_id == frame_id, Object.source != "human"))
-    return list(rows.scalars().all())
+async def _load_objects(db: AsyncSession, frame_id: uuid.UUID,
+                        only_classes: set[int] | None = None) -> list[Object]:
+    # Only machine objects are in scope; human-owned labels are never touched by the agent. An optional
+    # class filter lets a scoped command ("auto-accept the two-wheelers") act on a subset.
+    q = select(Object).where(Object.frame_id == frame_id, Object.source != "human")
+    if only_classes:
+        q = q.where(Object.class_id.in_(list(only_classes)))
+    return list((await db.execute(q)).scalars().all())
 
 
 async def _build_context(db: AsyncSession, frame: Frame, objs: list[Object]) -> CriticContext:
@@ -83,13 +87,14 @@ def _obj_decision(obj: Object, critic_ok: bool, th: PolicyThresholds) -> Decisio
     return decide(float(obj.conf), agreement, quality_ok, critic_ok, th)
 
 
-async def plan_frame(db: AsyncSession, frame_id: uuid.UUID, th: PolicyThresholds | None = None) -> dict:
+async def plan_frame(db: AsyncSession, frame_id: uuid.UUID, th: PolicyThresholds | None = None,
+                     only_classes: set[int] | None = None) -> dict:
     """Dry-run: what the agent would do to this frame's machine objects. Writes nothing."""
     th = th or PolicyThresholds()
     frame = await db.get(Frame, frame_id)
     if frame is None:
         raise ValueError("frame not found")
-    objs = await _load_objects(db, frame_id)
+    objs = await _load_objects(db, frame_id, only_classes)
     ctx = await _build_context(db, frame, objs)
     verdicts = critique_frame(ctx)
 
@@ -125,15 +130,15 @@ async def plan_frame(db: AsyncSession, frame_id: uuid.UUID, th: PolicyThresholds
 
 
 async def commit_frame(db: AsyncSession, frame_id: uuid.UUID, th: PolicyThresholds | None = None,
-                       created_by: str | None = None) -> dict:
+                       created_by: str | None = None, only_classes: set[int] | None = None) -> dict:
     """Apply the plan and record it as one reversible AgentRun."""
     th = th or PolicyThresholds()
-    plan = await plan_frame(db, frame_id, th)
+    plan = await plan_frame(db, frame_id, th, only_classes)
 
     run_id = uuid.uuid4()
     changes: dict[str, dict] = {}
     # index objects for mutation
-    objs = {str(o.object_id): o for o in await _load_objects(db, frame_id)}
+    objs = {str(o.object_id): o for o in await _load_objects(db, frame_id, only_classes)}
     for item in plan["items"]:
         if not item["changes_state"]:
             continue

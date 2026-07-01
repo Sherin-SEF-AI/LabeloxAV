@@ -89,6 +89,27 @@ async def flywheel(body: FlywheelIn, db: AsyncSession = Depends(db_session), use
     return {"run_id": str(run_id), "status": "running", "dry_run": body.dry_run}
 
 
+class CommandIn(BaseModel):
+    text: str
+    frame_id: str
+
+
+@router.post("/agent/command", dependencies=[Depends(require_role("annotator"))])
+async def command(body: CommandIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Natural-language control: turn an instruction ('auto-accept the two-wheelers above 0.9') into a
+    scoped agent action on a frame. Returns the parsed intent, the result, and a plain-language summary.
+    plan/find are read-only; accept/revert write and are reversible."""
+    from services.agent.nl import execute_command
+    from services.api.deps import role_rank
+
+    can_write = bool(user) and role_rank(user.role) >= role_rank("reviewer")
+    try:
+        return await execute_command(db, body.text, uuid.UUID(body.frame_id),
+                                     created_by=str(user.user_id) if user else None, can_write=can_write)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 class ReconcileIn(BaseModel):
     object_ids: list[str] | None = None  # None = the whole frame's machine objects
 
