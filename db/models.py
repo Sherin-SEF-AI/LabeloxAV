@@ -1156,3 +1156,28 @@ class FrameSegmentation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_frame_segmentation_frame_kind", "frame_id", "kind"),)
+
+
+class AgentRun(Base):
+    # An auditable, reversible unit of autonomous work by the annotation agent. The agent never mutates
+    # objects silently: every run records the policy it applied, per-object state transitions (so a run can
+    # be reverted exactly), the critic's findings, and roll-up counts. This is the guardrail that makes
+    # auto-accept safe at scale -- a bad run is one row to revert, and provenance never lies about who
+    # (which run, which model) touched a label.
+    __tablename__ = "agent_run"
+
+    run_id: Mapped[uuid.UUID] = _uuid_pk()
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # frame|session|flywheel
+    scope: Mapped[dict] = mapped_column(JSONB, default=dict)       # {frame_id?, session_id?, ...}
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="planned")  # planned|committed|reverted|error
+    policy: Mapped[dict] = mapped_column(JSONB, default=dict)      # thresholds + toggles the run used
+    counts: Mapped[dict] = mapped_column(JSONB, default=dict)      # {auto_accepted, routed_review, escalated, demoted, ...}
+    changes: Mapped[dict] = mapped_column(JSONB, default=dict)     # {object_id: {from_state, to_state, from_source, to_source}}
+    critic: Mapped[dict] = mapped_column(JSONB, default=dict)      # critic findings summary (by check, by object)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String(64))     # user id that launched it, or "flywheel"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    reverted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_agent_run_status", "status"), Index("ix_agent_run_kind", "kind"))
