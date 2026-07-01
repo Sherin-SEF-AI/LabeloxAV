@@ -210,10 +210,22 @@ async def get_frame(frame_id: str, db: AsyncSession = Depends(db_session)):
         select(Frame.frame_id).where(Frame.session_id == frame.session_id, Frame.ts_ns > frame.ts_ns)
         .order_by(Frame.ts_ns.asc()).limit(1))).scalar_one_or_none()
     n = (await db.execute(select(func.count()).select_from(Object).where(Object.frame_id == frame.frame_id))).scalar_one()
+    # The dominant annotation source on this frame, so the editor can say plainly whether these labels are
+    # imported from a public dataset (Mapillary / IDD / BDD) or produced in-app.
+    src_rows = (await db.execute(
+        select(Object.source, func.count()).where(Object.frame_id == frame.frame_id)
+        .group_by(Object.source).order_by(func.count().desc()))).all()
+    annotation_source = src_rows[0][0] if src_rows else None
+    import_format = None
+    if annotation_source == "imported":
+        prov = (await db.execute(select(Object.provenance).where(
+            Object.frame_id == frame.frame_id, Object.source == "imported").limit(1))).scalar()
+        import_format = (prov or {}).get("import_format")
     return {
         "frame_id": str(frame.frame_id), "session_id": str(frame.session_id),
         "width": frame.width, "height": frame.height, "ts_ns": frame.ts_ns, "cam_id": frame.cam_id,
         "image_url": f"/api/frames/{frame.frame_id}/image", "n_objects": int(n),
+        "annotation_source": annotation_source, "import_format": import_format,
         "prev_frame_id": str(prev) if prev else None, "next_frame_id": str(nxt) if nxt else None,
         "is_lidar": bool(frame.lidar), "lidar_points": (frame.lidar or {}).get("n_points"),
         "lidar_res": ((frame.lidar or {}).get("bev") or {}).get("res"),  # metres per pixel, for the ruler

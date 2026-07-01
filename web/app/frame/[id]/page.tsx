@@ -11,6 +11,7 @@ import { acceptState, getUser, setUser } from "@/lib/user";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
 import { PERSON_17 } from "@/lib/skeleton";
 import BackButton from "@/components/BackButton";
+import { ObjectSourceBadge } from "@/components/SourceBadge";
 import CorrectionModal, { type CorrectionChange } from "@/components/CorrectionModal";
 import ToolStrip from "@/components/shell/ToolStrip";
 import ModeRail from "@/components/shell/ModeRail";
@@ -783,6 +784,13 @@ export default function FrameEditor() {
           <span className="font-mono text-[11px] text-ink">FRAME {String(id).slice(0, 8)}</span>
           <span className="font-mono text-[9.5px] text-ink-3">{st.objects.length} objects{meta.is_lidar ? " · lidar" : ""}</span>
         </div>
+        {meta.annotation_source ? (
+          <span title={meta.annotation_source === "imported"
+            ? "these labels were imported from a public dataset, not created in this app"
+            : "these labels were produced in this app"}>
+            <ObjectSourceBadge source={meta.annotation_source} importFormat={meta.import_format} />
+          </span>
+        ) : null}
         <button onClick={() => router.push(`/search?frame=${id}`)} title="find visually similar frames (DINOv3)"
           className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="search" size={16} /></button>
 

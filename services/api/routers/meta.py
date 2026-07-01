@@ -58,6 +58,21 @@ async def ontology():
     }
 
 
+_IMPORT_VEHICLES = {"MAPILLARY", "IDD", "BDD", "BDD100K", "KITTI", "NUSCENES", "IMPORT-01"}
+
+
+def _session_origin(s) -> str:
+    """Where a session's data came from: imported (public dataset), fleet (your own dashcam drives), or
+    other (synthetic/test). Lets the UI make clear that a Mapillary frame is not your own annotation."""
+    v = (s.vehicle_id or "").upper()
+    r = s.raw_uri or ""
+    if "import_staging" in r or v in _IMPORT_VEHICLES:
+        return "imported"
+    if v.startswith("DASHCAM"):
+        return "fleet"
+    return "other"
+
+
 @router.get("/sessions")
 async def sessions(db: AsyncSession = Depends(db_session), limit: int = Query(200, ge=1, le=1000)):
     rows = (await db.execute(select(DbSession).order_by(DbSession.created_at.desc()).limit(limit))).scalars().all()
@@ -70,6 +85,7 @@ async def sessions(db: AsyncSession = Depends(db_session), limit: int = Query(20
             "start_ts_ns": s.start_ts_ns,
             "end_ts_ns": s.end_ts_ns,
             "ontology_version": s.ontology_version,
+            "origin": _session_origin(s),
         }
         for s in rows
     ]
