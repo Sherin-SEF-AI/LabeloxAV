@@ -26,7 +26,7 @@ Labeling that data by hand is slow and expensive. The cases that actually matter
 
 **One surface, every annotation primitive.** Boxes and oriented boxes, manual polygons, promptable SAM masks, pose and keypoint skeletons for pedestrians and cyclists, and 3D cuboids lifted from LiDAR, plus a measure tool and copy paste across frames. Edit lane splines and drivable area, read each object's derived dynamics, fix a wrong label in place, or add a brand new class on the fly. All keyboard driven. Here it is on a real Indian street, with a truck, an autorickshaw, a hatchback, and pedestrians.
 
-![Annotation canvas on a real Indian street](docs/screenshots/07-annotation-canvas.png)
+<img width="1907" height="928" alt="image" src="https://github.com/user-attachments/assets/ad103a42-abf5-4794-951e-4ee3f19c0274" />
 
 **Start from raw data.** Drop in a folder of images, a whole batch of dashcam videos, or an mcap and it imports each into its own session with faces and plates blurred before anything reaches storage, then opens the first frame so you are annotating in seconds. The home shows live ingest progress across the batch, and sends you straight back to the highest priority frame left to label.
 
