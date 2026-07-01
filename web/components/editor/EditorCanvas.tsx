@@ -66,7 +66,11 @@ const ADVERSE_COLOR: Record<string, string> = {
 
 export default function EditorCanvas(p: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 800, h: 600 });
+  // Start at 0x0, not a guessed 800x600: the fit effect keys off `size` and runs once when scale is the
+  // fit-pending sentinel, so if it fired against a placeholder size it would fit to 800x600 and never
+  // re-fit when the real container size arrived. Zero keeps the fit guard (size.w > 1) false until the
+  // container is actually measured, so the frame fits to the true canvas.
+  const [size, setSize] = useState({ w: 0, h: 0 });
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [draw, setDraw] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [poly, setPoly] = useState<number[]>([]); // in-progress manual polygon, flattened [x,y,...]
