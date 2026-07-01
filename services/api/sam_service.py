@@ -36,6 +36,7 @@ def segment(
     points: list[list[float]] | None = None,
     labels: list[int] | None = None,
     box: list[float] | None = None,
+    precise: bool = False,
 ) -> dict:
     model = _get_model()
     dev = get_settings().gpu.device
@@ -52,7 +53,10 @@ def segment(
         return {"polygons": [], "bbox": None}
 
     m = masks.data[0].cpu().numpy().astype(bool)
-    polys = polygons_from_mask(m)
+    # Panoptic wants segments that tile without overlap: follow the visible edge tightly (a fixed pixel
+    # tolerance, so a large stuff region is no coarser than a small one) and keep interior holes where a
+    # vehicle occludes the region. Semantic keeps the lighter perimeter-relative simplification.
+    polys = polygons_from_mask(m, keep_holes=True, epsilon_px=1.5) if precise else polygons_from_mask(m)
     ys, xs = np.where(m)
     bbox = [float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())] if xs.size else None
     return {"polygons": polys, "bbox": bbox}

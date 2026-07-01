@@ -385,7 +385,7 @@ async def segment(payload: SegmentIn, db: AsyncSession = Depends(db_session)):
     if img is None:
         raise HTTPException(500, "failed to decode frame image")
     try:
-        return run_segment(img, points=payload.points, labels=payload.labels, box=payload.box)
+        return run_segment(img, points=payload.points, labels=payload.labels, box=payload.box, precise=payload.precise)
     except Exception as exc:  # noqa: BLE001
         # On a single GPU, a running training job can consume all VRAM. Surface that cleanly (503)
         # instead of an unhandled 500 so the UI can show a friendly "GPU busy" notice. Box-level

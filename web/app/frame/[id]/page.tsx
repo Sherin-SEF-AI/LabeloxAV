@@ -257,7 +257,7 @@ export default function FrameEditor() {
   // magic-wand: a single SAM point click that auto-creates (or refines) the object, no accept step
   const runMagicWand = async (pt: number[]) => {
     try {
-      const r = await api.segmentPrompt(id, { points: [pt], labels: [1] });
+      const r = await api.segmentPrompt(id, { points: [pt], labels: [1], precise: segKind === "panoptic" });
       if (!r.polygons.length) { flash("magic-wand found nothing here"); return; }
       const box = bboxOfPolys(r.polygons);
       if (selected && overlapFrac(box, selected.bbox) > 0.5) {
@@ -569,7 +569,7 @@ export default function FrameEditor() {
     async (prompt: { points?: number[][]; labels?: number[]; box?: number[] }) => {
       if (st.candidate?.length) acceptCandidate(); // commit the pending mask before starting the next
       try {
-        const r = await api.segmentPrompt(id, prompt);
+        const r = await api.segmentPrompt(id, { ...prompt, precise: segKind === "panoptic" });
         dispatch({ t: "candidate", polys: r.polygons });
         if (!r.polygons.length) flash("SAM found nothing here");
       } catch (e) {
@@ -577,7 +577,7 @@ export default function FrameEditor() {
         flash(msg.includes("503") ? "GPU busy (training). Box tools still work." : "segment failed");
       }
     },
-    [id, dispatch, st.candidate, acceptCandidate],
+    [id, dispatch, st.candidate, acceptCandidate, segKind],
   );
 
   // Leaving a SAM tool (or switching away) commits any uncommitted mask instead of dropping it.

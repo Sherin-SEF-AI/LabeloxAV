@@ -104,7 +104,7 @@ async function del<T>(path: string): Promise<T> {
 
 // SAM segment supports point prompts (with fg/bg labels) and/or a box prompt. Returns 503 if a
 // training job holds the GPU; callers surface that as a non-blocking notice.
-export type SegmentPrompt = { points?: number[][]; labels?: number[]; box?: number[] };
+export type SegmentPrompt = { points?: number[][]; labels?: number[]; box?: number[]; precise?: boolean };
 
 // LiDAR 3D viewer
 export type LidarBounds = { min: number[]; max: number[]; n: number };

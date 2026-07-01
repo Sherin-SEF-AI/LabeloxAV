@@ -116,13 +116,19 @@ class Sam3Path:
         return m.data.cpu().numpy().astype(bool)
 
 
-def polygons_from_mask(mask: np.ndarray, epsilon_frac: float = 0.005, keep_holes: bool = False) -> list[list[float]]:
+def polygons_from_mask(mask: np.ndarray, epsilon_frac: float = 0.005, keep_holes: bool = False,
+                       epsilon_px: float | None = None) -> list[list[float]]:
     """Compact polygon encoding for persistence, flattened [x,y,...] per ring.
 
     Default (keep_holes=False) keeps only external contours, which is right for a solid object. With
     keep_holes=True the interior contours are returned too, so a mask with a hole (an erased region, or a
     stuff region cut by an occluding vehicle) round-trips: consumers interpret the ring list with the
     even-odd rule, so a ring nested inside another reads as a hole rather than a second filled blob.
+
+    Simplification tolerance defaults to epsilon_frac * perimeter, which is fine for compact objects but
+    coarsens large regions (a huge retaining wall gets a big absolute tolerance, so its boundary drifts
+    off the visible edge). Pass epsilon_px to use a fixed pixel tolerance instead, size-independent, so a
+    big stuff region follows its edge as tightly as a small one.
     """
     m = (mask.astype(np.uint8)) * 255
     mode = cv2.RETR_CCOMP if keep_holes else cv2.RETR_EXTERNAL
@@ -131,7 +137,7 @@ def polygons_from_mask(mask: np.ndarray, epsilon_frac: float = 0.005, keep_holes
     for c in contours:
         if cv2.contourArea(c) < 4:
             continue
-        eps = epsilon_frac * cv2.arcLength(c, True)
+        eps = epsilon_px if epsilon_px is not None else epsilon_frac * cv2.arcLength(c, True)
         approx = cv2.approxPolyDP(c, eps, True)
         polys.append([float(v) for pt in approx.reshape(-1, 2) for v in pt])
     return polys
