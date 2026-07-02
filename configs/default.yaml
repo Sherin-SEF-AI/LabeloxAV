@@ -175,3 +175,20 @@ ontology:
 
 paths:
   scratch: .scratch          # local working dir (frames cache, model weights)
+
+# Session Inspector: Foxglove-class MCAP inspection inside LabeloxAV. Lichtblick is the day-one escape
+# hatch (self-hosted open-source Foxglove fork); the native indexer + health checks answer "did my
+# recording work" before any panel opens. One ts_ns playback clock, presigned range-request reads.
+inspector:
+  lichtblick_base_url: http://localhost:8090
+  lichtblick_ds_id: remote-file
+  presign_expiry_s: 3600
+  indexer_version: inspector-idx-v1
+  gap_min_factor: 5.0
+  rate_tolerance: 0.10
+  rate_warn_tolerance: 0.20
+  dropout_factor: 10.0
+  max_cross_sensor_offset_ms: 500.0
+  min_gnss_fix: 1
+  default_layout: ["image", "imu_plot", "can_plot", "map", "raw"]
+  decode_enabled: true

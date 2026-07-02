@@ -612,6 +612,9 @@ export const api = {
   }) => post<{ job_id: string; status: string }>("/api/imports/start", body),
   importStatus: (jobId: string) => get<ImportJob>(`/api/imports/${jobId}`),
   listImports: () => get<ImportJob[]>("/api/imports"),
+  // Session Inspector: presigned Lichtblick remote-file deep link for full-power MCAP inspection
+  inspectorLichtblick: (session_id: string) =>
+    get<{ session_id: string; url: string; mcap_url: string; expires_s: number }>(`/api/inspector/sessions/${session_id}/lichtblick`),
   // In-app training platform
   trainingTasks: () => get<{ task_type: string; default_base_weights: string }[]>("/api/training/tasks"),
   startTraining: (body: {

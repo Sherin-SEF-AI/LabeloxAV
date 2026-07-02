@@ -217,6 +217,22 @@ export default function ImportPage() {
                       view
                     </button>
                   )}
+                  {j.session_id && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          const r = await api.inspectorLichtblick(j.session_id!);
+                          window.open(r.url, "_blank", "noopener");
+                        } catch (e) {
+                          setErr("Open in Lichtblick failed (no MCAP for this session, or Lichtblick is not running): " + String(e));
+                        }
+                      }}
+                      title="full-power MCAP inspection in the self-hosted Lichtblick"
+                      className="border border-line px-1.5 hover:border-accent"
+                    >
+                      lichtblick
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
