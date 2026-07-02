@@ -60,6 +60,14 @@ async def run(frame_id: str, body: AgentPolicyIn | None = None,
         raise HTTPException(404, str(exc)) from exc
 
 
+@router.get("/agent/coverage", dependencies=[Depends(require_role("annotator"))])
+async def coverage(db: AsyncSession = Depends(db_session)):
+    """Corpus coverage report: class balance, scene-axis coverage, geography, and the named gaps to fill."""
+    from services.agent.coverage import analyze_coverage
+
+    return await analyze_coverage(db)
+
+
 class MineIn(BaseModel):
     session_id: str | None = None
     ttc_thresh: float = 2.5
