@@ -274,18 +274,18 @@ export default function AgentConsole() {
               <div className="flex-1">
                 <div className="text-ink font-medium">Overnight Auditor <span className="font-mono text-[10px] text-accent">morning report</span></div>
                 <div className="text-ink-3 text-xs mt-1">Patrols the day&apos;s auto-accepted labels within a token budget: VLM spot-checks + cross-frame consistency + control-sample precision. Suspects are queued to review (reversible). Runs nightly off-hours; run it now below.</div>
-                {audit?.report ? (
+                {audit?.report?.notes ? (
                   <div className="mt-2 font-mono text-[11px] text-ink-2 space-y-0.5">
                     {audit.report.notes.map((n, i) => <div key={i}>· {n}</div>)}
                     <div className="text-ink-3 mt-1">
-                      sampled {audit.report.sampled} · vlm-checked {audit.report.vlm_checked} · <span className="text-warn">{audit.report.vlm_disagreements} vlm-disagree</span> · budget {audit.report.budget.used}/{audit.report.budget.max_calls}
+                      sampled {audit.report.sampled ?? 0} · vlm-checked {audit.report.vlm_checked ?? 0} · <span className="text-warn">{audit.report.vlm_disagreements ?? 0} vlm-disagree</span> · budget {audit.report.budget?.used ?? 0}/{audit.report.budget?.max_calls ?? 0}
                       {audit.created_at ? ` · ${new Date(audit.created_at).toLocaleString()}` : ""}
                     </div>
-                    {audit.report.confusion_movers.length > 0 && (
+                    {(audit.report.confusion_movers?.length ?? 0) > 0 && (
                       <div className="text-ink-3">movers: {audit.report.confusion_movers.map((m) => `${m.from}->${m.to} (${m.n})${m.concentrated_in ? ` in ${m.concentrated_in}` : ""}`).join(", ")}</div>
                     )}
                   </div>
-                ) : <div className="mt-2 font-mono text-[11px] text-ink-3">no audit yet</div>}
+                ) : <div className="mt-2 font-mono text-[11px] text-ink-3">{audit?.status === "running" ? "audit running..." : "no audit yet"}</div>}
               </div>
               <button onClick={runAudit} disabled={!!busy} className="shrink-0 font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "audit" ? "auditing..." : "run audit now"}</button>
             </div>

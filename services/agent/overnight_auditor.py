@@ -83,7 +83,10 @@ async def run_audit(run_id: uuid.UUID, *, sample_size: int = 200, vlm_calls: int
         sampled = await _sample_auto_accepts(db, since, sample_size)
 
     if not sampled:
-        report = {"window_hours": since_hours, "sampled": 0, "note": "no auto-accepted labels in the window"}
+        report = {"window_hours": since_hours, "sampled": 0, "vlm_checked": 0, "vlm_disagreements": 0,
+                  "among_sample_agreement": None, "control_precision": {"precision": None},
+                  "confusion_movers": [], "critic_flags": {}, "suspects_queued": 0,
+                  "budget": budget.as_dict(), "notes": ["no auto-accepted labels in the window"]}
         await _finish(run_id, "committed", report, {})
         return
 
