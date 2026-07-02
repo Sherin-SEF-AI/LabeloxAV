@@ -347,6 +347,14 @@ export const api = {
     post<{ counts: { objects: number; attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes/plan`, {}),
   agentAttributes: (frame_id: string) =>
     post<{ run_id: string; objects_updated: number; counts: { attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes`, {}),
+  agentErrorSweep: (max_sessions = 10, kinds?: string[]) =>
+    post<{ run_id: string; status: string }>(`/api/agent/errors/sweep`, kinds ? { max_sessions, kinds } : { max_sessions }),
+  agentErrorQueue: (status = "pending", limit = 60) =>
+    get<{ summary: Record<string, number>; candidates: { candidate_id: string; object_id: string; kind: string; score: number; detail: Record<string, unknown>; proposed_label?: { class_name?: string } | null }[] }>(`/api/agent/errors/queue?status=${status}&limit=${limit}`),
+  agentTemporalRepairPlan: (session_id?: string) =>
+    post<{ counts: { tracks: number; flipped_tracks: number; relabels: number; skipped_static?: number } }>(`/api/agent/temporal-repair/plan`, session_id ? { session_id } : {}),
+  agentTemporalRepair: (session_id?: string) =>
+    post<{ run_id: string; relabeled: number; counts: Record<string, number> }>(`/api/agent/temporal-repair`, session_id ? { session_id } : {}),
   agentCuboidsPlan: (frame_id: string) =>
     post<{ counts: { total: number; auto_accept: number; review: number; skip: number } }>(`/api/agent/frames/${frame_id}/cuboids/plan`, {}),
   agentCuboids: (frame_id: string) =>
