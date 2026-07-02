@@ -574,6 +574,45 @@ class LidarSettings(BaseModel):
     quality_misalign_fill: float = 0.05      # a box with fewer enclosed points than this is misaligned
 
 
+class InspectorSettings(BaseModel):
+    """Session Inspector: the Lichtblick escape hatch, the MCAP indexer, and session-health thresholds."""
+
+    # M-I.0 Lichtblick escape hatch. The self-hosted Lichtblick (open-source Foxglove fork, MPL-2.0) reads
+    # the session MCAP straight from the object store via a presigned remote-file deep link. The data-source
+    # id and arg keys follow Lichtblick's URL scheme (ds=<id>, ds.url=<file>); kept configurable so a fork
+    # change is a config edit, not a code edit.
+    lichtblick_base_url: str = "http://localhost:8090"
+    lichtblick_ds_id: str = "remote-file"
+    presign_expiry_s: int = 3600
+
+    # M-I.1 indexer. Version stamps every index + health row for reproducibility.
+    indexer_version: str = "inspector-idx-v1"
+    gap_min_factor: float = 5.0        # a silence longer than this * the topic's nominal period is a gap
+
+    # M-I.2 health thresholds.
+    rate_tolerance: float = 0.10       # measured rate within +/- this fraction of expected is a pass
+    rate_warn_tolerance: float = 0.20  # beyond rate_tolerance but within this is a warn; beyond it is a fail
+    dropout_factor: float = 10.0       # a gap longer than this * nominal period is a dropout (fail-worthy)
+    max_cross_sensor_offset_ms: float = 500.0  # first/last-ts skew across sensors beyond this is suspect
+    min_gnss_fix: int = 1              # minimum acceptable GNSS fix quality (0=no fix)
+
+    # M-I.2 rig manifest: the topics a session should carry and their expected rates. A required topic that
+    # is absent fails the session; a measured rate outside tolerance warns or fails. match is a substring of
+    # the topic name (so /camera/cam_f and /imu both resolve).
+    expected_topics: list = Field(default_factory=lambda: [
+        {"match": "camera", "rate": 10.0, "required": True},
+        {"match": "imu", "rate": 200.0, "required": True},
+        {"match": "gnss", "rate": 10.0, "required": True},
+        {"match": "can", "rate": 100.0, "required": False},
+    ])
+
+    # M-I.3 default panel layout (image, IMU plot, CAN plot, map, raw messages).
+    default_layout: list = Field(default_factory=lambda: ["image", "imu_plot", "can_plot", "map", "raw"])
+
+    # M-I.4 backend decode-on-seek fallback for video the browser cannot decode.
+    decode_enabled: bool = True
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="LBX_",
@@ -609,6 +648,7 @@ class Settings(BaseSettings):
     phase4: Phase4Settings = Phase4Settings()  # Phase 4 closed loop + governance
     auth: AuthSettings = AuthSettings()        # deny-by-default API auth
     lidar: LidarSettings = LidarSettings()     # 3D LiDAR module (ingestion, clean, viewer)
+    inspector: InspectorSettings = InspectorSettings()  # Session Inspector (MCAP viewer + health)
 
     @classmethod
     def settings_customise_sources(

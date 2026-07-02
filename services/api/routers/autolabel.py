@@ -65,6 +65,12 @@ async def start(payload: AutolabelStartIn, db: AsyncSession = Depends(db_session
     sess = await db.get(DbSession, uuid.UUID(payload.session_id))
     if sess is None:
         raise HTTPException(404, "session not found")
+    # Inspector health gate: a session whose recording failed health checks is excluded from auto-labeling
+    # until a human reviews, exactly as calibration validation gates 3D work.
+    from services.inspector.health import is_gated
+
+    if await is_gated(db, uuid.UUID(payload.session_id)):
+        raise HTTPException(409, "session failed inspector health checks; review it before auto-labeling")
     job_id = uuid.uuid4()
     db.add(AutolabelJob(job_id=job_id, session_id=uuid.UUID(payload.session_id), status="pending"))
     await db.commit()

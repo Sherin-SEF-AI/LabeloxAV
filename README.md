@@ -34,6 +34,12 @@ Labeling that data by hand is slow and expensive. The cases that actually matter
 
 ![LiDAR bird's eye view annotation](docs/screenshots/11-lidar-inapp.png)
 
+**Every camera at once, on one canvas.** A vehicle carries a rig of cameras, so the same object shows up in several views at the same instant. LabeloxAV groups the synchronized frames, then lets you switch the editor into a rig view, a grid, a surround strip ordered the way the cameras face, or a focus plus context layout, with no change of mode and every tool working exactly as before. A dropped frame shows as an empty tile instead of vanishing. Work happens in two tiers, gated on calibration and honest about which one is available: on any session you link the same object across views by hand or from a DINOv3 appearance suggestion, and the rig identity votes a class and flags a cross view disagreement for review; on a calibrated session you annotate once and project the box into the other views by geometry, lens aware for the narrow and fisheye lenses. Objects are then followed across time and cameras as one rig track, and a consistency check files the views that disagree straight into the review queue.
+
+![Synchronized multi camera annotation with rig identities and the two tier calibration gate](docs/screenshots/18-multicam-identities.png)
+
+*The rig view on a real two camera session: the focused camera keeps the full annotation canvas while the other camera rides along as context, the identities panel links one physical object across views, and the header shows the tier the session has earned (here TIER 2, calibrated, so annotate once and project is available) alongside the group and track controls.*
+
 **Smart triage, not endless clicking.** Every detection gets a calibrated confidence and a reason. High confidence agrees get auto accepted. The uncertain, rare, and conflicting ones rise to the top of a priority queue. You spend your attention where it matters.
 
 ![Priority queue](docs/screenshots/03-triage.png)
@@ -57,7 +63,7 @@ Every automated decision is in an audit log. A drift breach pauses promotion. On
 - **Auto labeling** through a fusion of detection, promptable segmentation, and a vision language verifier, gated by calibrated confidence.
 - **Perception depth**: multi object tracking, lane splines, drivable area segmentation, traffic sign and signal understanding, and license plate privacy that never stores plate text.
 - **3D and LiDAR**: point clouds annotated in a bird's eye view, lifted to metric cuboids from the enclosed points.
-- **Multi sensor and spatial**: camera calibration validation, synchronized multi camera annotation, map assisted labeling from OpenStreetMap, and HD map generation exported to Lanelet2 and OpenDRIVE.
+- **Multi sensor and spatial**: camera calibration validation, synchronized multi camera annotation on one canvas (rig frame groups, manual and appearance based cross view linking, annotate once and project across views when calibrated, and cross view track handoff with a consistency check), map assisted labeling from OpenStreetMap, and HD map generation exported to Lanelet2 and OpenDRIVE.
 - **Derived dynamics**: per object distance, speed, heading, time to collision, and a risk level, turning a perception dataset into one that supports planning and prediction.
 - **Self improvement**: active learning, annotation error detection, AI assisted relabeling, champion and challenger promotion that actually serves the promoted model, a kill switch that genuinely stops auto accept, control sample precision, drift detection with recovery, and a full audit trail.
 - **Export and import**: COCO, YOLO, KITTI, BDD100K, OpenLABEL, nuScenes (with real 3D when a cuboid exists), and a lossless Parquet round trip.
@@ -132,7 +138,7 @@ The test suite once wrote to the same database as production and left synthetic 
 
 ## Calibration and trust
 
-A session that fails camera calibration is flagged and excluded from 3D and multi camera work until it is fixed. Trust is earned per session, not assumed.
+A session that fails camera calibration is flagged and excluded from metric 3D work until it is fixed. Multi camera annotation degrades honestly rather than blocking: an uncalibrated session still gets manual cross view linking (Tier 1), and only a calibrated one unlocks annotate once and project across views (Tier 2). Trust is earned per session, not assumed.
 
 ![Calibration report](docs/screenshots/05-calibration.png)
 

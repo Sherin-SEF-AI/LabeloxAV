@@ -35,6 +35,7 @@ from services.api.routers import (
     govern,
     hdmap,
     imports,
+    inspector,
     intelligence,
     jobs,
     lanes,
@@ -277,5 +278,6 @@ app.include_router(objects3d.router, prefix="/api", tags=["lidar"])
 app.include_router(lidar_scene.router, prefix="/api", tags=["lidar"])
 app.include_router(drivable.router, prefix="/api", tags=["drivable"])
 app.include_router(inertial.router, prefix="/api", tags=["inertial"])
+app.include_router(inspector.router, prefix="/api", tags=["inspector"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])

@@ -30,6 +30,9 @@ import { MODES, type ToolGroup } from "@/lib/editor/registry";
 // Wrap the import so next/dynamic's convertModule always gets a clean { default } and cannot mistake the
 // module for a react-konva export on a StrictMode re-mount.
 const EditorCanvas = dynamic(() => import("@/components/editor/EditorCanvas").then((m) => ({ default: m.default })), { ssr: false });
+const RigView = dynamic(() => import("@/components/editor/RigView"), { ssr: false });
+const RigIdentityPanel = dynamic(() => import("@/components/editor/RigIdentityPanel"), { ssr: false });
+const RigTrackPanel = dynamic(() => import("@/components/editor/RigTrackPanel"), { ssr: false });
 // Lanes mode swaps to this fit-to-width Konva stage (the folded-in lane editor). Loaded once, ssr off.
 const LaneCanvas = dynamic(() => import("@/components/lane/LaneCanvas"), { ssr: false });
 // 3D and LiDAR mode swaps to the three.js point cloud (the folded-in cuboid workspace). Loaded once, ssr off.
@@ -123,6 +126,7 @@ export default function FrameEditor() {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const focus = useSearchParams().get("focus");
+  const rigParam = useSearchParams().get("rig");   // M-MC.1 deep link: keep rig view + layout across camera focus
 
   const [st, dispatch] = useEditor();
   const [meta, setMeta] = useState<FrameMeta | null>(null);
@@ -176,6 +180,15 @@ export default function FrameEditor() {
   const [objSearch, setObjSearch] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState("objects");
+  // M-MC.1 rig view: a canvas view state (not a mode). rigGroup is the synchronized frame group this frame
+  // belongs to; rigView toggles the multi-camera layout with the current camera focused.
+  const [rigView, setRigView] = useState(false);
+  const [rigLayout, setRigLayout] = useState<import("@/components/editor/RigView").RigLayout>("focus");
+  const [rigGroup, setRigGroup] = useState<{ groupId: string; cameras: string[]; frameIds: Record<string, string>; missingCams: string[]; confirmed: boolean } | null>(null);
+  const [rigPanel, setRigPanel] = useState(false);   // M-MC.2 rig-identity panel visibility
+  const [rigCalibrated, setRigCalibrated] = useState<boolean | null>(null);  // M-MC.3 Tier 2 eligibility
+  const [rigRefresh, setRigRefresh] = useState(0);   // bump to refetch the identity panel after a propagate
+  const [rigTracks, setRigTracks] = useState(false);  // M-MC.4 rig-track timeline panel visibility
   const [scaleNoteOpen, setScaleNoteOpen] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   // Responsive: on a narrow screen the properties panel collapses first (the design's degradation order),
@@ -212,6 +225,72 @@ export default function FrameEditor() {
       loadedRef.current = true;
     })();
   }, [id, focus, dispatch]);
+
+  // M-MC.1: resolve the synchronized frame group this frame belongs to, so the rig view can show the sibling
+  // cameras. Uses the persisted groups; if none exist yet for the session it builds them once on demand.
+  useEffect(() => {
+    if (!meta?.session_id || meta.ts_ns == null) return;
+    let live = true;
+    (async () => {
+      const load = async () => api.multicamGroupAt(meta.session_id, meta.ts_ns);
+      try {
+        let g = await load().catch(() => null);
+        if (!g) { await api.multicamBuild(meta.session_id).catch(() => undefined); g = await load().catch(() => null); }
+        if (!live || !g) { setRigGroup(null); return; }
+        const cams = Object.keys(g.frame_ids).concat(g.missing_cams);
+        setRigGroup({ groupId: g.group_id, cameras: Array.from(new Set(cams)), frameIds: g.frame_ids, missingCams: g.missing_cams, confirmed: g.confirmed });
+        if (rigParam && (rigParam === "grid" || rigParam === "strip" || rigParam === "focus")) {
+          setRigLayout(rigParam as import("@/components/editor/RigView").RigLayout);
+          setRigView(true);
+        }
+      } catch { if (live) setRigGroup(null); }
+    })();
+    return () => { live = false; };
+  }, [meta?.session_id, meta?.ts_ns, rigParam]);
+
+  const rigMulti = !!rigGroup && rigGroup.cameras.length > 1;
+  const focusCamOnce = useCallback((cam: string, frameId: string) => {
+    router.push(`/frame/${frameId}?rig=${rigLayout}`);
+  }, [router, rigLayout]);
+  const confirmRigGroup = async () => {
+    if (!rigGroup) return;
+    try { const g = await api.multicamGroupConfirm(rigGroup.groupId); setRigGroup((s) => s && { ...s, confirmed: g.confirmed }); flash("group confirmed"); }
+    catch (e) { flash("confirm group failed: " + String(e)); }
+  };
+  // group-aware prev/next: jump to the adjacent synchronized group, keeping the same camera focused when it has
+  // a frame there (else the group's first available camera), preserving the rig layout.
+  const navGroup = async (direction: "prev" | "next") => {
+    if (!meta?.session_id || !rigGroup) return;
+    try {
+      const r = await api.multicamGroupNav(meta.session_id, rigGroup.groupId, direction);
+      if (!r.group) { flash(`no ${direction} group`); return; }
+      const fids = r.group.frame_ids;
+      const target = fids[meta.cam_id] ?? Object.values(fids)[0];
+      if (target) router.push(`/frame/${target}?rig=${rigLayout}`);
+    } catch (e) { flash("group nav failed: " + String(e)); }
+  };
+  const rigEditable = mode !== "lanes" && mode !== "lidar3d";
+
+  // M-MC.3: is this session calibrated? Determines Tier 2 (projection) vs Tier 1 (manual link only).
+  useEffect(() => {
+    if (!rigMulti || !meta?.session_id) return;
+    let live = true;
+    api.calibrationDetail(meta.session_id)
+      .then((d) => live && setRigCalibrated(d.validations.length > 0 && d.overall !== "fail"))
+      .catch(() => live && setRigCalibrated(false));
+    return () => { live = false; };
+  }, [rigMulti, meta?.session_id]);
+
+  const propagateSelected = async () => {
+    if (!selected) return;
+    try {
+      const r = await api.multicamPropagate(selected.id, false);
+      if (r.gated) { flash("session not calibrated: Tier 1 manual linking only"); setRigCalibrated(false); return; }
+      const inView = (r.targets || []).filter((t) => t.in_view).length;
+      flash(`propagated to ${r.created?.length ?? 0} view(s)${r.metric ? ` · ${r.metric.range_m}m` : ""}${inView ? "" : " (out of view)"}`);
+      setRigPanel(true); setRigRefresh((n) => n + 1);
+    } catch (e) { flash("propagate failed: " + String(e)); }
+  };
 
   const selected = st.objects.find((o) => o.id === st.selectedId) || null;
   const dirty = isDirty(st);
@@ -817,6 +896,43 @@ export default function FrameEditor() {
 
   if (!meta || !onto) return <div className="min-h-screen flex items-center justify-center font-mono text-ink-3">loading frame...</div>;
 
+  // The focused annotation canvas, hoisted so single-frame and rig (M-MC.1) views share one instance and every
+  // tool behaves identically in both. In rig view this element renders inside the focused camera tile.
+  const editorCanvasEl = (
+    <EditorCanvas
+      imageUrl={meta.image_url} imgW={meta.width} imgH={meta.height}
+      objects={st.objects} selectedId={st.selectedId} tool={st.tool} candidate={st.candidate}
+      viewport={st.viewport} panning={panning}
+      lanes={lanes} drivable={drivable} layers={layers}
+      onViewport={(viewport) => dispatch({ t: "viewport", viewport })}
+      onSelect={doSelect}
+      relationships={relationships}
+      onUpdateBbox={(oid, bbox, rot) => dispatch({ t: "update", id: oid, patch: rot !== undefined ? { bbox, rot } : { bbox } })}
+      onDrawBox={(bbox) => { if (currentClass) { const nid = tmpId(); dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox, mask: [], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } }); autoClassify(nid, bbox); } }}
+      onDrawPolygon={(pts) => { if (currentClass) { const nid = tmpId(); const bb = bboxOfPolys([pts]); dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox: bb, mask: [pts], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } }); autoClassify(nid, bb); } }}
+      onDrawPolyline={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [], polyline: Array.from({ length: pts.length / 2 }, (_, i) => [pts[2 * i], pts[2 * i + 1]]), attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
+      adverse={adverse}
+      onDrawAdverse={async (pts) => { try { await api.createAdverse(id, { geometry: pts, condition: adverseCond }); setAdverse(await api.listAdverse(id).catch(() => [])); flash(`tagged ${adverseCond}`); } catch (e) { flash("region failed: " + String(e)); } }}
+      cuboids={layers.cuboids ? cuboids : []}
+      onPlaceCuboid={placeCuboid}
+      onMagicWand={runMagicWand}
+      brushRadius={brushRadius}
+      onBrushStroke={onBrushStroke}
+      superpixels={superpixels}
+      onPickSuperpixel={pickSuperpixel}
+      segOverlayUrl={layers.seg ? segUrl : null}
+      keypointDraft={kpDraft} skeletonEdges={PERSON_17.edges as unknown as number[][]}
+      onPlaceKeypoint={onPlaceKeypoint} onUpdateKeypoints={onUpdateKeypoints}
+      mPerPx={meta.lidar_res ?? undefined}
+      onSamPoint={(pt, label) => runSam({ points: [pt], labels: [label] })}
+      onSamBox={(box) => runSam({ box })}
+      onUpdateMask={(oid, polys) =>
+        // Keep the bbox in sync with the edited mask so geometry and segmentation never diverge.
+        dispatch({ t: "update", id: oid, patch: polys.length ? { mask: polys, bbox: bboxOfPolys(polys) } : { mask: polys } })}
+      onCursor={setCursor}
+    />
+  );
+
   return (
     <div className="h-screen flex flex-col">
       {/* TOP BAR: identity, frame context, global actions, confirm (the design's 46px top bar) */}
@@ -840,6 +956,8 @@ export default function FrameEditor() {
         ) : null}
         <button onClick={() => router.push(`/search?frame=${id}`)} title="find visually similar frames (DINOv3)"
           className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="search" size={16} /></button>
+        <button onClick={() => router.push(`/inspect/${meta.session_id}?ts=${meta.ts_ns}`)} title="inspect this moment in the Session Inspector (MCAP timeline)"
+          className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink font-mono text-[11px]">inspect</button>
 
         <div className="ml-auto flex items-center gap-1.5">
           <button onClick={() => gotoFrame(meta.prev_frame_id)} disabled={!meta.prev_frame_id} title="previous frame ( [ )"
@@ -939,39 +1057,13 @@ export default function FrameEditor() {
                 </div>
               </div>
             ) : <div className="absolute inset-0 grid place-items-center font-mono text-[11px] text-ink-3">{lidarMsg ?? "loading point cloud..."}</div>
+          ) : rigView && rigMulti && rigGroup ? (
+            <RigView cameras={rigGroup.cameras} focusedCam={meta.cam_id} frameIds={rigGroup.frameIds}
+              missingCams={rigGroup.missingCams} layout={rigLayout} onFocus={focusCamOnce}>
+              {editorCanvasEl}
+            </RigView>
           ) : (
-          <EditorCanvas
-            imageUrl={meta.image_url} imgW={meta.width} imgH={meta.height}
-            objects={st.objects} selectedId={st.selectedId} tool={st.tool} candidate={st.candidate}
-            viewport={st.viewport} panning={panning}
-            lanes={lanes} drivable={drivable} layers={layers}
-            onViewport={(viewport) => dispatch({ t: "viewport", viewport })}
-            onSelect={doSelect}
-            relationships={relationships}
-            onUpdateBbox={(oid, bbox, rot) => dispatch({ t: "update", id: oid, patch: rot !== undefined ? { bbox, rot } : { bbox } })}
-            onDrawBox={(bbox) => { if (currentClass) { const nid = tmpId(); dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox, mask: [], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } }); autoClassify(nid, bbox); } }}
-            onDrawPolygon={(pts) => { if (currentClass) { const nid = tmpId(); const bb = bboxOfPolys([pts]); dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox: bb, mask: [pts], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } }); autoClassify(nid, bb); } }}
-            onDrawPolyline={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [], polyline: Array.from({ length: pts.length / 2 }, (_, i) => [pts[2 * i], pts[2 * i + 1]]), attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
-            adverse={adverse}
-            onDrawAdverse={async (pts) => { try { await api.createAdverse(id, { geometry: pts, condition: adverseCond }); setAdverse(await api.listAdverse(id).catch(() => [])); flash(`tagged ${adverseCond}`); } catch (e) { flash("region failed: " + String(e)); } }}
-            cuboids={layers.cuboids ? cuboids : []}
-            onPlaceCuboid={placeCuboid}
-            onMagicWand={runMagicWand}
-            brushRadius={brushRadius}
-            onBrushStroke={onBrushStroke}
-            superpixels={superpixels}
-            onPickSuperpixel={pickSuperpixel}
-            segOverlayUrl={layers.seg ? segUrl : null}
-            keypointDraft={kpDraft} skeletonEdges={PERSON_17.edges as unknown as number[][]}
-            onPlaceKeypoint={onPlaceKeypoint} onUpdateKeypoints={onUpdateKeypoints}
-            mPerPx={meta.lidar_res ?? undefined}
-            onSamPoint={(pt, label) => runSam({ points: [pt], labels: [label] })}
-            onSamBox={(box) => runSam({ box })}
-            onUpdateMask={(oid, polys) =>
-              // Keep the bbox in sync with the edited mask so geometry and segmentation never diverge.
-              dispatch({ t: "update", id: oid, patch: polys.length ? { mask: polys, bbox: bboxOfPolys(polys) } : { mask: polys } })}
-            onCursor={setCursor}
-          />
+            editorCanvasEl
           )}
           {mode !== "lidar3d" && <FloatingLayers layers={layers} meta={layerMeta} onToggle={(k) => setLayers((s) => ({ ...s, [k]: !s[k as keyof typeof s] }))}
             extra={
@@ -1071,6 +1163,71 @@ export default function FrameEditor() {
               <span className="font-mono text-[11px] text-ink-2 bg-bg/60 px-1.5 py-0.5 rounded w-fit">{new Date(Number(meta.ts_ns) / 1e6).toISOString().replace("T", " ").replace("Z", "")}</span>
               <span className="font-mono text-[11px] text-ink-3 bg-bg/60 px-1.5 py-0.5 rounded w-fit">cam {meta.cam_id}{meta.is_lidar ? " · lidar" : ""}{cursor ? `  ·  ${Math.round(cursor[0])}, ${Math.round(cursor[1])}` : ""}</span>
             </div>
+          )}
+
+          {/* M-MC.1 rig view control: a canvas view-state cluster (NOT a mode or tool). Only when this frame is
+              part of a multi-camera group and the current mode uses the annotation canvas. */}
+          {rigMulti && rigEditable && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 font-mono text-[10px] panel/80 bg-bg/70 px-1.5 py-1 rounded">
+              <button onClick={() => setRigView((v) => !v)} title="toggle the multi-camera rig view (this camera stays focused)"
+                className={`border px-2 py-0.5 rounded ${rigView ? "border-accent text-accent bg-accent/10" : "border-line text-ink-3 hover:border-accent"}`}>
+                rig {rigGroup ? `${Object.keys(rigGroup.frameIds).length}/${rigGroup.cameras.length}` : ""}
+              </button>
+              {rigView && (
+                <>
+                  <div className="flex border border-line rounded overflow-hidden">
+                    {(["focus", "grid", "strip"] as const).map((l) => (
+                      <button key={l} onClick={() => setRigLayout(l)} title={`${l} layout`}
+                        className={`px-1.5 py-0.5 ${rigLayout === l ? "bg-accent/20 text-accent" : "text-ink-3 hover:text-ink"}`}>{l}</button>
+                    ))}
+                  </div>
+                  <button onClick={() => navGroup("prev")} title="previous synchronized group" className="border border-line px-1.5 py-0.5 rounded text-ink-3 hover:border-accent">◂</button>
+                  <button onClick={() => navGroup("next")} title="next synchronized group" className="border border-line px-1.5 py-0.5 rounded text-ink-3 hover:border-accent">▸</button>
+                  {rigGroup && rigGroup.missingCams.length > 0 && (
+                    <span className="border border-block/50 text-block px-1.5 py-0.5 rounded" title="cameras with no frame in this group">
+                      {rigGroup.missingCams.length} dropped
+                    </span>
+                  )}
+                  {/* M-MC.3 tier chip: Tier 2 projects across views (calibrated); Tier 1 is manual link only */}
+                  {rigCalibrated !== null && (
+                    <span title={rigCalibrated ? "calibrated: annotate once and project into the other views" : "not calibrated: use manual linking (Tier 1). Run calibration validation to enable projection."}
+                      className={`border px-1.5 py-0.5 rounded uppercase ${rigCalibrated ? "border-pass/60 text-pass" : "border-warn/60 text-warn"}`}>
+                      {rigCalibrated ? "tier 2" : "tier 1"}
+                    </span>
+                  )}
+                  {rigCalibrated && selected && (
+                    <button onClick={propagateSelected} title="annotate once, project the selected object into the other views"
+                      className="border border-info/60 text-info bg-info/10 px-2 py-0.5 rounded hover:bg-info/20">propagate</button>
+                  )}
+                  <button onClick={() => setRigPanel((v) => !v)} title="rig identities: link the same object across views"
+                    className={`border px-2 py-0.5 rounded ${rigPanel ? "border-accent text-accent bg-accent/10" : "border-line text-ink-3 hover:border-accent"}`}>identities</button>
+                  <button onClick={() => setRigTracks((v) => !v)} title="rig tracks over time + cross-view consistency check"
+                    className={`border px-2 py-0.5 rounded ${rigTracks ? "border-accent text-accent bg-accent/10" : "border-line text-ink-3 hover:border-accent"}`}>tracks</button>
+                  <button onClick={confirmRigGroup} title="confirm the whole group at once"
+                    className={`border px-2 py-0.5 rounded ${rigGroup?.confirmed ? "border-pass text-pass bg-pass/10" : "border-line text-ink-3 hover:border-pass"}`}>
+                    {rigGroup?.confirmed ? "confirmed" : "confirm group"}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* M-MC.2 rig identity panel: rig-first object list, manual link, appearance-suggest, unlink */}
+          {rigView && rigMulti && rigPanel && rigGroup && (
+            <RigIdentityPanel key={rigRefresh} sessionId={meta.session_id} groupId={rigGroup.groupId} onClose={() => setRigPanel(false)}
+              onSelectObject={(oid, cam) => {
+                if (cam === meta.cam_id) doSelect(oid);
+                else if (rigGroup.frameIds[cam]) router.push(`/frame/${rigGroup.frameIds[cam]}?rig=${rigLayout}&focus=${oid}`);
+              }} />
+          )}
+
+          {/* M-MC.4 rig track timeline + consistency check */}
+          {rigView && rigMulti && rigTracks && (
+            <RigTrackPanel sessionId={meta.session_id} onClose={() => setRigTracks(false)}
+              onOpenInstant={(oid, cam) => {
+                if (cam === meta.cam_id) doSelect(oid);
+                else if (rigGroup?.frameIds[cam]) router.push(`/frame/${rigGroup.frameIds[cam]}?rig=${rigLayout}&focus=${oid}`);
+              }} />
           )}
         </div>
         </div>

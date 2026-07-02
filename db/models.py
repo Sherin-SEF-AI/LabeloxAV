@@ -184,6 +184,7 @@ class Object(Base):
     ocr_text: Mapped[str | None] = mapped_column(Text)            # M2.4 (never a license plate)
     ocr_lang: Mapped[str | None] = mapped_column(String(16))
     ocr_conf: Mapped[float | None] = mapped_column(Float)
+    rig_object_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # M-MC one physical object across views at one instant
     rig_track_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # M3.1 same object across cameras
     cross_cam_links: Mapped[dict | None] = mapped_column(JSONB)   # M3.1 the same object seen in other views
 
@@ -1229,3 +1230,94 @@ class CollectionOrder(Base):
     created_by: Mapped[str | None] = mapped_column(String(64))
 
     __table_args__ = (Index("ix_collection_order_status", "status"),)
+
+
+class SessionIndex(Base):
+    """Per-session MCAP index (M-I.1): every topic with its schema, message count, measured rate, time range,
+    and gap windows, read cheaply from the MCAP summary + message index. The raw material for the Inspector
+    timeline, the topic browser, and the session-health checks. Stamped with the indexer version."""
+
+    __tablename__ = "session_index"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), primary_key=True)
+    mcap_uri: Mapped[str | None] = mapped_column(Text)
+    topics: Mapped[dict] = mapped_column(JSONB, default=dict)      # {topic: {name, schema, count, rate, first_ts, last_ts}}
+    time_range: Mapped[list] = mapped_column(ARRAY(BigInteger))    # [first_ts_ns, last_ts_ns] across all topics
+    gaps: Mapped[dict] = mapped_column(JSONB, default=dict)        # {topic: [[gap_start_ns, gap_end_ns], ...]}
+    indexer_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    built_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SessionHealth(Base):
+    """Per-session health-check run (M-I.2): the per-check results over the index and a pass/warn/fail verdict.
+    A fail flags the session and gates it from auto-ingestion until a human reviews, exactly as calibration
+    validation does."""
+
+    __tablename__ = "session_health"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), nullable=False)
+    checks: Mapped[list] = mapped_column(JSONB, default=list)      # [{name, status, detail, evidence}]
+    verdict: Mapped[str] = mapped_column(String(8), nullable=False)  # pass | warn | fail
+    indexer_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_session_health_session", "session_id"),)
+
+
+class InspectorLayout(Base):
+    """A saveable Inspector panel layout (M-I.3): panel types, sources, and arrangement, per user."""
+
+    __tablename__ = "inspector_layout"
+
+    layout_id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("app_user.user_id"))
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    panels: Mapped[list] = mapped_column(JSONB, default=list)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FrameGroup(Base):
+    """A synchronized set of frames across the rig at one instant (M-MC.0): the frames whose timestamps fall
+    inside the sync tolerance, one per camera. The unit the multi-camera canvas navigates and the reviewer
+    confirms as a whole. missing_cams records a camera that dropped a frame in this window (a dropout the
+    surround view must show as an empty tile, not silently omit); sync_spread_ns is the max pairwise timestamp
+    difference within the group, which must stay inside tolerance for the group to be trustworthy."""
+
+    __tablename__ = "frame_group"
+
+    group_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), nullable=False)
+    ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)         # group reference time (earliest member)
+    frame_ids: Mapped[dict] = mapped_column(JSONB, default=dict)          # {cam_id: frame_id}
+    missing_cams: Mapped[list] = mapped_column(ARRAY(Text), default=list)  # cameras with no frame in this window
+    sync_spread_ns: Mapped[int] = mapped_column(BigInteger, default=0)     # max pairwise ts diff across members
+    n_cams: Mapped[int] = mapped_column(Integer, default=0)                # members present (for quick filters)
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False)        # reviewer confirmed the whole group
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_frame_group_session_ts", "session_id", "ts_ns"),)
+
+
+class RigObject(Base):
+    """One physical object seen across views at a single instant (M-MC.2): the rig-level identity that binds the
+    per-camera Object rows (member_object_ids) which are the same real thing (the rickshaw visible in both the
+    front and right cameras). class_id is the voted class across members; conflict marks members that disagree
+    and route the rig object to review. Links carry their source (manual, appearance, or projection) so a
+    reversible agent run can undo exactly the links it made."""
+
+    __tablename__ = "rig_object"
+
+    rig_object_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), nullable=False)
+    group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("frame_group.group_id"), nullable=False)
+    class_id: Mapped[int | None] = mapped_column(Integer)                 # voted class across members
+    member_object_ids: Mapped[list] = mapped_column(ARRAY(UUID(as_uuid=True)), default=list)
+    link_sources: Mapped[dict] = mapped_column(JSONB, default=dict)       # {object_id: "manual"|"appearance"|"projection"}
+    rig_track_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # M-MC.4 same rig object across time
+    conflict: Mapped[bool] = mapped_column(Boolean, default=False)        # members disagree on class -> review
+    provenance: Mapped[dict | None] = mapped_column(JSONB)                # {agent_run_id, ...} for reversibility
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_rig_object_group", "group_id"), Index("ix_rig_object_track", "rig_track_id"))
