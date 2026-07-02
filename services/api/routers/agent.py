@@ -501,6 +501,33 @@ async def cleanup_sweep(body: CleanupIn | None = None, db: AsyncSession = Depend
     return {"run_id": str(run_id), "status": "running"}
 
 
+class AuditIn(BaseModel):
+    sample_size: int = 200
+    vlm_calls: int = 60
+    since_hours: int = 24
+
+
+@router.post("/agent/audit/run", dependencies=[Depends(require_role("reviewer"))])
+async def audit_run(body: AuditIn | None = None, db: AsyncSession = Depends(db_session),
+                    user=Depends(current_user)):
+    """Run the Overnight Auditor now: sample the window's auto-accepts, VLM + critic spot-check them within a
+    token budget, fold in control-sample precision, and queue suspects to review as a reversible run. Poll
+    GET /agent/audit/latest for the morning report."""
+    from services.agent.overnight_auditor import launch_audit
+
+    body = body or AuditIn()
+    return await launch_audit(db, created_by=str(user.user_id) if user else "overnight_auditor",
+                              sample_size=body.sample_size, vlm_calls=body.vlm_calls, since_hours=body.since_hours)
+
+
+@router.get("/agent/audit/latest", dependencies=[Depends(require_role("annotator"))])
+async def audit_latest(db: AsyncSession = Depends(db_session)):
+    """The most recent Overnight Auditor run and its morning report."""
+    from services.agent.overnight_auditor import latest_report
+
+    return await latest_report(db) or {"report": None}
+
+
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
 async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
     return await list_runs(db, limit)

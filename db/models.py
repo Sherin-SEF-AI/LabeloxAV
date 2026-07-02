@@ -1167,7 +1167,7 @@ class AgentRun(Base):
     __tablename__ = "agent_run"
 
     run_id: Mapped[uuid.UUID] = _uuid_pk()
-    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # frame|session|flywheel
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # frame|session|flywheel|overnight_auditor|...
     scope: Mapped[dict] = mapped_column(JSONB, default=dict)       # {frame_id?, session_id?, ...}
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="planned")  # planned|committed|reverted|error
     policy: Mapped[dict] = mapped_column(JSONB, default=dict)      # thresholds + toggles the run used

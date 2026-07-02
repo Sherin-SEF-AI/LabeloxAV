@@ -110,6 +110,14 @@ export type AgentPolicy = { auto_accept_conf?: number; review_low?: number; requ
 export type AgentCounts = { total: number; auto_accept: number; review: number; annotate: number; unchanged: number; demoted_by_critic: number };
 export type AgentPlanItem = { object_id: string; class_name: string; conf: number; current_state: string; action: string; changes_state: boolean; reason: string; tier: string; critic_ok: boolean; critic_reasons: string[] };
 export type AgentPlan = { frame_id: string; policy: AgentPolicy; counts: AgentCounts; critic_flags: Record<string, number>; items: AgentPlanItem[] };
+export type AuditReport = {
+  window_hours: number; sampled: number; vlm_checked: number; vlm_disagreements: number;
+  among_sample_agreement: number | null;
+  control_precision: { precision: number | null; reviewed: number; pending: number };
+  confusion_movers: { from: string; to: string; n: number; concentrated_in: string | null }[];
+  critic_flags: Record<string, number>; suspects_queued: number;
+  budget: { max_calls: number; used: number; remaining: number }; notes: string[];
+};
 
 // LiDAR 3D viewer
 export type LidarBounds = { min: number[]; max: number[]; n: number };
@@ -394,6 +402,11 @@ export const api = {
     post<{ run_id: string; status: string }>(`/api/agent/relabel/all`, opts),
   agentRunStatus: (run_id: string) =>
     get<{ run_id: string; kind: string; status: string; counts: Record<string, number>; changed: number }>(`/api/agent/runs/${run_id}`),
+  // Overnight Auditor: run the nightly patrol, read the morning report
+  agentAuditRun: (opts: { sample_size?: number; vlm_calls?: number; since_hours?: number } = {}) =>
+    post<{ run_id: string; status: string }>(`/api/agent/audit/run`, opts),
+  agentAuditLatest: () =>
+    get<{ run_id?: string; status?: string; created_at?: string; report: AuditReport | null }>(`/api/agent/audit/latest`),
   // pixel-assist: brush/eraser mask composition + SLIC superpixels
   composeMask: (body: { polygons: number[][]; ops: { op: string; center: number[]; radius: number }[]; width: number; height: number }) =>
     post<{ polygons: number[][] }>(`/api/mask/compose`, body),

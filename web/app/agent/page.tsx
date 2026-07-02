@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, type AuditReport } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { Spinner } from "@/components/Spinner";
 
@@ -26,12 +26,29 @@ export default function AgentConsole() {
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [audit, setAudit] = useState<{ status?: string; created_at?: string; report: AuditReport | null } | null>(null);
+  const loadAudit = useCallback(async () => { try { setAudit(await api.agentAuditLatest()); } catch { /* none yet */ } }, []);
   const load = useCallback(async () => {
     setLoading(true);
     try { const q = await api.agentErrorQueue(); setQueue(q.candidates); setSummary(q.summary); }
     finally { setLoading(false); }
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); loadAudit(); }, [load, loadAudit]);
+
+  const runAudit = async () => {
+    setBusy("audit"); setMsg(null);
+    try {
+      const r = await api.agentAuditRun({ sample_size: 200, vlm_calls: 60 });
+      setMsg("overnight audit running in the background - sampling auto-accepts, VLM + critic spot-checks");
+      const poll = async (n: number) => {
+        const a = await api.agentAuditLatest(); setAudit(a);
+        if (a.status === "committed" || a.status === "error") { load(); return; }
+        if (n > 0) setTimeout(() => poll(n - 1), 5000);
+      };
+      void r; poll(60);
+    } catch (e) { setMsg("audit failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
 
   const sweep = async () => {
     setBusy("sweep"); setMsg(null);
@@ -167,6 +184,29 @@ export default function AgentConsole() {
           <div>
             <h1 className="text-xl text-ink font-semibold">Agent Console</h1>
             <p className="text-ink-3 text-sm mt-1 max-w-2xl">Autonomous QA over the whole corpus: the agent finds likely-wrong labels and fixes the obvious ones itself. Everything it does is reversible and provenance-stamped.</p>
+          </div>
+
+          {/* Overnight Auditor: standing watchdog + morning report */}
+          <div className="panel p-4 border border-accent/30">
+            <div className="flex items-start gap-3">
+              <div className="flex-1">
+                <div className="text-ink font-medium">Overnight Auditor <span className="font-mono text-[10px] text-accent">morning report</span></div>
+                <div className="text-ink-3 text-xs mt-1">Patrols the day&apos;s auto-accepted labels within a token budget: VLM spot-checks + cross-frame consistency + control-sample precision. Suspects are queued to review (reversible). Runs nightly off-hours; run it now below.</div>
+                {audit?.report ? (
+                  <div className="mt-2 font-mono text-[11px] text-ink-2 space-y-0.5">
+                    {audit.report.notes.map((n, i) => <div key={i}>· {n}</div>)}
+                    <div className="text-ink-3 mt-1">
+                      sampled {audit.report.sampled} · vlm-checked {audit.report.vlm_checked} · <span className="text-warn">{audit.report.vlm_disagreements} vlm-disagree</span> · budget {audit.report.budget.used}/{audit.report.budget.max_calls}
+                      {audit.created_at ? ` · ${new Date(audit.created_at).toLocaleString()}` : ""}
+                    </div>
+                    {audit.report.confusion_movers.length > 0 && (
+                      <div className="text-ink-3">movers: {audit.report.confusion_movers.map((m) => `${m.from}->${m.to} (${m.n})${m.concentrated_in ? ` in ${m.concentrated_in}` : ""}`).join(", ")}</div>
+                    )}
+                  </div>
+                ) : <div className="mt-2 font-mono text-[11px] text-ink-3">no audit yet</div>}
+              </div>
+              <button onClick={runAudit} disabled={!!busy} className="shrink-0 font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "audit" ? "auditing..." : "run audit now"}</button>
+            </div>
           </div>
 
           {/* Ask the dataset (conversational corpus query) */}
