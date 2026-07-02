@@ -188,6 +188,16 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
+  const [doc, setDoc] = useState<string | null>(null);
+  const genDoc = async (kind: "datasheet" | "weekly") => {
+    setBusy("doc"); setMsg(null); setDoc(null);
+    try {
+      const r = kind === "datasheet" ? await api.agentDocDatasheet() : await api.agentDocWeekly();
+      setDoc(r.markdown); setMsg(`${kind} drafted and stored (${r.uri.split("/").slice(-2).join("/")})`);
+    } catch (e) { setMsg("doc generation failed: " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const reason = (c: Cand) => (c.detail?.reason as string) || (c.detail?.reasons ? (c.detail.reasons as string[]).join("; ") : (c.detail?.note as string) || JSON.stringify(c.detail).slice(0, 80));
 
   return (
@@ -340,6 +350,19 @@ export default function AgentConsole() {
                 ) : null}
                 <button onClick={investigateDrift} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "driftinv" ? "investigating..." : "investigate drift"}</button>
               </div>
+            </div>
+          </div>
+
+          {/* Documentation agent */}
+          <div>
+            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Documentation</h2>
+            <div className="panel p-4">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 text-ink-3 text-xs">Auto-draft the buyer-diligence artifacts from the platform&apos;s own metrics: dataset datasheet (composition, coverage, known gaps) and the weekly quality report (precision, drift, promotions). Model cards are drafted per model via the API.</div>
+                <button onClick={() => genDoc("datasheet")} disabled={!!busy} className="shrink-0 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "doc" ? "..." : "datasheet"}</button>
+                <button onClick={() => genDoc("weekly")} disabled={!!busy} className="shrink-0 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">weekly report</button>
+              </div>
+              {doc ? <pre className="mt-3 max-h-64 overflow-auto no-scrollbar bg-bg-2 rounded p-3 font-mono text-[10.5px] text-ink-2 whitespace-pre-wrap">{doc.slice(0, 4000)}</pre> : null}
             </div>
           </div>
 

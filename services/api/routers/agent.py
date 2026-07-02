@@ -554,6 +554,41 @@ async def drift_latest(db: AsyncSession = Depends(db_session)):
     return await latest_report(db) or {"report": None}
 
 
+class DatasheetIn(BaseModel):
+    gold_id: str | None = None
+    title: str | None = None
+
+
+@router.post("/agent/docs/datasheet", dependencies=[Depends(require_role("annotator"))])
+async def docs_datasheet(body: DatasheetIn | None = None, db: AsyncSession = Depends(db_session)):
+    """Draft the dataset datasheet (composition, class + scene + geo coverage, known gaps, and gold metrics
+    if a gold_id is given). Stored in the object store; returns the uri + Markdown."""
+    from services.agent.doc_agent import generate_datasheet
+
+    body = body or DatasheetIn()
+    return await generate_datasheet(db, gold_id=body.gold_id, title=body.title)
+
+
+@router.post("/agent/docs/model-card", dependencies=[Depends(require_role("annotator"))])
+async def docs_model_card(model_version: str, db: AsyncSession = Depends(db_session)):
+    """Draft the model card for a registered model (task, champion status, gold metrics, per-class,
+    intended use + limitations)."""
+    from services.agent.doc_agent import generate_model_card
+
+    try:
+        return await generate_model_card(db, model_version)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/agent/docs/weekly", dependencies=[Depends(require_role("annotator"))])
+async def docs_weekly(db: AsyncSession = Depends(db_session)):
+    """Draft the weekly quality report (auto-accept precision, drift events, promotions, open gaps)."""
+    from services.agent.doc_agent import generate_weekly_report
+
+    return await generate_weekly_report(db)
+
+
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
 async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
     return await list_runs(db, limit)

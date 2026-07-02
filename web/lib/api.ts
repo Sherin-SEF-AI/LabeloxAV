@@ -412,6 +412,11 @@ export const api = {
     post<{ breached: string[]; ran?: boolean; run_id?: string }>(`/api/agent/drift/investigate`, {}),
   agentDriftLatest: () =>
     get<{ status?: string; created_at?: string; report: { breached: string[]; hypothesis: string; proposed_action: { kind: string; detail?: string } } | null }>(`/api/agent/drift/latest`),
+  // Documentation Agent: draft datasheet / weekly quality report from the platform's own metrics
+  agentDocDatasheet: (gold_id?: string) =>
+    post<{ uri: string; markdown: string }>(`/api/agent/docs/datasheet`, gold_id ? { gold_id } : {}),
+  agentDocWeekly: () =>
+    post<{ uri: string; markdown: string }>(`/api/agent/docs/weekly`, {}),
   // pixel-assist: brush/eraser mask composition + SLIC superpixels
   composeMask: (body: { polygons: number[][]; ops: { op: string; center: number[]; radius: number }[]; width: number; height: number }) =>
     post<{ polygons: number[][] }>(`/api/mask/compose`, body),
