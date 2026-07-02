@@ -35,6 +35,19 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
     finally { setBusy(null); }
   };
 
+  const doRelabel = async () => {
+    setBusy("relabel"); setMsg(null);
+    try {
+      const p = await api.agentRelabelPlan(frameId);
+      if (!p.counts.relabel_keep && !p.counts.relabel_review) { setMsg("labels look right (no confident corrections)"); return; }
+      const preview = p.items.slice(0, 3).map((i) => `${i.from_name}→${i.to_name}`).join(", ");
+      const r = await api.agentRelabel(frameId);
+      setMsg(`relabeled ${r.relabeled} (${r.counts.relabel_keep} fixed, ${r.counts.relabel_review} to review): ${preview}`);
+      onApplied?.();
+    } catch (e) { setMsg("relabel failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const doCuboids = async () => {
     setBusy("cuboids"); setMsg(null);
     try {
@@ -136,6 +149,11 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
           title="auto-fill the derivable attributes (occlusion, truncation, static, direction)"
           className="font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
           {busy === "attrs" ? "filling..." : "fill attributes"}
+        </button>
+        <button onClick={doRelabel} disabled={!!busy}
+          title="an independent model re-reads every box and corrects the class where it decisively disagrees (reversible)"
+          className="col-span-2 font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+          {busy === "relabel" ? "re-reading labels..." : "relabel this frame (AI reasoning)"}
         </button>
       </div>
 

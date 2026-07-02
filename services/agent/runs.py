@@ -34,6 +34,24 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
     if run.status != "committed":
         raise ValueError(f"run is {run.status}, only a committed run can be reverted")
 
+    # A corpus run (e.g. relabel-all) owns no objects itself; it aggregates one child run per frame.
+    # Reverting it reverts each child, so 'undo relabel all' is one click.
+    child_ids = (run.changes or {}).get("child_runs")
+    if child_ids:
+        child_reverted = child_children = 0
+        for cid in child_ids:
+            try:
+                r = await revert_run(db, uuid.UUID(cid))
+            except ValueError:
+                continue
+            child_reverted += r["reverted"]
+            child_children += 1
+        run.status = "reverted"
+        run.reverted_at = datetime.now(timezone.utc)
+        await db.commit()
+        log.info("agent.run.revert_cascade", run_id=str(run_id), children=child_children, reverted=child_reverted)
+        return {"run_id": str(run_id), "reverted": child_reverted, "skipped": 0, "children": child_children}
+
     reverted = 0
     skipped = 0
     for oid, ch in (run.changes or {}).items():

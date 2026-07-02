@@ -385,6 +385,15 @@ export const api = {
     post<{ run_id: string; track_id: string; created: number; counts: { auto_accept: number; review: number; stops: number } }>(`/api/agent/objects/${object_id}/propagate`, { span }),
   agentCommand: (frame_id: string, text: string) =>
     post<{ intent: { action: string; classes: string[] | string; conf_min: number | null }; result: unknown; summary: string; blocked?: boolean }>(`/api/agent/command`, { text, frame_id }),
+  // relabel: an independent model re-reads existing boxes and corrects the class where it decisively disagrees
+  agentRelabelPlan: (frame_id: string) =>
+    post<{ frame_id: string; counts: { total: number; relabel_keep: number; relabel_review: number }; items: { object_id: string; from_name: string; to_name: string; conf: number; action: string }[] }>(`/api/agent/frames/${frame_id}/relabel/plan`, {}),
+  agentRelabel: (frame_id: string) =>
+    post<{ run_id: string; relabeled: number; counts: { total: number; relabel_keep: number; relabel_review: number } }>(`/api/agent/frames/${frame_id}/relabel`, {}),
+  agentRelabelAll: (opts: { max_frames?: number; session_id?: string } = {}) =>
+    post<{ run_id: string; status: string }>(`/api/agent/relabel/all`, opts),
+  agentRunStatus: (run_id: string) =>
+    get<{ run_id: string; kind: string; status: string; counts: Record<string, number>; changed: number }>(`/api/agent/runs/${run_id}`),
   // pixel-assist: brush/eraser mask composition + SLIC superpixels
   composeMask: (body: { polygons: number[][]; ops: { op: string; center: number[]; radius: number }[]; width: number; height: number }) =>
     post<{ polygons: number[][] }>(`/api/mask/compose`, body),

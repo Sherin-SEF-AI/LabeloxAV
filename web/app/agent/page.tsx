@@ -45,6 +45,27 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
+  const [relabel, setRelabel] = useState<{ frames: number; relabel_keep: number; relabel_review: number } | null>(null);
+  const [relabelDone, setRelabelDone] = useState(false);
+  const relabelAll = async () => {
+    setBusy("relabel"); setMsg(null); setRelabel(null); setRelabelDone(false);
+    try {
+      const r = await api.agentRelabelAll({ max_frames: 300 });
+      setMsg("relabel running across the corpus — an independent model is re-reading every box");
+      // poll progress until the background run reports committed
+      const poll = async (n: number) => {
+        try {
+          const s = await api.agentRunStatus(r.run_id);
+          setRelabel({ frames: s.counts.frames ?? 0, relabel_keep: s.counts.relabel_keep ?? 0, relabel_review: s.counts.relabel_review ?? 0 });
+          if (s.status === "committed" || s.status === "error") { setRelabelDone(true); load(); return; }
+        } catch { /* keep polling */ }
+        if (n > 0) setTimeout(() => poll(n - 1), 4000);
+      };
+      poll(60);
+    } catch (e) { setMsg("relabel failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const repair = async () => {
     setBusy("repair"); setMsg(null);
     try {
@@ -143,6 +164,22 @@ export default function AgentConsole() {
                 <div><div className="text-ink-3 text-[10px] uppercase">sessions</div><div className="text-ink text-base tabular-nums">{report.size.sessions.toLocaleString()}</div></div>
                 <div><div className="text-ink-3 text-[10px] uppercase">coverage gaps</div><div className="text-warn text-base tabular-nums">{report.coverage_gaps.length}</div></div>
                 <div><div className="text-ink-3 text-[10px] uppercase">fix queue</div><div className="text-block text-base tabular-nums">{report.fix_queue_total}</div><div className="text-ink-3">{Object.values(report.scenarios).reduce((a, b) => a + b, 0)} scenarios</div></div>
+              </div>
+            ) : null}
+          </div>
+
+          {/* Relabel: the reasoning layer improves accuracy across the corpus */}
+          <div className="panel p-4 border border-accent/30">
+            <div className="flex items-start gap-3">
+              <div className="flex-1">
+                <div className="text-ink font-medium">Relabel all frames <span className="font-mono text-[10px] text-accent">AI reasoning</span></div>
+                <div className="text-ink-3 text-xs mt-1">Re-read every machine-labelled box with an independent model and correct the class wherever it decisively disagrees with the current label. Decisive corrections are applied and kept; moderate ones are applied but routed to review. One reversible run per frame, so it can be undone wholesale. To relabel a single frame, use the Agent panel in the editor.</div>
+              </div>
+              <button onClick={relabelAll} disabled={!!busy} className="shrink-0 font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "relabel" ? "starting..." : "relabel all frames"}</button>
+            </div>
+            {relabel ? (
+              <div className="mt-3 font-mono text-[11px] text-ink-2">
+                {relabelDone ? "done" : "running"} · scanned {relabel.frames} frames · <span className="text-pass">{relabel.relabel_keep} fixed</span> · <span className="text-warn">{relabel.relabel_review} routed to review</span>
               </div>
             ) : null}
           </div>

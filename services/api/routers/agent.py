@@ -417,6 +417,68 @@ async def reconcile(frame_id: str, body: ReconcileIn | None = None,
         raise HTTPException(404, str(exc)) from exc
 
 
+class RelabelIn(BaseModel):
+    min_conf: float = 0.45      # absolute floor the suggested class must clear
+    margin: float = 0.15        # how far the suggested class must beat the current one
+
+
+class RelabelAllIn(BaseModel):
+    max_frames: int = 200
+    session_id: str | None = None    # scope to one session, or None for the whole corpus
+    min_conf: float = 0.45
+    margin: float = 0.15
+
+
+@router.post("/agent/frames/{frame_id}/relabel/plan", dependencies=[Depends(require_role("annotator"))])
+async def relabel_plan(frame_id: str, body: RelabelIn | None = None, db: AsyncSession = Depends(db_session)):
+    """Dry-run: which objects the reasoning layer would relabel and to what, with the winning class's
+    confidence and whether it is decisive enough to keep or should route to review. Writes nothing."""
+    from services.agent.relabel_agent import plan_relabel
+
+    body = body or RelabelIn()
+    try:
+        return await plan_relabel(db, uuid.UUID(frame_id), min_conf=body.min_conf, margin=body.margin)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/agent/frames/{frame_id}/relabel", dependencies=[Depends(require_role("reviewer"))])
+async def relabel_frame(frame_id: str, body: RelabelIn | None = None,
+                        db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Improve this frame's labels: an independent model re-reads every machine box and, where it decisively
+    disagrees, corrects the class as one reversible run. Decisive corrections are kept; moderate ones are
+    applied but routed to review for a human to confirm."""
+    from services.agent.relabel_agent import commit_relabel
+
+    body = body or RelabelIn()
+    try:
+        return await commit_relabel(db, uuid.UUID(frame_id), min_conf=body.min_conf, margin=body.margin,
+                                    created_by=str(user.user_id) if user else None)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/agent/relabel/all", dependencies=[Depends(require_role("reviewer"))])
+async def relabel_all(body: RelabelAllIn | None = None, db: AsyncSession = Depends(db_session),
+                      user=Depends(current_user)):
+    """Relabel all frames: launch the reasoning layer across the corpus (or one session) in the background,
+    one reversible child run per frame. Poll GET /agent/runs/{run_id} for progress and totals."""
+    from services.agent.relabel_agent import run_relabel_all
+
+    body = body or RelabelAllIn()
+    run_id = uuid.uuid4()
+    run = AgentRun(run_id=run_id, kind="relabel_all", status="running",
+                   scope={"max_frames": body.max_frames, "session_id": body.session_id},
+                   policy={"min_conf": body.min_conf, "margin": body.margin}, counts={}, changes={}, critic={},
+                   created_by=str(user.user_id) if user else "daemon")
+    db.add(run)
+    await db.commit()
+    asyncio.create_task(run_relabel_all(run_id, max_frames=max(1, body.max_frames),
+                                        session_id=body.session_id, min_conf=body.min_conf, margin=body.margin,
+                                        created_by=str(user.user_id) if user else None))
+    return {"run_id": str(run_id), "status": "running"}
+
+
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
 async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
     return await list_runs(db, limit)
