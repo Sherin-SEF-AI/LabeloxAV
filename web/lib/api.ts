@@ -570,6 +570,9 @@ export const api = {
   multicamLink: (body: { session_id: string; group_id: string; object_ids: string[]; source?: string }) =>
     post<{ rig_object_id: string; members: number; class_id: number | null; conflict: boolean }>(`/api/multicam/link`, body),
   multicamUnlink: (object_id: string) => post<{ unlinked: string; dissolved: boolean }>(`/api/multicam/unlink?object_id=${object_id}`, {}),
+  // M-MC.3 annotate-once propagate (Tier 2, calibration-gated)
+  multicamPropagate: (object_id: string, useSam = false) =>
+    post<{ gated?: boolean; tier?: number; reason?: string; created?: string[]; targets?: { cam: string; in_view: boolean }[]; metric?: { height_m: number; width_m: number; range_m: number } }>(`/api/multicam/propagate?object_id=${object_id}&use_sam=${useSam}`, {}),
   // M2.5 keyframe + interpolation
   setKeyframe: (objectId: string, value = true) => post<{ is_keyframe: boolean; track_id: string | null }>(`/api/objects/${objectId}/keyframe?value=${value}`, {}),
   interpolateKeyframed: (trackId: string, method = "linear") => post<{ created: number; method: string; keyframes: number }>(`/api/tracks/${trackId}/interpolate-keyframed?method=${method}`, {}),

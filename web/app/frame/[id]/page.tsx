@@ -185,6 +185,8 @@ export default function FrameEditor() {
   const [rigLayout, setRigLayout] = useState<import("@/components/editor/RigView").RigLayout>("focus");
   const [rigGroup, setRigGroup] = useState<{ groupId: string; cameras: string[]; frameIds: Record<string, string>; missingCams: string[]; confirmed: boolean } | null>(null);
   const [rigPanel, setRigPanel] = useState(false);   // M-MC.2 rig-identity panel visibility
+  const [rigCalibrated, setRigCalibrated] = useState<boolean | null>(null);  // M-MC.3 Tier 2 eligibility
+  const [rigRefresh, setRigRefresh] = useState(0);   // bump to refetch the identity panel after a propagate
   const [scaleNoteOpen, setScaleNoteOpen] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   // Responsive: on a narrow screen the properties panel collapses first (the design's degradation order),
@@ -266,6 +268,27 @@ export default function FrameEditor() {
     } catch (e) { flash("group nav failed: " + String(e)); }
   };
   const rigEditable = mode !== "lanes" && mode !== "lidar3d";
+
+  // M-MC.3: is this session calibrated? Determines Tier 2 (projection) vs Tier 1 (manual link only).
+  useEffect(() => {
+    if (!rigMulti || !meta?.session_id) return;
+    let live = true;
+    api.calibrationDetail(meta.session_id)
+      .then((d) => live && setRigCalibrated(d.validations.length > 0 && d.overall !== "fail"))
+      .catch(() => live && setRigCalibrated(false));
+    return () => { live = false; };
+  }, [rigMulti, meta?.session_id]);
+
+  const propagateSelected = async () => {
+    if (!selected) return;
+    try {
+      const r = await api.multicamPropagate(selected.id, false);
+      if (r.gated) { flash("session not calibrated: Tier 1 manual linking only"); setRigCalibrated(false); return; }
+      const inView = (r.targets || []).filter((t) => t.in_view).length;
+      flash(`propagated to ${r.created?.length ?? 0} view(s)${r.metric ? ` · ${r.metric.range_m}m` : ""}${inView ? "" : " (out of view)"}`);
+      setRigPanel(true); setRigRefresh((n) => n + 1);
+    } catch (e) { flash("propagate failed: " + String(e)); }
+  };
 
   const selected = st.objects.find((o) => o.id === st.selectedId) || null;
   const dirty = isDirty(st);
@@ -1163,6 +1186,17 @@ export default function FrameEditor() {
                       {rigGroup.missingCams.length} dropped
                     </span>
                   )}
+                  {/* M-MC.3 tier chip: Tier 2 projects across views (calibrated); Tier 1 is manual link only */}
+                  {rigCalibrated !== null && (
+                    <span title={rigCalibrated ? "calibrated: annotate once and project into the other views" : "not calibrated: use manual linking (Tier 1). Run calibration validation to enable projection."}
+                      className={`border px-1.5 py-0.5 rounded uppercase ${rigCalibrated ? "border-pass/60 text-pass" : "border-warn/60 text-warn"}`}>
+                      {rigCalibrated ? "tier 2" : "tier 1"}
+                    </span>
+                  )}
+                  {rigCalibrated && selected && (
+                    <button onClick={propagateSelected} title="annotate once, project the selected object into the other views"
+                      className="border border-info/60 text-info bg-info/10 px-2 py-0.5 rounded hover:bg-info/20">propagate</button>
+                  )}
                   <button onClick={() => setRigPanel((v) => !v)} title="rig identities: link the same object across views"
                     className={`border px-2 py-0.5 rounded ${rigPanel ? "border-accent text-accent bg-accent/10" : "border-line text-ink-3 hover:border-accent"}`}>identities</button>
                   <button onClick={confirmRigGroup} title="confirm the whole group at once"
@@ -1176,7 +1210,7 @@ export default function FrameEditor() {
 
           {/* M-MC.2 rig identity panel: rig-first object list, manual link, appearance-suggest, unlink */}
           {rigView && rigMulti && rigPanel && rigGroup && (
-            <RigIdentityPanel sessionId={meta.session_id} groupId={rigGroup.groupId} onClose={() => setRigPanel(false)}
+            <RigIdentityPanel key={rigRefresh} sessionId={meta.session_id} groupId={rigGroup.groupId} onClose={() => setRigPanel(false)}
               onSelectObject={(oid, cam) => {
                 if (cam === meta.cam_id) doSelect(oid);
                 else if (rigGroup.frameIds[cam]) router.push(`/frame/${rigGroup.frameIds[cam]}?rig=${rigLayout}&focus=${oid}`);

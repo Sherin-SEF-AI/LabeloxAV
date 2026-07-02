@@ -124,3 +124,18 @@ async def unlink_ep(object_id: str):
     if "error" in res:
         raise HTTPException(400, res["error"])
     return res
+
+
+# M-MC.3 annotate-once propagate (Tier 2, calibration-gated)
+
+
+@router.post("/multicam/propagate")
+async def propagate_ep(object_id: str, use_sam: bool = True):
+    """Place a source object into the other rig views by lens-aware projection (Tier 2). Returns gated=True
+    when the session is not calibrated, so the client shows the Tier 1 (manual link) chip instead."""
+    from services.multicam.propagate import propagate_object
+
+    res = await propagate_object(UUID(object_id), use_sam)
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
