@@ -17,6 +17,7 @@ from services.errordetect.confident import detect_confident_learning
 from services.errordetect.consistency import detect_consistency
 from services.errordetect.critic_detector import detect_critic
 from services.errordetect.embedding_outlier import detect_embedding_outliers
+from services.errordetect.near_dup import detect_near_dup_inconsistent
 
 log = get_logger("ed_queue")
 
@@ -24,7 +25,7 @@ log = get_logger("ed_queue")
 async def run_detection(db: AsyncSession, session_id: str | None = None, kinds: list[str] | None = None) -> dict:
     """Run the requested detectors and persist ranked error candidates. Idempotent: clears prior pending
     candidates of the run kinds before reinserting (confirmed/dismissed verdicts are preserved)."""
-    kinds = kinds or ["confident_learning", "embedding_outlier", "track_inconsistent", "cross_cam_inconsistent", "critic_flag"]
+    kinds = kinds or ["confident_learning", "embedding_outlier", "track_inconsistent", "cross_cam_inconsistent", "critic_flag", "near_dup_inconsistent"]
     found: list[dict] = []
     if "confident_learning" in kinds:
         found += await detect_confident_learning(db, session_id)
@@ -34,6 +35,8 @@ async def run_detection(db: AsyncSession, session_id: str | None = None, kinds: 
         found += [c for c in await detect_consistency(db, session_id) if c["kind"] in kinds]
     if "critic_flag" in kinds:
         found += await detect_critic(db, session_id)
+    if "near_dup_inconsistent" in kinds:
+        found += await detect_near_dup_inconsistent(db, session_id)
 
     # keep the strongest candidate per (object, kind)
     best: dict = {}
