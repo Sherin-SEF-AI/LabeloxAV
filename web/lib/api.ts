@@ -28,6 +28,8 @@ import type {
   MapFeature,
   MapProvenance,
   MulticamGroups,
+  FrameGroup,
+  PersistedGroups,
   SimilarResponse,
   FrameObject,
   ObjectDynamicsRow,
@@ -554,6 +556,12 @@ export const api = {
   // M3.1 multi-camera
   multicamGroups: (sid: string) => get<MulticamGroups>(`/api/multicam/groups?session_id=${sid}`),
   multicamAssociate: (sid: string) => post<{ associated: number; rig_tracks: number; cameras: string[]; reason?: string }>(`/api/multicam/associate?session_id=${sid}`, {}),
+  // M-MC.0 persisted frame groups + group-aware navigation
+  multicamBuild: (sid: string) => post<{ n_groups: number; groups_out_of_tolerance: number; groups_with_missing_cam: number }>(`/api/multicam/groups/build?session_id=${sid}`, {}),
+  multicamPersisted: (sid: string) => get<PersistedGroups>(`/api/multicam/groups/persisted?session_id=${sid}`),
+  multicamGroupAt: (sid: string, ts_ns: number) => get<FrameGroup>(`/api/multicam/group/at?session_id=${sid}&ts_ns=${ts_ns}`),
+  multicamGroupNav: (sid: string, gid: string, direction: "prev" | "next") => get<{ group: FrameGroup | null }>(`/api/multicam/group/nav?session_id=${sid}&group_id=${gid}&direction=${direction}`),
+  multicamGroupConfirm: (gid: string, confirmed = true) => post<FrameGroup>(`/api/multicam/group/confirm?group_id=${gid}&confirmed=${confirmed}`, {}),
   // M2.5 keyframe + interpolation
   setKeyframe: (objectId: string, value = true) => post<{ is_keyframe: boolean; track_id: string | null }>(`/api/objects/${objectId}/keyframe?value=${value}`, {}),
   interpolateKeyframed: (trackId: string, method = "linear") => post<{ created: number; method: string; keyframes: number }>(`/api/tracks/${trackId}/interpolate-keyframed?method=${method}`, {}),

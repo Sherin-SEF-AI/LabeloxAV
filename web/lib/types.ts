@@ -128,6 +128,18 @@ export type MulticamGroups = {
   groups: { ts_ns: number; frames: Record<string, { frame_id: string; img_uri: string }> }[];
 };
 
+// M-MC.0 persisted frame groups
+export type FrameGroup = {
+  group_id: string;
+  ts_ns: number;
+  frame_ids: Record<string, string>;   // cam_id -> frame_id
+  missing_cams: string[];
+  sync_spread_ns: number;
+  n_cams: number;
+  confirmed: boolean;
+};
+export type PersistedGroups = { session_id: string; cameras: string[]; multicamera: boolean; n_groups: number; groups: FrameGroup[] };
+
 export type CalibFovCheck = { implied_fov_deg: number; expected_fov_deg: number | null; diff_deg: number | null; tolerance_deg: number; ok: boolean };
 export type CalibCamera = { cam_id: string; model: string; lens?: string; reproj_error_px: number | null; fov_check: CalibFovCheck; time_offset_ns: number | null; status: string };
 export type CalibDetail = { session_id: string; cameras_in_session: string[]; validations: CalibCamera[]; overall: string };
