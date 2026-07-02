@@ -32,6 +32,7 @@ import { MODES, type ToolGroup } from "@/lib/editor/registry";
 const EditorCanvas = dynamic(() => import("@/components/editor/EditorCanvas").then((m) => ({ default: m.default })), { ssr: false });
 const RigView = dynamic(() => import("@/components/editor/RigView"), { ssr: false });
 const RigIdentityPanel = dynamic(() => import("@/components/editor/RigIdentityPanel"), { ssr: false });
+const RigTrackPanel = dynamic(() => import("@/components/editor/RigTrackPanel"), { ssr: false });
 // Lanes mode swaps to this fit-to-width Konva stage (the folded-in lane editor). Loaded once, ssr off.
 const LaneCanvas = dynamic(() => import("@/components/lane/LaneCanvas"), { ssr: false });
 // 3D and LiDAR mode swaps to the three.js point cloud (the folded-in cuboid workspace). Loaded once, ssr off.
@@ -187,6 +188,7 @@ export default function FrameEditor() {
   const [rigPanel, setRigPanel] = useState(false);   // M-MC.2 rig-identity panel visibility
   const [rigCalibrated, setRigCalibrated] = useState<boolean | null>(null);  // M-MC.3 Tier 2 eligibility
   const [rigRefresh, setRigRefresh] = useState(0);   // bump to refetch the identity panel after a propagate
+  const [rigTracks, setRigTracks] = useState(false);  // M-MC.4 rig-track timeline panel visibility
   const [scaleNoteOpen, setScaleNoteOpen] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   // Responsive: on a narrow screen the properties panel collapses first (the design's degradation order),
@@ -1199,6 +1201,8 @@ export default function FrameEditor() {
                   )}
                   <button onClick={() => setRigPanel((v) => !v)} title="rig identities: link the same object across views"
                     className={`border px-2 py-0.5 rounded ${rigPanel ? "border-accent text-accent bg-accent/10" : "border-line text-ink-3 hover:border-accent"}`}>identities</button>
+                  <button onClick={() => setRigTracks((v) => !v)} title="rig tracks over time + cross-view consistency check"
+                    className={`border px-2 py-0.5 rounded ${rigTracks ? "border-accent text-accent bg-accent/10" : "border-line text-ink-3 hover:border-accent"}`}>tracks</button>
                   <button onClick={confirmRigGroup} title="confirm the whole group at once"
                     className={`border px-2 py-0.5 rounded ${rigGroup?.confirmed ? "border-pass text-pass bg-pass/10" : "border-line text-ink-3 hover:border-pass"}`}>
                     {rigGroup?.confirmed ? "confirmed" : "confirm group"}
@@ -1214,6 +1218,15 @@ export default function FrameEditor() {
               onSelectObject={(oid, cam) => {
                 if (cam === meta.cam_id) doSelect(oid);
                 else if (rigGroup.frameIds[cam]) router.push(`/frame/${rigGroup.frameIds[cam]}?rig=${rigLayout}&focus=${oid}`);
+              }} />
+          )}
+
+          {/* M-MC.4 rig track timeline + consistency check */}
+          {rigView && rigMulti && rigTracks && (
+            <RigTrackPanel sessionId={meta.session_id} onClose={() => setRigTracks(false)}
+              onOpenInstant={(oid, cam) => {
+                if (cam === meta.cam_id) doSelect(oid);
+                else if (rigGroup?.frameIds[cam]) router.push(`/frame/${rigGroup.frameIds[cam]}?rig=${rigLayout}&focus=${oid}`);
               }} />
           )}
         </div>

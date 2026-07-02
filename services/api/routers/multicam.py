@@ -139,3 +139,38 @@ async def propagate_ep(object_id: str, use_sam: bool = True):
     if "error" in res:
         raise HTTPException(400, res["error"])
     return res
+
+
+# M-MC.4 cross-view track handoff + consistency
+
+
+@router.post("/multicam/rig-tracks/build")
+async def rig_tracks_build_ep(session_id: str):
+    """Chain the per-instant rig identities into rig tracks across time and cameras (via per-camera tracks)."""
+    from services.multicam.rigtrack import build_rig_tracks
+
+    return await build_rig_tracks(UUID(session_id))
+
+
+@router.get("/multicam/rig-tracks")
+async def rig_tracks_ep(session_id: str):
+    """The session's rig tracks: instants, cameras, time span, voted class, and inconsistency flag."""
+    from services.multicam.rigtrack import rig_tracks
+
+    return await rig_tracks(UUID(session_id))
+
+
+@router.get("/multicam/rig-track/timeline")
+async def rig_track_timeline_ep(session_id: str, rig_track_id: str):
+    """One rig track's ordered instants (the cross-camera handoff over time)."""
+    from services.multicam.rigtrack import rig_track_timeline
+
+    return await rig_track_timeline(UUID(session_id), UUID(rig_track_id))
+
+
+@router.post("/multicam/consistency-check")
+async def consistency_check_ep(session_id: str):
+    """Flag cross-view class disagreement on rig tracks as cross_cam_inconsistent error candidates."""
+    from services.multicam.rigtrack import check_consistency
+
+    return await check_consistency(UUID(session_id))

@@ -32,6 +32,9 @@ import type {
   PersistedGroups,
   RigObjectsResponse,
   SuggestResponse,
+  RigTracksResponse,
+  RigTrackTimeline,
+  ConsistencyResult,
   SimilarResponse,
   FrameObject,
   ObjectDynamicsRow,
@@ -573,6 +576,11 @@ export const api = {
   // M-MC.3 annotate-once propagate (Tier 2, calibration-gated)
   multicamPropagate: (object_id: string, useSam = false) =>
     post<{ gated?: boolean; tier?: number; reason?: string; created?: string[]; targets?: { cam: string; in_view: boolean }[]; metric?: { height_m: number; width_m: number; range_m: number } }>(`/api/multicam/propagate?object_id=${object_id}&use_sam=${useSam}`, {}),
+  // M-MC.4 rig tracks + consistency
+  multicamRigTracksBuild: (sid: string) => post<{ rig_objects: number; rig_tracks: number }>(`/api/multicam/rig-tracks/build?session_id=${sid}`, {}),
+  multicamRigTracks: (sid: string) => get<RigTracksResponse>(`/api/multicam/rig-tracks?session_id=${sid}`),
+  multicamRigTrackTimeline: (sid: string, tid: string) => get<RigTrackTimeline>(`/api/multicam/rig-track/timeline?session_id=${sid}&rig_track_id=${tid}`),
+  multicamConsistencyCheck: (sid: string) => post<ConsistencyResult>(`/api/multicam/consistency-check?session_id=${sid}`, {}),
   // M2.5 keyframe + interpolation
   setKeyframe: (objectId: string, value = true) => post<{ is_keyframe: boolean; track_id: string | null }>(`/api/objects/${objectId}/keyframe?value=${value}`, {}),
   interpolateKeyframed: (trackId: string, method = "linear") => post<{ created: number; method: string; keyframes: number }>(`/api/tracks/${trackId}/interpolate-keyframed?method=${method}`, {}),

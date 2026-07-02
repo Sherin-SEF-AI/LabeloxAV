@@ -147,6 +147,13 @@ export type RigObjectsResponse = { group_id: string; rig_objects: RigObjectItem[
 export type LinkSuggestion = { a: string; b: string; cam_a: string; cam_b: string; class_a: number | null; class_b: number | null; cos: number };
 export type SuggestResponse = { group_id: string; suggestions: LinkSuggestion[]; appearance_cos: number };
 
+// M-MC.4 rig tracks
+export type RigTrackRow = { rig_track_id: string; instants: number; cameras: string[]; ts_start: number | null; ts_end: number | null; class_name: string | null; inconsistent: boolean };
+export type RigTracksResponse = { session_id: string; n_tracks: number; tracks: RigTrackRow[] };
+export type RigTrackInstant = { rig_object_id: string; group_id: string; ts_ns: number | null; class_name: string | null; conflict: boolean; cameras: string[]; members: { object_id: string; cam: string | null; class_name: string }[] };
+export type RigTrackTimeline = { rig_track_id: string; n_instants: number; instants: RigTrackInstant[] };
+export type ConsistencyResult = { session_id: string; n_tracks: number; inconsistent_objects: number };
+
 export type CalibFovCheck = { implied_fov_deg: number; expected_fov_deg: number | null; diff_deg: number | null; tolerance_deg: number; ok: boolean };
 export type CalibCamera = { cam_id: string; model: string; lens?: string; reproj_error_px: number | null; fov_check: CalibFovCheck; time_offset_ns: number | null; status: string };
 export type CalibDetail = { session_id: string; cameras_in_session: string[]; validations: CalibCamera[]; overall: string };
