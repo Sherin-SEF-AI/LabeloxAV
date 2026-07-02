@@ -347,6 +347,10 @@ export const api = {
     post<{ counts: { objects: number; attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes/plan`, {}),
   agentAttributes: (frame_id: string) =>
     post<{ run_id: string; objects_updated: number; counts: { attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes`, {}),
+  agentTrainingCycle: (dry_run = true) =>
+    post<{ run_id: string; tick: { frames: number; auto_accept: number; review: number; annotate: number }; retrain: { attempted: boolean; triggered?: boolean } }>(`/api/agent/training/cycle`, { dry_run }),
+  agentGoldDrift: () =>
+    post<{ status: string; champion?: string; baseline_map?: number; current_map?: number; drop?: number }>(`/api/agent/gold-drift`, {}),
   agentMineScenarios: () =>
     post<{ persisted: number; by_kind: Record<string, number>; top: { kind: string; score: number; tag: string }[] }>(`/api/agent/scenarios/mine`, {}),
   agentMineDisagreements: () =>

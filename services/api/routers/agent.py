@@ -92,6 +92,31 @@ async def disagreements_mine(body: MineIn | None = None, db: AsyncSession = Depe
     return await mine_disagreements(db, b.session_id)
 
 
+class CycleIn(BaseModel):
+    max_frames: int = 25
+    dry_run: bool = True
+    retrain: bool = False
+
+
+@router.post("/agent/training/cycle", dependencies=[Depends(require_role("reviewer"))])
+async def training_cycle(body: CycleIn | None = None, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """One turn of the self-improving loop: flywheel tick (mine -> auto-accept/escalate) then, when not
+    dry-run and retrain is set, a closed-loop retrain if enough corrections have accumulated."""
+    from services.agent.training_daemon import flywheel_cycle
+
+    b = body or CycleIn()
+    return await flywheel_cycle(db, max_frames=b.max_frames, dry_run=b.dry_run, retrain=b.retrain,
+                                created_by=str(user.user_id) if user else None)
+
+
+@router.post("/agent/gold-drift", dependencies=[Depends(require_role("reviewer"))])
+async def gold_drift(db: AsyncSession = Depends(db_session)):
+    """Re-evaluate the serving champion on the gold set; roll back + pause the loop on regression."""
+    from services.agent.training_daemon import check_gold_drift
+
+    return await check_gold_drift(db)
+
+
 class TemporalRepairIn(BaseModel):
     session_id: str | None = None
     min_majority: float = 0.8

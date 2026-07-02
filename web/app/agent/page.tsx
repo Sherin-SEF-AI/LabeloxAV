@@ -72,6 +72,24 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
+  const cycle = async () => {
+    setBusy("cycle"); setMsg(null);
+    try { const r = await api.agentTrainingCycle(true); setMsg(`flywheel cycle (dry-run): would auto-accept ${r.tick.auto_accept}, review ${r.tick.review}, annotate ${r.tick.annotate} across ${r.tick.frames} top-value frames`); }
+    catch (e) { setMsg("cycle failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+  const drift = async () => {
+    setBusy("drift"); setMsg(null);
+    try {
+      const r = await api.agentGoldDrift();
+      setMsg(r.status === "rolled_back" ? `GOLD DRIFT: champion regressed ${r.baseline_map}→${r.current_map} — rolled back + paused loop`
+        : r.status === "healthy" ? `champion healthy on gold (${r.current_map} vs baseline ${r.baseline_map})`
+        : r.status === "cannot_evaluate" ? `champion ${r.champion} (baseline mAP ${r.baseline_map}) — gold set not materialized here`
+        : "no champion registered");
+    } catch (e) { setMsg("gold-drift check failed: " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const act = async (c: Cand, kind: "confirm" | "dismiss") => {
     try { await (kind === "confirm" ? api.errorConfirm(c.candidate_id) : api.errorDismiss(c.candidate_id)); load(); }
     catch (e) { setMsg(String(e)); }
@@ -128,6 +146,23 @@ export default function AgentConsole() {
                 <ul className="space-y-0.5">{gaps.slice(0, 10).map((g, i) => <li key={i} className="font-mono text-[11px] text-ink-2">· {g}</li>)}</ul>
               </div>
             ) : null}
+          </div>
+
+          {/* Self-improving loop */}
+          <div>
+            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Self-improving loop</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="panel p-4">
+                <div className="text-ink font-medium text-sm">Flywheel cycle</div>
+                <div className="text-ink-3 text-xs mt-1">One turn of the loop: mine the highest-value frames, auto-accept the sure ones, escalate the rest; retrains when enough corrections accumulate. Dry-run preview.</div>
+                <button onClick={cycle} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "cycle" ? "running..." : "run flywheel cycle"}</button>
+              </div>
+              <div className="panel p-4">
+                <div className="text-ink font-medium text-sm">Gold-drift monitor</div>
+                <div className="text-ink-3 text-xs mt-1">Re-evaluate the serving champion on the gold set; if it has regressed beyond tolerance, roll back to the prior champion and pause the loop.</div>
+                <button onClick={drift} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "drift" ? "checking..." : "check gold drift"}</button>
+              </div>
+            </div>
           </div>
 
           {msg ? <div className="font-mono text-[11px] text-warn">{msg}</div> : null}
