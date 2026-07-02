@@ -216,6 +216,18 @@ async def ingest(
     finally:
         await bus.stop()
 
+    # Session Inspector: index the MCAP for the topic browser, timeline, and health checks. Best-effort and
+    # off the ingestion critical path; a failure here never fails the ingest.
+    if mcap_uri:
+        try:
+            import asyncio
+
+            from services.inspector.indexer import index_session_bg
+
+            asyncio.create_task(index_session_bg(session_id))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("ingest.index_schedule_failed", error=str(exc))
+
     result = {
         "session_id": str(session_id),
         "n_frames": n_frames,

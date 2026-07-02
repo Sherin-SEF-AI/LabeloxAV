@@ -50,3 +50,43 @@ async def lichtblick_link(session_id: str, db: AsyncSession = Depends(db_session
     deep = _lichtblick_url(mcap_url)
     log.info("inspector.lichtblick_link", session_id=session_id)
     return {"session_id": session_id, "url": deep, "mcap_url": mcap_url, "expires_s": cfg.presign_expiry_s}
+
+
+def _parse_sid(session_id: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(session_id)
+    except ValueError as exc:
+        raise HTTPException(400, "invalid session id") from exc
+
+
+@router.post("/inspector/sessions/{session_id}/index", dependencies=[Depends(require_role("reviewer"))])
+async def build_index(session_id: str, db: AsyncSession = Depends(db_session)) -> dict:
+    """Build (or rebuild) the MCAP index for a session: per-topic schema, count, measured rate, time range,
+    and gap windows. Cheap; reads message log_times without decoding payloads."""
+    from services.inspector.indexer import index_session
+
+    try:
+        return await index_session(db, _parse_sid(session_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/inspector/sessions/{session_id}/index", dependencies=[Depends(require_role("annotator"))])
+async def get_index(session_id: str, db: AsyncSession = Depends(db_session)) -> dict:
+    """The stored MCAP index for a session (topics, time range, gaps)."""
+    from db.models import SessionIndex
+
+    row = await db.get(SessionIndex, _parse_sid(session_id))
+    if row is None:
+        raise HTTPException(404, "session not indexed yet")
+    return {"session_id": session_id, "mcap_uri": row.mcap_uri, "topics": row.topics,
+            "time_range": row.time_range, "gaps": row.gaps, "indexer_version": row.indexer_version,
+            "built_at": row.built_at.isoformat() if row.built_at else None}
+
+
+@router.post("/inspector/index/backfill", dependencies=[Depends(require_role("reviewer"))])
+async def index_backfill(limit: int = 500, db: AsyncSession = Depends(db_session)) -> dict:
+    """Index every MCAP session that is missing a current index."""
+    from services.inspector.indexer import backfill
+
+    return await backfill(limit=limit)

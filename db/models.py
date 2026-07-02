@@ -1229,3 +1229,49 @@ class CollectionOrder(Base):
     created_by: Mapped[str | None] = mapped_column(String(64))
 
     __table_args__ = (Index("ix_collection_order_status", "status"),)
+
+
+class SessionIndex(Base):
+    """Per-session MCAP index (M-I.1): every topic with its schema, message count, measured rate, time range,
+    and gap windows, read cheaply from the MCAP summary + message index. The raw material for the Inspector
+    timeline, the topic browser, and the session-health checks. Stamped with the indexer version."""
+
+    __tablename__ = "session_index"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), primary_key=True)
+    mcap_uri: Mapped[str | None] = mapped_column(Text)
+    topics: Mapped[dict] = mapped_column(JSONB, default=dict)      # {topic: {name, schema, count, rate, first_ts, last_ts}}
+    time_range: Mapped[list] = mapped_column(ARRAY(BigInteger))    # [first_ts_ns, last_ts_ns] across all topics
+    gaps: Mapped[dict] = mapped_column(JSONB, default=dict)        # {topic: [[gap_start_ns, gap_end_ns], ...]}
+    indexer_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    built_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SessionHealth(Base):
+    """Per-session health-check run (M-I.2): the per-check results over the index and a pass/warn/fail verdict.
+    A fail flags the session and gates it from auto-ingestion until a human reviews, exactly as calibration
+    validation does."""
+
+    __tablename__ = "session_health"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), nullable=False)
+    checks: Mapped[list] = mapped_column(JSONB, default=list)      # [{name, status, detail, evidence}]
+    verdict: Mapped[str] = mapped_column(String(8), nullable=False)  # pass | warn | fail
+    indexer_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_session_health_session", "session_id"),)
+
+
+class InspectorLayout(Base):
+    """A saveable Inspector panel layout (M-I.3): panel types, sources, and arrangement, per user."""
+
+    __tablename__ = "inspector_layout"
+
+    layout_id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("app_user.user_id"))
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    panels: Mapped[list] = mapped_column(JSONB, default=list)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
