@@ -60,6 +60,29 @@ async def run(frame_id: str, body: AgentPolicyIn | None = None,
         raise HTTPException(404, str(exc)) from exc
 
 
+@router.post("/agent/frames/{frame_id}/attributes/plan", dependencies=[Depends(require_role("annotator"))])
+async def attributes_plan(frame_id: str, db: AsyncSession = Depends(db_session)):
+    """Dry-run: the derivable attributes (occlusion, truncation, static, direction) each machine object
+    would gain. Writes nothing."""
+    from services.agent.attribute_agent import plan_attributes
+
+    try:
+        return await plan_attributes(db, uuid.UUID(frame_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/agent/frames/{frame_id}/attributes", dependencies=[Depends(require_role("reviewer"))])
+async def attributes_run(frame_id: str, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Fill the derivable attributes on the frame's objects as one reversible run."""
+    from services.agent.attribute_agent import commit_attributes
+
+    try:
+        return await commit_attributes(db, uuid.UUID(frame_id), created_by=str(user.user_id) if user else None)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 class CrossCamIn(BaseModel):
     tol_ms: int = 20
     high: float = 0.75

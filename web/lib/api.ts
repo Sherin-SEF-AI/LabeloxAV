@@ -343,6 +343,10 @@ export const api = {
     post<{ run_id: string; applied: number; counts: AgentCounts; policy: AgentPolicy }>(`/api/agent/frames/${frame_id}/run`, policy),
   agentRevert: (run_id: string) =>
     post<{ run_id: string; reverted: number; skipped: number }>(`/api/agent/runs/${run_id}/revert`, {}),
+  agentAttributesPlan: (frame_id: string) =>
+    post<{ counts: { objects: number; attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes/plan`, {}),
+  agentAttributes: (frame_id: string) =>
+    post<{ run_id: string; objects_updated: number; counts: { attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes`, {}),
   agentCuboidsPlan: (frame_id: string) =>
     post<{ counts: { total: number; auto_accept: number; review: number; skip: number } }>(`/api/agent/frames/${frame_id}/cuboids/plan`, {}),
   agentCuboids: (frame_id: string) =>

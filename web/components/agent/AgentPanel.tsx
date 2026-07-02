@@ -15,6 +15,19 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
   const [msg, setMsg] = useState<string | null>(null);
   const [cmd, setCmd] = useState("");
 
+  const doAttributes = async () => {
+    setBusy("attrs"); setMsg(null);
+    try {
+      const p = await api.agentAttributesPlan(frameId);
+      if (!p.counts.attrs_filled) { setMsg("no derivable attributes to fill on this frame"); return; }
+      const r = await api.agentAttributes(frameId);
+      const by = Object.entries(r.counts.by_attr).map(([k, n]) => `${k}:${n}`).join(", ");
+      setMsg(`filled ${r.counts.attrs_filled} attrs on ${r.objects_updated} objects (${by})`);
+      onApplied?.();
+    } catch (e) { setMsg("attribute fill failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const doCuboids = async () => {
     setBusy("cuboids"); setMsg(null);
     try {
@@ -106,11 +119,16 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
         </button>
       </div>
 
-      <div className="px-1 pb-1.5">
+      <div className="px-1 pb-1.5 grid grid-cols-2 gap-1">
         <button onClick={doCuboids} disabled={!!busy}
           title="lift every 2D vehicle/VRU box on this frame to a 3D cuboid (monocular, reprojection-validated)"
-          className="w-full font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
-          {busy === "cuboids" ? "fitting 3D..." : "fit 3D boxes on frame"}
+          className="font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+          {busy === "cuboids" ? "fitting..." : "fit 3D boxes"}
+        </button>
+        <button onClick={doAttributes} disabled={!!busy}
+          title="auto-fill the derivable attributes (occlusion, truncation, static, direction)"
+          className="font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+          {busy === "attrs" ? "filling..." : "fill attributes"}
         </button>
       </div>
 

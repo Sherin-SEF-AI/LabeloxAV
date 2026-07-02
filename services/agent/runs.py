@@ -60,11 +60,12 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
             obj.class_id = ch["from_class"]
         if "from_cuboid" in ch:           # an auto-cuboid: clear/restore the 3D box
             obj.cuboid_3d = ch["from_cuboid"]
+        if "from_attrs" in ch:            # an auto-attribute fill: restore the prior attrs
+            obj.attrs = ch["from_attrs"]
         obj.version = (obj.version or 0) + 1
         prov = dict(prov)
-        prov.pop("agent_run_id", None)
-        prov.pop("agent_critic", None)
-        prov.pop("agent_cuboid", None)
+        for k in ("agent_run_id", "agent_critic", "agent_cuboid", "agent_attrs"):
+            prov.pop(k, None)
         obj.provenance = prov
         reverted += 1
 
