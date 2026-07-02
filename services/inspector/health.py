@@ -173,6 +173,19 @@ async def check_health(db: AsyncSession, session_id: uuid.UUID) -> dict:
                            indexer_version=cfg.indexer_version)
     db.add(health)
     await db.commit()
+
+    # Health-to-quality wiring: a confirmed data-health failure lands in the same governance/quality audit
+    # trail as label and calibration decisions, so a session's data problems and label problems are one
+    # story a reviewer can follow.
+    if verdict == "fail":
+        try:
+            from services.govern.audit import record
+
+            await record(db, "inspector_health", "health_fail", str(session_id),
+                         {"fails": [c["name"] for c in checks if c["status"] == "fail"],
+                          "evidence": [c for c in checks if c["status"] == "fail"]})
+        except Exception:  # noqa: BLE001
+            pass
     log.info("inspector.health", session_id=str(session_id), verdict=verdict,
              fails=[c["name"] for c in checks if c["status"] == "fail"])
     return {"session_id": str(session_id), "verdict": verdict, "checks": checks,

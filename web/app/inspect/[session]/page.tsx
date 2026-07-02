@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useClock } from "@/lib/inspector/clock";
 import { api, type InspectorEvent, type InspectorPanel, type InspectorTopic } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { Spinner } from "@/components/Spinner";
@@ -14,6 +15,16 @@ import PanelHost from "@/components/inspector/PanelHost";
 
 let PANEL_SEQ = 0;
 const mkPanel = (type: string, topic?: string): InspectorPanel => ({ id: `p${++PANEL_SEQ}`, type, topic });
+
+// Bidirectional deep link (annotation workspace -> Inspector): when the URL carries ?ts=<ns>, seek the one
+// clock to that moment once the session is open. Runs inside the ClockProvider.
+function SeekToParam({ tsNs, startNs }: { tsNs: string | null; startNs: bigint }) {
+  const clock = useClock();
+  useEffect(() => {
+    if (tsNs) clock.seek(Number(BigInt(tsNs) - startNs) / 1e9);
+  }, [clock, tsNs, startNs]);
+  return null;
+}
 
 // Build the config default layout by binding each default panel type to a sensible topic from the index.
 function defaultPanels(types: string[], topics: InspectorTopic[]): InspectorPanel[] {
@@ -30,7 +41,10 @@ function defaultPanels(types: string[], topics: InspectorTopic[]): InspectorPane
 export default function InspectorWorkspace() {
   const router = useRouter();
   const params = useParams();
+  const search = useSearchParams();
   const sessionId = String(params.session);
+  const tsParam = search.get("ts");
+  const [curFrame, setCurFrame] = useState<{ frameId: string | null; tsNs: string } | null>(null);
 
   const [mcap, setMcap] = useState<SessionMcap | null>(null);
   const [range, setRange] = useState<[bigint, bigint] | null>(null);
@@ -105,9 +119,13 @@ export default function InspectorWorkspace() {
   const right = useMemo(() => (
     <div className="flex items-center gap-2 font-mono text-[11px]">
       {verdict && <span className={`border px-1.5 rounded uppercase ${vColor}`}>{verdict}</span>}
+      {curFrame?.frameId && (
+        <button onClick={() => router.push(`/frame/${curFrame.frameId}`)} title="open the frame at the current time in the annotation workspace"
+          className="border border-accent/50 bg-accent/10 text-accent px-2 py-0.5 rounded hover:bg-accent/20">open frame in workspace</button>
+      )}
       <button onClick={openLichtblick} className="border border-line px-2 py-0.5 rounded hover:border-accent">open in lichtblick</button>
     </div>
-  ), [verdict]);
+  ), [verdict, curFrame, router]);
 
   return (
     <PageShell active="INSPECT" subtitle="SESSION" right={right}>
@@ -118,6 +136,7 @@ export default function InspectorWorkspace() {
       ) : mcap && range ? (
         <ClockProvider startNs={range[0]} endNs={range[1]}>
           <McapProvider mcap={mcap} sessionId={sessionId}>
+            <SeekToParam tsNs={tsParam} startNs={range[0]} />
             <div className="h-full flex flex-col min-h-0">
               <div className="flex-1 flex min-h-0">
                 {/* topic browser + layout controls */}
@@ -146,12 +165,13 @@ export default function InspectorWorkspace() {
                     <div className="h-full flex items-center justify-center font-mono text-xs text-ink-3">add a panel from the topic list</div>
                   ) : (
                     <div className="grid grid-cols-2 gap-2 auto-rows-[minmax(200px,1fr)] h-full">
-                      {panels.map((p) => <PanelHost key={p.id} panel={p} onRemove={() => removePanel(p.id)} />)}
+                      {panels.map((p) => <PanelHost key={p.id} panel={p} onRemove={() => removePanel(p.id)}
+                        onFrame={(frameId, tsNs) => setCurFrame({ frameId, tsNs })} />)}
                     </div>
                   )}
                 </div>
               </div>
-              <Timeline topics={topics} gaps={gaps} events={events} onMarkerClick={(ts) => router.push(`/inspect/${sessionId}?ts=${ts}`)} />
+              <Timeline topics={topics} gaps={gaps} events={events} />
             </div>
           </McapProvider>
         </ClockProvider>

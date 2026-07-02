@@ -12,7 +12,7 @@ from services.inspector.indexer import build_index_from_bytes
 
 
 def test_measured_rates_and_topics():
-    data, lo, hi = build_mcap(seconds=6.0, imu_rate=200.0, gap_topic=None)
+    data, lo, hi, _ = build_mcap(seconds=6.0, imu_rate=200.0, gap_topic=None)
     idx = build_index_from_bytes(data, gap_min_factor=5.0)
     topics = idx["topics"]
     assert set(topics) == {"/camera/cam_f", "/gnss", "/imu", "/can/speed"}
@@ -27,7 +27,7 @@ def test_measured_rates_and_topics():
 
 
 def test_gap_detection():
-    data, _lo, _hi = build_mcap(seconds=6.0, imu_rate=200.0, gap_topic="/imu")
+    data, _lo, _hi, _ = build_mcap(seconds=6.0, imu_rate=200.0, gap_topic="/imu")
     idx = build_index_from_bytes(data, gap_min_factor=5.0)
     assert "/imu" in idx["gaps"]
     win = idx["gaps"]["/imu"][0]
@@ -35,6 +35,6 @@ def test_gap_detection():
 
 
 def test_wrong_rate_is_measured():
-    data, _lo, _hi = build_mcap(seconds=6.0, imu_rate=247.0, gap_topic=None)
+    data, _lo, _hi, _ = build_mcap(seconds=6.0, imu_rate=247.0, gap_topic=None)
     idx = build_index_from_bytes(data, gap_min_factor=5.0)
     assert abs(idx["topics"]["/imu"]["rate"] - 247.0) < 6.0   # the real 247Hz, which M-I.2 flags vs a 200 target

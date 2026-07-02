@@ -88,6 +88,23 @@ async def frame_at(session_id: str, ts_ns: int, db: AsyncSession = Depends(db_se
     return {"frame_id": str(fid), "ts_ns": int(fts), "image_url": f"/api/frames/{fid}/image", "cam_id": cam}
 
 
+@router.get("/inspector/sessions/{session_id}/events", dependencies=[Depends(require_role("annotator"))])
+async def session_events(session_id: str, db: AsyncSession = Depends(db_session)) -> dict:
+    """The typed timeline markers: CAN events (hard braking, regen spikes) from the MCAP, plus scenario
+    candidates, quality flags, and gold frames from the records, all keyed to ts_ns."""
+    from services.inspector.events import session_events as _events
+
+    return {"events": await _events(db, _parse_sid(session_id))}
+
+
+@router.get("/inspector/sessions/{session_id}/annotations-at", dependencies=[Depends(require_role("annotator"))])
+async def annotations_at(session_id: str, ts_ns: int, db: AsyncSession = Depends(db_session)) -> dict:
+    """The nearest extracted frame's annotations, for the image panel's live overlay during playback."""
+    from services.inspector.events import annotations_at as _ann
+
+    return await _ann(db, _parse_sid(session_id), ts_ns)
+
+
 def _parse_sid(session_id: str) -> uuid.UUID:
     try:
         return uuid.UUID(session_id)
