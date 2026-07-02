@@ -60,6 +60,35 @@ async def run(frame_id: str, body: AgentPolicyIn | None = None,
         raise HTTPException(404, str(exc)) from exc
 
 
+class ErrorSweepIn(BaseModel):
+    max_sessions: int = 10
+    kinds: list[str] | None = None
+
+
+@router.post("/agent/errors/sweep", dependencies=[Depends(require_role("reviewer"))])
+async def error_sweep(body: ErrorSweepIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Launch the corpus-wide error daemon in the background: run every detector across sessions, refreshing
+    the fix queue. Poll GET /agent/runs/{run_id} for progress, and GET /agent/errors/queue for the results."""
+    from services.agent.error_daemon import run_error_sweep
+
+    run_id = uuid.uuid4()
+    run = AgentRun(run_id=run_id, kind="error_sweep", scope={"max_sessions": body.max_sessions},
+                   status="running", policy={"kinds": body.kinds}, counts={}, changes={}, critic={},
+                   created_by=str(user.user_id) if user else "daemon")
+    db.add(run)
+    await db.commit()
+    asyncio.create_task(run_error_sweep(run_id, max_sessions=max(1, body.max_sessions), kinds=body.kinds))
+    return {"run_id": str(run_id), "status": "running"}
+
+
+@router.get("/agent/errors/queue", dependencies=[Depends(require_role("annotator"))])
+async def error_queue(status: str = "pending", limit: int = 100, db: AsyncSession = Depends(db_session)):
+    """The ranked fix queue: likely-wrong labels the daemon surfaced, worst first."""
+    from services.errordetect.queue import list_candidates, summary
+
+    return {"summary": await summary(db), "candidates": await list_candidates(db, status, limit)}
+
+
 @router.post("/agent/frames/{frame_id}/attributes/plan", dependencies=[Depends(require_role("annotator"))])
 async def attributes_plan(frame_id: str, db: AsyncSession = Depends(db_session)):
     """Dry-run: the derivable attributes (occlusion, truncation, static, direction) each machine object
