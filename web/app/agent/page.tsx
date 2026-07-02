@@ -221,6 +221,16 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
+  const [buyer, setBuyer] = useState("");
+  const [buyerRes, setBuyerRes] = useState<{ status: string; understood?: string; fulfillment?: { requested: number | null; available: number; fulfillable: number; shortfall: number }; guidance?: string | null; datasheet_uri?: string } | null>(null);
+  const askBuyer = async (confirm = false) => {
+    if (!buyer.trim()) return;
+    setBusy("buyer"); setMsg(null);
+    try { setBuyerRes(await api.agentBuyerSpec(buyer.trim(), confirm, confirm ? "buyer-" + Date.now() : undefined)); if (confirm) setMsg("slice composed, sealed export launched, datasheet drafted"); }
+    catch (e) { setMsg("buyer spec failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const [ops, setOps] = useState("");
   const [opsRes, setOpsRes] = useState<{ plan: { source: string; steps: { tool: string; mutating: boolean }[] }; status: string; results?: { tool: string; result: Record<string, unknown> }[]; pending?: { tool: string } | null } | null>(null);
   const askOps = async (confirm = false) => {
@@ -396,6 +406,30 @@ export default function AgentConsole() {
                 <button onClick={() => genDoc("weekly")} disabled={!!busy} className="shrink-0 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">weekly report</button>
               </div>
               {doc ? <pre className="mt-3 max-h-64 overflow-auto no-scrollbar bg-bg-2 rounded p-3 font-mono text-[10.5px] text-ink-2 whitespace-pre-wrap">{doc.slice(0, 4000)}</pre> : null}
+            </div>
+          </div>
+
+          {/* Buyer Curation Agent */}
+          <div>
+            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Buyer curation — spec to sealed dataset</h2>
+            <div className="panel p-4">
+              <div className="flex items-center gap-1.5">
+                <input value={buyer} onChange={(e) => setBuyer(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") askBuyer(false); }}
+                  placeholder="e.g. 10k night-rain frames with an autorickshaw and a VRU, balanced across cities"
+                  className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-2 py-1.5 font-mono text-[11px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
+                <button onClick={() => askBuyer(false)} disabled={!!busy || !buyer.trim()} className="font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "buyer" ? "checking..." : "check"}</button>
+              </div>
+              {buyerRes?.fulfillment ? (
+                <div className="mt-3 font-mono text-[11px] text-ink-2">
+                  <div className="text-ink-3">{buyerRes.understood}</div>
+                  <div className="mt-1">requested {buyerRes.fulfillment.requested ?? "any"} · <span className="text-pass">{buyerRes.fulfillment.available} available</span>{buyerRes.fulfillment.shortfall ? <span className="text-warn"> · short {buyerRes.fulfillment.shortfall}</span> : <span className="text-pass"> · fully fulfillable</span>}</div>
+                  {buyerRes.guidance ? <div className="text-warn mt-1">{buyerRes.guidance}</div> : null}
+                  {buyerRes.fulfillment.available > 0 && buyerRes.status === "analyzed" ? (
+                    <button onClick={() => askBuyer(true)} disabled={!!busy} className="mt-2 font-mono text-[10px] border border-accent/40 bg-accent/10 text-accent px-2 py-1 rounded disabled:opacity-40">compose slice &amp; export</button>
+                  ) : null}
+                  {buyerRes.datasheet_uri ? <div className="text-ink-3 mt-1">datasheet: {buyerRes.datasheet_uri.split("/").slice(-2).join("/")}</div> : null}
+                </div>
+              ) : null}
             </div>
           </div>
 

@@ -436,6 +436,8 @@ export const api = {
   agentCopilotBatchFix: (object_ids: string[], to_class: number) =>
     post<{ run_id: string; relabeled: number }>(`/api/agent/copilot/batch-fix`, { object_ids, to_class }),
   // Operations Agent: plan + run a platform operation from a sentence
+  agentBuyerSpec: (text: string, confirm = false, name?: string) =>
+    post<{ status: string; understood?: string; fulfillment?: { requested: number | null; available: number; fulfillable: number; shortfall: number }; guidance?: string | null; slice?: { slice_id: string }; datasheet_uri?: string }>(`/api/agent/buyer/spec`, { text, confirm, name }),
   agentOpsAsk: (text: string, confirm = false) =>
     post<{ plan: { source: string; steps: { tool: string; args: Record<string, unknown>; mutating: boolean }[] }; status: string; results?: { tool: string; result: Record<string, unknown> }[]; pending?: { tool: string } | null; message?: string }>(`/api/agent/ops/ask`, { text, confirm }),
   // pixel-assist: brush/eraser mask composition + SLIC superpixels

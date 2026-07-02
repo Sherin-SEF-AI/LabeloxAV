@@ -679,6 +679,22 @@ async def ops_ask(body: OpsAskIn, db: AsyncSession = Depends(db_session), user=D
     return await ask(db, body.text, confirm=body.confirm, created_by=str(user.user_id) if user else None)
 
 
+class BuyerSpecIn(BaseModel):
+    text: str
+    name: str | None = None
+    confirm: bool = False
+
+
+@router.post("/agent/buyer/spec", dependencies=[Depends(require_role("reviewer"))])
+async def buyer_spec(body: BuyerSpecIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Buyer spec -> honest fulfillment report (what the corpus can and cannot deliver). With confirm=true,
+    composes the slice, launches the sealed export, and drafts the datasheet."""
+    from services.agent.buyer_agent import spec
+
+    return await spec(db, body.text, name=body.name, confirm=body.confirm,
+                      created_by=str(user.user_id) if user else None)
+
+
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
 async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
     return await list_runs(db, limit)
