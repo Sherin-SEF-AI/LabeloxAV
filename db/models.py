@@ -1205,3 +1205,27 @@ class PromotionProposal(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (Index("ix_promotion_proposal_status", "status"),)
+
+
+class CollectionOrder(Base):
+    """A Fleet Dispatch proposal: a vehicle sent to a place, in a window, under a forecast, to collect the
+    data the corpus is starved of. This closes the acquisition loop the way the labeling agents close the
+    labeling loop, and only a platform that owns the fleet can act on it. Proposed by the agent; a human
+    dispatches."""
+
+    __tablename__ = "collection_order"
+
+    order_id: Mapped[uuid.UUID] = _uuid_pk()
+    vehicle_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    city: Mapped[str | None] = mapped_column(String(64))
+    area: Mapped[str | None] = mapped_column(String(128))     # route / junction descriptor
+    window: Mapped[str | None] = mapped_column(String(32))    # capture time window, e.g. "18:00-22:00"
+    target: Mapped[str] = mapped_column(Text, nullable=False)  # the gap it fills, human-readable
+    gap_kind: Mapped[str | None] = mapped_column(String(24))  # weather | time_of_day | road_type | class
+    forecast: Mapped[str | None] = mapped_column(String(32))  # weather forecast for the window, if known
+    priority: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="proposed")  # proposed|dispatched|done
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[str | None] = mapped_column(String(64))
+
+    __table_args__ = (Index("ix_collection_order_status", "status"),)

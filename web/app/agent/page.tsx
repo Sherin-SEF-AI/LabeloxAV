@@ -221,6 +221,22 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
+  const [orders, setOrders] = useState<{ order_id: string; priority: number; summary: string; status: string }[]>([]);
+  const loadOrders = useCallback(async () => { try { setOrders(await api.agentFleetOrders("proposed")); } catch { /* none */ } }, []);
+  useEffect(() => { loadOrders(); }, [loadOrders]);
+  const planFleet = async () => {
+    setBusy("fleet"); setMsg(null);
+    try { const r = await api.agentFleetPlan(); setMsg(`fused ${r.gaps} gaps + ${r.vehicles} vehicles -> ${r.orders} collection orders`); await loadOrders(); }
+    catch (e) { setMsg("fleet plan failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+  const dispatchOrder = async (id: string) => {
+    setBusy(id); setMsg(null);
+    try { await api.agentFleetDispatch(id, "dispatched"); await loadOrders(); }
+    catch (e) { setMsg("dispatch failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const [buyer, setBuyer] = useState("");
   const [buyerRes, setBuyerRes] = useState<{ status: string; understood?: string; fulfillment?: { requested: number | null; available: number; fulfillable: number; shortfall: number }; guidance?: string | null; datasheet_uri?: string } | null>(null);
   const askBuyer = async (confirm = false) => {
@@ -407,6 +423,25 @@ export default function AgentConsole() {
               </div>
               {doc ? <pre className="mt-3 max-h-64 overflow-auto no-scrollbar bg-bg-2 rounded p-3 font-mono text-[10.5px] text-ink-2 whitespace-pre-wrap">{doc.slice(0, 4000)}</pre> : null}
             </div>
+          </div>
+
+          {/* Fleet Dispatch */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3">Fleet dispatch — collect what the corpus lacks</h2>
+              <button onClick={planFleet} disabled={!!busy} className="ml-auto font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "fleet" ? "planning..." : "plan collection orders"}</button>
+            </div>
+            {orders.length ? (
+              <div className="panel divide-y divide-line/50">
+                {orders.map((o) => (
+                  <div key={o.order_id} className="flex items-center gap-2 px-3 py-2">
+                    <span className="font-mono text-[10px] text-accent w-8">{o.priority.toFixed(1)}</span>
+                    <span className="font-mono text-[10.5px] text-ink-2 flex-1">{o.summary}</span>
+                    <button onClick={() => dispatchOrder(o.order_id)} disabled={!!busy} className="font-mono text-[10px] border border-accent/40 text-accent px-2 py-0.5 rounded disabled:opacity-40">dispatch</button>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="panel p-4 text-ink-3 text-sm">No collection orders. Plan orders to turn the coverage gaps into fleet acquisition tasks.</div>}
           </div>
 
           {/* Buyer Curation Agent */}

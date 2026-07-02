@@ -436,6 +436,13 @@ export const api = {
   agentCopilotBatchFix: (object_ids: string[], to_class: number) =>
     post<{ run_id: string; relabeled: number }>(`/api/agent/copilot/batch-fix`, { object_ids, to_class }),
   // Operations Agent: plan + run a platform operation from a sentence
+  // Fleet Dispatch: turn coverage gaps + fleet + forecast into collection orders
+  agentFleetPlan: () =>
+    post<{ gaps: number; orders: number; vehicles: number }>(`/api/agent/fleet/plan`, {}),
+  agentFleetOrders: (status = "proposed") =>
+    get<{ order_id: string; vehicle_id: string; city: string | null; window: string | null; target: string; forecast: string | null; priority: number; status: string; summary: string }[]>(`/api/agent/fleet/orders?status=${status}`),
+  agentFleetDispatch: (order_id: string, status: string) =>
+    post<{ status: string }>(`/api/agent/fleet/orders/${order_id}/${status}`, {}),
   agentBuyerSpec: (text: string, confirm = false, name?: string) =>
     post<{ status: string; understood?: string; fulfillment?: { requested: number | null; available: number; fulfillable: number; shortfall: number }; guidance?: string | null; slice?: { slice_id: string }; datasheet_uri?: string }>(`/api/agent/buyer/spec`, { text, confirm, name }),
   agentOpsAsk: (text: string, confirm = false) =>

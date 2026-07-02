@@ -695,6 +695,35 @@ async def buyer_spec(body: BuyerSpecIn, db: AsyncSession = Depends(db_session), 
                       created_by=str(user.user_id) if user else None)
 
 
+@router.post("/agent/fleet/plan", dependencies=[Depends(require_role("reviewer"))])
+async def fleet_plan(db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Generate ranked collection orders from the current coverage gaps, the fleet, and the forecast."""
+    from services.agent.fleet_dispatch import plan_collection
+
+    return await plan_collection(db, created_by=str(user.user_id) if user else None)
+
+
+@router.get("/agent/fleet/orders", dependencies=[Depends(require_role("annotator"))])
+async def fleet_orders(status: str = "proposed", db: AsyncSession = Depends(db_session)):
+    """The proposed (or dispatched/done) collection orders, highest priority first."""
+    from services.agent.fleet_dispatch import list_orders
+
+    return await list_orders(db, status=status)
+
+
+@router.post("/agent/fleet/orders/{order_id}/{status}", dependencies=[Depends(require_role("reviewer"))])
+async def fleet_order_status(order_id: str, status: str, db: AsyncSession = Depends(db_session)):
+    """Dispatch or complete an order (status = dispatched | done)."""
+    from services.agent.fleet_dispatch import set_status
+
+    if status not in ("dispatched", "done", "proposed"):
+        raise HTTPException(400, "status must be dispatched, done, or proposed")
+    try:
+        return await set_status(db, uuid.UUID(order_id), status)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
 async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
     return await list_runs(db, limit)
