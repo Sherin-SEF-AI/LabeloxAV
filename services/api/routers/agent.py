@@ -60,6 +60,20 @@ async def run(frame_id: str, body: AgentPolicyIn | None = None,
         raise HTTPException(404, str(exc)) from exc
 
 
+class MineIn(BaseModel):
+    session_id: str | None = None
+    ttc_thresh: float = 2.5
+
+
+@router.post("/agent/scenarios/mine", dependencies=[Depends(require_role("reviewer"))])
+async def scenarios_mine(body: MineIn | None = None, db: AsyncSession = Depends(db_session)):
+    """Mine safety-critical scenarios (near-miss / high-risk / hard-brake) into the scenario queue."""
+    from services.agent.scenario_miner import mine_scenarios
+
+    b = body or MineIn()
+    return await mine_scenarios(db, b.session_id, ttc_thresh=b.ttc_thresh)
+
+
 class TemporalRepairIn(BaseModel):
     session_id: str | None = None
     min_majority: float = 0.8
