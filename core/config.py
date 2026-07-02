@@ -596,6 +596,16 @@ class InspectorSettings(BaseModel):
     max_cross_sensor_offset_ms: float = 500.0  # first/last-ts skew across sensors beyond this is suspect
     min_gnss_fix: int = 1              # minimum acceptable GNSS fix quality (0=no fix)
 
+    # M-I.2 rig manifest: the topics a session should carry and their expected rates. A required topic that
+    # is absent fails the session; a measured rate outside tolerance warns or fails. match is a substring of
+    # the topic name (so /camera/cam_f and /imu both resolve).
+    expected_topics: list = Field(default_factory=lambda: [
+        {"match": "camera", "rate": 10.0, "required": True},
+        {"match": "imu", "rate": 200.0, "required": True},
+        {"match": "gnss", "rate": 10.0, "required": True},
+        {"match": "can", "rate": 100.0, "required": False},
+    ])
+
     # M-I.3 default panel layout (image, IMU plot, CAN plot, map, raw messages).
     default_layout: list = Field(default_factory=lambda: ["image", "imu_plot", "can_plot", "map", "raw"])
 

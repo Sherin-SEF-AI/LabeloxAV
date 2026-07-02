@@ -12,6 +12,7 @@ import uuid
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
@@ -90,3 +91,47 @@ async def index_backfill(limit: int = 500, db: AsyncSession = Depends(db_session
     from services.inspector.indexer import backfill
 
     return await backfill(limit=limit)
+
+
+@router.post("/inspector/sessions/{session_id}/health", dependencies=[Depends(require_role("reviewer"))])
+async def run_health(session_id: str, db: AsyncSession = Depends(db_session)) -> dict:
+    """Run the session health checks (rate, gaps, missing topics, cross-sensor offset, GNSS, integrity) and
+    record a pass/warn/fail verdict. A fail gates the session from auto-labeling until reviewed."""
+    from services.inspector.health import check_health
+
+    try:
+        return await check_health(db, _parse_sid(session_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/inspector/sessions/{session_id}/health", dependencies=[Depends(require_role("annotator"))])
+async def get_health(session_id: str, db: AsyncSession = Depends(db_session)) -> dict:
+    """The latest health verdict + per-check detail for a session."""
+    from db.models import SessionHealth
+
+    sid = _parse_sid(session_id)
+    row = (await db.execute(select(SessionHealth).where(SessionHealth.session_id == sid)
+                            .order_by(SessionHealth.created_at.desc()).limit(1))).scalar_one_or_none()
+    if row is None:
+        return {"session_id": session_id, "verdict": None, "checks": []}
+    return {"session_id": session_id, "verdict": row.verdict, "checks": row.checks,
+            "created_at": row.created_at.isoformat() if row.created_at else None}
+
+
+@router.post("/inspector/health/sweep", dependencies=[Depends(require_role("reviewer"))])
+async def health_sweep(limit: int = 500, db: AsyncSession = Depends(db_session)) -> dict:
+    """Run health checks across all MCAP sessions (indexing as needed). Returns the verdict tally."""
+    from collections import Counter
+
+    from services.inspector.health import check_health
+
+    sids = (await db.execute(select(DbSession.session_id).where(DbSession.mcap_uri.isnot(None)).limit(limit))).scalars().all()
+    tally: Counter = Counter()
+    for sid in sids:
+        try:
+            r = await check_health(db, sid)
+            tally[r["verdict"]] += 1
+        except Exception:  # noqa: BLE001
+            tally["error"] += 1
+    return {"checked": len(sids), "verdicts": dict(tally)}

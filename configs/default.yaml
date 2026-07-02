@@ -190,5 +190,10 @@ inspector:
   dropout_factor: 10.0
   max_cross_sensor_offset_ms: 500.0
   min_gnss_fix: 1
+  expected_topics:
+    - {match: camera, rate: 10.0, required: true}
+    - {match: imu, rate: 200.0, required: true}
+    - {match: gnss, rate: 10.0, required: true}
+    - {match: can, rate: 100.0, required: false}
   default_layout: ["image", "imu_plot", "can_plot", "map", "raw"]
   decode_enabled: true

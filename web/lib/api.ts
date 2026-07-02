@@ -615,6 +615,10 @@ export const api = {
   // Session Inspector: presigned Lichtblick remote-file deep link for full-power MCAP inspection
   inspectorLichtblick: (session_id: string) =>
     get<{ session_id: string; url: string; mcap_url: string; expires_s: number }>(`/api/inspector/sessions/${session_id}/lichtblick`),
+  inspectorHealth: (session_id: string) =>
+    get<{ session_id: string; verdict: "pass" | "warn" | "fail" | null; checks: { name: string; status: string; detail: string }[] }>(`/api/inspector/sessions/${session_id}/health`),
+  inspectorRunHealth: (session_id: string) =>
+    post<{ verdict: string; gated: boolean; checks: { name: string; status: string; detail: string }[] }>(`/api/inspector/sessions/${session_id}/health`, {}),
   // In-app training platform
   trainingTasks: () => get<{ task_type: string; default_base_weights: string }[]>("/api/training/tasks"),
   startTraining: (body: {

@@ -48,13 +48,22 @@ export default function ImportPage() {
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const [health, setHealth] = useState<Record<string, "pass" | "warn" | "fail" | null>>({});
   async function refresh() {
     try {
-      setJobs(await api.listImports());
+      const js = await api.listImports();
+      setJobs(js);
+      // Inspector health verdict per session: the chip that answers "did my recording work" before opening a panel.
+      const sids = Array.from(new Set(js.map((j) => j.session_id).filter(Boolean))) as string[];
+      const pairs = await Promise.all(sids.map(async (sid) => {
+        try { return [sid, (await api.inspectorHealth(sid)).verdict] as const; } catch { return [sid, null] as const; }
+      }));
+      setHealth(Object.fromEntries(pairs));
     } catch {
       /* ignore */
     }
   }
+  const HEALTH_COLOR: Record<string, string> = { pass: "text-pass border-pass", warn: "text-warn border-warn", fail: "text-block border-block" };
 
   useEffect(() => {
     refresh();
@@ -209,6 +218,14 @@ export default function ImportPage() {
                     {j.counts?.frames ?? 0}fr / {j.counts?.objects ?? 0}obj
                     {j.error ? ` · ${j.error.slice(0, 30)}` : ""}
                   </span>
+                  {j.session_id && health[j.session_id] && (
+                    <span
+                      title="Inspector health verdict for this recording"
+                      className={`border px-1.5 rounded uppercase text-[10px] ${HEALTH_COLOR[health[j.session_id]!] || "text-ink-3 border-line"}`}
+                    >
+                      {health[j.session_id]}
+                    </span>
+                  )}
                   {j.session_id && (
                     <button
                       onClick={() => router.push(`/?session=${j.session_id}`)}
