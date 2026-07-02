@@ -430,6 +430,11 @@ export const api = {
     post<{ class_id: number; name: string; relabeled: number; run_id: string }>(`/api/agent/ontology/proposals/${proposal_id}/approve`, { name }),
   agentOntologyReject: (proposal_id: string) =>
     post<{ status: string }>(`/api/agent/ontology/proposals/${proposal_id}/reject`, {}),
+  // Annotation Copilot: the reviewer's repeated correction + similar cases a one-click batch would fix
+  agentCopilotPattern: () =>
+    get<{ pattern: { from_name: string; to_name: string; to_class: number; count: number } | null; candidates: string[] }>(`/api/agent/copilot/pattern`),
+  agentCopilotBatchFix: (object_ids: string[], to_class: number) =>
+    post<{ run_id: string; relabeled: number }>(`/api/agent/copilot/batch-fix`, { object_ids, to_class }),
   // pixel-assist: brush/eraser mask composition + SLIC superpixels
   composeMask: (body: { polygons: number[][]; ops: { op: string; center: number[]; radius: number }[]; width: number; height: number }) =>
     post<{ polygons: number[][] }>(`/api/mask/compose`, body),

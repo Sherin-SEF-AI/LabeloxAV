@@ -641,6 +641,30 @@ async def ontology_reject(proposal_id: str, db: AsyncSession = Depends(db_sessio
         raise HTTPException(404, str(exc)) from exc
 
 
+class BatchFixIn(BaseModel):
+    object_ids: list[str]
+    to_class: int
+
+
+@router.get("/agent/copilot/pattern", dependencies=[Depends(require_role("annotator"))])
+async def copilot_pattern(mine: bool = True, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """The reviewer's repeated correction pattern and the similar cases a one-click batch would fix. mine=true
+    scopes to the current reviewer's corrections; false looks across everyone."""
+    from services.agent.annotation_copilot import suggest_for_reviewer
+
+    uid = (user.user_id if (user and mine) else None)
+    return await suggest_for_reviewer(db, uid)
+
+
+@router.post("/agent/copilot/batch-fix", dependencies=[Depends(require_role("reviewer"))])
+async def copilot_batch_fix(body: BatchFixIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Relabel the chosen similar cases to the target class and route them to review, as one reversible run."""
+    from services.agent.annotation_copilot import apply_batch
+
+    return await apply_batch(db, body.object_ids, body.to_class,
+                             created_by=str(user.user_id) if user else None)
+
+
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
 async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
     return await list_runs(db, limit)

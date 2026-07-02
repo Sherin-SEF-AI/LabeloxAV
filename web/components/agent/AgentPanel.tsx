@@ -15,12 +15,25 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
   const [msg, setMsg] = useState<string | null>(null);
   const [cmd, setCmd] = useState("");
   const [suggestions, setSuggestions] = useState<{ action: string; label: string }[]>([]);
+  const [copilot, setCopilot] = useState<{ pattern: { from_name: string; to_name: string; to_class: number; count: number } | null; candidates: string[] } | null>(null);
 
   useEffect(() => {
     let live = true;
     api.agentSuggest(frameId).then((r) => { if (live) setSuggestions(r.suggestions.slice(0, 3)); }).catch(() => {});
+    api.agentCopilotPattern().then((r) => { if (live) setCopilot(r); }).catch(() => {});
     return () => { live = false; };
   }, [frameId]);
+
+  const doBatchFix = async () => {
+    if (!copilot?.pattern || !copilot.candidates.length) return;
+    setBusy("batch"); setMsg(null);
+    try {
+      const r = await api.agentCopilotBatchFix(copilot.candidates, copilot.pattern.to_class);
+      setMsg(`batch-fixed ${r.relabeled} similar ${copilot.pattern.from_name} -> ${copilot.pattern.to_name}, routed to review (reversible)`);
+      setCopilot(null); onApplied?.();
+    } catch (e) { setMsg("batch fix failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
 
   const doAttributes = async () => {
     setBusy("attrs"); setMsg(null);
@@ -156,6 +169,20 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
           {busy === "relabel" ? "re-reading labels..." : "relabel this frame (AI reasoning)"}
         </button>
       </div>
+
+      {copilot?.pattern && copilot.candidates.length > 0 && (
+        <div className="px-1 pb-1.5">
+          <div className="border border-accent/40 bg-accent/5 rounded p-1.5">
+            <div className="font-mono text-[9.5px] text-ink-2">
+              you relabeled <span className="text-accent">{copilot.pattern.from_name} → {copilot.pattern.to_name}</span> {copilot.pattern.count}x
+            </div>
+            <button onClick={doBatchFix} disabled={!!busy}
+              className="w-full mt-1 font-mono text-[10px] border border-accent/40 bg-accent/10 text-accent px-2 py-1 rounded hover:bg-accent/20 disabled:opacity-40">
+              {busy === "batch" ? "fixing..." : `batch-fix ${copilot.candidates.length} similar → review`}
+            </button>
+          </div>
+        </div>
+      )}
 
       {suggestions.length > 0 && (
         <div className="px-1 pb-1.5">
