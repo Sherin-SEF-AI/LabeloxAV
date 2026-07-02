@@ -110,6 +110,9 @@ export type AgentPolicy = { auto_accept_conf?: number; review_low?: number; requ
 export type AgentCounts = { total: number; auto_accept: number; review: number; annotate: number; unchanged: number; demoted_by_critic: number };
 export type AgentPlanItem = { object_id: string; class_name: string; conf: number; current_state: string; action: string; changes_state: boolean; reason: string; tier: string; critic_ok: boolean; critic_reasons: string[] };
 export type AgentPlan = { frame_id: string; policy: AgentPolicy; counts: AgentCounts; critic_flags: Record<string, number>; items: AgentPlanItem[] };
+export type InspectorTopic = { name: string; schema: string; count: number; rate: number; first_ts: number; last_ts: number };
+export type InspectorPanel = { id: string; type: string; topic?: string; field?: string };
+export type InspectorEvent = { ts_ns: number; kind: string; label: string; detail?: string };
 export type PromotionProposalRow = {
   proposal_id: string; from_class: string; member_count: number; suggested_name: string | null;
   confusion_classes: { class: string; share: number }[]; sample_object_ids: string[]; status: string;
@@ -619,6 +622,19 @@ export const api = {
     get<{ session_id: string; verdict: "pass" | "warn" | "fail" | null; checks: { name: string; status: string; detail: string }[] }>(`/api/inspector/sessions/${session_id}/health`),
   inspectorRunHealth: (session_id: string) =>
     post<{ verdict: string; gated: boolean; checks: { name: string; status: string; detail: string }[] }>(`/api/inspector/sessions/${session_id}/health`, {}),
+  inspectorMcapUrl: (session_id: string) =>
+    get<{ url: string; vehicle_id: string; time_range: [number, number] | null; topics: Record<string, InspectorTopic>; gaps: Record<string, [number, number][]> }>(`/api/inspector/sessions/${session_id}/mcap-url`),
+  inspectorLayouts: () =>
+    get<{ layouts: { layout_id: string; name: string; panels: InspectorPanel[]; is_default: boolean }[]; config_default: string[] }>(`/api/inspector/layouts`),
+  inspectorSaveLayout: (name: string, panels: InspectorPanel[], is_default = false) =>
+    post<{ layout_id: string; name: string; is_default: boolean }>(`/api/inspector/layouts`, { name, panels, is_default }),
+  inspectorDeleteLayout: (layout_id: string) => del<{ deleted: string }>(`/api/inspector/layouts/${layout_id}`),
+  inspectorSessions: () =>
+    get<{ session_id: string; vehicle_id: string; city: string | null; start_ts_ns: number; end_ts_ns: number; verdict: string | null }[]>(`/api/inspector/sessions`),
+  inspectorEvents: (session_id: string) =>
+    get<{ events: InspectorEvent[] }>(`/api/inspector/sessions/${session_id}/events`),
+  inspectorFrameAt: (session_id: string, ts_ns: number) =>
+    get<{ frame_id: string | null; ts_ns: number | null; image_url: string | null; cam_id: string | null }>(`/api/inspector/sessions/${session_id}/frame-at?ts_ns=${ts_ns}`),
   // In-app training platform
   trainingTasks: () => get<{ task_type: string; default_base_weights: string }[]>("/api/training/tasks"),
   startTraining: (body: {

@@ -12,6 +12,7 @@ import uuid
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +20,7 @@ from core.config import get_settings
 from core.logging import get_logger
 from core.storage import get_object_store
 from db.models import Session as DbSession
-from services.api.deps import db_session, require_role
+from services.api.deps import current_user, db_session, require_role
 
 log = get_logger("api_inspector")
 router = APIRouter()
@@ -51,6 +52,22 @@ async def lichtblick_link(session_id: str, db: AsyncSession = Depends(db_session
     deep = _lichtblick_url(mcap_url)
     log.info("inspector.lichtblick_link", session_id=session_id)
     return {"session_id": session_id, "url": deep, "mcap_url": mcap_url, "expires_s": cfg.presign_expiry_s}
+
+
+@router.get("/inspector/sessions", dependencies=[Depends(require_role("annotator"))])
+async def list_sessions(limit: int = 100, db: AsyncSession = Depends(db_session)) -> list[dict]:
+    """MCAP sessions available to inspect, each with its latest health verdict for the session-list chip."""
+    from db.models import SessionHealth
+
+    rows = (await db.execute(
+        select(DbSession).where(DbSession.mcap_uri.isnot(None)).order_by(DbSession.created_at.desc()).limit(limit))).scalars().all()
+    out = []
+    for s in rows:
+        h = (await db.execute(select(SessionHealth.verdict).where(SessionHealth.session_id == s.session_id)
+                              .order_by(SessionHealth.created_at.desc()).limit(1))).scalar_one_or_none()
+        out.append({"session_id": str(s.session_id), "vehicle_id": s.vehicle_id, "city": s.city,
+                    "start_ts_ns": s.start_ts_ns, "end_ts_ns": s.end_ts_ns, "verdict": h})
+    return out
 
 
 def _parse_sid(session_id: str) -> uuid.UUID:
@@ -135,3 +152,78 @@ async def health_sweep(limit: int = 500, db: AsyncSession = Depends(db_session))
         except Exception:  # noqa: BLE001
             tally["error"] += 1
     return {"checked": len(sids), "verdicts": dict(tally)}
+
+
+@router.get("/inspector/sessions/{session_id}/mcap-url", dependencies=[Depends(require_role("annotator"))])
+async def mcap_url(session_id: str, db: AsyncSession = Depends(db_session)) -> dict:
+    """A presigned MCAP URL plus the index summary, so the browser panels can read the file directly over
+    HTTP range requests (the native Inspector's read path). Returns the time range and topics from the index
+    if it has been built, so a panel knows the clock bounds without scanning the whole file."""
+    sess = await db.get(DbSession, _parse_sid(session_id))
+    if sess is None:
+        raise HTTPException(404, "session not found")
+    if not sess.mcap_uri:
+        raise HTTPException(409, "session has no MCAP")
+    from db.models import SessionIndex
+
+    cfg = get_settings().inspector
+    url = get_object_store().presigned_get(sess.mcap_uri, expires=cfg.presign_expiry_s)
+    idx = await db.get(SessionIndex, _parse_sid(session_id))
+    return {"session_id": session_id, "url": url, "expires_s": cfg.presign_expiry_s,
+            "vehicle_id": sess.vehicle_id,
+            "time_range": (idx.time_range if idx else [sess.start_ts_ns, sess.end_ts_ns]),
+            "topics": (idx.topics if idx else {}), "gaps": (idx.gaps if idx else {})}
+
+
+class LayoutIn(BaseModel):
+    name: str
+    panels: list
+    is_default: bool = False
+
+
+@router.get("/inspector/layouts", dependencies=[Depends(require_role("annotator"))])
+async def list_layouts(db: AsyncSession = Depends(db_session), user=Depends(current_user)) -> dict:
+    """This user's saved Inspector layouts, plus the config default as a fallback."""
+    from db.models import InspectorLayout
+
+    q = select(InspectorLayout).order_by(InspectorLayout.created_at.desc())
+    if user:
+        q = q.where((InspectorLayout.user_id == user.user_id) | (InspectorLayout.user_id.is_(None)))
+    rows = (await db.execute(q)).scalars().all()
+    layouts = [{"layout_id": str(r.layout_id), "name": r.name, "panels": r.panels, "is_default": r.is_default}
+               for r in rows]
+    return {"layouts": layouts, "config_default": get_settings().inspector.default_layout}
+
+
+@router.post("/inspector/layouts", dependencies=[Depends(require_role("annotator"))])
+async def save_layout(body: LayoutIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)) -> dict:
+    """Save (or update by name) a named panel layout for this user."""
+    import uuid as _uuid
+
+    from db.models import InspectorLayout
+
+    uid = user.user_id if user else None
+    existing = (await db.execute(select(InspectorLayout).where(
+        InspectorLayout.name == body.name, InspectorLayout.user_id == uid).limit(1))).scalar_one_or_none()
+    if body.is_default and uid is not None:
+        for r in (await db.execute(select(InspectorLayout).where(InspectorLayout.user_id == uid))).scalars().all():
+            r.is_default = False
+    if existing is None:
+        existing = InspectorLayout(layout_id=_uuid.uuid4(), user_id=uid, name=body.name)
+        db.add(existing)
+    existing.panels = body.panels
+    existing.is_default = body.is_default
+    await db.commit()
+    return {"layout_id": str(existing.layout_id), "name": existing.name, "is_default": existing.is_default}
+
+
+@router.delete("/inspector/layouts/{layout_id}", dependencies=[Depends(require_role("annotator"))])
+async def delete_layout(layout_id: str, db: AsyncSession = Depends(db_session)) -> dict:
+    from db.models import InspectorLayout
+
+    row = await db.get(InspectorLayout, _parse_sid(layout_id))
+    if row is None:
+        raise HTTPException(404, "layout not found")
+    await db.delete(row)
+    await db.commit()
+    return {"deleted": layout_id}

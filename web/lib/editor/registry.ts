@@ -58,6 +58,7 @@ export const APP_GROUPS: NavGroup[] = [
       { href: "/lidar", label: "LiDAR", hint: "point cloud explorer" },
       { href: "/map", label: "HD map", hint: "fused map and provenance" },
       { href: "/inertial", label: "Inertial", hint: "ego-state timeline, events, maneuvers" },
+      { href: "/inspect", label: "Inspector", hint: "Foxglove-class MCAP session inspection" },
     ],
   },
 ];
