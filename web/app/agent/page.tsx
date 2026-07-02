@@ -221,6 +221,16 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
+  const [ops, setOps] = useState("");
+  const [opsRes, setOpsRes] = useState<{ plan: { source: string; steps: { tool: string; mutating: boolean }[] }; status: string; results?: { tool: string; result: Record<string, unknown> }[]; pending?: { tool: string } | null } | null>(null);
+  const askOps = async (confirm = false) => {
+    if (!ops.trim()) return;
+    setBusy("ops"); setMsg(null);
+    try { setOpsRes(await api.agentOpsAsk(ops.trim(), confirm)); }
+    catch (e) { setMsg("ops failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const reason = (c: Cand) => (c.detail?.reason as string) || (c.detail?.reasons ? (c.detail.reasons as string[]).join("; ") : (c.detail?.note as string) || JSON.stringify(c.detail).slice(0, 80));
 
   return (
@@ -386,6 +396,33 @@ export default function AgentConsole() {
                 <button onClick={() => genDoc("weekly")} disabled={!!busy} className="shrink-0 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">weekly report</button>
               </div>
               {doc ? <pre className="mt-3 max-h-64 overflow-auto no-scrollbar bg-bg-2 rounded p-3 font-mono text-[10.5px] text-ink-2 whitespace-pre-wrap">{doc.slice(0, 4000)}</pre> : null}
+            </div>
+          </div>
+
+          {/* Operations Agent */}
+          <div>
+            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Ask LabeloxAV — operate in sentences</h2>
+            <div className="panel p-4">
+              <div className="flex items-center gap-1.5">
+                <input value={ops} onChange={(e) => setOps(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") askOps(false); }}
+                  placeholder="e.g. show coverage gaps · list sessions in BLR · export accepted frames to coco"
+                  className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-2 py-1.5 font-mono text-[11px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
+                <button onClick={() => askOps(false)} disabled={!!busy || !ops.trim()} className="font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "ops" ? "planning..." : "ask"}</button>
+              </div>
+              {opsRes ? (
+                <div className="mt-3 font-mono text-[10.5px] text-ink-2">
+                  <div className="text-ink-3">plan ({opsRes.plan.source}): {opsRes.plan.steps.map((s) => s.tool).join(" -> ") || "no plan"}</div>
+                  {opsRes.results?.map((r, i) => (
+                    <pre key={i} className="mt-1 bg-bg-2 rounded p-2 whitespace-pre-wrap max-h-40 overflow-auto no-scrollbar">{r.tool}: {JSON.stringify(r.result).slice(0, 600)}</pre>
+                  ))}
+                  {opsRes.pending ? (
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="text-warn">step &quot;{opsRes.pending.tool}&quot; mutates data.</span>
+                      <button onClick={() => askOps(true)} disabled={!!busy} className="font-mono text-[10px] border border-warn text-warn px-2 py-1 rounded disabled:opacity-40">confirm &amp; run</button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
 

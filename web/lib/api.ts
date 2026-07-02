@@ -435,6 +435,9 @@ export const api = {
     get<{ pattern: { from_name: string; to_name: string; to_class: number; count: number } | null; candidates: string[] }>(`/api/agent/copilot/pattern`),
   agentCopilotBatchFix: (object_ids: string[], to_class: number) =>
     post<{ run_id: string; relabeled: number }>(`/api/agent/copilot/batch-fix`, { object_ids, to_class }),
+  // Operations Agent: plan + run a platform operation from a sentence
+  agentOpsAsk: (text: string, confirm = false) =>
+    post<{ plan: { source: string; steps: { tool: string; args: Record<string, unknown>; mutating: boolean }[] }; status: string; results?: { tool: string; result: Record<string, unknown> }[]; pending?: { tool: string } | null; message?: string }>(`/api/agent/ops/ask`, { text, confirm }),
   // pixel-assist: brush/eraser mask composition + SLIC superpixels
   composeMask: (body: { polygons: number[][]; ops: { op: string; center: number[]; radius: number }[]; width: number; height: number }) =>
     post<{ polygons: number[][] }>(`/api/mask/compose`, body),

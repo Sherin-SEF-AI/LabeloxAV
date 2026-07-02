@@ -665,6 +665,20 @@ async def copilot_batch_fix(body: BatchFixIn, db: AsyncSession = Depends(db_sess
                              created_by=str(user.user_id) if user else None)
 
 
+class OpsAskIn(BaseModel):
+    text: str
+    confirm: bool = False
+
+
+@router.post("/agent/ops/ask", dependencies=[Depends(require_role("reviewer"))])
+async def ops_ask(body: OpsAskIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Ask LabeloxAV: plan a data-platform operation from a sentence and run its read steps. Mutating steps
+    (autolabel, export) run only when confirm=true; otherwise the plan pauses at the first one for review."""
+    from services.agent.ops_agent import ask
+
+    return await ask(db, body.text, confirm=body.confirm, created_by=str(user.user_id) if user else None)
+
+
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
 async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
     return await list_runs(db, limit)
