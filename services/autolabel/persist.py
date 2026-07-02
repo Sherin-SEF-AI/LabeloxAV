@@ -17,6 +17,7 @@ from core.storage import ObjectStore
 from core.timebase import now_ns
 from db.models import Object
 from services.autolabel.fusion import FusedObject
+from services.autolabel.ontology import get_ontology
 from services.autolabel.paths.path_b_sam3 import polygons_from_mask
 
 log = get_logger("persist")
@@ -51,6 +52,13 @@ async def persist_frame_objects(
 ) -> dict[str, int]:
     by_state: dict[str, int] = {}
     await _clear_machine_objects(db, store, frame)
+
+    # Thing/stuff enforcement (panoptic split), the single chokepoint every machine path funnels through:
+    # stuff classes (sky, road, every surface, vegetation, barriers, walls, buildings) are background and
+    # belong to semantic segmentation, never an instance box. Drop them here so no detection path -- runner,
+    # fresh-inference, re-detection -- can ever persist a boxed tree or barrier, by construction.
+    onto = get_ontology()
+    fused = [fo for fo in fused if onto.is_thing(fo.obj.class_id)]
 
     for fo in fused:
         obj = fo.obj

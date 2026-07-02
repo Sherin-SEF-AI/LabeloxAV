@@ -1156,3 +1156,76 @@ class FrameSegmentation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_frame_segmentation_frame_kind", "frame_id", "kind"),)
+
+
+class AgentRun(Base):
+    # An auditable, reversible unit of autonomous work by the annotation agent. The agent never mutates
+    # objects silently: every run records the policy it applied, per-object state transitions (so a run can
+    # be reverted exactly), the critic's findings, and roll-up counts. This is the guardrail that makes
+    # auto-accept safe at scale -- a bad run is one row to revert, and provenance never lies about who
+    # (which run, which model) touched a label.
+    __tablename__ = "agent_run"
+
+    run_id: Mapped[uuid.UUID] = _uuid_pk()
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # frame|session|flywheel|overnight_auditor|...
+    scope: Mapped[dict] = mapped_column(JSONB, default=dict)       # {frame_id?, session_id?, ...}
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="planned")  # planned|committed|reverted|error
+    policy: Mapped[dict] = mapped_column(JSONB, default=dict)      # thresholds + toggles the run used
+    counts: Mapped[dict] = mapped_column(JSONB, default=dict)      # {auto_accepted, routed_review, escalated, demoted, ...}
+    changes: Mapped[dict] = mapped_column(JSONB, default=dict)     # {object_id: {from_state, to_state, from_source, to_source}}
+    critic: Mapped[dict] = mapped_column(JSONB, default=dict)      # critic findings summary (by check, by object)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String(64))     # user id that launched it, or "flywheel"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    reverted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_agent_run_status", "status"), Index("ix_agent_run_kind", "kind"))
+
+
+class PromotionProposal(Base):
+    """An Ontology Steward evidence packet: a fallback cluster that has grown past the promotion threshold and
+    is proposed as a new named class, awaiting a one-click approve/reject. Approval mints the class and
+    relabels the cluster (reversibly); rejection records the decision. This is how the ontology grows from a
+    reviewed pipeline instead of ad-hoc governance."""
+
+    __tablename__ = "promotion_proposal"
+
+    proposal_id: Mapped[uuid.UUID] = _uuid_pk()
+    from_class: Mapped[int] = mapped_column(Integer, nullable=False)   # the fallback class id it split out of
+    member_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    rep_object_ids: Mapped[list] = mapped_column(JSONB, default=list)  # cluster members (capped) to relabel on approve
+    suggested_name: Mapped[str | None] = mapped_column(String(64))     # nearest existing-class hint (human names it)
+    confusion_classes: Mapped[list] = mapped_column(JSONB, default=list)  # [{class, share}] visual neighbours
+    evidence_uri: Mapped[str | None] = mapped_column(Text)             # crop-grid image in the object store
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="proposed")  # proposed|approved|rejected
+    approved_class: Mapped[int | None] = mapped_column(Integer)        # the minted class id, once approved
+    run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # the reversible relabel run
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_promotion_proposal_status", "status"),)
+
+
+class CollectionOrder(Base):
+    """A Fleet Dispatch proposal: a vehicle sent to a place, in a window, under a forecast, to collect the
+    data the corpus is starved of. This closes the acquisition loop the way the labeling agents close the
+    labeling loop, and only a platform that owns the fleet can act on it. Proposed by the agent; a human
+    dispatches."""
+
+    __tablename__ = "collection_order"
+
+    order_id: Mapped[uuid.UUID] = _uuid_pk()
+    vehicle_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    city: Mapped[str | None] = mapped_column(String(64))
+    area: Mapped[str | None] = mapped_column(String(128))     # route / junction descriptor
+    window: Mapped[str | None] = mapped_column(String(32))    # capture time window, e.g. "18:00-22:00"
+    target: Mapped[str] = mapped_column(Text, nullable=False)  # the gap it fills, human-readable
+    gap_kind: Mapped[str | None] = mapped_column(String(24))  # weather | time_of_day | road_type | class
+    forecast: Mapped[str | None] = mapped_column(String(32))  # weather forecast for the window, if known
+    priority: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="proposed")  # proposed|dispatched|done
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[str | None] = mapped_column(String(64))
+
+    __table_args__ = (Index("ix_collection_order_status", "status"),)

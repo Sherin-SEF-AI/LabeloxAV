@@ -124,6 +124,7 @@ class SegmentIn(BaseModel):
     points: list[list[float]] | None = None
     labels: list[int] | None = None
     box: list[float] | None = None
+    precise: bool = False  # panoptic mode: follow the visible edge tightly and keep occlusion holes
 
 
 class CreateObjectIn(BaseModel):

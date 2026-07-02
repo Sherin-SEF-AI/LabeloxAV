@@ -69,6 +69,16 @@ async def tick(db: AsyncSession, now_hour_utc: int | None = None, schedule_burst
         if r.get("triggered"):
             actions.append({"action": "schedule_retrain", "job_id": r.get("job_id")})
 
+    # 4. Fleet agents: fire whichever scheduled agents are due this tick (nightly auditor off-hours, the
+    #    drift investigator on a breach). The runtime dispatcher self-guards against re-firing.
+    if schedule_bursts:
+        try:
+            from services.agent.runtime.schedule import run_due
+
+            actions.extend(await run_due(db, offhours=offhours, drift=drift))
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("controller.fleet_failed", error=str(exc))
+
     depth = await _queue_depth(db)
     await record(db, "controller", "tick", None,
                  {"actions": [a["action"] for a in actions], "queue": depth,

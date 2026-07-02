@@ -17,6 +17,13 @@ export default function TopNav({ active, right }: { active: string; right?: Reac
   return (
     <header className="flex items-center justify-between gap-4 px-4 h-12 border-b hairline shrink-0">
       <div className="flex items-center gap-3 min-w-0">
+        <button
+          onClick={() => { if (typeof window !== "undefined" && window.history.length > 1) router.back(); else router.push("/"); }}
+          title="back (Alt+Left)"
+          className="flex items-center justify-center w-7 h-7 rounded-md text-ink-3 hover:text-accent hover:bg-line/40 shrink-0"
+        >
+          <span className="text-[15px] leading-none">&larr;</span>
+        </button>
         <button onClick={() => router.push("/")} className="font-display font-bold shrink-0" title="home (triage)">
           Labelox<span className="text-accent">AV</span>
         </button>

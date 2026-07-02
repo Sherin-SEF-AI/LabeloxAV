@@ -81,6 +81,11 @@ def review_object_quality(
                 reasons.append("smaller_than_vru")
                 break
 
+    # 2b. Absolute oversize: a single instance spanning most of the frame is the "everything" box (a fusion
+    #     artifact wrapping the whole scene), implausible for any one road object regardless of class.
+    if area_frac > cfg.max_area_frac:
+        reasons.append("oversize")
+
     # 4. Part versus whole: a small vehicle box mostly inside a much larger vehicle box is a part of it (a
     #    wheel/tyre read as a vehicle), not its own vehicle.
     if l1 in _VEHICLE:

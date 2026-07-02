@@ -17,6 +17,7 @@ from services.api.deps import role_rank
 from services.api.routers import (
     activelearn,
     adverse,
+    agent,
     analytics,
     autolabel,
     calibration,
@@ -233,6 +234,7 @@ async def metrics():
     }
 
 
+app.include_router(agent.router, prefix="/api", tags=["agent"])
 app.include_router(meta.router, prefix="/api", tags=["meta"])
 app.include_router(triage.router, prefix="/api", tags=["triage"])
 app.include_router(objects.router, prefix="/api", tags=["objects"])

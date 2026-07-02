@@ -21,6 +21,29 @@ from core.config import get_settings
 # treats a brand-new class as rare and forces human review until it has been governed properly.
 CUSTOM_ID_BASE = 200
 
+# Thing vs stuff (panoptic split). THINGS are countable foreground objects (vehicles, people, animals,
+# signs, poles, cones) that get one instance box each. STUFF is background: uncountable extended regions
+# (sky, road and every surface, vegetation, barriers, walls, buildings) that belong to semantic
+# segmentation and must never get an instance box. Boxing stuff is the "tree/barrier/sky is an object"
+# error. Surfaces and ignore-regions are stuff by their l0; the rest of stuff is a curated name set, because
+# infra/fixed mixes real things (pole, traffic_sign) with stuff (tree, barrier) under the same l0/l1. Extend
+# STUFF_NAMES when a new uncountable class is added; a class absent here defaults to a thing.
+STUFF_L0 = frozenset({"surface", "ignore"})
+STUFF_NAMES = frozenset({
+    # vegetation / foliage
+    "tree", "vegetation", "fallen_tree",
+    # barriers / fences / walls / railings
+    "barrier", "crash_barrier", "median_barrier", "guardrail", "fence", "road_side_grill",
+    "side_wall", "construction_barrier", "barricade_line", "temp_barricade", "sandbag",
+    # buildings and large fixed structures
+    "buildings", "shops", "foot_overbridge", "flyover_pillar", "fly_over", "bus_shelter",
+    "bmtc_bus_shelter", "metro_bus_stop", "school_bus_stop", "temp_bus_stop", "toll_booth",
+    "telephone_booth", "overhead_water_tank", "shrine", "hoarding", "metro_pillar",
+    "festival_pandal", "roadside_shop",
+    # amorphous ground clutter and lines
+    "electric_line", "debris", "garbage_pile", "waterlogging", "excavation_pit",
+})
+
 
 @dataclass(frozen=True)
 class OntologyClassDef:
@@ -86,6 +109,16 @@ class Ontology:
 
     def is_fallback(self, class_id: int) -> bool:
         return self.by_id(class_id).l1 == "fallback"
+
+    def is_stuff(self, class_id: int) -> bool:
+        """True if the class is background stuff (semantic-seg only, never an instance box): any surface or
+        ignore-region, plus the curated uncountable structures/vegetation/barriers in STUFF_NAMES."""
+        c = self.by_id(class_id)
+        return c.l0 in STUFF_L0 or c.name in STUFF_NAMES
+
+    def is_thing(self, class_id: int) -> bool:
+        """True if the class is a countable foreground object that legitimately gets one instance box."""
+        return not self.is_stuff(class_id)
 
     def validate_attrs(self, attrs: dict, class_id: int | None = None) -> list[str]:
         """Return a list of validation errors; empty means valid. When class_id is given and its subclass

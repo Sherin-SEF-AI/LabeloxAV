@@ -171,6 +171,13 @@ class FusionSettings(BaseModel):
     centroid_px: float = 48.0
     mask_box_disagree_iou: float = 0.70
     class_priors: dict = Field(default_factory=dict)
+    # Post-fusion de-duplication: after clustering, suppress a fused box that overlaps a higher-confidence
+    # same-object box. Two boxes are the same object when their classes are compatible (same class, same l1
+    # superclass, or one is a fallback) AND they either overlap heavily (IoU) or one nests in the other
+    # (intersection-over-min, for the many-scales-of-one-car case). Different-l1 pairs (rider on a bike)
+    # are never merged. This turns "one object wrapped in many boxes" into one box.
+    dedupe_iou: float = 0.70
+    dedupe_iom: float = 0.85
 
 
 class CalibrateSettings(BaseModel):
@@ -204,6 +211,10 @@ class QualitySettings(BaseModel):
     dup_iou: float = 0.85          # IoU above which two boxes are the same detection (keep the higher conf)
     part_contain: float = 0.80     # a small vehicle box this contained in a much larger one is a part (wheel)
     vru_contain: float = 0.70      # a VRU box this contained in a four-wheeler/heavy box is implausible
+    # a single instance spanning more than this fraction of the frame is the "everything" box: a fusion
+    # artifact that wraps most of the scene. An absolute ceiling above every per-class band, so even a
+    # heavy-vehicle box cannot slip a full-frame span through. Demote (route to review), never delete.
+    max_area_frac: float = 0.85
     # per-superclass (l1) plausible area as a fraction of the frame; outside is an impossible size
     size_bounds: dict[str, list[float]] = Field(default_factory=lambda: {
         "two_wheeler": [0.0004, 0.45], "three_wheeler": [0.0008, 0.55], "four_wheeler": [0.0008, 0.75],

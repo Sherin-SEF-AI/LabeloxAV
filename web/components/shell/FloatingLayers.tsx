@@ -8,10 +8,13 @@ import Icon from "@/components/shell/Icon";
 // layers panel: an eye toggle per layer keyed off the layers object, so a new layer is one more key with
 // zero toolbar impact.
 
-export default function FloatingLayers({ layers, onToggle, extra }: {
+export default function FloatingLayers({ layers, onToggle, extra, meta }: {
   layers: Record<string, boolean>;
   onToggle: (key: string) => void;
   extra?: React.ReactNode;
+  // per-layer provenance line ("proposed - mask2former"), so it is obvious who produced each overlay
+  // (an AI model on the pod vs a human vs an import) without opening the object list or the database.
+  meta?: Record<string, string>;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -25,12 +28,16 @@ export default function FloatingLayers({ layers, onToggle, extra }: {
         <div className="p-1">
           {Object.keys(layers).map((k) => {
             const on = layers[k];
+            const prov = meta?.[k];
             return (
-              <button key={k} onClick={() => onToggle(k)}
+              <button key={k} onClick={() => onToggle(k)} title={prov ? `${k}: ${prov}` : k}
                 className={`flex items-center gap-2 w-full px-2 py-1 rounded hover:bg-line/40 ${on ? "text-ink-2" : "text-ink-3"}`}>
                 <span className={`flex ${on ? "text-ink-2" : "text-ink-3/60"}`}><Icon name={on ? "eye" : "eyeOff"} size={14} /></span>
-                <span className={`w-2 h-2 rounded-sm ${on ? "bg-accent" : "bg-line"}`} />
-                <span className="flex-1 text-left font-body text-[11.5px]">{k}</span>
+                <span className={`w-2 h-2 rounded-sm shrink-0 ${on ? "bg-accent" : "bg-line"}`} />
+                <span className="flex-1 min-w-0 text-left">
+                  <span className="block font-body text-[11.5px] leading-tight">{k}</span>
+                  {prov && <span className="block font-mono text-[9px] leading-tight text-ink-3/80 truncate">{prov}</span>}
+                </span>
               </button>
             );
           })}

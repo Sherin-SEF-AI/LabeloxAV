@@ -52,6 +52,18 @@ def segment_frame(image_bgr, frame_id, session_id, store, onto, settings, *, bac
         segments[str(inst)] = {"class_id": cid, "class_name": name, "object_id": None}
     log.info("segment2d.frame", kind=kind, regions=len(regions), instances=inst)
 
+    if kind == "panoptic":
+        # Panoptic segments must tile the frame without overlap, so each one's polygon has to follow the
+        # visible edge precisely and exclude whatever occludes it. The instance raster already encodes
+        # that: regions were painted largest-first, so a vehicle in front of a retaining wall overwrote
+        # the wall's pixels there. Polygonize each segment straight from that raster with a fixed pixel
+        # tolerance (so a large stuff region is no coarser than a small thing) and keep interior holes, so
+        # a stuff region keeps the cut-out where an occluding vehicle sits instead of swallowing it.
+        # (Semantic stays raster-only; a coarse boundary is acceptable there.)
+        from services.autolabel.paths.path_b_sam3 import polygons_from_mask
+        for sid, seg in segments.items():
+            seg["polygon"] = polygons_from_mask(instance == int(sid), keep_holes=True, epsilon_px=1.5)
+
     total = float(h * w) or 1.0
     coverage: dict[str, float] = {}
     for cid in np.unique(labels):

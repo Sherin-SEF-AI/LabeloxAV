@@ -91,6 +91,9 @@ class Provenance(BaseModel):
     # M-Q.4 quality reviewer demotion reasons (above_horizon, impossible_size, part_of_vehicle, ...). Empty
     # when the object passed; persisted so confirmed demotions feed the correction and retrain loop.
     quality_flags: list[str] = Field(default_factory=list)
+    # Fusion de-duplication: the lower-confidence same-object boxes this one absorbed (class + conf each),
+    # so a merged duplicate is auditable rather than silently dropped.
+    merged_duplicates: list[dict] = Field(default_factory=list)
 
 
 class UnifiedObject(BaseModel):

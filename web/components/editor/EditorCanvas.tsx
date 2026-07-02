@@ -6,7 +6,7 @@
 // image pixels; the stage transform maps to screen. getRelativePointerPosition() returns image coords.
 
 import { useEffect, useRef, useState } from "react";
-import { Circle, Group, Image as KImage, Layer, Line, Rect, Stage, Text as KText, Transformer } from "react-konva";
+import { Circle, Group, Image as KImage, Layer, Line, Rect, Shape, Stage, Text as KText, Transformer } from "react-konva";
 import type Konva from "konva";
 import { classColor, classFill } from "@/lib/colors";
 import type { EdObject, Tool, Viewport } from "./useEditor";
@@ -66,7 +66,11 @@ const ADVERSE_COLOR: Record<string, string> = {
 
 export default function EditorCanvas(p: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 800, h: 600 });
+  // Start at 0x0, not a guessed 800x600: the fit effect keys off `size` and runs once when scale is the
+  // fit-pending sentinel, so if it fired against a placeholder size it would fit to 800x600 and never
+  // re-fit when the real container size arrived. Zero keeps the fit guard (size.w > 1) false until the
+  // container is actually measured, so the frame fits to the true canvas.
+  const [size, setSize] = useState({ w: 0, h: 0 });
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [draw, setDraw] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [poly, setPoly] = useState<number[]>([]); // in-progress manual polygon, flattened [x,y,...]
@@ -266,14 +270,25 @@ export default function EditorCanvas(p: Props) {
               fill={(ADVERSE_COLOR[a.condition] ?? "#A0A6AD") + "33"} />
           ))}
 
-          {/* masks */}
-          {L.masks && p.objects.filter((o) => o.visible).flatMap((o) =>
-            o.mask.map((poly, i) => (
-              <Line key={`m${o.id}-${i}`} points={poly} closed listening={false}
-                stroke={classColor(o.class_id)} strokeWidth={1.5 / s}
-                fill={classFill(o.class_id, o.id === p.selectedId ? 0.3 : 0.16)} />
-            )),
-          )}
+          {/* masks: one even-odd Shape per object, so a ring nested inside another (an erased or
+              occlusion-cut region) renders as a hole instead of a second filled blob */}
+          {L.masks && p.objects.filter((o) => o.visible && o.mask.length).map((o) => (
+            <Shape key={`m${o.id}`} listening={false}
+              sceneFunc={(ctx) => {
+                ctx.beginPath();
+                for (const poly of o.mask) {
+                  if (poly.length < 6) continue;
+                  ctx.moveTo(poly[0], poly[1]);
+                  for (let i = 2; i < poly.length; i += 2) ctx.lineTo(poly[i], poly[i + 1]);
+                  ctx.closePath();
+                }
+                ctx.fillStyle = classFill(o.class_id, o.id === p.selectedId ? 0.3 : 0.16);
+                ctx.fill("evenodd");
+                ctx.strokeStyle = classColor(o.class_id);
+                ctx.lineWidth = 1.5 / s;
+                ctx.stroke();
+              }} />
+          ))}
 
           {/* lane splines (M2.1), drawn above masks */}
           {L.lanes && p.lanes?.map((ln) => (
@@ -291,8 +306,18 @@ export default function EditorCanvas(p: Props) {
           ))}
 
           {/* boxes (rendered around their centre so rotation is about the centre; bbox stays the AABB).
-              Polyline objects render as the open line above, not as a box. */}
-          {L.boxes && p.objects.filter((o) => o.visible && !(o.polyline && o.polyline.length >= 2)).map((o) => {
+              Polyline objects render as the open line above, not as a box.
+              Order matters for hit-testing: draw the largest boxes first so the smallest one sits on top,
+              and a click inside a dense cluster selects the tightest object rather than the big one behind
+              it. The selected box is forced to the very top so its transform handles are never occluded. */}
+          {L.boxes && [...p.objects.filter((o) => o.visible && !(o.polyline && o.polyline.length >= 2))]
+            .sort((a, b) => {
+              if (a.id === p.selectedId) return 1;
+              if (b.id === p.selectedId) return -1;
+              const area = (o: typeof a) => (o.bbox[2] - o.bbox[0]) * (o.bbox[3] - o.bbox[1]);
+              return area(b) - area(a);
+            })
+            .map((o) => {
             const w = o.bbox[2] - o.bbox[0];
             const h = o.bbox[3] - o.bbox[1];
             const cx = o.bbox[0] + w / 2;
@@ -304,6 +329,10 @@ export default function EditorCanvas(p: Props) {
                 ref={isSel ? selRectRef : undefined}
                 x={cx} y={cy} offsetX={w / 2} offsetY={h / 2} width={w} height={h} rotation={o.rot ?? 0}
                 stroke={classColor(o.class_id)} strokeWidth={(isSel ? 2.5 : 1.5) / s}
+                // a hit-only transparent fill makes the whole interior selectable (an unfilled Konva shape
+                // is clickable on its 1px stroke only); the wide hitStrokeWidth makes tiny boxes catchable.
+                fill="transparent"
+                hitStrokeWidth={12 / s}
                 dash={o.isNew ? [6 / s, 4 / s] : undefined}
                 draggable={isSel && p.tool === "select"}
                 onMouseDown={(e) => {

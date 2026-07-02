@@ -16,6 +16,7 @@ import CorrectionModal, { type CorrectionChange } from "@/components/CorrectionM
 import ToolStrip from "@/components/shell/ToolStrip";
 import ModeRail from "@/components/shell/ModeRail";
 import FloatingLayers from "@/components/shell/FloatingLayers";
+import AgentPanel from "@/components/agent/AgentPanel";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import ScoreBar from "@/components/shell/ScoreBar";
 import Icon, { MODE_ICON } from "@/components/shell/Icon";
@@ -169,6 +170,9 @@ export default function FrameEditor() {
   const [brushRadius, setBrushRadius] = useState(14);
   const [segUrl, setSegUrl] = useState<string | null>(null); // dense-segmentation overlay png url
   const [segKind, setSegKind] = useState<"semantic" | "panoptic">("semantic");
+  // provenance of the machine-produced overlays (drivable/seg), so the layers panel can show who made each
+  const [drivableMeta, setDrivableMeta] = useState<{ source: string; model?: string | null } | null>(null);
+  const [segMeta, setSegMeta] = useState<{ source: string; model?: string | null } | null>(null);
   const [objSearch, setObjSearch] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState("objects");
@@ -234,7 +238,8 @@ export default function FrameEditor() {
   const placeCuboid = async (pt: number[]) => {
     if (!currentClass) return;
     try {
-      const { ego } = await api.liftGround(id, pt[0], pt[1]);
+      const { ego, reason } = await api.liftGround(id, pt[0], pt[1]);
+      if (!ego) { flash(reason || "click on the road ahead to place a cuboid"); return; }
       const cub = { center: [ego[0], ego[1], 0.75], size: [1.8, 4.2, 1.5], yaw: 0 };
       dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
         bbox: [pt[0] - 40, pt[1] - 40, pt[0] + 40, pt[1] + 40], mask: [], cuboid_3d: cub, attrs: {},
@@ -257,7 +262,7 @@ export default function FrameEditor() {
   // magic-wand: a single SAM point click that auto-creates (or refines) the object, no accept step
   const runMagicWand = async (pt: number[]) => {
     try {
-      const r = await api.segmentPrompt(id, { points: [pt], labels: [1] });
+      const r = await api.segmentPrompt(id, { points: [pt], labels: [1], precise: segKind === "panoptic" });
       if (!r.polygons.length) { flash("magic-wand found nothing here"); return; }
       const box = bboxOfPolys(r.polygons);
       if (selected && overlapFrac(box, selected.bbox) > 0.5) {
@@ -315,13 +320,38 @@ export default function FrameEditor() {
     const [ls, dr, rel, adv, cub] = await Promise.all([api.framesLanes(id).catch(() => []), api.getDrivable(id).catch(() => null), api.frameRelationships(id).catch(() => []), api.listAdverse(id).catch(() => []), api.frameCuboids(id).catch(() => [])]);
     setLanes(ls);
     setDrivable(dr && dr.found ? dr.classes ?? null : null);
+    setDrivableMeta(dr && dr.found ? { source: dr.source ?? "", model: dr.model_version } : null);
     setRelationships(rel);
     setAdverse(adv);
     setCuboids(cub);
-    const seg = await api.getSegment(id, segKind).catch(() => ({ found: false, has_overlay: false }));
+    const seg = await api.getSegment(id, segKind).catch(() => ({ found: false, has_overlay: false, source: "", model_version: null }));
     setSegUrl(seg.found && seg.has_overlay ? `/api/frames/${id}/segment/overlay?kind=${segKind}&t=${Date.now()}` : null);
+    setSegMeta(seg.found ? { source: seg.source ?? "", model: seg.model_version } : null);
   }, [id, segKind]);
   useEffect(() => { loadLayers(); }, [loadLayers]);
+  // Compact provenance per overlay layer ("proposed - mask2former-mapillary"), so the layers panel shows
+  // who produced each overlay: a model on the pod, a human, or an import. Object layers (boxes/masks/
+  // cuboids) already carry per-object source badges in the object list, so they are not repeated here.
+  const layerMeta = useMemo(() => {
+    const clean = (m?: string | null) => (m ? m.split(":")[0] : ""); // drop the ":pod"/":local" runtime tag
+    // The model is only meaningful for machine-produced overlays; a human-owned layer reads plainly as
+    // "human" (showing a stale proposing-model there was misleading, e.g. "human - clrernet").
+    const MACHINE = new Set(["proposed", "propagated", "fused", "auto_accept", "interpolated"]);
+    const fmt = (source?: string, model?: string | null) =>
+      [source || "", source && MACHINE.has(source) ? clean(model) : ""].filter(Boolean).join(" · ");
+    const out: Record<string, string> = {};
+    if (lanes.length) {
+      const srcs = Array.from(new Set(lanes.map((l) => l.source)));
+      out.lanes = srcs.length === 1 ? fmt(srcs[0], lanes.find((l) => l.model_version)?.model_version) : "mixed sources";
+    }
+    if (drivableMeta) out.drivable = fmt(drivableMeta.source, drivableMeta.model);
+    if (adverse.length) {
+      const srcs = Array.from(new Set(adverse.map((a) => a.source)));
+      out.adverse = srcs.length === 1 ? srcs[0] || "" : "mixed sources";
+    }
+    if (segMeta) out.seg = fmt(segMeta.source, segMeta.model);
+    return out;
+  }, [lanes, drivableMeta, adverse, segMeta]);
   // fetch SLIC superpixels lazily, the first time the superpixel tool is used on this frame
   useEffect(() => {
     if (st.tool === "superpixel" && !superpixels.length) {
@@ -569,7 +599,7 @@ export default function FrameEditor() {
     async (prompt: { points?: number[][]; labels?: number[]; box?: number[] }) => {
       if (st.candidate?.length) acceptCandidate(); // commit the pending mask before starting the next
       try {
-        const r = await api.segmentPrompt(id, prompt);
+        const r = await api.segmentPrompt(id, { ...prompt, precise: segKind === "panoptic" });
         dispatch({ t: "candidate", polys: r.polygons });
         if (!r.polygons.length) flash("SAM found nothing here");
       } catch (e) {
@@ -577,7 +607,7 @@ export default function FrameEditor() {
         flash(msg.includes("503") ? "GPU busy (training). Box tools still work." : "segment failed");
       }
     },
-    [id, dispatch, st.candidate, acceptCandidate],
+    [id, dispatch, st.candidate, acceptCandidate, segKind],
   );
 
   // Leaving a SAM tool (or switching away) commits any uncommitted mask instead of dropping it.
@@ -943,7 +973,7 @@ export default function FrameEditor() {
             onCursor={setCursor}
           />
           )}
-          {mode !== "lidar3d" && <FloatingLayers layers={layers} onToggle={(k) => setLayers((s) => ({ ...s, [k]: !s[k as keyof typeof s] }))}
+          {mode !== "lidar3d" && <FloatingLayers layers={layers} meta={layerMeta} onToggle={(k) => setLayers((s) => ({ ...s, [k]: !s[k as keyof typeof s] }))}
             extra={
               <>
                 <select value={segKind} onChange={(e) => setSegKind(e.target.value as "semantic" | "panoptic")}
@@ -1386,6 +1416,7 @@ export default function FrameEditor() {
               <button onClick={genLanes} className="border border-line text-ink-2 px-1.5 py-1 hover:border-accent">propose lanes</button>
               <button onClick={() => router.push(`/annotate/lane/${id}`)} className="border border-line text-ink-2 px-1.5 py-1 hover:border-accent col-span-2">edit lanes + drivable &rarr;</button>
             </div>
+            <AgentPanel frameId={id} selectedId={st.selectedId} onApplied={loadLayers} />
           </div>
 
           {/* object list: grouped by class, searchable, collapsible, with a confidence bar per row. Scales

@@ -29,8 +29,11 @@ def _ontology_text_vecs():
 def classify_crop(crop_bgr: np.ndarray, topk: int = 3) -> list[dict]:
     """Top-k ontology classes for a crop by SigLIP 2 zero-shot similarity, each with a softmax confidence."""
     from services.intelligence.embed import siglip2
+    from services.intelligence.embed.prep import square_letterbox
     classes, tvecs = _ontology_text_vecs()
-    fv = siglip2.encode_image(crop_bgr)
+    # Letterbox to a square first: SigLIP's processor would otherwise squish a tall/wide crop and blur the
+    # very shape that distinguishes, say, a pedestrian from an autorickshaw.
+    fv = siglip2.encode_image(square_letterbox(crop_bgr))
     logits = (np.asarray(tvecs) @ np.asarray(fv)) * 100.0
     p = np.exp(logits - logits.max())
     p = p / p.sum()

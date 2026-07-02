@@ -104,7 +104,24 @@ async function del<T>(path: string): Promise<T> {
 
 // SAM segment supports point prompts (with fg/bg labels) and/or a box prompt. Returns 503 if a
 // training job holds the GPU; callers surface that as a non-blocking notice.
-export type SegmentPrompt = { points?: number[][]; labels?: number[]; box?: number[] };
+export type SegmentPrompt = { points?: number[][]; labels?: number[]; box?: number[]; precise?: boolean };
+
+export type AgentPolicy = { auto_accept_conf?: number; review_low?: number; require_agreement?: boolean };
+export type AgentCounts = { total: number; auto_accept: number; review: number; annotate: number; unchanged: number; demoted_by_critic: number };
+export type AgentPlanItem = { object_id: string; class_name: string; conf: number; current_state: string; action: string; changes_state: boolean; reason: string; tier: string; critic_ok: boolean; critic_reasons: string[] };
+export type AgentPlan = { frame_id: string; policy: AgentPolicy; counts: AgentCounts; critic_flags: Record<string, number>; items: AgentPlanItem[] };
+export type PromotionProposalRow = {
+  proposal_id: string; from_class: string; member_count: number; suggested_name: string | null;
+  confusion_classes: { class: string; share: number }[]; sample_object_ids: string[]; status: string;
+};
+export type AuditReport = {
+  window_hours: number; sampled: number; vlm_checked: number; vlm_disagreements: number;
+  among_sample_agreement: number | null;
+  control_precision: { precision: number | null; reviewed: number; pending: number };
+  confusion_movers: { from: string; to: string; n: number; concentrated_in: string | null }[];
+  critic_flags: Record<string, number>; suspects_queued: number;
+  budget: { max_calls: number; used: number; remaining: number }; notes: string[];
+};
 
 // LiDAR 3D viewer
 export type LidarBounds = { min: number[]; max: number[]; n: number };
@@ -330,7 +347,106 @@ export const api = {
   // in-image cuboids: projected wireframes + lift a pixel to the ego ground point
   frameCuboids: (frame_id: string) => get<ProjectedCuboid[]>(`/api/frames/${frame_id}/cuboids`),
   liftGround: (frame_id: string, u: number, v: number) =>
-    get<{ ego: number[] }>(`/api/frames/${frame_id}/lift_ground?u=${u}&v=${v}`),
+    get<{ ego: number[] | null; reason?: string }>(`/api/frames/${frame_id}/lift_ground?u=${u}&v=${v}`),
+  // annotation agent: dry-run plan, reversible commit, revert
+  agentPlan: (frame_id: string, policy: AgentPolicy = {}) =>
+    post<AgentPlan>(`/api/agent/frames/${frame_id}/plan`, policy),
+  agentRun: (frame_id: string, policy: AgentPolicy = {}) =>
+    post<{ run_id: string; applied: number; counts: AgentCounts; policy: AgentPolicy }>(`/api/agent/frames/${frame_id}/run`, policy),
+  agentRevert: (run_id: string) =>
+    post<{ run_id: string; reverted: number; skipped: number }>(`/api/agent/runs/${run_id}/revert`, {}),
+  agentAttributesPlan: (frame_id: string) =>
+    post<{ counts: { objects: number; attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes/plan`, {}),
+  agentAttributes: (frame_id: string) =>
+    post<{ run_id: string; objects_updated: number; counts: { attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes`, {}),
+  agentAsk: (text: string) =>
+    post<{ understood: string; count: number; frames: { frame_id: string; session_id: string }[] }>(`/api/agent/ask`, { text }),
+  agentReport: () =>
+    get<{ size: { sessions: number; objects: number; human_labeled: number }; class_balance: { missing: number; rare: number }; coverage_gaps: string[]; fix_queue: Record<string, number>; fix_queue_total: number; scenarios: Record<string, number>; geo: Record<string, number> }>(`/api/agent/report`),
+  agentSuggest: (frame_id: string) =>
+    get<{ suggestions: { action: string; label: string; n: number; score: number }[] }>(`/api/agent/frames/${frame_id}/suggest`),
+  agentTrainingCycle: (dry_run = true) =>
+    post<{ run_id: string; tick: { frames: number; auto_accept: number; review: number; annotate: number }; retrain: { attempted: boolean; triggered?: boolean } }>(`/api/agent/training/cycle`, { dry_run }),
+  agentGoldDrift: () =>
+    post<{ status: string; champion?: string; baseline_map?: number; current_map?: number; drop?: number }>(`/api/agent/gold-drift`, {}),
+  agentMineScenarios: () =>
+    post<{ persisted: number; by_kind: Record<string, number>; top: { kind: string; score: number; tag: string }[] }>(`/api/agent/scenarios/mine`, {}),
+  agentMineDisagreements: () =>
+    post<{ persisted: number; top: { score: number; tag: string }[] }>(`/api/agent/disagreements/mine`, {}),
+  agentCoverage: () =>
+    get<{ scene_frames: number; class_balance: { median: number; missing: string[]; rare: string[] }; scene_coverage: Record<string, Record<string, number>>; geo: Record<string, number>; gaps: string[] }>(`/api/agent/coverage`),
+  agentErrorSweep: (max_sessions = 10, kinds?: string[]) =>
+    post<{ run_id: string; status: string }>(`/api/agent/errors/sweep`, kinds ? { max_sessions, kinds } : { max_sessions }),
+  agentErrorQueue: (status = "pending", limit = 60) =>
+    get<{ summary: Record<string, number>; candidates: { candidate_id: string; object_id: string; kind: string; score: number; detail: Record<string, unknown>; proposed_label?: { class_name?: string } | null }[] }>(`/api/agent/errors/queue?status=${status}&limit=${limit}`),
+  agentTemporalRepairPlan: (session_id?: string) =>
+    post<{ counts: { tracks: number; flipped_tracks: number; relabels: number; skipped_static?: number } }>(`/api/agent/temporal-repair/plan`, session_id ? { session_id } : {}),
+  agentTemporalRepair: (session_id?: string) =>
+    post<{ run_id: string; relabeled: number; counts: Record<string, number> }>(`/api/agent/temporal-repair`, session_id ? { session_id } : {}),
+  agentCuboidsPlan: (frame_id: string) =>
+    post<{ counts: { total: number; auto_accept: number; review: number; skip: number } }>(`/api/agent/frames/${frame_id}/cuboids/plan`, {}),
+  agentCuboids: (frame_id: string) =>
+    post<{ run_id: string; attached: number; counts: { auto_accept: number; review: number; skip: number } }>(`/api/agent/frames/${frame_id}/cuboids`, {}),
+  agentCrossCamPlan: (object_id: string) =>
+    post<{ counts: { targets: number; auto_accept: number; review: number; skip: number }; class_name?: string; reason?: string }>(`/api/agent/objects/${object_id}/crosscam/plan`, {}),
+  agentCrossCam: (object_id: string) =>
+    post<{ run_id: string; created: number; counts: { auto_accept: number; review: number; skip: number } }>(`/api/agent/objects/${object_id}/crosscam`, {}),
+  agentPropagatePlan: (object_id: string, span = 24) =>
+    post<{ object_id: string; counts: { total_steps: number; auto_accept: number; review: number; stops: number; appearance_used: boolean }; forward: number; backward: number }>(`/api/agent/objects/${object_id}/propagate/plan`, { span }),
+  agentPropagate: (object_id: string, span = 24) =>
+    post<{ run_id: string; track_id: string; created: number; counts: { auto_accept: number; review: number; stops: number } }>(`/api/agent/objects/${object_id}/propagate`, { span }),
+  agentCommand: (frame_id: string, text: string) =>
+    post<{ intent: { action: string; classes: string[] | string; conf_min: number | null }; result: unknown; summary: string; blocked?: boolean }>(`/api/agent/command`, { text, frame_id }),
+  // relabel: an independent model re-reads existing boxes and corrects the class where it decisively disagrees
+  agentRelabelPlan: (frame_id: string) =>
+    post<{ frame_id: string; counts: { total: number; relabel_keep: number; relabel_review: number }; items: { object_id: string; from_name: string; to_name: string; conf: number; action: string }[] }>(`/api/agent/frames/${frame_id}/relabel/plan`, {}),
+  agentRelabel: (frame_id: string) =>
+    post<{ run_id: string; relabeled: number; counts: { total: number; relabel_keep: number; relabel_review: number } }>(`/api/agent/frames/${frame_id}/relabel`, {}),
+  agentRelabelAll: (opts: { max_frames?: number; session_id?: string } = {}) =>
+    post<{ run_id: string; status: string }>(`/api/agent/relabel/all`, opts),
+  agentRunStatus: (run_id: string) =>
+    get<{ run_id: string; kind: string; status: string; counts: Record<string, number>; changed: number }>(`/api/agent/runs/${run_id}`),
+  // Overnight Auditor: run the nightly patrol, read the morning report
+  agentAuditRun: (opts: { sample_size?: number; vlm_calls?: number; since_hours?: number } = {}) =>
+    post<{ run_id: string; status: string }>(`/api/agent/audit/run`, opts),
+  agentAuditLatest: () =>
+    get<{ run_id?: string; status?: string; created_at?: string; report: AuditReport | null }>(`/api/agent/audit/latest`),
+  // Drift Investigator: scan for drift now, root-cause a breach; read the latest diagnosis
+  agentDriftInvestigate: () =>
+    post<{ breached: string[]; ran?: boolean; run_id?: string }>(`/api/agent/drift/investigate`, {}),
+  agentDriftLatest: () =>
+    get<{ status?: string; created_at?: string; report: { breached: string[]; hypothesis: string; proposed_action: { kind: string; detail?: string } } | null }>(`/api/agent/drift/latest`),
+  // Documentation Agent: draft datasheet / weekly quality report from the platform's own metrics
+  agentDocDatasheet: (gold_id?: string) =>
+    post<{ uri: string; markdown: string }>(`/api/agent/docs/datasheet`, gold_id ? { gold_id } : {}),
+  agentDocWeekly: () =>
+    post<{ uri: string; markdown: string }>(`/api/agent/docs/weekly`, {}),
+  // Ontology Steward: scan fallback clusters, review promotion proposals, approve/reject
+  agentOntologyScan: (min_cluster = 40) =>
+    post<{ scanned: number; clusters: number; proposals: number }>(`/api/agent/ontology/scan`, { min_cluster }),
+  agentOntologyProposals: () =>
+    get<PromotionProposalRow[]>(`/api/agent/ontology/proposals`),
+  agentOntologyApprove: (proposal_id: string, name: string) =>
+    post<{ class_id: number; name: string; relabeled: number; run_id: string }>(`/api/agent/ontology/proposals/${proposal_id}/approve`, { name }),
+  agentOntologyReject: (proposal_id: string) =>
+    post<{ status: string }>(`/api/agent/ontology/proposals/${proposal_id}/reject`, {}),
+  // Annotation Copilot: the reviewer's repeated correction + similar cases a one-click batch would fix
+  agentCopilotPattern: () =>
+    get<{ pattern: { from_name: string; to_name: string; to_class: number; count: number } | null; candidates: string[] }>(`/api/agent/copilot/pattern`),
+  agentCopilotBatchFix: (object_ids: string[], to_class: number) =>
+    post<{ run_id: string; relabeled: number }>(`/api/agent/copilot/batch-fix`, { object_ids, to_class }),
+  // Operations Agent: plan + run a platform operation from a sentence
+  // Fleet Dispatch: turn coverage gaps + fleet + forecast into collection orders
+  agentFleetPlan: () =>
+    post<{ gaps: number; orders: number; vehicles: number }>(`/api/agent/fleet/plan`, {}),
+  agentFleetOrders: (status = "proposed") =>
+    get<{ order_id: string; vehicle_id: string; city: string | null; window: string | null; target: string; forecast: string | null; priority: number; status: string; summary: string }[]>(`/api/agent/fleet/orders?status=${status}`),
+  agentFleetDispatch: (order_id: string, status: string) =>
+    post<{ status: string }>(`/api/agent/fleet/orders/${order_id}/${status}`, {}),
+  agentBuyerSpec: (text: string, confirm = false, name?: string) =>
+    post<{ status: string; understood?: string; fulfillment?: { requested: number | null; available: number; fulfillable: number; shortfall: number }; guidance?: string | null; slice?: { slice_id: string }; datasheet_uri?: string }>(`/api/agent/buyer/spec`, { text, confirm, name }),
+  agentOpsAsk: (text: string, confirm = false) =>
+    post<{ plan: { source: string; steps: { tool: string; args: Record<string, unknown>; mutating: boolean }[] }; status: string; results?: { tool: string; result: Record<string, unknown> }[]; pending?: { tool: string } | null; message?: string }>(`/api/agent/ops/ask`, { text, confirm }),
   // pixel-assist: brush/eraser mask composition + SLIC superpixels
   composeMask: (body: { polygons: number[][]; ops: { op: string; center: number[]; radius: number }[]; width: number; height: number }) =>
     post<{ polygons: number[][] }>(`/api/mask/compose`, body),
@@ -340,7 +456,7 @@ export const api = {
   autoSegment: (frame_id: string, kind = "semantic") =>
     post<{ kind: string; coverage: Record<string, number>; n_instances: number }>(`/api/frames/${frame_id}/segment?kind=${kind}`, {}),
   getSegment: (frame_id: string, kind = "semantic") =>
-    get<{ found: boolean; coverage?: Record<string, number>; has_overlay?: boolean }>(`/api/frames/${frame_id}/segment?kind=${kind}`),
+    get<{ found: boolean; coverage?: Record<string, number>; has_overlay?: boolean; source?: string; model_version?: string | null }>(`/api/frames/${frame_id}/segment?kind=${kind}`),
   // M2.1 lanes
   framesLanes: (frameId: string) => get<LaneRow[]>(`/api/frames/${frameId}/lanes`),
   proposeLanes: (frameId: string) => post<{ proposed: number; lanes: LaneRow[]; model: string }>(`/api/frames/${frameId}/lanes/propose`, {}),
@@ -352,7 +468,7 @@ export const api = {
   propagateLanes: (frameId: string, frames = 8) => post<{ created: number; to_frames: number }>(`/api/frames/${frameId}/lanes/propagate?frames=${frames}`, {}),
   // M2.2 drivable
   segmentDrivable: (frameId: string) => post<{ coverage: Record<string, number>; model: string }>(`/api/frames/${frameId}/drivable`, {}),
-  getDrivable: (frameId: string) => get<{ found: boolean; classes?: Record<string, number[][]>; coverage?: Record<string, number> }>(`/api/frames/${frameId}/drivable`),
+  getDrivable: (frameId: string) => get<{ found: boolean; classes?: Record<string, number[][]>; coverage?: Record<string, number>; source?: string; model_version?: string | null }>(`/api/frames/${frameId}/drivable`),
   propagateObject: (object_id: string, frames = 12) =>
     post<{ created: number; track_id?: string; object_ids?: string[]; reason?: string }>(
       `/api/objects/${object_id}/propagate?frames=${frames}`, {}),
@@ -403,6 +519,12 @@ export const api = {
     post<{ started: boolean }>("/api/corrections/embed" + (session_id ? `?session_id=${session_id}` : ""), {}),
   startAutolabel: (session_id: string, limit?: number, compute_target: "local" | "cloud" = "local") =>
     post<{ job_id: string; status: string }>("/api/autolabel/start", { session_id, limit, compute_target }),
+  estimateEgoMasks: (force = false) =>
+    post<{ cameras: number; with_hood: number; no_hood: string[] }>(`/api/autolabel/ego-masks/estimate?force=${force}`, {}),
+  piiBackfill: (limit = 2000) =>
+    post<{ status: string; limit: number }>(`/api/autolabel/pii-backfill?limit=${limit}`, {}),
+  redetectAll: (backfill_pii = true) =>
+    post<{ run_id: string; status: string }>(`/api/autolabel/redetect-all?backfill_pii=${backfill_pii}`, {}),
   startVlmQa: (session_id: string, limit = 40) =>
     post<{ started: boolean }>(`/api/qa/vlm?session_id=${session_id}&limit=${limit}`, {}),
   recognizeSigns: (session_id: string, limit = 200) =>

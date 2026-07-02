@@ -9,7 +9,13 @@ from __future__ import annotations
 
 def compose_mask(polygons: list[list[float]], ops: list[dict], width: int, height: int) -> list[list[float]]:
     """Rasterize the object's current polygons, apply circular brush (add) / eraser (subtract) stamps,
-    and re-polygonize. ops is a list of {"op": "add"|"erase", "center": [x,y], "radius": r}."""
+    and re-polygonize. ops is a list of {"op": "add"|"erase", "center": [x,y], "radius": r}.
+
+    The rings are combined with the even-odd rule (XOR per ring), not a flat union, so a ring nested
+    inside another reads as a hole. Without this the eraser looked broken: erasing the interior of a mask
+    (for example an occluding vehicle out of a large wall region) punched a hole in the raster, but the
+    old external-only re-polygonize discarded it and returned the unchanged outer boundary. Holes are now
+    preserved on the way in (so successive strokes compound) and on the way out (keep_holes=True)."""
     import cv2
     import numpy as np
 
@@ -19,11 +25,13 @@ def compose_mask(polygons: list[list[float]], ops: list[dict], width: int, heigh
     for poly in polygons:
         pts = np.asarray(poly, np.float32).reshape(-1, 2).astype(np.int32)
         if len(pts) >= 3:
-            cv2.fillPoly(m, [pts], 1)
+            ring = np.zeros_like(m)
+            cv2.fillPoly(ring, [pts], 1)
+            m ^= ring  # even-odd: a ring inside a filled region carves a hole
     for op in ops:
         cx, cy = int(round(op["center"][0])), int(round(op["center"][1]))
         cv2.circle(m, (cx, cy), max(1, int(round(op["radius"]))), 1 if op.get("op") == "add" else 0, -1)
-    return polygons_from_mask(m.astype(bool))
+    return polygons_from_mask(m.astype(bool), keep_holes=True)
 
 
 def slic_superpixels(image_bgr, n_segments: int = 300, compactness: float = 12.0) -> list[list[float]]:

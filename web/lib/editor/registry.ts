@@ -14,6 +14,7 @@ export const APP_GROUPS: NavGroup[] = [
     label: "Work",
     items: [
       { href: "/", label: "Triage", hint: "object queue ranked by value" },
+      { href: "/agent", label: "Agent Console", hint: "autonomous QA: error sweep, temporal repair, fix queue" },
       { href: "/review/queue", label: "Review queue", hint: "active learning + error candidates" },
       { href: "/annotations", label: "Annotations", hint: "browse and resume sessions" },
       { href: "/jobs", label: "Jobs", hint: "import, training, autolabel runs" },
