@@ -528,6 +528,32 @@ async def audit_latest(db: AsyncSession = Depends(db_session)):
     return await latest_report(db) or {"report": None}
 
 
+class DriftInvestigateIn(BaseModel):
+    ref_sessions: list[str] | None = None
+    cur_sessions: list[str] | None = None
+
+
+@router.post("/agent/drift/investigate", dependencies=[Depends(require_role("reviewer"))])
+async def drift_investigate(body: DriftInvestigateIn | None = None, db: AsyncSession = Depends(db_session),
+                            user=Depends(current_user)):
+    """Scan for drift now and, on a breach, launch the Drift Investigator to root-cause it (affected slice,
+    worst classes/scenes/sessions, common factor, hypothesis + proposed action). Proposes only; poll
+    GET /agent/drift/latest."""
+    from services.agent.drift_investigator import run_on_demand
+
+    body = body or DriftInvestigateIn()
+    return await run_on_demand(db, body.ref_sessions, body.cur_sessions,
+                               created_by=str(user.user_id) if user else "drift_investigator")
+
+
+@router.get("/agent/drift/latest", dependencies=[Depends(require_role("annotator"))])
+async def drift_latest(db: AsyncSession = Depends(db_session)):
+    """The most recent Drift Investigator diagnosis."""
+    from services.agent.drift_investigator import latest_report
+
+    return await latest_report(db) or {"report": None}
+
+
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
 async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
     return await list_runs(db, limit)

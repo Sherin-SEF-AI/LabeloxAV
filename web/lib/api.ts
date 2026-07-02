@@ -407,6 +407,11 @@ export const api = {
     post<{ run_id: string; status: string }>(`/api/agent/audit/run`, opts),
   agentAuditLatest: () =>
     get<{ run_id?: string; status?: string; created_at?: string; report: AuditReport | null }>(`/api/agent/audit/latest`),
+  // Drift Investigator: scan for drift now, root-cause a breach; read the latest diagnosis
+  agentDriftInvestigate: () =>
+    post<{ breached: string[]; ran?: boolean; run_id?: string }>(`/api/agent/drift/investigate`, {}),
+  agentDriftLatest: () =>
+    get<{ status?: string; created_at?: string; report: { breached: string[]; hypothesis: string; proposed_action: { kind: string; detail?: string } } | null }>(`/api/agent/drift/latest`),
   // pixel-assist: brush/eraser mask composition + SLIC superpixels
   composeMask: (body: { polygons: number[][]; ops: { op: string; center: number[]; radius: number }[]; width: number; height: number }) =>
     post<{ polygons: number[][] }>(`/api/mask/compose`, body),

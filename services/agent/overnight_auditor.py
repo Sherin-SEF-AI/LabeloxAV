@@ -14,7 +14,6 @@ using the AgentRun table itself as the "already ran today" marker (no new schema
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -24,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from core.storage import get_object_store
-from db.models import AgentRun, Frame, Object
+from db.models import Frame, Object
 from db.session import get_sessionmaker
 from services.agent.runtime.budget import TokenBudget
 
@@ -213,47 +212,33 @@ async def _control_precision(db: AsyncSession) -> dict:
 
 
 async def _finish(run_id: uuid.UUID, status: str, report: dict, changes: dict) -> None:
-    maker = get_sessionmaker()
-    async with maker() as db:
-        run = await db.get(AgentRun, run_id)
-        if run:
-            run.status = status
-            run.counts = report
-            run.changes = changes
-            await db.commit()
-        try:
-            from services.govern.audit import record
+    from services.agent.runtime.report import finish_run
 
-            await record(db, actor=_KIND, decision="audit_summary", subject=str(run_id), rationale=report)
-        except Exception:  # noqa: BLE001
-            pass
+    await finish_run(run_id, status=status, report=report, changes=changes, decision="audit_summary")
 
 
 async def launch_audit(db: AsyncSession, *, created_by: str = _KIND, **kw) -> dict:
     """Create the AgentRun and fire the background audit. Returns the run id immediately."""
-    run_id = uuid.uuid4()
-    db.add(AgentRun(run_id=run_id, kind=_KIND, scope={}, status="running", policy=kw, counts={},
-                    changes={}, critic={}, created_by=created_by))
-    await db.commit()
-    asyncio.create_task(run_audit(run_id, **kw))
-    return {"run_id": str(run_id), "status": "running"}
+    from services.agent.runtime.report import launch
+
+    async def _worker(run_id: uuid.UUID) -> None:
+        await run_audit(run_id, **kw)
+
+    return await launch(db, _KIND, _worker, created_by=created_by, policy=kw)
 
 
 async def maybe_run_nightly(db: AsyncSession) -> dict:
-    """Off-hours hook for controller.tick: run once per calendar day, using the AgentRun table as the marker."""
+    """Off-hours hook for the runtime scheduler: run once per calendar day (AgentRun as the marker)."""
+    from services.agent.runtime.report import ran_since
+
     day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    exists = (await db.execute(select(AgentRun.run_id).where(
-        AgentRun.kind == _KIND, AgentRun.created_at >= day_start).limit(1))).first()
-    if exists:
+    if await ran_since(db, _KIND, day_start):
         return {"ran": False, "reason": "already ran today"}
     res = await launch_audit(db, created_by="scheduler")
     return {"ran": True, **res}
 
 
 async def latest_report(db: AsyncSession) -> dict | None:
-    run = (await db.execute(select(AgentRun).where(AgentRun.kind == _KIND)
-                            .order_by(AgentRun.created_at.desc()).limit(1))).scalar_one_or_none()
-    if run is None:
-        return None
-    return {"run_id": str(run.run_id), "status": run.status,
-            "created_at": run.created_at.isoformat() if run.created_at else None, "report": run.counts}
+    from services.agent.runtime.report import latest_run
+
+    return await latest_run(db, _KIND)

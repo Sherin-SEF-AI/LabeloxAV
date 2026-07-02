@@ -175,6 +175,19 @@ export default function AgentConsole() {
     catch (e) { setMsg(String(e)); }
   };
 
+  const [driftDiag, setDriftDiag] = useState<{ report: { hypothesis: string; proposed_action: { kind: string } } | null } | null>(null);
+  useEffect(() => { api.agentDriftLatest().then(setDriftDiag).catch(() => {}); }, []);
+  const investigateDrift = async () => {
+    setBusy("driftinv"); setMsg(null);
+    try {
+      const r = await api.agentDriftInvestigate();
+      if (!r.breached.length) { setMsg("no drift breach right now - governance is holding within tolerance"); return; }
+      setMsg(`drift breach (${r.breached.join(", ")}) - investigating root cause in the background`);
+      setTimeout(() => api.agentDriftLatest().then(setDriftDiag).catch(() => {}), 4000);
+    } catch (e) { setMsg("drift investigation failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const reason = (c: Cand) => (c.detail?.reason as string) || (c.detail?.reasons ? (c.detail.reasons as string[]).join("; ") : (c.detail?.note as string) || JSON.stringify(c.detail).slice(0, 80));
 
   return (
@@ -315,6 +328,17 @@ export default function AgentConsole() {
                 <div className="text-ink font-medium text-sm">Gold-drift monitor</div>
                 <div className="text-ink-3 text-xs mt-1">Re-evaluate the serving champion on the gold set; if it has regressed beyond tolerance, roll back to the prior champion and pause the loop.</div>
                 <button onClick={drift} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "drift" ? "checking..." : "check gold drift"}</button>
+              </div>
+              <div className="panel p-4">
+                <div className="text-ink font-medium text-sm">Drift Investigator</div>
+                <div className="text-ink-3 text-xs mt-1">On a drift breach, root-cause it: the affected slice, worst classes/scenes/sessions, a common factor, and a proposed action. Proposes only.</div>
+                {driftDiag?.report ? (
+                  <div className="mt-2 font-mono text-[10.5px] text-ink-2">
+                    <div>{driftDiag.report.hypothesis}</div>
+                    <div className="text-ink-3 mt-0.5">proposed: {driftDiag.report.proposed_action.kind}</div>
+                  </div>
+                ) : null}
+                <button onClick={investigateDrift} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "driftinv" ? "investigating..." : "investigate drift"}</button>
               </div>
             </div>
           </div>
