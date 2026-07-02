@@ -347,6 +347,10 @@ export const api = {
     post<{ counts: { total: number; auto_accept: number; review: number; skip: number } }>(`/api/agent/frames/${frame_id}/cuboids/plan`, {}),
   agentCuboids: (frame_id: string) =>
     post<{ run_id: string; attached: number; counts: { auto_accept: number; review: number; skip: number } }>(`/api/agent/frames/${frame_id}/cuboids`, {}),
+  agentCrossCamPlan: (object_id: string) =>
+    post<{ counts: { targets: number; auto_accept: number; review: number; skip: number }; class_name?: string; reason?: string }>(`/api/agent/objects/${object_id}/crosscam/plan`, {}),
+  agentCrossCam: (object_id: string) =>
+    post<{ run_id: string; created: number; counts: { auto_accept: number; review: number; skip: number } }>(`/api/agent/objects/${object_id}/crosscam`, {}),
   agentPropagatePlan: (object_id: string, span = 24) =>
     post<{ object_id: string; counts: { total_steps: number; auto_accept: number; review: number; stops: number; appearance_used: boolean }; forward: number; backward: number }>(`/api/agent/objects/${object_id}/propagate/plan`, { span }),
   agentPropagate: (object_id: string, span = 24) =>

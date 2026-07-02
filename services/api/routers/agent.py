@@ -60,6 +60,38 @@ async def run(frame_id: str, body: AgentPolicyIn | None = None,
         raise HTTPException(404, str(exc)) from exc
 
 
+class CrossCamIn(BaseModel):
+    tol_ms: int = 20
+    high: float = 0.75
+    min_vis: float = 0.50
+
+
+@router.post("/agent/objects/{object_id}/crosscam/plan", dependencies=[Depends(require_role("annotator"))])
+async def crosscam_plan(object_id: str, body: CrossCamIn | None = None, db: AsyncSession = Depends(db_session)):
+    """Dry-run: which other cameras can see this object (via its 3D cuboid) and the box it would get. No writes."""
+    from services.agent.crosscam_agent import plan_cross_camera
+
+    b = body or CrossCamIn()
+    try:
+        return await plan_cross_camera(db, uuid.UUID(object_id), tol_ms=b.tol_ms, high=b.high, min_vis=b.min_vis)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/agent/objects/{object_id}/crosscam", dependencies=[Depends(require_role("reviewer"))])
+async def crosscam_run(object_id: str, body: CrossCamIn | None = None,
+                       db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Propagate the label to the other cameras that can see it, as one reversible run."""
+    from services.agent.crosscam_agent import commit_cross_camera
+
+    b = body or CrossCamIn()
+    try:
+        return await commit_cross_camera(db, uuid.UUID(object_id), tol_ms=b.tol_ms, high=b.high, min_vis=b.min_vis,
+                                         created_by=str(user.user_id) if user else None)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 class CuboidIn(BaseModel):
     min_iou: float = 0.35
     high: float = 0.60

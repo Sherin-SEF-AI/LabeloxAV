@@ -27,6 +27,19 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
     finally { setBusy(null); }
   };
 
+  const doCrossCam = async () => {
+    if (!selectedId) return;
+    setBusy("xcam"); setMsg(null);
+    try {
+      const p = await api.agentCrossCamPlan(selectedId);
+      if (!p.counts.targets) { setMsg(p.reason ? p.reason : "no other synchronized cameras for this object"); return; }
+      const r = await api.agentCrossCam(selectedId);
+      setMsg(r.created ? `propagated to ${r.created} camera view${r.created > 1 ? "s" : ""}` : "not visible in any other camera");
+      onApplied?.();
+    } catch (e) { setMsg("cross-camera failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const doPropagate = async () => {
     if (!selectedId) return;
     setBusy("track"); setMsg(null);
@@ -107,6 +120,11 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
             title="label once, carry this object across the clip both ways; stops where it drifts"
             className="w-full font-mono text-[10px] border border-accent/40 bg-accent/5 text-accent px-2 py-1 rounded hover:bg-accent/15 disabled:opacity-40">
             {busy === "track" ? "auto-tracking..." : "auto-track selected object →"}
+          </button>
+          <button onClick={doCrossCam} disabled={!!busy}
+            title="project this object's 3D box into the other synchronized cameras and label it there"
+            className="w-full mt-1 font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+            {busy === "xcam" ? "projecting..." : "propagate to other cameras →"}
           </button>
         </div>
       )}
