@@ -30,6 +30,8 @@ import type {
   MulticamGroups,
   FrameGroup,
   PersistedGroups,
+  RigObjectsResponse,
+  SuggestResponse,
   SimilarResponse,
   FrameObject,
   ObjectDynamicsRow,
@@ -562,6 +564,12 @@ export const api = {
   multicamGroupAt: (sid: string, ts_ns: number) => get<FrameGroup>(`/api/multicam/group/at?session_id=${sid}&ts_ns=${ts_ns}`),
   multicamGroupNav: (sid: string, gid: string, direction: "prev" | "next") => get<{ group: FrameGroup | null }>(`/api/multicam/group/nav?session_id=${sid}&group_id=${gid}&direction=${direction}`),
   multicamGroupConfirm: (gid: string, confirmed = true) => post<FrameGroup>(`/api/multicam/group/confirm?group_id=${gid}&confirmed=${confirmed}`, {}),
+  // M-MC.2 rig identity + linked selection
+  multicamRigObjects: (sid: string, gid: string) => get<RigObjectsResponse>(`/api/multicam/rig-objects?session_id=${sid}&group_id=${gid}`),
+  multicamSuggestLinks: (sid: string, gid: string) => get<SuggestResponse>(`/api/multicam/suggest-links?session_id=${sid}&group_id=${gid}`),
+  multicamLink: (body: { session_id: string; group_id: string; object_ids: string[]; source?: string }) =>
+    post<{ rig_object_id: string; members: number; class_id: number | null; conflict: boolean }>(`/api/multicam/link`, body),
+  multicamUnlink: (object_id: string) => post<{ unlinked: string; dissolved: boolean }>(`/api/multicam/unlink?object_id=${object_id}`, {}),
   // M2.5 keyframe + interpolation
   setKeyframe: (objectId: string, value = true) => post<{ is_keyframe: boolean; track_id: string | null }>(`/api/objects/${objectId}/keyframe?value=${value}`, {}),
   interpolateKeyframed: (trackId: string, method = "linear") => post<{ created: number; method: string; keyframes: number }>(`/api/tracks/${trackId}/interpolate-keyframed?method=${method}`, {}),

@@ -8,6 +8,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -74,3 +75,52 @@ async def associate(session_id: str):
     from services.multicam.associate import associate_session
 
     return await associate_session(UUID(session_id))
+
+
+# M-MC.2 rig identity + linked selection (Tier 1, no calibration required)
+
+
+@router.get("/multicam/rig-objects")
+async def rig_objects_ep(session_id: str, group_id: str):
+    """The rig-first object list for a group: linked identities + unlinked singletons."""
+    from services.multicam.rigident import rig_objects
+
+    return await rig_objects(UUID(session_id), UUID(group_id))
+
+
+@router.get("/multicam/suggest-links")
+async def suggest_links_ep(session_id: str, group_id: str, appearance_cos: float = 0.55):
+    """DINOv3 appearance-based cross-camera link candidates (assist only, never applied)."""
+    from services.multicam.rigident import suggest_links
+
+    return await suggest_links(UUID(session_id), UUID(group_id), appearance_cos)
+
+
+class LinkBody(BaseModel):
+    session_id: str
+    group_id: str
+    object_ids: list[str]
+    source: str = "manual"
+
+
+@router.post("/multicam/link")
+async def link_ep(body: LinkBody):
+    """Bind two or more objects across views into one rig identity (manual or accepted appearance suggestion)."""
+    from services.multicam.rigident import link_objects
+
+    res = await link_objects(UUID(body.session_id), UUID(body.group_id),
+                             [UUID(o) for o in body.object_ids], body.source)
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@router.post("/multicam/unlink")
+async def unlink_ep(object_id: str):
+    """Remove an object from its rig identity (dissolves the identity if fewer than two members remain)."""
+    from services.multicam.rigident import unlink_object
+
+    res = await unlink_object(UUID(object_id))
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res

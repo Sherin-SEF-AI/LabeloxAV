@@ -140,6 +140,13 @@ export type FrameGroup = {
 };
 export type PersistedGroups = { session_id: string; cameras: string[]; multicamera: boolean; n_groups: number; groups: FrameGroup[] };
 
+// M-MC.2 rig identity
+export type RigMember = { object_id: string; cam: string; class_id: number | null; class_name: string; state: string };
+export type RigObjectItem = { rig_object_id: string; class_id: number | null; class_name: string | null; conflict: boolean; cameras: string[]; members: RigMember[] };
+export type RigObjectsResponse = { group_id: string; rig_objects: RigObjectItem[]; singletons: RigMember[] };
+export type LinkSuggestion = { a: string; b: string; cam_a: string; cam_b: string; class_a: number | null; class_b: number | null; cos: number };
+export type SuggestResponse = { group_id: string; suggestions: LinkSuggestion[]; appearance_cos: number };
+
 export type CalibFovCheck = { implied_fov_deg: number; expected_fov_deg: number | null; diff_deg: number | null; tolerance_deg: number; ok: boolean };
 export type CalibCamera = { cam_id: string; model: string; lens?: string; reproj_error_px: number | null; fov_check: CalibFovCheck; time_offset_ns: number | null; status: string };
 export type CalibDetail = { session_id: string; cameras_in_session: string[]; validations: CalibCamera[]; overall: string };

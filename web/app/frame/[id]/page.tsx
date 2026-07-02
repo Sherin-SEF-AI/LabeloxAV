@@ -31,6 +31,7 @@ import { MODES, type ToolGroup } from "@/lib/editor/registry";
 // module for a react-konva export on a StrictMode re-mount.
 const EditorCanvas = dynamic(() => import("@/components/editor/EditorCanvas").then((m) => ({ default: m.default })), { ssr: false });
 const RigView = dynamic(() => import("@/components/editor/RigView"), { ssr: false });
+const RigIdentityPanel = dynamic(() => import("@/components/editor/RigIdentityPanel"), { ssr: false });
 // Lanes mode swaps to this fit-to-width Konva stage (the folded-in lane editor). Loaded once, ssr off.
 const LaneCanvas = dynamic(() => import("@/components/lane/LaneCanvas"), { ssr: false });
 // 3D and LiDAR mode swaps to the three.js point cloud (the folded-in cuboid workspace). Loaded once, ssr off.
@@ -183,6 +184,7 @@ export default function FrameEditor() {
   const [rigView, setRigView] = useState(false);
   const [rigLayout, setRigLayout] = useState<import("@/components/editor/RigView").RigLayout>("focus");
   const [rigGroup, setRigGroup] = useState<{ groupId: string; cameras: string[]; frameIds: Record<string, string>; missingCams: string[]; confirmed: boolean } | null>(null);
+  const [rigPanel, setRigPanel] = useState(false);   // M-MC.2 rig-identity panel visibility
   const [scaleNoteOpen, setScaleNoteOpen] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   // Responsive: on a narrow screen the properties panel collapses first (the design's degradation order),
@@ -1161,6 +1163,8 @@ export default function FrameEditor() {
                       {rigGroup.missingCams.length} dropped
                     </span>
                   )}
+                  <button onClick={() => setRigPanel((v) => !v)} title="rig identities: link the same object across views"
+                    className={`border px-2 py-0.5 rounded ${rigPanel ? "border-accent text-accent bg-accent/10" : "border-line text-ink-3 hover:border-accent"}`}>identities</button>
                   <button onClick={confirmRigGroup} title="confirm the whole group at once"
                     className={`border px-2 py-0.5 rounded ${rigGroup?.confirmed ? "border-pass text-pass bg-pass/10" : "border-line text-ink-3 hover:border-pass"}`}>
                     {rigGroup?.confirmed ? "confirmed" : "confirm group"}
@@ -1168,6 +1172,15 @@ export default function FrameEditor() {
                 </>
               )}
             </div>
+          )}
+
+          {/* M-MC.2 rig identity panel: rig-first object list, manual link, appearance-suggest, unlink */}
+          {rigView && rigMulti && rigPanel && rigGroup && (
+            <RigIdentityPanel sessionId={meta.session_id} groupId={rigGroup.groupId} onClose={() => setRigPanel(false)}
+              onSelectObject={(oid, cam) => {
+                if (cam === meta.cam_id) doSelect(oid);
+                else if (rigGroup.frameIds[cam]) router.push(`/frame/${rigGroup.frameIds[cam]}?rig=${rigLayout}&focus=${oid}`);
+              }} />
           )}
         </div>
         </div>
