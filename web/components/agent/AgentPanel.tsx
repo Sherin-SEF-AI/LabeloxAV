@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type AgentPlan } from "@/lib/api";
 
 // The frame agent, surfaced in the editor. It runs a dry-run plan first (writes nothing), shows what it
@@ -14,6 +14,13 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
   const [runId, setRunId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [cmd, setCmd] = useState("");
+  const [suggestions, setSuggestions] = useState<{ action: string; label: string }[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    api.agentSuggest(frameId).then((r) => { if (live) setSuggestions(r.suggestions.slice(0, 3)); }).catch(() => {});
+    return () => { live = false; };
+  }, [frameId]);
 
   const doAttributes = async () => {
     setBusy("attrs"); setMsg(null);
@@ -131,6 +138,17 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
           {busy === "attrs" ? "filling..." : "fill attributes"}
         </button>
       </div>
+
+      {suggestions.length > 0 && (
+        <div className="px-1 pb-1.5">
+          <div className="font-mono text-[9px] uppercase tracking-wider text-ink-3/70 mb-0.5">suggested</div>
+          {suggestions.map((s, i) => (
+            <div key={i} className="flex items-center gap-1.5 font-mono text-[9.5px] text-ink-3">
+              <span className="text-accent">›</span><span className="truncate">{s.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {selectedId && (
         <div className="px-1 pb-1.5">

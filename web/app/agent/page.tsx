@@ -57,6 +57,23 @@ export default function AgentConsole() {
   };
 
   const [gaps, setGaps] = useState<string[] | null>(null);
+  const [ask, setAsk] = useState("");
+  const [askResult, setAskResult] = useState<{ understood: string; count: number } | null>(null);
+  const [report, setReport] = useState<{ size: { sessions: number; objects: number; human_labeled: number }; coverage_gaps: string[]; fix_queue_total: number; scenarios: Record<string, number> } | null>(null);
+
+  const doAsk = async () => {
+    const t = ask.trim(); if (!t) return;
+    setBusy("ask"); setMsg(null);
+    try { const r = await api.agentAsk(t); setAskResult({ understood: r.understood, count: r.count }); }
+    catch (e) { setMsg("query failed: " + String(e)); }
+    finally { setBusy(null); }
+  };
+  const doReport = async () => {
+    setBusy("report"); setMsg(null);
+    try { setReport(await api.agentReport()); }
+    catch (e) { setMsg("report failed: " + String(e)); }
+    finally { setBusy(null); }
+  };
   const mine = async (what: "scenarios" | "disagreements") => {
     setBusy(what); setMsg(null);
     try {
@@ -104,6 +121,30 @@ export default function AgentConsole() {
           <div>
             <h1 className="text-xl text-ink font-semibold">Agent Console</h1>
             <p className="text-ink-3 text-sm mt-1 max-w-2xl">Autonomous QA over the whole corpus: the agent finds likely-wrong labels and fixes the obvious ones itself. Everything it does is reversible and provenance-stamped.</p>
+          </div>
+
+          {/* Ask the dataset (conversational corpus query) */}
+          <div className="panel p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-ink font-medium text-sm">Ask the dataset</span>
+              <span className="font-mono text-[10px] text-ink-3">plain-language corpus query</span>
+              <button onClick={doReport} disabled={!!busy} className="ml-auto font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "report" ? "…" : "dataset report"}</button>
+            </div>
+            <div className="flex items-center gap-2">
+              <input value={ask} onChange={(e) => setAsk(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doAsk(); }}
+                placeholder="e.g. two-wheelers going against traffic at night on the highway"
+                className="flex-1 bg-bg-2 border border-line rounded px-2.5 py-1.5 font-mono text-[11px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
+              <button onClick={doAsk} disabled={!!busy || !ask.trim()} className="font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "ask" ? "…" : "ask"}</button>
+            </div>
+            {askResult ? <div className="mt-2 font-mono text-[11px] text-ink-2"><span className="text-pass">{askResult.count} frames</span> · understood as <span className="text-ink-3">{askResult.understood}</span></div> : null}
+            {report ? (
+              <div className="mt-3 border-t hairline pt-3 grid grid-cols-2 md:grid-cols-4 gap-3 font-mono text-[11px]">
+                <div><div className="text-ink-3 text-[10px] uppercase">objects</div><div className="text-ink text-base tabular-nums">{report.size.objects.toLocaleString()}</div><div className="text-ink-3">{report.size.human_labeled.toLocaleString()} human</div></div>
+                <div><div className="text-ink-3 text-[10px] uppercase">sessions</div><div className="text-ink text-base tabular-nums">{report.size.sessions.toLocaleString()}</div></div>
+                <div><div className="text-ink-3 text-[10px] uppercase">coverage gaps</div><div className="text-warn text-base tabular-nums">{report.coverage_gaps.length}</div></div>
+                <div><div className="text-ink-3 text-[10px] uppercase">fix queue</div><div className="text-block text-base tabular-nums">{report.fix_queue_total}</div><div className="text-ink-3">{Object.values(report.scenarios).reduce((a, b) => a + b, 0)} scenarios</div></div>
+              </div>
+            ) : null}
           </div>
 
           {/* Self-healing actions */}

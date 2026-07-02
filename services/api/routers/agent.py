@@ -92,6 +92,36 @@ async def disagreements_mine(body: MineIn | None = None, db: AsyncSession = Depe
     return await mine_disagreements(db, b.session_id)
 
 
+@router.get("/agent/frames/{frame_id}/suggest", dependencies=[Depends(require_role("annotator"))])
+async def suggest(frame_id: str, db: AsyncSession = Depends(db_session)):
+    """Proactive assistant: the highest-leverage agent actions for this frame, each with its count."""
+    from services.agent.copilot import suggest_for_frame
+
+    return await suggest_for_frame(db, uuid.UUID(frame_id))
+
+
+@router.get("/agent/report", dependencies=[Depends(require_role("annotator"))])
+async def report(db: AsyncSession = Depends(db_session)):
+    """Auto dataset report: corpus size, class balance, coverage gaps, fix-queue and scenario summaries."""
+    from services.agent.copilot import dataset_report
+
+    return await dataset_report(db)
+
+
+class AskIn(BaseModel):
+    text: str
+    limit: int = 40
+
+
+@router.post("/agent/ask", dependencies=[Depends(require_role("annotator"))])
+async def ask(body: AskIn, db: AsyncSession = Depends(db_session)):
+    """Conversational corpus query: ask the dataset a plain-language question ('pedestrians crossing against
+    traffic at night') and get the matching frames, plus how the question was parsed into facets."""
+    from services.agent.copilot import answer_corpus_query
+
+    return await answer_corpus_query(db, body.text, limit=body.limit)
+
+
 class CycleIn(BaseModel):
     max_frames: int = 25
     dry_run: bool = True

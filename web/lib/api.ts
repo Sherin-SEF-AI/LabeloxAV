@@ -347,6 +347,12 @@ export const api = {
     post<{ counts: { objects: number; attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes/plan`, {}),
   agentAttributes: (frame_id: string) =>
     post<{ run_id: string; objects_updated: number; counts: { attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes`, {}),
+  agentAsk: (text: string) =>
+    post<{ understood: string; count: number; frames: { frame_id: string; session_id: string }[] }>(`/api/agent/ask`, { text }),
+  agentReport: () =>
+    get<{ size: { sessions: number; objects: number; human_labeled: number }; class_balance: { missing: number; rare: number }; coverage_gaps: string[]; fix_queue: Record<string, number>; fix_queue_total: number; scenarios: Record<string, number>; geo: Record<string, number> }>(`/api/agent/report`),
+  agentSuggest: (frame_id: string) =>
+    get<{ suggestions: { action: string; label: string; n: number; score: number }[] }>(`/api/agent/frames/${frame_id}/suggest`),
   agentTrainingCycle: (dry_run = true) =>
     post<{ run_id: string; tick: { frames: number; auto_accept: number; review: number; annotate: number }; retrain: { attempted: boolean; triggered?: boolean } }>(`/api/agent/training/cycle`, { dry_run }),
   agentGoldDrift: () =>
