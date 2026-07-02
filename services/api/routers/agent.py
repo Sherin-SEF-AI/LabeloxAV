@@ -60,6 +60,31 @@ async def run(frame_id: str, body: AgentPolicyIn | None = None,
         raise HTTPException(404, str(exc)) from exc
 
 
+class TemporalRepairIn(BaseModel):
+    session_id: str | None = None
+    min_majority: float = 0.8
+
+
+@router.post("/agent/temporal-repair/plan", dependencies=[Depends(require_role("annotator"))])
+async def temporal_repair_plan(body: TemporalRepairIn | None = None, db: AsyncSession = Depends(db_session)):
+    """Dry-run: which class-flip outliers would be relabeled to their track majority. Writes nothing."""
+    from services.agent.temporal_repair import plan_temporal_repair
+
+    b = body or TemporalRepairIn()
+    return await plan_temporal_repair(db, b.session_id, min_majority=b.min_majority)
+
+
+@router.post("/agent/temporal-repair", dependencies=[Depends(require_role("reviewer"))])
+async def temporal_repair_run(body: TemporalRepairIn | None = None,
+                              db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Relabel strong-majority class-flip outliers to the track class as one reversible run."""
+    from services.agent.temporal_repair import commit_temporal_repair
+
+    b = body or TemporalRepairIn()
+    return await commit_temporal_repair(db, b.session_id, min_majority=b.min_majority,
+                                        created_by=str(user.user_id) if user else None)
+
+
 class ErrorSweepIn(BaseModel):
     max_sessions: int = 10
     kinds: list[str] | None = None
