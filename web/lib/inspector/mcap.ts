@@ -106,4 +106,33 @@ export class SessionMcap {
     for await (const m of this.messages([topic], ts > lookbackNs ? ts - lookbackNs : 0n, ts)) best = m;
     return best;
   }
+
+  // Collect the numeric leaf fields of a topic across the whole session into parallel arrays, for the plot,
+  // CAN, and map panels. t is seconds relative to startNs; values maps a dotted field path to its samples.
+  async collect(topic: string, startNs: bigint, maxN = 50_000): Promise<{ t: number[]; values: Record<string, number[]> }> {
+    const t: number[] = [];
+    const values: Record<string, number[]> = {};
+    let n = 0;
+    for await (const m of this.messages([topic])) {
+      if (n++ >= maxN) break;
+      t.push(Number(m.logTime - startNs) / 1e9);
+      const flat = flattenNumeric(m.value);
+      for (const [k, v] of Object.entries(flat)) {
+        (values[k] ??= []).push(v);
+      }
+    }
+    return { t, values };
+  }
+}
+
+// Flatten an object's numeric leaves to { "a.b": value }. Non-numeric leaves are ignored.
+export function flattenNumeric(obj: unknown, prefix = "", out: Record<string, number> = {}): Record<string, number> {
+  if (typeof obj === "number" && Number.isFinite(obj)) {
+    out[prefix || "value"] = obj;
+  } else if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      flattenNumeric(v, prefix ? `${prefix}.${k}` : k, out);
+    }
+  }
+  return out;
 }

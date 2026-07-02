@@ -70,6 +70,24 @@ async def list_sessions(limit: int = 100, db: AsyncSession = Depends(db_session)
     return out
 
 
+@router.get("/inspector/sessions/{session_id}/frame-at", dependencies=[Depends(require_role("annotator"))])
+async def frame_at(session_id: str, ts_ns: int, db: AsyncSession = Depends(db_session)) -> dict:
+    """The extracted frame nearest a ts_ns (the image fast path and the Inspector-to-workspace deep link).
+    Returns the frame id + its proxied image URL, or nulls if the session has no extracted frames."""
+    from sqlalchemy import func
+
+    from db.models import Frame
+
+    sid = _parse_sid(session_id)
+    row = (await db.execute(
+        select(Frame.frame_id, Frame.ts_ns, Frame.cam_id).where(Frame.session_id == sid)
+        .order_by(func.abs(Frame.ts_ns - ts_ns)).limit(1))).first()
+    if row is None:
+        return {"frame_id": None, "ts_ns": None, "image_url": None, "cam_id": None}
+    fid, fts, cam = row
+    return {"frame_id": str(fid), "ts_ns": int(fts), "image_url": f"/api/frames/{fid}/image", "cam_id": cam}
+
+
 def _parse_sid(session_id: str) -> uuid.UUID:
     try:
         return uuid.UUID(session_id)
