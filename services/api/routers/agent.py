@@ -589,6 +589,58 @@ async def docs_weekly(db: AsyncSession = Depends(db_session)):
     return await generate_weekly_report(db)
 
 
+class StewardScanIn(BaseModel):
+    min_cluster: int = 30
+    sample: int = 3000
+    sim_thresh: float = 0.62
+
+
+class ApproveIn(BaseModel):
+    name: str
+    l0: str = "object"
+    l1: str = "custom"
+
+
+@router.post("/agent/ontology/scan", dependencies=[Depends(require_role("reviewer"))])
+async def ontology_scan(body: StewardScanIn | None = None, db: AsyncSession = Depends(db_session)):
+    """Cluster the fallback buckets and file a PromotionProposal for every cluster past the threshold."""
+    from services.agent.ontology_steward import scan_fallbacks
+
+    body = body or StewardScanIn()
+    return await scan_fallbacks(db, sample=body.sample, min_cluster=body.min_cluster, sim_thresh=body.sim_thresh)
+
+
+@router.get("/agent/ontology/proposals", dependencies=[Depends(require_role("annotator"))])
+async def ontology_proposals(status: str = "proposed", db: AsyncSession = Depends(db_session)):
+    """The pending promotion proposals: fallback clusters proposed as new classes, worst-to-best by size."""
+    from services.agent.ontology_steward import list_proposals
+
+    return await list_proposals(db, status=status)
+
+
+@router.post("/agent/ontology/proposals/{proposal_id}/approve", dependencies=[Depends(require_role("reviewer"))])
+async def ontology_approve(proposal_id: str, body: ApproveIn, db: AsyncSession = Depends(db_session),
+                           user=Depends(current_user)):
+    """Approve: mint the class and relabel the cluster to it as one reversible run."""
+    from services.agent.ontology_steward import approve
+
+    try:
+        return await approve(db, uuid.UUID(proposal_id), body.name, l0=body.l0, l1=body.l1,
+                             created_by=str(user.user_id) if user else None)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/agent/ontology/proposals/{proposal_id}/reject", dependencies=[Depends(require_role("reviewer"))])
+async def ontology_reject(proposal_id: str, db: AsyncSession = Depends(db_session)):
+    from services.agent.ontology_steward import reject
+
+    try:
+        return await reject(db, uuid.UUID(proposal_id))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
 async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
     return await list_runs(db, limit)

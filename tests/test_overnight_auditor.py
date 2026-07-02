@@ -53,15 +53,21 @@ def test_token_budget():
 
 
 async def _seed_auto_accept():
-    from db.models import Frame, Object, OntologyClass, OntologyVersion
+    from db.models import ControlSample, Frame, Object, OntologyClass, OntologyVersion
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
     from services.autolabel.ontology import get_ontology
+    from sqlalchemy import delete
 
     store = get_object_store()
     store.ensure_bucket()
     onto = get_ontology()
     maker = get_sessionmaker()
+    # deterministic sample: no other auto-accepts or control samples left over from sibling tests
+    async with maker() as db:
+        await db.execute(delete(ControlSample))
+        await db.execute(delete(Object).where(Object.state == "auto_accept"))
+        await db.commit()
     sid, fid, oid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     ts = now_ns()
     img = np.random.default_rng(7).integers(20, 230, size=(240, 320, 3), dtype=np.uint8)

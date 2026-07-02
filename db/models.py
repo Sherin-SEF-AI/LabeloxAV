@@ -1181,3 +1181,27 @@ class AgentRun(Base):
     reverted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (Index("ix_agent_run_status", "status"), Index("ix_agent_run_kind", "kind"))
+
+
+class PromotionProposal(Base):
+    """An Ontology Steward evidence packet: a fallback cluster that has grown past the promotion threshold and
+    is proposed as a new named class, awaiting a one-click approve/reject. Approval mints the class and
+    relabels the cluster (reversibly); rejection records the decision. This is how the ontology grows from a
+    reviewed pipeline instead of ad-hoc governance."""
+
+    __tablename__ = "promotion_proposal"
+
+    proposal_id: Mapped[uuid.UUID] = _uuid_pk()
+    from_class: Mapped[int] = mapped_column(Integer, nullable=False)   # the fallback class id it split out of
+    member_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    rep_object_ids: Mapped[list] = mapped_column(JSONB, default=list)  # cluster members (capped) to relabel on approve
+    suggested_name: Mapped[str | None] = mapped_column(String(64))     # nearest existing-class hint (human names it)
+    confusion_classes: Mapped[list] = mapped_column(JSONB, default=list)  # [{class, share}] visual neighbours
+    evidence_uri: Mapped[str | None] = mapped_column(Text)             # crop-grid image in the object store
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="proposed")  # proposed|approved|rejected
+    approved_class: Mapped[int | None] = mapped_column(Integer)        # the minted class id, once approved
+    run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # the reversible relabel run
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_promotion_proposal_status", "status"),)

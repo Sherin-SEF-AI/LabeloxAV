@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, type AuditReport } from "@/lib/api";
+import { api, type AuditReport, type PromotionProposalRow } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { Spinner } from "@/components/Spinner";
 
@@ -198,6 +198,29 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
+  const [props, setProps] = useState<PromotionProposalRow[]>([]);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const loadProps = useCallback(async () => { try { setProps(await api.agentOntologyProposals()); } catch { /* none */ } }, []);
+  useEffect(() => { loadProps(); }, [loadProps]);
+  const scanOntology = async () => {
+    setBusy("ontscan"); setMsg(null);
+    try { const r = await api.agentOntologyScan(40); setMsg(`scanned ${r.scanned} fallbacks -> ${r.proposals} promotion proposals`); await loadProps(); }
+    catch (e) { setMsg("ontology scan failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+  const decide = async (id: string, action: "approve" | "reject") => {
+    setBusy(id); setMsg(null);
+    try {
+      if (action === "approve") {
+        const nm = (names[id] || props.find((p) => p.proposal_id === id)?.suggested_name || "").trim();
+        if (!nm) { setMsg("give the new class a name first"); return; }
+        const r = await api.agentOntologyApprove(id, nm); setMsg(`minted ${r.name} (#${r.class_id}), relabeled ${r.relabeled} - reversible run ${r.run_id.slice(0, 8)}`);
+      } else { await api.agentOntologyReject(id); setMsg("proposal rejected"); }
+      await loadProps();
+    } catch (e) { setMsg("decision failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const reason = (c: Cand) => (c.detail?.reason as string) || (c.detail?.reasons ? (c.detail.reasons as string[]).join("; ") : (c.detail?.note as string) || JSON.stringify(c.detail).slice(0, 80));
 
   return (
@@ -364,6 +387,35 @@ export default function AgentConsole() {
               </div>
               {doc ? <pre className="mt-3 max-h-64 overflow-auto no-scrollbar bg-bg-2 rounded p-3 font-mono text-[10.5px] text-ink-2 whitespace-pre-wrap">{doc.slice(0, 4000)}</pre> : null}
             </div>
+          </div>
+
+          {/* Ontology Steward */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3">Ontology Steward — grow the ontology</h2>
+              <button onClick={scanOntology} disabled={!!busy} className="ml-auto font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "ontscan" ? "scanning..." : "scan fallback clusters"}</button>
+            </div>
+            {props.length ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {props.map((p) => (
+                  <div key={p.proposal_id} className="panel p-3">
+                    <div className="flex gap-1 mb-2">
+                      {p.sample_object_ids.slice(0, 6).map((oid) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={oid} src={`/api/objects/${oid}/crop`} alt="" className="w-12 h-12 object-cover rounded bg-bg-2" />
+                      ))}
+                    </div>
+                    <div className="font-mono text-[10.5px] text-ink-2">{p.member_count} in {p.from_class} · looks like {p.confusion_classes.map((c) => `${c.class} ${Math.round(c.share * 100)}%`).join(", ") || "nothing known"}</div>
+                    <div className="flex items-center gap-1.5 mt-2">
+                      <input value={names[p.proposal_id] ?? p.suggested_name ?? ""} onChange={(e) => setNames((s) => ({ ...s, [p.proposal_id]: e.target.value }))}
+                        placeholder="new class name" className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-1.5 py-1 font-mono text-[10.5px] text-ink-2 focus:border-accent outline-none" />
+                      <button onClick={() => decide(p.proposal_id, "approve")} disabled={!!busy} className="font-mono text-[10px] border border-pass text-pass px-2 py-1 rounded disabled:opacity-40">approve</button>
+                      <button onClick={() => decide(p.proposal_id, "reject")} disabled={!!busy} className="font-mono text-[10px] border border-line text-ink-3 px-2 py-1 rounded hover:text-ink disabled:opacity-40">reject</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="panel p-4 text-ink-3 text-sm">No promotion proposals. Scan the fallback clusters to find classes that have earned their way in.</div>}
           </div>
 
           {msg ? <div className="font-mono text-[11px] text-warn">{msg}</div> : null}

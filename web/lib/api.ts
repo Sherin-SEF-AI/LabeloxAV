@@ -110,6 +110,10 @@ export type AgentPolicy = { auto_accept_conf?: number; review_low?: number; requ
 export type AgentCounts = { total: number; auto_accept: number; review: number; annotate: number; unchanged: number; demoted_by_critic: number };
 export type AgentPlanItem = { object_id: string; class_name: string; conf: number; current_state: string; action: string; changes_state: boolean; reason: string; tier: string; critic_ok: boolean; critic_reasons: string[] };
 export type AgentPlan = { frame_id: string; policy: AgentPolicy; counts: AgentCounts; critic_flags: Record<string, number>; items: AgentPlanItem[] };
+export type PromotionProposalRow = {
+  proposal_id: string; from_class: string; member_count: number; suggested_name: string | null;
+  confusion_classes: { class: string; share: number }[]; sample_object_ids: string[]; status: string;
+};
 export type AuditReport = {
   window_hours: number; sampled: number; vlm_checked: number; vlm_disagreements: number;
   among_sample_agreement: number | null;
@@ -417,6 +421,15 @@ export const api = {
     post<{ uri: string; markdown: string }>(`/api/agent/docs/datasheet`, gold_id ? { gold_id } : {}),
   agentDocWeekly: () =>
     post<{ uri: string; markdown: string }>(`/api/agent/docs/weekly`, {}),
+  // Ontology Steward: scan fallback clusters, review promotion proposals, approve/reject
+  agentOntologyScan: (min_cluster = 40) =>
+    post<{ scanned: number; clusters: number; proposals: number }>(`/api/agent/ontology/scan`, { min_cluster }),
+  agentOntologyProposals: () =>
+    get<PromotionProposalRow[]>(`/api/agent/ontology/proposals`),
+  agentOntologyApprove: (proposal_id: string, name: string) =>
+    post<{ class_id: number; name: string; relabeled: number; run_id: string }>(`/api/agent/ontology/proposals/${proposal_id}/approve`, { name }),
+  agentOntologyReject: (proposal_id: string) =>
+    post<{ status: string }>(`/api/agent/ontology/proposals/${proposal_id}/reject`, {}),
   // pixel-assist: brush/eraser mask composition + SLIC superpixels
   composeMask: (body: { polygons: number[][]; ops: { op: string; center: number[]; radius: number }[]; width: number; height: number }) =>
     post<{ polygons: number[][] }>(`/api/mask/compose`, body),
