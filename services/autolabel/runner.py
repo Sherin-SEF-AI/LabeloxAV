@@ -272,6 +272,14 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
     bus = EventBus()
     await bus.start()
 
+    # Ego-hood exclusion: look up this session's vehicle so on_frame can drop detections that fall inside
+    # the camera's pre-estimated hood mask (the ego vehicle labeling itself). No mask cached -> a safe no-op.
+    from db.models import Session as DbSession
+    from services.autolabel.ego_mask import get_ego_mask
+    async with maker() as _s:
+        vehicle_id = (await _s.execute(
+            select(DbSession.vehicle_id).where(DbSession.session_id == session_id))).scalar_one_or_none()
+
     verifier = None
     if settings.models.vlm.enabled:
         client = vlm_client or make_vlm_client(settings)
@@ -297,6 +305,23 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
 
         async def on_frame(fd: FrameDetections) -> None:
             fused = engine.fuse_frame(fd.frame.frame_id, fd.dets_a, fd.dets_b)
+            # Thing/stuff (panoptic): drop stuff detections (sky, road, vegetation, barriers, walls) before
+            # spending any quality-review or VLM budget on them. They belong to semantic seg, not instances.
+            # persist enforces the same rule as the hard chokepoint; this just avoids wasted work upstream.
+            n_stuff = sum(1 for g in fused if not onto.is_thing(g.obj.class_id))
+            if n_stuff:
+                fused = [g for g in fused if onto.is_thing(g.obj.class_id)]
+                totals["stuff_dropped"] = totals.get("stuff_dropped", 0) + n_stuff
+            # Ego-hood: drop any detection that is mostly inside this camera's hood mask (the car labeling
+            # its own bonnet). Cached mask per camera; absent -> no-op.
+            ego = get_ego_mask(vehicle_id, fd.frame.cam_id) if vehicle_id else None
+            if ego is not None:
+                def _in_ego(g):
+                    return ego.contains_bbox(tuple(g.obj.bbox.as_list()), fd.frame.width, fd.frame.height)
+                n_ego = sum(1 for g in fused if _in_ego(g))
+                if n_ego:
+                    fused = [g for g in fused if not _in_ego(g)]
+                    totals["ego_dropped"] = totals.get("ego_dropped", 0) + n_ego
             # M-Q.4: quality-review each object against the rest of the frame (geometric/contextual nonsense),
             # record the reasons in provenance, and carry the verdict into the gate so a flagged object cannot
             # auto-accept.

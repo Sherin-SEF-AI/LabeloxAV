@@ -193,7 +193,40 @@ class FusionEngine:
                 provenance=provenance,
             )
             out.append(FusedObject(obj=obj, mask=mask))
-        return out
+        return self._suppress_duplicates(out)
+
+    def _same_object(self, a_class: int, b_class: int) -> bool:
+        """Two fused boxes could be the same physical object: same class, same l1 superclass, or one is a
+        fallback catch-all. A rider (vru) over a two_wheeler is NOT the same object, so it is never merged."""
+        if a_class == b_class:
+            return True
+        if self.onto.is_fallback(a_class) or self.onto.is_fallback(b_class):
+            return True
+        return self.onto.by_id(a_class).l1 == self.onto.by_id(b_class).l1
+
+    def _suppress_duplicates(self, out: list[FusedObject]) -> list[FusedObject]:
+        """Greedy NMS over the fused objects: keep the highest-confidence box of each physical object, drop
+        the rest. Overlap is measured by IoU (same-scale duplicates) and intersection-over-min (a small box
+        nested inside a larger one of the same object). The kept box absorbs the dropped one's provenance so
+        the merge is auditable."""
+        kept: list[FusedObject] = []
+        for fo in sorted(out, key=lambda f: f.obj.conf, reverse=True):
+            box = tuple(fo.obj.bbox.as_list())
+            dup_of = None
+            for k in kept:
+                if not self._same_object(fo.obj.class_id, k.obj.class_id):
+                    continue
+                kbox = tuple(k.obj.bbox.as_list())
+                if _iou(box, kbox) >= self.cfg.dedupe_iou or _iom(box, kbox) >= self.cfg.dedupe_iom:
+                    dup_of = k
+                    break
+            if dup_of is None:
+                kept.append(fo)
+            else:
+                merged = list(getattr(dup_of.obj.provenance, "merged_duplicates", []) or [])
+                merged.append({"class": fo.obj.class_name, "conf": round(float(fo.obj.conf), 3)})
+                dup_of.obj.provenance.merged_duplicates = merged
+        return kept
 
     def _provenance(
         self,
