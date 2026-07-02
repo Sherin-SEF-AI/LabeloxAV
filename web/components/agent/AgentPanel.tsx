@@ -15,6 +15,18 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
   const [msg, setMsg] = useState<string | null>(null);
   const [cmd, setCmd] = useState("");
 
+  const doCuboids = async () => {
+    setBusy("cuboids"); setMsg(null);
+    try {
+      const p = await api.agentCuboidsPlan(frameId);
+      if (!p.counts.total) { setMsg("no liftable vehicles/VRUs on this frame"); return; }
+      const r = await api.agentCuboids(frameId);
+      setMsg(`fit ${r.attached} 3D boxes (${r.counts.auto_accept} auto, ${r.counts.review} review, ${r.counts.skip} skipped)`);
+      onApplied?.();
+    } catch (e) { setMsg("fit 3D failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const doPropagate = async () => {
     if (!selectedId) return;
     setBusy("track"); setMsg(null);
@@ -78,6 +90,14 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
         <button onClick={doPlan} disabled={!!busy}
           className="ml-auto font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-50">
           {busy === "plan" ? "planning..." : "dry-run"}
+        </button>
+      </div>
+
+      <div className="px-1 pb-1.5">
+        <button onClick={doCuboids} disabled={!!busy}
+          title="lift every 2D vehicle/VRU box on this frame to a 3D cuboid (monocular, reprojection-validated)"
+          className="w-full font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+          {busy === "cuboids" ? "fitting 3D..." : "fit 3D boxes on frame"}
         </button>
       </div>
 

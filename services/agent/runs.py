@@ -51,14 +51,20 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
             await db.delete(obj)
             reverted += 1
             continue
-        obj.state = ch["from_state"]
-        obj.source = ch["from_source"]
-        if "from_class" in ch:            # a reconcile relabel: restore the original class too
+        # Field-driven restore: put back whatever the run recorded a prior value for.
+        if "from_state" in ch:
+            obj.state = ch["from_state"]
+        if "from_source" in ch:
+            obj.source = ch["from_source"]
+        if "from_class" in ch:            # a reconcile relabel: restore the original class
             obj.class_id = ch["from_class"]
+        if "from_cuboid" in ch:           # an auto-cuboid: clear/restore the 3D box
+            obj.cuboid_3d = ch["from_cuboid"]
         obj.version = (obj.version or 0) + 1
         prov = dict(prov)
         prov.pop("agent_run_id", None)
         prov.pop("agent_critic", None)
+        prov.pop("agent_cuboid", None)
         obj.provenance = prov
         reverted += 1
 

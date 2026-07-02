@@ -60,6 +60,38 @@ async def run(frame_id: str, body: AgentPolicyIn | None = None,
         raise HTTPException(404, str(exc)) from exc
 
 
+class CuboidIn(BaseModel):
+    min_iou: float = 0.35
+    high: float = 0.60
+
+
+@router.post("/agent/frames/{frame_id}/cuboids/plan", dependencies=[Depends(require_role("annotator"))])
+async def cuboids_plan(frame_id: str, body: CuboidIn | None = None, db: AsyncSession = Depends(db_session)):
+    """Dry-run: which 2D vehicle/VRU boxes on this frame lift to a valid 3D cuboid (monocular, reprojection-
+    validated). Writes nothing."""
+    from services.agent.cuboid_agent import plan_cuboids
+
+    b = body or CuboidIn()
+    try:
+        return await plan_cuboids(db, uuid.UUID(frame_id), min_iou=b.min_iou, high=b.high)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/agent/frames/{frame_id}/cuboids", dependencies=[Depends(require_role("reviewer"))])
+async def cuboids_run(frame_id: str, body: CuboidIn | None = None,
+                      db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Attach fitted 3D cuboids to the frame's 2D objects as one reversible run."""
+    from services.agent.cuboid_agent import commit_cuboids
+
+    b = body or CuboidIn()
+    try:
+        return await commit_cuboids(db, uuid.UUID(frame_id), min_iou=b.min_iou, high=b.high,
+                                    created_by=str(user.user_id) if user else None)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 class PropagateIn(BaseModel):
     span: int = 24
     drift: float = 0.62
