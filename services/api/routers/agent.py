@@ -479,6 +479,28 @@ async def relabel_all(body: RelabelAllIn | None = None, db: AsyncSession = Depen
     return {"run_id": str(run_id), "status": "running"}
 
 
+class CleanupIn(BaseModel):
+    do_pii: bool = True
+    pii_limit: int = 5000
+
+
+@router.post("/agent/cleanup-sweep", dependencies=[Depends(require_role("reviewer"))])
+async def cleanup_sweep(body: CleanupIn | None = None, db: AsyncSession = Depends(db_session),
+                        user=Depends(current_user)):
+    """Apply the panoptic/quality gates to objects ALREADY in the corpus (no model re-run): remove boxed
+    stuff (trees/barriers/sky), ego-hood boxes, oversize boxes, and duplicate/nested boxes, and backfill PII
+    on pre-gate frames. Fast; fully reversible (removed objects are snapshotted). Poll GET /agent/runs/{id}."""
+    from services.agent.cleanup_sweep import run_cleanup_sweep
+
+    body = body or CleanupIn()
+    run_id = uuid.uuid4()
+    db.add(AgentRun(run_id=run_id, kind="cleanup_sweep", scope={}, status="running", policy=body.model_dump(),
+                    counts={}, changes={}, critic={}, created_by=str(user.user_id) if user else "cleanup"))
+    await db.commit()
+    asyncio.create_task(run_cleanup_sweep(run_id, do_pii=body.do_pii, pii_limit=body.pii_limit))
+    return {"run_id": str(run_id), "status": "running"}
+
+
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
 async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
     return await list_runs(db, limit)

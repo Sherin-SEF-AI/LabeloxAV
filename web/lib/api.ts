@@ -466,6 +466,12 @@ export const api = {
     post<{ started: boolean }>("/api/corrections/embed" + (session_id ? `?session_id=${session_id}` : ""), {}),
   startAutolabel: (session_id: string, limit?: number, compute_target: "local" | "cloud" = "local") =>
     post<{ job_id: string; status: string }>("/api/autolabel/start", { session_id, limit, compute_target }),
+  estimateEgoMasks: (force = false) =>
+    post<{ cameras: number; with_hood: number; no_hood: string[] }>(`/api/autolabel/ego-masks/estimate?force=${force}`, {}),
+  piiBackfill: (limit = 2000) =>
+    post<{ status: string; limit: number }>(`/api/autolabel/pii-backfill?limit=${limit}`, {}),
+  redetectAll: (backfill_pii = true) =>
+    post<{ run_id: string; status: string }>(`/api/autolabel/redetect-all?backfill_pii=${backfill_pii}`, {}),
   startVlmQa: (session_id: string, limit = 40) =>
     post<{ started: boolean }>(`/api/qa/vlm?session_id=${session_id}&limit=${limit}`, {}),
   recognizeSigns: (session_id: string, limit = 200) =>

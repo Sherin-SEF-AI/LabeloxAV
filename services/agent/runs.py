@@ -34,6 +34,12 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
     if run.status != "committed":
         raise ValueError(f"run is {run.status}, only a committed run can be reverted")
 
+    # A cleanup sweep removed objects; reverting re-inserts them from the stored snapshots.
+    if run.kind == "cleanup_sweep":
+        from services.agent.cleanup_sweep import revert_cleanup
+
+        return await revert_cleanup(db, run)
+
     # A corpus run (e.g. relabel-all) owns no objects itself; it aggregates one child run per frame.
     # Reverting it reverts each child, so 'undo relabel all' is one click.
     child_ids = (run.changes or {}).get("child_runs")

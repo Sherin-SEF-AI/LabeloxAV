@@ -66,6 +66,31 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
+  const estimateEgo = async () => {
+    setBusy("ego"); setMsg(null);
+    try {
+      const r = await api.estimateEgoMasks();
+      setMsg(`ego-hood masks: ${r.with_hood}/${r.cameras} cameras have a detected hood${r.no_hood.length ? ` (no hood: ${r.no_hood.slice(0, 4).join(", ")})` : ""}`);
+    } catch (e) { setMsg("ego-mask estimation failed: " + String(e)); }
+    finally { setBusy(null); }
+  };
+  const backfillPii = async () => {
+    setBusy("pii"); setMsg(null);
+    try {
+      await api.piiBackfill(2000);
+      setMsg("PII backfill running in the background: blurring faces/plates on pre-gate frames, overwriting the stored image in place");
+    } catch (e) { setMsg("PII backfill failed (needs plate/face weights): " + String(e)); }
+    finally { setBusy(null); }
+  };
+  const redetectAll = async () => {
+    setBusy("redetect"); setMsg(null);
+    try {
+      const r = await api.redetectAll(true);
+      setMsg(`full re-detection started (run ${r.run_id.slice(0, 8)}): PII backfill, then re-run every session with thing/stuff + ego-hood + de-dup + oversize gates, one at a time on the GPU`);
+    } catch (e) { setMsg("re-detection failed (GPU may be reserved for training): " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const repair = async () => {
     setBusy("repair"); setMsg(null);
     try {
@@ -182,6 +207,17 @@ export default function AgentConsole() {
                 {relabelDone ? "done" : "running"} · scanned {relabel.frames} frames · <span className="text-pass">{relabel.relabel_keep} fixed</span> · <span className="text-warn">{relabel.relabel_review} routed to review</span>
               </div>
             ) : null}
+          </div>
+
+          {/* Corpus re-detection: fix existing frames with the new detection gates */}
+          <div className="panel p-4 border border-line">
+            <div className="text-ink font-medium">Corpus re-detection <span className="font-mono text-[10px] text-ink-3">label quality</span></div>
+            <div className="text-ink-3 text-xs mt-1">The detection pipeline now enforces thing/stuff (no boxed trees, barriers, sky), an auto-estimated ego-hood mask (no self-labeling), fusion de-duplication (one object, one box), and an oversize reviewer rule (no frame-spanning boxes). Those shape new labels; run this to fix the frames already in the corpus. Sequential on one GPU, yields to training.</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button onClick={estimateEgo} disabled={!!busy} className="font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "ego" ? "estimating..." : "1. estimate ego-hood masks"}</button>
+              <button onClick={backfillPii} disabled={!!busy} className="font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "pii" ? "starting..." : "2. PII backfill (pre-gate frames)"}</button>
+              <button onClick={redetectAll} disabled={!!busy} className="font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "redetect" ? "starting..." : "3. re-detect all frames"}</button>
+            </div>
           </div>
 
           {/* Self-healing actions */}

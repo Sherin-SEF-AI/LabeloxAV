@@ -80,6 +80,50 @@ async def start(payload: AutolabelStartIn, db: AsyncSession = Depends(db_session
     return {"job_id": str(job_id), "status": "pending"}
 
 
+@router.post("/autolabel/ego-masks/estimate")
+async def estimate_ego_masks(force: bool = False, db: AsyncSession = Depends(db_session)):
+    """Estimate + cache each camera's ego-hood mask from temporal stability. Idempotent unless force=True.
+    Fast (no GPU); run once before re-detection so the re-run can drop the hood."""
+    from services.autolabel.redetect import estimate_all_ego_masks
+
+    return await estimate_all_ego_masks(force=force)
+
+
+@router.post("/autolabel/pii-backfill")
+async def pii_backfill(limit: int = 2000, session_id: str | None = None, db: AsyncSession = Depends(db_session)):
+    """Blur faces/plates on frames that predate the anonymization gate (no PII audit), overwriting the stored
+    image in place. Closes the DPDPA exposure on the existing corpus. Launched in the background."""
+    from services.anonymize.backfill import backfill_unaudited
+
+    async def _go():
+        try:
+            await backfill_unaudited(limit=limit, session_id=session_id)
+        except Exception as exc:  # noqa: BLE001
+            log.error("pii_backfill.failed", error=str(exc))
+
+    asyncio.create_task(_go())
+    return {"status": "running", "limit": limit}
+
+
+@router.post("/autolabel/redetect-all")
+async def redetect_all(backfill_pii: bool = True, db: AsyncSession = Depends(db_session)):
+    """Full re-detection of the corpus with the new gates (thing/stuff, ego-hood, fusion de-dup, oversize),
+    plus a PII backfill of pre-gate frames. Sequential on one GPU, yields to training. Background; poll the
+    returned run and the per-session autolabel jobs."""
+    from db.models import AgentRun
+
+    from services.autolabel.redetect import redetect_and_backfill
+
+    if (await db.execute(select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1))).first():
+        raise HTTPException(503, "GPU reserved for a training job; re-detection is paused until it finishes")
+    run_id = uuid.uuid4()
+    db.add(AgentRun(run_id=run_id, kind="redetect_all", scope={}, status="running", policy={}, counts={},
+                    changes={}, critic={}, created_by="redetect"))
+    await db.commit()
+    asyncio.create_task(redetect_and_backfill(run_id, backfill_pii=backfill_pii))
+    return {"run_id": str(run_id), "status": "running"}
+
+
 @router.get("/autolabel/{job_id}")
 async def status(job_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
     j = await db.get(AutolabelJob, job_id)
