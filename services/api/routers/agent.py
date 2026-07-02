@@ -82,6 +82,16 @@ async def scenarios_mine(body: MineIn | None = None, db: AsyncSession = Depends(
     return await mine_scenarios(db, b.session_id, ttc_thresh=b.ttc_thresh)
 
 
+@router.post("/agent/disagreements/mine", dependencies=[Depends(require_role("reviewer"))])
+async def disagreements_mine(body: MineIn | None = None, db: AsyncSession = Depends(db_session)):
+    """Mine champion-vs-challenger model-disagreement frames (paths voted different classes) into the
+    scenario queue -- the highest-value frames to label and an early regression signal."""
+    from services.agent.disagreement import mine_disagreements
+
+    b = body or MineIn()
+    return await mine_disagreements(db, b.session_id)
+
+
 class TemporalRepairIn(BaseModel):
     session_id: str | None = None
     min_majority: float = 0.8

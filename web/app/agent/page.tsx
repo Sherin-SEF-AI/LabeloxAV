@@ -56,6 +56,22 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
+  const [gaps, setGaps] = useState<string[] | null>(null);
+  const mine = async (what: "scenarios" | "disagreements") => {
+    setBusy(what); setMsg(null);
+    try {
+      if (what === "scenarios") { const r = await api.agentMineScenarios(); setMsg(`mined ${r.persisted} safety scenarios (${Object.entries(r.by_kind).map(([k, n]) => `${k}:${n}`).join(", ") || "none"}) — see Scenarios`); }
+      else { const r = await api.agentMineDisagreements(); setMsg(`mined ${r.persisted} model-disagreement frames${r.top[0] ? ` (top: ${r.top[0].tag})` : ""} — see Scenarios`); }
+    } catch (e) { setMsg("mine failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
+  const coverage = async () => {
+    setBusy("coverage"); setMsg(null);
+    try { const r = await api.agentCoverage(); setGaps(r.gaps); }
+    catch (e) { setMsg("coverage failed: " + String(e)); }
+    finally { setBusy(null); }
+  };
+
   const act = async (c: Cand, kind: "confirm" | "dismiss") => {
     try { await (kind === "confirm" ? api.errorConfirm(c.candidate_id) : api.errorDismiss(c.candidate_id)); load(); }
     catch (e) { setMsg(String(e)); }
@@ -84,6 +100,34 @@ export default function AgentConsole() {
               <div className="text-ink-3 text-xs mt-1">Relabel track class-flip outliers to their strong track majority automatically. Corrupt tracks (static-class majority) are left for a human. Reversible.</div>
               <button onClick={repair} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "repair" ? "repairing..." : "run temporal repair"}</button>
             </div>
+          </div>
+
+          {/* Data intelligence: the system finds what is worth labeling */}
+          <div>
+            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Data intelligence — find what matters</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="panel p-4">
+                <div className="text-ink font-medium text-sm">Safety scenarios</div>
+                <div className="text-ink-3 text-xs mt-1">Mine near-misses (low TTC), high-risk interactions, and hard-brake events into the scenario queue.</div>
+                <button onClick={() => mine("scenarios")} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "scenarios" ? "mining..." : "mine safety scenarios"}</button>
+              </div>
+              <div className="panel p-4">
+                <div className="text-ink font-medium text-sm">Model disagreement</div>
+                <div className="text-ink-3 text-xs mt-1">Surface frames where the champion and challenger detectors voted different classes — the highest-value labels + a regression signal.</div>
+                <button onClick={() => mine("disagreements")} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "disagreements" ? "mining..." : "mine disagreements"}</button>
+              </div>
+              <div className="panel p-4">
+                <div className="text-ink font-medium text-sm">Coverage gaps</div>
+                <div className="text-ink-3 text-xs mt-1">Profile the corpus and name the thin cells (rare classes, missing weather/time/road coverage).</div>
+                <button onClick={coverage} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "coverage" ? "analyzing..." : "coverage report"}</button>
+              </div>
+            </div>
+            {gaps ? (
+              <div className="panel mt-3 p-4">
+                <div className="font-mono text-[10px] uppercase text-ink-3 mb-1.5">coverage gaps ({gaps.length})</div>
+                <ul className="space-y-0.5">{gaps.slice(0, 10).map((g, i) => <li key={i} className="font-mono text-[11px] text-ink-2">· {g}</li>)}</ul>
+              </div>
+            ) : null}
           </div>
 
           {msg ? <div className="font-mono text-[11px] text-warn">{msg}</div> : null}

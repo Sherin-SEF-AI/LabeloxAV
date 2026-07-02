@@ -347,6 +347,12 @@ export const api = {
     post<{ counts: { objects: number; attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes/plan`, {}),
   agentAttributes: (frame_id: string) =>
     post<{ run_id: string; objects_updated: number; counts: { attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes`, {}),
+  agentMineScenarios: () =>
+    post<{ persisted: number; by_kind: Record<string, number>; top: { kind: string; score: number; tag: string }[] }>(`/api/agent/scenarios/mine`, {}),
+  agentMineDisagreements: () =>
+    post<{ persisted: number; top: { score: number; tag: string }[] }>(`/api/agent/disagreements/mine`, {}),
+  agentCoverage: () =>
+    get<{ scene_frames: number; class_balance: { median: number; missing: string[]; rare: string[] }; scene_coverage: Record<string, Record<string, number>>; geo: Record<string, number>; gaps: string[] }>(`/api/agent/coverage`),
   agentErrorSweep: (max_sessions = 10, kinds?: string[]) =>
     post<{ run_id: string; status: string }>(`/api/agent/errors/sweep`, kinds ? { max_sessions, kinds } : { max_sessions }),
   agentErrorQueue: (status = "pending", limit = 60) =>
