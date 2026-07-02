@@ -60,6 +60,39 @@ async def run(frame_id: str, body: AgentPolicyIn | None = None,
         raise HTTPException(404, str(exc)) from exc
 
 
+class PropagateIn(BaseModel):
+    span: int = 24
+    drift: float = 0.62
+    high: float = 0.80
+
+
+@router.post("/agent/objects/{object_id}/propagate/plan", dependencies=[Depends(require_role("annotator"))])
+async def propagate_plan(object_id: str, body: PropagateIn | None = None, db: AsyncSession = Depends(db_session)):
+    """Dry-run: what the track-propagation agent would carry across the clip from this keyframe (both
+    directions, stopping where the box drifts). Writes nothing."""
+    from services.agent.propagate_agent import plan_propagate
+
+    b = body or PropagateIn()
+    try:
+        return await plan_propagate(db, uuid.UUID(object_id), span=b.span, drift=b.drift, high=b.high)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/agent/objects/{object_id}/propagate", dependencies=[Depends(require_role("reviewer"))])
+async def propagate_run(object_id: str, body: PropagateIn | None = None,
+                        db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Propagate the keyframe across its track and persist the boxes as one reversible run."""
+    from services.agent.propagate_agent import commit_propagate
+
+    b = body or PropagateIn()
+    try:
+        return await commit_propagate(db, uuid.UUID(object_id), span=b.span, drift=b.drift, high=b.high,
+                                      created_by=str(user.user_id) if user else None)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 class FlywheelIn(AgentPolicyIn):
     ticks: int = 1
     max_frames: int = 25

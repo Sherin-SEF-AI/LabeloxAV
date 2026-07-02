@@ -8,12 +8,25 @@ import { api, type AgentPlan } from "@/lib/api";
 // commit. Every commit is one reversible run, so the Revert button undoes it exactly. This is the
 // "human supervises exceptions" surface: you see the 80% the system is sure about before it touches them.
 
-export default function AgentPanel({ frameId, onApplied }: { frameId: string; onApplied?: () => void }) {
+export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId: string; selectedId?: string | null; onApplied?: () => void }) {
   const [plan, setPlan] = useState<AgentPlan | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [cmd, setCmd] = useState("");
+
+  const doPropagate = async () => {
+    if (!selectedId) return;
+    setBusy("track"); setMsg(null);
+    try {
+      const p = await api.agentPropagatePlan(selectedId);
+      if (p.counts.total_steps === 0) { setMsg("nothing to propagate (no adjacent frames / drifts immediately)"); return; }
+      const r = await api.agentPropagate(selectedId);
+      setMsg(`tracked across ${r.created} frames (${r.counts.auto_accept} auto, ${r.counts.review} review${p.counts.appearance_used ? "" : ", no drift model"})`);
+      onApplied?.();
+    } catch (e) { setMsg("auto-track failed (needs reviewer role): " + String(e)); }
+    finally { setBusy(null); }
+  };
 
   const doCommand = async () => {
     const text = cmd.trim();
@@ -67,6 +80,16 @@ export default function AgentPanel({ frameId, onApplied }: { frameId: string; on
           {busy === "plan" ? "planning..." : "dry-run"}
         </button>
       </div>
+
+      {selectedId && (
+        <div className="px-1 pb-1.5">
+          <button onClick={doPropagate} disabled={!!busy}
+            title="label once, carry this object across the clip both ways; stops where it drifts"
+            className="w-full font-mono text-[10px] border border-accent/40 bg-accent/5 text-accent px-2 py-1 rounded hover:bg-accent/15 disabled:opacity-40">
+            {busy === "track" ? "auto-tracking..." : "auto-track selected object →"}
+          </button>
+        </div>
+      )}
 
       {c && (
         <div className="px-1 space-y-1.5">

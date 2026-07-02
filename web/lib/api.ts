@@ -343,6 +343,10 @@ export const api = {
     post<{ run_id: string; applied: number; counts: AgentCounts; policy: AgentPolicy }>(`/api/agent/frames/${frame_id}/run`, policy),
   agentRevert: (run_id: string) =>
     post<{ run_id: string; reverted: number; skipped: number }>(`/api/agent/runs/${run_id}/revert`, {}),
+  agentPropagatePlan: (object_id: string, span = 24) =>
+    post<{ object_id: string; counts: { total_steps: number; auto_accept: number; review: number; stops: number; appearance_used: boolean }; forward: number; backward: number }>(`/api/agent/objects/${object_id}/propagate/plan`, { span }),
+  agentPropagate: (object_id: string, span = 24) =>
+    post<{ run_id: string; track_id: string; created: number; counts: { auto_accept: number; review: number; stops: number } }>(`/api/agent/objects/${object_id}/propagate`, { span }),
   agentCommand: (frame_id: string, text: string) =>
     post<{ intent: { action: string; classes: string[] | string; conf_min: number | null }; result: unknown; summary: string; blocked?: boolean }>(`/api/agent/command`, { text, frame_id }),
   // pixel-assist: brush/eraser mask composition + SLIC superpixels

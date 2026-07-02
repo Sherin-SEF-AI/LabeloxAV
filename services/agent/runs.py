@@ -46,6 +46,11 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
         if obj.source == "human" or str(prov.get("agent_run_id")) != str(run_id):
             skipped += 1
             continue
+        # Objects the run CREATED (e.g. propagated boxes) are undone by deleting them.
+        if ch.get("created"):
+            await db.delete(obj)
+            reverted += 1
+            continue
         obj.state = ch["from_state"]
         obj.source = ch["from_source"]
         if "from_class" in ch:            # a reconcile relabel: restore the original class too

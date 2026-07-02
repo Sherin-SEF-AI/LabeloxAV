@@ -1416,7 +1416,7 @@ export default function FrameEditor() {
               <button onClick={genLanes} className="border border-line text-ink-2 px-1.5 py-1 hover:border-accent">propose lanes</button>
               <button onClick={() => router.push(`/annotate/lane/${id}`)} className="border border-line text-ink-2 px-1.5 py-1 hover:border-accent col-span-2">edit lanes + drivable &rarr;</button>
             </div>
-            <AgentPanel frameId={id} />
+            <AgentPanel frameId={id} selectedId={st.selectedId} />
           </div>
 
           {/* object list: grouped by class, searchable, collapsible, with a confidence bar per row. Scales
