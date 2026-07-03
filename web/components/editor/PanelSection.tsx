@@ -17,14 +17,14 @@ export default function PanelSection({ title, badge, defaultOpen = false, accent
   return (
     <div className="border-b hairline">
       <button onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-line/30 group">
+        className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-line/30 group transition-colors">
         <span className={`font-mono text-[10px] uppercase tracking-wide ${accent ? "text-ink-2" : "text-ink-3"}`}>{title}</span>
         <span className="flex items-center gap-2">
           {badge != null && <span className="font-mono text-[10px] text-ink-3">{badge}</span>}
-          <span className="font-mono text-[11px] text-ink-3 group-hover:text-ink w-3 text-center">{open ? "−" : "+"}</span>
+          <span className={`text-ink-3 group-hover:text-ink w-3 text-center text-[9px] leading-none transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▸</span>
         </span>
       </button>
-      {open && <div className="px-2 pb-2">{children}</div>}
+      {open && <div className="px-2 pb-2 reveal">{children}</div>}
     </div>
   );
 }

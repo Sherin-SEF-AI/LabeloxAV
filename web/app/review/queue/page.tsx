@@ -23,11 +23,17 @@ export default function ReviewQueuePage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [whyOpen, setWhyOpen] = useState<string | null>(null);  // M-F.0 expanded rationale row
   const [sortQ, setSortQ] = useState(false);  // M-F.1 sort the value queue by lowest label quality first
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const [al, ec] = await Promise.all([api.alScore(undefined, 60), api.errorCandidates("pending", 80)]);
-    setItems(al.items);
-    setErrs(ec);
+    setLoading(true);
+    try {
+      const [al, ec] = await Promise.all([api.alScore(undefined, 60), api.errorCandidates("pending", 80)]);
+      setItems(al.items);
+      setErrs(ec);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -55,6 +61,13 @@ export default function ReviewQueuePage() {
                 className={sortQ ? "text-accent" : "hover:text-ink"}>quality{sortQ ? " ↓" : ""}</button></th>
               <th>value</th><th>uncertain</th><th>diverse</th><th>rare</th><th>err</th><th></th></tr></thead>
             <tbody>
+              {loading && items.length === 0 && Array.from({ length: 10 }).map((_, r) => (
+                <tr key={`sk${r}`} className="border-b hairline">
+                  {Array.from({ length: 8 }).map((__, c) => (
+                    <td key={c} className="px-2 py-1.5"><span className="block h-3 skeleton" style={{ width: c === 0 ? "80%" : "60%", animationDelay: `${(r * 8 + c) * 40}ms` }} /></td>
+                  ))}
+                </tr>
+              ))}
               {(sortQ ? [...items].sort((a, b) => (a.quality_score ?? 1) - (b.quality_score ?? 1)) : items).map((it) => (
                 <Fragment key={it.object_id}>
                   <tr className="border-b hairline hover:bg-line">

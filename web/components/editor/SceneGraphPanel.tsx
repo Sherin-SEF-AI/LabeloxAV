@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { Busy } from "@/components/Spinner";
 
 type Rel = Awaited<ReturnType<typeof api.relationsList>>[number];
 type Target = Awaited<ReturnType<typeof api.vlmTargetsList>>[number];
@@ -47,8 +48,8 @@ export default function SceneGraphPanel({ frameId, embedded = false }: { frameId
       <div className="flex items-center justify-between">
         {!embedded && <span className="uppercase text-ink-3">scene graph + vlm dataset</span>}
         <div className={`flex gap-1 ${embedded ? "ml-auto" : ""}`}>
-          <button onClick={propose} disabled={busy} className="border border-line px-1.5 rounded text-ink-3 hover:border-accent disabled:opacity-40">propose relations</button>
-          <button onClick={generate} disabled={busy} className="border border-info/50 text-info px-1.5 rounded hover:bg-info/10 disabled:opacity-40">generate target</button>
+          <button onClick={propose} disabled={busy} className="flex items-center gap-1 border border-line px-1.5 rounded text-ink-3 hover:border-accent disabled:opacity-40">{busy && <Busy />}propose relations</button>
+          <button onClick={generate} disabled={busy} className={`flex items-center gap-1 border border-info/50 text-info px-1.5 rounded hover:bg-info/10 disabled:opacity-40 ${busy ? "running" : ""}`}>{busy && <Busy className="border-t-info" />}generate target</button>
         </div>
       </div>
 

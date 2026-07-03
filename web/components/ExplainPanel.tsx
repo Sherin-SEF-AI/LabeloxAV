@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { Busy } from "@/components/Spinner";
 import type { ObjectExplanation } from "@/lib/types";
 
 const DECISION_COLOR: Record<string, string> = {
@@ -28,13 +29,13 @@ export default function ExplainPanel({ objectId }: { objectId: string }) {
   }, [objectId]);
 
   if (err) return <div className="font-mono text-[10px] text-block px-1">{err}</div>;
-  if (!ex) return <div className="font-mono text-[10px] text-ink-3 px-1">explaining...</div>;
+  if (!ex) return <div className="font-mono text-[10px] text-ink-3 px-1 flex items-center gap-1.5"><Busy />explaining...</div>;
 
   const cal = ex.calibration;
   const dc = DECISION_COLOR[ex.machine_decision] ?? "text-ink-3 border-line";
 
   return (
-    <div className="font-mono text-[10.5px] text-ink-2 space-y-2">
+    <div className="font-mono text-[10.5px] text-ink-2 space-y-2 reveal">
       <div className="flex items-center gap-2">
         <span className={`border px-1.5 py-0.5 rounded uppercase ${dc}`}>{ex.machine_decision}</span>
         {ex.rare && <span className="border border-info/50 text-info px-1.5 py-0.5 rounded uppercase">rare</span>}

@@ -1449,8 +1449,9 @@ export default function FrameEditor() {
           </div>
           )}
 
-          {/* scroll body: shows the objects-tab content or the tools-tab content depending on the active tab */}
-          <div className="flex-1 min-h-0 overflow-y-auto">
+          {/* scroll body: shows the objects-tab content or the tools-tab content depending on the active tab.
+              Keyed by tab so switching fades the new content in. */}
+          <div key={rightTab} className="flex-1 min-h-0 overflow-y-auto reveal">
 
           {/* attributes of selected (objects tab) */}
           {rightTab === "objects" && selected && (
