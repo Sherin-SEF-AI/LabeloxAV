@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import type { Ontology, Track } from "@/lib/types";
+import type { IntentVocab, Ontology, Track } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import BackButton from "@/components/BackButton";
 import PageHeaderBar from "@/components/shell/PageHeaderBar";
@@ -20,12 +20,40 @@ export default function TrackEditor() {
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [vocab, setVocab] = useState<IntentVocab | null>(null);
 
   const load = useCallback(async () => {
-    const [t, o] = await Promise.all([api.track(id), api.ontology()]);
+    const [t, o, v] = await Promise.all([api.track(id), api.ontology(), api.intentVocab().catch(() => null)]);
     setTrack(t);
     setOnto(o);
+    setVocab(v);
   }, [id]);
+
+  // M-F.2 intent kind (vehicle | vru | null) from the dominant class's l1 subclass
+  const intentKind = useMemo(() => {
+    if (!onto || !track) return null;
+    const l1 = onto.classes.find((c) => c.name === track.dominant)?.l1;
+    if (["two_wheeler", "three_wheeler", "four_wheeler", "heavy"].includes(l1 || "")) return "vehicle";
+    if (l1 === "vru") return "vru";
+    return null;
+  }, [onto, track]);
+
+  const proposeIntent = useCallback(async () => {
+    setBusy(true);
+    try { const r = await api.intentPropose(id); setMsg(r.proposed.length ? `proposed: ${r.proposed.join(", ")}` : "no geometric intent (left unknown)"); await load(); }
+    catch (e) { setMsg(String(e)); } finally { setBusy(false); }
+  }, [id, load]);
+  const vlmIntent = useCallback(async () => {
+    setBusy(true); setMsg("asking the VLM...");
+    try { const r = await api.intentVlm(id); setMsg(r.proposed ? `VLM proposed: ${r.proposed}` : `VLM: ${r.reason ?? "unclear (unknown)"}`); await load(); }
+    catch (e) { setMsg(String(e)); } finally { setBusy(false); }
+  }, [id, load]);
+  const setIntent = useCallback(async (intent: string) => {
+    if (!intentKind) return;
+    setBusy(true);
+    try { await api.intentSet(id, intent, intentKind); setMsg(intent === "unknown" ? "cleared intent" : `confirmed intent: ${intent}`); await load(); }
+    catch (e) { setMsg(String(e)); } finally { setBusy(false); }
+  }, [id, intentKind, load]);
 
   useEffect(() => {
     load().catch((e) => setMsg(String(e)));
@@ -114,7 +142,7 @@ export default function TrackEditor() {
         {/* timeline strip */}
         <section className="panel">
           <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
-            timeline ({track.n_frames}) — click a frame to open it in the editor
+            timeline ({track.n_frames}) - click a frame to open it in the editor
           </div>
           <div className="p-3 flex gap-2 overflow-x-auto">
             {track.items.map((it, i) => {
@@ -135,6 +163,45 @@ export default function TrackEditor() {
             })}
           </div>
         </section>
+
+        {/* M-F.2 behavior / intent (track-level, from a closed vocabulary; proposals need human confirmation) */}
+        {intentKind && (
+          <section className="panel max-w-2xl">
+            <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2 flex items-center justify-between">
+              <span>behavior / intent ({intentKind})</span>
+              <span className="flex items-center gap-2">
+                <button onClick={proposeIntent} disabled={busy} className="border border-line px-1.5 py-0.5 rounded text-ink-3 hover:border-accent disabled:opacity-40">propose from trajectory</button>
+                {intentKind === "vru" && <button onClick={vlmIntent} disabled={busy} className="border border-info/50 text-info px-1.5 py-0.5 rounded hover:bg-info/10 disabled:opacity-40">propose from VLM</button>}
+              </span>
+            </div>
+            <div className="p-3 space-y-3 font-mono text-[11px]">
+              {/* current intents */}
+              <div className="flex flex-wrap gap-1.5">
+                {(track.intents || []).length === 0 && <span className="text-ink-3">no intent yet. propose from trajectory or VLM, or set one below.</span>}
+                {(track.intents || []).map((it, i) => (
+                  <span key={i} title={`source ${it.source} · confidence ${it.confidence}`}
+                    className={`inline-flex items-center gap-1 border px-1.5 py-0.5 rounded ${it.status === "confirmed" ? "border-pass/60 text-pass" : "border-warn/60 text-warn"}`}>
+                    {it.intent}
+                    <span className="text-ink-3 text-[9px] uppercase">{it.source}</span>
+                    {it.status === "proposed" && it.source !== "human" && (
+                      <button onClick={() => setIntent(it.intent)} disabled={busy} title="confirm this intent" className="text-pass hover:text-accent ml-0.5">✓</button>
+                    )}
+                  </span>
+                ))}
+              </div>
+              {/* set from the closed vocabulary */}
+              <div className="flex flex-wrap items-center gap-1.5 border-t hairline pt-2">
+                <span className="text-ink-3 uppercase text-[9px] w-full">set intent (closed vocabulary)</span>
+                {(intentKind === "vehicle" ? vocab?.vehicle : vocab?.vru)?.map((v) => (
+                  <button key={v} onClick={() => setIntent(v)} disabled={busy}
+                    className="border border-line px-1.5 py-0.5 rounded text-ink-2 hover:border-accent disabled:opacity-40">{v}</button>
+                ))}
+                <button onClick={() => setIntent("unknown")} disabled={busy}
+                  className="border border-line px-1.5 py-0.5 rounded text-ink-3 hover:border-block disabled:opacity-40">unknown</button>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* relabel whole track */}
         <section className="panel max-w-md">

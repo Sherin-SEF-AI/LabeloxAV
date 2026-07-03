@@ -47,6 +47,8 @@ import type {
   SegmentResult,
   SessionRow,
   Track,
+  TrackIntent,
+  IntentVocab,
   TriageRow,
   UserRow,
   CloudStatus,
@@ -542,6 +544,11 @@ export const api = {
   recognizeSigns: (session_id: string, limit = 200) =>
     post<{ recognized: number; text_bearing: number }>(`/api/signs/recognize?session_id=${session_id}&limit=${limit}`, {}),
   track: (id: string) => get<Track>(`/api/tracks/${id}`),
+  // M-F.2 behavior/intent annotation
+  intentVocab: () => get<IntentVocab>(`/api/intent/vocab`),
+  intentPropose: (id: string) => post<{ proposed: string[]; intents: TrackIntent[] }>(`/api/tracks/${id}/intent/propose`, {}),
+  intentVlm: (id: string) => post<{ proposed: string | null; confidence?: number; reason?: string }>(`/api/tracks/${id}/intent/vlm`, {}),
+  intentSet: (id: string, intent: string, kind: string) => post<{ intents: TrackIntent[] }>(`/api/tracks/${id}/intent/set`, { intent, kind }),
   // M3.2 map-assisted
   mapMatch: (sid: string) => post<{ matched: number; no_road: number; road_classes: Record<string, number> }>(`/api/mapassist/match?session_id=${sid}`, {}),
   framePriors: (fid: string) => get<{ found: boolean; has_map: boolean; road_class?: string; lane_count?: number | null; speed_limit?: number | null; hints: { kind: string }[] }>(`/api/mapassist/priors?frame_id=${fid}`),

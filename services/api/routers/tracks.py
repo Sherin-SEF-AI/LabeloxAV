@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.timebase import now_ns
-from db.models import Frame, Object, Review
+from db.models import Frame, Object, Review, Track
 from services.api.deps import RelabelTrackIn, current_user, db_session
 from services.autolabel.ontology import get_ontology
 
@@ -41,10 +41,70 @@ async def get_track(track_id: UUID, db: AsyncSession = Depends(db_session)):
         for o, ts, fid in rows
     ]
     classes = Counter(i["class_name"] for i in items)
+    track = await db.get(Track, track_id)
     return {
         "track_id": str(track_id), "n_frames": len(items), "classes": dict(classes),
         "dominant": classes.most_common(1)[0][0], "flips": len(classes) > 1, "items": items,
+        "intents": (track.intents if track else []) or [],  # M-F.2 track-level intents
     }
+
+
+# M-F.2 behavior/intent annotation
+
+
+@router.get("/intent/vocab")
+async def intent_vocab():
+    """The governed closed intent vocabularies (VRU + vehicle) and which each assist path may propose."""
+    from services.intelligence.intent import vocab
+
+    return vocab()
+
+
+@router.post("/tracks/{track_id}/intent/propose")
+async def intent_propose(track_id: UUID):
+    """Propose trajectory-derived intents for a track (geometric: cut_in, hard_brake, crossing, ...)."""
+    from services.intelligence.intent import propose_track
+
+    res = await propose_track(track_id)
+    if "error" in res:
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@router.post("/tracks/{track_id}/intent/vlm")
+async def intent_vlm(track_id: UUID):
+    """Propose a VLM-derived intent for a VRU track (looking_at_vehicle, hesitating, jaywalking)."""
+    from services.intelligence.intent import propose_vlm
+
+    res = await propose_vlm(track_id)
+    if "error" in res:
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@router.post("/intent/propose-session")
+async def intent_propose_session(session_id: UUID):
+    """Trajectory-derived intent proposals across a whole session."""
+    from services.intelligence.intent import propose_session
+
+    return await propose_session(session_id)
+
+
+class IntentSetIn(BaseModel):
+    intent: str
+    kind: str
+    status: str = "confirmed"
+
+
+@router.post("/tracks/{track_id}/intent/set", dependencies=[Depends(current_user)])
+async def intent_set(track_id: UUID, body: IntentSetIn):
+    """Human confirms or sets a track's intent from the closed vocabulary (or 'unknown' to clear)."""
+    from services.intelligence.intent import set_intent
+
+    res = await set_intent(track_id, body.intent, body.kind, body.status)
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
 
 
 @router.post("/tracks/{track_id}/relabel")

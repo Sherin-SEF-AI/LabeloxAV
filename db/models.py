@@ -139,6 +139,7 @@ class Track(Base):
     trajectory: Mapped[dict | None] = mapped_column(JSONB)  # per-frame centroids (image + ego frame)
     id_switch_flags: Mapped[dict | None] = mapped_column(JSONB)  # M2.0: flagged re-id/occlusion events
     tracker_version: Mapped[str | None] = mapped_column(String(48))  # M2.0: tracker backend + version
+    intents: Mapped[list] = mapped_column(JSONB, default=list)  # M-F.2 track-level typed intents (proposed/confirmed)
 
     __table_args__ = (Index("ix_track_session", "session_id"),)
 

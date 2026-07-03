@@ -297,6 +297,7 @@ export type TrackItem = {
   crop_url: string;
 };
 
+export type TrackIntent = { intent: string; kind: string; source: string; status: string; confidence: number; evidence: Record<string, unknown> };
 export type Track = {
   track_id: string;
   n_frames: number;
@@ -304,7 +305,9 @@ export type Track = {
   dominant: string;
   flips: boolean;
   items: TrackItem[];
+  intents: TrackIntent[];
 };
+export type IntentVocab = { ontology_version: string; vru: string[]; vehicle: string[]; trajectory_vru: string[]; trajectory_vehicle: string[]; vlm_vru: string[] };
 
 export type Scenario = {
   scenario_id: string;
