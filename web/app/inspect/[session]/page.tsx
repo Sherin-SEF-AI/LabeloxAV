@@ -85,7 +85,10 @@ export default function InspectorWorkspace() {
         const def = lay.layouts.find((l) => l.is_default);
         setPanels(def ? def.panels.map((p) => ({ ...p, id: `p${++PANEL_SEQ}` })) : defaultPanels(lay.config_default, idxTopics.length ? idxTopics : m.topics().map((t) => ({ name: t.topic, schema: t.schema, count: 0, rate: 0, first_ts: 0, last_ts: 0 }))));
       } catch (e) {
-        if (live) setErr(String(e));
+        // a session ingested from images/video/imagery has no MCAP; say so plainly instead of a raw 409
+        if (live) setErr(/409/.test(String(e))
+          ? "This session has no MCAP recording to inspect. The Session Inspector applies to sessions ingested from an .mcap file."
+          : String(e));
       } finally {
         if (live) setLoading(false);
       }

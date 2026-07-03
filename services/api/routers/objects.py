@@ -334,10 +334,16 @@ async def get_frame(frame_id: str, db: AsyncSession = Depends(db_session)):
         prov = (await db.execute(select(Object.provenance).where(
             Object.frame_id == frame.frame_id, Object.source == "imported").limit(1))).scalar()
         import_format = (prov or {}).get("import_format")
+    # whether this session has an MCAP recording, so the editor only offers the Session Inspector when there is
+    # a timeline to inspect (image/video/imagery sessions have no MCAP and the Inspector would 409).
+    from db.models import Session as DbSession
+
+    mcap_uri = (await db.execute(select(DbSession.mcap_uri).where(DbSession.session_id == frame.session_id))).scalar_one_or_none()
     return {
         "frame_id": str(frame.frame_id), "session_id": str(frame.session_id),
         "width": frame.width, "height": frame.height, "ts_ns": frame.ts_ns, "cam_id": frame.cam_id,
         "image_url": f"/api/frames/{frame.frame_id}/image", "n_objects": int(n),
+        "has_mcap": mcap_uri is not None,
         "annotation_source": annotation_source, "import_format": import_format,
         "prev_frame_id": str(prev) if prev else None, "next_frame_id": str(nxt) if nxt else None,
         "is_lidar": bool(frame.lidar), "lidar_points": (frame.lidar or {}).get("n_points"),

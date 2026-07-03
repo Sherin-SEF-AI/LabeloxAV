@@ -263,6 +263,7 @@ export type FrameMeta = {
   cam_id: string;
   image_url: string;
   n_objects: number;
+  has_mcap?: boolean;
   annotation_source?: string | null;
   import_format?: string | null;
   prev_frame_id: string | null;
