@@ -10,10 +10,11 @@ import { api } from "@/lib/api";
 
 type Preview = Awaited<ReturnType<typeof api.nlEditPreview>>;
 
-export default function BulkEditBar({ frameId, sessionId, onApplied }: {
+export default function BulkEditBar({ frameId, sessionId, onApplied, embedded = false }: {
   frameId: string;
   sessionId?: string | null;
   onApplied?: () => void;
+  embedded?: boolean;
 }) {
   const [cmd, setCmd] = useState("");
   const [scope, setScope] = useState<"frame" | "session">("frame");
@@ -49,8 +50,8 @@ export default function BulkEditBar({ frameId, sessionId, onApplied }: {
   const canApply = preview && preview.count > 0 && op !== "select" && !(op === "reclassify" && preview.plan.to_class_id == null);
 
   return (
-    <div className="border-t hairline p-2 space-y-1.5 font-mono text-[10px]">
-      <div className="uppercase text-ink-3">natural-language bulk edit</div>
+    <div className={`space-y-1.5 font-mono text-[10px] ${embedded ? "" : "border-t hairline p-2"}`}>
+      {!embedded && <div className="uppercase text-ink-3">natural-language bulk edit</div>}
       <div className="flex gap-1">
         <input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === "Enter" && doPreview()}
           placeholder="e.g. reclassify the fallback objects to push_cart"

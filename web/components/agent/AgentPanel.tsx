@@ -8,7 +8,7 @@ import { api, type AgentPlan } from "@/lib/api";
 // commit. Every commit is one reversible run, so the Revert button undoes it exactly. This is the
 // "human supervises exceptions" surface: you see the 80% the system is sure about before it touches them.
 
-export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId: string; selectedId?: string | null; onApplied?: () => void }) {
+export default function AgentPanel({ frameId, selectedId, onApplied, embedded = false }: { frameId: string; selectedId?: string | null; onApplied?: () => void; embedded?: boolean }) {
   const [plan, setPlan] = useState<AgentPlan | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
@@ -142,9 +142,9 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
 
   const c = plan?.counts;
   return (
-    <div className="border-t hairline pt-2 mt-2">
+    <div className={embedded ? "" : "border-t hairline pt-2 mt-2"}>
       <div className="flex items-center gap-2 px-1 pb-1.5">
-        <span className="font-display text-[10px] font-semibold uppercase tracking-wider text-ink-3">Agent</span>
+        {!embedded && <span className="font-display text-[10px] font-semibold uppercase tracking-wider text-ink-3">Agent</span>}
         <span className="font-mono text-[9px] text-ink-3/70">auto-accept the sure ones</span>
         <button onClick={doPlan} disabled={!!busy}
           className="ml-auto font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-50">
@@ -237,7 +237,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
               </div>
             ))}
             {plan!.items.filter((i) => i.changes_state).length === 0 && (
-              <div className="font-mono text-[9.5px] text-ink-3">no changes — already settled</div>
+              <div className="font-mono text-[9.5px] text-ink-3">no changes, already settled</div>
             )}
           </div>
           <button onClick={doCommit} disabled={!!busy || c.auto_accept + c.review + c.annotate === c.unchanged}
