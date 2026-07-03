@@ -28,6 +28,7 @@ import type {
   MapFeature,
   MapProvenance,
   MulticamGroups,
+  ObjectExplanation,
   FrameGroup,
   PersistedGroups,
   RigObjectsResponse,
@@ -327,6 +328,7 @@ export const api = {
   // Frame-centric editor
   frame: (id: string) => get<FrameMeta>(`/api/frames/${id}`),
   frameObjects: (id: string) => get<FrameObject[]>(`/api/frames/${id}/objects`),
+  explainObject: (id: string) => get<ObjectExplanation>(`/api/objects/${id}/explain`),
   // P3 per-object dynamics (derived: distance/speed/heading/ttc/risk)
   frameDynamics: (id: string) => get<{ frame_id: string; dynamics: ObjectDynamicsRow[] }>(`/api/dynamics/frame/${id}`),
   computeDynamics: (session_id: string) => post<{ objects: number; tracked_with_speed: number; with_distance: number }>(`/api/dynamics/compute?session_id=${session_id}`, {}),

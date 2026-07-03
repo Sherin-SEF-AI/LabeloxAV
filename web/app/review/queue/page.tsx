@@ -1,12 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { AlItem, ErrorCandidateRow } from "@/lib/types";
+import dynamic from "next/dynamic";
 import PageShell from "@/components/shell/PageShell";
 import ScoreBar from "@/components/shell/ScoreBar";
 import { ConfBar } from "@/components/StateBadge";
+
+const ExplainPanel = dynamic(() => import("@/components/ExplainPanel"), { ssr: false });
 
 // M4.0 + M4.1 unified review queue: the highest-value active-learning items to label, and the
 // error candidates flagged on already-accepted data. The human governor spends touches here, on the
@@ -18,6 +21,7 @@ export default function ReviewQueuePage() {
   const [items, setItems] = useState<AlItem[]>([]);
   const [errs, setErrs] = useState<ErrorCandidateRow[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
+  const [whyOpen, setWhyOpen] = useState<string | null>(null);  // M-F.0 expanded rationale row
 
   const load = useCallback(async () => {
     const [al, ec] = await Promise.all([api.alScore(undefined, 60), api.errorCandidates("pending", 80)]);
@@ -48,16 +52,27 @@ export default function ReviewQueuePage() {
             <thead><tr className="text-ink-3 text-left border-b hairline"><th className="px-2 py-1">class</th><th>conf</th><th>value</th><th>uncertain</th><th>diverse</th><th>rare</th><th>err</th><th></th></tr></thead>
             <tbody>
               {items.map((it) => (
-                <tr key={it.object_id} className="border-b hairline hover:bg-line">
-                  <td className="px-2 py-1 text-ink-2">{it.class_name}</td>
-                  <td><ConfBar conf={it.conf} /></td>
-                  <td className="text-accent">{it.value.toFixed(3)}</td>
-                  <td><ScoreBar value={it.scores.uncertainty} showValue={false} /></td>
-                  <td><ScoreBar value={it.scores.diversity} showValue={false} /></td>
-                  <td><ScoreBar value={it.scores.rarity} showValue={false} /></td>
-                  <td><ScoreBar value={it.scores.error_prone} showValue={false} tone="warn" /></td>
-                  <td className="text-right pr-2"><button onClick={() => router.push(`/frame/${it.frame_id}`)} className="text-info hover:text-accent">label →</button></td>
-                </tr>
+                <Fragment key={it.object_id}>
+                  <tr className="border-b hairline hover:bg-line">
+                    <td className="px-2 py-1 text-ink-2">{it.class_name}</td>
+                    <td><ConfBar conf={it.conf} /></td>
+                    <td className="text-accent">{it.value.toFixed(3)}</td>
+                    <td><ScoreBar value={it.scores.uncertainty} showValue={false} /></td>
+                    <td><ScoreBar value={it.scores.diversity} showValue={false} /></td>
+                    <td><ScoreBar value={it.scores.rarity} showValue={false} /></td>
+                    <td><ScoreBar value={it.scores.error_prone} showValue={false} tone="warn" /></td>
+                    <td className="text-right pr-2 space-x-2 whitespace-nowrap">
+                      <button onClick={() => setWhyOpen((w) => (w === it.object_id ? null : it.object_id))}
+                        className={whyOpen === it.object_id ? "text-accent" : "text-ink-3 hover:text-ink"}>why</button>
+                      <button onClick={() => router.push(`/frame/${it.frame_id}`)} className="text-info hover:text-accent">label →</button>
+                    </td>
+                  </tr>
+                  {whyOpen === it.object_id && (
+                    <tr className="border-b hairline"><td colSpan={8} className="px-3 py-2 bg-bg-2">
+                      <ExplainPanel objectId={it.object_id} />
+                    </td></tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>

@@ -121,6 +121,26 @@ export type MapCommitRow = { commit_id: string; region: string; element_count: n
 export type MapFeature = { type: "Feature"; geometry: { type: string; coordinates: number[] | number[][] } | null; properties: Record<string, unknown> & { element_id: string; kind: string; confidence: number } };
 export type MapProvenance = { found: boolean; element_id?: string; kind?: string; attrs?: Record<string, unknown>; confidence?: number; calibration_version?: string | null; commit_id?: string | null; fusion_job_id?: string | null; source_sessions?: string[] | null; source_frames?: { frame_id: string; session_id: string; cam_id: string; ts_ns: number; vehicle_id: string | null }[] };
 
+// M-F.0 explainable auto-labeling
+export type ExplainPath = { path: string; label: string; class_name: string | null; conf: number; verdict: string | null; model_version: string | null };
+export type ObjectExplanation = {
+  object_id: string;
+  class_name: string;
+  state: string;
+  source: string;
+  rare: boolean;
+  paths: ExplainPath[];
+  agreement: boolean;
+  mask_box_disagree: boolean;
+  vlm: { confirmed: boolean; class_name: string | null; verdict: string | null } | null;
+  overruled_classes: string[];
+  calibration: { raw: number | null; calibrated: number | null; auto_accept_floor: number | null };
+  quality_flags: string[];
+  machine_decision: string;
+  deciding_reason: string;
+  summary: string[];
+};
+
 export type MulticamGroups = {
   cameras: string[];
   multicamera: boolean;

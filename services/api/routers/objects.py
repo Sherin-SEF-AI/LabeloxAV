@@ -174,6 +174,17 @@ async def get_object(object_id: str, db: AsyncSession = Depends(db_session)):
     return _detail(obj, frame, get_ontology())
 
 
+@router.get("/objects/{object_id}/explain")
+async def explain_object_ep(object_id: str, db: AsyncSession = Depends(db_session)):
+    """M-F.0: the plain-language decision story for an object, assembled from its real provenance."""
+    from services.autolabel.explain import explain_object
+
+    res = await explain_object(db, UUID(object_id))
+    if "error" in res:
+        raise HTTPException(404, res["error"])
+    return res
+
+
 @router.get("/frames/{frame_id}/objects")
 async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
     from sqlalchemy import select

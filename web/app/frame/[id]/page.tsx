@@ -32,6 +32,7 @@ import { MODES, type ToolGroup } from "@/lib/editor/registry";
 const EditorCanvas = dynamic(() => import("@/components/editor/EditorCanvas").then((m) => ({ default: m.default })), { ssr: false });
 const RigView = dynamic(() => import("@/components/editor/RigView"), { ssr: false });
 const RigIdentityPanel = dynamic(() => import("@/components/editor/RigIdentityPanel"), { ssr: false });
+const ExplainPanel = dynamic(() => import("@/components/ExplainPanel"), { ssr: false });
 const RigTrackPanel = dynamic(() => import("@/components/editor/RigTrackPanel"), { ssr: false });
 // Lanes mode swaps to this fit-to-width Konva stage (the folded-in lane editor). Loaded once, ssr off.
 const LaneCanvas = dynamic(() => import("@/components/lane/LaneCanvas"), { ssr: false });
@@ -186,6 +187,7 @@ export default function FrameEditor() {
   const [rigLayout, setRigLayout] = useState<import("@/components/editor/RigView").RigLayout>("focus");
   const [rigGroup, setRigGroup] = useState<{ groupId: string; cameras: string[]; frameIds: Record<string, string>; missingCams: string[]; confirmed: boolean } | null>(null);
   const [rigPanel, setRigPanel] = useState(false);   // M-MC.2 rig-identity panel visibility
+  const [explainOpen, setExplainOpen] = useState(false);  // M-F.0 "why this label" rationale
   const [rigCalibrated, setRigCalibrated] = useState<boolean | null>(null);  // M-MC.3 Tier 2 eligibility
   const [rigRefresh, setRigRefresh] = useState(0);   // bump to refetch the identity panel after a propagate
   const [rigTracks, setRigTracks] = useState(false);  // M-MC.4 rig-track timeline panel visibility
@@ -1465,6 +1467,20 @@ export default function FrameEditor() {
                   </div>
                 </div>
               </div>
+              {/* M-F.0: why this label was decided the way it was, from real provenance */}
+              {!selected.isNew && (
+                <div className="mb-1.5">
+                  <button onClick={() => setExplainOpen((v) => !v)}
+                    className="w-full flex items-center justify-between font-mono text-[10px] uppercase text-ink-3 border border-line rounded px-1.5 py-1 hover:border-accent">
+                    <span>why this label</span><span>{explainOpen ? "−" : "+"}</span>
+                  </button>
+                  {explainOpen && (
+                    <div className="mt-1.5 bg-bg-2 border border-line rounded p-2">
+                      <ExplainPanel objectId={selected.id} />
+                    </div>
+                  )}
+                </div>
+              )}
               <button
                 disabled={selected.isNew}
                 title={selected.isNew ? "save the frame first, then propagate" : "optical-flow propagate this box across the next 12 frames as a track to confirm"}
