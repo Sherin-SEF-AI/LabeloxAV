@@ -28,6 +28,8 @@ import type {
   MapFeature,
   MapProvenance,
   MulticamGroups,
+  ObjectExplanation,
+  ProductivityReport,
   FrameGroup,
   PersistedGroups,
   RigObjectsResponse,
@@ -46,6 +48,8 @@ import type {
   SegmentResult,
   SessionRow,
   Track,
+  TrackIntent,
+  IntentVocab,
   TriageRow,
   UserRow,
   CloudStatus,
@@ -327,6 +331,21 @@ export const api = {
   // Frame-centric editor
   frame: (id: string) => get<FrameMeta>(`/api/frames/${id}`),
   frameObjects: (id: string) => get<FrameObject[]>(`/api/frames/${id}/objects`),
+  explainObject: (id: string) => get<ObjectExplanation>(`/api/objects/${id}/explain`),
+  // M-F.5 scene-graph relations + VLM dataset generation
+  sceneGraphVocab: () => get<{ relations: string[]; geometric: string[]; vlm_or_human: string[] }>(`/api/scene-graph/vocab`),
+  relationsPropose: (frameId: string) => post<{ proposed: number; by_kind: Record<string, number> }>(`/api/frames/${frameId}/relations/propose`, {}),
+  relationsList: (frameId: string) => get<{ relationship_id: string; from_name: string; to_name: string; kind: string; status: string; source: string }[]>(`/api/frames/${frameId}/relations`),
+  relationStatus: (id: string, status: string) => post<{ status: string }>(`/api/relations/${id}/status?status=${status}`, {}),
+  vlmTargetGenerate: (frameId: string) => post<{ target_id: string; content: Record<string, unknown>; grounding: { objects: number; intents: number; relations: number } }>(`/api/frames/${frameId}/vlm-target/generate`, {}),
+  vlmTargetsList: (frameId: string) => get<{ target_id: string; kind: string; content: Record<string, unknown>; grounding: Record<string, string[]>; status: string; model: string | null }[]>(`/api/frames/${frameId}/vlm-targets`),
+  vlmTargetStatus: (id: string, status: string) => post<{ status: string }>(`/api/vlm-targets/${id}/status?status=${status}`, {}),
+  vlmExport: (sessionId?: string) => get<{ format: string; n_samples: number }>(`/api/vlm-dataset/export${sessionId ? `?session_id=${sessionId}` : ""}`),
+  // M-F.3 natural-language bulk editing
+  nlEditPreview: (body: { command: string; frame_id?: string; session_id?: string; use_vlm?: boolean }) =>
+    post<{ plan: { operation: string; to_class_id: number | null }; count: number; objects: { object_id: string; class_name: string; frame_id: string }[]; warnings: string[]; vlm_refined?: boolean }>(`/api/agent/nl-edit/preview`, body),
+  nlEditApply: (body: { command: string; object_ids: string[] }) =>
+    post<{ run_id: string; operation: string; edited: number; routed_to: string }>(`/api/agent/nl-edit/apply`, body),
   // P3 per-object dynamics (derived: distance/speed/heading/ttc/risk)
   frameDynamics: (id: string) => get<{ frame_id: string; dynamics: ObjectDynamicsRow[] }>(`/api/dynamics/frame/${id}`),
   computeDynamics: (session_id: string) => post<{ objects: number; tracked_with_speed: number; with_distance: number }>(`/api/dynamics/compute?session_id=${session_id}`, {}),
@@ -540,6 +559,11 @@ export const api = {
   recognizeSigns: (session_id: string, limit = 200) =>
     post<{ recognized: number; text_bearing: number }>(`/api/signs/recognize?session_id=${session_id}&limit=${limit}`, {}),
   track: (id: string) => get<Track>(`/api/tracks/${id}`),
+  // M-F.2 behavior/intent annotation
+  intentVocab: () => get<IntentVocab>(`/api/intent/vocab`),
+  intentPropose: (id: string) => post<{ proposed: string[]; intents: TrackIntent[] }>(`/api/tracks/${id}/intent/propose`, {}),
+  intentVlm: (id: string) => post<{ proposed: string | null; confidence?: number; reason?: string }>(`/api/tracks/${id}/intent/vlm`, {}),
+  intentSet: (id: string, intent: string, kind: string) => post<{ intents: TrackIntent[] }>(`/api/tracks/${id}/intent/set`, { intent, kind }),
   // M3.2 map-assisted
   mapMatch: (sid: string) => post<{ matched: number; no_road: number; road_classes: Record<string, number> }>(`/api/mapassist/match?session_id=${sid}`, {}),
   framePriors: (fid: string) => get<{ found: boolean; has_map: boolean; road_class?: string; lane_count?: number | null; speed_limit?: number | null; hints: { kind: string }[] }>(`/api/mapassist/priors?frame_id=${fid}`),
@@ -621,6 +645,7 @@ export const api = {
   // Gate A evidence + Gate B (M9) quality sheet
   analyticsPii: (session_id?: string) =>
     get<PiiCoverage>("/api/analytics/pii" + (session_id ? `?session_id=${session_id}` : "")),
+  analyticsProductivity: () => get<ProductivityReport>("/api/analytics/productivity"),
   goldSets: () => get<GoldSetRow[]>("/api/quality/gold-sets"),
   qualitySheet: (gold_id: string) =>
     get<QualitySheet>("/api/quality/sheet?" + new URLSearchParams({ gold_id }).toString()),

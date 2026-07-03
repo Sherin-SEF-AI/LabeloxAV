@@ -20,7 +20,7 @@ def write_parquet(records: list[ExportRecord], out_dir: Path, filename: str = "o
         "ts_ns": [], "cam_id": [], "img_uri": [], "width": [], "height": [],
         "vehicle_id": [], "city": [], "class_id": [], "class_name": [],
         "bbox_x1": [], "bbox_y1": [], "bbox_x2": [], "bbox_y2": [],
-        "conf": [], "state": [], "source": [], "mask_uri": [], "mask_encoding": [],
+        "conf": [], "quality_score": [], "state": [], "source": [], "mask_uri": [], "mask_encoding": [],
         "rot_deg": [], "keypoints_json": [], "polyline_json": [], "relationships_json": [],
         "attrs_json": [], "provenance_json": [],
     }
@@ -43,6 +43,7 @@ def write_parquet(records: list[ExportRecord], out_dir: Path, filename: str = "o
         cols["bbox_x2"].append(r.bbox[2])
         cols["bbox_y2"].append(r.bbox[3])
         cols["conf"].append(r.conf)
+        cols["quality_score"].append(r.quality_score)
         cols["state"].append(r.state)
         cols["source"].append(r.source)
         cols["mask_uri"].append(r.mask_uri)

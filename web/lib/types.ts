@@ -108,7 +108,7 @@ export type ConfusionRow = { old_class: string; new_class: string; count: number
 export type Confusions = { by: string; total_corrections: number; confusions: ConfusionRow[] };
 export type CorrectionCoverage = { embedded: number; total: number; pct: number };
 
-export type AlItem = { object_id: string; frame_id: string; class_name: string; conf: number; value: number; scores: { uncertainty: number; diversity: number; rarity: number; error_prone: number } };
+export type AlItem = { object_id: string; frame_id: string; class_name: string; conf: number; quality_score?: number | null; value: number; scores: { uncertainty: number; diversity: number; rarity: number; error_prone: number } };
 export type ErrorCandidateRow = { candidate_id: string; object_id: string; kind: string; score: number; proposed_label: { class_name?: string } | null; detail: Record<string, unknown>; status: string };
 export type GovState = { loop_enabled: boolean; auto_accept_enabled: boolean; auto_promote_enabled: boolean; champion_version: string | null; paused_reason: string | null; updated_at: string | null };
 export type RegistryRow = { model_version: string; task: string; is_champion: boolean; promoted_from: string | null; gold_metrics: Record<string, unknown>; dataset_commit: string | null; created_at: string | null };
@@ -120,6 +120,37 @@ export type MergeRequestRow = { mr_id: string; title: string; source_branch: str
 export type MapCommitRow = { commit_id: string; region: string; element_count: number; session_ids: string[]; formats: Record<string, string>; calibration_version: string | null; created_at: string | null };
 export type MapFeature = { type: "Feature"; geometry: { type: string; coordinates: number[] | number[][] } | null; properties: Record<string, unknown> & { element_id: string; kind: string; confidence: number } };
 export type MapProvenance = { found: boolean; element_id?: string; kind?: string; attrs?: Record<string, unknown>; confidence?: number; calibration_version?: string | null; commit_id?: string | null; fusion_job_id?: string | null; source_sessions?: string[] | null; source_frames?: { frame_id: string; session_id: string; cam_id: string; ts_ns: number; vehicle_id: string | null }[] };
+
+// M-F.4 productivity + QA analytics
+export type ReviewerMetric = { reviewer: string; reviews: number; correction_rate: number | null; avg_review_ms: number; objects_per_hour: number | null; agreement: number | null };
+export type ProductivityReport = {
+  reviewers: ReviewerMetric[];
+  n_reviewers: number;
+  interannotator: { shared_objects: number; agreed: number; agreement_rate: number | null };
+  trend: { day: number; reviews: number; agreement: number | null }[];
+  cost: { human_hours: number; human_cost_usd: number; gpu_hours: number; n_objects: number; n_frames: number; n_auto_accept: number; cost_per_object_usd: number | null; cost_per_frame_usd: number | null; auto_accept_saved_hours: number; auto_accept_saved_usd: number; assumptions: { human_usd_per_hour: number; manual_label_seconds: number } };
+  note: string;
+};
+
+// M-F.0 explainable auto-labeling
+export type ExplainPath = { path: string; label: string; class_name: string | null; conf: number; verdict: string | null; model_version: string | null };
+export type ObjectExplanation = {
+  object_id: string;
+  class_name: string;
+  state: string;
+  source: string;
+  rare: boolean;
+  paths: ExplainPath[];
+  agreement: boolean;
+  mask_box_disagree: boolean;
+  vlm: { confirmed: boolean; class_name: string | null; verdict: string | null } | null;
+  overruled_classes: string[];
+  calibration: { raw: number | null; calibrated: number | null; auto_accept_floor: number | null };
+  quality_flags: string[];
+  machine_decision: string;
+  deciding_reason: string;
+  summary: string[];
+};
 
 export type MulticamGroups = {
   cameras: string[];
@@ -232,6 +263,7 @@ export type FrameMeta = {
   cam_id: string;
   image_url: string;
   n_objects: number;
+  has_mcap?: boolean;
   annotation_source?: string | null;
   import_format?: string | null;
   prev_frame_id: string | null;
@@ -252,6 +284,7 @@ export type FrameObject = {
   class_name: string;
   bbox: number[]; // xyxy
   conf: number;
+  quality_score?: number | null;
   state: string;
   mask_polygons: number[][];
   version?: number;
@@ -276,6 +309,7 @@ export type TrackItem = {
   crop_url: string;
 };
 
+export type TrackIntent = { intent: string; kind: string; source: string; status: string; confidence: number; evidence: Record<string, unknown> };
 export type Track = {
   track_id: string;
   n_frames: number;
@@ -283,7 +317,9 @@ export type Track = {
   dominant: string;
   flips: boolean;
   items: TrackItem[];
+  intents: TrackIntent[];
 };
+export type IntentVocab = { ontology_version: string; vru: string[]; vehicle: string[]; trajectory_vru: string[]; trajectory_vehicle: string[]; vlm_vru: string[] };
 
 export type Scenario = {
   scenario_id: string;

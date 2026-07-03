@@ -174,6 +174,114 @@ async def get_object(object_id: str, db: AsyncSession = Depends(db_session)):
     return _detail(obj, frame, get_ontology())
 
 
+@router.get("/objects/{object_id}/explain")
+async def explain_object_ep(object_id: str, db: AsyncSession = Depends(db_session)):
+    """M-F.0: the plain-language decision story for an object, assembled from its real provenance."""
+    from services.autolabel.explain import explain_object
+
+    res = await explain_object(db, UUID(object_id))
+    if "error" in res:
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@router.get("/objects/{object_id}/quality")
+async def object_quality_ep(object_id: str, db: AsyncSession = Depends(db_session)):
+    """M-F.1: the object's composite quality score with its factor breakdown."""
+    from services.analytics.quality_score import score_object
+
+    res = await score_object(db, UUID(object_id), persist=True)
+    if res is None:
+        raise HTTPException(404, "object not found")
+    return res
+
+
+@router.post("/objects/quality/backfill")
+async def quality_backfill_ep(session_id: str | None = None):
+    """M-F.1: compute and store quality scores across a session or the whole corpus."""
+    from services.analytics.quality_score import backfill
+
+    return await backfill(UUID(session_id) if session_id else None)
+
+
+# M-F.5 scene-graph relations
+
+
+@router.get("/scene-graph/vocab")
+async def scene_graph_vocab():
+    from services.intelligence.scene_graph import vocab
+
+    return vocab()
+
+
+@router.post("/frames/{frame_id}/relations/propose")
+async def relations_propose(frame_id: str):
+    """Propose geometric scene-graph relations (occluded_by, following, parked_near, crossing_in_front_of)."""
+    from services.intelligence.scene_graph import propose_relations
+
+    res = await propose_relations(UUID(frame_id))
+    if "error" in res:
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@router.get("/frames/{frame_id}/relations")
+async def relations_list(frame_id: str):
+    from services.intelligence.scene_graph import frame_relations
+
+    return await frame_relations(UUID(frame_id))
+
+
+@router.post("/relations/{relationship_id}/status")
+async def relation_status(relationship_id: str, status: str):
+    from services.intelligence.scene_graph import set_relation_status
+
+    res = await set_relation_status(UUID(relationship_id), status)
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
+
+
+# M-F.5 VLM dataset generation
+
+
+@router.post("/frames/{frame_id}/vlm-target/generate")
+async def vlm_target_generate(frame_id: str):
+    """Generate a grounded VLM training target for a labeled frame (awaits human review)."""
+    from services.intelligence.vlm_dataset import generate_target
+
+    res = await generate_target(UUID(frame_id))
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@router.get("/frames/{frame_id}/vlm-targets")
+async def vlm_targets_list(frame_id: str):
+    from services.intelligence.vlm_dataset import list_targets
+
+    return await list_targets(UUID(frame_id))
+
+
+@router.post("/vlm-targets/{target_id}/status")
+async def vlm_target_status(target_id: str, status: str):
+    """Human review gate: approve or reject a generated target (only approved export)."""
+    from services.intelligence.vlm_dataset import set_target_status
+
+    res = await set_target_status(UUID(target_id), status)
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@router.get("/vlm-dataset/export")
+async def vlm_dataset_export(session_id: str | None = None):
+    """Export the approved VLM targets in the multimodal per-frame format."""
+    from services.intelligence.vlm_dataset import export_dataset
+
+    return await export_dataset(UUID(session_id) if session_id else None)
+
+
 @router.get("/frames/{frame_id}/objects")
 async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
     from sqlalchemy import select
@@ -188,6 +296,7 @@ async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
             "class_name": onto.by_id(o.class_id).name,
             "bbox": list(o.bbox),
             "conf": o.conf,
+            "quality_score": o.quality_score,
             "state": o.state,
             "mask_polygons": _mask_polygons(o.mask_uri),
             "version": o.version,
@@ -225,10 +334,16 @@ async def get_frame(frame_id: str, db: AsyncSession = Depends(db_session)):
         prov = (await db.execute(select(Object.provenance).where(
             Object.frame_id == frame.frame_id, Object.source == "imported").limit(1))).scalar()
         import_format = (prov or {}).get("import_format")
+    # whether this session has an MCAP recording, so the editor only offers the Session Inspector when there is
+    # a timeline to inspect (image/video/imagery sessions have no MCAP and the Inspector would 409).
+    from db.models import Session as DbSession
+
+    mcap_uri = (await db.execute(select(DbSession.mcap_uri).where(DbSession.session_id == frame.session_id))).scalar_one_or_none()
     return {
         "frame_id": str(frame.frame_id), "session_id": str(frame.session_id),
         "width": frame.width, "height": frame.height, "ts_ns": frame.ts_ns, "cam_id": frame.cam_id,
         "image_url": f"/api/frames/{frame.frame_id}/image", "n_objects": int(n),
+        "has_mcap": mcap_uri is not None,
         "annotation_source": annotation_source, "import_format": import_format,
         "prev_frame_id": str(prev) if prev else None, "next_frame_id": str(nxt) if nxt else None,
         "is_lidar": bool(frame.lidar), "lidar_points": (frame.lidar or {}).get("n_points"),

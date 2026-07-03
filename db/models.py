@@ -139,6 +139,7 @@ class Track(Base):
     trajectory: Mapped[dict | None] = mapped_column(JSONB)  # per-frame centroids (image + ego frame)
     id_switch_flags: Mapped[dict | None] = mapped_column(JSONB)  # M2.0: flagged re-id/occlusion events
     tracker_version: Mapped[str | None] = mapped_column(String(48))  # M2.0: tracker backend + version
+    intents: Mapped[list] = mapped_column(JSONB, default=list)  # M-F.2 track-level typed intents (proposed/confirmed)
 
     __table_args__ = (Index("ix_track_session", "session_id"),)
 
@@ -184,6 +185,7 @@ class Object(Base):
     ocr_text: Mapped[str | None] = mapped_column(Text)            # M2.4 (never a license plate)
     ocr_lang: Mapped[str | None] = mapped_column(String(16))
     ocr_conf: Mapped[float | None] = mapped_column(Float)
+    quality_score: Mapped[float | None] = mapped_column(Float)  # M-F.1 composite label-quality QA signal [0,1]
     rig_object_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # M-MC one physical object across views at one instant
     rig_track_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # M3.1 same object across cameras
     cross_cam_links: Mapped[dict | None] = mapped_column(JSONB)   # M3.1 the same object seen in other views
@@ -207,12 +209,36 @@ class ObjectRelationship(Base):
     from_object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
     to_object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
     frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
-    kind: Mapped[str] = mapped_column(String(24), nullable=False)  # rider_of|towed_by|part_of|member_of|occludes
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # structural OR scene-graph relation (M-F.5)
+    status: Mapped[str] = mapped_column(String(16), default="confirmed")  # M-F.5 proposed | confirmed
+    source: Mapped[str] = mapped_column(String(16), default="human")      # M-F.5 human | geometry | vlm
+    evidence: Mapped[dict | None] = mapped_column(JSONB)                  # M-F.5 why it was proposed
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_object_relationship_from", "from_object_id"),
                       Index("ix_object_relationship_to", "to_object_id"),
                       Index("ix_object_relationship_frame", "frame_id"))
+
+
+class VlmTarget(Base):
+    """A generated multimodal training target for a labeled frame (M-F.5): a scene description, hazard list,
+    per-agent intent, or ego-action justification, GROUNDED in the frame's actual labels (objects, intents,
+    relations) rather than free-hallucinated. Every target records the label ids it was produced from, so it is
+    fully traceable, and it must pass human review (status approved) before it can enter a sellable dataset."""
+
+    __tablename__ = "vlm_target"
+
+    target_id: Mapped[uuid.UUID] = _uuid_pk()
+    frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"), nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)  # scene_description|hazards|agent_intents|ego_action
+    content: Mapped[dict] = mapped_column(JSONB, default=dict)     # the structured target
+    grounding: Mapped[dict] = mapped_column(JSONB, default=dict)   # {object_ids, track_ids, relation_ids} it came from
+    model: Mapped[str | None] = mapped_column(String(48))
+    status: Mapped[str] = mapped_column(String(16), default="generated")  # generated | approved | rejected
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_vlm_target_frame", "frame_id"), Index("ix_vlm_target_status", "status"))
 
 
 class Lane(Base):

@@ -19,6 +19,7 @@ from services.agent.policy import PolicyThresholds
 from services.agent.reconcile import reconcile_frame
 from services.agent.runs import list_runs, revert_run, run_dict
 from services.api.deps import current_user, db_session, require_role
+from services.autolabel.ontology import get_ontology
 
 router = APIRouter()
 
@@ -38,6 +39,47 @@ def _thresholds(body: AgentPolicyIn | None) -> PolicyThresholds:
         review_low=body.review_low if body.review_low is not None else d.review_low,
         require_agreement=body.require_agreement if body.require_agreement is not None else d.require_agreement,
     )
+
+
+class NlEditPreviewIn(BaseModel):
+    command: str
+    frame_id: str | None = None
+    session_id: str | None = None
+    use_vlm: bool = False
+
+
+class NlEditApplyIn(BaseModel):
+    command: str
+    object_ids: list[str]
+
+
+@router.post("/agent/nl-edit/preview", dependencies=[Depends(require_role("annotator"))])
+async def nl_edit_preview(body: NlEditPreviewIn, db: AsyncSession = Depends(db_session)):
+    """M-F.3: parse a natural-language edit and PREVIEW the objects it would touch. Writes nothing."""
+    from services.agent.nl_edit import parse_edit, resolve, vlm_refine
+
+    plan_ = parse_edit(body.command, get_ontology())
+    res = await resolve(db, plan_, frame_id=uuid.UUID(body.frame_id) if body.frame_id else None,
+                        session_id=uuid.UUID(body.session_id) if body.session_id else None)
+    if body.use_vlm and plan_["referential"] and res["objects"]:
+        kept = set(await vlm_refine(res["objects"], plan_["raw"]))
+        res["objects"] = [o for o in res["objects"] if o["object_id"] in kept]
+        res["count"] = len(res["objects"])
+        res["vlm_refined"] = True
+    return res
+
+
+@router.post("/agent/nl-edit/apply", dependencies=[Depends(require_role("reviewer"))])
+async def nl_edit_apply(body: NlEditApplyIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """M-F.3: apply a bulk edit to the CONFIRMED objects from the preview, as one reversible audited run."""
+    from services.agent.nl_edit import apply_edit, parse_edit
+
+    plan_ = parse_edit(body.command, get_ontology())
+    res = await apply_edit(db, plan_, [uuid.UUID(o) for o in body.object_ids],
+                           created_by=str(user.user_id) if user else None)
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
 
 
 @router.post("/agent/frames/{frame_id}/plan", dependencies=[Depends(require_role("annotator"))])

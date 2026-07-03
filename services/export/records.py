@@ -25,6 +25,7 @@ class ExportRecord:
     conf: float
     state: str
     source: str
+    quality_score: float | None = None  # M-F.1 composite label-quality QA signal [0,1], for buyers to filter on
     mask_uri: str | None = None
     mask_encoding: str | None = None
     track_id: UUID | None = None

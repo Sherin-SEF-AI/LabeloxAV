@@ -17,6 +17,8 @@ import ToolStrip from "@/components/shell/ToolStrip";
 import ModeRail from "@/components/shell/ModeRail";
 import FloatingLayers from "@/components/shell/FloatingLayers";
 import AgentPanel from "@/components/agent/AgentPanel";
+import BulkEditBar from "@/components/agent/BulkEditBar";
+import SceneGraphPanel from "@/components/editor/SceneGraphPanel";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import ScoreBar from "@/components/shell/ScoreBar";
 import Icon, { MODE_ICON } from "@/components/shell/Icon";
@@ -32,6 +34,7 @@ import { MODES, type ToolGroup } from "@/lib/editor/registry";
 const EditorCanvas = dynamic(() => import("@/components/editor/EditorCanvas").then((m) => ({ default: m.default })), { ssr: false });
 const RigView = dynamic(() => import("@/components/editor/RigView"), { ssr: false });
 const RigIdentityPanel = dynamic(() => import("@/components/editor/RigIdentityPanel"), { ssr: false });
+const ExplainPanel = dynamic(() => import("@/components/ExplainPanel"), { ssr: false });
 const RigTrackPanel = dynamic(() => import("@/components/editor/RigTrackPanel"), { ssr: false });
 // Lanes mode swaps to this fit-to-width Konva stage (the folded-in lane editor). Loaded once, ssr off.
 const LaneCanvas = dynamic(() => import("@/components/lane/LaneCanvas"), { ssr: false });
@@ -186,6 +189,7 @@ export default function FrameEditor() {
   const [rigLayout, setRigLayout] = useState<import("@/components/editor/RigView").RigLayout>("focus");
   const [rigGroup, setRigGroup] = useState<{ groupId: string; cameras: string[]; frameIds: Record<string, string>; missingCams: string[]; confirmed: boolean } | null>(null);
   const [rigPanel, setRigPanel] = useState(false);   // M-MC.2 rig-identity panel visibility
+  const [explainOpen, setExplainOpen] = useState(false);  // M-F.0 "why this label" rationale
   const [rigCalibrated, setRigCalibrated] = useState<boolean | null>(null);  // M-MC.3 Tier 2 eligibility
   const [rigRefresh, setRigRefresh] = useState(0);   // bump to refetch the identity panel after a propagate
   const [rigTracks, setRigTracks] = useState(false);  // M-MC.4 rig-track timeline panel visibility
@@ -215,7 +219,7 @@ export default function FrameEditor() {
       setOnto(o);
       const eds: EdObject[] = objs.map((x) => ({
         id: x.object_id, track_id: x.track_id, class_id: x.class_id, class_name: x.class_name, bbox: x.bbox,
-        mask: x.mask_polygons || [], attrs: {}, conf: x.conf, state: x.state, visible: true, version: x.version,
+        mask: x.mask_polygons || [], attrs: {}, conf: x.conf, quality_score: x.quality_score, state: x.state, visible: true, version: x.version,
         rot: x.rot_deg, keypoints: x.keypoints ?? undefined, polyline: x.polyline ?? undefined,
         cuboid_3d: x.cuboid_3d ?? undefined,
       }));
@@ -956,8 +960,10 @@ export default function FrameEditor() {
         ) : null}
         <button onClick={() => router.push(`/search?frame=${id}`)} title="find visually similar frames (DINOv3)"
           className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="search" size={16} /></button>
-        <button onClick={() => router.push(`/inspect/${meta.session_id}?ts=${meta.ts_ns}`)} title="inspect this moment in the Session Inspector (MCAP timeline)"
-          className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink font-mono text-[11px]">inspect</button>
+        {meta.has_mcap && (
+          <button onClick={() => router.push(`/inspect/${meta.session_id}?ts=${meta.ts_ns}`)} title="inspect this moment in the Session Inspector (MCAP timeline)"
+            className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink font-mono text-[11px]">inspect</button>
+        )}
 
         <div className="ml-auto flex items-center gap-1.5">
           <button onClick={() => gotoFrame(meta.prev_frame_id)} disabled={!meta.prev_frame_id} title="previous frame ( [ )"
@@ -1448,6 +1454,12 @@ export default function FrameEditor() {
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(selected.class_id) }} />
                 <span className="font-mono text-[11px] text-ink truncate flex-1">{selected.class_name}</span>
+                {selected.quality_score != null && (
+                  <span title="M-F.1 label quality score (0-1): calibrated correctness, penalised for geometric/consistency defects"
+                    className={`font-mono text-[10px] px-1 rounded border ${selected.quality_score >= 0.4 ? "border-pass/50 text-pass" : selected.quality_score >= 0.25 ? "border-warn/50 text-warn" : "border-block/50 text-block"}`}>
+                    Q {selected.quality_score.toFixed(2)}
+                  </span>
+                )}
                 <ConfBar conf={selected.conf} />
                 <StateBadge state={selected.state} />
               </div>
@@ -1465,6 +1477,20 @@ export default function FrameEditor() {
                   </div>
                 </div>
               </div>
+              {/* M-F.0: why this label was decided the way it was, from real provenance */}
+              {!selected.isNew && (
+                <div className="mb-1.5">
+                  <button onClick={() => setExplainOpen((v) => !v)}
+                    className="w-full flex items-center justify-between font-mono text-[10px] uppercase text-ink-3 border border-line rounded px-1.5 py-1 hover:border-accent">
+                    <span>why this label</span><span>{explainOpen ? "−" : "+"}</span>
+                  </button>
+                  {explainOpen && (
+                    <div className="mt-1.5 bg-bg-2 border border-line rounded p-2">
+                      <ExplainPanel objectId={selected.id} />
+                    </div>
+                  )}
+                </div>
+              )}
               <button
                 disabled={selected.isNew}
                 title={selected.isNew ? "save the frame first, then propagate" : "optical-flow propagate this box across the next 12 frames as a track to confirm"}
@@ -1574,6 +1600,8 @@ export default function FrameEditor() {
               <button onClick={() => router.push(`/annotate/lane/${id}`)} className="border border-line text-ink-2 px-1.5 py-1 hover:border-accent col-span-2">edit lanes + drivable &rarr;</button>
             </div>
             <AgentPanel frameId={id} selectedId={st.selectedId} onApplied={loadLayers} />
+            <BulkEditBar frameId={id} sessionId={meta.session_id} onApplied={() => flash("bulk edit applied (routed to review)")} />
+            <SceneGraphPanel frameId={id} />
           </div>
 
           {/* object list: grouped by class, searchable, collapsible, with a confidence bar per row. Scales
@@ -1608,6 +1636,8 @@ export default function FrameEditor() {
                           <button onClick={(e) => { e.stopPropagation(); dispatch({ t: "update", id: o.id, patch: { visible: !o.visible } }); }}
                             className={o.visible ? "text-ink-2" : "text-ink-3"}>{o.visible ? "●" : "○"}</button>
                           <span className="truncate flex-1">{o.id.startsWith("tmp-") ? "new" : o.id.slice(0, 8)}{o.isNew ? " *" : ""}</span>
+                          {o.quality_score != null && <span title={`label quality ${o.quality_score.toFixed(2)}`}
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${o.quality_score >= 0.4 ? "bg-pass" : o.quality_score >= 0.25 ? "bg-warn" : "bg-block"}`} />}
                           <ConfBar conf={o.conf} />
                           {o.mask.length > 0 && <span className="text-info" title="has mask">&#9670;</span>}
                           <button onClick={(e) => { e.stopPropagation(); dispatch({ t: "delete", id: o.id }); }} className="text-ink-3 hover:text-block">x</button>

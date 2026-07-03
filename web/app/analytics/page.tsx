@@ -17,6 +17,7 @@ import {
 import PageShell from "@/components/shell/PageShell";
 import ScoreBar from "@/components/shell/ScoreBar";
 import { api } from "@/lib/api";
+import type { ProductivityReport } from "@/lib/types";
 import type { Confusions } from "@/lib/types";
 
 // The sales sheet: corpus totals, class distribution and long-tail coverage, label-source mix
@@ -59,6 +60,7 @@ export default function AnalyticsPage() {
   const [dedup, setDedup] = useState<DedupRate | null>(null);
   const [growth, setGrowth] = useState<GrowthPoint[]>([]);
   const [cluster, setCluster] = useState<ClusterMap | null>(null);
+  const [prod, setProd] = useState<ProductivityReport | null>(null);
 
   useEffect(() => {
     api.confusions(confBy).then(setConfusions).catch(() => setConfusions(null));
@@ -69,6 +71,7 @@ export default function AnalyticsPage() {
     analyticsApi.dedupRate().then(setDedup).catch(() => {});
     analyticsApi.growth().then(setGrowth).catch(() => {});
     analyticsApi.clusterMap(1200).then(setCluster).catch(() => {});
+    api.analyticsProductivity().then(setProd).catch(() => {});
   }, []);
 
   const exportReport = async () => {
@@ -288,7 +291,54 @@ export default function AnalyticsPage() {
             )}
           </Section>
 
-          <Section title={`model confusions — learn from corrections (${confusions?.total_corrections ?? 0} total)`}>
+          {/* M-F.4 productivity + QA analytics (DataOps view; non-punitive) */}
+          {prod && (
+            <Section title={`operations: productivity + QA (${prod.n_reviewers} reviewers)`}>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                <Stat label="human hours" value={String(prod.cost.human_hours)} sub={`$${prod.cost.human_cost_usd}`} />
+                <Stat label="gpu hours" value={String(prod.cost.gpu_hours)} />
+                <Stat label="cost / frame" value={prod.cost.cost_per_frame_usd != null ? `$${prod.cost.cost_per_frame_usd}` : "-"} sub={prod.cost.cost_per_object_usd != null ? `$${prod.cost.cost_per_object_usd}/obj` : undefined} />
+                <Stat label="auto-accept saved" value={`$${prod.cost.auto_accept_saved_usd}`} sub={`${prod.cost.n_auto_accept} objects`} />
+              </div>
+              <div className="font-mono text-[11px] text-ink-3 mb-2">
+                inter-annotator agreement: {prod.interannotator.agreement_rate != null
+                  ? <span className="text-pass">{(prod.interannotator.agreement_rate * 100).toFixed(0)}%</span>
+                  : "-"} over {prod.interannotator.shared_objects} shared objects
+              </div>
+              {/* throughput + agreement trend over time (one bar per active day) */}
+              {prod.trend.length > 0 && (() => {
+                const maxR = Math.max(...prod.trend.map((d) => d.reviews), 1);
+                return (
+                  <div className="mb-3">
+                    <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">throughput trend (reviews/day, bar height; agreement, green tint)</div>
+                    <div className="flex items-end gap-0.5 h-12">
+                      {prod.trend.map((d) => (
+                        <div key={d.day} title={`${d.reviews} reviews, agreement ${d.agreement != null ? (d.agreement * 100).toFixed(0) + "%" : "-"}`}
+                          className="flex-1 min-w-[3px] rounded-t" style={{ height: `${(d.reviews / maxR) * 100}%`, background: d.agreement != null ? `rgba(86,211,100,${0.35 + 0.6 * d.agreement})` : "#6C727A" }} />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+              <table className="w-full font-mono text-[11px]">
+                <thead><tr className="text-ink-3 text-left border-b hairline"><th className="py-1">reviewer</th><th>reviews</th><th>correction rate</th><th>agreement</th><th>obj/hr</th></tr></thead>
+                <tbody>
+                  {prod.reviewers.filter((r) => r.reviews >= 5).slice(0, 12).map((r) => (
+                    <tr key={r.reviewer} className="border-b hairline">
+                      <td className="py-1 text-ink-2">{r.reviewer}</td>
+                      <td>{r.reviews}</td>
+                      <td className={r.correction_rate != null && r.correction_rate > 0.5 ? "text-warn" : "text-ink-2"}>{r.correction_rate != null ? `${(r.correction_rate * 100).toFixed(0)}%` : "-"}</td>
+                      <td className={r.agreement != null && r.agreement >= 0.8 ? "text-pass" : "text-ink-2"}>{r.agreement != null ? `${(r.agreement * 100).toFixed(0)}%` : "-"}</td>
+                      <td className="text-ink-3">{r.objects_per_hour ?? "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="font-mono text-[10px] text-ink-3 mt-2 leading-snug">{prod.note}</div>
+            </Section>
+          )}
+
+          <Section title={`model confusions - learn from corrections (${confusions?.total_corrections ?? 0} total)`}>
             <div className="flex items-center gap-2 mb-2 font-mono text-[11px]">
               <span className="text-ink-3">group by:</span>
               {(["class", "camera", "city"] as const).map((b) => (

@@ -81,3 +81,11 @@ async def report(session_id: str | None = None):
         "scenarios": await dashboards.scenario_coverage(session_id),
         "pii": await dashboards.pii_coverage(session_id),
     }
+
+
+@router.get("/analytics/productivity")
+async def productivity():
+    """M-F.4: the DataOps operations view (per-reviewer throughput/correction/agreement, cost, trend)."""
+    from services.analytics.productivity import productivity_report
+
+    return await productivity_report()

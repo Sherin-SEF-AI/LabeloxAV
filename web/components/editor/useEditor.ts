@@ -17,6 +17,7 @@ export type EdObject = {
   mask: number[][]; // polygons, flattened [x,y,...] image coords
   attrs: Record<string, unknown>;
   conf: number;
+  quality_score?: number | null; // M-F.1 composite label-quality signal [0,1]
   state: string;
   visible: boolean;
   isNew?: boolean;

@@ -46,7 +46,8 @@ async def score_candidates(db: AsyncSession, session_id: str | None = None, pool
     cfg = get_settings().phase4.activelearn
     onto = get_ontology()
 
-    q = (select(Object.object_id, Object.frame_id, Object.class_id, Object.conf, Object.provenance)
+    q = (select(Object.object_id, Object.frame_id, Object.class_id, Object.conf, Object.provenance,
+                Object.quality_score)
          .where(Object.state.in_(_CANDIDATE_STATES), Object.source != "human"))
     if session_id:
         from db.models import Frame
@@ -81,7 +82,7 @@ async def score_candidates(db: AsyncSession, session_id: str | None = None, pool
     novelty = _pool_novelty([emb.get(oid) for oid in oids], cfg.diversity_knn)
 
     items = []
-    for i, (oid, fid, cid, conf, prov) in enumerate(rows):
+    for i, (oid, fid, cid, conf, prov, qscore) in enumerate(rows):
         prov = prov or {}
         u = _uncertainty(float(conf or 0.0), bool(prov.get("agreement", True)),
                          bool(prov.get("mask_box_disagree", False)), cfg.uncertainty_lo, cfg.uncertainty_hi)
@@ -98,6 +99,7 @@ async def score_candidates(db: AsyncSession, session_id: str | None = None, pool
         fn = float(rc.get("fn_value", 0.0)) if isinstance(rc, dict) else 0.0
         items.append({"object_id": str(oid), "frame_id": str(fid), "class_id": cid,
                       "class_name": onto.by_id(cid).name, "conf": float(conf or 0.0),
+                      "quality_score": float(qscore) if qscore is not None else None,
                       "_u": u, "_r": rare, "_n": float(novelty[i]), "_e": err_scores.get(str(oid), 0.0), "_f": fn})
 
     u = _norm([it["_u"] for it in items])
