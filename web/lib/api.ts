@@ -331,6 +331,11 @@ export const api = {
   frame: (id: string) => get<FrameMeta>(`/api/frames/${id}`),
   frameObjects: (id: string) => get<FrameObject[]>(`/api/frames/${id}/objects`),
   explainObject: (id: string) => get<ObjectExplanation>(`/api/objects/${id}/explain`),
+  // M-F.3 natural-language bulk editing
+  nlEditPreview: (body: { command: string; frame_id?: string; session_id?: string; use_vlm?: boolean }) =>
+    post<{ plan: { operation: string; to_class_id: number | null }; count: number; objects: { object_id: string; class_name: string; frame_id: string }[]; warnings: string[]; vlm_refined?: boolean }>(`/api/agent/nl-edit/preview`, body),
+  nlEditApply: (body: { command: string; object_ids: string[] }) =>
+    post<{ run_id: string; operation: string; edited: number; routed_to: string }>(`/api/agent/nl-edit/apply`, body),
   // P3 per-object dynamics (derived: distance/speed/heading/ttc/risk)
   frameDynamics: (id: string) => get<{ frame_id: string; dynamics: ObjectDynamicsRow[] }>(`/api/dynamics/frame/${id}`),
   computeDynamics: (session_id: string) => post<{ objects: number; tracked_with_speed: number; with_distance: number }>(`/api/dynamics/compute?session_id=${session_id}`, {}),

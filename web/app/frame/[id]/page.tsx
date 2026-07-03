@@ -17,6 +17,7 @@ import ToolStrip from "@/components/shell/ToolStrip";
 import ModeRail from "@/components/shell/ModeRail";
 import FloatingLayers from "@/components/shell/FloatingLayers";
 import AgentPanel from "@/components/agent/AgentPanel";
+import BulkEditBar from "@/components/agent/BulkEditBar";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import ScoreBar from "@/components/shell/ScoreBar";
 import Icon, { MODE_ICON } from "@/components/shell/Icon";
@@ -1596,6 +1597,7 @@ export default function FrameEditor() {
               <button onClick={() => router.push(`/annotate/lane/${id}`)} className="border border-line text-ink-2 px-1.5 py-1 hover:border-accent col-span-2">edit lanes + drivable &rarr;</button>
             </div>
             <AgentPanel frameId={id} selectedId={st.selectedId} onApplied={loadLayers} />
+            <BulkEditBar frameId={id} sessionId={meta.session_id} onApplied={() => flash("bulk edit applied (routed to review)")} />
           </div>
 
           {/* object list: grouped by class, searchable, collapsible, with a confidence bar per row. Scales
