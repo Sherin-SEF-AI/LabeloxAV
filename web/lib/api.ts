@@ -29,6 +29,7 @@ import type {
   MapProvenance,
   MulticamGroups,
   ObjectExplanation,
+  ProductivityReport,
   FrameGroup,
   PersistedGroups,
   RigObjectsResponse,
@@ -635,6 +636,7 @@ export const api = {
   // Gate A evidence + Gate B (M9) quality sheet
   analyticsPii: (session_id?: string) =>
     get<PiiCoverage>("/api/analytics/pii" + (session_id ? `?session_id=${session_id}` : "")),
+  analyticsProductivity: () => get<ProductivityReport>("/api/analytics/productivity"),
   goldSets: () => get<GoldSetRow[]>("/api/quality/gold-sets"),
   qualitySheet: (gold_id: string) =>
     get<QualitySheet>("/api/quality/sheet?" + new URLSearchParams({ gold_id }).toString()),

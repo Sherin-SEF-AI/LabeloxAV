@@ -121,6 +121,17 @@ export type MapCommitRow = { commit_id: string; region: string; element_count: n
 export type MapFeature = { type: "Feature"; geometry: { type: string; coordinates: number[] | number[][] } | null; properties: Record<string, unknown> & { element_id: string; kind: string; confidence: number } };
 export type MapProvenance = { found: boolean; element_id?: string; kind?: string; attrs?: Record<string, unknown>; confidence?: number; calibration_version?: string | null; commit_id?: string | null; fusion_job_id?: string | null; source_sessions?: string[] | null; source_frames?: { frame_id: string; session_id: string; cam_id: string; ts_ns: number; vehicle_id: string | null }[] };
 
+// M-F.4 productivity + QA analytics
+export type ReviewerMetric = { reviewer: string; reviews: number; correction_rate: number | null; avg_review_ms: number; objects_per_hour: number | null; agreement: number | null };
+export type ProductivityReport = {
+  reviewers: ReviewerMetric[];
+  n_reviewers: number;
+  interannotator: { shared_objects: number; agreed: number; agreement_rate: number | null };
+  trend: { day: number; reviews: number; agreement: number | null }[];
+  cost: { human_hours: number; human_cost_usd: number; gpu_hours: number; n_objects: number; n_frames: number; n_auto_accept: number; cost_per_object_usd: number | null; cost_per_frame_usd: number | null; auto_accept_saved_hours: number; auto_accept_saved_usd: number; assumptions: { human_usd_per_hour: number; manual_label_seconds: number } };
+  note: string;
+};
+
 // M-F.0 explainable auto-labeling
 export type ExplainPath = { path: string; label: string; class_name: string | null; conf: number; verdict: string | null; model_version: string | null };
 export type ObjectExplanation = {
