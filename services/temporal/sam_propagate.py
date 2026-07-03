@@ -34,7 +34,14 @@ _LK = {"winSize": (21, 21), "maxLevel": 3,
 def flow_box(prev_gray: np.ndarray, cur_gray: np.ndarray, box: list[float]) -> list[float] | None:
     """Move a box from prev_gray to cur_gray via LK optical flow on its interior features plus a RANSAC
     similarity fit. None when it cannot be tracked (too small, too few features, no transform)."""
-    h, w = cur_gray.shape
+    ph, pw = prev_gray.shape
+    ch, cw = cur_gray.shape
+    # Optical flow requires both frames to be the same size; a session with varying image dimensions (common
+    # in imported imagery) otherwise crashes calcOpticalFlowPyrLK. Track in the previous frame's space by
+    # resizing the current frame to match, then scale the result back to the current frame's real size.
+    if (ch, cw) != (ph, pw):
+        cur_gray = cv2.resize(cur_gray, (pw, ph))
+    h, w = ph, pw
     x1, y1, x2, y2 = (int(v) for v in box)
     if x2 - x1 < 4 or y2 - y1 < 4:
         return None
@@ -60,6 +67,10 @@ def flow_box(prev_gray: np.ndarray, cur_gray: np.ndarray, box: list[float]) -> l
     old_area = max(1.0, (box[2] - box[0]) * (box[3] - box[1]))
     if not (0.25 <= (nb[2] - nb[0]) * (nb[3] - nb[1]) / old_area <= 4.0):
         return None
+    # nb is in the previous frame's space; scale it back to the current frame's real dimensions when they differ
+    if (ch, cw) != (ph, pw):
+        sx, sy = cw / pw, ch / ph
+        nb = [nb[0] * sx, nb[1] * sy, nb[2] * sx, nb[3] * sy]
     return nb
 
 
