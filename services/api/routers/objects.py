@@ -204,6 +204,84 @@ async def quality_backfill_ep(session_id: str | None = None):
     return await backfill(UUID(session_id) if session_id else None)
 
 
+# M-F.5 scene-graph relations
+
+
+@router.get("/scene-graph/vocab")
+async def scene_graph_vocab():
+    from services.intelligence.scene_graph import vocab
+
+    return vocab()
+
+
+@router.post("/frames/{frame_id}/relations/propose")
+async def relations_propose(frame_id: str):
+    """Propose geometric scene-graph relations (occluded_by, following, parked_near, crossing_in_front_of)."""
+    from services.intelligence.scene_graph import propose_relations
+
+    res = await propose_relations(UUID(frame_id))
+    if "error" in res:
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@router.get("/frames/{frame_id}/relations")
+async def relations_list(frame_id: str):
+    from services.intelligence.scene_graph import frame_relations
+
+    return await frame_relations(UUID(frame_id))
+
+
+@router.post("/relations/{relationship_id}/status")
+async def relation_status(relationship_id: str, status: str):
+    from services.intelligence.scene_graph import set_relation_status
+
+    res = await set_relation_status(UUID(relationship_id), status)
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
+
+
+# M-F.5 VLM dataset generation
+
+
+@router.post("/frames/{frame_id}/vlm-target/generate")
+async def vlm_target_generate(frame_id: str):
+    """Generate a grounded VLM training target for a labeled frame (awaits human review)."""
+    from services.intelligence.vlm_dataset import generate_target
+
+    res = await generate_target(UUID(frame_id))
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@router.get("/frames/{frame_id}/vlm-targets")
+async def vlm_targets_list(frame_id: str):
+    from services.intelligence.vlm_dataset import list_targets
+
+    return await list_targets(UUID(frame_id))
+
+
+@router.post("/vlm-targets/{target_id}/status")
+async def vlm_target_status(target_id: str, status: str):
+    """Human review gate: approve or reject a generated target (only approved export)."""
+    from services.intelligence.vlm_dataset import set_target_status
+
+    res = await set_target_status(UUID(target_id), status)
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@router.get("/vlm-dataset/export")
+async def vlm_dataset_export(session_id: str | None = None):
+    """Export the approved VLM targets in the multimodal per-frame format."""
+    from services.intelligence.vlm_dataset import export_dataset
+
+    return await export_dataset(UUID(session_id) if session_id else None)
+
+
 @router.get("/frames/{frame_id}/objects")
 async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
     from sqlalchemy import select

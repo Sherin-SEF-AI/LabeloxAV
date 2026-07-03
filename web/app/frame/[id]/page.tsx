@@ -18,6 +18,7 @@ import ModeRail from "@/components/shell/ModeRail";
 import FloatingLayers from "@/components/shell/FloatingLayers";
 import AgentPanel from "@/components/agent/AgentPanel";
 import BulkEditBar from "@/components/agent/BulkEditBar";
+import SceneGraphPanel from "@/components/editor/SceneGraphPanel";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import ScoreBar from "@/components/shell/ScoreBar";
 import Icon, { MODE_ICON } from "@/components/shell/Icon";
@@ -1598,6 +1599,7 @@ export default function FrameEditor() {
             </div>
             <AgentPanel frameId={id} selectedId={st.selectedId} onApplied={loadLayers} />
             <BulkEditBar frameId={id} sessionId={meta.session_id} onApplied={() => flash("bulk edit applied (routed to review)")} />
+            <SceneGraphPanel frameId={id} />
           </div>
 
           {/* object list: grouped by class, searchable, collapsible, with a confidence bar per row. Scales

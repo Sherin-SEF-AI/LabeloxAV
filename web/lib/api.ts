@@ -332,6 +332,15 @@ export const api = {
   frame: (id: string) => get<FrameMeta>(`/api/frames/${id}`),
   frameObjects: (id: string) => get<FrameObject[]>(`/api/frames/${id}/objects`),
   explainObject: (id: string) => get<ObjectExplanation>(`/api/objects/${id}/explain`),
+  // M-F.5 scene-graph relations + VLM dataset generation
+  sceneGraphVocab: () => get<{ relations: string[]; geometric: string[]; vlm_or_human: string[] }>(`/api/scene-graph/vocab`),
+  relationsPropose: (frameId: string) => post<{ proposed: number; by_kind: Record<string, number> }>(`/api/frames/${frameId}/relations/propose`, {}),
+  relationsList: (frameId: string) => get<{ relationship_id: string; from_name: string; to_name: string; kind: string; status: string; source: string }[]>(`/api/frames/${frameId}/relations`),
+  relationStatus: (id: string, status: string) => post<{ status: string }>(`/api/relations/${id}/status?status=${status}`, {}),
+  vlmTargetGenerate: (frameId: string) => post<{ target_id: string; content: Record<string, unknown>; grounding: { objects: number; intents: number; relations: number } }>(`/api/frames/${frameId}/vlm-target/generate`, {}),
+  vlmTargetsList: (frameId: string) => get<{ target_id: string; kind: string; content: Record<string, unknown>; grounding: Record<string, string[]>; status: string; model: string | null }[]>(`/api/frames/${frameId}/vlm-targets`),
+  vlmTargetStatus: (id: string, status: string) => post<{ status: string }>(`/api/vlm-targets/${id}/status?status=${status}`, {}),
+  vlmExport: (sessionId?: string) => get<{ format: string; n_samples: number }>(`/api/vlm-dataset/export${sessionId ? `?session_id=${sessionId}` : ""}`),
   // M-F.3 natural-language bulk editing
   nlEditPreview: (body: { command: string; frame_id?: string; session_id?: string; use_vlm?: boolean }) =>
     post<{ plan: { operation: string; to_class_id: number | null }; count: number; objects: { object_id: string; class_name: string; frame_id: string }[]; warnings: string[]; vlm_refined?: boolean }>(`/api/agent/nl-edit/preview`, body),
