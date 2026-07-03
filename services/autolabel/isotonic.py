@@ -55,10 +55,17 @@ async def _collect_pairs(session_id: str | None = None) -> tuple[np.ndarray, np.
 
     xs, ys = [], []
     for prov, state in rows:
-        rc = (prov or {}).get("raw_conf")
-        # raw_conf is a plain pre-calibration confidence for a normal detection; recall-recovered rows store
-        # a dict there and have no single scalar confidence, so they are not calibration pairs. Skip them.
-        if not isinstance(rc, int | float) or isinstance(rc, bool):
+        prov = prov or {}
+        # The scalar the gate actually calibrates and thresholds is provenance.calibrated_from (the fused
+        # pre-calibration score). provenance.raw_conf holds the PER-PATH breakdown as a dict for a normal
+        # detection ({"path_a_yolo26": 0.9, ...}) and an {"fn_value": ...} dict for a recall-recovered row, so
+        # it is not the scalar to calibrate. Fall back to raw_conf only when it is a scalar (legacy rows
+        # written before calibrated_from existed).
+        rc = prov.get("calibrated_from")
+        if not isinstance(rc, (int, float)) or isinstance(rc, bool):
+            legacy = prov.get("raw_conf")
+            rc = legacy if isinstance(legacy, (int, float)) and not isinstance(legacy, bool) else None
+        if rc is None:
             continue
         xs.append(float(rc))
         ys.append(1.0 if state in _CORRECT else 0.0)

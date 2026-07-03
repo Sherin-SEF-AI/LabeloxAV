@@ -95,16 +95,23 @@ fusion:
       default: 0.6
 
 calibrate:
-  method: temperature        # temperature | isotonic (isotonic needs a sealed gold set)
+  method: isotonic
   temperature: 1.5
   agreement_bonus: 0.10      # added (pre-clip) when paths agree on class
   disagreement_penalty: 0.25
-  isotonic_uri: null         # set to s3://.../isotonic.json (from make calibrate) + method=isotonic
+  isotonic_uri: s3://labeloxav/calibration/vlm_judge/isotonic_vlm.json
 
 gate:
-  auto_accept: 0.95              # benign default; calibrated, so a precision floor
-  safety_auto_accept: 0.99       # M-Q.4: VRU and animals must be near-certain to auto-accept
-  review_low: 0.60
+  # Thresholds are on the HONEST calibrated scale (isotonic curve fit against VLM-judged correctness). The
+  # calibrated confidence is P(this label is correct); on the current champion detector it tops out near 0.48
+  # (the detector is overconfident on India roads), so the pre-isotonic 0.95/0.60 thresholds would have sent
+  # every detection to full annotation. These are floors on that honest scale and STACK with the gate's other
+  # requirements (cross-path agreement, the quality reviewer, and VLM confirmation for rare classes), so the
+  # auto-accepted subset is far more precise than the single-path floor. Raise them toward higher precision as
+  # the detector improves and the curve rises.
+  auto_accept: 0.45              # benign floor: only top-confidence detections reach it, and only auto-accept WITH agreement
+  safety_auto_accept: 0.47       # M-Q.4: VRU and animals must sit at the very top of the honest curve
+  review_low: 0.08               # below this a pre-label is too weak to help; above it, route to human review with the pre-label
   force_review_on_rare: false    # strict escape hatch; off in favour of the agreement+VLM rule below
   rare_needs_agreement_and_vlm: true  # M-Q.4: a rare class auto-accepts only with agreement AND a VLM confirm
   force_review_on_mask_box_disagree: true
