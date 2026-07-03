@@ -185,6 +185,25 @@ async def explain_object_ep(object_id: str, db: AsyncSession = Depends(db_sessio
     return res
 
 
+@router.get("/objects/{object_id}/quality")
+async def object_quality_ep(object_id: str, db: AsyncSession = Depends(db_session)):
+    """M-F.1: the object's composite quality score with its factor breakdown."""
+    from services.analytics.quality_score import score_object
+
+    res = await score_object(db, UUID(object_id), persist=True)
+    if res is None:
+        raise HTTPException(404, "object not found")
+    return res
+
+
+@router.post("/objects/quality/backfill")
+async def quality_backfill_ep(session_id: str | None = None):
+    """M-F.1: compute and store quality scores across a session or the whole corpus."""
+    from services.analytics.quality_score import backfill
+
+    return await backfill(UUID(session_id) if session_id else None)
+
+
 @router.get("/frames/{frame_id}/objects")
 async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
     from sqlalchemy import select
@@ -199,6 +218,7 @@ async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
             "class_name": onto.by_id(o.class_id).name,
             "bbox": list(o.bbox),
             "conf": o.conf,
+            "quality_score": o.quality_score,
             "state": o.state,
             "mask_polygons": _mask_polygons(o.mask_uri),
             "version": o.version,

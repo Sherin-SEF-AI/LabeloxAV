@@ -217,7 +217,7 @@ export default function FrameEditor() {
       setOnto(o);
       const eds: EdObject[] = objs.map((x) => ({
         id: x.object_id, track_id: x.track_id, class_id: x.class_id, class_name: x.class_name, bbox: x.bbox,
-        mask: x.mask_polygons || [], attrs: {}, conf: x.conf, state: x.state, visible: true, version: x.version,
+        mask: x.mask_polygons || [], attrs: {}, conf: x.conf, quality_score: x.quality_score, state: x.state, visible: true, version: x.version,
         rot: x.rot_deg, keypoints: x.keypoints ?? undefined, polyline: x.polyline ?? undefined,
         cuboid_3d: x.cuboid_3d ?? undefined,
       }));
@@ -1450,6 +1450,12 @@ export default function FrameEditor() {
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(selected.class_id) }} />
                 <span className="font-mono text-[11px] text-ink truncate flex-1">{selected.class_name}</span>
+                {selected.quality_score != null && (
+                  <span title="M-F.1 label quality score (0-1): calibrated correctness, penalised for geometric/consistency defects"
+                    className={`font-mono text-[10px] px-1 rounded border ${selected.quality_score >= 0.4 ? "border-pass/50 text-pass" : selected.quality_score >= 0.25 ? "border-warn/50 text-warn" : "border-block/50 text-block"}`}>
+                    Q {selected.quality_score.toFixed(2)}
+                  </span>
+                )}
                 <ConfBar conf={selected.conf} />
                 <StateBadge state={selected.state} />
               </div>
@@ -1624,6 +1630,8 @@ export default function FrameEditor() {
                           <button onClick={(e) => { e.stopPropagation(); dispatch({ t: "update", id: o.id, patch: { visible: !o.visible } }); }}
                             className={o.visible ? "text-ink-2" : "text-ink-3"}>{o.visible ? "●" : "○"}</button>
                           <span className="truncate flex-1">{o.id.startsWith("tmp-") ? "new" : o.id.slice(0, 8)}{o.isNew ? " *" : ""}</span>
+                          {o.quality_score != null && <span title={`label quality ${o.quality_score.toFixed(2)}`}
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${o.quality_score >= 0.4 ? "bg-pass" : o.quality_score >= 0.25 ? "bg-warn" : "bg-block"}`} />}
                           <ConfBar conf={o.conf} />
                           {o.mask.length > 0 && <span className="text-info" title="has mask">&#9670;</span>}
                           <button onClick={(e) => { e.stopPropagation(); dispatch({ t: "delete", id: o.id }); }} className="text-ink-3 hover:text-block">x</button>

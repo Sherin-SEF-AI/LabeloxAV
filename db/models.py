@@ -184,6 +184,7 @@ class Object(Base):
     ocr_text: Mapped[str | None] = mapped_column(Text)            # M2.4 (never a license plate)
     ocr_lang: Mapped[str | None] = mapped_column(String(16))
     ocr_conf: Mapped[float | None] = mapped_column(Float)
+    quality_score: Mapped[float | None] = mapped_column(Float)  # M-F.1 composite label-quality QA signal [0,1]
     rig_object_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # M-MC one physical object across views at one instant
     rig_track_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # M3.1 same object across cameras
     cross_cam_links: Mapped[dict | None] = mapped_column(JSONB)   # M3.1 the same object seen in other views

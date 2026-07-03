@@ -103,6 +103,7 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
                 class_name=onto.by_id(obj.class_id).name,
                 bbox=list(obj.bbox),
                 conf=obj.conf,
+                quality_score=obj.quality_score,
                 state=obj.state,
                 source=obj.source,
                 mask_uri=obj.mask_uri,
