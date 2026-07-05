@@ -19,6 +19,7 @@ from services.api.routers import (
     adverse,
     agent,
     calyx as calyx_router,
+    flywheel as flywheel_router,
     forgyx as forgyx_router,
     labelox as labelox_router,
     oraclyx as oraclyx_router,
@@ -295,5 +296,6 @@ app.include_router(oraclyx_router.router, prefix="/api", tags=["oraclyx"])
 app.include_router(release_router.router, prefix="/api", tags=["release"])
 app.include_router(verdyx_router.router, prefix="/api", tags=["verdyx"])
 app.include_router(forgyx_router.router, prefix="/api", tags=["forgyx"])
+app.include_router(flywheel_router.router, prefix="/api", tags=["flywheel"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])
