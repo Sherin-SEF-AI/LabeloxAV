@@ -20,6 +20,7 @@ from services.api.routers import (
     agent,
     calyx as calyx_router,
     sanyx as sanyx_router,
+    sievyx as sievyx_router,
     analytics,
     autolabel,
     calibration,
@@ -283,5 +284,6 @@ app.include_router(inertial.router, prefix="/api", tags=["inertial"])
 app.include_router(inspector.router, prefix="/api", tags=["inspector"])
 app.include_router(sanyx_router.router, prefix="/api", tags=["sanyx"])
 app.include_router(calyx_router.router, prefix="/api", tags=["calyx"])
+app.include_router(sievyx_router.router, prefix="/api", tags=["sievyx"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])
