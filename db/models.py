@@ -575,6 +575,8 @@ class CalibrationValidation(Base):
     extrinsic_consistency: Mapped[dict | None] = mapped_column(JSONB)      # epipolar + IMU residuals
     time_offset_ns: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(8), nullable=False, default="pass")  # pass | warn | fail
+    drift_delta: Mapped[dict | None] = mapped_column(JSONB)        # CALYX: SE(3) drift delta per sensor pair
+    severity: Mapped[str | None] = mapped_column(String(16))       # CALYX: ok | drift_detected | block
     report_uri: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -1283,8 +1285,10 @@ class SessionHealth(Base):
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), nullable=False)
-    checks: Mapped[list] = mapped_column(JSONB, default=list)      # [{name, status, detail, evidence}]
+    checks: Mapped[list] = mapped_column(JSONB, default=list)      # [{name, status, detail, evidence, score}]
     verdict: Mapped[str] = mapped_column(String(8), nullable=False)  # pass | warn | fail
+    score: Mapped[float | None] = mapped_column(Float)             # SANYX overall 0..100 health score
+    decision: Mapped[str | None] = mapped_column(String(12))       # SANYX: pass | degraded | quarantine
     indexer_version: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -1347,3 +1351,94 @@ class RigObject(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_rig_object_group", "group_id"), Index("ix_rig_object_track", "rig_track_id"))
+
+
+# ---------------------------------------------------------------------------
+# Data Engine spine additions (migration 0049). These complete the Model side of the canonical spine for the
+# VERDYX (evaluation) and FORGYX (edge optimization) planes, and make ORACLYX offline-fusion consensus explicit
+# without touching the hot object table. All additive; nothing above changes shape.
+# ---------------------------------------------------------------------------
+
+
+class Evaluation(Base):
+    """VERDYX: a first-class per-slice evaluation of a model against a lineage-locked release or gold set, plus
+    the champion-challenger verdict LabeloxAV governance consumes. Lifts eval out of model_registry.gold_metrics
+    so a model can carry many slice-resolved evals over time, not one flat metrics blob."""
+
+    __tablename__ = "evaluation"
+
+    eval_id: Mapped[uuid.UUID] = _uuid_pk()
+    model_version: Mapped[str] = mapped_column(
+        ForeignKey("model_registry.model_version", ondelete="CASCADE"), nullable=False)
+    release_commit: Mapped[str | None] = mapped_column(ForeignKey("dataset_commit.commit_id", ondelete="SET NULL"))
+    gold_id: Mapped[str | None] = mapped_column(ForeignKey("gold_set.gold_id", ondelete="SET NULL"))
+    per_slice: Mapped[dict] = mapped_column(JSONB, default=dict)        # slice_id -> {map, precision, recall, confusion}
+    failure_clusters: Mapped[dict] = mapped_column(JSONB, default=dict)  # cluster_id -> {condition, member_object_ids, size}
+    aggregate: Mapped[dict] = mapped_column(JSONB, default=dict)        # map50, map, precision, recall, safe_miou
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False, default="needs_review")  # promote|reject|needs_review
+    challenger_of: Mapped[str | None] = mapped_column(String(128))     # the champion version this challenges
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_evaluation_model", "model_version"),)
+
+
+class Benchmark(Base):
+    """FORGYX: how a model behaves on one target silicon. One row per (model, target) with latency/throughput/
+    power and a pointer to the accuracy re-verification (Evaluation), so a model that got faster but quietly lost
+    a protected slice is visible, not hidden."""
+
+    __tablename__ = "benchmark"
+
+    benchmark_id: Mapped[uuid.UUID] = _uuid_pk()
+    model_version: Mapped[str] = mapped_column(
+        ForeignKey("model_registry.model_version", ondelete="CASCADE"), nullable=False)
+    target: Mapped[str] = mapped_column(String(32), nullable=False)   # sentrixai_litert|agx_orin_trt|orin_nano_trt|pi_hailo
+    latency_ms: Mapped[dict] = mapped_column(JSONB, default=dict)     # {p50, p95, p99}
+    throughput_fps: Mapped[float | None] = mapped_column(Float)
+    power_w: Mapped[float | None] = mapped_column(Float)
+    accuracy_ref: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("evaluation.eval_id", ondelete="SET NULL"))
+    per_layer_uri: Mapped[str | None] = mapped_column(Text)          # profile blob in the object store
+    pareto_rank: Mapped[int | None] = mapped_column(Integer)
+    artifact_uri: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_benchmark_model_target", "model_version", "target"),)
+
+
+class Deployment(Base):
+    """FORGYX: a deployable, verified artifact per target, with lineage back to the release it was built from and
+    the VERDYX verdict and FORGYX benchmark that gated it. The SentrixAI row is a LiteRT artifact verified on the
+    mobile latency budget and the FCW-relevant slices."""
+
+    __tablename__ = "deployment"
+
+    deployment_id: Mapped[uuid.UUID] = _uuid_pk()
+    model_version: Mapped[str] = mapped_column(
+        ForeignKey("model_registry.model_version", ondelete="CASCADE"), nullable=False)
+    target: Mapped[str] = mapped_column(String(32), nullable=False)
+    artifact_uri: Mapped[str] = mapped_column(Text, nullable=False)   # .onnx | .engine | .tflite | .hef in the object store
+    export_format: Mapped[str] = mapped_column(String(16), nullable=False)  # onnx|tensorrt|litert|hailo
+    release_commit: Mapped[str | None] = mapped_column(ForeignKey("dataset_commit.commit_id", ondelete="SET NULL"))
+    verdict_ref: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("evaluation.eval_id", ondelete="SET NULL"))
+    benchmark_ref: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("benchmark.benchmark_id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="built")  # built|verified|blocked|deployed|retired
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_deployment_model", "model_version"),)
+
+
+class PseudoLabel(Base):
+    """ORACLYX: offline-fusion consensus over a fused object, in a side table so the hot object row is untouched.
+    consensus True means fusion and the three auto-label paths agreed within tolerance (auto-accept); False routes
+    the sample to the human queue, which is exactly where human attention has the highest marginal value."""
+
+    __tablename__ = "pseudo_label"
+
+    object_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("object.object_id", ondelete="CASCADE"), primary_key=True)
+    consensus: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    consensus_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    voters: Mapped[dict] = mapped_column(JSONB, default=dict)         # path -> {agree: bool, conf: float}
+    fusion_run_id: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -613,6 +613,59 @@ class InspectorSettings(BaseModel):
     decode_enabled: bool = True
 
 
+class SanyxSettings(BaseModel):
+    """SANYX ingest-QA thresholds. All config-driven so a rig with different tolerances retunes without code.
+    A check returns a sub-score in [0,1]; the weighted overall is 0..100. A check may also hard-fail (force
+    quarantine regardless of score), which is how a lost time-sync pulse quarantines a session outright."""
+
+    # cross-channel time sync (the invariant SANYX exists to protect)
+    pps_required: bool = False            # when True, a missing time-sync reference pulse hard-fails
+    clock_slope_ppm_max: float = 200.0    # clock slope error tolerance (parts per million)
+    # dropped frames
+    drop_rate_warn: float = 0.005         # fraction of missing frames that degrades
+    drop_rate_fail: float = 0.05          # fraction that quarantines
+    max_gap_frames_fail: int = 30         # a single gap this long quarantines
+    # exposure / rolling shutter (per-frame stats come from ingest.score_frame)
+    exposure_ok_frac_warn: float = 0.90   # fraction of frames that must be well exposed
+    exposure_ok_frac_fail: float = 0.60
+    rolling_shutter_skew_max: float = 0.35  # normalized skew on high-motion frames
+    # GPS integrity (u-blox NEO-F9P)
+    hdop_max: float = 5.0
+    min_fix_frac: float = 0.80            # fraction of samples with a usable fix
+    min_rtk_frac: float = 0.0             # RTK continuity floor (0 = RTK not required)
+    max_dropout_s: float = 5.0
+    # IMU integrity (Xsens MTi-3)
+    imu_sat_frac_max: float = 0.02        # fraction of accel/gyro samples at saturation
+    imu_bias_jump_max: float = 2.0        # sudden bias step (m/s^2 or rad/s) that flags
+    imu_gap_ms_max: float = 100.0
+    # lens contamination
+    fft_highfreq_min_ratio: float = 0.001  # min high-frequency energy fraction (below = fouled/defocused);
+    #                                        calibrated so compressed web imagery clears and only a severely
+    #                                        defocused or occluded lens (near-total high-freq loss) fails
+    occlusion_area_frac_max: float = 0.15  # persistent dark/blurred area fraction that flags
+    occlusion_persist_frac: float = 0.80   # fraction of frames a region must persist to count as contamination
+    # scoring
+    weights: dict = {
+        "time_sync": 0.30, "dropped_frames": 0.15, "exposure": 0.10,
+        "gps": 0.15, "imu": 0.15, "lens": 0.15,
+    }
+    pass_min: float = 85.0                # overall >= pass_min -> pass
+    quarantine_below: float = 55.0        # overall < quarantine_below -> quarantine, otherwise degraded
+
+
+class CalyxSettings(BaseModel):
+    """CALYX calibration-drift thresholds. Drift is estimated as an SE(3) delta between what the cameras see
+    (visual odometry / epipolar) and what the IMU and GNSS report; its magnitude sets the severity that gates
+    or flags the session."""
+
+    rot_deg_flag: float = 0.5      # SE(3) drift rotation that raises drift_detected
+    rot_deg_block: float = 2.0     # rotation that blocks the session
+    trans_m_flag: float = 0.05     # translation drift that flags
+    trans_m_block: float = 0.20    # translation drift that blocks
+    min_correspondences: int = 8   # below this the estimate is untrustworthy and returns ok with low confidence
+    slerp_discontinuity_deg: float = 5.0  # rotation step between adjacent frames inconsistent with dynamics
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="LBX_",
@@ -649,6 +702,8 @@ class Settings(BaseSettings):
     auth: AuthSettings = AuthSettings()        # deny-by-default API auth
     lidar: LidarSettings = LidarSettings()     # 3D LiDAR module (ingestion, clean, viewer)
     inspector: InspectorSettings = InspectorSettings()  # Session Inspector (MCAP viewer + health)
+    sanyx: SanyxSettings = SanyxSettings()     # SANYX ingest QA thresholds (data engine plane)
+    calyx: CalyxSettings = CalyxSettings()     # CALYX calibration-drift thresholds (data engine plane)
 
     @classmethod
     def settings_customise_sources(

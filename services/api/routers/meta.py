@@ -11,10 +11,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Frame, Object, OntologyClass
 from db.models import Session as DbSession
+from platforms.registry import as_dicts as platform_dicts
 from services.api.deps import OntologyClassOut, db_session
 from services.autolabel.ontology import add_custom_class, get_ontology
 
 router = APIRouter()
+
+
+@router.get("/platforms")
+async def list_platforms():
+    """The platform registry: the seven platforms the data engine hosts (annotation core + the six folded
+    subsystems), in launcher order. The frontend mirror (web/platforms/registry.ts) must match these ids;
+    a test reconciles the two."""
+    return {"platforms": platform_dicts()}
 
 
 class NewClassIn(BaseModel):

@@ -13,6 +13,7 @@ export const APP_GROUPS: NavGroup[] = [
     key: "work",
     label: "Work",
     items: [
+      { href: "/platforms", label: "Platforms", hint: "the seven planes of the data engine" },
       { href: "/", label: "Triage", hint: "object queue ranked by value" },
       { href: "/agent", label: "Agent Console", hint: "autonomous QA: error sweep, temporal repair, fix queue" },
       { href: "/review/queue", label: "Review queue", hint: "active learning + error candidates" },
