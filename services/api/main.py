@@ -23,6 +23,7 @@ from services.api.routers import (
     oraclyx as oraclyx_router,
     release as release_router,
     sanyx as sanyx_router,
+    verdyx as verdyx_router,
     sievyx as sievyx_router,
     analytics,
     autolabel,
@@ -291,5 +292,6 @@ app.include_router(sievyx_router.router, prefix="/api", tags=["sievyx"])
 app.include_router(labelox_router.router, prefix="/api", tags=["labelox"])
 app.include_router(oraclyx_router.router, prefix="/api", tags=["oraclyx"])
 app.include_router(release_router.router, prefix="/api", tags=["release"])
+app.include_router(verdyx_router.router, prefix="/api", tags=["verdyx"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])
