@@ -35,6 +35,23 @@ async def evaluate(payload: EvalIn, db: AsyncSession = Depends(db_session)):
                                    gold_id=payload.gold_id, protected=payload.protected)
 
 
+@router.get("/verdyx/pairs")
+async def pairs(db: AsyncSession = Depends(db_session)):
+    """Recent challenger/champion pairs that have evaluations, so the matrix has something to compare."""
+    rows = (await db.execute(
+        select(Evaluation.model_version, Evaluation.challenger_of, Evaluation.verdict, Evaluation.created_at)
+        .where(Evaluation.challenger_of.isnot(None)).order_by(Evaluation.created_at.desc()).limit(20))).all()
+    seen = set()
+    out = []
+    for mv, champ, verdict, _ in rows:
+        key = (champ, mv)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"champion": champ, "challenger": mv, "verdict": verdict})
+    return {"pairs": out}
+
+
 @router.get("/verdyx/matrix")
 async def slice_matrix_view(champion: str, challenger: str, slice_metric: str = "map",
                             db: AsyncSession = Depends(db_session)):

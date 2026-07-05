@@ -49,12 +49,22 @@ async def record_deployment(db: AsyncSession, model_version: str, target: str, a
 
 async def benchmark_matrix(db: AsyncSession, model_version: str | None = None) -> dict:
     """The benchmark matrix across (model, target), Pareto-ranked on latency vs accuracy."""
+    from db.models import Evaluation
+
     q = select(Benchmark).order_by(Benchmark.created_at.desc())
     if model_version:
         q = q.where(Benchmark.model_version == model_version)
     rows = (await db.execute(q.limit(500))).scalars().all()
-    items = [{"benchmark_id": str(r.benchmark_id), "model_version": r.model_version, "target": r.target,
-              "latency_ms": r.latency_ms, "throughput_fps": r.throughput_fps, "power_w": r.power_w,
-              "artifact_uri": r.artifact_uri,
-              "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
+    items = []
+    for r in rows:
+        # denormalize the re-verified accuracy from the linked VERDYX evaluation, so the Pareto plot is
+        # genuinely latency vs accuracy (not latency alone).
+        map50 = None
+        if r.accuracy_ref is not None:
+            ev = await db.get(Evaluation, r.accuracy_ref)
+            map50 = (ev.aggregate or {}).get("map50") if ev else None
+        items.append({"benchmark_id": str(r.benchmark_id), "model_version": r.model_version, "target": r.target,
+                      "latency_ms": r.latency_ms, "throughput_fps": r.throughput_fps, "power_w": r.power_w,
+                      "map50": map50, "artifact_uri": r.artifact_uri,
+                      "created_at": r.created_at.isoformat() if r.created_at else None})
     return {"capabilities": available_targets(), "benchmarks": pareto_rank(items) if items else []}
