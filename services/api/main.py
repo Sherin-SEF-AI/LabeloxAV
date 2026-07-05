@@ -19,6 +19,7 @@ from services.api.routers import (
     adverse,
     agent,
     calyx as calyx_router,
+    labelox as labelox_router,
     sanyx as sanyx_router,
     sievyx as sievyx_router,
     analytics,
@@ -285,5 +286,6 @@ app.include_router(inspector.router, prefix="/api", tags=["inspector"])
 app.include_router(sanyx_router.router, prefix="/api", tags=["sanyx"])
 app.include_router(calyx_router.router, prefix="/api", tags=["calyx"])
 app.include_router(sievyx_router.router, prefix="/api", tags=["sievyx"])
+app.include_router(labelox_router.router, prefix="/api", tags=["labelox"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])
