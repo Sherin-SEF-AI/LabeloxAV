@@ -7,13 +7,15 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { Busy } from "@/components/Spinner";
 
 type Preview = Awaited<ReturnType<typeof api.nlEditPreview>>;
 
-export default function BulkEditBar({ frameId, sessionId, onApplied }: {
+export default function BulkEditBar({ frameId, sessionId, onApplied, embedded = false }: {
   frameId: string;
   sessionId?: string | null;
   onApplied?: () => void;
+  embedded?: boolean;
 }) {
   const [cmd, setCmd] = useState("");
   const [scope, setScope] = useState<"frame" | "session">("frame");
@@ -49,13 +51,13 @@ export default function BulkEditBar({ frameId, sessionId, onApplied }: {
   const canApply = preview && preview.count > 0 && op !== "select" && !(op === "reclassify" && preview.plan.to_class_id == null);
 
   return (
-    <div className="border-t hairline p-2 space-y-1.5 font-mono text-[10px]">
-      <div className="uppercase text-ink-3">natural-language bulk edit</div>
+    <div className={`space-y-1.5 font-mono text-[10px] ${embedded ? "" : "border-t hairline p-2"}`}>
+      {!embedded && <div className="uppercase text-ink-3">natural-language bulk edit</div>}
       <div className="flex gap-1">
         <input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === "Enter" && doPreview()}
           placeholder="e.g. reclassify the fallback objects to push_cart"
           className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-1.5 py-1 text-ink-2 focus:border-accent outline-none" />
-        <button onClick={doPreview} disabled={busy || !cmd.trim()} className="border border-line px-1.5 rounded text-ink-3 hover:border-accent disabled:opacity-40">preview</button>
+        <button onClick={doPreview} disabled={busy || !cmd.trim()} className={`flex items-center gap-1 border px-1.5 rounded text-ink-3 hover:border-accent disabled:opacity-40 ${busy ? "running border-accent/40" : "border-line"}`}>{busy && <Busy />}preview</button>
       </div>
       <div className="flex items-center gap-2 text-ink-3">
         <button onClick={() => setScope("frame")} className={scope === "frame" ? "text-accent" : "hover:text-ink"}>this frame</button>
@@ -69,7 +71,7 @@ export default function BulkEditBar({ frameId, sessionId, onApplied }: {
         <div className="border border-line rounded p-1.5 space-y-1 bg-bg-2">
           <div className="flex items-center justify-between">
             <span className="text-ink-2">{op} would touch <span className="text-accent">{preview.count}</span> object(s){preview.vlm_refined ? " (VLM-refined)" : ""}</span>
-            {canApply && <button onClick={doApply} disabled={busy} className="border border-accent/60 text-accent bg-accent/10 px-1.5 py-0.5 rounded hover:bg-accent/20">confirm and apply</button>}
+            {canApply && <button onClick={doApply} disabled={busy} className="flex items-center gap-1 border border-accent/60 text-accent bg-accent/10 px-1.5 py-0.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy && <Busy />}confirm and apply</button>}
           </div>
           {preview.warnings.map((w, i) => <div key={i} className="text-warn">{w}</div>)}
           <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto">

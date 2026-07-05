@@ -5,11 +5,13 @@ registry. The API only enqueues (writes a pending training_job row); the out-of-
 
 from __future__ import annotations
 
+import csv
 import uuid
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
+from core.config import get_settings
 from db.models import ModelRun, TrainingJob
 from db.session import get_sessionmaker
 from services.api.deps import TrainingStartIn
@@ -17,6 +19,25 @@ from services.training.jobs import TrainJobSpec, enqueue_job
 from services.training.tasks import get_task, list_tasks
 
 router = APIRouter()
+
+# results.csv column -> the short key we expose for per-epoch curves
+_CURVE_COLS = {
+    "train/box_loss": "train_box_loss", "train/cls_loss": "train_cls_loss",
+    "val/box_loss": "val_box_loss", "val/cls_loss": "val_cls_loss",
+    "metrics/precision(B)": "precision", "metrics/recall(B)": "recall",
+    "metrics/mAP50(B)": "map50", "metrics/mAP50-95(B)": "map",
+}
+
+
+def _run_dict(r: ModelRun) -> dict:
+    """A model run with enough for a graphical baseline->candidate comparison + the gate decision."""
+    return {
+        "run_id": r.run_id, "dataset_name": r.dataset_name, "purpose": r.purpose,
+        "epochs": r.epochs, "n_train": r.n_train, "n_val": r.n_val, "promoted": r.promoted,
+        "base_weights": r.base_weights, "notes": r.notes,
+        "baseline_metrics": r.baseline_metrics or {}, "metrics": r.metrics or {}, "gate": r.gate or {},
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
 
 
 def _job_dict(j: TrainingJob) -> dict:
@@ -63,6 +84,47 @@ async def registry():
         if r.promoted and line["promoted"] is None:
             line["promoted"] = entry
     return list(lines.values())
+
+
+# NB: these literal-prefixed routes must precede /training/{job_id} (a uuid path param) so "runs"
+# is not matched (and 422'd) as a job id.
+@router.get("/training/runs")
+async def runs(limit: int = 50):
+    """Recorded model runs (finetune close-the-loop output), newest first, with baseline vs candidate
+    metrics and the promotion gate - the data behind the graphical comparison."""
+    limit = min(max(limit, 1), 500)
+    async with get_sessionmaker()() as db:
+        rows = (await db.execute(
+            select(ModelRun).order_by(ModelRun.created_at.desc()).limit(limit))).scalars().all()
+    return [_run_dict(r) for r in rows]
+
+
+@router.get("/training/runs/{run_id}/curve")
+async def run_curve(run_id: str):
+    """Per-epoch training curves parsed from ultralytics results.csv for this run's dataset."""
+    async with get_sessionmaker()() as db:
+        r = await db.get(ModelRun, run_id)
+    if r is None:
+        raise HTTPException(status_code=404, detail="model run not found")
+    path = get_settings().scratch_path() / "training" / "runs" / r.dataset_name / "results.csv"
+    if not path.exists():
+        return {"run_id": run_id, "epochs": [], "series": {}, "available": False}
+    epochs: list[int] = []
+    series: dict[str, list[float]] = {v: [] for v in _CURVE_COLS.values()}
+    with path.open() as fh:
+        for row in csv.DictReader(fh):
+            row = {k.strip(): v for k, v in row.items()}
+            try:
+                epochs.append(int(float(row["epoch"])))
+            except (KeyError, ValueError):
+                continue
+            for col, key in _CURVE_COLS.items():
+                try:
+                    series[key].append(round(float(row[col]), 5))
+                except (KeyError, ValueError):
+                    series[key].append(0.0)
+    return {"run_id": run_id, "dataset_name": r.dataset_name, "epochs": epochs, "series": series,
+            "available": bool(epochs)}
 
 
 @router.get("/training/{job_id}")

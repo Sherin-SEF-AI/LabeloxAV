@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { api, type AgentPlan } from "@/lib/api";
+import { Busy } from "@/components/Spinner";
 
 // The frame agent, surfaced in the editor. It runs a dry-run plan first (writes nothing), shows what it
 // would auto-accept vs route to a human plus any consistency-critic flags, and only then lets a reviewer
 // commit. Every commit is one reversible run, so the Revert button undoes it exactly. This is the
 // "human supervises exceptions" surface: you see the 80% the system is sure about before it touches them.
 
-export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId: string; selectedId?: string | null; onApplied?: () => void }) {
+export default function AgentPanel({ frameId, selectedId, onApplied, embedded = false }: { frameId: string; selectedId?: string | null; onApplied?: () => void; embedded?: boolean }) {
   const [plan, setPlan] = useState<AgentPlan | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
@@ -142,13 +143,13 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
 
   const c = plan?.counts;
   return (
-    <div className="border-t hairline pt-2 mt-2">
+    <div className={embedded ? "" : "border-t hairline pt-2 mt-2"}>
       <div className="flex items-center gap-2 px-1 pb-1.5">
-        <span className="font-display text-[10px] font-semibold uppercase tracking-wider text-ink-3">Agent</span>
+        {!embedded && <span className="font-display text-[10px] font-semibold uppercase tracking-wider text-ink-3">Agent</span>}
         <span className="font-mono text-[9px] text-ink-3/70">auto-accept the sure ones</span>
         <button onClick={doPlan} disabled={!!busy}
-          className="ml-auto font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-50">
-          {busy === "plan" ? "planning..." : "dry-run"}
+          className={`ml-auto flex items-center gap-1.5 font-mono text-[10px] border px-2 py-1 rounded hover:border-accent disabled:opacity-50 ${busy === "plan" ? "running border-accent/40" : "border-line"}`}>
+          {busy === "plan" && <Busy />}{busy === "plan" ? "planning..." : "dry-run"}
         </button>
       </div>
 
@@ -165,8 +166,8 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
         </button>
         <button onClick={doRelabel} disabled={!!busy}
           title="an independent model re-reads every box and corrects the class where it decisively disagrees (reversible)"
-          className="col-span-2 font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
-          {busy === "relabel" ? "re-reading labels..." : "relabel this frame (AI reasoning)"}
+          className={`col-span-2 flex items-center justify-center gap-1.5 font-mono text-[10px] border px-2 py-1 rounded hover:border-accent disabled:opacity-40 ${busy === "relabel" ? "running border-accent/40" : "border-line"}`}>
+          {busy === "relabel" && <Busy />}{busy === "relabel" ? "re-reading labels..." : "relabel this frame (AI reasoning)"}
         </button>
       </div>
 
@@ -237,7 +238,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied }: { frameId
               </div>
             ))}
             {plan!.items.filter((i) => i.changes_state).length === 0 && (
-              <div className="font-mono text-[9.5px] text-ink-3">no changes — already settled</div>
+              <div className="font-mono text-[9.5px] text-ink-3">no changes, already settled</div>
             )}
           </div>
           <button onClick={doCommit} disabled={!!busy || c.auto_accept + c.review + c.annotate === c.unchanged}

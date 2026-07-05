@@ -31,10 +31,35 @@ export function SkeletonRows({ rows = 6, cols }: { rows?: number; cols: string }
       {Array.from({ length: rows }).map((_, r) => (
         <div key={r} className={`grid ${cols} gap-2 px-3 py-2 border-b hairline items-center`}>
           {Array.from({ length: Math.max(1, cols.split("_").length) }).map((__, c) => (
-            <span key={c} className="h-3 rounded bg-line/50 animate-pulse"
-              style={{ animationDelay: `${(r * 3 + c) * 60}ms`, width: c === 1 ? "70%" : "90%" }} />
+            <span key={c} className="h-3 skeleton"
+              style={{ animationDelay: `${(r * 3 + c) * 70}ms`, width: c === 1 ? "70%" : "90%" }} />
           ))}
         </div>
+      ))}
+    </div>
+  );
+}
+
+// A tiny inline spinner for a button or label that is running an async task. Sits next to the label so a
+// running action reads as "working", not frozen.
+export function Busy({ className = "" }: { className?: string }) {
+  return (
+    <span aria-hidden
+      className={`inline-block w-3 h-3 rounded-full border-2 border-line border-t-accent animate-spin shrink-0 ${className}`} />
+  );
+}
+
+// A soft pulsing accent dot for a longer-running task (autolabel, VLM generation).
+export function RunningDot({ className = "" }: { className?: string }) {
+  return <span aria-hidden className={`running-dot ${className}`} />;
+}
+
+// A block of shimmer skeleton lines (for a loading list/panel that is not a grid table).
+export function SkeletonLines({ lines = 4, className = "" }: { lines?: number; className?: string }) {
+  return (
+    <div aria-hidden className={`space-y-1.5 ${className}`}>
+      {Array.from({ length: lines }).map((_, i) => (
+        <div key={i} className="h-3 skeleton" style={{ width: `${60 + ((i * 37) % 40)}%` }} />
       ))}
     </div>
   );

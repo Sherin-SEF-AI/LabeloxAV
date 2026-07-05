@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, type ModelLine, type TrainingJob } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
+import RunsPanel from "@/components/training/RunsPanel";
 
 // In-app training platform: submit a training job (a "purpose" = dataset filters + hparams), watch it
 // run on the GPU worker (status / stage / epoch / map50), and browse the model registry. The API only
@@ -188,6 +189,10 @@ export default function TrainingPage() {
           ) : (
             <div className="font-mono text-xs text-ink-3 py-4 text-center">no training jobs yet</div>
           )}
+        </Section>
+
+        <Section title="model runs · training curves + champion→candidate + gate">
+          <RunsPanel />
         </Section>
 
         <Section title={`model registry (${registry.length} lines)`}>

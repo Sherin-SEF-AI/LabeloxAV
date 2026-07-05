@@ -19,6 +19,7 @@ import FloatingLayers from "@/components/shell/FloatingLayers";
 import AgentPanel from "@/components/agent/AgentPanel";
 import BulkEditBar from "@/components/agent/BulkEditBar";
 import SceneGraphPanel from "@/components/editor/SceneGraphPanel";
+import PanelSection from "@/components/editor/PanelSection";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import ScoreBar from "@/components/shell/ScoreBar";
 import Icon, { MODE_ICON } from "@/components/shell/Icon";
@@ -195,6 +196,7 @@ export default function FrameEditor() {
   const [rigTracks, setRigTracks] = useState(false);  // M-MC.4 rig-track timeline panel visibility
   const [scaleNoteOpen, setScaleNoteOpen] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [rightTab, setRightTab] = useState<"objects" | "tools">("objects");  // right panel: annotation vs AI tools
   // Responsive: on a narrow screen the properties panel collapses first (the design's degradation order),
   // giving the canvas and tool strip room. One-time on mount; the user can expand it manually after.
   useEffect(() => { if (typeof window !== "undefined" && window.innerWidth < 1100) setRightCollapsed(true); }, []);
@@ -1407,7 +1409,17 @@ export default function FrameEditor() {
             </div>
           )}
           {mode !== "lanes" && mode !== "lidar3d" && mode !== "review" && (<>
-          {/* class palette */}
+          {/* right-panel tabs: the object-annotation workflow vs the AI/automation tools, so neither buries the
+              other in one long scroll */}
+          <div className="flex border-b hairline shrink-0 font-mono text-[10px] uppercase tracking-wide">
+            {(["objects", "tools"] as const).map((t) => (
+              <button key={t} onClick={() => setRightTab(t)}
+                className={`flex-1 py-2 ${rightTab === t ? "text-accent border-b-2 border-accent -mb-px" : "text-ink-3 hover:text-ink-2"}`}>{t}</button>
+            ))}
+          </div>
+
+          {/* class palette (objects tab) */}
+          {rightTab === "objects" && (
           <div className="border-b hairline p-2">
             <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">class for new / selected</div>
             <div className="font-mono text-xs text-ink mb-1 flex items-center gap-1.5">
@@ -1435,13 +1447,14 @@ export default function FrameEditor() {
               ))}
             </div>
           </div>
+          )}
 
-          {/* Everything below the class picker scrolls together, so a long attributes list plus the
-              dynamics and road-segmentation panels stay reachable on short screens. */}
-          <div className="flex-1 min-h-0 overflow-y-auto">
+          {/* scroll body: shows the objects-tab content or the tools-tab content depending on the active tab.
+              Keyed by tab so switching fades the new content in. */}
+          <div key={rightTab} className="flex-1 min-h-0 overflow-y-auto reveal">
 
-          {/* attributes of selected */}
-          {selected && (
+          {/* attributes of selected (objects tab) */}
+          {rightTab === "objects" && selected && (
             <div className="border-b hairline p-2">
               <div className="flex items-center justify-between mb-1">
                 <span className="font-mono text-[10px] uppercase text-ink-3">attributes</span>
@@ -1538,10 +1551,9 @@ export default function FrameEditor() {
           )}
 
           {/* P3 derived dynamics readout for the selected object (planning/prediction signals) */}
-          {selected && (
-            <div className="border-b hairline p-2">
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-mono text-[10px] uppercase text-ink-3">dynamics</span>
+          {rightTab === "objects" && selected && (
+            <PanelSection title="dynamics">
+              <div className="flex justify-end mb-1">
                 <button onClick={recomputeDynamics} title="compute distance/speed/heading/TTC/risk for this session"
                   className="font-mono text-[10px] text-info hover:text-accent">recompute</button>
               </div>
@@ -1565,16 +1577,12 @@ export default function FrameEditor() {
                   </div>
                 );
               })()}
-            </div>
+            </PanelSection>
           )}
 
           {/* LiDAR BEV: draw oriented boxes on the bird's-eye view, then lift them to metric 3D cuboids */}
-          {meta?.is_lidar && (
-            <div className="border-b hairline p-2">
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-mono text-[10px] uppercase text-ink-3">lidar bev</span>
-                <span className="font-mono text-[10px] text-ink-3">{(meta.lidar_points ?? 0).toLocaleString()} pts</span>
-              </div>
+          {rightTab === "tools" && meta?.is_lidar && (
+            <PanelSection title="lidar bev" badge={`${(meta.lidar_points ?? 0).toLocaleString()} pts`}>
               <button
                 onClick={async () => {
                   if (isDirty(st)) await save();
@@ -1585,27 +1593,36 @@ export default function FrameEditor() {
                 className="w-full font-mono text-[10px] border border-line text-ink-2 px-1.5 py-1 hover:border-accent">
                 compute 3D cuboids from boxes &rarr;
               </button>
-            </div>
+            </PanelSection>
           )}
 
-          {/* P4 road segmentation: generate + edit the lane and drivable layers in place */}
-          <div className="border-b hairline p-2">
-            <div className="flex items-center justify-between mb-1">
-              <span className="font-mono text-[10px] uppercase text-ink-3">road segmentation</span>
-              <span className="font-mono text-[10px] text-ink-3">{lanes.length} lanes{drivable ? " · drivable" : ""}</span>
-            </div>
+          {/* Tools tab: the AI/automation clusters, each collapsible, in their own tab so they never bury the
+              object list. The AI panels are no longer nested inside road segmentation. */}
+          {rightTab === "tools" && (<>
+          <PanelSection title="agent · auto-label" defaultOpen>
+            <AgentPanel frameId={id} selectedId={st.selectedId} onApplied={loadLayers} embedded />
+          </PanelSection>
+
+          <PanelSection title="natural-language bulk edit" defaultOpen>
+            <BulkEditBar frameId={id} sessionId={meta.session_id} onApplied={() => flash("bulk edit applied (routed to review)")} embedded />
+          </PanelSection>
+
+          <PanelSection title="scene graph + vlm dataset">
+            <SceneGraphPanel frameId={id} embedded />
+          </PanelSection>
+
+          <PanelSection title="road segmentation" badge={`${lanes.length} lanes${drivable ? " · drivable" : ""}`}>
             <div className="grid grid-cols-2 gap-1 font-mono text-[10px]">
               <button onClick={segRoad} className="border border-line text-ink-2 px-1.5 py-1 hover:border-accent">segment road</button>
               <button onClick={genLanes} className="border border-line text-ink-2 px-1.5 py-1 hover:border-accent">propose lanes</button>
               <button onClick={() => router.push(`/annotate/lane/${id}`)} className="border border-line text-ink-2 px-1.5 py-1 hover:border-accent col-span-2">edit lanes + drivable &rarr;</button>
             </div>
-            <AgentPanel frameId={id} selectedId={st.selectedId} onApplied={loadLayers} />
-            <BulkEditBar frameId={id} sessionId={meta.session_id} onApplied={() => flash("bulk edit applied (routed to review)")} />
-            <SceneGraphPanel frameId={id} />
-          </div>
+          </PanelSection>
+          </>)}
 
-          {/* object list: grouped by class, searchable, collapsible, with a confidence bar per row. Scales
-              to many objects without a flat scroll; selection is bidirectional with the canvas. */}
+          {/* object list (objects tab): grouped by class, searchable, collapsible, with a confidence bar per
+              row; selection is bidirectional with the canvas. */}
+          {rightTab === "objects" && (
           <div className="p-2">
             <div className="flex items-center justify-between mb-1">
               <span className="font-mono text-[10px] uppercase text-ink-3">objects ({st.objects.length})</span>
@@ -1649,6 +1666,7 @@ export default function FrameEditor() {
               })()}
             </div>
           </div>
+          )}
           </div>
           </>)}
         </aside>

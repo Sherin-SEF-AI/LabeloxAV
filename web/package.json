@@ -11,6 +11,7 @@
   "dependencies": {
     "@mcap/core": "^2.1.5",
     "fzstd": "^0.1.1",
+    "geist": "^1.7.2",
     "konva": "9.3.16",
     "lz4js": "^0.2.0",
     "maplibre-gl": "^4.7.1",

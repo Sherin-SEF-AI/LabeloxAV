@@ -706,6 +706,8 @@ export const api = {
   listTraining: () => get<TrainingJob[]>("/api/training"),
   cancelTraining: (jobId: string) => post<TrainingJob>(`/api/training/${jobId}/cancel`, {}),
   trainingRegistry: () => get<ModelLine[]>("/api/training/registry"),
+  trainingRuns: () => get<ModelRunRow[]>("/api/training/runs"),
+  trainingRunCurve: (runId: string) => get<TrainingCurve>(`/api/training/runs/${encodeURIComponent(runId)}/curve`),
 
   // Warm cloud-GPU control. connect carries the acknowledged hourly rate (the backend rejects a mismatch).
   cloudStatus: () => get<CloudStatus>("/api/cloud/status"),
@@ -749,6 +751,41 @@ export type ModelLine = {
   task_type: string;
   runs: ModelLineRun[];
   promoted: ModelLineRun | null;
+};
+
+// A detector eval-metrics dict (candidate or baseline). per_class / per_class_recall are class_name -> value.
+export type RunMetrics = {
+  map50?: number;
+  map?: number;
+  precision?: number;
+  recall?: number;
+  safe_miou?: number | null;
+  per_class?: Record<string, number>;
+  per_class_recall?: Record<string, number>;
+};
+
+export type ModelRunRow = {
+  run_id: string;
+  dataset_name: string;
+  purpose: string;
+  epochs: number;
+  n_train: number;
+  n_val: number;
+  promoted: boolean;
+  base_weights: string;
+  notes: string | null;
+  baseline_metrics: RunMetrics;
+  metrics: RunMetrics;
+  gate: { promote?: boolean; map50_delta?: number; reasons?: string[] };
+  created_at: string | null;
+};
+
+export type TrainingCurve = {
+  run_id: string;
+  dataset_name?: string;
+  epochs: number[];
+  series: Record<string, number[]>; // train_box_loss, val_box_loss, map50, map, precision, recall, ...
+  available: boolean;
 };
 
 export type ImportJob = {
