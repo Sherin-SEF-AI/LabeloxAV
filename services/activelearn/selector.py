@@ -42,7 +42,8 @@ def _uncertainty(conf: float, agreement: bool, mask_box_disagree: bool, lo: floa
     return min(1.0, band + bonus)
 
 
-async def score_candidates(db: AsyncSession, session_id: str | None = None, pool_limit: int = 2000) -> list[dict]:
+async def score_candidates(db: AsyncSession, session_id: str | None = None, pool_limit: int = 2000,
+                           class_ids: list[int] | None = None) -> list[dict]:
     cfg = get_settings().phase4.activelearn
     onto = get_ontology()
 
@@ -52,6 +53,10 @@ async def score_candidates(db: AsyncSession, session_id: str | None = None, pool
     if session_id:
         from db.models import Frame
         q = q.join(Frame, Frame.frame_id == Object.frame_id).where(Frame.session_id == session_id)
+    if class_ids:
+        # class-focused mining: scope the pool to specific ontology classes (e.g. safety classes the
+        # champion gate is blocked on) so the value ranking is computed within that class set.
+        q = q.where(Object.class_id.in_(class_ids))
     q = q.limit(pool_limit)
     rows = (await db.execute(q)).all()
     if not rows:

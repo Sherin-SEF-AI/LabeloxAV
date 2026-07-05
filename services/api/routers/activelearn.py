@@ -30,7 +30,9 @@ async def score(session_id: str | None = None, limit: int = 50, db: AsyncSession
 
 
 @router.post("/activelearn/select")
-async def select(payload: SelectIn, db: AsyncSession = Depends(db_session)):
+async def select_route(payload: SelectIn, db: AsyncSession = Depends(db_session)):
+    # NB: not named `select` - that would shadow the module-level sqlalchemy `select` import and break
+    # the other endpoints in this router (e.g. /batches builds a `select(AlSelection)` query).
     return await select_batch(db, payload.budget_hours, payload.session_id, payload.dedup_cos)
 
 
