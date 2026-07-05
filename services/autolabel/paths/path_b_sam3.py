@@ -22,6 +22,14 @@ from services.autolabel.paths.base import RawDetection, mask_to_bbox
 
 log = get_logger("path_b")
 
+# Open-vocab synonym expansion: some ontology class names are poor text prompts for YOLO-World (it was
+# trained on common nouns). "cattle" barely activates; "cow"/"buffalo"/"bull"/"ox" do. Prompt with the
+# synonyms too and map every one of them back to the single ontology class, so the long-tail rural classes
+# the champion is blind to actually get proposed. Keyed by ontology class name.
+_OPENVOCAB_SYNONYMS: dict[str, list[str]] = {
+    "cattle": ["cattle", "cow", "buffalo", "bull", "ox"],
+}
+
 
 class Sam3Path:
     name = "path_b_sam3"
@@ -38,7 +46,14 @@ class Sam3Path:
         classes = self.onto.classes if supported_ids is None else [c for c in self.onto.classes if c.id in supported_ids]
         # India/rare classes first so the open-vocab budget favors where Path A is weakest.
         self._classes = sorted(classes, key=lambda c: (not c.india, c.id))
-        self._phrases = [c.name.replace("_", " ") for c in self._classes]
+        # Expand each class into its prompt phrases (usually just its name; synonyms for weak-prompt classes
+        # like cattle). _phrase_classes[i] is the ontology class the i-th phrase resolves back to.
+        self._phrases: list[str] = []
+        self._phrase_classes: list = []
+        for c in self._classes:
+            for phrase in _OPENVOCAB_SYNONYMS.get(c.name, [c.name.replace("_", " ")]):
+                self._phrases.append(phrase)
+                self._phrase_classes.append(c)
         self.model_version = (
             f"{self.settings.models.openvocab.detector_weights}+{self.settings.models.openvocab.seg_weights}"
         )
@@ -88,7 +103,7 @@ class Sam3Path:
         dets: list[RawDetection] = []
         for i in range(len(xyxy)):
             ci = clsidx[i]
-            spec = self._classes[ci] if 0 <= ci < len(self._classes) else self._classes[-1]
+            spec = self._phrase_classes[ci] if 0 <= ci < len(self._phrase_classes) else self._phrase_classes[-1]
             mask = masks[i] if masks is not None and i < len(masks) else None
             bbox = mask_to_bbox(mask) if mask is not None else tuple(float(v) for v in xyxy[i])
             if bbox is None:

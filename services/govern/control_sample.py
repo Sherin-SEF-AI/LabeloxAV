@@ -26,7 +26,16 @@ async def maybe_sample(db: AsyncSession, object_id: str, was_auto_accepted: bool
     draw = (rng.random() if rng is not None else random.random())
     if draw > rate:
         return None
-    cs = ControlSample(object_id=UUID(object_id), was_auto_accepted=was_auto_accepted)
+    # Flush the caller's pending object first, then confirm it is actually persisted before FK-referencing
+    # it. A control sample is a governance nicety (mirror 2% of auto-accepts to measure precision); it must
+    # NEVER abort a labeling run, so if the object is not present we skip rather than raise a FK violation
+    # that poisons the whole autolabel transaction.
+    oid = UUID(object_id)
+    await db.flush()
+    if await db.get(Object, oid) is None:
+        log.warning("control.sample_skipped_missing_object", object_id=object_id)
+        return None
+    cs = ControlSample(object_id=oid, was_auto_accepted=was_auto_accepted)
     db.add(cs)
     await db.flush()
     return str(cs.sample_id)
