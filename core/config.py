@@ -653,6 +653,19 @@ class SanyxSettings(BaseModel):
     quarantine_below: float = 55.0        # overall < quarantine_below -> quarantine, otherwise degraded
 
 
+class CalyxSettings(BaseModel):
+    """CALYX calibration-drift thresholds. Drift is estimated as an SE(3) delta between what the cameras see
+    (visual odometry / epipolar) and what the IMU and GNSS report; its magnitude sets the severity that gates
+    or flags the session."""
+
+    rot_deg_flag: float = 0.5      # SE(3) drift rotation that raises drift_detected
+    rot_deg_block: float = 2.0     # rotation that blocks the session
+    trans_m_flag: float = 0.05     # translation drift that flags
+    trans_m_block: float = 0.20    # translation drift that blocks
+    min_correspondences: int = 8   # below this the estimate is untrustworthy and returns ok with low confidence
+    slerp_discontinuity_deg: float = 5.0  # rotation step between adjacent frames inconsistent with dynamics
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="LBX_",
@@ -690,6 +703,7 @@ class Settings(BaseSettings):
     lidar: LidarSettings = LidarSettings()     # 3D LiDAR module (ingestion, clean, viewer)
     inspector: InspectorSettings = InspectorSettings()  # Session Inspector (MCAP viewer + health)
     sanyx: SanyxSettings = SanyxSettings()     # SANYX ingest QA thresholds (data engine plane)
+    calyx: CalyxSettings = CalyxSettings()     # CALYX calibration-drift thresholds (data engine plane)
 
     @classmethod
     def settings_customise_sources(
