@@ -1548,3 +1548,20 @@ class AnnotationQuality(Base):
     flags: Mapped[list] = mapped_column(JSONB, default=list)        # [tiny_box, off_screen, class_conflict, ...]
     audit_verdict: Mapped[str | None] = mapped_column(String(12))   # null | pass | fail (gold-set audit)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FlywheelCycle(Base):
+    """The adaptive flywheel controller (M17): one recorded cycle where VERDYX safety failures and SIEVYX ODD
+    coverage gaps are turned into a label-budget allocation across problem slices and a set of collection tasks.
+    This is the ledger of how the data engine steered its own attention, so a spend can be traced to the failure
+    or gap that justified it."""
+
+    __tablename__ = "flywheel_cycle"
+
+    cycle_id: Mapped[uuid.UUID] = _uuid_pk()
+    label_budget: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    signals: Mapped[dict] = mapped_column(JSONB, default=dict)          # {regressions, odd_gaps, safety_slices}
+    allocation: Mapped[list] = mapped_column(JSONB, default=list)       # [{slice, labels, weight, reason}]
+    collection_tasks: Mapped[list] = mapped_column(JSONB, default=list)  # [{cell, priority, target_count, reason}]
+    rationale: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
