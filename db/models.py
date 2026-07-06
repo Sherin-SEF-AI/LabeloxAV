@@ -1487,3 +1487,40 @@ class CalibrationOverride(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_calibration_override_session", "session_id"),)
+
+
+class ClipManeuver(Base):
+    """SIEVYX clip-level maneuver (M12): a maneuver recognized over a track's trajectory (cut-in, unprotected
+    turn, U-turn, jaywalk, ...), so mining works at the scenario level, not just the frame level. features holds
+    the trajectory descriptor the embedding and classifier rest on."""
+
+    __tablename__ = "clip_maneuver"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    track_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    t_in_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    t_out_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    maneuver: Mapped[str] = mapped_column(String(32), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    features: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_clip_maneuver_session", "session_id"),)
+
+
+class ScenarioCluster(Base):
+    """SIEVYX long-tail discovery (M12): an auto-discovered rare scenario group, surfaced for a human to name so
+    the scenario ontology grows from data. rarity is the cluster's isolation in embedding space; status walks
+    discovered -> named -> dismissed."""
+
+    __tablename__ = "scenario_cluster"
+
+    cluster_id: Mapped[uuid.UUID] = _uuid_pk()
+    method: Mapped[str] = mapped_column(String(24), nullable=False, default="dino_hdbscan")
+    size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rarity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    rep_frame_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    name: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="discovered")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
