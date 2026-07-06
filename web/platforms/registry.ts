@@ -33,6 +33,9 @@ export const PLATFORMS: Platform[] = [
       { href: "/annotations", label: "Annotations", hint: "browse and resume sessions" },
       { href: "/annotate/new", label: "New annotation", hint: "start from an upload" },
       { href: "/collaborate", label: "Collaborate", hint: "branches and merge requests" },
+      { href: "/labelox/quality", label: "Label quality", hint: "gold audit, parity gate, 4D propagation" },
+      { href: "/flywheel/adaptive", label: "Adaptive flywheel", hint: "budget and collection from failures + gaps" },
+      { href: "/ops", label: "Operations", hint: "SLOs, reproducibility, label efficiency" },
       { href: "/jobs", label: "Jobs", hint: "import, training, autolabel runs" },
     ],
   },
@@ -41,6 +44,7 @@ export const PLATFORMS: Platform[] = [
     glyph: "SNX", order: 1, gate: "health", flywheelStage: 1, home: "/sanyx",
     nav: [
       { href: "/sanyx", label: "Ingest board", hint: "health scores and quarantine" },
+      { href: "/sanyx/predictive", label: "Predictive", hint: "pre-failure rig trends and alerts" },
       { href: "/inspect", label: "Inspector", hint: "MCAP session inspection" },
     ],
   },
@@ -48,6 +52,7 @@ export const PLATFORMS: Platform[] = [
     id: "calyx", label: "CALYX", role: "calibration monitor: extrinsic / intrinsic drift",
     glyph: "CLX", order: 2, gate: "calibration", flywheelStage: 2, home: "/calyx",
     nav: [{ href: "/calyx", label: "Rig timeline", hint: "drift over time per rig" },
+          { href: "/calyx/recovery", label: "Recovery", hint: "targetless recovery + rig consensus" },
           { href: "/calibration", label: "Calibration", hint: "camera validation" }],
   },
   {
@@ -55,6 +60,7 @@ export const PLATFORMS: Platform[] = [
     glyph: "SVX", order: 3, gate: null, flywheelStage: 3, home: "/sievyx",
     nav: [
       { href: "/sievyx", label: "Queue composition", hint: "what the label budget buys" },
+      { href: "/sievyx/longtail", label: "Long-tail", hint: "ODD gaps, discovery, maneuvers" },
       { href: "/curation", label: "Curation", hint: "frame-level active learning" },
       { href: "/search", label: "Search", hint: "visual and semantic similarity" },
       { href: "/discovery", label: "Discovery", hint: "rare-scenario novelty queue" },
@@ -66,6 +72,7 @@ export const PLATFORMS: Platform[] = [
     glyph: "ORX", order: 4, gate: null, flywheelStage: 5, home: "/oraclyx",
     nav: [
       { href: "/oraclyx", label: "Consensus board", hint: "auto-truthed vs human-routed" },
+      { href: "/oraclyx/pseudogt", label: "Pseudo-GT 4D", hint: "uncertainty, depth priors, info-gain queue" },
       { href: "/lidar", label: "LiDAR", hint: "point cloud explorer" },
       { href: "/map", label: "HD map", hint: "fused map and provenance" },
       { href: "/inertial", label: "Inertial", hint: "ego-state timeline and events" },
@@ -76,8 +83,10 @@ export const PLATFORMS: Platform[] = [
     glyph: "VDX", order: 5, gate: "eval", flywheelStage: 7, home: "/verdyx",
     nav: [
       { href: "/verdyx", label: "Slice matrix", hint: "champion vs challenger per slice" },
+      { href: "/verdyx/safety", label: "Safety eval", hint: "TTC recall, significance, shadow triage" },
       { href: "/training", label: "Training", hint: "training jobs and model runs" },
       { href: "/govern", label: "Govern", hint: "loop control and championship" },
+      { href: "/govern/compliance", label: "Compliance", hint: "redaction proof, consent, cost, lineage" },
       { href: "/quality", label: "Quality", hint: "gold sets and slice metrics" },
       { href: "/analytics", label: "Analytics", hint: "corpus health and loop signal" },
     ],
@@ -87,6 +96,7 @@ export const PLATFORMS: Platform[] = [
     glyph: "FGX", order: 6, gate: "benchmark", flywheelStage: 8, home: "/forgyx",
     nav: [
       { href: "/forgyx", label: "Pareto explorer", hint: "latency vs accuracy + artifact registry" },
+      { href: "/forgyx/deploy", label: "Deploy", hint: "co-optimize, thermal envelope, rollout" },
       { href: "/datasets", label: "Datasets", hint: "sealed dataset delivery" },
       { href: "/import", label: "Import", hint: "ingest an external dataset" },
     ],
