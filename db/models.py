@@ -1289,6 +1289,8 @@ class SessionHealth(Base):
     verdict: Mapped[str] = mapped_column(String(8), nullable=False)  # pass | warn | fail
     score: Mapped[float | None] = mapped_column(Float)             # SANYX overall 0..100 health score
     decision: Mapped[str | None] = mapped_column(String(12))       # SANYX: pass | degraded | quarantine
+    root_cause: Mapped[str | None] = mapped_column(String(48))     # M10: named fault (loose_gmsl2_connector, ...)
+    remediation: Mapped[str | None] = mapped_column(Text)          # M10: operator remediation hint
     indexer_version: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -1442,3 +1444,23 @@ class PseudoLabel(Base):
     voters: Mapped[dict] = mapped_column(JSONB, default=dict)         # path -> {agree: bool, conf: float}
     fusion_run_id: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SanyxRigAlert(Base):
+    """SANYX predictive maintenance (M10): a per-component health trend across a vehicle's sessions that flags a
+    module degrading toward failure before it fails (a camera whose exposure or lens sub-score is monotonically
+    falling, an IMU whose saturation is climbing). Distinct from a single session's HealthReport; this is the
+    rig-level trend over time."""
+
+    __tablename__ = "sanyx_rig_alert"
+
+    alert_id: Mapped[uuid.UUID] = _uuid_pk()
+    vehicle_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    component: Mapped[str] = mapped_column(String(32), nullable=False)   # cam_ft | cam_rt | imu | gnss | ...
+    metric: Mapped[str] = mapped_column(String(48), nullable=False)      # the check/sub-score that is trending
+    trend: Mapped[str] = mapped_column(String(8), nullable=False)        # rising | falling
+    severity: Mapped[str] = mapped_column(String(8), nullable=False)     # watch | warn | critical
+    evidence: Mapped[dict] = mapped_column(JSONB, default=dict)          # slope, n_sessions, projected sessions to threshold
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_sanyx_rig_alert_vehicle", "vehicle_id"),)

@@ -115,11 +115,17 @@ async def run_health(session_id: UUID, sample_per_cam: int = 12) -> dict:
                                            inertial["gnss_ts"], inertial.get("rtk_flags")))
 
         report = aggregate(results, cfg)
+        # M10: name the fault and hand the operator a remediation hint, from the same evidence
+        from services.sanyx.rootcause import classify
+        rc = classify(report["checks"]) if report["decision"] != "pass" else {"fault": None, "remediation": None}
+        report["root_cause"] = rc["fault"]
+        report["remediation"] = rc.get("remediation")
         db.add(SessionHealth(session_id=session_id, checks=report["checks"], verdict=report["verdict"],
-                             score=report["score"], decision=report["decision"], indexer_version=INDEXER_VERSION))
+                             score=report["score"], decision=report["decision"], root_cause=rc["fault"],
+                             remediation=rc.get("remediation"), indexer_version=INDEXER_VERSION))
         await db.commit()
     log.info("sanyx.health", session=str(session_id), score=report["score"], decision=report["decision"],
-             checks=len(report["checks"]))
+             checks=len(report["checks"]), root_cause=report.get("root_cause"))
     return report
 
 
