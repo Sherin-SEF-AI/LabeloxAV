@@ -1550,6 +1550,42 @@ class AnnotationQuality(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class RedactionProof(Base):
+    """M18 governance: a signed attestation that PII redaction (Gate A) ran over every frame of a release. The
+    per-frame PiiAudit rows are the evidence; this rolls them up per release into a coverage number and an HMAC
+    signature a buyer can verify. A release whose coverage is below the floor cannot pass, so an unredacted
+    frame cannot hide inside a sold dataset."""
+
+    __tablename__ = "redaction_proof"
+
+    proof_id: Mapped[uuid.UUID] = _uuid_pk()
+    release_commit: Mapped[str] = mapped_column(String(128), nullable=False)
+    n_frames: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    n_covered: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    coverage: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    verdict: Mapped[str] = mapped_column(String(12), nullable=False, default="fail")  # pass|fail
+    signature: Mapped[str | None] = mapped_column(String(128))
+    uncovered: Mapped[list] = mapped_column(JSONB, default=list)        # frame ids missing a PII audit
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_redaction_proof_release", "release_commit"),)
+
+
+class ConsentRecord(Base):
+    """M18 governance: the consent basis and retention deadline for a session's data. Export is refused unless
+    consent is granted; a session past its retention_until must be purged. One row per session, so DPDPA
+    consent and retention are enforced at the spine, not left to policy documents."""
+
+    __tablename__ = "consent_record"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"), primary_key=True)
+    consent_status: Mapped[str] = mapped_column(String(12), nullable=False, default="unknown")  # granted|denied|unknown
+    legal_basis: Mapped[str | None] = mapped_column(String(64))         # consent|legitimate_interest|contract
+    retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class FlywheelCycle(Base):
     """The adaptive flywheel controller (M17): one recorded cycle where VERDYX safety failures and SIEVYX ODD
     coverage gaps are turned into a label-budget allocation across problem slices and a set of collection tasks.

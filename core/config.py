@@ -341,6 +341,7 @@ class CloudSettings(BaseModel):
     ckpt_dir: str = "/workspace/ckpts"
     gpu_pref: list[str] = Field(default_factory=lambda: ["A100 80GB", "H100 PCIe"])
     budget_cap_usd: float = 50.0
+    per_job_cap_usd: float = 10.0        # M18: hard per-job ceiling; a single job estimated above this is refused
     image: str = ""  # pinned once the runbook discovers a CUDA 12.8 devel image
 
     # Warm-session mode (the user-facing connect/disconnect control): one pod held across a work session,
@@ -472,6 +473,10 @@ class GovernSettings(BaseModel):
     offhours_utc: list[int] = [18, 19, 20, 21, 22, 23, 0, 1, 2, 3]  # when the controller may burst the A100
     controller_poll_s: float = 60.0      # the autonomy daemon ticks the controller this often
     controller_lock_key: int = 816       # Postgres advisory-lock id so only one controller daemon runs
+    # M18 governance: the key that signs a release redaction-proof attestation so a buyer can verify PII
+    # redaction ran over every frame of a release. Dev default is refused in prod by _require_prod_secrets.
+    attestation_key: str = "labeloxavgovernattestationkey0123456789"
+    redaction_coverage_floor: float = 1.0  # a release proof passes only when every frame passed the PII gate
 
 
 class RecallSettings(BaseModel):
@@ -758,6 +763,8 @@ class Settings(BaseSettings):
             weak.append("LBX_PHASE4__LAKEFS__SECRET_KEY")
         if self.forgyx.deploy_signing_key.startswith("labeloxforgyxdeploysigningkey"):
             weak.append("LBX_FORGYX__DEPLOY_SIGNING_KEY")
+        if self.phase4.govern.attestation_key.startswith("labeloxavgovernattestationkey"):
+            weak.append("LBX_PHASE4__GOVERN__ATTESTATION_KEY")
         if weak:
             raise ValueError(
                 f"env '{self.env}' is not a dev env but still uses default credentials; set: {', '.join(weak)}"
