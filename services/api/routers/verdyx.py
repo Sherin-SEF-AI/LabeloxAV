@@ -13,8 +13,67 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Evaluation
 from services.api.deps import db_session
 from services.verdyx.run import matrix, record_evaluation
+from services.verdyx.safety_recall import critical_object_recall, near_miss_slice, ttc_weighted_recall
+from services.verdyx.shadow import regression_triage
+from services.verdyx.stats import bootstrap_ci, paired_significance
 
 router = APIRouter()
+
+
+class SafetyIn(BaseModel):
+    objects: list[dict]              # [{object_id, class_id, detected, ttc_s}]
+    ttc_horizon_s: float = 6.0
+    near_miss_ttc_s: float = 2.0
+
+
+@router.post("/verdyx/safety/recall")
+async def safety_recall(payload: SafetyIn):
+    """The safety-weighted recall panel: critical-object recall, TTC-weighted recall, and the near-miss slice
+    with the missed-object escalation list."""
+    return {"critical": critical_object_recall(payload.objects),
+            "ttc_weighted": ttc_weighted_recall(payload.objects, payload.ttc_horizon_s),
+            "near_miss": near_miss_slice(payload.objects, payload.near_miss_ttc_s)}
+
+
+class BootstrapIn(BaseModel):
+    values: list[float]
+    n_boot: int = 2000
+    alpha: float = 0.05
+    seed: int = 12345
+
+
+@router.post("/verdyx/stats/bootstrap")
+async def stats_bootstrap(payload: BootstrapIn):
+    """A percentile bootstrap CI on a per-object metric, so a point estimate carries its uncertainty."""
+    return bootstrap_ci(payload.values, payload.n_boot, payload.alpha, payload.seed)
+
+
+class SignificanceIn(BaseModel):
+    champion: list[float]
+    challenger: list[float]
+    n_perm: int = 2000
+    seed: int = 12345
+
+
+@router.post("/verdyx/stats/significance")
+async def stats_significance(payload: SignificanceIn):
+    """A paired permutation test: is the challenger's per-object gain over the champion real or chance?"""
+    return paired_significance(payload.champion, payload.challenger, payload.n_perm, payload.seed)
+
+
+class TriageIn(BaseModel):
+    baseline: dict[str, float]
+    current: dict[str, float]
+    margin: float = 0.05
+    protected: list[str] | None = None
+
+
+@router.post("/verdyx/shadow/triage")
+async def shadow_triage(payload: TriageIn):
+    """Regression triage over a shadow snapshot: name the regressed slices worst-first and alarm on a protected
+    slice drop."""
+    return regression_triage(payload.baseline, payload.current, payload.margin,
+                             set(payload.protected or []))
 
 
 class EvalIn(BaseModel):

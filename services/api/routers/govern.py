@@ -7,20 +7,83 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import uuid
+
 from services.api.deps import db_session
 from services.govern import killswitch as K
 from services.govern.audit import list_audit
 from services.govern.champion import evaluate_and_promote
+from services.govern.consent import export_consent_gate
 from services.govern.control_sample import (
     measured_precision,
     record_verdict,
     seed_from_recent_auto_accepts,
 )
 from services.govern.controller import tick
+from services.govern.cost import cost_gate, estimate_job_cost
 from services.govern.drift import run_drift_scan
+from services.govern.redaction_run import build_release_proof, governance_lineage, set_consent
 from services.govern.registry import list_models, register, register_from_run
 
 router = APIRouter()
+
+
+# ---- M18 governance: redaction proof, consent/retention, cost ceilings, lineage ----
+class RedactionProofIn(BaseModel):
+    release_commit: str
+    frame_ids: list[str]
+    method_version: str = ""
+
+
+@router.post("/govern/redaction/proof")
+async def redaction_proof(payload: RedactionProofIn, db: AsyncSession = Depends(db_session)):
+    """Build and sign a release redaction proof from the per-frame PII audits; a release with an unredacted
+    frame fails the proof and names it."""
+    return await build_release_proof(db, payload.release_commit, payload.frame_ids, payload.method_version)
+
+
+class ConsentIn(BaseModel):
+    session_id: uuid.UUID
+    consent_status: str              # granted|denied|unknown
+    legal_basis: str | None = None
+
+
+@router.post("/govern/consent")
+async def consent(payload: ConsentIn, db: AsyncSession = Depends(db_session)):
+    """Set a session's consent/retention record; export is refused later unless consent is 'granted'."""
+    return await set_consent(db, payload.session_id, payload.consent_status, payload.legal_basis)
+
+
+@router.get("/govern/consent/{consent_status}/gate")
+async def consent_gate(consent_status: str):
+    """The export consent gate (fails closed on anything but 'granted')."""
+    return export_consent_gate(consent_status)
+
+
+class CostGateIn(BaseModel):
+    gpu_hours: float
+    hourly_usd: float
+    spent_usd: float = 0.0
+    per_job_cap_usd: float | None = None
+    window_cap_usd: float | None = None
+
+
+@router.post("/govern/cost/gate")
+async def cost_ceiling(payload: CostGateIn):
+    """Admit or refuse a cloud GPU job against the per-job cap and the remaining window budget, before it is
+    dispatched."""
+    from core.config import get_settings
+    cfg = get_settings()
+    est = estimate_job_cost(payload.gpu_hours, payload.hourly_usd)
+    per_job = payload.per_job_cap_usd if payload.per_job_cap_usd is not None else cfg.cloud.per_job_cap_usd
+    window = payload.window_cap_usd if payload.window_cap_usd is not None else cfg.cloud.budget_cap_usd
+    return cost_gate(est, per_job, payload.spent_usd, window)
+
+
+@router.get("/govern/lineage/{subject}")
+async def lineage(subject: str, db: AsyncSession = Depends(db_session)):
+    """The governance lineage of a subject: its audit decisions and (for a release) its redaction proof."""
+    return await governance_lineage(db, subject)
 
 
 # ---- registry + promotion ----

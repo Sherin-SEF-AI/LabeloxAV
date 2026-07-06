@@ -1378,6 +1378,7 @@ class Evaluation(Base):
     per_slice: Mapped[dict] = mapped_column(JSONB, default=dict)        # slice_id -> {map, precision, recall, confusion}
     failure_clusters: Mapped[dict] = mapped_column(JSONB, default=dict)  # cluster_id -> {condition, member_object_ids, size}
     aggregate: Mapped[dict] = mapped_column(JSONB, default=dict)        # map50, map, precision, recall, safe_miou
+    safety: Mapped[dict] = mapped_column(JSONB, default=dict)           # M15: track/scenario safety metrics + CIs + significance
     verdict: Mapped[str] = mapped_column(String(16), nullable=False, default="needs_review")  # promote|reject|needs_review
     challenger_of: Mapped[str | None] = mapped_column(String(128))     # the champion version this challenges
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -1425,6 +1426,11 @@ class Deployment(Base):
     verdict_ref: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("evaluation.eval_id", ondelete="SET NULL"))
     benchmark_ref: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("benchmark.benchmark_id", ondelete="SET NULL"))
     status: Mapped[str] = mapped_column(String(12), nullable=False, default="built")  # built|verified|blocked|deployed|retired
+    signature: Mapped[str | None] = mapped_column(String(128))         # M16: HMAC over the signed package manifest
+    package_uri: Mapped[str | None] = mapped_column(Text)              # M16: signed deployment package in the object store
+    thermal_envelope: Mapped[dict] = mapped_column(JSONB, default=dict)  # M16: {sustained_fps, throttle_temp_c, power_w, headroom}
+    rollout_state: Mapped[str] = mapped_column(String(12), nullable=False, default="none")  # none|canary|full|rolled_back
+    superseded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("deployment.deployment_id", ondelete="SET NULL"))
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -1541,4 +1547,76 @@ class AnnotationQuality(Base):
     agreement: Mapped[float | None] = mapped_column(Float)          # inter-annotator agreement 0..1
     flags: Mapped[list] = mapped_column(JSONB, default=list)        # [tiny_box, off_screen, class_conflict, ...]
     audit_verdict: Mapped[str | None] = mapped_column(String(12))   # null | pass | fail (gold-set audit)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PlaneSLO(Base):
+    """M19 hardening: a recorded per-plane SLO evaluation over an observation window. Each plane declares its
+    latency/error/coverage budgets; a tick measures them and records whether the plane met its SLO and which
+    objectives breached. This is the observability ledger the fleet-scale operator reads to see which plane is
+    the bottleneck, rather than inferring it from scattered logs."""
+
+    __tablename__ = "plane_slo"
+
+    slo_id: Mapped[uuid.UUID] = _uuid_pk()
+    plane: Mapped[str] = mapped_column(String(16), nullable=False)      # labelox|sanyx|calyx|sievyx|oraclyx|verdyx|forgyx
+    window_s: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    met: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    metrics: Mapped[dict] = mapped_column(JSONB, default=dict)          # measured values
+    breaches: Mapped[list] = mapped_column(JSONB, default=list)         # [{metric, value, threshold, op}]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_plane_slo_plane", "plane", "created_at"),)
+
+
+class RedactionProof(Base):
+    """M18 governance: a signed attestation that PII redaction (Gate A) ran over every frame of a release. The
+    per-frame PiiAudit rows are the evidence; this rolls them up per release into a coverage number and an HMAC
+    signature a buyer can verify. A release whose coverage is below the floor cannot pass, so an unredacted
+    frame cannot hide inside a sold dataset."""
+
+    __tablename__ = "redaction_proof"
+
+    proof_id: Mapped[uuid.UUID] = _uuid_pk()
+    release_commit: Mapped[str] = mapped_column(String(128), nullable=False)
+    n_frames: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    n_covered: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    coverage: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    verdict: Mapped[str] = mapped_column(String(12), nullable=False, default="fail")  # pass|fail
+    signature: Mapped[str | None] = mapped_column(String(128))
+    uncovered: Mapped[list] = mapped_column(JSONB, default=list)        # frame ids missing a PII audit
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_redaction_proof_release", "release_commit"),)
+
+
+class ConsentRecord(Base):
+    """M18 governance: the consent basis and retention deadline for a session's data. Export is refused unless
+    consent is granted; a session past its retention_until must be purged. One row per session, so DPDPA
+    consent and retention are enforced at the spine, not left to policy documents."""
+
+    __tablename__ = "consent_record"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"), primary_key=True)
+    consent_status: Mapped[str] = mapped_column(String(12), nullable=False, default="unknown")  # granted|denied|unknown
+    legal_basis: Mapped[str | None] = mapped_column(String(64))         # consent|legitimate_interest|contract
+    retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FlywheelCycle(Base):
+    """The adaptive flywheel controller (M17): one recorded cycle where VERDYX safety failures and SIEVYX ODD
+    coverage gaps are turned into a label-budget allocation across problem slices and a set of collection tasks.
+    This is the ledger of how the data engine steered its own attention, so a spend can be traced to the failure
+    or gap that justified it."""
+
+    __tablename__ = "flywheel_cycle"
+
+    cycle_id: Mapped[uuid.UUID] = _uuid_pk()
+    label_budget: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    signals: Mapped[dict] = mapped_column(JSONB, default=dict)          # {regressions, odd_gaps, safety_slices}
+    allocation: Mapped[list] = mapped_column(JSONB, default=list)       # [{slice, labels, weight, reason}]
+    collection_tasks: Mapped[list] = mapped_column(JSONB, default=list)  # [{cell, priority, target_count, reason}]
+    rationale: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
