@@ -19,7 +19,14 @@ from services.api.routers import (
     adverse,
     agent,
     calyx as calyx_router,
+    flywheel as flywheel_router,
+    forgyx as forgyx_router,
+    labelox as labelox_router,
+    oraclyx as oraclyx_router,
+    release as release_router,
     sanyx as sanyx_router,
+    verdyx as verdyx_router,
+    sievyx as sievyx_router,
     analytics,
     autolabel,
     calibration,
@@ -283,5 +290,12 @@ app.include_router(inertial.router, prefix="/api", tags=["inertial"])
 app.include_router(inspector.router, prefix="/api", tags=["inspector"])
 app.include_router(sanyx_router.router, prefix="/api", tags=["sanyx"])
 app.include_router(calyx_router.router, prefix="/api", tags=["calyx"])
+app.include_router(sievyx_router.router, prefix="/api", tags=["sievyx"])
+app.include_router(labelox_router.router, prefix="/api", tags=["labelox"])
+app.include_router(oraclyx_router.router, prefix="/api", tags=["oraclyx"])
+app.include_router(release_router.router, prefix="/api", tags=["release"])
+app.include_router(verdyx_router.router, prefix="/api", tags=["verdyx"])
+app.include_router(forgyx_router.router, prefix="/api", tags=["forgyx"])
+app.include_router(flywheel_router.router, prefix="/api", tags=["flywheel"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])

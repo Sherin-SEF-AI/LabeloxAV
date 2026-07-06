@@ -16,8 +16,16 @@ from db.models import SessionHealth
 from services.api.deps import db_session
 from services.sanyx.gate import gate_state, latest_health
 from services.sanyx.run import run_health
+from services.sanyx.trends import rig_trends
 
 router = APIRouter()
+
+
+@router.get("/sanyx/rig/{vehicle_id}/trends")
+async def rig_trends_view(vehicle_id: str, db: AsyncSession = Depends(db_session)):
+    """SANYX predictive maintenance: per-component health trends across the vehicle's sessions, with alerts on
+    modules degrading toward failure before they fail."""
+    return await rig_trends(db, vehicle_id, persist=False)
 
 
 def _report(h: SessionHealth | None) -> dict | None:
@@ -27,6 +35,7 @@ def _report(h: SessionHealth | None) -> dict | None:
         "session_id": str(h.session_id), "score": h.score,
         "decision": h.decision or {"pass": "pass", "warn": "degraded", "fail": "quarantine"}.get(h.verdict),
         "verdict": h.verdict, "checks": h.checks, "indexer_version": h.indexer_version,
+        "root_cause": h.root_cause, "remediation": h.remediation,
         "created_at": h.created_at.isoformat() if h.created_at else None,
     }
 
@@ -46,6 +55,7 @@ async def board(limit: int = 100, db: AsyncSession = Depends(db_session)):
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "score": rep["score"] if rep else None,
             "decision": rep["decision"] if rep else None,
+            "root_cause": rep.get("root_cause") if rep else None,
             "n_checks": len(rep["checks"]) if rep else 0,
         })
     return {"sessions": rows}

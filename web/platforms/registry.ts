@@ -31,26 +31,30 @@ export const PLATFORMS: Platform[] = [
       { href: "/agent", label: "Agent Console", hint: "autonomous QA and fix queue" },
       { href: "/review/queue", label: "Review queue", hint: "active learning + error candidates" },
       { href: "/annotations", label: "Annotations", hint: "browse and resume sessions" },
+      { href: "/annotate/new", label: "New annotation", hint: "start from an upload" },
+      { href: "/collaborate", label: "Collaborate", hint: "branches and merge requests" },
       { href: "/jobs", label: "Jobs", hint: "import, training, autolabel runs" },
     ],
   },
   {
     id: "sanyx", label: "SANYX", role: "ingest QA: health score, quarantine bad sessions",
-    glyph: "SNX", order: 1, gate: "health", flywheelStage: 1, home: "/inspect",
+    glyph: "SNX", order: 1, gate: "health", flywheelStage: 1, home: "/sanyx",
     nav: [
+      { href: "/sanyx", label: "Ingest board", hint: "health scores and quarantine" },
       { href: "/inspect", label: "Inspector", hint: "MCAP session inspection" },
-      { href: "/sanyx", label: "Ingest board", hint: "health scores and quarantine (M1)" },
     ],
   },
   {
     id: "calyx", label: "CALYX", role: "calibration monitor: extrinsic / intrinsic drift",
-    glyph: "CLX", order: 2, gate: "calibration", flywheelStage: 2, home: "/calibration",
-    nav: [{ href: "/calibration", label: "Calibration", hint: "camera validation and drift" }],
+    glyph: "CLX", order: 2, gate: "calibration", flywheelStage: 2, home: "/calyx",
+    nav: [{ href: "/calyx", label: "Rig timeline", hint: "drift over time per rig" },
+          { href: "/calibration", label: "Calibration", hint: "camera validation" }],
   },
   {
     id: "sievyx", label: "SIEVYX", role: "curation and mining: embed, rank, dedup, decide what to label",
-    glyph: "SVX", order: 3, gate: null, flywheelStage: 3, home: "/curation",
+    glyph: "SVX", order: 3, gate: null, flywheelStage: 3, home: "/sievyx",
     nav: [
+      { href: "/sievyx", label: "Queue composition", hint: "what the label budget buys" },
       { href: "/curation", label: "Curation", hint: "frame-level active learning" },
       { href: "/search", label: "Search", hint: "visual and semantic similarity" },
       { href: "/discovery", label: "Discovery", hint: "rare-scenario novelty queue" },
@@ -59,8 +63,9 @@ export const PLATFORMS: Platform[] = [
   },
   {
     id: "oraclyx", label: "ORACLYX", role: "offline-fusion pseudo-GT: auto-truth the majority, route disagreements",
-    glyph: "ORX", order: 4, gate: null, flywheelStage: 5, home: "/lidar",
+    glyph: "ORX", order: 4, gate: null, flywheelStage: 5, home: "/oraclyx",
     nav: [
+      { href: "/oraclyx", label: "Consensus board", hint: "auto-truthed vs human-routed" },
       { href: "/lidar", label: "LiDAR", hint: "point cloud explorer" },
       { href: "/map", label: "HD map", hint: "fused map and provenance" },
       { href: "/inertial", label: "Inertial", hint: "ego-state timeline and events" },
@@ -68,8 +73,9 @@ export const PLATFORMS: Platform[] = [
   },
   {
     id: "verdyx", label: "VERDYX", role: "slice evaluation: per-slice regression + champion / challenger verdict",
-    glyph: "VDX", order: 5, gate: "eval", flywheelStage: 7, home: "/training",
+    glyph: "VDX", order: 5, gate: "eval", flywheelStage: 7, home: "/verdyx",
     nav: [
+      { href: "/verdyx", label: "Slice matrix", hint: "champion vs challenger per slice" },
       { href: "/training", label: "Training", hint: "training jobs and model runs" },
       { href: "/govern", label: "Govern", hint: "loop control and championship" },
       { href: "/quality", label: "Quality", hint: "gold sets and slice metrics" },
@@ -78,10 +84,11 @@ export const PLATFORMS: Platform[] = [
   },
   {
     id: "forgyx", label: "FORGYX", role: "edge optimization: quantize, compile, benchmark, gate on latency and accuracy",
-    glyph: "FGX", order: 6, gate: "benchmark", flywheelStage: 8, home: "/datasets",
+    glyph: "FGX", order: 6, gate: "benchmark", flywheelStage: 8, home: "/forgyx",
     nav: [
+      { href: "/forgyx", label: "Pareto explorer", hint: "latency vs accuracy + artifact registry" },
       { href: "/datasets", label: "Datasets", hint: "sealed dataset delivery" },
-      { href: "/forgyx", label: "Deployments", hint: "benchmark matrix and artifacts (M8)" },
+      { href: "/import", label: "Import", hint: "ingest an external dataset" },
     ],
   },
 ];

@@ -577,6 +577,7 @@ class CalibrationValidation(Base):
     status: Mapped[str] = mapped_column(String(8), nullable=False, default="pass")  # pass | warn | fail
     drift_delta: Mapped[dict | None] = mapped_column(JSONB)        # CALYX: SE(3) drift delta per sensor pair
     severity: Mapped[str | None] = mapped_column(String(16))       # CALYX: ok | drift_detected | block
+    confidence: Mapped[float | None] = mapped_column(Float)        # M11: calibration confidence 0..1 (uncertainty)
     report_uri: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -1289,6 +1290,8 @@ class SessionHealth(Base):
     verdict: Mapped[str] = mapped_column(String(8), nullable=False)  # pass | warn | fail
     score: Mapped[float | None] = mapped_column(Float)             # SANYX overall 0..100 health score
     decision: Mapped[str | None] = mapped_column(String(12))       # SANYX: pass | degraded | quarantine
+    root_cause: Mapped[str | None] = mapped_column(String(48))     # M10: named fault (loose_gmsl2_connector, ...)
+    remediation: Mapped[str | None] = mapped_column(Text)          # M10: operator remediation hint
     indexer_version: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -1441,4 +1444,83 @@ class PseudoLabel(Base):
     consensus_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     voters: Mapped[dict] = mapped_column(JSONB, default=dict)         # path -> {agree: bool, conf: float}
     fusion_run_id: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SanyxRigAlert(Base):
+    """SANYX predictive maintenance (M10): a per-component health trend across a vehicle's sessions that flags a
+    module degrading toward failure before it fails (a camera whose exposure or lens sub-score is monotonically
+    falling, an IMU whose saturation is climbing). Distinct from a single session's HealthReport; this is the
+    rig-level trend over time."""
+
+    __tablename__ = "sanyx_rig_alert"
+
+    alert_id: Mapped[uuid.UUID] = _uuid_pk()
+    vehicle_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    component: Mapped[str] = mapped_column(String(32), nullable=False)   # cam_ft | cam_rt | imu | gnss | ...
+    metric: Mapped[str] = mapped_column(String(48), nullable=False)      # the check/sub-score that is trending
+    trend: Mapped[str] = mapped_column(String(8), nullable=False)        # rising | falling
+    severity: Mapped[str] = mapped_column(String(8), nullable=False)     # watch | warn | critical
+    evidence: Mapped[dict] = mapped_column(JSONB, default=dict)          # slope, n_sessions, projected sessions to threshold
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_sanyx_rig_alert_vehicle", "vehicle_id"),)
+
+
+class CalibrationOverride(Base):
+    """CALYX data recovery (M11): a corrected calibration that makes a mildly drifted session usable instead of
+    quarantined, kept as a versioned override on the session (raw calibration is never mutated). source records
+    how it was derived (self-cal from the drift delta, targetless from natural-scene cues, or a cross-session
+    consensus prior); confidence and provenance let ORACLYX and the workspace weight how much to trust it."""
+
+    __tablename__ = "calibration_override"
+
+    override_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    cam_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)   # self_cal | targetless | consensus
+    corrected: Mapped[dict] = mapped_column(JSONB, default=dict)      # {rpy_deg, xyz_m, fx, fy, cx, cy, dist}
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict)     # {method, drift_delta, residual_before/after, n}
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_calibration_override_session", "session_id"),)
+
+
+class ClipManeuver(Base):
+    """SIEVYX clip-level maneuver (M12): a maneuver recognized over a track's trajectory (cut-in, unprotected
+    turn, U-turn, jaywalk, ...), so mining works at the scenario level, not just the frame level. features holds
+    the trajectory descriptor the embedding and classifier rest on."""
+
+    __tablename__ = "clip_maneuver"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    track_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    t_in_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    t_out_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    maneuver: Mapped[str] = mapped_column(String(32), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    features: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_clip_maneuver_session", "session_id"),)
+
+
+class ScenarioCluster(Base):
+    """SIEVYX long-tail discovery (M12): an auto-discovered rare scenario group, surfaced for a human to name so
+    the scenario ontology grows from data. rarity is the cluster's isolation in embedding space; status walks
+    discovered -> named -> dismissed."""
+
+    __tablename__ = "scenario_cluster"
+
+    cluster_id: Mapped[uuid.UUID] = _uuid_pk()
+    method: Mapped[str] = mapped_column(String(24), nullable=False, default="dino_hdbscan")
+    size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rarity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    rep_frame_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    name: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="discovered")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

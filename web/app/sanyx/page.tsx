@@ -10,7 +10,7 @@ import PageShell from "@/components/shell/PageShell";
 type Check = { name: string; status: string; score: number | null; detail: string; evidence: Record<string, unknown> };
 type Row = {
   session_id: string; vehicle_id: string | null; city: string | null; created_at: string | null;
-  score: number | null; decision: string | null; n_checks: number;
+  score: number | null; decision: string | null; root_cause: string | null; n_checks: number;
 };
 
 const DECISION: Record<string, string> = { pass: "text-pass", degraded: "text-warn", quarantine: "text-block" };
@@ -65,7 +65,7 @@ export default function SanyxBoard() {
           <thead>
             <tr className="text-ink-3 text-left border-b hairline">
               <th className="px-2 py-1">session</th><th>vehicle</th><th>city</th>
-              <th>score</th><th>decision</th><th>checks</th><th></th>
+              <th>score</th><th>decision</th><th>root cause</th><th>checks</th><th></th>
             </tr>
           </thead>
           <tbody>
@@ -77,6 +77,7 @@ export default function SanyxBoard() {
                   <td className="text-ink-3">{r.city ?? "-"}</td>
                   <td className="text-ink">{r.score != null ? r.score.toFixed(0) : "-"}</td>
                   <td className={DECISION[r.decision ?? ""] ?? "text-ink-3"}>{r.decision ?? "unrun"}</td>
+                  <td className="text-ink-3">{r.root_cause ? r.root_cause.replace(/_/g, " ") : "-"}</td>
                   <td className="text-ink-3">{r.n_checks || "-"}</td>
                   <td className="text-right pr-2 whitespace-nowrap space-x-2">
                     <button onClick={() => expand(r.session_id)}
@@ -88,7 +89,7 @@ export default function SanyxBoard() {
                   </td>
                 </tr>
                 {open === r.session_id && (
-                  <tr className="border-b hairline"><td colSpan={7} className="px-3 py-2 bg-bg-2">
+                  <tr className="border-b hairline"><td colSpan={8} className="px-3 py-2 bg-bg-2">
                     {(report[r.session_id] ?? []).length ? (
                       <div className="space-y-1">
                         {(report[r.session_id] ?? []).map((c, i) => (
@@ -108,7 +109,7 @@ export default function SanyxBoard() {
                 )}
               </Fragment>
             ))}
-            {!rows.length && <tr><td colSpan={7} className="text-ink-3 text-center py-4">no sessions</td></tr>}
+            {!rows.length && <tr><td colSpan={8} className="text-ink-3 text-center py-4">no sessions</td></tr>}
           </tbody>
         </table>
       </div>
