@@ -1550,6 +1550,25 @@ class AnnotationQuality(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PlaneSLO(Base):
+    """M19 hardening: a recorded per-plane SLO evaluation over an observation window. Each plane declares its
+    latency/error/coverage budgets; a tick measures them and records whether the plane met its SLO and which
+    objectives breached. This is the observability ledger the fleet-scale operator reads to see which plane is
+    the bottleneck, rather than inferring it from scattered logs."""
+
+    __tablename__ = "plane_slo"
+
+    slo_id: Mapped[uuid.UUID] = _uuid_pk()
+    plane: Mapped[str] = mapped_column(String(16), nullable=False)      # labelox|sanyx|calyx|sievyx|oraclyx|verdyx|forgyx
+    window_s: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    met: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    metrics: Mapped[dict] = mapped_column(JSONB, default=dict)          # measured values
+    breaches: Mapped[list] = mapped_column(JSONB, default=list)         # [{metric, value, threshold, op}]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_plane_slo_plane", "plane", "created_at"),)
+
+
 class RedactionProof(Base):
     """M18 governance: a signed attestation that PII redaction (Gate A) ran over every frame of a release. The
     per-frame PiiAudit rows are the evidence; this rolls them up per release into a coverage number and an HMAC
