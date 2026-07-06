@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import UserPicker from "./UserPicker";
 import AppSwitcher from "./shell/AppSwitcher";
+import PlatformSwitcher from "./shell/PlatformSwitcher";
 import CommandPalette from "./shell/CommandPalette";
 import ShortcutOverlay from "./shell/ShortcutOverlay";
 import CloudControl from "./shell/CloudControl";
@@ -24,9 +25,10 @@ export default function TopNav({ active, right }: { active: string; right?: Reac
         >
           <span className="text-[15px] leading-none">&larr;</span>
         </button>
-        <button onClick={() => router.push("/")} className="font-display font-bold shrink-0" title="home (triage)">
+        <button onClick={() => router.push("/platforms")} className="font-display font-bold shrink-0" title="platform launcher">
           Labelox<span className="text-accent">AV</span>
         </button>
+        <PlatformSwitcher />
         <AppSwitcher />
         <button onClick={() => window.dispatchEvent(new Event("lbx:palette"))} title="command palette (Cmd+K)"
           className="font-mono text-[11px] text-ink-3 border border-line px-2 py-1 hover:border-accent">

@@ -31,6 +31,8 @@ export const PLATFORMS: Platform[] = [
       { href: "/agent", label: "Agent Console", hint: "autonomous QA and fix queue" },
       { href: "/review/queue", label: "Review queue", hint: "active learning + error candidates" },
       { href: "/annotations", label: "Annotations", hint: "browse and resume sessions" },
+      { href: "/annotate/new", label: "New annotation", hint: "start from an upload" },
+      { href: "/collaborate", label: "Collaborate", hint: "branches and merge requests" },
       { href: "/jobs", label: "Jobs", hint: "import, training, autolabel runs" },
     ],
   },
@@ -86,6 +88,7 @@ export const PLATFORMS: Platform[] = [
     nav: [
       { href: "/forgyx", label: "Pareto explorer", hint: "latency vs accuracy + artifact registry" },
       { href: "/datasets", label: "Datasets", hint: "sealed dataset delivery" },
+      { href: "/import", label: "Import", hint: "ingest an external dataset" },
     ],
   },
 ];
