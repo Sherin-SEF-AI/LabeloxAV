@@ -674,6 +674,14 @@ class LabeloxSettings(BaseModel):
     reconcile_parity_margin: float = 0.0  # the learned head must beat the heuristic by at least this to promote
 
 
+class ForgyxSettings(BaseModel):
+    """FORGYX edge-deployment settings (M16). The deploy signing key signs the deployment package manifest so a
+    device can verify integrity and provenance; the default is a dev key and MUST be overridden via
+    LBX_FORGYX__DEPLOY_SIGNING_KEY in production (enforced by _require_prod_secrets)."""
+
+    deploy_signing_key: str = "labeloxforgyxdeploysigningkey0123456789"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="LBX_",
@@ -713,6 +721,7 @@ class Settings(BaseSettings):
     labelox: LabeloxSettings = LabeloxSettings()
     sanyx: SanyxSettings = SanyxSettings()     # SANYX ingest QA thresholds (data engine plane)
     calyx: CalyxSettings = CalyxSettings()     # CALYX calibration-drift thresholds (data engine plane)
+    forgyx: ForgyxSettings = ForgyxSettings()  # FORGYX edge-deployment signing (data engine plane)
 
     @classmethod
     def settings_customise_sources(
@@ -747,6 +756,8 @@ class Settings(BaseSettings):
             weak.append("LBX_MINIO__SECRET_KEY")
         if self.phase4.lakefs.secret_key.startswith("labeloxavlakefssecret"):
             weak.append("LBX_PHASE4__LAKEFS__SECRET_KEY")
+        if self.forgyx.deploy_signing_key.startswith("labeloxforgyxdeploysigningkey"):
+            weak.append("LBX_FORGYX__DEPLOY_SIGNING_KEY")
         if weak:
             raise ValueError(
                 f"env '{self.env}' is not a dev env but still uses default credentials; set: {', '.join(weak)}"

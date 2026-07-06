@@ -1426,6 +1426,11 @@ class Deployment(Base):
     verdict_ref: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("evaluation.eval_id", ondelete="SET NULL"))
     benchmark_ref: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("benchmark.benchmark_id", ondelete="SET NULL"))
     status: Mapped[str] = mapped_column(String(12), nullable=False, default="built")  # built|verified|blocked|deployed|retired
+    signature: Mapped[str | None] = mapped_column(String(128))         # M16: HMAC over the signed package manifest
+    package_uri: Mapped[str | None] = mapped_column(Text)              # M16: signed deployment package in the object store
+    thermal_envelope: Mapped[dict] = mapped_column(JSONB, default=dict)  # M16: {sustained_fps, throttle_temp_c, power_w, headroom}
+    rollout_state: Mapped[str] = mapped_column(String(12), nullable=False, default="none")  # none|canary|full|rolled_back
+    superseded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("deployment.deployment_id", ondelete="SET NULL"))
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

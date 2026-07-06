@@ -13,8 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Deployment
 from services.api.deps import db_session
 from services.forgyx.capabilities import available_targets
+from services.forgyx.cooptimize import plan_cooptimization
 from services.forgyx.gate import dual_gate
+from services.forgyx.packaging import plan_rollout
 from services.forgyx.run import benchmark_matrix, record_benchmark
+from services.forgyx.thermal import thermal_envelope
 
 router = APIRouter()
 
@@ -74,3 +77,41 @@ async def gate(payload: GateIn):
     """The dual regression gate: block on latency regression OR protected-slice accuracy regression."""
     return dual_gate(payload.baseline_latency, payload.candidate_latency, payload.champion_eval,
                      payload.candidate_eval, payload.protected_slices)
+
+
+class CooptIn(BaseModel):
+    target: str
+    base_latency_ms: float
+    base_map50: float
+    prune_grid: list[float] | None = None
+
+
+@router.post("/forgyx/cooptimize")
+async def cooptimize(payload: CooptIn):
+    """Plan model-target co-optimization: rank (prune, int8) configs and pick the most accurate one that clears
+    the target latency budget."""
+    return plan_cooptimization(payload.target, payload.base_latency_ms, payload.base_map50, payload.prune_grid)
+
+
+class ThermalIn(BaseModel):
+    target: str
+    readings: dict                   # device-farm run: {peak_temp_c, power_w, throttled_fps}
+    cold_fps: float
+
+
+@router.post("/forgyx/thermal")
+async def thermal(payload: ThermalIn):
+    """Check a device-farm sustained-load run against the target thermal/power envelope (refused without real
+    readings)."""
+    return thermal_envelope(payload.target, payload.readings, payload.cold_fps)
+
+
+class RolloutIn(BaseModel):
+    current_state: str               # none|canary|full|rolled_back
+    action: str                      # canary|full|rolled_back
+
+
+@router.post("/forgyx/rollout")
+async def rollout(payload: RolloutIn):
+    """The rollout/rollback transition for a deployment; refuses an illegal jump (e.g. none straight to full)."""
+    return plan_rollout(payload.current_state, payload.action)
