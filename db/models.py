@@ -1444,6 +1444,8 @@ class PseudoLabel(Base):
     consensus_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     voters: Mapped[dict] = mapped_column(JSONB, default=dict)         # path -> {agree: bool, conf: float}
     fusion_run_id: Mapped[str | None] = mapped_column(String(128))
+    uncertainty: Mapped[float | None] = mapped_column(Float)          # M14: calibrated pseudo-GT uncertainty 0..1
+    info_gain: Mapped[float | None] = mapped_column(Float)            # M14: expected training value of reviewing it
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
