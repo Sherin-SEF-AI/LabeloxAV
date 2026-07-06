@@ -577,6 +577,7 @@ class CalibrationValidation(Base):
     status: Mapped[str] = mapped_column(String(8), nullable=False, default="pass")  # pass | warn | fail
     drift_delta: Mapped[dict | None] = mapped_column(JSONB)        # CALYX: SE(3) drift delta per sensor pair
     severity: Mapped[str | None] = mapped_column(String(16))       # CALYX: ok | drift_detected | block
+    confidence: Mapped[float | None] = mapped_column(Float)        # M11: calibration confidence 0..1 (uncertainty)
     report_uri: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -1464,3 +1465,25 @@ class SanyxRigAlert(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_sanyx_rig_alert_vehicle", "vehicle_id"),)
+
+
+class CalibrationOverride(Base):
+    """CALYX data recovery (M11): a corrected calibration that makes a mildly drifted session usable instead of
+    quarantined, kept as a versioned override on the session (raw calibration is never mutated). source records
+    how it was derived (self-cal from the drift delta, targetless from natural-scene cues, or a cross-session
+    consensus prior); confidence and provenance let ORACLYX and the workspace weight how much to trust it."""
+
+    __tablename__ = "calibration_override"
+
+    override_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    cam_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)   # self_cal | targetless | consensus
+    corrected: Mapped[dict] = mapped_column(JSONB, default=dict)      # {rpy_deg, xyz_m, fx, fy, cx, cy, dist}
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict)     # {method, drift_delta, residual_before/after, n}
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_calibration_override_session", "session_id"),)
