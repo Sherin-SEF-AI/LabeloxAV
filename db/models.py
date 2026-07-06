@@ -1378,6 +1378,7 @@ class Evaluation(Base):
     per_slice: Mapped[dict] = mapped_column(JSONB, default=dict)        # slice_id -> {map, precision, recall, confusion}
     failure_clusters: Mapped[dict] = mapped_column(JSONB, default=dict)  # cluster_id -> {condition, member_object_ids, size}
     aggregate: Mapped[dict] = mapped_column(JSONB, default=dict)        # map50, map, precision, recall, safe_miou
+    safety: Mapped[dict] = mapped_column(JSONB, default=dict)           # M15: track/scenario safety metrics + CIs + significance
     verdict: Mapped[str] = mapped_column(String(16), nullable=False, default="needs_review")  # promote|reject|needs_review
     challenger_of: Mapped[str | None] = mapped_column(String(128))     # the champion version this challenges
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
