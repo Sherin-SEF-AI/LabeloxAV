@@ -666,6 +666,14 @@ class CalyxSettings(BaseModel):
     slerp_discontinuity_deg: float = 5.0  # rotation step between adjacent frames inconsistent with dynamics
 
 
+class LabeloxSettings(BaseModel):
+    """LabeloxAV core enhancement flags (M13). The learned three-path reconciler stays off until it passes the
+    parity gate against the heuristic on a held-out set; the heuristic remains the default and live."""
+
+    learned_reconcile: bool = False       # switch to the learned fusion head (only after parity)
+    reconcile_parity_margin: float = 0.0  # the learned head must beat the heuristic by at least this to promote
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="LBX_",
@@ -702,6 +710,7 @@ class Settings(BaseSettings):
     auth: AuthSettings = AuthSettings()        # deny-by-default API auth
     lidar: LidarSettings = LidarSettings()     # 3D LiDAR module (ingestion, clean, viewer)
     inspector: InspectorSettings = InspectorSettings()  # Session Inspector (MCAP viewer + health)
+    labelox: LabeloxSettings = LabeloxSettings()
     sanyx: SanyxSettings = SanyxSettings()     # SANYX ingest QA thresholds (data engine plane)
     calyx: CalyxSettings = CalyxSettings()     # CALYX calibration-drift thresholds (data engine plane)
 

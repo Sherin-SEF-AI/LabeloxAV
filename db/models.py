@@ -1524,3 +1524,19 @@ class ScenarioCluster(Base):
     name: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(12), nullable=False, default="discovered")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AnnotationQuality(Base):
+    """LabeloxAV label quality layer (M13): per-annotation quality score, inter-annotator agreement, and gold
+    audit verdict, in a side table so the hot object row is untouched. Surfaced in the workspace so a reviewer
+    sees which labels to trust."""
+
+    __tablename__ = "annotation_quality"
+
+    object_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("object.object_id", ondelete="CASCADE"), primary_key=True)
+    quality: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    agreement: Mapped[float | None] = mapped_column(Float)          # inter-annotator agreement 0..1
+    flags: Mapped[list] = mapped_column(JSONB, default=list)        # [tiny_box, off_screen, class_conflict, ...]
+    audit_verdict: Mapped[str | None] = mapped_column(String(12))   # null | pass | fail (gold-set audit)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
