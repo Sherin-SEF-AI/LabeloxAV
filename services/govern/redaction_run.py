@@ -12,13 +12,22 @@ from core.config import get_settings
 from db.models import AuditDecision, ConsentRecord, PiiAudit, RedactionProof
 from services.govern.redaction_proof import build_proof, redaction_coverage
 
+# A single proof request covers at most this many frames; larger releases are proven in batches. Bounds the
+# UUID parse, the IN query, and the response payload against an unbounded-input DoS.
+MAX_PROOF_FRAMES = 200_000
+
 
 async def build_release_proof(db: AsyncSession, release_commit: str, frame_ids: list[str],
                               method_version: str = "") -> dict:
     """Compute PII-gate coverage over a release's frames, build and sign the proof, and persist it. frame_ids
     is the release's frame set (resolved by the caller from the DatasetCommit); a frame with a PiiAudit row is
     covered."""
-    fid_uuids = [uuid.UUID(f) if not isinstance(f, uuid.UUID) else f for f in frame_ids]
+    if len(frame_ids) > MAX_PROOF_FRAMES:
+        raise ValueError(f"too many frame_ids ({len(frame_ids)}); cap is {MAX_PROOF_FRAMES} per proof request")
+    try:
+        fid_uuids = [f if isinstance(f, uuid.UUID) else uuid.UUID(f) for f in frame_ids]
+    except (ValueError, AttributeError, TypeError) as e:
+        raise ValueError(f"frame_ids must be valid UUIDs: {e}") from e
     audited = set()
     if fid_uuids:
         rows = (await db.execute(
@@ -33,6 +42,9 @@ async def build_release_proof(db: AsyncSession, release_commit: str, frame_ids: 
         coverage=cov["coverage"], verdict=proof["verdict"], signature=proof["signature"],
         uncovered=cov["uncovered"][:500],
     )
+    # Bound the response payload too (the DB row is already truncated), so a caller cannot pull an unbounded
+    # uncovered list back through the API.
+    proof["uncovered"] = proof["uncovered"][:500]
     db.add(row)
     await db.commit()
     await db.refresh(row)

@@ -33,7 +33,18 @@ def build_proof(release_commit: str, coverage: dict, key: str, method_version: s
     """Build and sign a release redaction proof. verdict is 'pass' only when coverage meets the floor (every
     frame redacted by default); a shortfall yields 'fail' and the proof names the uncovered frames rather than
     attesting a clean release. The signature is an HMAC over the canonical manifest."""
-    verdict = "pass" if coverage["coverage"] >= coverage_floor and coverage["n_frames"] > 0 else "fail"
+    # Gate on exact integer counts, never the rounded coverage float: for a very large release a single
+    # unredacted frame rounds to 1.0, which would otherwise sign a false clean proof. At the default floor of
+    # 1.0 the proof passes only when every frame is covered; a lower floor compares the exact (unrounded)
+    # fraction.
+    n_frames, n_covered = coverage["n_frames"], coverage["n_covered"]
+    if n_frames <= 0:
+        covered_ok = False
+    elif coverage_floor >= 1.0:
+        covered_ok = n_covered == n_frames
+    else:
+        covered_ok = (n_covered / n_frames) >= coverage_floor
+    verdict = "pass" if covered_ok else "fail"
     manifest = {
         "release_commit": release_commit,
         "n_frames": coverage["n_frames"],

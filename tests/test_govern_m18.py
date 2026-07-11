@@ -25,6 +25,16 @@ def test_redaction_proof_gate_and_tamper():
     assert verify_proof(forged, p["signature"], KEY) is False
 
 
+def test_redaction_proof_gate_is_exact_not_rounded():
+    # a single unredacted frame in a huge release rounds coverage to 1.0, but the proof must still FAIL:
+    # the gate is on exact counts, not the rounded float, so a leaked frame cannot sign a clean attestation.
+    n = 2_000_000
+    cov = {"n_frames": n, "n_covered": n - 1, "coverage": round((n - 1) / n, 6), "uncovered": ["leaked-frame"]}
+    assert cov["coverage"] == 1.0                       # the rounding trap
+    p = build_proof("rel-huge", cov, KEY, coverage_floor=1.0)
+    assert p["verdict"] == "fail"                        # exact-count gate catches the one leaked frame
+
+
 def test_consent_gate_fails_closed():
     assert export_consent_gate("granted")["allowed"] is True
     assert export_consent_gate("denied")["allowed"] is False
