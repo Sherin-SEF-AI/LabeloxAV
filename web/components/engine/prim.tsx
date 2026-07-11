@@ -1,8 +1,8 @@
 "use client";
 
-// Shared primitives for the Data Engine (M10-M19) plane surfaces. Operational Materialism: matte panels,
-// monospace data, color earned only by state (pass/warn/block). Kept tiny and local so each plane page reads
-// as one focused file.
+// Shared primitives for the Data Engine (M10-M19) plane surfaces. Blender-style: panels with a raised named
+// header, rounded tool buttons with the blue action state, recessed value fields, and status-colored bars.
+// The export signatures are unchanged so the ten plane pages inherit the new look without edits.
 
 import { useState } from "react";
 
@@ -10,21 +10,21 @@ export function Panel({ title, hint, children, className = "" }: {
   title: string; hint?: string; children: React.ReactNode; className?: string;
 }) {
   return (
-    <section className={`border border-line p-3 ${className}`}>
-      <div className="flex items-baseline justify-between mb-2">
-        <div className="font-mono text-[10px] uppercase tracking-wide text-ink-3">{title}</div>
-        {hint && <div className="font-mono text-[10px] text-ink-3">{hint}</div>}
+    <section className={`bg-panel border border-line rounded ${className}`}>
+      <div className="panel-head">
+        <span className="uppercase tracking-wide text-[10px] text-ink-2 font-medium">{title}</span>
+        {hint && <span className="ml-auto text-[10px] text-ink-3">{hint}</span>}
       </div>
-      {children}
+      <div className="p-3">{children}</div>
     </section>
   );
 }
 
 export function KV({ k, v, tone = "ink" }: { k: string; v: React.ReactNode; tone?: Tone }) {
   return (
-    <div className="flex items-center justify-between gap-3 font-mono text-[11px] py-0.5">
+    <div className="flex items-center justify-between gap-3 text-[12px] py-0.5">
       <span className="text-ink-3">{k}</span>
-      <span className={toneText(tone)}>{v}</span>
+      <span className={`font-mono ${toneText(tone)}`}>{v}</span>
     </div>
   );
 }
@@ -32,7 +32,7 @@ export function KV({ k, v, tone = "ink" }: { k: string; v: React.ReactNode; tone
 export type Tone = "ink" | "pass" | "warn" | "block" | "accent" | "info" | "ink-3";
 export function toneText(t: Tone): string {
   return { ink: "text-ink", pass: "text-pass", warn: "text-warn", block: "text-block",
-    accent: "text-accent", info: "text-info", "ink-3": "text-ink-3" }[t];
+    accent: "text-accent-2", info: "text-info", "ink-3": "text-ink-3" }[t];
 }
 export function toneBg(t: Tone): string {
   return { ink: "bg-ink", pass: "bg-pass", warn: "bg-warn", block: "bg-block",
@@ -41,8 +41,8 @@ export function toneBg(t: Tone): string {
 
 export function Verdict({ ok, yes = "pass", no = "fail" }: { ok: boolean; yes?: string; no?: string }) {
   return (
-    <span className={`font-mono text-[11px] px-1.5 py-0.5 border ${ok
-      ? "border-pass/40 text-pass" : "border-block/40 text-block"}`}>
+    <span className={`inline-flex items-center text-[11px] px-1.5 py-0.5 rounded border ${ok
+      ? "border-pass/40 text-pass bg-pass/5" : "border-block/40 text-block bg-block/5"}`}>
       {ok ? yes : no}
     </span>
   );
@@ -50,8 +50,8 @@ export function Verdict({ ok, yes = "pass", no = "fail" }: { ok: boolean; yes?: 
 
 export function Bar({ frac, tone = "accent" }: { frac: number; tone?: Tone }) {
   return (
-    <span className="flex-1 h-3 bg-line/40 relative block">
-      <span className={`absolute left-0 top-0 h-full ${toneBg(tone)}`}
+    <span className="flex-1 h-2.5 bg-bg-2 rounded-sm relative block overflow-hidden">
+      <span className={`absolute left-0 top-0 h-full rounded-sm ${toneBg(tone)}`}
         style={{ width: `${Math.max(0, Math.min(1, frac)) * 100}%` }} />
     </span>
   );
@@ -61,11 +61,10 @@ export function NumField({ label, value, onChange, step = "any", w = "w-24" }: {
   label: string; value: number; onChange: (n: number) => void; step?: string; w?: string;
 }) {
   return (
-    <label className="flex items-center gap-2 font-mono text-[11px]">
-      <span className="text-ink-3">{label}</span>
-      <input type="number" step={step} value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className={`${w} bg-bg-2 border border-line px-1.5 py-0.5 text-ink focus:border-accent outline-none`} />
+    <label className="flex items-center justify-between gap-2 text-[12px]">
+      <span className="text-ink-2">{label}</span>
+      <input type="number" step={step} value={Number.isFinite(value) ? value : ""}
+        onChange={(e) => onChange(parseFloat(e.target.value))} className={`field ${w}`} />
     </label>
   );
 }
@@ -85,9 +84,7 @@ export function useRun<T>() {
 
 export function RunButton({ busy, onClick, label = "run" }: { busy: boolean; onClick: () => void; label?: string }) {
   return (
-    <button onClick={onClick} disabled={busy}
-      className="font-mono text-[11px] px-3 py-1 border border-line text-ink-2 hover:text-accent hover:border-accent
-        disabled:opacity-40 disabled:hover:text-ink-2 disabled:hover:border-line">
+    <button onClick={onClick} disabled={busy} className="btn btn-primary">
       {busy ? "running..." : label}
     </button>
   );
@@ -95,5 +92,5 @@ export function RunButton({ busy, onClick, label = "run" }: { busy: boolean; onC
 
 export function ErrLine({ err }: { err: string | null }) {
   if (!err) return null;
-  return <div className="font-mono text-[10px] text-block border border-block/30 px-2 py-1 mt-2 break-all">{err}</div>;
+  return <div className="text-[11px] text-block border border-block/30 rounded px-2 py-1 mt-2 break-all bg-block/5">{err}</div>;
 }

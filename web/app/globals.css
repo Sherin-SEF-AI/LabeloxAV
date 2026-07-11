@@ -8,56 +8,158 @@
 
 html,
 body {
-  background: #0b0c0e;
-  color: #e7e9eb;
+  background: #1d1d1d;
+  color: #e6e6e6;
 }
 
-/* Matte surfaces, hairline separators, depth from a single tone step (no shadows). */
+/* Blender-style surfaces: panels are a flat lighter grey with a 1px outline and moderate rounding. */
 .panel {
-  background: #131519;
-  border: 1px solid #23262b;
+  background: #2d2d2d;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
 }
 
 .hairline {
-  border-color: #23262b;
+  border-color: #3c3c3c;
 }
 
-/* Binary motion: one-frame confirm flash on accept, no easing-heavy transitions. */
-@keyframes confirm-flash {
-  0% { background-color: rgba(86, 211, 100, 0.35); }
-  100% { background-color: transparent; }
-}
-.confirm-flash {
-  animation: confirm-flash 120ms steps(1, end);
+/* Blender component layer: tool buttons, primary/toggle states, input fields, panel headers, tooltips.
+   Using classes (not per-page edits) so the whole app inherits the Blender look. */
+@layer components {
+  /* Tool button: subtle top-lit vertical gradient, darker border, rounded, brightens on hover. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 5px 10px;
+    font-size: 12px;
+    line-height: 1;
+    color: #e6e6e6;
+    background: linear-gradient(#525252, #454545);
+    border: 1px solid #2b2b2b;
+    border-radius: 4px;
+    white-space: nowrap;
+    transition: background 90ms linear, border-color 90ms linear;
+  }
+  .btn:hover:not(:disabled) { background: linear-gradient(#5e5e5e, #515151); border-color: #262626; }
+  .btn:active:not(:disabled) { background: #3d3d3d; }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+
+  /* Primary action: Blender blue gradient. */
+  .btn-primary {
+    color: #ffffff;
+    background: linear-gradient(#5183c7, #4772b3);
+    border-color: #2f5588;
+  }
+  .btn-primary:hover:not(:disabled) { background: linear-gradient(#5f92d6, #5080c4); border-color: #365f97; }
+  .btn-primary:active:not(:disabled) { background: #3f66a0; }
+
+  /* An engaged toggle reads as the blue selection state. */
+  .btn-on {
+    color: #ffffff;
+    background: linear-gradient(#5183c7, #4772b3);
+    border-color: #2f5588;
+  }
+
+  /* Recessed input field. */
+  .field {
+    background: #161616;
+    border: 1px solid #333333;
+    border-radius: 4px;
+    color: #e6e6e6;
+    padding: 4px 8px;
+    font-size: 12px;
+    outline: none;
+  }
+  .field:focus { border-color: #4772b3; box-shadow: inset 0 0 0 1px rgba(71, 114, 179, 0.7); }
+  .field::placeholder { color: #6a6a6a; }
+
+  /* Panel header strip: a raised bar that names a panel, like Blender's collapsible region headers. */
+  .panel-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: #383838;
+    border-bottom: 1px solid #262626;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    font-size: 11px;
+    color: #cfcfcf;
+  }
 }
 
+/* Blender selection blue. */
 ::selection {
-  background: rgba(255, 122, 47, 0.3);
+  background: rgba(71, 114, 179, 0.4);
 }
 
-/* Keyboard focus: a clear accent ring for accessibility, no motion. */
+/* Global control rounding: buttons, inputs, selects round like Blender by default. */
+button, input, select, textarea {
+  border-radius: 4px;
+}
+
+/* Keyboard focus: the Blender blue ring. */
 :focus-visible {
-  outline: 1px solid rgba(255, 122, 47, 0.65);
+  outline: 1px solid rgba(91, 135, 201, 0.8);
   outline-offset: 1px;
 }
 button:not(:disabled) {
   cursor: pointer;
 }
 
-/* Thin instrument-grade scrollbars so dense panels read as surfaces, not web pages. */
+/* Native tooltip helper: any element with data-tip shows a Blender-style tooltip on hover. Self-explanatory
+   UI leans on these so every control says what it does. */
+[data-tip] {
+  position: relative;
+}
+[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #e6e6e6;
+  background: #101010;
+  border: 1px solid #4772b3;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Binary motion: one-frame confirm flash on accept. */
+@keyframes confirm-flash {
+  0% { background-color: rgba(98, 194, 90, 0.35); }
+  100% { background-color: transparent; }
+}
+.confirm-flash {
+  animation: confirm-flash 120ms steps(1, end);
+}
+
+/* Thin Blender-grey scrollbars. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2a2e34 transparent;
+  scrollbar-color: #4a4a4a transparent;
 }
 *::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 11px;
+  height: 11px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #2a2e34;
+  background: #4a4a4a;
+  border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: #3a3f46;
+  background: #5a5a5a;
+  background-clip: content-box;
 }
 
 /* Horizontal nav scrolls without a visible bar. */
@@ -68,7 +170,7 @@ button:not(:disabled) {
   display: none;
 }
 
-/* Global top loading bar: an indeterminate sweep shown while the app is fetching. */
+/* Global top loading bar: an indeterminate blue sweep shown while the app is fetching. */
 @keyframes lbx-progress {
   0%   { left: -35%; width: 35%; }
   50%  { left: 30%;  width: 45%; }
@@ -78,13 +180,11 @@ button:not(:disabled) {
   position: absolute;
   top: 0;
   height: 100%;
-  background: #f5a623;
+  background: #5b87c9;
   animation: lbx-progress 1.1s ease-in-out infinite;
 }
 
-/* Motion layer (restrained, functional). Every animation below is disabled under prefers-reduced-motion. */
-
-/* Content reveal: a fast opacity + tiny lift when a section, panel, or tab body appears. */
+/* Motion layer (restrained, functional). Disabled under prefers-reduced-motion. */
 @keyframes lbx-reveal {
   from { opacity: 0; transform: translateY(-3px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -93,19 +193,17 @@ button:not(:disabled) {
   animation: lbx-reveal 150ms ease-out;
 }
 
-/* Skeleton shimmer: a placeholder surface that sweeps while data loads. */
 @keyframes lbx-shimmer {
   0%   { background-position: -160% 0; }
   100% { background-position: 160% 0; }
 }
 .skeleton {
-  background: linear-gradient(90deg, #16181c 25%, #23262b 50%, #16181c 75%);
+  background: linear-gradient(90deg, #232323 25%, #333333 50%, #232323 75%);
   background-size: 220% 100%;
   animation: lbx-shimmer 1.3s ease-in-out infinite;
-  border-radius: 2px;
+  border-radius: 3px;
 }
 
-/* Running task: a soft pulsing accent dot for work in flight (autolabel, VLM generate, ...). */
 @keyframes lbx-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50%      { opacity: 0.35; transform: scale(0.82); }
@@ -115,17 +213,16 @@ button:not(:disabled) {
   width: 6px;
   height: 6px;
   border-radius: 9999px;
-  background: #ff7a2f;
+  background: #5b87c9;
   animation: lbx-pulse 0.9s ease-in-out infinite;
 }
 
-/* A subtle pulse for a whole element (e.g. a button/section actively working). */
 .running {
   animation: lbx-running 1.1s ease-in-out infinite;
 }
 @keyframes lbx-running {
-  0%, 100% { border-color: #23262b; }
-  50%      { border-color: rgba(255, 122, 47, 0.6); }
+  0%, 100% { border-color: #3c3c3c; }
+  50%      { border-color: rgba(91, 135, 201, 0.6); }
 }
 
 @media (prefers-reduced-motion: reduce) {

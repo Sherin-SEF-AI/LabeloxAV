@@ -1,24 +1,34 @@
 import type { Config } from "tailwindcss";
 
-// Operational Materialism design tokens. Color is earned: grey by default, color only encodes
-// state. Depth is a single tone step, not shadows.
+// Blender-style dark theme. Neutral greys for surfaces, the signature Blender blue for active/accent state,
+// rounded controls, and state colors (pass/warn/block) kept for status. The palette maps the old token names
+// so the whole app re-themes without per-page edits: bg = editor background, panel = a panel surface, head =
+// a raised header/tab strip, bg-2 = a recessed input field, line = panel outlines, ink* = text tiers.
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        bg: "#0B0C0E",
-        "bg-2": "#0F1113",
-        panel: "#131519",
-        line: "#23262B",
-        ink: "#E7E9EB",
-        "ink-2": "#A0A6AD",
-        "ink-3": "#6C727A",
-        accent: "#FF7A2F",
-        pass: "#56D364",
-        warn: "#E3B341",
-        block: "#F85149",
-        info: "#58A6FF",
+        bg: "#1d1d1d",         // editor / window background
+        "bg-2": "#161616",     // recessed input / number field (reads inset)
+        panel: "#2d2d2d",      // panel surface (card)
+        head: "#383838",       // raised header / tab strip / toolbar
+        line: "#3c3c3c",       // panel outline / separator
+        "line-2": "#242424",   // darker inset separator
+        ink: "#e6e6e6",        // primary text
+        "ink-2": "#b0b0b0",    // secondary text
+        "ink-3": "#808080",    // tertiary / dim text
+        accent: "#4772b3",     // Blender blue: active, selection, primary action
+        "accent-2": "#5b87c9", // brighter blue: hover / focus
+        pass: "#62c25a",       // healthy / accept
+        warn: "#e0a63f",       // degraded / caution
+        block: "#e0524b",      // quarantine / fail
+        info: "#6a9ee0",       // informational blue
+        btn: "#4a4a4a",        // tool-button base
+        "btn-2": "#565656",    // tool-button hover
+      },
+      borderRadius: {
+        DEFAULT: "4px",        // Blender's moderate control rounding
       },
       fontFamily: {
         display: ["var(--font-display)", "system-ui", "sans-serif"],
