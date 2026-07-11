@@ -14,6 +14,24 @@ One ontology, 170 classes, tuned for the chaos that global datasets never saw: a
 
 ---
 
+## The interface
+
+A Blender-style dark workstation: neutral greys, a single blue accent that only appears on the active or primary control, rounded tool buttons, recessed value fields, and panels with named headers. Every control carries a tooltip and every panel a one line description, so the UI explains itself instead of assuming you already know it.
+
+The whole engine is organized as **seven platforms** over one shared spine, navigable from a launcher and a platform switcher reachable anywhere. Data flows through them in flywheel order: ingest QA (SANYX), calibration (CALYX), curation and mining (SIEVYX), annotation (Labelox), offline pseudo truth (ORACLYX), evaluation (VERDYX), and edge deploy (FORGYX), then the loop closes as failures and coverage gaps feed the next collection and labeling cycle.
+
+![The platform launcher: seven planes of the data engine, in flywheel order, each described](docs/screenshots/20-ui-platforms.png)
+
+*The launcher: a self explanatory home. An intro that says what the engine does, a labeled flywheel strip showing how data moves between planes, a described tile per platform with a live state badge, and a legend for the gates that can block a session or a model from advancing.*
+
+Each plane is a focused, self explanatory tool surface. The adaptive flywheel controller turns evaluation failures and ODD coverage gaps into a label budget allocation and a set of collection tasks, then records every cycle. The hardware in the loop deployment page co optimizes a model to its target silicon, verifies the thermal and power envelope from a real device farm run, and stages the rollout from canary to fleet with a rollback path.
+
+![The adaptive flywheel controller: signals in, budget, and the cycle ledger](docs/screenshots/22-ui-flywheel.png)
+
+![Hardware in the loop deployment: co-optimization, thermal envelope, and staged rollout](docs/screenshots/21-ui-deploy-tool.png)
+
+---
+
 ## Why this exists
 
 Most perception models are trained on clean, orderly roads. Put them on an Indian street and they struggle: dense mixed traffic, classes that simply do not exist elsewhere, lane markings that are more of a suggestion, and safety critical moments buried under thousands of boring frames.

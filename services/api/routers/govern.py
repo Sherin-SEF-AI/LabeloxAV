@@ -3,7 +3,7 @@ drift scan, the controller tick, the kill switch, and the audit log."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,8 +38,11 @@ class RedactionProofIn(BaseModel):
 @router.post("/govern/redaction/proof")
 async def redaction_proof(payload: RedactionProofIn, db: AsyncSession = Depends(db_session)):
     """Build and sign a release redaction proof from the per-frame PII audits; a release with an unredacted
-    frame fails the proof and names it."""
-    return await build_release_proof(db, payload.release_commit, payload.frame_ids, payload.method_version)
+    frame fails the proof and names it. Rejects an oversized or malformed frame set with a 400."""
+    try:
+        return await build_release_proof(db, payload.release_commit, payload.frame_ids, payload.method_version)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 class ConsentIn(BaseModel):
