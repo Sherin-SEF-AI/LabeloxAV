@@ -435,6 +435,9 @@ class ActiveLearnSettings(BaseModel):
     w_diversity: float = 0.25
     w_rarity: float = 0.20
     w_error_prone: float = 0.15
+    w_flicker: float = 0.15              # temporal box jitter: a high-flicker high-confidence track is a
+                                         # classic auto-label failure the scalar confidence misses, so it earns
+                                         # review priority (core.accel.uncertainty.flicker_scores)
     w_fn: float = 0.6                    # recall-recovery (false-negative) value, so a recovered miss ranks
     uncertainty_lo: float = 0.55         # below this is hopeless, above uncertainty_hi is easy
     uncertainty_hi: float = 0.92

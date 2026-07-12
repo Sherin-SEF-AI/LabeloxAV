@@ -48,7 +48,7 @@ async def score_candidates(db: AsyncSession, session_id: str | None = None, pool
     onto = get_ontology()
 
     q = (select(Object.object_id, Object.frame_id, Object.class_id, Object.conf, Object.provenance,
-                Object.quality_score)
+                Object.quality_score, Object.track_id)
          .where(Object.state.in_(_CANDIDATE_STATES), Object.source != "human"))
     if session_id:
         from db.models import Frame
@@ -86,8 +86,12 @@ async def score_candidates(db: AsyncSession, session_id: str | None = None, pool
     # novelty: mean cosine distance to the k nearest neighbours in the pool (isolated = novel)
     novelty = _pool_novelty([emb.get(oid) for oid in oids], cfg.diversity_knn)
 
+    # temporal flicker per track: a box that jumps or breathes frame-to-frame is a likely auto-label failure
+    track_ids = {r[6] for r in rows if r[6] is not None}
+    flicker_map = await _track_flicker(db, track_ids)
+
     items = []
-    for i, (oid, fid, cid, conf, prov, qscore) in enumerate(rows):
+    for i, (oid, fid, cid, conf, prov, qscore, tid) in enumerate(rows):
         prov = prov or {}
         u = _uncertainty(float(conf or 0.0), bool(prov.get("agreement", True)),
                          bool(prov.get("mask_box_disagree", False)), cfg.uncertainty_lo, cfg.uncertainty_hi)
@@ -105,24 +109,61 @@ async def score_candidates(db: AsyncSession, session_id: str | None = None, pool
         items.append({"object_id": str(oid), "frame_id": str(fid), "class_id": cid,
                       "class_name": onto.by_id(cid).name, "conf": float(conf or 0.0),
                       "quality_score": float(qscore) if qscore is not None else None,
-                      "_u": u, "_r": rare, "_n": float(novelty[i]), "_e": err_scores.get(str(oid), 0.0), "_f": fn})
+                      "_u": u, "_r": rare, "_n": float(novelty[i]), "_e": err_scores.get(str(oid), 0.0),
+                      "_fl": flicker_map.get(tid, 0.0), "_f": fn})
 
     u = _norm([it["_u"] for it in items])
     r = _norm([it["_r"] for it in items])
     n = _norm([it["_n"] for it in items])
     e = _norm([it["_e"] for it in items])
+    fl = _norm([it["_fl"] for it in items])
     f = _norm([it["_f"] for it in items])
     for i, it in enumerate(items):
         it["scores"] = {"uncertainty": round(float(u[i]), 4), "diversity": round(float(n[i]), 4),
                         "rarity": round(float(r[i]), 4), "error_prone": round(float(e[i]), 4),
-                        "fn": round(float(f[i]), 4)}
+                        "flicker": round(float(fl[i]), 4), "fn": round(float(f[i]), 4)}
         it["value"] = round(float(cfg.w_uncertainty * u[i] + cfg.w_diversity * n[i]
-                                  + cfg.w_rarity * r[i] + cfg.w_error_prone * e[i] + cfg.w_fn * f[i]), 5)
-        for k in ("_u", "_r", "_n", "_e", "_f"):
+                                  + cfg.w_rarity * r[i] + cfg.w_error_prone * e[i]
+                                  + cfg.w_flicker * fl[i] + cfg.w_fn * f[i]), 5)
+        for k in ("_u", "_r", "_n", "_e", "_fl", "_f"):
             it.pop(k)
     items.sort(key=lambda x: x["value"], reverse=True)
     log.info("al.scored", pool=len(items), session_id=session_id)
     return items
+
+
+async def _track_flicker(db: AsyncSession, track_ids: set) -> dict:
+    """Per-track temporal flicker (scale-normalized box jitter across consecutive frames) for the candidate
+    tracks, via core.accel.uncertainty.flicker_scores. A high-flicker track is a likely auto-label failure the
+    scalar confidence misses. Tracks with a single frame flicker 0. Returns {track_id: flicker}."""
+    if not track_ids:
+        return {}
+    from core.accel.uncertainty import flicker_scores
+    from db.models import Frame
+
+    rows = (await db.execute(
+        select(Object.track_id, Frame.ts_ns, Object.bbox, Object.conf)
+        .join(Frame, Frame.frame_id == Object.frame_id)
+        .where(Object.track_id.in_(track_ids))
+        .order_by(Object.track_id, Frame.ts_ns))).all()
+    seqs: dict = {}
+    for tid, _ts, bbox, conf in rows:
+        seqs.setdefault(tid, []).append((bbox, conf))
+    tids = list(seqs)
+    if not tids:
+        return {}
+    T = max(len(seqs[t]) for t in tids)
+    M = len(tids)
+    boxes = np.zeros((M, T, 4))
+    confs = np.zeros((M, T))
+    valid = np.zeros((M, T), dtype=bool)
+    for m, t in enumerate(tids):
+        for k, (bbox, conf) in enumerate(seqs[t]):
+            boxes[m, k] = bbox
+            confs[m, k] = float(conf or 0.0)
+            valid[m, k] = True
+    out = flicker_scores(boxes, confs, valid)
+    return {tids[m]: float(out["flicker"][m]) for m in range(M)}
 
 
 def _pool_novelty(vecs: list[np.ndarray | None], k: int) -> np.ndarray:
