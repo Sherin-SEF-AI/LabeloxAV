@@ -29,6 +29,19 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
         except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
             log.error("schedule.auditor_failed", error=str(exc))
 
+        # nightly adaptive flywheel: refresh the label/collect plan and the fleet collection orders from the
+        # live corpus, so the worklist and the dispatch board are current each morning. It proposes only (runs
+        # the cycle and the collection orders); the human still clicks send-to-review and dispatches drives.
+        try:
+            from services.flywheel.auto_schedule import maybe_run_flywheel
+
+            f = await maybe_run_flywheel(db)
+            if f.get("ran"):
+                actions.append({"action": "flywheel_cycle", "cycle_id": f.get("cycle_id"),
+                                "orders": f.get("orders")})
+        except Exception as exc:  # noqa: BLE001
+            log.error("schedule.flywheel_failed", error=str(exc))
+
     # on-breach root-cause investigation
     if drift and drift.get("breached"):
         try:

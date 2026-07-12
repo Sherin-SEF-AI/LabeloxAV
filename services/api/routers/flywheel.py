@@ -45,6 +45,18 @@ async def adaptive_dispatch(payload: DispatchIn, db: AsyncSession = Depends(db_s
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@router.post("/flywheel/adaptive/collection-orders")
+async def adaptive_collection_orders(cycle_id: str | None = None, db: AsyncSession = Depends(db_session)):
+    """Turn a cycle's collection tasks into ranked fleet collection orders: scene cells become windowed,
+    forecast-aware drives and empty species become class-collection orders, each with its target count. View
+    the result on the fleet board (GET /api/agent/fleet/orders)."""
+    from services.agent.fleet_dispatch import plan_from_flywheel
+    try:
+        return await plan_from_flywheel(db, cycle_id=uuid.UUID(cycle_id) if cycle_id else None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 class AdaptiveIn(BaseModel):
     regressions: list[dict]          # VERDYX: [{slice, delta, protected}]
     odd_gaps: list[dict]             # SIEVYX: coverage_gaps() cell records

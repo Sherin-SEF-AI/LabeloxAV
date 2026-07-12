@@ -15,6 +15,8 @@ from services.flywheel.dispatch import dispatch_worklist
 
 @pytest.mark.asyncio
 async def test_dispatch_bumps_to_review_and_reverts():
+    from sqlalchemy import delete
+
     from db.models import AgentRun, Frame, FlywheelCycle, Object, OntologyClass, OntologyVersion
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
@@ -26,6 +28,11 @@ async def test_dispatch_bumps_to_review_and_reverts():
     ts = now_ns()
     sid, fid = uuid.uuid4(), uuid.uuid4()
     annotate_id, review_id, human_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+    async with maker() as db:
+        # isolation: clear any cattle objects a prior run left in the shared test DB
+        await db.execute(delete(Object).where(Object.class_id == cattle))
+        await db.commit()
 
     async with maker() as db:
         if await db.get(OntologyVersion, onto.version) is None:
@@ -60,6 +67,7 @@ async def test_dispatch_bumps_to_review_and_reverts():
         res = await dispatch_worklist(db, cid, per_slice_cap=300, created_by="flywheel")
         assert res["dispatched"] == 2                       # the annotate + review candidates, not the accepted one
         assert res["by_slice"]["cattle"] == 2
+    run_id = uuid.UUID(res["run_id"])
 
     async with maker() as db:
         bumped = await db.get(Object, annotate_id)
@@ -67,9 +75,8 @@ async def test_dispatch_bumps_to_review_and_reverts():
         assert bumped.provenance["flywheel"]["cycle_id"] == cid
         human = await db.get(Object, human_id)
         assert human.state == "accepted" and human.source == "human"   # never touched
-        run = (await db.execute(select(AgentRun).where(AgentRun.kind == "flywheel"))).scalars().first()
+        run = await db.get(AgentRun, run_id)
         assert run is not None and run.status == "committed"
-        run_id = run.run_id
 
     async with maker() as db:
         await revert_run(db, run_id)

@@ -38,6 +38,7 @@ export default function AdaptiveFlywheel() {
   const [budget, setBudget] = useState(2000);
   const [floor, setFloor] = useState(150);
   const dispatch = useRun<{ run_id: string; cycle_id: string; dispatched: number; by_slice: Record<string, number> }>();
+  const orders = useRun<{ cycle_id: string; orders: number; scene: number; classes: number }>();
 
   // manual tool
   const [reg, setReg] = useState(DEMO_REGRESSIONS);
@@ -130,7 +131,19 @@ export default function AdaptiveFlywheel() {
               </Panel>
 
               {/* collection tasks */}
-              <Panel title="collection tasks" hint={`${p.collection_tasks.length} to collect, not label`}>
+              <Panel title="collection tasks" hint={`${p.collection_tasks.length} to collect, not label`}
+                right={<button onClick={() => orders.run(() =>
+                  runJSON(`/api/flywheel/adaptive/collection-orders?cycle_id=${p.cycle_id}`, {}))}
+                  disabled={orders.busy} className="btn btn-primary text-[11px]"
+                  data-tip="turn these into per-vehicle fleet collection orders (scene drives + missing species)">
+                  {orders.busy ? "planning..." : "make collection orders"}</button>}>
+                {orders.out && (
+                  <div className="text-[11px] text-pass border border-pass/30 rounded px-2 py-1.5 mb-2 bg-pass/5">
+                    {orders.out.orders} collection orders proposed ({orders.out.scene} scene drives, {orders.out.classes} species).{" "}
+                    <a href="/agent" className="text-accent-2 underline">open fleet board &rarr;</a>
+                  </div>
+                )}
+                <ErrLine err={orders.err} />
                 <div className="space-y-1">
                   {p.collection_tasks.slice(0, 18).map((t) => (
                     <div key={t.cell} className="flex items-center justify-between text-[11px] font-mono">
