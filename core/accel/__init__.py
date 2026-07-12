@@ -11,6 +11,7 @@ VERDYX triage signal)."""
 
 from core.accel.agreement import agreement_matrix, consensus_scores
 from core.accel.boxes import box_iou_matrix, nms
+from core.accel.calib_frontend import descriptor_match, refine_corners
 from core.accel.curation import (
     cosine_sim_matrix,
     hamming_matrix,
@@ -63,4 +64,5 @@ __all__ = [
     "slerp_batch", "interp_boxes", "warp_boxes_by_flow", "warp_masks_by_flow",
     "dilate", "erode", "morph_open", "morph_close", "remove_small_components",
     "rle_encode", "rle_decode", "boundary_tightness",
+    "refine_corners", "descriptor_match",
 ]
