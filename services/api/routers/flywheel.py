@@ -13,9 +13,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Session as DbSession
 from orchestration.dag import STAGES, run_session, trace_lineage
 from services.api.deps import db_session
+from services.flywheel.auto import run_auto_cycle
 from services.flywheel.run import recent_cycles, run_and_record
 
 router = APIRouter()
+
+
+@router.post("/flywheel/adaptive/auto")
+async def adaptive_auto(total_label_budget: int = 2000, safety_floor: int = 200,
+                        min_share: float = 0.003, db: AsyncSession = Depends(db_session)):
+    """Run one adaptive cycle from real corpus signals: class starvation (VRU/animal/two-wheeler classes below
+    their floor) drives the label budget, ODD scene gaps drive collection, and the response carries the per-class
+    work order of real candidate objects a reviewer would open. This closes the loop on live data."""
+    return await run_auto_cycle(db, total_label_budget, safety_floor, min_share)
 
 
 class AdaptiveIn(BaseModel):
