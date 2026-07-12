@@ -58,13 +58,26 @@ def _nv12_to_rgb(y_uv, H, W):
     return rgb.clamp_(0.0, 255.0)
 
 
-def preprocess_nv12_batch(nv12, src_hw, out_hw=(640, 640), mean=None, std=None, device=None):
+def _apply_undistort(rgb, map_x, map_y, dev):
+    """Apply a precomputed fisheye undistort map to (N, 3, H, W) RGB on the device, staying resident so the
+    OpenCV remap drops out of the preprocess path. map_x, map_y are (H, W) source-pixel maps."""
+    _, _, H, W = rgb.shape
+    x = torch.as_tensor(np.asarray(map_x, dtype=np.float32), device=dev)
+    y = torch.as_tensor(np.asarray(map_y, dtype=np.float32), device=dev)
+    gx = (2.0 * x + 1.0) / W - 1.0
+    gy = (2.0 * y + 1.0) / H - 1.0
+    grid = torch.stack([gx, gy], dim=-1).unsqueeze(0).expand(rgb.shape[0], H, W, 2)
+    return F.grid_sample(rgb, grid, mode="bilinear", padding_mode="zeros", align_corners=False)
+
+
+def preprocess_nv12_batch(nv12, src_hw, out_hw=(640, 640), mean=None, std=None, undistort_map=None, device=None):
     """Fused preprocess of a batch of NV12 frames into a model-ready NCHW tensor.
 
     nv12: (N, H*3/2, W) uint8 (or a list of such). src_hw = (H, W). Returns (batch (N, 3, out_h, out_w) float32,
     meta dict with the letterbox scale/pad for un-mapping boxes). ``mean``/``std`` (len-3, in [0,1]) apply an
-    optional channel normalization after the /255 scale; without them the tensor is simply in [0, 1].
-    ``device`` forces "cpu"/"cuda"; the GPU is used when available."""
+    optional channel normalization after the /255 scale. ``undistort_map`` (map_x, map_y) applies a fisheye
+    undistort on the device between the color convert and the letterbox, so a wide rig frame is rectified
+    without a separate cv2.remap. ``device`` forces "cpu"/"cuda"; the GPU is used when available."""
     if not _HAS_TORCH:
         raise RuntimeError("preprocess_nv12_batch needs torch")
     H, W = src_hw
@@ -76,6 +89,8 @@ def preprocess_nv12_batch(nv12, src_hw, out_hw=(640, 640), mean=None, std=None, 
     t = torch.as_tensor(arr, device=dev)                         # (N, H*3/2, W) uint8
 
     rgb = _nv12_to_rgb(t, H, W)                                  # (N, 3, H, W) [0,255]
+    if undistort_map is not None:
+        rgb = _apply_undistort(rgb, undistort_map[0], undistort_map[1], dev)
     lb = letterbox_params((H, W), (oh, ow))
     resized = F.interpolate(rgb, size=(lb["nh"], lb["nw"]), mode="bilinear", align_corners=False)
     canvas = torch.full((rgb.shape[0], 3, oh, ow), 114.0, device=dev)
@@ -85,4 +100,5 @@ def preprocess_nv12_batch(nv12, src_hw, out_hw=(640, 640), mean=None, std=None, 
         m = torch.as_tensor(mean, device=dev, dtype=out.dtype).view(1, 3, 1, 1)
         s = torch.as_tensor(std, device=dev, dtype=out.dtype).view(1, 3, 1, 1)
         out = (out - m) / s
-    return out.contiguous(), {**lb, "src_hw": (H, W), "out_hw": (oh, ow), "device": dev.type}
+    return out.contiguous(), {**lb, "src_hw": (H, W), "out_hw": (oh, ow), "device": dev.type,
+                              "undistorted": undistort_map is not None}

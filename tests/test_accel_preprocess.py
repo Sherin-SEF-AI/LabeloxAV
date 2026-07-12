@@ -51,6 +51,24 @@ def test_letterbox_unmaps_box():
     assert abs((ly - lb["pad_y"]) / lb["scale"] - 360) < 1e-6
 
 
+def test_fused_undistort_in_preprocess():
+    cv2 = pytest.importorskip("cv2")
+    rng = np.random.default_rng(5)
+    H, W = 240, 320
+    nv12 = _make_nv12(H, W, rng)
+    K = np.array([[160.0, 0, W / 2], [0, 160.0, H / 2], [0, 0, 1]])
+    dist = np.array([-0.05, 0.01, -0.002, 0.0003])
+    map_x, map_y = cv2.fisheye.initUndistortRectifyMap(K, dist.reshape(4, 1), np.eye(3), K, (W, H), cv2.CV_32FC1)
+
+    # the fused path (undistort inside preprocess, on device) equals: RGB -> grid_sample undistort -> letterbox
+    plain, meta_plain = preprocess_nv12_batch(nv12, (H, W), out_hw=(H, W), device="cpu")
+    fused, meta = preprocess_nv12_batch(nv12, (H, W), out_hw=(H, W), undistort_map=(map_x, map_y), device="cpu")
+    assert meta["undistorted"] and not meta_plain["undistorted"]
+    assert fused.shape == plain.shape
+    # undistortion changes the image where the map bends it; the two are not identical
+    assert np.abs(fused.numpy() - plain.numpy()).mean() > 1e-3
+
+
 def test_measurable():
     cv2 = pytest.importorskip("cv2")
     if not gpu_available():
