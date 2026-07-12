@@ -55,7 +55,7 @@ def _distort_fisheye_np(x, y, dist):
     return x * scale, y * scale
 
 
-def _project_world_np(points_world, T_cam_world, K, dist, img_wh, model):
+def _project_world_np(points_world, T_cam_world, K, dist, img_wh, model, z_min):
     pts = np.asarray(points_world, dtype=np.float64)                      # (M, 3)
     T = np.asarray(T_cam_world, dtype=np.float64)                         # (C, 4, 4)
     K = np.asarray(K, dtype=np.float64)                                   # (C, 3, 3)
@@ -63,7 +63,7 @@ def _project_world_np(points_world, T_cam_world, K, dist, img_wh, model):
     t = T[:, :3, 3]                                                       # (C, 3)
     p_cam = np.einsum("cij,mj->cmi", R, pts) + t[:, None, :]             # (C, M, 3)
     z = p_cam[..., 2]
-    valid = z > _EPS
+    valid = z > z_min
     zc = np.where(valid, z, 1.0)
     x = p_cam[..., 0] / zc
     y = p_cam[..., 1] / zc
@@ -110,7 +110,7 @@ def _distort_fisheye_t(x, y, dist):
     return x * scale, y * scale
 
 
-def _project_world_torch(points_world, T_cam_world, K, dist, img_wh, model, device):
+def _project_world_torch(points_world, T_cam_world, K, dist, img_wh, model, z_min, device):
     f64 = torch.float64
     pts = torch.as_tensor(np.asarray(points_world, dtype=np.float64), device=device, dtype=f64)     # (M,3)
     T = torch.as_tensor(np.asarray(T_cam_world, dtype=np.float64), device=device, dtype=f64)        # (C,4,4)
@@ -119,7 +119,7 @@ def _project_world_torch(points_world, T_cam_world, K, dist, img_wh, model, devi
     tvec = T[:, :3, 3]
     p_cam = torch.einsum("cij,mj->cmi", R, pts) + tvec[:, None, :]                                  # (C,M,3)
     z = p_cam[..., 2]
-    valid = z > _EPS
+    valid = z > z_min
     zc = torch.where(valid, z, torch.ones_like(z))
     x = p_cam[..., 0] / zc
     y = p_cam[..., 1] / zc
@@ -142,7 +142,23 @@ def _project_world_torch(points_world, T_cam_world, K, dist, img_wh, model, devi
 
 # --------------------------------------------------------------------------- public API
 
-def project_world_batch(points_world, T_cam_world, K, dist=None, img_wh=None, model="pinhole", device=None):
+def project_cam_batch(points_cam, K, dist=None, img_wh=None, model="pinhole", z_min=_EPS, device=None):
+    """Project camera-frame points to pixels (the projection stage without the world->camera transform), for
+    callers that already hold camera-frame points (e.g. LiDAR->camera). points_cam (M, 3); K (3, 3); dist (D,)
+    or None; img_wh (2,) optional; z_min is the in-front depth threshold. Returns (uv (M, 2), valid (M,),
+    in_bounds (M,)). Uses the same fused math as project_world_batch with an identity pose, so it matches the
+    plain NumPy projection exactly (pinhole)."""
+    pts = np.asarray(points_cam, dtype=np.float64).reshape(-1, 3)
+    eye = np.eye(4)[None]
+    K1 = np.asarray(K, dtype=np.float64).reshape(1, 3, 3)
+    d1 = None if dist is None else np.asarray(dist, dtype=np.float64).reshape(1, -1)
+    wh1 = None if img_wh is None else np.asarray(img_wh, dtype=np.float64).reshape(1, 2)
+    uv, valid, ib = project_world_batch(pts, eye, K1, d1, wh1, model=model, z_min=z_min, device=device)
+    return uv[0], valid[0], ib[0]
+
+
+def project_world_batch(points_world, T_cam_world, K, dist=None, img_wh=None, model="pinhole", z_min=_EPS,
+                        device=None):
     """Project M world points into C cameras in one batched pass.
 
     Shapes: points_world (M, 3); T_cam_world (C, 4, 4) world->camera per camera; K (C, 3, 3);
@@ -156,5 +172,5 @@ def project_world_batch(points_world, T_cam_world, K, dist=None, img_wh=None, mo
     K = np.asarray(K, dtype=np.float64).reshape(-1, 3, 3)
     if _HAS_TORCH and device != "cpu" and (device == "cuda" or torch.cuda.is_available()):
         dev = torch.device("cuda" if (device == "cuda" or torch.cuda.is_available()) else "cpu")
-        return _project_world_torch(points_world, T_cam_world, K, dist, img_wh, model, dev)
-    return _project_world_np(points_world, T_cam_world, K, dist, img_wh, model)
+        return _project_world_torch(points_world, T_cam_world, K, dist, img_wh, model, z_min, dev)
+    return _project_world_np(points_world, T_cam_world, K, dist, img_wh, model, z_min)
