@@ -32,6 +32,28 @@ class FusedObject:
     mask: np.ndarray | None
 
 
+def _frame_vote_entropy(weights_list: list[dict[int, float]]) -> list[float]:
+    """Entropy (nats) of each object's ensemble class-vote distribution, batched over a frame via the accel
+    entropy_margin kernel. Builds a compact (N, C) log-probability matrix over the classes present in the frame
+    (softmax recovers each normalized vote distribution) and returns the per-object entropy. 0 for an empty or
+    single-class frame."""
+    if not weights_list:
+        return []
+    classes = sorted({c for w in weights_list for c in w})
+    if len(classes) < 2:
+        return [0.0] * len(weights_list)
+    idx = {c: i for i, c in enumerate(classes)}
+    logits = np.full((len(weights_list), len(classes)), -1e9, dtype=np.float64)
+    for i, w in enumerate(weights_list):
+        s = sum(w.values()) or 1.0
+        for c, val in w.items():
+            logits[i, idx[c]] = np.log(max(val / s, 1e-12))
+    from core.accel.uncertainty import entropy_margin
+
+    out = entropy_margin(logits, normalize=False, device="cpu")
+    return [float(e) for e in out["entropy"]]
+
+
 def _iou(a: tuple, b: tuple) -> float:
     ax1, ay1, ax2, ay2 = a
     bx1, by1, bx2, by2 = b
@@ -110,8 +132,10 @@ class FusionEngine:
         table = self.cfg.class_priors.get(path, {})
         return float(table.get(l1, table.get("default", 0.5)))
 
-    def _vote(self, cluster: list[RawDetection]) -> tuple[int, float, bool]:
-        """Return (winning_class_id, raw_conf, class_disagreement)."""
+    def _vote(self, cluster: list[RawDetection]) -> tuple[int, float, bool, dict[int, float]]:
+        """Return (winning_class_id, raw_conf, class_disagreement, class_weights). class_weights is the ensemble
+        vote distribution over classes (prior * conf, summed per class), whose entropy is the class-distribution
+        uncertainty."""
         weights: dict[int, float] = {}
         per_path_class: dict[str, int] = {}
         for d in cluster:
@@ -126,13 +150,13 @@ class FusionEngine:
         if not weights:
             # No class anywhere: fallback.
             fb = self.onto.by_name("object_fallback").id
-            return fb, max((d.conf for d in cluster), default=0.3), False
+            return fb, max((d.conf for d in cluster), default=0.3), False, {}
 
         winner = max(weights, key=weights.get)
         raw = max((d.conf for d in cluster if d.class_id == winner), default=0.3)
         distinct = {c for c in per_path_class.values()}
         class_disagreement = len(distinct) > 1
-        return winner, raw, class_disagreement
+        return winner, raw, class_disagreement, weights
 
     def _geometry(self, cluster: list[RawDetection]) -> tuple[tuple, np.ndarray | None, bool]:
         """Return (bbox xyxy, mask or None, mask_box_disagree)."""
@@ -161,9 +185,10 @@ class FusionEngine:
     ) -> list[FusedObject]:
         clusters = self._cluster(dets_a, dets_b)
         out: list[FusedObject] = []
+        vote_weights: list[dict[int, float]] = []
 
         for cluster in clusters:
-            class_id, raw_conf, class_disagreement = self._vote(cluster)
+            class_id, raw_conf, class_disagreement, weights = self._vote(cluster)
             box, mask, mask_box_disagree = self._geometry(cluster)
             paths_present = {d.path for d in cluster}
             agreement = len(paths_present) >= 2 and not class_disagreement
@@ -193,6 +218,12 @@ class FusionEngine:
                 provenance=provenance,
             )
             out.append(FusedObject(obj=obj, mask=mask))
+            vote_weights.append(weights)
+
+        # class-distribution entropy of the ensemble votes, batched over the frame's objects through the accel
+        # kernel; persisted so the active-learning value score reads it (agreement -> 0, split votes -> high).
+        for fo, ent in zip(out, _frame_vote_entropy(vote_weights)):
+            fo.obj.provenance.entropy = ent
         return self._suppress_duplicates(out)
 
     def _same_object(self, a_class: int, b_class: int) -> bool:

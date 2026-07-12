@@ -95,6 +95,11 @@ async def score_candidates(db: AsyncSession, session_id: str | None = None, pool
         prov = prov or {}
         u = _uncertainty(float(conf or 0.0), bool(prov.get("agreement", True)),
                          bool(prov.get("mask_box_disagree", False)), cfg.uncertainty_lo, cfg.uncertainty_hi)
+        # ensemble class-distribution entropy (persisted at fusion): a split-vote object reads uncertain even
+        # when its scalar confidence sits outside the informative band. Squash nats into [0, 1).
+        en = prov.get("entropy")
+        if en:
+            u = max(u, 1.0 - float(np.exp(-float(en))))
         rare = 0.6 if is_rare(cid, onto) else 0.0
         rare = max(rare, 1.0 - class_counts.get(cid, 0) / max_count)
         if fid in rare_frames:
