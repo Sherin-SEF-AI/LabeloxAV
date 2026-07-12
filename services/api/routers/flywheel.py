@@ -14,6 +14,7 @@ from db.models import Session as DbSession
 from orchestration.dag import STAGES, run_session, trace_lineage
 from services.api.deps import db_session
 from services.flywheel.auto import run_auto_cycle
+from services.flywheel.dispatch import dispatch_worklist
 from services.flywheel.run import recent_cycles, run_and_record
 
 router = APIRouter()
@@ -26,6 +27,22 @@ async def adaptive_auto(total_label_budget: int = 2000, safety_floor: int = 200,
     their floor) drives the label budget, ODD scene gaps drive collection, and the response carries the per-class
     work order of real candidate objects a reviewer would open. This closes the loop on live data."""
     return await run_auto_cycle(db, total_label_budget, safety_floor, min_share)
+
+
+class DispatchIn(BaseModel):
+    cycle_id: str | None = None            # default: the latest cycle
+    slices: list[str] | None = None        # default: every class the cycle allocated labels to
+    per_slice_cap: int = 300
+
+
+@router.post("/flywheel/adaptive/dispatch")
+async def adaptive_dispatch(payload: DispatchIn, db: AsyncSession = Depends(db_session)):
+    """Action a cycle's work order: bump its real labelable candidates into the review queue, stamped with the
+    cycle provenance, as one reversible AgentRun. Never touches a human-accepted object."""
+    try:
+        return await dispatch_worklist(db, payload.cycle_id, payload.slices, payload.per_slice_cap)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 class AdaptiveIn(BaseModel):

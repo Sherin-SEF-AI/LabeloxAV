@@ -37,6 +37,7 @@ export default function AdaptiveFlywheel() {
   const auto = useRun<AutoPlan>();
   const [budget, setBudget] = useState(2000);
   const [floor, setFloor] = useState(150);
+  const dispatch = useRun<{ run_id: string; cycle_id: string; dispatched: number; by_slice: Record<string, number> }>();
 
   // manual tool
   const [reg, setReg] = useState(DEMO_REGRESSIONS);
@@ -96,7 +97,19 @@ export default function AdaptiveFlywheel() {
             <div className="text-[12px] text-ink-2">{p.rationale}</div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* label allocation + work order */}
-              <Panel title="label allocation" hint={`${p.allocated} labels across classes labeling can improve`}>
+              <Panel title="label allocation" hint={`${p.allocated} labels across classes labeling can improve`}
+                right={<button onClick={() => dispatch.run(() => runJSON("/api/flywheel/adaptive/dispatch",
+                  { cycle_id: p.cycle_id, per_slice_cap: 300 }))} disabled={dispatch.busy}
+                  className="btn btn-primary text-[11px]"
+                  data-tip="bump the real labelable candidates into the review queue as one reversible run">
+                  {dispatch.busy ? "sending..." : "send to review"}</button>}>
+                {dispatch.out && (
+                  <div className="text-[11px] text-pass border border-pass/30 rounded px-2 py-1.5 mb-2 bg-pass/5">
+                    dispatched {dispatch.out.dispatched} candidates to the review queue (run {dispatch.out.run_id.slice(0, 8)}, revertible).{" "}
+                    <a href={`/?flywheel=${dispatch.out.cycle_id}`} className="text-accent-2 underline">open worklist &rarr;</a>
+                  </div>
+                )}
+                <ErrLine err={dispatch.err} />
                 <div className="space-y-1.5">
                   {p.allocation.map((a) => {
                     const w = workBySlice.get(a.slice);

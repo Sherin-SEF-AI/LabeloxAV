@@ -6,14 +6,15 @@
 
 import { useState } from "react";
 
-export function Panel({ title, hint, children, className = "" }: {
-  title: string; hint?: string; children: React.ReactNode; className?: string;
+export function Panel({ title, hint, right, children, className = "" }: {
+  title: string; hint?: string; right?: React.ReactNode; children: React.ReactNode; className?: string;
 }) {
   return (
     <section className={`bg-panel border border-line rounded ${className}`}>
       <div className="panel-head">
         <span className="uppercase tracking-wide text-[10px] text-ink-2 font-medium">{title}</span>
-        {hint && <span className="ml-auto text-[10px] text-ink-3">{hint}</span>}
+        {hint && <span className="text-[10px] text-ink-3">{hint}</span>}
+        {right && <span className="ml-auto">{right}</span>}
       </div>
       <div className="p-3">{children}</div>
     </section>
