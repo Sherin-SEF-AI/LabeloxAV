@@ -11,6 +11,13 @@ VERDYX triage signal)."""
 
 from core.accel.agreement import agreement_matrix, consensus_scores
 from core.accel.boxes import box_iou_matrix, nms
+from core.accel.curation import (
+    cosine_sim_matrix,
+    hamming_matrix,
+    kcenter_greedy,
+    nearest_neighbor_sim,
+    phash_batch,
+)
 from core.accel.geometry_mv import best_epipolar_match, sampson_matrix
 from core.accel.imgqa import image_quality_batch, rig_exposure_consistency
 from core.accel.mask_iou import mask_iou_matrix
@@ -36,4 +43,5 @@ __all__ = [
     "match_detections",
     "confusion_matrix", "slice_recall", "slice_precision",
     "entropy_margin", "ensemble_disagreement", "flicker_scores",
+    "cosine_sim_matrix", "nearest_neighbor_sim", "phash_batch", "hamming_matrix", "kcenter_greedy",
 ]
