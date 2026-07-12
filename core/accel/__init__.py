@@ -42,6 +42,7 @@ from core.accel.propagate import (
     warp_masks_by_flow,
 )
 from core.accel.residual import reprojection_residuals
+from core.accel.sensorqa import equalize_hist_batch, motion_blur_score
 from core.accel.slices import confusion_matrix, slice_precision, slice_recall
 from core.accel.uncertainty import ensemble_disagreement, entropy_margin, flicker_scores
 from core.accel.undistort import apply_map_batch, build_fisheye_map
@@ -65,4 +66,5 @@ __all__ = [
     "dilate", "erode", "morph_open", "morph_close", "remove_small_components",
     "rle_encode", "rle_decode", "boundary_tightness",
     "refine_corners", "descriptor_match",
+    "equalize_hist_batch", "motion_blur_score",
 ]
