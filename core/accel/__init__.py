@@ -24,6 +24,12 @@ from core.accel.mask_iou import mask_iou_matrix
 from core.accel.matching import match_detections
 from core.accel.preprocess import preprocess_nv12_batch
 from core.accel.projection import gpu_available, project_cam_batch, project_world_batch
+from core.accel.propagate import (
+    interp_boxes,
+    slerp_batch,
+    warp_boxes_by_flow,
+    warp_masks_by_flow,
+)
 from core.accel.residual import reprojection_residuals
 from core.accel.slices import confusion_matrix, slice_precision, slice_recall
 from core.accel.uncertainty import ensemble_disagreement, entropy_margin, flicker_scores
@@ -44,4 +50,5 @@ __all__ = [
     "confusion_matrix", "slice_recall", "slice_precision",
     "entropy_margin", "ensemble_disagreement", "flicker_scores",
     "cosine_sim_matrix", "nearest_neighbor_sim", "phash_batch", "hamming_matrix", "kcenter_greedy",
+    "slerp_batch", "interp_boxes", "warp_boxes_by_flow", "warp_masks_by_flow",
 ]
