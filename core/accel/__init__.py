@@ -5,7 +5,9 @@ the identical NumPy math).
 Tier 1: fused projection (world -> pixel), all-pairs mask IoU (Triton bit-packed), fused auto-label preprocess.
 Tier 2: multi-view epipolar consistency, box IoU + NMS, pseudo-GT cross-path agreement.
 Tier 3: calibration residual field, batched image-QA metrics, undistort/rectify LUT (fused into preprocess).
-Tier 4: prediction-to-GT matching for mAP, confusion + error-slice aggregation."""
+Tier 4: prediction-to-GT matching for mAP, confusion + error-slice aggregation.
+Active learning: per-detection entropy + margin, ensemble BALD disagreement, temporal flicker (ORACLYX ->
+VERDYX triage signal)."""
 
 from core.accel.agreement import agreement_matrix, consensus_scores
 from core.accel.boxes import box_iou_matrix, nms
@@ -17,6 +19,7 @@ from core.accel.preprocess import preprocess_nv12_batch
 from core.accel.projection import gpu_available, project_cam_batch, project_world_batch
 from core.accel.residual import reprojection_residuals
 from core.accel.slices import confusion_matrix, slice_precision, slice_recall
+from core.accel.uncertainty import ensemble_disagreement, entropy_margin, flicker_scores
 from core.accel.undistort import apply_map_batch, build_fisheye_map
 
 __all__ = [
@@ -32,4 +35,5 @@ __all__ = [
     "build_fisheye_map", "apply_map_batch",
     "match_detections",
     "confusion_matrix", "slice_recall", "slice_precision",
+    "entropy_margin", "ensemble_disagreement", "flicker_scores",
 ]
