@@ -21,6 +21,16 @@ from core.accel.curation import (
 from core.accel.geometry_mv import best_epipolar_match, sampson_matrix
 from core.accel.imgqa import image_quality_batch, rig_exposure_consistency
 from core.accel.mask_iou import mask_iou_matrix
+from core.accel.maskops import (
+    boundary_tightness,
+    dilate,
+    erode,
+    morph_close,
+    morph_open,
+    remove_small_components,
+    rle_decode,
+    rle_encode,
+)
 from core.accel.matching import match_detections
 from core.accel.preprocess import preprocess_nv12_batch
 from core.accel.projection import gpu_available, project_cam_batch, project_world_batch
@@ -51,4 +61,6 @@ __all__ = [
     "entropy_margin", "ensemble_disagreement", "flicker_scores",
     "cosine_sim_matrix", "nearest_neighbor_sim", "phash_batch", "hamming_matrix", "kcenter_greedy",
     "slerp_batch", "interp_boxes", "warp_boxes_by_flow", "warp_masks_by_flow",
+    "dilate", "erode", "morph_open", "morph_close", "remove_small_components",
+    "rle_encode", "rle_decode", "boundary_tightness",
 ]
