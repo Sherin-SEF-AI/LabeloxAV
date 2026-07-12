@@ -48,6 +48,7 @@ async def triage(
     session_id: str | None = None,
     klass: str | None = None,
     city: str | None = None,
+    flywheel: str | None = None,
     limit: int = 200,
 ):
     limit = min(max(limit, 1), 1000)
@@ -65,6 +66,9 @@ async def triage(
         stmt = stmt.where(DbSession.city == city)
     if klass:
         stmt = stmt.where(Object.class_id == onto.by_name(klass).id)
+    if flywheel:
+        # the worklist a flywheel cycle dispatched: objects it stamped with this cycle id
+        stmt = stmt.where(Object.provenance["flywheel"]["cycle_id"].astext == flywheel)
     stmt = stmt.limit(max(limit * 3, limit))  # over-fetch, rank, then trim
 
     rows = (await db.execute(stmt)).all()

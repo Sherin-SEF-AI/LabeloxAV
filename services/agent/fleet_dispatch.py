@@ -13,18 +13,31 @@ from __future__ import annotations
 import re
 import uuid
 
-from sqlalchemy import delete, distinct, select
+from sqlalchemy import delete, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
-from db.models import CollectionOrder
+from db.models import CollectionOrder, FlywheelCycle
 from db.models import Session as DbSession
 
 log = get_logger("agent.fleet_dispatch")
 
 _KIND = "fleet_dispatch"
+_FLYWHEEL_KIND = "flywheel_cycle"   # collection orders sourced from a flywheel cycle's collection tasks
 
 _WINDOWS = {"night": "18:00-22:00", "dusk": "17:00-18:30", "dawn": "05:30-06:30", "day": "10:00-16:00"}
+
+_TOD = {"day", "night", "dusk", "dawn"}
+_WEATHER = {"clear", "overcast", "rain", "fog", "snow"}
+
+
+def _classify_cell(cell: str) -> tuple[str, str, str | None]:
+    """A flywheel collection-task cell is either a scene cell ('night_rain') or a class ('elephant'). Returns
+    (kind, a, b): ('scene', time_of_day, weather) or ('class', class_name, None)."""
+    parts = cell.rsplit("_", 1)
+    if len(parts) == 2 and parts[0] in _TOD and parts[1] in _WEATHER:
+        return "scene", parts[0], parts[1]
+    return "class", cell, None
 
 
 def _parse_gap(gap: str) -> tuple[str, str, str] | None:
@@ -90,6 +103,63 @@ async def plan_collection(db: AsyncSession, *, created_by: str | None = None, ma
     await db.commit()
     log.info("fleet.plan", gaps=len(gaps), orders=min(len(proposals), max_orders), vehicles=len(vehicles))
     return {"gaps": len(gaps), "orders": min(len(proposals), max_orders), "vehicles": len(vehicles)}
+
+
+async def plan_from_flywheel(db: AsyncSession, *, cycle_id: uuid.UUID | None = None,
+                             created_by: str | None = None, max_orders: int = 24) -> dict:
+    """Turn a flywheel cycle's collection tasks into ranked collection orders. Where plan_collection parses
+    coverage strings and skips classes, this consumes the flywheel's real signals: scene cells (night_rain,
+    day_fog) become windowed, forecast-aware drives, and empty safety classes (elephant, camel, buffalo)
+    become class-collection orders, because a species with no imagery is found by driving, not by labeling.
+    Each order carries the target sample count the cycle computed. Supersedes prior flywheel-sourced orders
+    only, so it coexists with plan_collection."""
+    from services.agent import weather
+
+    cycle = (await db.get(FlywheelCycle, cycle_id)) if cycle_id else (await db.execute(
+        select(FlywheelCycle).order_by(FlywheelCycle.created_at.desc()).limit(1))).scalars().first()
+    if cycle is None:
+        raise ValueError("no flywheel cycle on record; run one first")
+
+    tasks = sorted(cycle.collection_tasks or [], key=lambda t: t.get("priority", 0.0), reverse=True)[:max_orders]
+    vehicles = [v for (v,) in (await db.execute(select(distinct(DbSession.vehicle_id)))).all() if v] or ["unassigned"]
+    # the fleet's dominant operating city (most sessions), so orders default to where the fleet actually drives
+    city_row = (await db.execute(
+        select(DbSession.city, func.count()).where(DbSession.city.isnot(None))
+        .group_by(DbSession.city).order_by(func.count().desc()).limit(1))).first()
+    default_city = city_row[0] if city_row else None
+
+    proposals: list[CollectionOrder] = []
+    for i, t in enumerate(tasks):
+        kind, a, b = _classify_cell(t.get("cell", ""))
+        need = t.get("target_count")
+        need_str = f" (need {need:,})" if need else ""
+        vehicle = vehicles[i % len(vehicles)]
+        if kind == "scene":
+            tod, wx = a, b
+            window = _WINDOWS.get(tod, _WINDOWS["day"])
+            fc = (await weather.forecast(default_city))["condition"] if wx in ("rain", "fog") else "n/a"
+            proposals.append(CollectionOrder(
+                vehicle_id=vehicle, city=default_city, area=None, window=window,
+                target=f"{tod} {wx} driving{need_str}", gap_kind="scene", forecast=fc,
+                priority=round(float(t.get("priority", 0.0)), 4), status="proposed",
+                created_by=created_by or _FLYWHEEL_KIND))
+        else:
+            proposals.append(CollectionOrder(
+                vehicle_id=vehicle, city=default_city, area=None, window=_WINDOWS["day"],
+                target=f"{a} sightings{need_str}", gap_kind="class", forecast="n/a",
+                priority=round(float(t.get("priority", 0.0)), 4), status="proposed",
+                created_by=created_by or _FLYWHEEL_KIND))
+
+    # supersede only prior flywheel-sourced proposals (coexist with plan_collection's orders)
+    await db.execute(delete(CollectionOrder).where(
+        CollectionOrder.status == "proposed", CollectionOrder.created_by == (created_by or _FLYWHEEL_KIND)))
+    for o in proposals:
+        db.add(o)
+    await db.commit()
+    log.info("fleet.plan_flywheel", cycle=str(cycle.cycle_id), orders=len(proposals))
+    return {"cycle_id": str(cycle.cycle_id), "orders": len(proposals),
+            "scene": sum(1 for o in proposals if o.gap_kind == "scene"),
+            "classes": sum(1 for o in proposals if o.gap_kind == "class")}
 
 
 async def list_orders(db: AsyncSession, status: str = "proposed", limit: int = 50) -> list[dict]:

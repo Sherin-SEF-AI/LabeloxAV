@@ -15,12 +15,22 @@ import math
 import cv2
 import numpy as np
 
+from core.accel import projection as accel_proj
 from core.config import get_settings
 from core.logging import get_logger
 from services.lidar.ingest.normalize import Cloud
 from services.lidar.ingest.pseudo import _R_OPT2EGO
 
 log = get_logger("lidar_project")
+
+# A cloud at least this many points, with a CUDA device present, projects through the fused GPU kernel
+# (core.accel.projection); smaller clouds keep the NumPy path, where the GPU transfer would not pay off. The
+# kernel reproduces the pinhole projection bit-for-bit (same math, same z>1e-3 in-front threshold).
+_ACCEL_MIN_POINTS = 16384
+
+
+def _accel_pinhole(n: int) -> bool:
+    return n >= _ACCEL_MIN_POINTS and accel_proj.gpu_available()
 
 
 def _intrinsics(cam_id: str, img_w: int, img_h: int):
@@ -63,6 +73,12 @@ def _project_cam_points(cam: np.ndarray, fx: float, fy: float, cx: float, cy: fl
         pts = cam[in_front].astype(np.float64).reshape(-1, 1, 3)
         proj, _ = cv2.fisheye.projectPoints(pts, np.zeros(3), np.zeros(3), km, d)
         uv[in_front] = proj.reshape(-1, 2).astype(np.float32)
+    elif _accel_pinhole(cam.shape[0]):
+        # fused GPU projection for large clouds; bit-exact to the NumPy formula (same z>1e-3 in-front threshold)
+        km = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
+        uv2, _, _ = accel_proj.project_cam_batch(cam, km, dist=None, model="pinhole", z_min=1e-3)
+        uv[:, 0] = uv2[:, 0].astype(np.float32)
+        uv[:, 1] = uv2[:, 1].astype(np.float32)
     else:
         safe_z = np.where(in_front, z, 1.0)
         uv[:, 0] = cam[:, 0] / safe_z * fx + cx

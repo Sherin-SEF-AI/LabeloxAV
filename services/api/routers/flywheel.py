@@ -13,9 +13,48 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Session as DbSession
 from orchestration.dag import STAGES, run_session, trace_lineage
 from services.api.deps import db_session
+from services.flywheel.auto import run_auto_cycle
+from services.flywheel.dispatch import dispatch_worklist
 from services.flywheel.run import recent_cycles, run_and_record
 
 router = APIRouter()
+
+
+@router.post("/flywheel/adaptive/auto")
+async def adaptive_auto(total_label_budget: int = 2000, safety_floor: int = 200,
+                        min_share: float = 0.003, db: AsyncSession = Depends(db_session)):
+    """Run one adaptive cycle from real corpus signals: class starvation (VRU/animal/two-wheeler classes below
+    their floor) drives the label budget, ODD scene gaps drive collection, and the response carries the per-class
+    work order of real candidate objects a reviewer would open. This closes the loop on live data."""
+    return await run_auto_cycle(db, total_label_budget, safety_floor, min_share)
+
+
+class DispatchIn(BaseModel):
+    cycle_id: str | None = None            # default: the latest cycle
+    slices: list[str] | None = None        # default: every class the cycle allocated labels to
+    per_slice_cap: int = 300
+
+
+@router.post("/flywheel/adaptive/dispatch")
+async def adaptive_dispatch(payload: DispatchIn, db: AsyncSession = Depends(db_session)):
+    """Action a cycle's work order: bump its real labelable candidates into the review queue, stamped with the
+    cycle provenance, as one reversible AgentRun. Never touches a human-accepted object."""
+    try:
+        return await dispatch_worklist(db, payload.cycle_id, payload.slices, payload.per_slice_cap)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/flywheel/adaptive/collection-orders")
+async def adaptive_collection_orders(cycle_id: str | None = None, db: AsyncSession = Depends(db_session)):
+    """Turn a cycle's collection tasks into ranked fleet collection orders: scene cells become windowed,
+    forecast-aware drives and empty species become class-collection orders, each with its target count. View
+    the result on the fleet board (GET /api/agent/fleet/orders)."""
+    from services.agent.fleet_dispatch import plan_from_flywheel
+    try:
+        return await plan_from_flywheel(db, cycle_id=uuid.UUID(cycle_id) if cycle_id else None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 class AdaptiveIn(BaseModel):

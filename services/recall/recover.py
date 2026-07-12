@@ -65,6 +65,12 @@ class FusedRecall:
 # Pure geometry, mining, fusion, scoring (numpy only, no DB, no torch)
 # ---------------------------------------------------------------------------------------------------
 
+# A box-IoU call at least this many pairs, with a CUDA device present, routes through the fused GPU kernel
+# (core.accel.boxes); smaller calls stay on NumPy, where the GPU transfer would not pay off. Kept as a lazy
+# import so the pure recall tier still loads with no torch stack.
+_ACCEL_MIN_PAIRS = 250_000
+
+
 def iou_matrix(a, b) -> np.ndarray:
     """Pairwise IoU of two xyxy box sets, shape (len(a), len(b)). Empty inputs return a correctly
     shaped zero matrix."""
@@ -72,6 +78,14 @@ def iou_matrix(a, b) -> np.ndarray:
     b = np.asarray(b, dtype=float).reshape(-1, 4)
     if a.shape[0] == 0 or b.shape[0] == 0:
         return np.zeros((a.shape[0], b.shape[0]), dtype=float)
+    if a.shape[0] * b.shape[0] >= _ACCEL_MIN_PAIRS:
+        try:
+            from core.accel import boxes as accel_boxes
+
+            if accel_boxes.gpu_available():
+                return accel_boxes.box_iou_matrix(a, b)   # bit-exact to the NumPy path below
+        except ImportError:
+            pass
     area_a = (a[:, 2] - a[:, 0]).clip(min=0) * (a[:, 3] - a[:, 1]).clip(min=0)
     area_b = (b[:, 2] - b[:, 0]).clip(min=0) * (b[:, 3] - b[:, 1]).clip(min=0)
     x1 = np.maximum(a[:, None, 0], b[None, :, 0])

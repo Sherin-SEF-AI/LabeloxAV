@@ -93,6 +93,9 @@ export default function HomePage() {
     try {
       const params: Record<string, string> = { states, limit: "200" };
       if (session) params.session_id = session;
+      // a flywheel worklist deep-link (?flywheel=<cycle>) scopes the queue to that cycle's dispatched objects
+      const fw = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("flywheel") : null;
+      if (fw) { params.flywheel = fw; params.states = "review,annotate"; }
       setRows(await api.triage(params));
       setCursor(0);
     } finally {
