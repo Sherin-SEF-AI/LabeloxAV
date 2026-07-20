@@ -89,7 +89,7 @@ def voxelize_occupancy(points, origin, bounds, voxel_size: float, min_points: in
              & (vi[:, 2] >= 0) & (vi[:, 2] < dims[2]))
         vi = vi[m]
         uniq, cnt = np.unique(vi, axis=0, return_counts=True)
-        counts = {tuple(int(x) for x in v): int(c) for v, c in zip(uniq, cnt)}
+        counts = {tuple(int(x) for x in v): int(c) for v, c in zip(uniq, cnt, strict=False)}
     else:
         counts = {}
     occupied = {v for v, c in counts.items() if c >= min_points}

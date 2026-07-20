@@ -14,21 +14,10 @@ from starlette.responses import JSONResponse
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
 from services.api.deps import role_rank
-from services.export.dataset import DpdpaRefusal
 from services.api.routers import (
     activelearn,
     adverse,
     agent,
-    calyx as calyx_router,
-    flywheel as flywheel_router,
-    forgyx as forgyx_router,
-    hardening as hardening_router,
-    labelox as labelox_router,
-    oraclyx as oraclyx_router,
-    release as release_router,
-    sanyx as sanyx_router,
-    verdyx as verdyx_router,
-    sievyx as sievyx_router,
     analytics,
     autolabel,
     calibration,
@@ -39,13 +28,13 @@ from services.api.routers import (
     datasets,
     discovery,
     drivable,
-    inertial,
     dynamics,
     errordetect,
     export,
     govern,
     hdmap,
     imports,
+    inertial,
     inspector,
     intelligence,
     jobs,
@@ -73,6 +62,37 @@ from services.api.routers import (
     upload,
     users,
 )
+from services.api.routers import (
+    calyx as calyx_router,
+)
+from services.api.routers import (
+    flywheel as flywheel_router,
+)
+from services.api.routers import (
+    forgyx as forgyx_router,
+)
+from services.api.routers import (
+    hardening as hardening_router,
+)
+from services.api.routers import (
+    labelox as labelox_router,
+)
+from services.api.routers import (
+    oraclyx as oraclyx_router,
+)
+from services.api.routers import (
+    release as release_router,
+)
+from services.api.routers import (
+    sanyx as sanyx_router,
+)
+from services.api.routers import (
+    sievyx as sievyx_router,
+)
+from services.api.routers import (
+    verdyx as verdyx_router,
+)
+from services.export.dataset import DpdpaRefusal
 
 log = get_logger("api")
 

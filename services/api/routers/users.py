@@ -76,7 +76,7 @@ async def reissue_token(user_id: str, _admin=Depends(require_role("admin")),
     try:
         u = await db.get(User, UUID(user_id))
     except ValueError:
-        raise HTTPException(400, "invalid user id")
+        raise HTTPException(400, "invalid user id") from None
     if u is None:
         raise HTTPException(404, "user not found")
     return {"user_id": str(u.user_id), "name": u.name, "role": u.role, "token": _token_for(u)}

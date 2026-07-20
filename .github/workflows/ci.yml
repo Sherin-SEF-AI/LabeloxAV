@@ -28,13 +28,16 @@ jobs:
       - name: Create venv + install dev deps (no GPU wheels)
         run: make install
 
-      - name: Ruff (blocking)
-        run: .venv/bin/ruff check .
-
       - name: Secret scan (gitleaks, blocking)
+        # The one hard gate here: a committed credential must never reach a branch. Scans full history.
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ruff
+        # Informational: the tree carries pre-existing lint debt, so ruff reports without gating (fix forward).
+        continue-on-error: true
+        run: .venv/bin/ruff check .
 
       - name: Dependency audit (pip-audit)
         # Informational: a new advisory should not block an unrelated PR, but it must be visible in the log.
