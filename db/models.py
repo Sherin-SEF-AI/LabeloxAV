@@ -1271,7 +1271,7 @@ class SessionIndex(Base):
 
     __tablename__ = "session_index"
 
-    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), primary_key=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id", ondelete="CASCADE"), primary_key=True)
     mcap_uri: Mapped[str | None] = mapped_column(Text)
     topics: Mapped[dict] = mapped_column(JSONB, default=dict)      # {topic: {name, schema, count, rate, first_ts, last_ts}}
     time_range: Mapped[list] = mapped_column(ARRAY(BigInteger))    # [first_ts_ns, last_ts_ns] across all topics
@@ -1288,7 +1288,7 @@ class SessionHealth(Base):
     __tablename__ = "session_health"
 
     id: Mapped[uuid.UUID] = _uuid_pk()
-    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id", ondelete="CASCADE"), nullable=False)
     checks: Mapped[list] = mapped_column(JSONB, default=list)      # [{name, status, detail, evidence, score}]
     verdict: Mapped[str] = mapped_column(String(8), nullable=False)  # pass | warn | fail
     score: Mapped[float | None] = mapped_column(Float)             # SANYX overall 0..100 health score
@@ -1324,7 +1324,7 @@ class FrameGroup(Base):
     __tablename__ = "frame_group"
 
     group_id: Mapped[uuid.UUID] = _uuid_pk()
-    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id", ondelete="CASCADE"), nullable=False)
     ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)         # group reference time (earliest member)
     frame_ids: Mapped[dict] = mapped_column(JSONB, default=dict)          # {cam_id: frame_id}
     missing_cams: Mapped[list] = mapped_column(ARRAY(Text), default=list)  # cameras with no frame in this window
@@ -1346,7 +1346,7 @@ class RigObject(Base):
     __tablename__ = "rig_object"
 
     rig_object_id: Mapped[uuid.UUID] = _uuid_pk()
-    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id", ondelete="CASCADE"), nullable=False)
     group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("frame_group.group_id"), nullable=False)
     class_id: Mapped[int | None] = mapped_column(Integer)                 # voted class across members
     member_object_ids: Mapped[list] = mapped_column(ARRAY(UUID(as_uuid=True)), default=list)

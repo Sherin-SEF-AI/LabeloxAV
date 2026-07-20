@@ -173,8 +173,12 @@ def check_imu(cfg: SanyxSettings, accel: np.ndarray, gyro: np.ndarray, ts_ns: li
     if accel.shape[0] == 0:
         return {"name": "imu", "score": 0.0, "status": "quarantine", "detail": "no IMU samples", "evidence": {}}
 
-    sat = np.mean(np.any(np.abs(accel) >= accel_limit, axis=1) | (
-        np.any(np.abs(gyro) >= gyro_limit, axis=1) if gyro.shape[0] == accel.shape[0] else False))
+    # Evaluate accel and gyro saturation independently: gyro may have a different sample count than accel (rate
+    # mismatch or a dropped run), and the old per-sample OR silently dropped ALL gyro saturation whenever the
+    # lengths differed, hiding a pegged gyro.
+    accel_sat = float(np.mean(np.any(np.abs(accel) >= accel_limit, axis=1))) if accel.shape[0] else 0.0
+    gyro_sat = float(np.mean(np.any(np.abs(gyro) >= gyro_limit, axis=1))) if gyro.shape[0] else 0.0
+    sat = max(accel_sat, gyro_sat)
     # bias jump: largest step in a short moving-mean of accel magnitude
     mag = np.linalg.norm(accel, axis=1)
     win = max(1, min(25, mag.size // 4))

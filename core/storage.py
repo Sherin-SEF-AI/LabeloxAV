@@ -36,7 +36,9 @@ class ObjectStore:
             endpoint_url=m.endpoint,
             aws_access_key_id=m.access_key,
             aws_secret_access_key=m.secret_key,
-            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+            config=Config(signature_version="s3v4", s3={"addressing_style": "path"},
+                          connect_timeout=5, read_timeout=60,
+                          retries={"max_attempts": 3, "mode": "standard"}),
             region_name="us-east-1",
         )
         # Presigned URLs are handed to browsers/buyers, so they must point at the public endpoint, not

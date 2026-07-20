@@ -7,6 +7,7 @@ dropped event never loses data, it only delays a downstream consumer.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 
@@ -31,9 +32,14 @@ class EventBus:
     def __init__(self, brokers: str | None = None) -> None:
         self.brokers = brokers or get_settings().redpanda.brokers
         self._producer: AIOKafkaProducer | None = None
+        self._start_lock = asyncio.Lock()
 
     async def start(self) -> None:
-        if self._producer is None:
+        # Serialize lazy start: two concurrent publish()/emit() calls could both see _producer is None and each
+        # create + start a producer, orphaning one. The lock + re-check makes start idempotent under concurrency.
+        async with self._start_lock:
+            if self._producer is not None:
+                return
             self._producer = AIOKafkaProducer(
                 bootstrap_servers=self.brokers,
                 value_serializer=lambda v: json.dumps(v).encode("utf-8"),
