@@ -45,6 +45,10 @@ async def _seed_objects() -> uuid.UUID:
                          ontology_version="labelox-in-0.1.0"))
         db.add(Frame(frame_id=fid, session_id=sid, ts_ns=start, cam_id="cam_f",
                      img_uri=f"s3://x/frames/{sid}/cam_f/{start}.jpg", width=640, height=480, quality=0.9))
+        # Flush the session+frame before the rows that reference the frame (pii_audit, objects): the models use
+        # raw FK columns with no ORM relationship, so SQLAlchemy will not order the frame insert first on its
+        # own. This mirrors the ingest path (services/ingest/run.py), which flushes the frame before its audit.
+        await db.flush()
         # the frame was anonymized at ingest (0 faces/plates here), so the DPDPA export gate passes
         from db.models import PiiAudit
         db.add(PiiAudit(frame_id=fid, session_id=sid, n_faces=0, n_plates=0, regions=[],
