@@ -101,10 +101,17 @@ async def interpolate_track_keyframed(track_id: UUID, method: str = "linear", lo
         class_id = anchors[0][0].class_id
         a, b = (lo_ts if lo_ts is not None else kf_ts[0]), (hi_ts if hi_ts is not None else kf_ts[-1])
 
-        frames = (await db.execute(
-            select(Frame.frame_id, Frame.ts_ns)
-            .where(Frame.session_id == tr.session_id, Frame.ts_ns > a, Frame.ts_ns < b)
-            .order_by(Frame.ts_ns))).all()
+        # Confine interpolation to the track's own camera. A rig session has frames from several cameras at
+        # overlapping timestamps; without this filter the fill would create boxes on every camera's frames,
+        # poisoning views the track was never in.
+        anchor_frame = await db.get(Frame, anchors[0][0].frame_id)
+        cam_id = anchor_frame.cam_id if anchor_frame else None
+
+        fq = (select(Frame.frame_id, Frame.ts_ns)
+              .where(Frame.session_id == tr.session_id, Frame.ts_ns > a, Frame.ts_ns < b))
+        if cam_id is not None:
+            fq = fq.where(Frame.cam_id == cam_id)
+        frames = (await db.execute(fq.order_by(Frame.ts_ns))).all()
         # clear existing machine-filled boxes on this track in the segment (idempotent re-interpolation)
         seg_fids = [fid for fid, _ in frames]
         if seg_fids:

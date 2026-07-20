@@ -164,21 +164,19 @@ async def search_objects_by_text(db: AsyncSession, query: str, limit: int = 24, 
 
 
 async def similar_objects(db: AsyncSession, object_id: str, limit: int = 12) -> list[dict]:
-    target = await db.get(Embedding, UUID(object_id))
-    if target is None:
+    # Find-similar reads the live DINOv3 ObjectEmbedding table via pgvector HNSW (the same source
+    # /search/similar uses), not the legacy CLIP `Embedding` table, which the current pipeline no longer
+    # populates: an in-Python cosine over that dead table returned nothing.
+    from core.embeddings import object_neighbors
+    from db.models import ObjectEmbedding
+
+    emb = await db.get(ObjectEmbedding, UUID(object_id))
+    if emb is None:
         return []
-    ids, mat = await _load_matrix(db, None)
-    q = np.array(target.vec, dtype=np.float32)
-    top = cosine_topk(q, mat, limit + 1)
-    chosen, scores = [], {}
-    for i, s in top:
-        if str(ids[i]) == object_id:
-            continue
-        chosen.append(ids[i])
-        scores[ids[i]] = s
-        if len(chosen) >= limit:
-            break
-    return await _decorate(db, chosen, scores)
+    nbrs = await object_neighbors(db, emb.dino_vec, k=limit, exclude_object_id=UUID(object_id))
+    ids = [UUID(oid) for oid, _ in nbrs]
+    scores = {UUID(oid): s for oid, s in nbrs}
+    return await _decorate(db, ids, scores)
 
 
 async def scenario_embedding(db: AsyncSession, actor_ids: list[str]) -> np.ndarray | None:
