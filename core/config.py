@@ -751,26 +751,36 @@ class Settings(BaseSettings):
 
     _DEV_ENVS = {"local", "test", "ci", "dev"}
 
+    _LOCAL_HOSTS = {"localhost", "127.0.0.1", "postgres", "minio", "redis", "::1"}
+
     @model_validator(mode="after")
     def _require_prod_secrets(self):
-        """Outside a dev env, the known dev-default credentials are refused so a deployment cannot ship
-        with `labelox`/`labelox123`. Set the real secrets via env (LBX_POSTGRES__PASSWORD, etc.)."""
-        if self.env.lower() in self._DEV_ENVS:
-            return self
+        """Fail closed on default credentials. The known dev-default secrets (postgres/minio creds, lakeFS key,
+        and the FORGYX/GOVERN HMAC signing keys) are refused whenever the deployment is NOT an explicit local
+        dev box: either env is outside the dev set, OR a non-local service host is configured (the 'forgot
+        LBX_ENV in prod' case). A purely-local dev box with dev creds is still allowed. This closes the
+        fail-open default where forgetting LBX_ENV shipped forgeable signing keys and public passwords."""
         weak = []
         if self.postgres.password == "labelox":
             weak.append("LBX_POSTGRES__PASSWORD")
         if self.minio.secret_key == "labelox123":
             weak.append("LBX_MINIO__SECRET_KEY")
+        if getattr(self.minio, "access_key", None) == "labelox":
+            weak.append("LBX_MINIO__ACCESS_KEY")
         if self.phase4.lakefs.secret_key.startswith("labeloxavlakefssecret"):
             weak.append("LBX_PHASE4__LAKEFS__SECRET_KEY")
         if self.forgyx.deploy_signing_key.startswith("labeloxforgyxdeploysigningkey"):
             weak.append("LBX_FORGYX__DEPLOY_SIGNING_KEY")
         if self.phase4.govern.attestation_key.startswith("labeloxavgovernattestationkey"):
             weak.append("LBX_PHASE4__GOVERN__ATTESTATION_KEY")
-        if weak:
+        if not weak:
+            return self
+        is_dev_env = self.env.lower() in self._DEV_ENVS
+        local_only = self.postgres.host in self._LOCAL_HOSTS
+        if not is_dev_env or not local_only:
             raise ValueError(
-                f"env '{self.env}' is not a dev env but still uses default credentials; set: {', '.join(weak)}"
+                f"default/weak credentials detected (env={self.env!r}, postgres host={self.postgres.host!r}); "
+                f"set real values for: {', '.join(weak)}"
             )
         return self
 

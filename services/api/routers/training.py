@@ -8,13 +8,13 @@ from __future__ import annotations
 import csv
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from core.config import get_settings
 from db.models import ModelRun, TrainingJob
 from db.session import get_sessionmaker
-from services.api.deps import TrainingStartIn
+from services.api.deps import TrainingStartIn, current_user, role_rank
 from services.training.jobs import TrainJobSpec, enqueue_job
 from services.training.tasks import get_task, list_tasks
 
@@ -57,12 +57,17 @@ async def tasks():
 
 
 @router.post("/training/start")
-async def start(payload: TrainingStartIn):
+async def start(payload: TrainingStartIn, user=Depends(current_user)):
     try:
         get_task(payload.task_type)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    job_id = await enqueue_job(TrainJobSpec(**payload.model_dump()))
+    spec = payload.model_dump()
+    # C7: auto-promotion is a governance action (equivalent to /govern/promote, which is admin-only). A
+    # reviewer may enqueue training, but only an admin may request that its result promote a champion.
+    if spec.get("promote") and role_rank(getattr(user, "role", None)) < role_rank("admin"):
+        raise HTTPException(status_code=403, detail="promote requires admin role")
+    job_id = await enqueue_job(TrainJobSpec(**spec))
     return {"job_id": job_id, "status": "pending"}
 
 

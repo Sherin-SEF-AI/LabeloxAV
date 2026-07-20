@@ -78,7 +78,14 @@ def _acquire_source(source_uri: str, workdir: Path) -> Path:
     if src.suffix.lower() == ".zip":
         ext = workdir / "extracted"
         ext.mkdir(parents=True, exist_ok=True)
+        ext_root = ext.resolve()
         with zipfile.ZipFile(src) as zf:
+            # zip-slip guard: a member named "../../x" or "/abs/path" escapes ext. Resolve every target and
+            # refuse anything outside ext before extracting a single byte.
+            for member in zf.namelist():
+                target = (ext / member).resolve()
+                if not (target == ext_root or ext_root in target.parents):
+                    raise ValueError(f"unsafe zip member escapes extract dir: {member!r}")
             zf.extractall(ext)
         return ext
     return src.parent

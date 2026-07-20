@@ -117,7 +117,12 @@ _ADMIN_PREFIXES = ("/api/govern", "/api/users")
 _REVIEWER_PREFIXES = (
     "/api/review", "/api/export", "/api/datasets", "/api/relabel", "/api/imports", "/api/curation",
     "/api/corrections", "/api/collaborate", "/api/objects", "/api/tracks", "/api/lanes", "/api/errordetect",
+    # C7: model promotion, paid-GPU control, and corpus-wide re-detection are not annotator actions.
+    "/api/training", "/api/cloud", "/api/autolabel",
 )
+# Reads under these prefixes are NOT open: they mint presigned download URLs (dataset exfiltration, C2) or
+# expose the governance state / audit log / user list (info disclosure). GET here still needs the role floor.
+_READ_GATED_PREFIXES = ("/api/govern", "/api/datasets", "/api/users", "/api/export")
 
 
 def _required_role(path: str) -> str:
@@ -129,15 +134,18 @@ def _required_role(path: str) -> str:
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Deny-by-default: every mutating /api request needs a known user, with role floors by path.
-    Open for reads. A new write route added later is gated automatically (fails closed)."""
+    """Deny-by-default: every mutating /api request needs a known user, with role floors by path. Reads are
+    open EXCEPT under _READ_GATED_PREFIXES (which leak data or presigned download URLs). A new write route added
+    later is gated automatically (fails closed)."""
 
     async def dispatch(self, request, call_next):
         if not get_settings().auth.enabled:
             return await call_next(request)
         method = request.method
         path = request.url.path
-        if method in ("GET", "HEAD", "OPTIONS") or path == "/api/health" or not path.startswith("/api/"):
+        read = method in ("GET", "HEAD", "OPTIONS")
+        gated_read = read and path.startswith(_READ_GATED_PREFIXES)
+        if (read and not gated_read) or path == "/api/health" or not path.startswith("/api/"):
             return await call_next(request)
 
         from sqlalchemy import func, select
