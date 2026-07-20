@@ -416,6 +416,9 @@ class DatasetCommit(Base):
     cloud_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     ontology_version: Mapped[str] = mapped_column(String(64), nullable=False)
     export_uris: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Content hash (class/geometry/state), distinct from the object-id-only commit_id, so a mutated
+    # annotation is detectable on /release/{id}/verify. Nullable: pre-0061 commits were not fingerprinted.
+    content_fingerprint: Mapped[str | None] = mapped_column(String(64))
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

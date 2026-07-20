@@ -96,14 +96,52 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
             "recall_ok": recall_ok, "reasons": reasons}
 
 
+async def _common_gold_metrics(db, reg, champ, task):
+    """Re-score challenger and champion on ONE common sealed gold set (C5). Returns (chal, champ, note): the
+    two commensurable metric dicts and an audit note describing which basis was used. Falls back to each
+    model's stored metrics (its own val split) only when no gold set or no downloadable weights exist, and
+    says so in the note so the comparison basis is never silently misrepresented."""
+    from services.govern.gold_eval import evaluate_on_gold, latest_gold_id
+
+    onto = get_ontology()
+    gold_id = await latest_gold_id(db, onto.version)
+    if gold_id is None:
+        return reg.gold_metrics or {}, (champ.gold_metrics if champ else None), "stored_own_split (no gold set sealed)"
+    chal_m = await evaluate_on_gold(db, reg.model_version, gold_id)
+    champ_m = await evaluate_on_gold(db, champ.model_version, gold_id) if champ else None
+    if chal_m is None or (champ is not None and champ_m is None):
+        # weights missing for one side: cannot form a fair common comparison, keep stored metrics but flag it
+        return (reg.gold_metrics or {}, (champ.gold_metrics if champ else None),
+                f"stored_own_split (weights unavailable for common eval on {gold_id})")
+    return chal_m, champ_m, f"common_gold:{gold_id}"
+
+
 async def evaluate_and_promote(db: AsyncSession, challenger_version: str, task: str = "detection") -> dict:
+    from sqlalchemy.exc import IntegrityError
+
     cfg = get_settings().phase4.govern
     onto = get_ontology()
     reg = await db.get(ModelRegistry, challenger_version)
     if reg is None:
         return {"error": "challenger not registered"}
+    # Promotion TOCTOU: two concurrent promotions could each read "no better champion" and both call
+    # set_champion. The partial unique index uq_model_registry_champion (migration 0060) makes a second
+    # champion for the same task impossible: the loser's commit raises IntegrityError instead of silently
+    # creating split-brain. Catch it and report a lost race rather than surfacing a 500.
+    try:
+        return await _evaluate_and_promote_locked(db, reg, challenger_version, task, cfg, onto)
+    except IntegrityError:
+        await db.rollback()
+        log.info("govern.promotion_race_lost", challenger=challenger_version, task=task)
+        return {"promoted": False, "race_lost": True,
+                "reason": "another promotion for this task committed first"}
+
+
+async def _evaluate_and_promote_locked(db, reg, challenger_version, task, cfg, onto) -> dict:
     champ = await get_champion(db, task)
-    gate = champion_gate(reg.gold_metrics or {}, champ.gold_metrics if champ else None, onto, cfg)
+    chal_metrics, champ_metrics, basis = await _common_gold_metrics(db, reg, champ, task)
+    gate = champion_gate(chal_metrics, champ_metrics, onto, cfg)
+    gate["comparison_basis"] = basis
 
     state = await get_state(db)
     if gate["promote"] and not state.auto_promote_enabled:

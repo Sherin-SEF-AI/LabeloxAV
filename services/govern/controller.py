@@ -26,6 +26,23 @@ from services.govern.killswitch import get_state
 log = get_logger("govern_controller")
 
 
+async def _drift_windows(db: AsyncSession, window: int = 20) -> tuple[list[str] | None, list[str] | None]:
+    """Split the most recent 2*window sessions (by capture time) into an older reference half and a newer
+    current half, so the PSI drifts compare recent capture against the prior baseline. Returns (None, None)
+    when there is not enough history to form two non-empty windows."""
+    from db.models import Session
+
+    rows = (await db.execute(
+        select(Session.session_id).order_by(Session.start_ts_ns.desc()).limit(2 * window))).scalars().all()
+    if len(rows) < 4:
+        return None, None
+    ids = [str(s) for s in rows]  # newest first
+    half = len(ids) // 2
+    cur = ids[:half]        # most recent sessions
+    ref = ids[half:]        # the prior baseline window
+    return ref, cur
+
+
 async def _queue_depth(db: AsyncSession) -> dict:
     pending_errors = (await db.execute(select(func.count()).select_from(ErrorCandidate).where(
         ErrorCandidate.status == "pending"))).scalar_one()
@@ -44,8 +61,11 @@ async def tick(db: AsyncSession, now_hour_utc: int | None = None, schedule_burst
         await record(db, "controller", "tick_paused", None, {"reason": state.paused_reason})
         return {"status": "paused", "reason": state.paused_reason, "actions": []}
 
-    # 1. drift (cheap, deterministic) - may soft-pause auto-promotion
-    drift = await run_drift_scan(db)
+    # 1. drift (cheap, deterministic) - may soft-pause auto-promotion. Feed it a reference and current session
+    # window so the PSI label/embedding drifts actually run (they no-op without ref+cur sessions); otherwise
+    # only control-precision drift ever fires and distribution shift goes unnoticed autonomously.
+    ref_sessions, cur_sessions = await _drift_windows(db)
+    drift = await run_drift_scan(db, ref_sessions, cur_sessions)
     if drift["breached"]:
         actions.append({"action": "drift_pause", "metrics": drift["breached"]})
 

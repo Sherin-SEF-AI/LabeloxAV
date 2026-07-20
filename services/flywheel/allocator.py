@@ -36,7 +36,21 @@ def allocate_label_budget(demands: list[dict], total_budget: int, safety_floor: 
     # reserve the safety floor for safety-critical demands, capped so it cannot exceed the budget
     critical = [i for i, d in enumerate(demands) if d.get("safety_weight", 1.0) > 1.0]
     reserved = min(len(critical) * safety_floor, total_budget)
-    floors = {i: safety_floor for i in critical} if reserved == len(critical) * safety_floor else {}
+    if critical and reserved > 0:
+        # When the budget covers the full floor for every critical demand, each gets `safety_floor`. When it
+        # is too tight to do so, split the reserved pool across the critical demands (by effective weight, or
+        # evenly if weights are zero) instead of DROPPING the floor for everyone: safety must still get first
+        # call on a tight budget, which the old all-or-nothing `else {}` failed to do.
+        if reserved == len(critical) * safety_floor:
+            floors = {i: safety_floor for i in critical}
+        else:
+            crit_eff = [eff[i] for i in critical]
+            shares = _largest_remainder(crit_eff, reserved)
+            if sum(shares) < reserved:  # zero weights: fall back to an even split of the reserved pool
+                shares = _largest_remainder([1.0] * len(critical), reserved)
+            floors = {i: shares[k] for k, i in enumerate(critical)}
+    else:
+        floors = {}
 
     remaining = total_budget - sum(floors.values())
     apportioned = _largest_remainder(eff, remaining)

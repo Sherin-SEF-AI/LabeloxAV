@@ -32,8 +32,18 @@ def dual_gate(baseline_latency: dict, candidate_latency: dict,
         reasons.append(f"latency regressed {lat['delta_pct']:.1%} at p95 (> {pct_tol:.0%})")
     if acc["verdict"] == "reject":
         reasons += acc["reasons"]
-    promote = not lat["regressed"] and acc["verdict"] != "reject"
-    return {"promote": promote, "latency": lat, "accuracy": acc,
+    # Auto-promote only on an unambiguous accuracy PASS ("promote"), never on "needs_review": a compiled model
+    # whose slices are unmeasured or show no uplift is a human-review case, not an automatic ship. Treating
+    # needs_review as promotable (the old `!= "reject"`) let an under-verified quant slip through.
+    if lat["regressed"] or acc["verdict"] == "reject":
+        verdict = "block"
+    elif acc["verdict"] == "promote":
+        verdict = "promote"
+    else:
+        verdict = "needs_review"
+        reasons += acc["reasons"]
+    promote = verdict == "promote"
+    return {"promote": promote, "verdict": verdict, "latency": lat, "accuracy": acc,
             "reasons": reasons or ["passes: faster or equal, no protected-slice regression"]}
 
 

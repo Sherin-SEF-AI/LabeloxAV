@@ -118,7 +118,11 @@ def regression_gate(
     # legitimate promotions). When set, the candidate must not confuse VRUs unsafely below the floor.
     if min_safe_miou is not None:
         sm = candidate.get("safe_miou")
-        if sm is not None and sm < min_safe_miou:
+        # Fail-closed: when a floor is set, a MISSING Safe-mIoU cannot clear it. Treating None as a pass let a
+        # candidate that never scored safety through the gate the operator explicitly asked to enforce.
+        if sm is None:
+            reasons.append(f"safe_miou required (floor {min_safe_miou}) but not measured")
+        elif sm < min_safe_miou:
             reasons.append(f"safe_miou {sm} < required {min_safe_miou}")
 
     # Only classes present in BOTH vocabularies are comparable. A class the candidate's vocabulary
