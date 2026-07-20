@@ -63,6 +63,8 @@ export type SessionRow = {
 export type SegmentResult = { polygons: number[][]; bbox: number[] | null };
 
 export type UserRow = { user_id: string; name: string; role: string; reviews: number };
+// Create/re-issue returns the signed token once (not present on the list endpoint).
+export type UserCreated = UserRow & { token: string };
 
 export type DatasetRow = {
   commit_id: string;

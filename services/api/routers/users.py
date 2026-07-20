@@ -1,5 +1,7 @@
-"""Lightweight multi-user: list/create users (no password). The web client picks the current user and
-sends it as the X-Lbx-User-Id header; mutations record that user for attribution + the QA workflow."""
+"""Multi-user: list/create users and issue signed API tokens. Creating a user returns that user's Bearer
+token once (the only time the plaintext is shown); the web client stores it and sends it as
+'Authorization: Bearer <token>'. Tokens are unforgeable (HMAC over the server signing key), and creating a
+user is itself role-gated, so a token can only originate from an already-authorized admin (C1)."""
 
 from __future__ import annotations
 
@@ -7,12 +9,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config import get_settings
 from db.models import Review, User
-from services.api.deps import UserCreateIn, db_session
+from services.api.auth_token import mint_token
+from services.api.deps import UserCreateIn, db_session, require_role
 
 router = APIRouter()
 
 _ROLES = {"admin", "reviewer", "annotator"}
+
+
+def _token_for(user: User) -> str:
+    return mint_token(user.user_id, get_settings().auth.signing_key)
 
 
 async def _with_counts(db: AsyncSession, users: list[User]) -> list[dict]:
@@ -27,6 +35,14 @@ async def _with_counts(db: AsyncSession, users: list[User]) -> list[dict]:
 async def list_users(db: AsyncSession = Depends(db_session)):
     users = (await db.execute(select(User).order_by(User.created_at))).scalars().all()
     return await _with_counts(db, users)
+
+
+@router.get("/users/me")
+async def whoami(user=Depends(require_role("annotator")), db: AsyncSession = Depends(db_session)):
+    """Resolve the caller's own identity from their Bearer token. Lets the web client turn a pasted token into
+    a name/role for display without trusting anything client-side."""
+    rows = await _with_counts(db, [user])
+    return rows[0]
 
 
 @router.post("/users")
@@ -45,4 +61,22 @@ async def create_user(payload: UserCreateIn, db: AsyncSession = Depends(db_sessi
     u = User(name=name, role=role)
     db.add(u)
     await db.commit()
-    return {"user_id": str(u.user_id), "name": u.name, "role": u.role, "reviews": 0}
+    # Return the signed token once: this is the new user's credential, handed off by the creating admin (or
+    # kept by the bootstrap admin who created the first account).
+    return {"user_id": str(u.user_id), "name": u.name, "role": u.role, "reviews": 0, "token": _token_for(u)}
+
+
+@router.post("/users/{user_id}/token")
+async def reissue_token(user_id: str, _admin=Depends(require_role("admin")),
+                        db: AsyncSession = Depends(db_session)):
+    """Re-issue a user's Bearer token (e.g. after a lost credential). Admin-only. Because tokens are stateless,
+    this does not revoke the old one; rotate the server signing key to invalidate all outstanding tokens."""
+    from uuid import UUID
+
+    try:
+        u = await db.get(User, UUID(user_id))
+    except ValueError:
+        raise HTTPException(400, "invalid user id")
+    if u is None:
+        raise HTTPException(404, "user not found")
+    return {"user_id": str(u.user_id), "name": u.name, "role": u.role, "token": _token_for(u)}

@@ -16,6 +16,7 @@ export default function UserPicker() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [role, setRole] = useState("annotator");
+  const [token, setToken] = useState("");
 
   useEffect(() => {
     setCur(getUser());
@@ -30,8 +31,8 @@ export default function UserPicker() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function pick(u: UserRow) {
-    const c = { user_id: u.user_id, name: u.name, role: u.role };
+  function pick(u: UserRow, token?: string) {
+    const c: CurrentUser = { user_id: u.user_id, name: u.name, role: u.role, token };
     setUser(c);
     setCur(c);
     setOpen(false);
@@ -43,9 +44,26 @@ export default function UserPicker() {
       const u = await api.createUser(name.trim(), role);
       setUsers((us) => [...us, u]);
       setName("");
-      pick(u);
+      // Store the freshly-issued token: it is this user's credential going forward.
+      pick(u, u.token);
     } catch (e) {
       alert(String(e));
+    }
+  }
+
+  // Sign in with a token issued by an admin: store it, then resolve name/role from the server (never trusted
+  // client-side). With auth disabled on a dev backend, /users/me still resolves via the token or id fallback.
+  async function signIn() {
+    const tok = token.trim();
+    if (!tok) return;
+    setUser({ user_id: "", name: "…", role: "", token: tok });
+    try {
+      const me = await api.me();
+      pick(me, tok);
+      setToken("");
+    } catch (e) {
+      setUser(cur);
+      alert(`invalid token: ${String(e)}`);
     }
   }
 
@@ -74,6 +92,11 @@ export default function UserPicker() {
               <option value="admin">adm</option>
             </select>
             <button onClick={add} className="border border-line px-1.5 text-ink-2 hover:border-accent">+</button>
+          </div>
+          <div className="border-t hairline pt-1 flex gap-1">
+            <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="sign in with token"
+              className="flex-1 bg-bg border border-line px-1 py-0.5 font-mono text-[11px] text-ink min-w-0" />
+            <button onClick={signIn} className="border border-line px-1.5 text-ink-2 hover:border-accent">go</button>
           </div>
         </div>
       )}

@@ -52,6 +52,7 @@ import type {
   IntentVocab,
   TriageRow,
   UserRow,
+  UserCreated,
   CloudStatus,
   CloudOrphan,
 } from "./types";
@@ -506,7 +507,8 @@ export const api = {
   // Track (tracklet) editor
   // Operational layer: unified jobs, bulk review, UI-triggered autolabel
   users: () => get<UserRow[]>("/api/users"),
-  createUser: (name: string, role: string) => post<UserRow>("/api/users", { name, role }),
+  me: () => get<UserRow>("/api/users/me"),
+  createUser: (name: string, role: string) => post<UserCreated>("/api/users", { name, role }),
   curationSummary: (session_id?: string) =>
     get<CurationSummary>("/api/curation/summary" + (session_id ? `?session_id=${session_id}` : "")),
   curationEmbed: (session_id?: string) =>

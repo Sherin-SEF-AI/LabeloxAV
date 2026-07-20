@@ -9,7 +9,9 @@ from fastapi import Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config import get_settings
 from db.session import get_sessionmaker
+from services.api.auth_token import bearer_uid
 
 # Role hierarchy: a higher rank satisfies any floor at or below it. admin is the superuser.
 ROLE_RANK = {"annotator": 1, "reviewer": 2, "admin": 3}
@@ -24,15 +26,33 @@ async def db_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def current_user(x_lbx_user_id: str | None = Header(default=None), db: AsyncSession = Depends(db_session)):
-    """The acting user, chosen client-side (lightweight, no password). Returns the User row or None.
-    Sent as the X-Lbx-User-Id header by the web client. Open (read) endpoints may receive None."""
+def _uid_from_credentials(authorization: str | None, x_lbx_user_id: str | None) -> str | None:
+    """Resolve the acting user_id. The real credential is a signed Bearer token (unforgeable). The legacy
+    plaintext X-Lbx-User-Id header is honored ONLY when auth is disabled (unit tests); with auth enabled it is
+    ignored, so a caller cannot self-assert an identity by echoing a UUID from the public user list (C1)."""
+    settings = get_settings()
+    uid = bearer_uid(authorization, settings.auth.signing_key)
+    if uid:
+        return uid
+    if not settings.auth.enabled and x_lbx_user_id:
+        return x_lbx_user_id
+    return None
+
+
+async def current_user(
+    authorization: str | None = Header(default=None),
+    x_lbx_user_id: str | None = Header(default=None),
+    db: AsyncSession = Depends(db_session),
+):
+    """The acting user, identified by a signed Bearer token. Returns the User row or None. Open (read)
+    endpoints may receive None."""
     from db.models import User
 
-    if not x_lbx_user_id:
+    uid = _uid_from_credentials(authorization, x_lbx_user_id)
+    if not uid:
         return None
     try:
-        return await db.get(User, UUID(x_lbx_user_id))
+        return await db.get(User, UUID(uid))
     except Exception:  # noqa: BLE001
         return None
 
@@ -40,7 +60,7 @@ async def current_user(x_lbx_user_id: str | None = Header(default=None), db: Asy
 async def require_user(user=Depends(current_user)):
     """Dependency that rejects unauthenticated callers (401). Use on any state-changing route."""
     if user is None:
-        raise HTTPException(status_code=401, detail="authentication required (X-Lbx-User-Id)")
+        raise HTTPException(status_code=401, detail="authentication required (Bearer token)")
     return user
 
 

@@ -517,9 +517,13 @@ class Phase4Settings(BaseModel):
 
 
 class AuthSettings(BaseModel):
-    # Deny-by-default API auth. When enabled, every mutating /api request needs a known X-Lbx-User-Id,
-    # and role floors gate destructive/governance routes. Reads stay open. Disable only for unit tests.
+    # Deny-by-default API auth. When enabled, every mutating /api request needs a valid signed Bearer token
+    # (services/api/auth_token.py) and role floors gate destructive/governance routes. Reads under
+    # data-bearing prefixes are gated too. Disable only for unit tests.
     enabled: bool = True
+    # HMAC key that signs/verifies API tokens. The weak default below is refused on any non-local deployment
+    # by _require_prod_secrets: a known signing key lets anyone mint an admin token.
+    signing_key: str = "labeloxavauthsigningkey0123456789abcdef"
 
 
 class LidarSettings(BaseModel):
@@ -773,6 +777,8 @@ class Settings(BaseSettings):
             weak.append("LBX_FORGYX__DEPLOY_SIGNING_KEY")
         if self.phase4.govern.attestation_key.startswith("labeloxavgovernattestationkey"):
             weak.append("LBX_PHASE4__GOVERN__ATTESTATION_KEY")
+        if self.auth.enabled and self.auth.signing_key.startswith("labeloxavauthsigningkey"):
+            weak.append("LBX_AUTH__SIGNING_KEY")
         if not weak:
             return self
         is_dev_env = self.env.lower() in self._DEV_ENVS

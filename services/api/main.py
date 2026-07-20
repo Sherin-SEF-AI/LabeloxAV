@@ -14,6 +14,7 @@ from starlette.responses import JSONResponse
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
 from services.api.deps import role_rank
+from services.export.dataset import DpdpaRefusal
 from services.api.routers import (
     activelearn,
     adverse,
@@ -125,7 +126,14 @@ _REVIEWER_PREFIXES = (
 _READ_GATED_PREFIXES = ("/api/govern", "/api/datasets", "/api/users", "/api/export")
 
 
+# Self-service routes: gated (need a valid token) but reachable by any authenticated user, so they must not
+# inherit the admin/reviewer floor of their prefix. GET /users/me lets a user resolve their own identity.
+_SELF_PATHS = ("/api/users/me",)
+
+
 def _required_role(path: str) -> str:
+    if path in _SELF_PATHS:
+        return "annotator"
     if path.startswith(_ADMIN_PREFIXES):
         return "admin"
     if path.startswith(_REVIEWER_PREFIXES):
@@ -134,12 +142,13 @@ def _required_role(path: str) -> str:
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Deny-by-default: every mutating /api request needs a known user, with role floors by path. Reads are
-    open EXCEPT under _READ_GATED_PREFIXES (which leak data or presigned download URLs). A new write route added
-    later is gated automatically (fails closed)."""
+    """Deny-by-default: every mutating /api request needs a valid signed Bearer token, with role floors by
+    path. Reads are open EXCEPT under _READ_GATED_PREFIXES (which leak data or presigned download URLs). A new
+    write route added later is gated automatically (fails closed)."""
 
     async def dispatch(self, request, call_next):
-        if not get_settings().auth.enabled:
+        settings = get_settings()
+        if not settings.auth.enabled:
             return await call_next(request)
         method = request.method
         path = request.url.path
@@ -152,8 +161,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         from db.models import User
         from db.session import get_sessionmaker
+        from services.api.auth_token import bearer_uid
 
-        uid = request.headers.get("x-lbx-user-id")
+        # The credential is a signed token in the Authorization header, not a plaintext user id: an attacker
+        # who reads the public user list cannot mint one without the server signing key (C1).
+        uid = bearer_uid(request.headers.get("authorization"), settings.auth.signing_key)
         role = None
         if uid:
             try:
@@ -171,7 +183,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
 
         if role is None:
-            return JSONResponse({"detail": "authentication required (X-Lbx-User-Id)"}, status_code=401)
+            return JSONResponse({"detail": "authentication required (Bearer token)"}, status_code=401)
         if role_rank(role) < role_rank(_required_role(path)):
             return JSONResponse({"detail": f"requires {_required_role(path)} role or higher"}, status_code=403)
         return await call_next(request)
@@ -186,6 +198,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(DpdpaRefusal)
+async def _dpdpa_handler(request, exc: DpdpaRefusal):
+    # A DPDPA pre-sale refusal is an expected, client-actionable outcome (un-redacted PII in the slice), not a
+    # server fault: return 422 with the per-session blockers instead of letting it escape as a 500.
+    payload = exc.args[0] if exc.args else {"detail": "DPDPA pre-sale gate refused export"}
+    return JSONResponse(payload, status_code=422)
 
 
 @app.get("/api/health")
