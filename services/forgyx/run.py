@@ -37,10 +37,21 @@ async def record_deployment(db: AsyncSession, model_version: str, target: str, a
                             release_commit: str | None = None, verdict_ref: UUID | None = None,
                             benchmark_ref: UUID | None = None, status: str = "verified") -> dict:
     """Persist a deployable, verified artifact with lineage to the release, the VERDYX verdict, and the
-    FORGYX benchmark that gated it."""
+    FORGYX benchmark that gated it. The manifest is HMAC-signed so a swapped artifact or forged verdict is
+    detectable (verify_manifest); the signing key was defined but never applied here."""
+    from core.config import get_settings
+    from services.forgyx.packaging import sign_manifest
+
+    export_format = _FORMAT.get(target, "onnx")
+    manifest = {"model_version": model_version, "target": target, "artifact_uri": artifact_uri,
+                "export_format": export_format, "release_commit": release_commit,
+                "verdict_ref": str(verdict_ref) if verdict_ref else None,
+                "benchmark_ref": str(benchmark_ref) if benchmark_ref else None, "status": status}
+    signature = sign_manifest(manifest, get_settings().forgyx.deploy_signing_key)
     row = Deployment(model_version=model_version, target=target, artifact_uri=artifact_uri,
-                     export_format=_FORMAT.get(target, "onnx"), release_commit=release_commit,
-                     verdict_ref=verdict_ref, benchmark_ref=benchmark_ref, status=status)
+                     export_format=export_format, release_commit=release_commit,
+                     verdict_ref=verdict_ref, benchmark_ref=benchmark_ref, status=status,
+                     signature=signature)
     db.add(row)
     await db.commit()
     log.info("forgyx.deploy", model=model_version, target=target, status=status)

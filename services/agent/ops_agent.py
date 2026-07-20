@@ -204,7 +204,12 @@ async def execute(db: AsyncSession, steps: list[dict], *, confirm: bool = False,
         results.append({"tool": step["tool"], "args": step["args"], "result": out})
         ran.append(step["tool"])
     status = "awaiting_confirmation" if pending else "committed"
-    db.add(AgentRun(run_id=run_id, kind=_KIND, scope={}, status="committed", policy={"steps": steps},
+    # Record the ACTUAL run state in the ledger: a run that paused on a mutating step is "planned" (work not
+    # committed), not "committed". Hardcoding "committed" claimed work had run that was still pending. The
+    # AgentRun.status column is a short enum (planned|committed|reverted|error); the finer-grained
+    # "awaiting_confirmation" lives in counts.status (JSONB) and in the returned payload.
+    run_status = "planned" if pending else "committed"
+    db.add(AgentRun(run_id=run_id, kind=_KIND, scope={}, status=run_status, policy={"steps": steps},
                     counts={"ran": ran, "status": status}, changes={}, critic={}, created_by=created_by or "ops"))
     await db.commit()
     try:

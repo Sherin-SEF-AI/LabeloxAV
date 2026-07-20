@@ -13,11 +13,20 @@ log = get_logger("speech")
 
 def detect_speech_regions(audio_signal, sample_rate: int) -> list[dict]:
     """Speech regions [{t_start_ns, t_end_ns}] on the audio. WIRE: a VAD/speech model (e.g. silero-vad or a
-    panns speech head) lives in an adapter and fills this in. Returns an empty list until wired, so the
-    caller stores nothing rather than inventing speech."""
-    # WIRE: services/anonymize adapter for a voice-activity / speech detector. No model runtime is invented
-    # here; the gate and store below are complete and run without it.
-    return []
+    panns speech head) lives in an adapter and fills this in.
+
+    Fail-closed until wired: with no detector we cannot prove a clip is speech-free, so the WHOLE clip is
+    returned as one personal segment (default redact) rather than an empty list that would silently let audio
+    with speech through the DPDPA export gate. A human confirms non-personal or masks it; a wired detector
+    replaces this with real segments."""
+    n = len(audio_signal) if audio_signal is not None else 0
+    if n == 0 or sample_rate <= 0:
+        return []
+    duration_ns = int(n / sample_rate * 1_000_000_000)
+    if duration_ns <= 0:
+        return []
+    # WIRE: a real VAD adapter returns precise segments here; until then, treat the entire clip as personal.
+    return [{"t_start_ns": 0, "t_end_ns": duration_ns, "method": "fail_closed_wholeclip"}]
 
 
 async def persist_speech_segments(session_id, regions: list[dict], method_version: str = "wire") -> dict:
