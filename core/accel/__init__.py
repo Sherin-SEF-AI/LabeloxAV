@@ -1,6 +1,12 @@
-"""GPU-accelerated kernels for the perception hot paths, capability-gated with a NumPy reference as both the
-correctness oracle and the fallback (runs on the GPU through torch/Triton when a CUDA device is present, else
-the identical NumPy math).
+"""GPU-accelerated kernels for the perception hot paths, capability-gated: they run on the GPU through
+torch/Triton when a CUDA device is present, and most carry an identical NumPy path used as both the
+correctness oracle and the CPU fallback.
+
+Not every kernel has a NumPy fallback. The torch-only kernels raise RuntimeError when torch is unavailable
+rather than silently degrading: phash_batch, image_quality_batch, preprocess_nv12_batch, the maskops
+morphology (dilate/erode/morph_open/morph_close), warp_masks_by_flow, and apply_map_batch depend on
+torch interpolate/conv primitives that have no pure-NumPy equivalent here. Callers on a CPU-only box must
+gate on gpu_available() (or catch the RuntimeError) for those.
 
 Tier 1: fused projection (world -> pixel), all-pairs mask IoU (Triton bit-packed), fused auto-label preprocess.
 Tier 2: multi-view epipolar consistency, box IoU + NMS, pseudo-GT cross-path agreement.

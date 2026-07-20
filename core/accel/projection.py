@@ -170,7 +170,9 @@ def project_world_batch(points_world, T_cam_world, K, dist=None, img_wh=None, mo
         raise ValueError(f"unknown model {model!r}")
     T_cam_world = np.atleast_3d(np.asarray(T_cam_world, dtype=np.float64)).reshape(-1, 4, 4)
     K = np.asarray(K, dtype=np.float64).reshape(-1, 3, 3)
-    if _HAS_TORCH and device != "cpu" and (device == "cuda" or torch.cuda.is_available()):
-        dev = torch.device("cuda" if (device == "cuda" or torch.cuda.is_available()) else "cpu")
-        return _project_world_torch(points_world, T_cam_world, K, dist, img_wh, model, z_min, dev)
+    # Only take the GPU path when CUDA is actually present: an explicit device="cuda" on a CPU-only box used to
+    # enter here and crash on torch.device("cuda"). Fall through to NumPy instead.
+    if _HAS_TORCH and device != "cpu" and torch.cuda.is_available():
+        return _project_world_torch(points_world, T_cam_world, K, dist, img_wh, model, z_min,
+                                    torch.device("cuda"))
     return _project_world_np(points_world, T_cam_world, K, dist, img_wh, model, z_min)

@@ -430,7 +430,9 @@ class SpatialSettings(BaseModel):
 
 
 class ActiveLearnSettings(BaseModel):
-    # M4.0 value-ranked selection. Weights sum to 1; the band is the most-informative confidence window.
+    # M4.0 value-ranked selection. The weights are relative ranking coefficients (the value is a weighted sum
+    # of per-signal [0,1] scores used only to sort, so they need not sum to 1); the base four total 1.0 and the
+    # flicker/fn signals are added on top. The band is the most-informative confidence window.
     w_uncertainty: float = 0.40
     w_diversity: float = 0.25
     w_rarity: float = 0.20

@@ -34,7 +34,9 @@ def entropy_margin(logits, normalize=True, device=None) -> dict:
     if a.ndim == 1:
         a = a[None]
     n, C = a.shape
-    if _HAS_TORCH and device != "cpu" and (device == "cuda" or torch.cuda.is_available()):
+    # Gate on real CUDA availability so an explicit device="cuda" on a CPU-only box falls back instead of
+    # crashing on torch.device("cuda").
+    if _HAS_TORCH and device != "cpu" and torch.cuda.is_available():
         dev = torch.device("cuda")
         t = torch.as_tensor(a, device=dev)
         logp = F.log_softmax(t, dim=1)
@@ -73,7 +75,7 @@ def ensemble_disagreement(path_probs, device=None) -> dict:
     def _ent(p):
         return -(p * np.log(np.clip(p, _EPS, 1.0))).sum(axis=-1)
 
-    if _HAS_TORCH and device != "cpu" and (device == "cuda" or torch.cuda.is_available()):
+    if _HAS_TORCH and device != "cpu" and torch.cuda.is_available():
         t = torch.as_tensor(a, device="cuda")
         mean = t.mean(dim=0)                                          # (N, C)
         pred_ent = -(mean * torch.log(mean.clamp_min(_EPS))).sum(dim=1)

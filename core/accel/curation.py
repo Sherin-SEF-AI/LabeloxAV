@@ -83,19 +83,29 @@ def phash_batch(imgs, hash_size=8, device=None) -> np.ndarray:
     return packed
 
 
-def hamming_matrix(hashes, device=None) -> np.ndarray:
+def hamming_matrix(hashes, device=None, chunk: int = 512) -> np.ndarray:
     """All-pairs Hamming distance (N, N) over packed uint8 hashes (N, B). popcount(a XOR b) via a byte lookup,
-    the coarse near-dup metric. Bit-packed and popcount-native."""
+    the coarse near-dup metric. Bit-packed and popcount-native. Computed in row-chunks so peak memory is
+    (chunk, N, B), not (N, N, B): at N=20k, B=8 the full XOR tensor is ~3.2 GB and OOMs the GPU; chunked it is
+    ~80 MB per block."""
     H = np.asarray(hashes, dtype=np.uint8)
     if H.ndim != 2 or H.shape[0] == 0:
         return np.zeros((H.shape[0], H.shape[0]), dtype=np.int64)
+    n = H.shape[0]
+    out = np.empty((n, n), dtype=np.int64)
     if _HAS_TORCH and device != "cpu" and torch.cuda.is_available():
         t = torch.as_tensor(H, device="cuda").to(torch.int32)
         lut = torch.as_tensor(_POPCOUNT8, device="cuda")
-        x = t[:, None, :] ^ t[None, :, :]                            # (N, N, B)
-        return lut[x.long()].sum(dim=2).cpu().numpy()
-    x = H[:, None, :].astype(np.int32) ^ H[None, :, :].astype(np.int32)
-    return _POPCOUNT8[x].sum(axis=2)
+        for i in range(0, n, chunk):
+            j = min(i + chunk, n)
+            x = t[i:j, None, :] ^ t[None, :, :]                      # (chunk, N, B)
+            out[i:j] = lut[x.long()].sum(dim=2).cpu().numpy()
+        return out
+    for i in range(0, n, chunk):
+        j = min(i + chunk, n)
+        x = H[i:j, None, :].astype(np.int32) ^ H[None, :, :].astype(np.int32)
+        out[i:j] = _POPCOUNT8[x].sum(axis=2)
+    return out
 
 
 # --------------------------------------------------------------------------- k-center greedy

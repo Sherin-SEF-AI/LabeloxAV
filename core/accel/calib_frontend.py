@@ -74,16 +74,25 @@ def refine_corners(gray, corners, win: int = 5, iters: int = 10, eps: float = 1e
 
 # --------------------------------------------------------------------------- descriptor Hamming matching
 
-def _hamming_all_pairs(a, b, device):
-    """(Na, Nb) Hamming distance between packed uint8 binary descriptors (Na, B) and (Nb, B)."""
+def _hamming_all_pairs(a, b, device, chunk: int = 512):
+    """(Na, Nb) Hamming distance between packed uint8 binary descriptors (Na, B) and (Nb, B). Computed in
+    row-chunks so peak memory is (chunk, Nb, B), not (Na, Nb, B), which OOMs on dense ORB descriptor sets."""
+    na, nb = len(a), len(b)
+    out = np.empty((na, nb), dtype=np.int64)
     if _HAS_TORCH and device != "cpu" and torch.cuda.is_available():
         ta = torch.as_tensor(a, device="cuda").to(torch.int32)
         tb = torch.as_tensor(b, device="cuda").to(torch.int32)
         lut = torch.as_tensor(_POPCOUNT8, device="cuda")
-        x = ta[:, None, :] ^ tb[None, :, :]
-        return lut[x.long()].sum(dim=2).cpu().numpy()
-    x = a[:, None, :].astype(np.int32) ^ b[None, :, :].astype(np.int32)
-    return _POPCOUNT8[x].sum(axis=2)
+        for i in range(0, na, chunk):
+            j = min(i + chunk, na)
+            x = ta[i:j, None, :] ^ tb[None, :, :]
+            out[i:j] = lut[x.long()].sum(dim=2).cpu().numpy()
+        return out
+    for i in range(0, na, chunk):
+        j = min(i + chunk, na)
+        x = a[i:j, None, :].astype(np.int32) ^ b[None, :, :].astype(np.int32)
+        out[i:j] = _POPCOUNT8[x].sum(axis=2)
+    return out
 
 
 def descriptor_match(desc_a, desc_b, ratio: float = 0.75, mutual: bool = True, device=None) -> dict:

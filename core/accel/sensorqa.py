@@ -63,12 +63,17 @@ def motion_blur_score(imgs, device=None) -> dict:
         a = a[None]
     n = a.shape[0]
 
-    if _HAS_TORCH and device != "cpu" and (device == "cuda" or torch.cuda.is_available()):
+    # Gate strictly on CUDA availability: an explicit device="cuda" with no GPU used to enter this branch and
+    # crash on torch.device("cuda"); now it falls through to the NumPy path.
+    if _HAS_TORCH and device != "cpu" and torch.cuda.is_available():
         import torch.nn.functional as F
         dev = torch.device("cuda")
         t = torch.as_tensor(a, device=dev, dtype=torch.float32).unsqueeze(1)
-        kx = torch.tensor([[-1.0, 0, 1]], device=dev).view(1, 1, 1, 3)
-        ky = torch.tensor([[-1.0], [0], [1]], device=dev).view(1, 1, 3, 1)
+        # Central-difference kernels scaled by 1/2 to match np.gradient exactly (np.gradient divides the
+        # [-1,0,1] stencil by the spacing of 2). Without the 1/2 the GPU path returned gradient magnitudes and
+        # jxx/jyy/mag at twice the CPU path, so blur_extent diverged by 2x between devices.
+        kx = torch.tensor([[-0.5, 0, 0.5]], device=dev).view(1, 1, 1, 3)
+        ky = torch.tensor([[-0.5], [0], [0.5]], device=dev).view(1, 1, 3, 1)
         gx = F.conv2d(F.pad(t, (1, 1, 0, 0), mode="replicate"), kx)[:, 0]
         gy = F.conv2d(F.pad(t, (0, 0, 1, 1), mode="replicate"), ky)[:, 0]
         gx, gy = gx.reshape(n, -1), gy.reshape(n, -1)
