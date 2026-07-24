@@ -439,6 +439,125 @@ class EvalPatch(Base):
     )
 
 
+class LabelProject(Base):
+    """A labeling programme: the unit a team is organised around, holding the schema and the QA policy every
+    task under it inherits. Named LabelProject rather than Project to keep it unambiguous against the compute
+    jobs (ImportJob / TrainingJob), which are a different notion of "job" entirely.
+
+    label_config is reserved for the per-project configurable interface; an AV project leaves it empty and
+    inherits the 170-class ontology, which stays the default source of truth."""
+
+    __tablename__ = "label_project"
+
+    project_id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    modality: Mapped[str] = mapped_column(String(16), nullable=False, default="image")
+    label_config: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # QA policy inherited by every task: what fraction of a job is hidden gold, and the accuracy an annotator
+    # must hold against it.
+    honeypot_frac: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    min_honeypot_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.9,
+                                                         server_default="0.9")
+    gold_id: Mapped[str | None] = mapped_column(String(128))   # the sealed gold set honeypots are drawn from
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LabelTask(Base):
+    """A batch of work inside a project, usually one session or one curated slice. Splits into jobs, which are
+    what a person actually picks up."""
+
+    __tablename__ = "label_task"
+
+    task_id: Mapped[uuid.UUID] = _uuid_pk()
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("label_project.project_id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    slice_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("curation_slice.slice_id", ondelete="SET NULL"))
+    predicate: Mapped[dict] = mapped_column(JSONB, default=dict)   # the explorer predicate that defined it
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_label_task_project", "project_id"),)
+
+
+class LabelJob(Base):
+    """The unit of assignable work: a bounded set of frames one person annotates, reviews, or accepts.
+
+    stage and state are separate on purpose, the same split CVAT uses. stage is WHERE in the pipeline the work
+    sits (annotation -> validation -> acceptance); state is how far along it is within that stage. Collapsing
+    them into one enum loses the ability to say "in validation, not yet started".
+
+    Frames are referenced by id, never copied, so a job is a view over the corpus and cannot drift from it."""
+
+    __tablename__ = "label_job"
+
+    job_id: Mapped[uuid.UUID] = _uuid_pk()
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("label_task.task_id", ondelete="CASCADE"), nullable=False)
+    frame_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    stage: Mapped[str] = mapped_column(String(12), nullable=False, default="annotation")
+    state: Mapped[str] = mapped_column(String(12), nullable=False, default="new")
+    # Hidden gold frames mixed into this job, and the measured accuracy against them once submitted.
+    honeypot_frame_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    honeypot_accuracy: Mapped[float | None] = mapped_column(Float)
+    honeypot_detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Optimistic concurrency, matching Object: two reviewers acting on one job cannot silently clobber.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_label_job_task", "task_id"),
+        Index("ix_label_job_assignee", "assignee_id", "state"),
+    )
+
+
+class Issue(Base):
+    """A review thread pinned to a specific annotation or region: the feedback loop that lets a reviewer say
+    "this box is wrong, here" instead of rejecting silently. Anchored to an object when the complaint is about
+    a label, or to a frame plus a box region when it is about something missing."""
+
+    __tablename__ = "issue"
+
+    issue_id: Mapped[uuid.UUID] = _uuid_pk()
+    job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("label_job.job_id", ondelete="CASCADE"))
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    object_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
+    region: Mapped[list | None] = mapped_column(JSONB)          # optional [x1,y1,x2,y2] pin on the frame
+    kind: Mapped[str] = mapped_column(String(24), nullable=False, default="comment")
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="open")   # open | resolved
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_issue_frame", "frame_id", "status"),
+        Index("ix_issue_job", "job_id", "status"),
+    )
+
+
+class IssueComment(Base):
+    """One message in an issue thread."""
+
+    __tablename__ = "issue_comment"
+
+    comment_id: Mapped[uuid.UUID] = _uuid_pk()
+    issue_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("issue.issue_id", ondelete="CASCADE"),
+                                                nullable=False)
+    author_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_issue_comment_issue", "issue_id"),)
+
+
 class ScenarioCandidate(Base):
     # Rare-scenario discovery output (M1.5): unusual frames surfaced by embedding novelty or rare-class,
     # routed to a human confirm/dismiss/tag queue. Feeds active learning and sellable rare slices.

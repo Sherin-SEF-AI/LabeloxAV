@@ -39,6 +39,7 @@ from services.api.routers import (
     inspector,
     intelligence,
     jobs,
+    labelops,
     lanes,
     lidar,
     lidar_scene,
@@ -317,6 +318,7 @@ app.include_router(training.router, prefix="/api", tags=["training"])
 app.include_router(tracks.router, prefix="/api", tags=["tracks"])
 app.include_router(autolabel.router, prefix="/api", tags=["autolabel"])
 app.include_router(jobs.router, prefix="/api", tags=["jobs"])
+app.include_router(labelops.router, prefix="/api", tags=["labelops"])
 app.include_router(users.router, prefix="/api", tags=["users"])
 app.include_router(datasets.router, prefix="/api", tags=["datasets"])
 app.include_router(curation.router, prefix="/api", tags=["curation"])
