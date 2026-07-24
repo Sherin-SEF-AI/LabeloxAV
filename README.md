@@ -62,6 +62,24 @@ Labeling that data by hand is slow and expensive. The cases that actually matter
 
 ![LiDAR bird's eye view annotation](docs/screenshots/11-lidar-inapp.png)
 
+**Tried on a public dataset, start to finish.** Three Velodyne HDL-64E scans from the KITTI object set were downloaded from a public mirror and pushed through the whole path: read, stored, served, and rendered. 362,543 points across the three, and the viewer draws all 115,384 of the first one without decimating.
+
+![The LiDAR viewer on real KITTI scans: 3D view, bird's eye view, and the cloud list](docs/screenshots/lidar-viewer.gif)
+
+*Cycling the three scans, then switching the colour channel between height, source and intensity. The panel reports `rendered 115,384 / decimated no`.*
+
+![The LiDAR viewer showing a KITTI scan in 3D and bird's eye view simultaneously](docs/screenshots/42-lidar-viewer.png)
+
+The processing is worth one honest detail. RANSAC ground segmentation put the road plane at **1.71 m, 1.68 m and 1.69 m** below the sensor on the three scans. KITTI mounts its Velodyne at roughly 1.73 m, so the fitted plane lands where the hardware actually sits, which is a much better check on the geometry than any number the code reports about itself. Ground came out at 31 to 64 percent of returns depending on how open the scene is, and voxel occupancy over a 80 by 80 by 6 metre volume took 0.08 to 0.15 s per scan.
+
+![Raw height-coloured returns beside the RANSAC ground and obstacle split](docs/screenshots/41-lidar-segmentation.png)
+
+*Left, raw returns coloured by height, with the Velodyne ring pattern on the road and buildings picked out along the kerb. Right, the same scan split by the fitted ground plane: blue is ground, orange is everything standing above it.*
+
+![Bird's eye view of three successive KITTI scans, raw and ground-segmented](docs/screenshots/lidar.gif)
+
+To be clear about scope: this is three frames from a public sample, not the full KITTI benchmark, and it exercises ingest, storage, serving, ground segmentation, occupancy and rendering. It does not train or evaluate a 3D detector.
+
 **Every camera at once, on one canvas.** A vehicle carries a rig of cameras, so the same object shows up in several views at the same instant. LabeloxAV groups the synchronized frames, then lets you switch the editor into a rig view, a grid, a surround strip ordered the way the cameras face, or a focus plus context layout, with no change of mode and every tool working exactly as before. A dropped frame shows as an empty tile instead of vanishing. Work happens in two tiers, gated on calibration and honest about which one is available: on any session you link the same object across views by hand or from a DINOv3 appearance suggestion, and the rig identity votes a class and flags a cross view disagreement for review; on a calibrated session you annotate once and project the box into the other views by geometry, lens aware for the narrow and fisheye lenses. Objects are then followed across time and cameras as one rig track, and a consistency check files the views that disagree straight into the review queue.
 
 ![Synchronized multi camera annotation with rig identities and the two tier calibration gate](docs/screenshots/18-multicam-identities.png)
