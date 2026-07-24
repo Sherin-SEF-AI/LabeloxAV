@@ -22,6 +22,9 @@ from sqlalchemy import (
     Text,
     func,
 )
+# Aliased: Asset defines a column literally named `text`, which would shadow the bare sqlalchemy.text
+# helper inside that class body.
+from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import (
     ARRAY as PGARRAY,  # noqa: F401  (scenario_candidate.rare_classes)
 )
@@ -556,6 +559,79 @@ class IssueComment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_issue_comment_issue", "issue_id"),)
+
+
+class Asset(Base):
+    """A labelable item in a project, for any modality.
+
+    LabeloxAV has two annotation spines, kept deliberately separate:
+
+      AV spine       Session -> Frame -> Object (+ TimelineEvent)   the driving corpus, untouched
+      project spine  LabelProject -> Asset -> Annotation            everything a project labels
+
+    Forcing text spans and audio regions into Object (which is welded to a bbox, an ontology class id and the
+    confidence gate) would have made both worse. An Asset can REFERENCE an existing frame or session, so an AV
+    project reuses the corpus through the same job machinery without copying a single row.
+    """
+
+    __tablename__ = "asset"
+
+    asset_id: Mapped[uuid.UUID] = _uuid_pk()
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("label_project.project_id", ondelete="CASCADE"), nullable=False)
+    # image | video | audio | text | timeseries | document | pointcloud | dialogue
+    media_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    uri: Mapped[str | None] = mapped_column(Text)          # object-store uri for binary media
+    text: Mapped[str | None] = mapped_column(Text)         # inline body for text/dialogue assets
+    external_id: Mapped[str | None] = mapped_column(String(200))   # caller's own id, for idempotent import
+    # Optional links back into the AV spine, so an Asset can be a view of an existing frame or session.
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict)  # duration_s, sample_rate, width/height, channels
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="new")  # new|in_progress|labeled|skipped
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_asset_project", "project_id", "state"),
+        Index("ix_asset_external", "project_id", "external_id", unique=True,
+              postgresql_where=sql_text("external_id IS NOT NULL")),
+    )
+
+
+class Annotation(Base):
+    """One annotation on an Asset, of any shape.
+
+    `kind` selects how `payload` is read, and payload is validated against the kind AND against the project's
+    label_config before it is stored (services/assets/labelconfig.py). Keeping the shape in JSONB rather than
+    as columns is what lets one table serve boxes, text spans, audio regions and preference rankings; keeping
+    the validation strict is what stops that flexibility from becoming a junk drawer.
+
+    Carries the same discipline as Object: source, state, version for optimistic concurrency, and provenance.
+    """
+
+    __tablename__ = "annotation"
+
+    annotation_id: Mapped[uuid.UUID] = _uuid_pk()
+    asset_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("asset.asset_id", ondelete="CASCADE"),
+                                                nullable=False)
+    # bbox | polygon | polyline | keypoints | mask | span | relation | region | classification |
+    # transcription | preference | rubric | ranking
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(120))   # the label config entry this instance carries
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    fields: Mapped[dict] = mapped_column(JSONB, default=dict)  # typed per-label fields from the label config
+    conf: Mapped[float | None] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="human")  # human|model|imported
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="accepted")
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_annotation_asset", "asset_id", "kind"),
+        Index("ix_annotation_label", "label"),
+    )
 
 
 class ScenarioCandidate(Base):
