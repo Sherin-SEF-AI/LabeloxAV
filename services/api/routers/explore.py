@@ -142,6 +142,60 @@ async def save_view(payload: ViewIn, _user=Depends(require_role("annotator"))):
     return await create_slice(payload.name, payload.predicate, payload.description)
 
 
+# ---- evaluation drill-down ------------------------------------------------------------------------------
+
+class EvalIn(BaseModel):
+    gold_id: str
+    pred_sources: list[str] | None = None
+    iou_thr: float = 0.5
+    model_version: str | None = None
+
+
+@router.post("/explore/eval")
+async def run_eval(payload: EvalIn, _user=Depends(require_role("reviewer")),
+                   db: AsyncSession = Depends(db_session)):
+    """Score machine labels against a sealed gold set, recording every individual tp/fp/fn so the confusion
+    matrix can be opened cell by cell."""
+    from services.analytics import evaluation as eval_svc
+
+    return await eval_svc.evaluate_gold_patches(
+        db, payload.gold_id, pred_sources=payload.pred_sources,
+        iou_thr=payload.iou_thr, model_version=payload.model_version)
+
+
+@router.get("/explore/evals")
+async def list_evals(limit: int = 50, db: AsyncSession = Depends(db_session)):
+    from services.analytics import evaluation as eval_svc
+
+    return {"evals": await eval_svc.list_evaluations(db, limit)}
+
+
+@router.get("/explore/eval/{eval_id}/cells")
+async def eval_cells(eval_id: str, db: AsyncSession = Depends(db_session)):
+    from services.analytics import evaluation as eval_svc
+
+    return await eval_svc.confusion_cells(db, eval_id)
+
+
+@router.get("/explore/eval/{eval_id}/patches")
+async def eval_patches(eval_id: str, gt_class_id: int | None = None, pred_class_id: int | None = None,
+                       outcome: str | None = None, limit: int = 120,
+                       db: AsyncSession = Depends(db_session)):
+    """The crops behind one confusion cell."""
+    from services.analytics import evaluation as eval_svc
+
+    return await eval_svc.cell_patches(db, eval_id, gt_class_id=gt_class_id,
+                                       pred_class_id=pred_class_id, outcome=outcome, limit=limit)
+
+
+@router.delete("/explore/eval/{eval_id}")
+async def delete_eval(eval_id: str, _user=Depends(require_role("reviewer")),
+                      db: AsyncSession = Depends(db_session)):
+    from services.analytics import evaluation as eval_svc
+
+    return await eval_svc.delete_evaluation(db, eval_id)
+
+
 @router.get("/explore/views/{slice_id}/export-spec")
 async def view_export_spec(slice_id: str, db: AsyncSession = Depends(db_session)):
     """Turn a saved view into the export SliceSpec, so a curated cohort exports without being redefined."""

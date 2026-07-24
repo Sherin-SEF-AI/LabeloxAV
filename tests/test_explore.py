@@ -242,3 +242,87 @@ def test_object_siglip_is_rejected():
                 await fit_projection(db, kind="object", space="siglip")
 
     run_async(run())
+
+
+@requires_infra
+def test_eval_patches_capture_confusion_and_misses():
+    """A cross-class confusion must land in an off-diagonal cell (both class ids set), an unmatched
+    prediction must be an fp with no gt class, and an unmatched gold object must be an fn."""
+    import uuid as _uuid
+
+    from db.models import GoldSet, Object
+    from db.session import get_sessionmaker
+    from services.analytics.evaluation import (
+        cell_patches,
+        confusion_cells,
+        delete_evaluation,
+        evaluate_gold_patches,
+    )
+
+    async def run():
+        sid, fid, oids, cids = await _seed()
+        eval_id = None
+        gold_id = f"gold-test-{_uuid.uuid4().hex[:8]}"
+        try:
+            from sqlalchemy import update
+
+            async with get_sessionmaker()() as db:
+                # Make the 3 seeded objects the GOLD (human truth) on this frame.
+                await db.execute(update(Object).where(Object.object_id.in_([_uuid.UUID(o) for o in oids]))
+                                 .values(source="human", state="accepted"))
+                db.add(GoldSet(gold_id=gold_id, name="explore-eval-test", spec={},
+                               object_ids=[str(o) for o in oids], n_objects=3, n_frames=1,
+                               ontology_version="test"))
+
+                # Predictions on the same frame:
+                #  - exact overlap of gold[0] but WRONG class  -> off-diagonal confusion
+                #  - exact overlap of gold[1] with RIGHT class -> tp
+                #  - a box overlapping nothing                 -> fp
+                #  gold[2] gets no prediction                  -> fn
+                db.add(Object(object_id=_uuid.uuid4(), frame_id=_uuid.UUID(fid), class_id=cids[2],
+                              bbox=[0.0, 0.0, 5.0, 5.0], conf=0.9, source="fused", state="auto_accept",
+                              attrs={}, provenance={}))
+                db.add(Object(object_id=_uuid.uuid4(), frame_id=_uuid.UUID(fid), class_id=cids[1],
+                              bbox=[10.0, 0.0, 15.0, 5.0], conf=0.8, source="fused", state="auto_accept",
+                              attrs={}, provenance={}))
+                db.add(Object(object_id=_uuid.uuid4(), frame_id=_uuid.UUID(fid), class_id=cids[0],
+                              bbox=[500.0, 400.0, 520.0, 420.0], conf=0.7, source="fused",
+                              state="auto_accept", attrs={}, provenance={}))
+                await db.commit()
+
+            async with get_sessionmaker()() as db:
+                res = await evaluate_gold_patches(db, gold_id, iou_thr=0.5)
+                eval_id = res["eval_id"]
+                assert res["tp"] == 1, res
+                assert res["fn"] == 1, res
+                # one wrong-class match + one box matching nothing
+                assert res["fp"] == 2, res
+
+                cells = (await confusion_cells(db, eval_id))["cells"]
+                off_diag = [c for c in cells
+                            if c["gt_class_id"] is not None and c["pred_class_id"] is not None
+                            and c["gt_class_id"] != c["pred_class_id"]]
+                assert off_diag, f"expected an off-diagonal confusion cell, got {cells}"
+
+                # drilling into that cell returns the real object with a crop url
+                cell = off_diag[0]
+                got = await cell_patches(db, eval_id, gt_class_id=cell["gt_class_id"],
+                                         pred_class_id=cell["pred_class_id"])
+                assert got["count"] >= 1
+                assert got["patches"][0]["crop_url"].startswith("/api/objects/")
+
+                # misses are recorded with no predicted class
+                misses = await cell_patches(db, eval_id, outcome="fn")
+                assert misses["count"] == 1
+                assert misses["patches"][0]["pred_class_id"] is None
+        finally:
+            async with get_sessionmaker()() as db:
+                if eval_id:
+                    await delete_evaluation(db, eval_id)
+                g = await db.get(GoldSet, gold_id)
+                if g:
+                    await db.delete(g)
+                    await db.commit()
+            await _teardown(sid)
+
+    run_async(run())
