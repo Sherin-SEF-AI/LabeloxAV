@@ -18,7 +18,13 @@ One ontology, 170 classes, tuned for the chaos that global datasets never saw: a
 
 A Blender-style dark workstation: neutral greys, a single blue accent that only appears on the active or primary control, rounded tool buttons, recessed value fields, and panels with named headers. Every control carries a tooltip and every panel a one line description, so the UI explains itself instead of assuming you already know it.
 
-**One chrome, every screen.** All 44 dashboards render inside a single shared shell, so the frame is identical wherever you are: a top bar with a grouped app switcher (Work, Discover, Data, Quality and models, Spatial), a titled header with the page's primary action, an optional filter band, and content that scrolls under fixed chrome. Jump anywhere with a **Cmd+K command palette** that fuzzy matches every destination, and press **?** on any page for a searchable keyboard-shortcut reference. Nothing is more than a keystroke away, and adding a new page costs no new navigation.
+**One chrome, every screen.** Every dashboard renders inside a single shared shell, so the frame is identical wherever you are: a menu bar, a titled header with the page's primary action, an optional filter band, and content that scrolls under fixed chrome. Jump anywhere with a **Cmd+K command palette** that fuzzy matches every destination, and press **?** on any page for a searchable keyboard-shortcut reference.
+
+![The application menu bar, with the File menu and its Import submenu open](docs/screenshots/menus.gif)
+
+The navigation is a **menu bar**, not a row of buttons: File, Edit, View, Label, Quality, Spatial, Window, Help. Sections split by dividers, icon on the left, shortcut right-aligned, submenus on hover. The reason is boring and practical: buttons compete for horizontal space and eventually force a scroll or an overflow chevron, while menus stay one row at any number of destinations. Adding a destination is one entry in `web/lib/menus.ts`. The command palette reads the same definition, so the menu and the palette cannot drift apart.
+
+![The File menu with the Import submenu open, showing the fourteen supported import formats](docs/screenshots/32-menubar.png)
 
 The whole engine is organized as **seven platforms** over one shared spine, navigable from a launcher and a platform switcher reachable anywhere. Data flows through them in flywheel order: ingest QA (SANYX), calibration (CALYX), curation and mining (SIEVYX), annotation (Labelox), offline pseudo truth (ORACLYX), evaluation (VERDYX), and edge deploy (FORGYX), then the loop closes as failures and coverage gaps feed the next collection and labeling cycle.
 
@@ -62,6 +68,16 @@ Labeling that data by hand is slow and expensive. The cases that actually matter
 
 *The rig view on a real two camera session: the focused camera keeps the full annotation canvas while the other camera rides along as context, the identities panel links one physical object across views, and the header shows the tier the session has earned (here TIER 2, calibrated, so annotate once and project is available) alongside the group and track controls.*
 
+**Explore the corpus as structure, not as a list.** Objects are laid out by embedding similarity (UMAP over the DINOv3 vectors, with HDBSCAN clusters), so lookalikes sit together and outliers sit apart. Lasso a region and act on it in bulk: tag it, save it as a view, or send it to review. A facet rail on the left cuts by class, state, source, confidence, scene axis, city and tag, and each facet is computed with its own clause dropped, so a bar always answers "how many would I get if I picked this instead" rather than collapsing to the value you already chose.
+
+![The Explore workspace: facet rail on the left with live counts over the ingested corpus](docs/screenshots/30-explore.png)
+
+*Real counts from the ingested corpus: 93,983 objects, with the state, source, confidence and weather facets computed under the current filter.*
+
+The filter you build here is the same predicate a curation slice stores, so a cut you like becomes a saved view and an export without being redefined.
+
+![The embedding cluster map on the analytics page: UMAP over DINOv3 frame embeddings](docs/screenshots/37-cluster-map.png)
+
 **Smart triage, not endless clicking.** Every detection gets a calibrated confidence and a reason. High confidence agrees get auto accepted. The uncertain, rare, and conflicting ones rise to the top of a priority queue. You spend your attention where it matters.
 
 ![Priority queue](docs/screenshots/03-triage.png)
@@ -69,6 +85,24 @@ Labeling that data by hand is slow and expensive. The cases that actually matter
 **Active learning that asks for the right frames.** Instead of labeling random data, the engine ranks every candidate by how much it would teach the model: uncertainty, diversity, rarity, and error proneness combined into a single value score. Label the top of the list, skip the redundant easy frames.
 
 ![Active learning value queue](docs/screenshots/06-review-queue.png)
+
+**Run a labeling team, not just a tool.** Work is organized as projects, tasks, and assignable jobs. A job moves along two independent axes: a **stage** (annotation, validation, acceptance) for where it sits in the pipeline, and a **state** (new, in progress, completed, rejected) for how far along it is within that stage. Keeping them separate is what lets the board say "in validation, not yet started", which one collapsed status cannot express. Jobs reference frames by id and never copy them, so a job is a view over the corpus.
+
+A configurable fraction of each job is seeded with frames drawn from a sealed gold set. The annotator cannot tell them apart from real work, and on submit they are graded silently. A job that misses the project's accuracy floor is sent **back** in the same stage rather than advanced, because work that failed its own quality bar should not reach a reviewer looking like it passed.
+
+![The Projects board: jobs by stage and state, assignment, and annotator scorecards](docs/screenshots/31-projects.png)
+
+Reviewers leave **issues** anchored to a specific object, or to a region on a frame when the complaint is that something is *missing* and there is no object to point at. Scorecards report median time alongside the mean, because annotation times are heavily skewed and one interrupted session drags a mean well off what the work actually costs.
+
+**Where the model disagrees with ground truth, and what that looks like.** A confusion count tells you pedestrians are being called poles; it does not show you the pedestrians. Scoring the machine labels against a sealed gold set records every individual outcome, so a cell opens into the actual crops.
+
+![Model versus gold: per-cell true positives, false positives and misses against a sealed gold set](docs/screenshots/35-eval-drilldown.png)
+
+*A real run against a 400-object gold set. The largest cells are misses, not confusions: 105 pedestrians and 55 autorickshaws the machine labels never found on those frames. Clicking a row loads the crops behind it.*
+
+**Beyond driving frames.** The same project, job and issue machinery also drives audio, text, time series, documents and LLM-evaluation tasks, through a second spine (`Asset` and `Annotation`) that sits beside the driving corpus rather than inside it. A project declares its own labels and typed fields, and one editor renders the right canvas for the media type.
+
+![Text and NER labeling: spans coloured by label, with the project's declared labels and typed fields](docs/screenshots/34-multimodal-text.png)
 
 **A closed loop you can govern.** Corrections and mined hard cases feed a versioned training set. The model retrains, gets measured against a frozen gold set, and is promoted only if it beats the champion without regressing a safety class. Then it relabels the existing data, surfaces the errors that remain, and the cycle repeats. Over each turn the auto accept ceiling rises and human touches fall.
 
@@ -89,8 +123,11 @@ Every automated decision is in an audit log. A drift breach pauses promotion. On
 - **Derived dynamics**: per object distance, speed, heading, time to collision, and a risk level, turning a perception dataset into one that supports planning and prediction.
 - **Self improvement**: active learning, annotation error detection, AI assisted relabeling, champion and challenger promotion that actually serves the promoted model, a kill switch that genuinely stops auto accept, control sample precision, drift detection with recovery, and a full audit trail.
 - **A standing agent workforce**: an Agent Console that runs autonomous QA overnight (error sweeps, temporal repair, a reviewable fix queue) and an "Ask LabeloxAV" operations agent that turns a plain sentence into a plan over the real endpoints, pausing for confirmation on anything destructive. Agents only propose; the gates dispose, and every action is a reversible, audited run.
-- **A unified workstation**: all 44 dashboards share one dark, self explaining chrome, with a grouped app switcher, a Cmd+K command palette to jump anywhere, and a press-? shortcut reference on every page. The frame editor is a mode-rail workspace (Objects, Lanes, Pose, 3D, Review) whose grouped tool strip stays a single row no matter how many tools a mode owns.
-- **Export and import**: COCO, YOLO, KITTI, BDD100K, OpenLABEL, nuScenes (with real 3D when a cuboid exists), and a lossless Parquet round trip.
+- **A unified workstation**: every dashboard shares one dark, self explaining chrome, with a menu bar carrying every destination, a Cmd+K command palette that reads the same definition, and a press-? shortcut reference on every page. The frame editor is a mode-rail workspace (Objects, Lanes, Pose, 3D, Review) whose grouped tool strip stays a single row no matter how many tools a mode owns.
+- **Export and import**: COCO, YOLO, Pascal VOC, KITTI, BDD100K, OpenLABEL, nuScenes (with real 3D when a cuboid exists), CVAT XML, Label Studio JSON, and a lossless Parquet round trip. The CVAT and Label Studio adapters are written as mirrored pairs and tested by round trip, since a format adapter that only works one way is a trap.
+![Integrations: webhook subscriptions with their event list, and registered storage buckets](docs/screenshots/33-integrations.png)
+
+- **Integrations**: outbound webhooks signed with an HMAC per subscription (an unsigned webhook is an unauthenticated write into whatever it triggers), registered S3/GCS/Azure source locators that deliberately store no credentials, and a thin Python SDK and CLI over the same REST API the web app uses.
 - **Secure and versioned**: deny by default API auth with annotator, reviewer, and admin roles, git style branches and reviewed merges over the dataset, and a mandatory privacy gate.
 
 ---
@@ -148,15 +185,21 @@ Detectors live in a versioned registry, trained on the India Driving Dataset and
 | idd-yolo11n | YOLO11n | IDD | 0.34 | 0.67 | 0.30 |
 | roadscope-yolo11l | YOLO11l | general | 0.72 | 0.73 | 0.65 |
 
-The accurate IDD model reaches 0.44 mAP@50, a clear step over the earlier 0.39 baseline, while the tiny YOLO11n trades accuracy for speed so it can run on the vehicle. The model nails the common road agents and is weaker on the rare India specific long tail, which is exactly the gap the active learning loop is built to close. Every model is promoted only through the champion and challenger gate above.
+The IDD model reaches 0.44 mAP@50, up from an earlier 0.39 baseline, while the tiny YOLO11n trades accuracy for speed so it can run on the vehicle. These are modest numbers on a hard dataset: the models do reasonably on common road agents and poorly on the rare India specific long tail, which is the gap the active learning loop exists to close. Every model is promoted only through the champion and challenger gate above.
 
 ## Honest status
 
-This is a from scratch build of the full pipeline, end to end, backed by an automated test suite. The engine, the ontology, the closed loop, the governance, the maps, and the editor are real and verified.
+This is a from scratch build of the full pipeline, backed by an automated test suite. What follows separates what has been exercised on real data from what has only been written and type checked, because those are not the same claim.
 
-The real data path is proven and now populated. A full fleet of real dashcam drives has been ingested: 186 trips and 32,455 frames from Indian roads, with faces and plates blurred before anything reaches storage. Real semantic segmentation models run the drivable surface and lane geometry across that corpus through the cloud GPU seam, which is now a wired dispatch that starts a pod, runs the sweep, ingests the result, and stops the pod to cap billing, rather than a promise. India Driving Dataset frames are embedded so search and discovery run on real pixels, a real KITTI LiDAR scan is annotated to 3D cuboids and exported as nuScenes, and detectors in the registry are trained on the India Driving Dataset and reach a real baseline.
+**Exercised on real data.** A fleet of real dashcam drives is ingested: 186 trips and 32,455 frames from Indian roads, with faces and plates blurred before anything reaches storage. Counting everything in the database, including imported public datasets and test sessions, that comes to 40,221 frames and 93,983 objects, which is the number the explorer screenshots above are filtering over. Semantic segmentation models run drivable surface and lane geometry across it through the cloud GPU seam, which starts a pod, runs the sweep, ingests the result and stops the pod to cap billing. Frames are embedded, so search, discovery and the embeddings map run on real pixels. A real KITTI LiDAR scan is annotated to 3D cuboids and exported as nuScenes. Detectors in the registry are trained on the India Driving Dataset. The explorer, the faceted counts, bulk tagging, the job and honeypot workflow, the model-versus-gold drill-down, the CVAT and Label Studio round trips, and signed webhook delivery have each been driven end to end against this running stack.
 
-The test suite once wrote to the same database as production and left synthetic frames behind; that is now fixed at the source (isolated test database, CI, and an ingest gate that rejects corrupt frames), and the residue was quarantined. What is left is to run the full closed loop on the new corpus at scale: autolabel every drive, mine the hard cases, retrain, and watch the auto accept ceiling climb. The pixels are real now, and the loop runs on them.
+**Written and type checked, but not yet exercised on real media.** The audio (waveform and region) and document/OCR editors have no sample audio or scanned pages in the corpus to run against, so they are unproven in practice. Storage-source listing is implemented for S3-compatible stores only; GCS and Azure register as locators but return an explicit "listing not implemented" rather than keys.
+
+**Known gaps in the test suite.** 751 tests pass. Thirteen fail for reasons unrelated to correctness of the features above: some require services that are not running locally (lakeFS, Ollama, a video codec), and a cluster of four encode gate thresholds that no longer match the configured values. That last group is deliberately left failing rather than updated, because rewriting the assertions to match current behaviour would hide a real change to the auto-accept threshold if it was not intended.
+
+**Not yet done.** The full closed loop has not been run on the new corpus at scale: autolabel every drive, mine the hard cases, retrain, and watch the auto-accept ceiling move. The model-versus-gold numbers in this README (precision 0.034, recall 0.018 on a 400-object gold slice) are exactly the kind of result that loop exists to improve, and they are reported here unflattering and unrounded.
+
+The test suite once wrote to the same database as production and left synthetic frames behind. That is fixed at the source with an isolated test database, CI, and an ingest gate that rejects corrupt frames, and the residue was quarantined.
 
 ---
 
