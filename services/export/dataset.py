@@ -27,7 +27,9 @@ from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
 from services.export.adapter_bdd import write_bdd
 from services.export.adapter_coco import write_coco
+from services.export.adapter_cvat import write_cvat
 from services.export.adapter_kitti import write_kitti
+from services.export.adapter_labelstudio import write_labelstudio
 from services.export.adapter_nuscenes import write_nuscenes
 from services.export.adapter_openlabel import write_openlabel
 from services.export.adapter_parquet import write_parquet
@@ -203,6 +205,10 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
         written.append(write_kitti(records, onto, out_dir / "kitti"))
     if "bdd" in spec.formats:
         written.append(write_bdd(records, onto, out_dir / "bdd"))
+    if "cvat" in spec.formats:
+        written.append(write_cvat(records, onto, store, out_dir / "cvat"))
+    if "labelstudio" in spec.formats:
+        written.append(write_labelstudio(records, onto, store, out_dir / "labelstudio"))
 
     prefix = f"datasets/{spec.name}/{commit_id}"
     export_uris = _upload_dir(store, prefix, out_dir)

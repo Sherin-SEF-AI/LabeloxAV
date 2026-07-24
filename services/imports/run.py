@@ -33,7 +33,9 @@ from services.autolabel.ontology import get_ontology
 from services.imports import (
     adapter_bdd,
     adapter_coco,
+    adapter_cvat,
     adapter_kitti,
+    adapter_labelstudio,
     adapter_mapillary,
     adapter_nuscenes,
     adapter_openlabel,
@@ -57,6 +59,8 @@ ADAPTERS = {
     "mapillary": adapter_mapillary.parse,
     "kitti": adapter_kitti.parse,
     "bdd": adapter_bdd.parse,
+    "cvat": adapter_cvat.parse,
+    "labelstudio": adapter_labelstudio.parse,
 }
 RAW_FORMATS = {"video", "mcap", "images"}
 ALL_FORMATS = sorted(set(ADAPTERS) | RAW_FORMATS)
@@ -240,11 +244,15 @@ async def import_dataset(spec: ImportSpec, job_id=None) -> dict:
                         mask_uri = store.put_bytes(f"masks/{session_id}/{frame_row.frame_id}/{oid}.json",
                                                    json.dumps(payload).encode(), "application/json")
                         mask_encoding = "polygon"
+                    # Polyline geometry is scaled with the same factor as the bbox, so a linear feature does
+                    # not drift off the image when the import resizes.
+                    polyline = ([[float(px) * scale, float(py) * scale] for px, py in o.polyline]
+                                if o.polyline else None)
                     db.add(Object(object_id=oid, frame_id=frame_row.frame_id, class_id=cid,
                                   bbox=[float(x) * scale for x in o.bbox], conf=float(o.conf),
                                   source="imported", state="review", provenance=prov, attrs=o.attrs or {},
                                   mask_uri=mask_uri, mask_encoding=mask_encoding, rot_deg=o.rot_deg,
-                                  keypoints=o.keypoints))
+                                  keypoints=o.keypoints, polyline=polyline))
                     counts["objects"] += 1
                 counts["frames"] += 1
 
