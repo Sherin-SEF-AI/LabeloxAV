@@ -119,12 +119,17 @@ class Frame(Base):
     # BEV projection params so an oriented box drawn on the image lifts back to a metric 3D cuboid.
     lidar: Mapped[dict | None] = mapped_column(JSONB)
 
+    # Free-form curation tags (explorer). Distinct from `scene`, which is model-derived: these are human or
+    # bulk-applied marks ("needs_relabel", "golden", "night_rain") used to slice and act on the corpus.
+    tags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+
     session: Mapped[Session] = relationship(back_populates="frames")
     objects: Mapped[list[Object]] = relationship(back_populates="frame")
 
     __table_args__ = (
         Index("ix_frame_session_ts", "session_id", "ts_ns"),
         Index("ix_frame_ts", "ts_ns"),
+        Index("ix_frame_tags_gin", "tags", postgresql_using="gin"),
     )
 
 
@@ -190,6 +195,10 @@ class Object(Base):
     rig_track_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # M3.1 same object across cameras
     cross_cam_links: Mapped[dict | None] = mapped_column(JSONB)   # M3.1 the same object seen in other views
 
+    # Free-form curation tags (explorer): human or bulk-applied marks used to slice and act on labels.
+    # Distinct from `attrs`, which is the ontology-typed attribute schema for this class.
+    tags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+
     frame: Mapped[Frame] = relationship(back_populates="objects")
 
     __table_args__ = (
@@ -197,6 +206,7 @@ class Object(Base):
         Index("ix_object_state", "state"),
         Index("ix_object_class", "class_id"),
         Index("ix_object_track", "track_id"),
+        Index("ix_object_tags_gin", "tags", postgresql_using="gin"),
     )
 
 
@@ -360,6 +370,73 @@ class ObjectEmbedding(Base):
     dino_vec: Mapped[list[float]] = mapped_column(Vector(768), nullable=False)
     model_versions: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EmbeddingProjection(Base):
+    """A fitted 2D projection of an embedding space, for the explorer's embeddings map. The high-dimensional
+    vectors already live in pgvector (object_embedding / frame_embedding); this stores the 2D layout so the
+    map opens instantly and the same picture is reproducible rather than re-fit (and re-shuffled) per visit.
+    `method` records what actually produced it (umap or the deterministic pca fallback), so a map is never
+    silently a different algorithm than the operator asked for."""
+
+    __tablename__ = "embedding_projection"
+
+    projection_id: Mapped[uuid.UUID] = _uuid_pk()
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)      # object | frame
+    space: Mapped[str] = mapped_column(String(8), nullable=False)     # dino | siglip
+    method: Mapped[str] = mapped_column(String(8), nullable=False)    # umap | pca
+    params: Mapped[dict] = mapped_column(JSONB, default=dict)         # n_neighbors, min_dist, seed, filters
+    n: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"))         # null = whole corpus
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EmbeddingProjectionPoint(Base):
+    """One point of a fitted projection: the 2D coordinate for an object or frame. Kept in its own table (not
+    a JSONB blob on the projection) so the explorer can page and filter points in SQL."""
+
+    __tablename__ = "embedding_projection_point"
+
+    projection_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("embedding_projection.projection_id", ondelete="CASCADE"), primary_key=True)
+    ref_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)  # object_id or frame_id
+    x: Mapped[float] = mapped_column(Float, nullable=False)
+    y: Mapped[float] = mapped_column(Float, nullable=False)
+    # Density-cluster label from HDBSCAN over the source vectors (-1 = noise/outlier). Persisted alongside the
+    # coordinates so "colour by cluster" and "select this cluster" need no re-fit.
+    cluster: Mapped[int | None] = mapped_column(Integer)
+
+    __table_args__ = (Index("ix_projection_point_projection", "projection_id"),)
+
+
+class EvalPatch(Base):
+    """One prediction-vs-gold outcome from a model evaluation, so a confusion-matrix cell can be opened and
+    the actual crops inspected (the "why did it confuse these" drill-down). outcome is tp | fp | fn; for a tp
+    the two class ids match, for a confusion they differ. object_id is the prediction (fp/tp) or the missed
+    gold object (fn), and is what the patch grid renders through /api/objects/{id}/crop."""
+
+    __tablename__ = "eval_patch"
+
+    patch_id: Mapped[uuid.UUID] = _uuid_pk()
+    eval_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)  # one evaluation run
+    gold_id: Mapped[str | None] = mapped_column(String(128))       # the sealed gold set it scored against
+    model_version: Mapped[str | None] = mapped_column(String(128))
+    object_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("object.object_id", ondelete="CASCADE"))
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    outcome: Mapped[str] = mapped_column(String(4), nullable=False)  # tp | fp | fn
+    gt_class_id: Mapped[int | None] = mapped_column(Integer)
+    pred_class_id: Mapped[int | None] = mapped_column(Integer)
+    iou: Mapped[float | None] = mapped_column(Float)
+    conf: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_eval_patch_eval", "eval_id"),
+        Index("ix_eval_patch_cell", "eval_id", "gt_class_id", "pred_class_id"),
+    )
 
 
 class ScenarioCandidate(Base):
