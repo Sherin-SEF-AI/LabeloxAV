@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import type { BoardCell, LabelJobRow, LabelProjectRow, ScorecardRow, UserRow } from "@/lib/types";
+import type { AssetRow, BoardCell, LabelJobRow, LabelProjectRow, ScorecardRow, UserRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 
 // The labeling-operations board: who is doing what, where it is stuck, and whether the work is any good.
@@ -53,16 +53,23 @@ export default function ProjectsPage() {
   const [tName, setTName] = useState("");
   const [tSession, setTSession] = useState("");
   const [jobsOf, setJobsOf] = useState(50);
+  // multi-modal assets
+  const [assets, setAssets] = useState<{ total: number; assets: AssetRow[] }>({ total: 0, assets: [] });
+  const [annKinds, setAnnKinds] = useState<Record<string, number>>({});
+  const [newMedia, setNewMedia] = useState("text");
+  const [newBody, setNewBody] = useState("");
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 5000); };
 
   const refreshProject = useCallback(async (pid: string) => {
     if (!pid) { setCells([]); setJobs([]); setLoad([]); return; }
     try {
-      const [b, j, s] = await Promise.all([
+      const [b, j, s, as, st] = await Promise.all([
         api.lopBoard(pid), api.lopJobs({ project_id: pid }), api.lopScorecards(pid),
+        api.projectAssets(pid), api.projectStats(pid),
       ]);
       setCells(b.cells); setLoad(b.open_load); setJobs(j.jobs); setCards(s.scorecards);
+      setAssets(as); setAnnKinds(st.annotations_by_kind ?? {});
     } catch (e) { flash(String(e)); }
   }, []);
 
@@ -105,6 +112,20 @@ export default function ProjectsPage() {
       flash(`${t.n_frames} frames split into ${t.n_jobs} jobs, ${t.honeypots_seeded} honeypots seeded`);
       setTName("");
       await refreshProject(projectId);
+    } catch (e) { flash(String(e)); } finally { setBusy(false); }
+  };
+
+  const addAsset = async () => {
+    if (!projectId || !newBody.trim()) { flash("give the asset a body or uri"); return; }
+    setBusy(true);
+    try {
+      const inline = newMedia === "text" || newMedia === "dialogue";
+      await api.createAssets(projectId, [inline
+        ? { media_type: newMedia, text: newBody.trim() }
+        : { media_type: newMedia, uri: newBody.trim() }]);
+      setNewBody("");
+      await refreshProject(projectId);
+      flash("asset added");
     } catch (e) { flash(String(e)); } finally { setBusy(false); }
   };
 
@@ -245,6 +266,56 @@ export default function ProjectsPage() {
                             title="open the first frame of this job"
                             className="text-ink-3 hover:text-accent">open</button>
                         )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+
+        {/* multi-modal assets */}
+        <Section title={`assets (${assets.total})`}
+          right={<span className="font-mono text-[11px] text-ink-3">
+            {Object.entries(annKinds).map(([k, v]) => `${k} ${v}`).join("  ") || "no annotations yet"}
+          </span>}>
+          <div className="flex items-center gap-2 font-mono text-[11px] flex-wrap mb-2">
+            <select value={newMedia} onChange={(e) => setNewMedia(e.target.value)}
+              className="bg-bg border border-line px-1.5 py-0.5 text-ink">
+              {["text", "dialogue", "audio", "timeseries", "document", "image"].map((m) =>
+                <option key={m} value={m}>{m}</option>)}
+            </select>
+            <input value={newBody} onChange={(e) => setNewBody(e.target.value)}
+              placeholder={newMedia === "text" || newMedia === "dialogue" ? "inline text" : "uri"}
+              className="flex-1 min-w-[240px] bg-bg border border-line px-1.5 py-0.5 text-ink" />
+            <button onClick={addAsset} disabled={busy || !projectId}
+              className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
+              add asset
+            </button>
+          </div>
+          {assets.assets.length === 0 ? (
+            <div className="font-mono text-[11px] text-ink-3 py-2">
+              no assets. add one above, or POST to /api/assets to bulk import.
+            </div>
+          ) : (
+            <div className="overflow-auto max-h-72">
+              <table className="w-full font-mono text-[11px]">
+                <thead>
+                  <tr className="text-ink-3 text-left border-b hairline">
+                    <th className="py-1">asset</th><th>media</th><th>state</th><th>preview</th><th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assets.assets.map((a) => (
+                    <tr key={a.asset_id} className="border-b hairline">
+                      <td className="py-1 text-ink-3">{(a.external_id ?? a.asset_id).slice(0, 12)}</td>
+                      <td className="text-ink-2">{a.media_type}</td>
+                      <td className={a.state === "labeled" ? "text-pass" : "text-ink-3"}>{a.state}</td>
+                      <td className="text-ink-3 truncate max-w-[280px]">{a.text ?? a.uri ?? "-"}</td>
+                      <td className="text-right">
+                        <button onClick={() => router.push(`/annotate/asset/${a.asset_id}`)}
+                          className="text-ink-3 hover:text-accent">annotate</button>
                       </td>
                     </tr>
                   ))}

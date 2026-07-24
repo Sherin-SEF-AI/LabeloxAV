@@ -62,6 +62,28 @@ export type SessionRow = {
 
 export type SegmentResult = { polygons: number[][]; bbox: number[] | null };
 
+// ---- Multi-modal project spine (Asset -> Annotation), Label-Studio style ----
+
+export type LabelDef = { name: string; color: string | null; kinds: string[] };
+export type FieldDef = { name: string; type: "enum" | "float" | "int" | "bool" | "text"; values: string[]; required: boolean };
+export type LabelConfig = { labels?: LabelDef[]; fields?: FieldDef[]; allow_kinds?: string[]; media?: string };
+
+export type AssetRow = {
+  asset_id: string; project_id: string; media_type: string;
+  uri: string | null; text: string | null; external_id: string | null;
+  frame_id: string | null; session_id: string | null;
+  meta: Record<string, unknown>; state: string; created_at: string | null;
+};
+
+export type AnnotationRow = {
+  annotation_id: string; asset_id: string; kind: string; label: string | null;
+  payload: Record<string, unknown>; fields: Record<string, unknown>;
+  conf: number | null; source: string; state: string; version: number;
+  provenance: Record<string, unknown>; created_at: string | null;
+};
+
+export type AssetDetail = AssetRow & { label_config: LabelConfig; annotations: AnnotationRow[] };
+
 // ---- Labeling operations (CVAT-style projects, jobs, issues, scorecards) ----
 
 export type LabelProjectRow = {

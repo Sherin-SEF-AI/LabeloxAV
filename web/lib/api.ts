@@ -53,6 +53,10 @@ import type {
   TriageRow,
   UserRow,
   UserCreated,
+  LabelConfig,
+  AssetRow,
+  AssetDetail,
+  AnnotationRow,
   LabelProjectRow,
   LabelJobRow,
   BoardCell,
@@ -110,6 +114,23 @@ async function put<T>(path: string, body: unknown): Promise<T> {
       body: JSON.stringify(body),
     });
     if (!r.ok) throw new Error(`PUT ${path} -> ${r.status} ${await r.text()}`);
+    return r.json();
+  } finally {
+    end();
+  }
+}
+
+// PATCH rather than PUT for partial updates: an annotation edit sends only the changed fields, so a client
+// that does not know about a column cannot blank it by omission.
+async function patch<T>(path: string, body: unknown): Promise<T> {
+  begin();
+  try {
+    const r = await fetch(path, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...userHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`PATCH ${path} -> ${r.status} ${await r.text()}`);
     return r.json();
   } finally {
     end();
@@ -522,6 +543,31 @@ export const api = {
   users: () => get<UserRow[]>("/api/users"),
   me: () => get<UserRow>("/api/users/me"),
   createUser: (name: string, role: string) => post<UserCreated>("/api/users", { name, role }),
+
+  // ---- Multi-modal assets and annotations ----
+  assetKinds: () => get<{ kinds: { kind: string; description: string }[] }>("/api/assets/kinds"),
+  setLabelConfig: (projectId: string, config: LabelConfig) =>
+    post<{ project_id: string; label_config: LabelConfig }>(
+      `/api/projects/${projectId}/label-config`, config),
+  createAssets: (project_id: string, items: Record<string, unknown>[]) =>
+    post<{ created: number; updated: number; assets: AssetRow[] }>("/api/assets", { project_id, items }),
+  projectAssets: (projectId: string, q: { state?: string; media_type?: string; limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v != null) p.set(k, String(v)); });
+    return get<{ total: number; assets: AssetRow[] }>(`/api/projects/${projectId}/assets?${p.toString()}`);
+  },
+  projectStats: (projectId: string) =>
+    get<{ assets_by_state: Record<string, number>; annotations_by_kind: Record<string, number>;
+          total_assets: number; total_annotations: number }>(`/api/projects/${projectId}/stats`),
+  asset: (assetId: string) => get<AssetDetail>(`/api/assets/${assetId}`),
+  setAssetState: (assetId: string, state: string) =>
+    post<AssetRow>(`/api/assets/${assetId}/state?state=${state}`, {}),
+  createAnnotation: (assetId: string, body: Record<string, unknown>) =>
+    post<AnnotationRow>(`/api/assets/${assetId}/annotations`, body),
+  updateAnnotation: (annotationId: string, body: Record<string, unknown>) =>
+    patch<AnnotationRow>(`/api/annotations/${annotationId}`, body),
+  deleteAnnotation: (annotationId: string) =>
+    del<{ deleted: boolean }>(`/api/annotations/${annotationId}`),
 
   // ---- Labeling operations (projects, jobs, issues, scorecards) ----
   lopProjects: () => get<{ projects: LabelProjectRow[] }>("/api/labelops/projects"),
