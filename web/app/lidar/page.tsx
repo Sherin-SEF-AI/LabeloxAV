@@ -38,6 +38,7 @@ export default function LidarViewerPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const loadClouds = useCallback(async (sid: string) => {
+    if (!sid.trim()) { setErr("enter a session id"); return; }
     setErr(null);
     try {
       const r = await api.lidarClouds(sid.trim());

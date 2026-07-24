@@ -43,6 +43,7 @@ export default function CuboidAnnotatePage() {
   );
 
   const loadClouds = useCallback(async (sid: string) => {
+    if (!sid.trim()) { setErr("enter a session id"); return; }
     setErr(null);
     try {
       const r = await api.lidarClouds(sid.trim());
