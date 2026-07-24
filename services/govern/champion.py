@@ -156,6 +156,10 @@ async def _evaluate_and_promote_locked(db, reg, challenger_version, task, cfg, o
         await db.commit()
         await record(db, "champion", "promote", challenger_version, {"gate": gate, "promoted_from": prev})
         log.info("govern.promote", challenger=challenger_version, promoted_from=prev)
+        from services.integrations.webhooks import emit
+
+        await emit("model.promoted", {"model_version": challenger_version, "task": task,
+                                      "promoted_from": prev, "gate": gate})
         return {"promoted": True, "champion": challenger_version, "promoted_from": prev, "gate": gate}
 
     await record(db, "champion", "reject", challenger_version, {"gate": gate})

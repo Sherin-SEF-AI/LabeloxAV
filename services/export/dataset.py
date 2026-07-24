@@ -242,6 +242,10 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
         "dataset_prefix": store.uri(prefix),
     }
     log.info("export.done", **result)
+    from services.integrations.webhooks import emit
+
+    await emit("export.completed", {k: result[k] for k in
+                                    ("commit_id", "object_count", "formats", "dataset_prefix")})
     return result
 
 

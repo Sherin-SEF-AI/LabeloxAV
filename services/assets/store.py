@@ -128,6 +128,11 @@ async def set_asset_state(db: AsyncSession, asset_id: str, state: str) -> dict:
         raise AssetError("asset not found")
     a.state = state
     await db.commit()
+    if state == "labeled":
+        from services.integrations.webhooks import emit
+
+        await emit("asset.labeled", {"asset_id": asset_id, "media_type": a.media_type},
+                   project_id=str(a.project_id))
     return _asset_dict(a)
 
 
@@ -163,6 +168,12 @@ async def create_annotation(db: AsyncSession, asset_id: str, *, kind: str, label
     if asset.state == "new":
         asset.state = "in_progress"
     await db.commit()
+    from services.integrations.webhooks import emit
+
+    await emit("annotation.created",
+               {"annotation_id": str(ann.annotation_id), "asset_id": asset_id, "kind": kind,
+                "label": label},
+               project_id=str(asset.project_id))
     return _ann_dict(ann)
 
 
