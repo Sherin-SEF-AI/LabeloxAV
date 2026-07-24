@@ -15,6 +15,7 @@ import {
   type ScenarioCoverage,
 } from "@/lib/analytics-api";
 import PageShell from "@/components/shell/PageShell";
+import EvalDrilldown from "@/components/explore/EvalDrilldown";
 import ScoreBar from "@/components/shell/ScoreBar";
 import { api } from "@/lib/api";
 import type { ProductivityReport } from "@/lib/types";
@@ -368,6 +369,11 @@ export default function AnalyticsPage() {
             ) : (
               <div className="font-mono text-xs text-ink-3 py-4 text-center">no corrections recorded yet</div>
             )}
+          </Section>
+
+          {/* Model vs sealed gold: the same question from the other side, with the crops behind each cell. */}
+          <Section title="model vs gold - open a cell to see the crops">
+            <EvalDrilldown />
           </Section>
         </div>
 
