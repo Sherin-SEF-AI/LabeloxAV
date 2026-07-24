@@ -54,6 +54,8 @@ import type {
   UserRow,
   UserCreated,
   LabelConfig,
+  WebhookRow,
+  StorageSourceRow,
   AssetRow,
   AssetDetail,
   AnnotationRow,
@@ -543,6 +545,20 @@ export const api = {
   users: () => get<UserRow[]>("/api/users"),
   me: () => get<UserRow>("/api/users/me"),
   createUser: (name: string, role: string) => post<UserCreated>("/api/users", { name, role }),
+
+  // ---- Integrations: webhooks and storage sources ----
+  integrationEvents: () => get<{ events: string[] }>("/api/integrations/events"),
+  webhooks: () => get<{ webhooks: WebhookRow[] }>("/api/integrations/webhooks"),
+  createWebhook: (url: string, events: string[]) =>
+    post<WebhookRow & { secret: string }>("/api/integrations/webhooks", { url, events }),
+  deleteWebhook: (id: string) => del<{ deleted: boolean }>(`/api/integrations/webhooks/${id}`),
+  storageSources: () => get<{ sources: StorageSourceRow[] }>("/api/integrations/sources"),
+  registerSource: (body: Record<string, unknown>) =>
+    post<StorageSourceRow>("/api/integrations/sources", body),
+  previewSource: (id: string) =>
+    get<{ uri: string; count?: number; keys?: string[]; detail?: string }>(
+      `/api/integrations/sources/${id}/preview`),
+  deleteSource: (id: string) => del<{ deleted: boolean }>(`/api/integrations/sources/${id}`),
 
   // ---- Multi-modal assets and annotations ----
   assetKinds: () => get<{ kinds: { kind: string; description: string }[] }>("/api/assets/kinds"),

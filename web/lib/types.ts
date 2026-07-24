@@ -62,6 +62,19 @@ export type SessionRow = {
 
 export type SegmentResult = { polygons: number[][]; bbox: number[] | null };
 
+// ---- Integrations ----
+
+export type WebhookRow = {
+  webhook_id: string; url: string; events: string[]; active: boolean;
+  last_status: number | null; last_error: string | null; failure_count: number;
+  last_delivery_at: string | null;
+};
+
+export type StorageSourceRow = {
+  source_id: string; name: string; provider: string; bucket: string; prefix: string | null;
+  uri: string; credential_profile: string | null; last_object_count: number | null;
+};
+
 // ---- Multi-modal project spine (Asset -> Annotation), Label-Studio style ----
 
 export type LabelDef = { name: string; color: string | null; kinds: string[] };

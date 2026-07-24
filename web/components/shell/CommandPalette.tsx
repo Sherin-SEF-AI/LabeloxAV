@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ALL_DESTINATIONS } from "@/lib/editor/registry";
+// One source of truth: the palette lists exactly what the menu bar offers, so the two cannot drift.
+import { MENU_DESTINATIONS } from "@/lib/menus";
 
 // Cmd+K fuzzy navigation to any destination. Opens on Cmd/Ctrl+K or a "lbx:palette" event (so a button
 // can open it). Keyboard-first: type to filter, arrows to move, Enter to go. This is how nav scales: no
@@ -32,7 +33,7 @@ export default function CommandPalette() {
   }, []);
 
   if (!open) return null;
-  const results = ALL_DESTINATIONS.filter(
+  const results = MENU_DESTINATIONS.filter(
     (d) => (d.label + " " + (d.hint ?? "")).toLowerCase().includes(q.toLowerCase()));
   const go = (href: string) => { setOpen(false); router.push(href); };
 
