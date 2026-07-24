@@ -38,14 +38,25 @@ def matches_predicate(record: dict, predicate: dict) -> bool:
 
 def slice_to_export_spec(slice_row, formats: list | None = None) -> dict:
     """Convert a saved slice to the fields of an export SliceSpec, so a cohort exports without redefining it.
-    The scene-axis clauses have no SliceSpec column, so they are carried as a note for the caller to apply
-    via the frame query; the column-backed clauses map directly."""
+    The scene-axis and tag clauses have no SliceSpec column, so they are carried as separate filters for the
+    caller to apply via the frame/object query; the column-backed clauses map directly.
+
+    `unsupported` names any clause that neither the spec nor the side filters can express. It must be checked
+    by the caller: a cohort defined purely by such a clause would otherwise export as the WHOLE corpus rather
+    than the intended subset, which is a silent data-correctness failure, not a cosmetic one."""
     p = slice_row.predicate or {}
     spec = {"name": slice_row.name, "class_names": p.get("class_names"), "states": p.get("states"),
             "cities": p.get("cities"), "min_conf": p.get("min_conf"),
             "formats": formats or ["coco", "parquet"]}
     scene = {axis: p[axis] for axis in _SCENE_AXES if p.get(axis)}
-    return {"spec": {k: v for k, v in spec.items() if v is not None}, "scene_filter": scene}
+    tags = {k: p[k] for k in ("tags", "frame_tags") if p.get(k)}
+    handled = set(_SCENE_AXES) | {"class_names", "states", "cities", "min_conf", "tags", "frame_tags",
+                                  "session_id", "sources", "max_conf", "object_ids", "frame_ids"}
+    unsupported = sorted(k for k, v in p.items() if v not in (None, [], {}) and k not in handled)
+    return {"spec": {k: v for k, v in spec.items() if v is not None},
+            "scene_filter": scene, "tag_filter": tags,
+            "session_id": p.get("session_id"), "sources": p.get("sources"),
+            "max_conf": p.get("max_conf"), "unsupported": unsupported}
 
 
 async def create_slice(name: str, predicate: dict, description: str | None = None) -> dict:

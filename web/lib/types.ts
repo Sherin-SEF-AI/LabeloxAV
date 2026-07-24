@@ -62,6 +62,53 @@ export type SessionRow = {
 
 export type SegmentResult = { polygons: number[][]; bbox: number[] | null };
 
+// ---- Explore workspace (embeddings map, facets, tags, saved views, eval drill-down) ----
+
+// The predicate is the same shape a CurationSlice stores, so a filter built in the explorer saves as a
+// cohort and exports unchanged (services/explore/query.py documents the full vocabulary).
+export type ExplorePredicate = {
+  weather?: string[]; time_of_day?: string[]; road_type?: string[]; density?: string[];
+  cities?: string[]; class_names?: string[]; states?: string[]; sources?: string[];
+  min_conf?: number; max_conf?: number; tags?: string[]; frame_tags?: string[];
+  session_id?: string; object_ids?: string[]; frame_ids?: string[];
+};
+
+export type FacetBucket = { value: string; count: number; class_id?: number; lo?: number; hi?: number };
+export type Facets = {
+  total: number;
+  classes: FacetBucket[]; states: FacetBucket[]; sources: FacetBucket[]; cities: FacetBucket[];
+  scene: Record<string, FacetBucket[]>; conf: FacetBucket[]; tags: FacetBucket[];
+};
+
+export type ProjectionRow = {
+  projection_id: string; kind: string; space: string; method: string; n: number;
+  session_id: string | null; params: Record<string, unknown>; notes: string | null; created_at: string | null;
+};
+export type ProjectionPoint = {
+  id: string; x: number; y: number; cluster: number;
+  class_id?: number; state?: string; source?: string; conf?: number | null; tags?: string[];
+  frame_id?: string; session_id?: string; quality?: number | null; scene?: Record<string, string>;
+};
+export type ProjectionPoints = {
+  projection_id: string; kind: string; space?: string; method: string; n?: number; points: ProjectionPoint[];
+};
+
+export type SavedView = {
+  slice_id: string; name: string; predicate: ExplorePredicate; description: string | null;
+  created_at: string | null;
+};
+
+export type EvalRun = { eval_id: string; gold_id: string | null; tp: number; fp: number; fn: number; created_at: string | null };
+export type ConfusionCell = {
+  gt_class_id: number | null; pred_class_id: number | null; gt_class: string | null; pred_class: string | null;
+  outcome: string; count: number;
+};
+export type EvalPatchRow = {
+  patch_id: string; object_id: string | null; frame_id: string | null; outcome: string;
+  gt_class_id: number | null; pred_class_id: number | null; iou: number | null; conf: number | null;
+  crop_url: string | null;
+};
+
 export type UserRow = { user_id: string; name: string; role: string; reviews: number };
 // Create/re-issue returns the signed token once (not present on the list endpoint).
 export type UserCreated = UserRow & { token: string };

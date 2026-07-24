@@ -25,6 +25,7 @@ export const APP_GROUPS: NavGroup[] = [
     key: "discover",
     label: "Discover",
     items: [
+      { href: "/explore", label: "Explore", hint: "embeddings map, facets, tags, saved views" },
       { href: "/search", label: "Search", hint: "visual and semantic similarity" },
       { href: "/scenarios", label: "Scenarios", hint: "behavioral scenario mining" },
       { href: "/discovery", label: "Discovery", hint: "rare-scenario novelty queue" },

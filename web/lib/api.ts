@@ -53,6 +53,14 @@ import type {
   TriageRow,
   UserRow,
   UserCreated,
+  ExplorePredicate,
+  Facets,
+  ProjectionRow,
+  ProjectionPoints,
+  SavedView,
+  EvalRun,
+  ConfusionCell,
+  EvalPatchRow,
   CloudStatus,
   CloudOrphan,
 } from "./types";
@@ -509,6 +517,40 @@ export const api = {
   users: () => get<UserRow[]>("/api/users"),
   me: () => get<UserRow>("/api/users/me"),
   createUser: (name: string, role: string) => post<UserCreated>("/api/users", { name, role }),
+
+  // ---- Explore workspace ----
+  exploreFacets: (predicate: ExplorePredicate) => post<Facets>("/api/explore/facets", predicate),
+  exploreSelect: (predicate: ExplorePredicate, level = "object", limit = 5000) =>
+    post<{ level: string; count: number; ids: string[] }>(
+      `/api/explore/select?level=${level}&limit=${limit}`, predicate),
+  exploreTag: (body: { level: string; predicate: ExplorePredicate; add?: string[]; remove?: string[] }) =>
+    post<{ matched: number; added: string[]; removed: string[] }>("/api/explore/tag", body),
+  exploreTagVocab: (level = "object") =>
+    get<{ level: string; tags: { tag: string; count: number }[] }>(`/api/explore/tags?level=${level}`),
+  exploreProjections: () => get<{ projections: ProjectionRow[] }>("/api/explore/projections"),
+  exploreFitProjection: (body: Record<string, unknown>) =>
+    post<{ projection_id?: string; method?: string; n?: number; clusters?: number; error?: string }>(
+      "/api/explore/projection", body),
+  exploreProjectionPoints: (id: string, limit = 50000) =>
+    get<ProjectionPoints>(`/api/explore/projection/${id}/points?limit=${limit}`),
+  exploreDeleteProjection: (id: string) => del<{ deleted: boolean }>(`/api/explore/projection/${id}`),
+  exploreViews: () => get<{ views: SavedView[] }>("/api/explore/views"),
+  exploreSaveView: (name: string, predicate: ExplorePredicate, description?: string) =>
+    post<{ slice_id: string; name: string }>("/api/explore/views", { name, predicate, description }),
+  exploreEvals: () => get<{ evals: EvalRun[] }>("/api/explore/evals"),
+  exploreRunEval: (gold_id: string, iou_thr = 0.5) =>
+    post<{ eval_id?: string; tp?: number; fp?: number; fn?: number; error?: string }>(
+      "/api/explore/eval", { gold_id, iou_thr }),
+  exploreEvalCells: (evalId: string) =>
+    get<{ eval_id: string; cells: ConfusionCell[] }>(`/api/explore/eval/${evalId}/cells`),
+  exploreEvalPatches: (evalId: string, q: { gt_class_id?: number | null; pred_class_id?: number | null; outcome?: string }) => {
+    const p = new URLSearchParams();
+    if (q.gt_class_id != null) p.set("gt_class_id", String(q.gt_class_id));
+    if (q.pred_class_id != null) p.set("pred_class_id", String(q.pred_class_id));
+    if (q.outcome) p.set("outcome", q.outcome);
+    return get<{ eval_id: string; count: number; patches: EvalPatchRow[] }>(
+      `/api/explore/eval/${evalId}/patches?${p.toString()}`);
+  },
   curationSummary: (session_id?: string) =>
     get<CurationSummary>("/api/curation/summary" + (session_id ? `?session_id=${session_id}` : "")),
   curationEmbed: (session_id?: string) =>

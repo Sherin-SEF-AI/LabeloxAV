@@ -204,4 +204,10 @@ async def view_export_spec(slice_id: str, db: AsyncSession = Depends(db_session)
     row = await db.get(CurationSlice, UUID(slice_id))
     if row is None:
         raise HTTPException(404, "view not found")
-    return slice_to_export_spec(row)
+    out = slice_to_export_spec(row)
+    if out.get("unsupported"):
+        # Fail loudly: exporting on a spec that dropped a clause would hand over the whole corpus while
+        # claiming to be the saved cohort.
+        out["warning"] = ("these clauses are not expressible in the export spec and must be applied by the "
+                          f"caller or the export will be too broad: {out['unsupported']}")
+    return out

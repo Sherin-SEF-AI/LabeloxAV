@@ -326,3 +326,26 @@ def test_eval_patches_capture_confusion_and_misses():
             await _teardown(sid)
 
     run_async(run())
+
+
+def test_export_spec_carries_tag_and_scene_clauses():
+    """A view saved purely on tags must not degrade to an unfiltered export. slice_to_export_spec predates
+    tags, and silently dropping the clause would export the whole corpus while claiming to be the cohort."""
+    from types import SimpleNamespace
+
+    from services.curation.slices import slice_to_export_spec
+
+    row = SimpleNamespace(name="night-rain-audit",
+                          predicate={"tags": ["night_rain_audit"], "weather": ["rain"],
+                                     "states": ["accepted"], "sources": ["fused"], "max_conf": 0.9})
+    out = slice_to_export_spec(row)
+    assert out["tag_filter"] == {"tags": ["night_rain_audit"]}, out
+    assert out["scene_filter"] == {"weather": ["rain"]}, out
+    assert out["spec"]["states"] == ["accepted"]
+    assert out["sources"] == ["fused"] and out["max_conf"] == 0.9
+    # everything in this predicate is expressible, so nothing is silently dropped
+    assert out["unsupported"] == [], out
+
+    # an unknown clause must be reported, not ignored
+    row2 = SimpleNamespace(name="x", predicate={"some_future_clause": ["v"]})
+    assert slice_to_export_spec(row2)["unsupported"] == ["some_future_clause"]
