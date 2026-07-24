@@ -53,6 +53,11 @@ import type {
   TriageRow,
   UserRow,
   UserCreated,
+  LabelProjectRow,
+  LabelJobRow,
+  BoardCell,
+  IssueRow,
+  ScorecardRow,
   ExplorePredicate,
   Facets,
   ProjectionRow,
@@ -517,6 +522,44 @@ export const api = {
   users: () => get<UserRow[]>("/api/users"),
   me: () => get<UserRow>("/api/users/me"),
   createUser: (name: string, role: string) => post<UserCreated>("/api/users", { name, role }),
+
+  // ---- Labeling operations (projects, jobs, issues, scorecards) ----
+  lopProjects: () => get<{ projects: LabelProjectRow[] }>("/api/labelops/projects"),
+  lopCreateProject: (body: Record<string, unknown>) =>
+    post<LabelProjectRow>("/api/labelops/projects", body),
+  lopBoard: (projectId: string) =>
+    get<{ project_id: string; cells: BoardCell[]; open_load: { assignee: string; open_jobs: number }[] }>(
+      `/api/labelops/projects/${projectId}/board`),
+  lopCreateTask: (body: Record<string, unknown>) =>
+    post<{ task_id: string; n_frames: number; n_jobs: number; honeypots_seeded: number }>(
+      "/api/labelops/tasks", body),
+  lopJobs: (q: { project_id?: string; assignee_id?: string; stage?: string; state?: string } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v) p.set(k, String(v)); });
+    return get<{ jobs: LabelJobRow[] }>(`/api/labelops/jobs?${p.toString()}`);
+  },
+  lopMyJobs: () => get<{ jobs: LabelJobRow[] }>("/api/labelops/my-jobs"),
+  lopAssign: (jobId: string, assignee_id: string | null, expected_version?: number) =>
+    post<LabelJobRow>(`/api/labelops/jobs/${jobId}/assign`, { assignee_id, expected_version }),
+  lopSetState: (jobId: string, state: string, expected_version?: number) =>
+    post<LabelJobRow>(`/api/labelops/jobs/${jobId}/state`, { state, expected_version }),
+  lopSubmit: (jobId: string, expected_version?: number) =>
+    post<LabelJobRow & { honeypot_failed: boolean; min_honeypot_accuracy: number }>(
+      `/api/labelops/jobs/${jobId}/submit`, { expected_version }),
+  lopIssues: (q: { frame_id?: string; job_id?: string; object_id?: string; status?: string } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v) p.set(k, String(v)); });
+    return get<{ issues: IssueRow[] }>(`/api/labelops/issues?${p.toString()}`);
+  },
+  lopCreateIssue: (body: Record<string, unknown>) => post<IssueRow>("/api/labelops/issues", body),
+  lopIssue: (issueId: string) => get<IssueRow>(`/api/labelops/issues/${issueId}`),
+  lopComment: (issueId: string, body: string) =>
+    post<IssueRow>(`/api/labelops/issues/${issueId}/comment`, { body }),
+  lopResolveIssue: (issueId: string, reopen = false) =>
+    post<IssueRow>(`/api/labelops/issues/${issueId}/resolve?reopen=${reopen}`, {}),
+  lopScorecards: (project_id?: string) =>
+    get<{ scorecards: ScorecardRow[] }>(
+      `/api/labelops/scorecards${project_id ? `?project_id=${project_id}` : ""}`),
 
   // ---- Explore workspace ----
   exploreFacets: (predicate: ExplorePredicate) => post<Facets>("/api/explore/facets", predicate),

@@ -16,6 +16,7 @@ export const APP_GROUPS: NavGroup[] = [
       { href: "/platforms", label: "Platforms", hint: "the seven planes of the data engine" },
       { href: "/", label: "Triage", hint: "object queue ranked by value" },
       { href: "/agent", label: "Agent Console", hint: "autonomous QA: error sweep, temporal repair, fix queue" },
+      { href: "/projects", label: "Projects", hint: "assign jobs, track stages, annotator scorecards" },
       { href: "/review/queue", label: "Review queue", hint: "active learning + error candidates" },
       { href: "/annotations", label: "Annotations", hint: "browse and resume sessions" },
       { href: "/jobs", label: "Jobs", hint: "import, training, autolabel runs" },

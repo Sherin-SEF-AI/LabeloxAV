@@ -24,6 +24,7 @@ import { StateBadge, ConfBar } from "@/components/StateBadge";
 import ScoreBar from "@/components/shell/ScoreBar";
 import Icon, { MODE_ICON } from "@/components/shell/Icon";
 import ShortcutOverlay from "@/components/shell/ShortcutOverlay";
+import IssuePanel from "@/components/labelops/IssuePanel";
 import CloudControl from "@/components/shell/CloudControl";
 import { MODES, type ToolGroup } from "@/lib/editor/registry";
 
@@ -1669,6 +1670,13 @@ export default function FrameEditor() {
           )}
           </div>
           </>)}
+
+          {/* Issue threads for this frame, anchored to the selected object when there is one. Frame-scoped
+              so it stays available in every mode: a problem worth reporting does not depend on which tool
+              happens to be active. */}
+          <div className="shrink-0 border-t hairline max-h-64 overflow-y-auto">
+            <IssuePanel frameId={id} objectId={selected?.id ?? null} />
+          </div>
         </aside>
         )}
       </div>

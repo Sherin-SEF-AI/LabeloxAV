@@ -62,6 +62,39 @@ export type SessionRow = {
 
 export type SegmentResult = { polygons: number[][]; bbox: number[] | null };
 
+// ---- Labeling operations (CVAT-style projects, jobs, issues, scorecards) ----
+
+export type LabelProjectRow = {
+  project_id: string; name: string; description: string | null; modality: string;
+  honeypot_frac: number; min_honeypot_accuracy: number; gold_id: string | null;
+  label_config: Record<string, unknown>; created_at: string | null;
+};
+
+// stage is where in the pipeline the work sits; state is how far along it is within that stage.
+export type LabelJobRow = {
+  job_id: string; task_id: string; assignee_id: string | null;
+  stage: string; state: string; version: number;
+  n_frames: number; frame_ids: string[]; n_honeypots: number;
+  honeypot_accuracy: number | null; honeypot_detail: Record<string, unknown>;
+  started_at: string | null; submitted_at: string | null; created_at: string | null;
+};
+
+export type BoardCell = { stage: string; state: string; count: number };
+
+export type IssueComment = { comment_id: string; body: string; author: string | null; created_at: string | null };
+export type IssueRow = {
+  issue_id: string; kind: string; status: string;
+  object_id: string | null; frame_id: string | null; job_id: string | null;
+  region: number[] | null; created_at: string | null; resolved_at: string | null;
+  comments?: IssueComment[]; n_comments?: number;
+};
+
+export type ScorecardRow = {
+  user_id: string; name: string; role: string; reviews: number;
+  total_time_min: number; mean_time_ms: number; median_time_ms: number;
+  jobs: number; honeypot_accuracy: number | null;
+};
+
 // ---- Explore workspace (embeddings map, facets, tags, saved views, eval drill-down) ----
 
 // The predicate is the same shape a CurationSlice stores, so a filter built in the explorer saves as a
