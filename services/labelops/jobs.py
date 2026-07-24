@@ -148,6 +148,9 @@ async def assign_job(db: AsyncSession, job_id: str, assignee_id: str | None,
     job.version += 1
     await db.commit()
     log.info("labelops.job_assigned", job=job_id, assignee=assignee_id)
+    from services.integrations.webhooks import emit
+
+    await emit("job.assigned", {"job_id": job_id, "assignee_id": assignee_id})
     return _job_dict(job)
 
 
@@ -206,6 +209,14 @@ async def submit_job(db: AsyncSession, job_id: str, *, expected_version: int | N
     await db.commit()
     log.info("labelops.job_submitted", job=job_id, stage=job.stage, state=job.state,
              honeypot_accuracy=job.honeypot_accuracy, failed=failed)
+    # Let external pipelines react without polling. Fire and forget: a slow receiver must not hold up the
+    # annotator who just clicked submit.
+    from services.integrations.webhooks import emit
+
+    await emit("job.rejected" if failed else "job.submitted",
+               {"job_id": job_id, "stage": job.stage, "state": job.state,
+                "honeypot_accuracy": job.honeypot_accuracy},
+               project_id=str(task.project_id) if task else None)
     return {**_job_dict(job), "honeypot_failed": failed, "min_honeypot_accuracy": floor}
 
 

@@ -634,6 +634,61 @@ class Annotation(Base):
     )
 
 
+class Webhook(Base):
+    """An outbound HTTP subscription, so an external pipeline can react to what happens here instead of
+    polling for it.
+
+    Deliveries are signed with an HMAC over the body using the subscription's own secret, the same scheme as
+    GitHub and Stripe. Without a signature a receiver cannot tell a real delivery from anyone who learned the
+    URL, which makes a webhook an unauthenticated write into whatever it triggers.
+    """
+
+    __tablename__ = "webhook"
+
+    webhook_id: Mapped[uuid.UUID] = _uuid_pk()
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("label_project.project_id", ondelete="CASCADE"))   # null = all projects
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    events: Mapped[list] = mapped_column(JSONB, default=list)         # [] = every event
+    secret: Mapped[str | None] = mapped_column(String(128))
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    # Delivery health, so a silently dead endpoint is visible rather than merely absent.
+    last_status: Mapped[int | None] = mapped_column(Integer)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_delivery_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_webhook_project", "project_id", "active"),)
+
+
+class StorageSource(Base):
+    """A registered external bucket a project imports from.
+
+    Credentials are NOT stored here: the row holds only the locator and which server-side credential profile
+    to use. Persisting per-source keys would put long-lived cloud credentials in the application database,
+    where a single read of one table becomes a breach of every connected bucket.
+    """
+
+    __tablename__ = "storage_source"
+
+    source_id: Mapped[uuid.UUID] = _uuid_pk()
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("label_project.project_id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider: Mapped[str] = mapped_column(String(12), nullable=False)   # s3 | gcs | azure | minio
+    bucket: Mapped[str] = mapped_column(String(200), nullable=False)
+    prefix: Mapped[str | None] = mapped_column(Text)
+    region: Mapped[str | None] = mapped_column(String(32))
+    endpoint_url: Mapped[str | None] = mapped_column(Text)             # for s3-compatible stores
+    credential_profile: Mapped[str | None] = mapped_column(String(64))  # names a server-side credential
+    last_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_object_count: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_storage_source_project", "project_id"),)
+
+
 class ScenarioCandidate(Base):
     # Rare-scenario discovery output (M1.5): unusual frames surfaced by embedding novelty or rare-class,
     # routed to a human confirm/dismiss/tag queue. Feeds active learning and sellable rare slices.

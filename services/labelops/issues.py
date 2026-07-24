@@ -52,6 +52,10 @@ async def create_issue(db: AsyncSession, *, kind: str = "comment", body: str | N
     await db.commit()
     log.info("labelops.issue_opened", issue=str(issue.issue_id), kind=kind,
              object=object_id, frame=frame_id)
+    from services.integrations.webhooks import emit
+
+    await emit("issue.opened", {"issue_id": str(issue.issue_id), "kind": kind,
+                                "object_id": object_id, "frame_id": frame_id})
     return await get_issue(db, str(issue.issue_id))
 
 
@@ -80,6 +84,10 @@ async def resolve_issue(db: AsyncSession, issue_id: str, resolved_by: str | None
         issue.resolved_by = UUID(resolved_by) if resolved_by else None
     await db.commit()
     log.info("labelops.issue_status", issue=issue_id, status=issue.status)
+    if issue.status == "resolved":
+        from services.integrations.webhooks import emit
+
+        await emit("issue.resolved", {"issue_id": issue_id})
     return await get_issue(db, issue_id)
 
 
