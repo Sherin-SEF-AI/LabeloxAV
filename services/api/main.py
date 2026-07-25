@@ -67,6 +67,9 @@ from services.api.routers import (
     users,
 )
 from services.api.routers import (
+    auth as auth_router,
+)
+from services.api.routers import (
     calyx as calyx_router,
 )
 from services.api.routers import (
@@ -198,6 +201,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     role = u.role if u else None
             except Exception:  # noqa: BLE001
                 role = None
+
+        # Dev-login must be reachable without a token (it exists to hand out the first one); the route itself
+        # is hard-gated to env == "local", so allowlisting it here does not open a hole on a real deployment.
+        if path == "/api/auth/dev-login" and method == "POST":
+            return await call_next(request)
 
         # Bootstrap: allow the very first user to be created before any user (hence any admin) exists.
         if path == "/api/users" and method == "POST":
@@ -353,6 +361,7 @@ app.include_router(oraclyx_router.router, prefix="/api", tags=["oraclyx"])
 app.include_router(release_router.router, prefix="/api", tags=["release"])
 app.include_router(verdyx_router.router, prefix="/api", tags=["verdyx"])
 app.include_router(forgyx_router.router, prefix="/api", tags=["forgyx"])
+app.include_router(auth_router.router, prefix="/api", tags=["auth"])
 app.include_router(flywheel_router.router, prefix="/api", tags=["flywheel"])
 app.include_router(hardening_router.router, prefix="/api", tags=["hardening"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])

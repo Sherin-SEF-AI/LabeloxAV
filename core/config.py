@@ -526,6 +526,10 @@ class AuthSettings(BaseModel):
     # HMAC key that signs/verifies API tokens. The weak default below is refused on any non-local deployment
     # by _require_prod_secrets: a known signing key lets anyone mint an admin token.
     signing_key: str = "labeloxavauthsigningkey0123456789abcdef"
+    # Dev convenience: POST /api/auth/dev-login hands the web app an admin token so a fresh browser is not
+    # locked out by deny-by-default auth. Hard-gated to env == "local" in the route, so it cannot mint a
+    # token on any real deployment no matter how this flag is set. Turn off to exercise the real login path.
+    dev_login: bool = True
 
 
 class LidarSettings(BaseModel):
