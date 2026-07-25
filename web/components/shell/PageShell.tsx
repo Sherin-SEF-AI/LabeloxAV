@@ -4,7 +4,7 @@ import TopNav from "@/components/TopNav";
 import PageHeaderBar from "./PageHeaderBar";
 
 // The single dashboard chrome wrapper. Renders TopNav (its {active, right} contract preserved verbatim, so
-// the grouped AppSwitcher + Cmd+K palette keep working), then an optional title/primary-action bar, then an
+// the menu bar + Cmd+K palette keep working), then an optional title/primary-action bar, then an
 // optional filters band, then the content. Pure chrome and opt-in: a page adopts it by replacing its outer
 // min-h-screen flex + TopNav + ad-hoc header with one PageShell, moving no data logic. The title bar is
 // omitted entirely when there is nothing to show in it, so a page that only wants the wrapped TopNav still
@@ -23,7 +23,9 @@ export default function PageShell({ active, title, subtitle, right, primaryActio
   const showBar = Boolean(title || primaryAction || meta || subtitle);
   return (
     <div className="h-screen flex flex-col">
-      <TopNav active={active} right={right} />
+      {/* The header crumb only appears when the page has no title bar of its own, so the location is never
+          spelled out twice in two different styles directly above itself. */}
+      <TopNav active={active} right={right} showCrumb={!showBar} />
       {showBar && <PageHeaderBar title={title ?? active} subtitle={subtitle} meta={meta} primaryAction={primaryAction} />}
       {filters && (
         <div className="flex items-center gap-2 px-4 py-2 border-b hairline shrink-0 font-mono text-[11px] overflow-x-auto no-scrollbar">

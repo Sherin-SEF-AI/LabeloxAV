@@ -70,6 +70,13 @@ def _client():
     return TestClient(app)
 
 
+def _bearer(user_id: str) -> dict:
+    from core.config import get_settings
+    from services.api.auth_token import mint_token
+
+    return {"Authorization": f"Bearer {mint_token(user_id, get_settings().auth.signing_key)}"}
+
+
 @requires_infra
 def test_auth_gate(auth_on):
     admin_id, rev_id, ann_id = run_async(_seed_users_coro())
@@ -80,20 +87,28 @@ def test_auth_gate(auth_on):
         # mutating route with no identity -> 401
         assert c.post("/api/govern/controller/tick").status_code == 401
 
-        # annotator cannot reach an admin route -> 403
-        r = c.post("/api/govern/controller/tick", headers={"X-Lbx-User-Id": ann_id})
+        # a plaintext user id (the old, forgeable credential) no longer authenticates -> 401
+        assert c.post("/api/govern/controller/tick",
+                      headers={"X-Lbx-User-Id": admin_id}).status_code == 401
+
+        # annotator (signed token) cannot reach an admin route -> 403
+        r = c.post("/api/govern/controller/tick", headers=_bearer(ann_id))
         assert r.status_code == 403
 
         # admin clears the auth gate on the admin route (not 401/403; may 200/5xx on logic)
-        r = c.post("/api/govern/controller/tick", headers={"X-Lbx-User-Id": admin_id})
+        r = c.post("/api/govern/controller/tick", headers=_bearer(admin_id))
         assert r.status_code not in (401, 403)
 
         # reviewer floor: annotator blocked on a reviewer route, reviewer passes the gate
         assert c.post("/api/export", json={"name": "x", "states": ["accepted"]},
-                      headers={"X-Lbx-User-Id": ann_id}).status_code == 403
+                      headers=_bearer(ann_id)).status_code == 403
         assert c.post("/api/export", json={"name": "x", "states": ["accepted"]},
-                      headers={"X-Lbx-User-Id": rev_id}).status_code not in (401, 403)
+                      headers=_bearer(rev_id)).status_code not in (401, 403)
 
-        # an unknown user id is treated as unauthenticated -> 401
+        # an unknown (but validly-signed) user id is treated as unauthenticated -> 401
         assert c.post("/api/govern/controller/tick",
-                      headers={"X-Lbx-User-Id": str(uuid.uuid4())}).status_code == 401
+                      headers=_bearer(str(uuid.uuid4()))).status_code == 401
+
+        # a tampered/garbage token -> 401
+        assert c.post("/api/govern/controller/tick",
+                      headers={"Authorization": "Bearer lbx1.deadbeef.deadbeef"}).status_code == 401

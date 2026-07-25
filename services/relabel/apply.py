@@ -48,6 +48,7 @@ async def apply_relabel(db: AsyncSession, proposals: list[dict], model_version: 
             prov = dict(obj.provenance or {})
             prov.setdefault("relabel_history", []).append(
                 {"old_class_id": old["class_id"], "new_class_id": p["new_class_id"],
+                 "old_source": old["source"], "old_state": old["state"],
                  "model_version": model_version, "branch": branch, "run_id": run_id})
             prov["relabel"] = {"from": p["old_class"], "to": p["new_class"], "model_version": model_version}
             obj.provenance = prov
@@ -91,7 +92,11 @@ async def revert_run(db: AsyncSession, run_id: str) -> dict:
             continue
         old = {"class_id": obj.class_id, "source": obj.source, "state": obj.state}
         obj.class_id = entry["old_class_id"]
-        obj.source, obj.state = "fused", "auto_accept"
+        # Restore the source/state the object actually had before the relabel, recorded at apply time. The old
+        # hardcoded "fused"/"auto_accept" clobbered a human-accepted or reviewed object's real prior state on
+        # revert. Fall back to the old constants for pre-existing history entries that lack the fields.
+        obj.source = entry.get("old_source", "fused")
+        obj.state = entry.get("old_state", "auto_accept")
         prov = dict(obj.provenance or {})
         prov.pop("relabel", None)
         obj.provenance = prov

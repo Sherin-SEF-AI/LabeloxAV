@@ -48,4 +48,10 @@ def paired_significance(champion: list[float], challenger: list[float], n_perm: 
         if abs(perm) >= abs(observed):
             at_least += 1
     p = (at_least + 1) / (n_perm + 1)
-    return {"delta": round(observed, 4), "p_value": round(p, 4), "significant": p < 0.05, "n": n}
+    # Direction matters for a promotion gate: a two-sided p<0.05 is reached by a significant DROP just as by a
+    # significant gain. "significant" therefore means "significantly BETTER" (the docstring's contract), so a
+    # caller can promote on it without accidentally shipping a significantly-worse challenger.
+    direction = "better" if observed > 0 else ("worse" if observed < 0 else "same")
+    return {"delta": round(observed, 4), "p_value": round(p, 4),
+            "significant": p < 0.05 and observed > 0, "direction": direction,
+            "significant_change": p < 0.05, "n": n}

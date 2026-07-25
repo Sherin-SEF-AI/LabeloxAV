@@ -411,11 +411,12 @@ async def cluster_map(limit: int = 1500) -> dict:
     if len(rows) < 10:
         return {"points": [], "n": len(rows)}
     mat = np.asarray([r[1] for r in rows], dtype=np.float32)
-    import hdbscan
-    import umap
+    # One fit implementation, shared with the explorer's persisted projections (services/curation/projection),
+    # so this map and the Explore map cluster identically instead of drifting apart.
+    from services.curation.projection import cluster_labels, fit_2d
 
-    xy = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1, metric="cosine").fit_transform(mat)
-    labels = hdbscan.HDBSCAN(min_cluster_size=15).fit_predict(mat)
+    xy, _method = fit_2d(mat, method="umap", n_neighbors=15, min_dist=0.1)
+    labels = cluster_labels(mat, min_cluster_size=15)
     points = []
     for (fid, _, scene), (x, y), lbl in zip(rows, xy, labels, strict=False):
         s = scene or {}

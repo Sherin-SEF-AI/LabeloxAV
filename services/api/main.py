@@ -18,17 +18,8 @@ from services.api.routers import (
     activelearn,
     adverse,
     agent,
-    calyx as calyx_router,
-    flywheel as flywheel_router,
-    forgyx as forgyx_router,
-    hardening as hardening_router,
-    labelox as labelox_router,
-    oraclyx as oraclyx_router,
-    release as release_router,
-    sanyx as sanyx_router,
-    verdyx as verdyx_router,
-    sievyx as sievyx_router,
     analytics,
+    assets,
     autolabel,
     calibration,
     cloud,
@@ -38,16 +29,19 @@ from services.api.routers import (
     datasets,
     discovery,
     drivable,
-    inertial,
     dynamics,
     errordetect,
+    explore,
     export,
     govern,
     hdmap,
     imports,
+    inertial,
     inspector,
+    integrations,
     intelligence,
     jobs,
+    labelops,
     lanes,
     lidar,
     lidar_scene,
@@ -72,6 +66,37 @@ from services.api.routers import (
     upload,
     users,
 )
+from services.api.routers import (
+    calyx as calyx_router,
+)
+from services.api.routers import (
+    flywheel as flywheel_router,
+)
+from services.api.routers import (
+    forgyx as forgyx_router,
+)
+from services.api.routers import (
+    hardening as hardening_router,
+)
+from services.api.routers import (
+    labelox as labelox_router,
+)
+from services.api.routers import (
+    oraclyx as oraclyx_router,
+)
+from services.api.routers import (
+    release as release_router,
+)
+from services.api.routers import (
+    sanyx as sanyx_router,
+)
+from services.api.routers import (
+    sievyx as sievyx_router,
+)
+from services.api.routers import (
+    verdyx as verdyx_router,
+)
+from services.export.dataset import DpdpaRefusal
 
 log = get_logger("api")
 
@@ -117,10 +142,22 @@ _ADMIN_PREFIXES = ("/api/govern", "/api/users")
 _REVIEWER_PREFIXES = (
     "/api/review", "/api/export", "/api/datasets", "/api/relabel", "/api/imports", "/api/curation",
     "/api/corrections", "/api/collaborate", "/api/objects", "/api/tracks", "/api/lanes", "/api/errordetect",
+    # C7: model promotion, paid-GPU control, and corpus-wide re-detection are not annotator actions.
+    "/api/training", "/api/cloud", "/api/autolabel",
 )
+# Reads under these prefixes are NOT open: they mint presigned download URLs (dataset exfiltration, C2) or
+# expose the governance state / audit log / user list (info disclosure). GET here still needs the role floor.
+_READ_GATED_PREFIXES = ("/api/govern", "/api/datasets", "/api/users", "/api/export")
+
+
+# Self-service routes: gated (need a valid token) but reachable by any authenticated user, so they must not
+# inherit the admin/reviewer floor of their prefix. GET /users/me lets a user resolve their own identity.
+_SELF_PATHS = ("/api/users/me",)
 
 
 def _required_role(path: str) -> str:
+    if path in _SELF_PATHS:
+        return "annotator"
     if path.startswith(_ADMIN_PREFIXES):
         return "admin"
     if path.startswith(_REVIEWER_PREFIXES):
@@ -129,23 +166,30 @@ def _required_role(path: str) -> str:
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Deny-by-default: every mutating /api request needs a known user, with role floors by path.
-    Open for reads. A new write route added later is gated automatically (fails closed)."""
+    """Deny-by-default: every mutating /api request needs a valid signed Bearer token, with role floors by
+    path. Reads are open EXCEPT under _READ_GATED_PREFIXES (which leak data or presigned download URLs). A new
+    write route added later is gated automatically (fails closed)."""
 
     async def dispatch(self, request, call_next):
-        if not get_settings().auth.enabled:
+        settings = get_settings()
+        if not settings.auth.enabled:
             return await call_next(request)
         method = request.method
         path = request.url.path
-        if method in ("GET", "HEAD", "OPTIONS") or path == "/api/health" or not path.startswith("/api/"):
+        read = method in ("GET", "HEAD", "OPTIONS")
+        gated_read = read and path.startswith(_READ_GATED_PREFIXES)
+        if (read and not gated_read) or path == "/api/health" or not path.startswith("/api/"):
             return await call_next(request)
 
         from sqlalchemy import func, select
 
         from db.models import User
         from db.session import get_sessionmaker
+        from services.api.auth_token import bearer_uid
 
-        uid = request.headers.get("x-lbx-user-id")
+        # The credential is a signed token in the Authorization header, not a plaintext user id: an attacker
+        # who reads the public user list cannot mint one without the server signing key (C1).
+        uid = bearer_uid(request.headers.get("authorization"), settings.auth.signing_key)
         role = None
         if uid:
             try:
@@ -163,7 +207,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
 
         if role is None:
-            return JSONResponse({"detail": "authentication required (X-Lbx-User-Id)"}, status_code=401)
+            return JSONResponse({"detail": "authentication required (Bearer token)"}, status_code=401)
         if role_rank(role) < role_rank(_required_role(path)):
             return JSONResponse({"detail": f"requires {_required_role(path)} role or higher"}, status_code=403)
         return await call_next(request)
@@ -178,6 +222,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(DpdpaRefusal)
+async def _dpdpa_handler(request, exc: DpdpaRefusal):
+    # A DPDPA pre-sale refusal is an expected, client-actionable outcome (un-redacted PII in the slice), not a
+    # server fault: return 422 with the per-session blockers instead of letting it escape as a 500.
+    payload = exc.args[0] if exc.args else {"detail": "DPDPA pre-sale gate refused export"}
+    return JSONResponse(payload, status_code=422)
 
 
 @app.get("/api/health")
@@ -256,6 +308,7 @@ app.include_router(analytics.router, prefix="/api", tags=["analytics"])
 app.include_router(cloud.router, prefix="/api", tags=["cloud"])
 app.include_router(models.router, prefix="/api", tags=["models"])
 app.include_router(export.router, prefix="/api", tags=["export"])
+app.include_router(explore.router, prefix="/api", tags=["explore"])
 app.include_router(quality.router, prefix="/api", tags=["quality"])
 app.include_router(recall.router, prefix="/api", tags=["recall"])
 app.include_router(adverse.router, prefix="/api", tags=["adverse"])
@@ -267,6 +320,9 @@ app.include_router(training.router, prefix="/api", tags=["training"])
 app.include_router(tracks.router, prefix="/api", tags=["tracks"])
 app.include_router(autolabel.router, prefix="/api", tags=["autolabel"])
 app.include_router(jobs.router, prefix="/api", tags=["jobs"])
+app.include_router(labelops.router, prefix="/api", tags=["labelops"])
+app.include_router(assets.router, prefix="/api", tags=["assets"])
+app.include_router(integrations.router, prefix="/api", tags=["integrations"])
 app.include_router(users.router, prefix="/api", tags=["users"])
 app.include_router(datasets.router, prefix="/api", tags=["datasets"])
 app.include_router(curation.router, prefix="/api", tags=["curation"])

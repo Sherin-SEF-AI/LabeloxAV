@@ -16,6 +16,27 @@ from services.release.lineage import gold_lineage
 router = APIRouter()
 
 
+@router.get("/release/{commit_id}/verify")
+async def verify(commit_id: str, db: AsyncSession = Depends(db_session)):
+    """Enforce release immutability: recompute the content fingerprint from the live objects the commit's
+    slice selects and compare it to the one sealed at export time. A mismatch means an annotation was mutated
+    after the release was cut (the commit_id, hashing only object ids, would not have caught it)."""
+    from services.export.dataset import SliceSpec, fetch_records, seal_content_fingerprint
+
+    c = await db.get(DatasetCommit, commit_id)
+    if c is None:
+        return {"error": "commit not found", "commit_id": commit_id}
+    if not c.content_fingerprint:
+        return {"commit_id": commit_id, "fingerprinted": False,
+                "detail": "sealed before content fingerprinting (migration 0061); cannot verify"}
+    records = await fetch_records(SliceSpec(**c.slice_spec))
+    recomputed = seal_content_fingerprint(SliceSpec(**c.slice_spec), records, c.ontology_version)
+    immutable = recomputed == c.content_fingerprint
+    return {"commit_id": commit_id, "fingerprinted": True, "immutable": immutable,
+            "sealed_fingerprint": c.content_fingerprint, "recomputed_fingerprint": recomputed,
+            "object_count_now": len(records), "object_count_sealed": c.object_count}
+
+
 @router.get("/release/registry")
 async def registry(limit: int = 100, db: AsyncSession = Depends(db_session)):
     """The Release registry: content-addressed dataset commits with their parent lineage, newest first."""

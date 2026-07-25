@@ -22,6 +22,9 @@ from sqlalchemy import (
     Text,
     func,
 )
+# Aliased: Asset defines a column literally named `text`, which would shadow the bare sqlalchemy.text
+# helper inside that class body.
+from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import (
     ARRAY as PGARRAY,  # noqa: F401  (scenario_candidate.rare_classes)
 )
@@ -119,12 +122,17 @@ class Frame(Base):
     # BEV projection params so an oriented box drawn on the image lifts back to a metric 3D cuboid.
     lidar: Mapped[dict | None] = mapped_column(JSONB)
 
+    # Free-form curation tags (explorer). Distinct from `scene`, which is model-derived: these are human or
+    # bulk-applied marks ("needs_relabel", "golden", "night_rain") used to slice and act on the corpus.
+    tags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+
     session: Mapped[Session] = relationship(back_populates="frames")
     objects: Mapped[list[Object]] = relationship(back_populates="frame")
 
     __table_args__ = (
         Index("ix_frame_session_ts", "session_id", "ts_ns"),
         Index("ix_frame_ts", "ts_ns"),
+        Index("ix_frame_tags_gin", "tags", postgresql_using="gin"),
     )
 
 
@@ -190,6 +198,10 @@ class Object(Base):
     rig_track_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # M3.1 same object across cameras
     cross_cam_links: Mapped[dict | None] = mapped_column(JSONB)   # M3.1 the same object seen in other views
 
+    # Free-form curation tags (explorer): human or bulk-applied marks used to slice and act on labels.
+    # Distinct from `attrs`, which is the ontology-typed attribute schema for this class.
+    tags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+
     frame: Mapped[Frame] = relationship(back_populates="objects")
 
     __table_args__ = (
@@ -197,6 +209,7 @@ class Object(Base):
         Index("ix_object_state", "state"),
         Index("ix_object_class", "class_id"),
         Index("ix_object_track", "track_id"),
+        Index("ix_object_tags_gin", "tags", postgresql_using="gin"),
     )
 
 
@@ -362,6 +375,320 @@ class ObjectEmbedding(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class EmbeddingProjection(Base):
+    """A fitted 2D projection of an embedding space, for the explorer's embeddings map. The high-dimensional
+    vectors already live in pgvector (object_embedding / frame_embedding); this stores the 2D layout so the
+    map opens instantly and the same picture is reproducible rather than re-fit (and re-shuffled) per visit.
+    `method` records what actually produced it (umap or the deterministic pca fallback), so a map is never
+    silently a different algorithm than the operator asked for."""
+
+    __tablename__ = "embedding_projection"
+
+    projection_id: Mapped[uuid.UUID] = _uuid_pk()
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)      # object | frame
+    space: Mapped[str] = mapped_column(String(8), nullable=False)     # dino | siglip
+    method: Mapped[str] = mapped_column(String(8), nullable=False)    # umap | pca
+    params: Mapped[dict] = mapped_column(JSONB, default=dict)         # n_neighbors, min_dist, seed, filters
+    n: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"))         # null = whole corpus
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EmbeddingProjectionPoint(Base):
+    """One point of a fitted projection: the 2D coordinate for an object or frame. Kept in its own table (not
+    a JSONB blob on the projection) so the explorer can page and filter points in SQL."""
+
+    __tablename__ = "embedding_projection_point"
+
+    projection_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("embedding_projection.projection_id", ondelete="CASCADE"), primary_key=True)
+    ref_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)  # object_id or frame_id
+    x: Mapped[float] = mapped_column(Float, nullable=False)
+    y: Mapped[float] = mapped_column(Float, nullable=False)
+    # Density-cluster label from HDBSCAN over the source vectors (-1 = noise/outlier). Persisted alongside the
+    # coordinates so "colour by cluster" and "select this cluster" need no re-fit.
+    cluster: Mapped[int | None] = mapped_column(Integer)
+
+    __table_args__ = (Index("ix_projection_point_projection", "projection_id"),)
+
+
+class EvalPatch(Base):
+    """One prediction-vs-gold outcome from a model evaluation, so a confusion-matrix cell can be opened and
+    the actual crops inspected (the "why did it confuse these" drill-down). outcome is tp | fp | fn; for a tp
+    the two class ids match, for a confusion they differ. object_id is the prediction (fp/tp) or the missed
+    gold object (fn), and is what the patch grid renders through /api/objects/{id}/crop."""
+
+    __tablename__ = "eval_patch"
+
+    patch_id: Mapped[uuid.UUID] = _uuid_pk()
+    eval_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)  # one evaluation run
+    gold_id: Mapped[str | None] = mapped_column(String(128))       # the sealed gold set it scored against
+    model_version: Mapped[str | None] = mapped_column(String(128))
+    object_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("object.object_id", ondelete="CASCADE"))
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    outcome: Mapped[str] = mapped_column(String(4), nullable=False)  # tp | fp | fn
+    gt_class_id: Mapped[int | None] = mapped_column(Integer)
+    pred_class_id: Mapped[int | None] = mapped_column(Integer)
+    iou: Mapped[float | None] = mapped_column(Float)
+    conf: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_eval_patch_eval", "eval_id"),
+        Index("ix_eval_patch_cell", "eval_id", "gt_class_id", "pred_class_id"),
+    )
+
+
+class LabelProject(Base):
+    """A labeling programme: the unit a team is organised around, holding the schema and the QA policy every
+    task under it inherits. Named LabelProject rather than Project to keep it unambiguous against the compute
+    jobs (ImportJob / TrainingJob), which are a different notion of "job" entirely.
+
+    label_config is reserved for the per-project configurable interface; an AV project leaves it empty and
+    inherits the 170-class ontology, which stays the default source of truth."""
+
+    __tablename__ = "label_project"
+
+    project_id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    modality: Mapped[str] = mapped_column(String(16), nullable=False, default="image")
+    label_config: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # QA policy inherited by every task: what fraction of a job is hidden gold, and the accuracy an annotator
+    # must hold against it.
+    honeypot_frac: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    min_honeypot_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.9,
+                                                         server_default="0.9")
+    gold_id: Mapped[str | None] = mapped_column(String(128))   # the sealed gold set honeypots are drawn from
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LabelTask(Base):
+    """A batch of work inside a project, usually one session or one curated slice. Splits into jobs, which are
+    what a person actually picks up."""
+
+    __tablename__ = "label_task"
+
+    task_id: Mapped[uuid.UUID] = _uuid_pk()
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("label_project.project_id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    slice_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("curation_slice.slice_id", ondelete="SET NULL"))
+    predicate: Mapped[dict] = mapped_column(JSONB, default=dict)   # the explorer predicate that defined it
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_label_task_project", "project_id"),)
+
+
+class LabelJob(Base):
+    """The unit of assignable work: a bounded set of frames one person annotates, reviews, or accepts.
+
+    stage and state are separate on purpose, the same split CVAT uses. stage is WHERE in the pipeline the work
+    sits (annotation -> validation -> acceptance); state is how far along it is within that stage. Collapsing
+    them into one enum loses the ability to say "in validation, not yet started".
+
+    Frames are referenced by id, never copied, so a job is a view over the corpus and cannot drift from it."""
+
+    __tablename__ = "label_job"
+
+    job_id: Mapped[uuid.UUID] = _uuid_pk()
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("label_task.task_id", ondelete="CASCADE"), nullable=False)
+    frame_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    stage: Mapped[str] = mapped_column(String(12), nullable=False, default="annotation")
+    state: Mapped[str] = mapped_column(String(12), nullable=False, default="new")
+    # Hidden gold frames mixed into this job, and the measured accuracy against them once submitted.
+    honeypot_frame_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    honeypot_accuracy: Mapped[float | None] = mapped_column(Float)
+    honeypot_detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Optimistic concurrency, matching Object: two reviewers acting on one job cannot silently clobber.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_label_job_task", "task_id"),
+        Index("ix_label_job_assignee", "assignee_id", "state"),
+    )
+
+
+class Issue(Base):
+    """A review thread pinned to a specific annotation or region: the feedback loop that lets a reviewer say
+    "this box is wrong, here" instead of rejecting silently. Anchored to an object when the complaint is about
+    a label, or to a frame plus a box region when it is about something missing."""
+
+    __tablename__ = "issue"
+
+    issue_id: Mapped[uuid.UUID] = _uuid_pk()
+    job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("label_job.job_id", ondelete="CASCADE"))
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    object_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
+    region: Mapped[list | None] = mapped_column(JSONB)          # optional [x1,y1,x2,y2] pin on the frame
+    kind: Mapped[str] = mapped_column(String(24), nullable=False, default="comment")
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="open")   # open | resolved
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_issue_frame", "frame_id", "status"),
+        Index("ix_issue_job", "job_id", "status"),
+    )
+
+
+class IssueComment(Base):
+    """One message in an issue thread."""
+
+    __tablename__ = "issue_comment"
+
+    comment_id: Mapped[uuid.UUID] = _uuid_pk()
+    issue_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("issue.issue_id", ondelete="CASCADE"),
+                                                nullable=False)
+    author_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_issue_comment_issue", "issue_id"),)
+
+
+class Asset(Base):
+    """A labelable item in a project, for any modality.
+
+    LabeloxAV has two annotation spines, kept deliberately separate:
+
+      AV spine       Session -> Frame -> Object (+ TimelineEvent)   the driving corpus, untouched
+      project spine  LabelProject -> Asset -> Annotation            everything a project labels
+
+    Forcing text spans and audio regions into Object (which is welded to a bbox, an ontology class id and the
+    confidence gate) would have made both worse. An Asset can REFERENCE an existing frame or session, so an AV
+    project reuses the corpus through the same job machinery without copying a single row.
+    """
+
+    __tablename__ = "asset"
+
+    asset_id: Mapped[uuid.UUID] = _uuid_pk()
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("label_project.project_id", ondelete="CASCADE"), nullable=False)
+    # image | video | audio | text | timeseries | document | pointcloud | dialogue
+    media_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    uri: Mapped[str | None] = mapped_column(Text)          # object-store uri for binary media
+    text: Mapped[str | None] = mapped_column(Text)         # inline body for text/dialogue assets
+    external_id: Mapped[str | None] = mapped_column(String(200))   # caller's own id, for idempotent import
+    # Optional links back into the AV spine, so an Asset can be a view of an existing frame or session.
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict)  # duration_s, sample_rate, width/height, channels
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="new")  # new|in_progress|labeled|skipped
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_asset_project", "project_id", "state"),
+        Index("ix_asset_external", "project_id", "external_id", unique=True,
+              postgresql_where=sql_text("external_id IS NOT NULL")),
+    )
+
+
+class Annotation(Base):
+    """One annotation on an Asset, of any shape.
+
+    `kind` selects how `payload` is read, and payload is validated against the kind AND against the project's
+    label_config before it is stored (services/assets/labelconfig.py). Keeping the shape in JSONB rather than
+    as columns is what lets one table serve boxes, text spans, audio regions and preference rankings; keeping
+    the validation strict is what stops that flexibility from becoming a junk drawer.
+
+    Carries the same discipline as Object: source, state, version for optimistic concurrency, and provenance.
+    """
+
+    __tablename__ = "annotation"
+
+    annotation_id: Mapped[uuid.UUID] = _uuid_pk()
+    asset_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("asset.asset_id", ondelete="CASCADE"),
+                                                nullable=False)
+    # bbox | polygon | polyline | keypoints | mask | span | relation | region | classification |
+    # transcription | preference | rubric | ranking
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(120))   # the label config entry this instance carries
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    fields: Mapped[dict] = mapped_column(JSONB, default=dict)  # typed per-label fields from the label config
+    conf: Mapped[float | None] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="human")  # human|model|imported
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="accepted")
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_annotation_asset", "asset_id", "kind"),
+        Index("ix_annotation_label", "label"),
+    )
+
+
+class Webhook(Base):
+    """An outbound HTTP subscription, so an external pipeline can react to what happens here instead of
+    polling for it.
+
+    Deliveries are signed with an HMAC over the body using the subscription's own secret, the same scheme as
+    GitHub and Stripe. Without a signature a receiver cannot tell a real delivery from anyone who learned the
+    URL, which makes a webhook an unauthenticated write into whatever it triggers.
+    """
+
+    __tablename__ = "webhook"
+
+    webhook_id: Mapped[uuid.UUID] = _uuid_pk()
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("label_project.project_id", ondelete="CASCADE"))   # null = all projects
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    events: Mapped[list] = mapped_column(JSONB, default=list)         # [] = every event
+    secret: Mapped[str | None] = mapped_column(String(128))
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    # Delivery health, so a silently dead endpoint is visible rather than merely absent.
+    last_status: Mapped[int | None] = mapped_column(Integer)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_delivery_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_webhook_project", "project_id", "active"),)
+
+
+class StorageSource(Base):
+    """A registered external bucket a project imports from.
+
+    Credentials are NOT stored here: the row holds only the locator and which server-side credential profile
+    to use. Persisting per-source keys would put long-lived cloud credentials in the application database,
+    where a single read of one table becomes a breach of every connected bucket.
+    """
+
+    __tablename__ = "storage_source"
+
+    source_id: Mapped[uuid.UUID] = _uuid_pk()
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("label_project.project_id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider: Mapped[str] = mapped_column(String(12), nullable=False)   # s3 | gcs | azure | minio
+    bucket: Mapped[str] = mapped_column(String(200), nullable=False)
+    prefix: Mapped[str | None] = mapped_column(Text)
+    region: Mapped[str | None] = mapped_column(String(32))
+    endpoint_url: Mapped[str | None] = mapped_column(Text)             # for s3-compatible stores
+    credential_profile: Mapped[str | None] = mapped_column(String(64))  # names a server-side credential
+    last_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_object_count: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_storage_source_project", "project_id"),)
+
+
 class ScenarioCandidate(Base):
     # Rare-scenario discovery output (M1.5): unusual frames surfaced by embedding novelty or rare-class,
     # routed to a human confirm/dismiss/tag queue. Feeds active learning and sellable rare slices.
@@ -416,6 +743,9 @@ class DatasetCommit(Base):
     cloud_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     ontology_version: Mapped[str] = mapped_column(String(64), nullable=False)
     export_uris: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Content hash (class/geometry/state), distinct from the object-id-only commit_id, so a mutated
+    # annotation is detectable on /release/{id}/verify. Nullable: pre-0061 commits were not fingerprinted.
+    content_fingerprint: Mapped[str | None] = mapped_column(String(64))
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -1268,7 +1598,7 @@ class SessionIndex(Base):
 
     __tablename__ = "session_index"
 
-    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), primary_key=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id", ondelete="CASCADE"), primary_key=True)
     mcap_uri: Mapped[str | None] = mapped_column(Text)
     topics: Mapped[dict] = mapped_column(JSONB, default=dict)      # {topic: {name, schema, count, rate, first_ts, last_ts}}
     time_range: Mapped[list] = mapped_column(ARRAY(BigInteger))    # [first_ts_ns, last_ts_ns] across all topics
@@ -1285,7 +1615,7 @@ class SessionHealth(Base):
     __tablename__ = "session_health"
 
     id: Mapped[uuid.UUID] = _uuid_pk()
-    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id", ondelete="CASCADE"), nullable=False)
     checks: Mapped[list] = mapped_column(JSONB, default=list)      # [{name, status, detail, evidence, score}]
     verdict: Mapped[str] = mapped_column(String(8), nullable=False)  # pass | warn | fail
     score: Mapped[float | None] = mapped_column(Float)             # SANYX overall 0..100 health score
@@ -1321,7 +1651,7 @@ class FrameGroup(Base):
     __tablename__ = "frame_group"
 
     group_id: Mapped[uuid.UUID] = _uuid_pk()
-    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id", ondelete="CASCADE"), nullable=False)
     ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)         # group reference time (earliest member)
     frame_ids: Mapped[dict] = mapped_column(JSONB, default=dict)          # {cam_id: frame_id}
     missing_cams: Mapped[list] = mapped_column(ARRAY(Text), default=list)  # cameras with no frame in this window
@@ -1343,7 +1673,7 @@ class RigObject(Base):
     __tablename__ = "rig_object"
 
     rig_object_id: Mapped[uuid.UUID] = _uuid_pk()
-    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"), nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id", ondelete="CASCADE"), nullable=False)
     group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("frame_group.group_id"), nullable=False)
     class_id: Mapped[int | None] = mapped_column(Integer)                 # voted class across members
     member_object_ids: Mapped[list] = mapped_column(ARRAY(UUID(as_uuid=True)), default=list)

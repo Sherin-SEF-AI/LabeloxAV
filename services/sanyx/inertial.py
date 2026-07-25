@@ -72,12 +72,13 @@ async def extract_inertial(db, session_id) -> dict:
             out["imu_ts"].append(ts)
             ax = _get_chain(decoded, "linear_acceleration", "x")
             gx = _get_chain(decoded, "angular_velocity", "x")
-            if ax is not None:
-                out["accel"].append([ax, _get_chain(decoded, "linear_acceleration", "y") or 0.0,
-                                     _get_chain(decoded, "linear_acceleration", "z") or 0.0])
-            if gx is not None:
-                out["gyro"].append([gx, _get_chain(decoded, "angular_velocity", "y") or 0.0,
-                                    _get_chain(decoded, "angular_velocity", "z") or 0.0])
+            # Append accel AND gyro on every IMU message (0-filled when a field is absent) so accel, gyro, and
+            # imu_ts stay the same length and index-aligned. Conditionally appending each let a message missing
+            # one field desync the two streams, so accel[i] and gyro[i] no longer referred to the same sample.
+            out["accel"].append([ax or 0.0, _get_chain(decoded, "linear_acceleration", "y") or 0.0,
+                                 _get_chain(decoded, "linear_acceleration", "z") or 0.0])
+            out["gyro"].append([gx or 0.0, _get_chain(decoded, "angular_velocity", "y") or 0.0,
+                                _get_chain(decoded, "angular_velocity", "z") or 0.0])
         elif kind == "gnss":
             out["gnss_ts"].append(ts)
             status = _get_chain(decoded, "status", "status")

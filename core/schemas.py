@@ -84,6 +84,10 @@ class Provenance(BaseModel):
     proposals: list[PathProposal] = Field(default_factory=list)
     agreement: bool = False
     mask_box_disagree: bool = False
+    # Entropy of the ensemble class-vote distribution at fusion (nats): 0 when the paths agree on one class,
+    # higher as their votes spread across classes. A class-distribution uncertainty the scalar conf misses;
+    # the active-learning value score reads it. Computed by core.accel.uncertainty.entropy_margin.
+    entropy: float | None = None
     raw_conf: dict[str, float] = Field(default_factory=dict)
     calibrated_from: float | None = None
     ontology_version: str | None = None

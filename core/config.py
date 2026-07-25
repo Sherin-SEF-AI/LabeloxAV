@@ -430,11 +430,16 @@ class SpatialSettings(BaseModel):
 
 
 class ActiveLearnSettings(BaseModel):
-    # M4.0 value-ranked selection. Weights sum to 1; the band is the most-informative confidence window.
+    # M4.0 value-ranked selection. The weights are relative ranking coefficients (the value is a weighted sum
+    # of per-signal [0,1] scores used only to sort, so they need not sum to 1); the base four total 1.0 and the
+    # flicker/fn signals are added on top. The band is the most-informative confidence window.
     w_uncertainty: float = 0.40
     w_diversity: float = 0.25
     w_rarity: float = 0.20
     w_error_prone: float = 0.15
+    w_flicker: float = 0.15              # temporal box jitter: a high-flicker high-confidence track is a
+                                         # classic auto-label failure the scalar confidence misses, so it earns
+                                         # review priority (core.accel.uncertainty.flicker_scores)
     w_fn: float = 0.6                    # recall-recovery (false-negative) value, so a recovered miss ranks
     uncertainty_lo: float = 0.55         # below this is hopeless, above uncertainty_hi is easy
     uncertainty_hi: float = 0.92
@@ -514,9 +519,13 @@ class Phase4Settings(BaseModel):
 
 
 class AuthSettings(BaseModel):
-    # Deny-by-default API auth. When enabled, every mutating /api request needs a known X-Lbx-User-Id,
-    # and role floors gate destructive/governance routes. Reads stay open. Disable only for unit tests.
+    # Deny-by-default API auth. When enabled, every mutating /api request needs a valid signed Bearer token
+    # (services/api/auth_token.py) and role floors gate destructive/governance routes. Reads under
+    # data-bearing prefixes are gated too. Disable only for unit tests.
     enabled: bool = True
+    # HMAC key that signs/verifies API tokens. The weak default below is refused on any non-local deployment
+    # by _require_prod_secrets: a known signing key lets anyone mint an admin token.
+    signing_key: str = "labeloxavauthsigningkey0123456789abcdef"
 
 
 class LidarSettings(BaseModel):
@@ -748,26 +757,38 @@ class Settings(BaseSettings):
 
     _DEV_ENVS = {"local", "test", "ci", "dev"}
 
+    _LOCAL_HOSTS = {"localhost", "127.0.0.1", "postgres", "minio", "redis", "::1"}
+
     @model_validator(mode="after")
     def _require_prod_secrets(self):
-        """Outside a dev env, the known dev-default credentials are refused so a deployment cannot ship
-        with `labelox`/`labelox123`. Set the real secrets via env (LBX_POSTGRES__PASSWORD, etc.)."""
-        if self.env.lower() in self._DEV_ENVS:
-            return self
+        """Fail closed on default credentials. The known dev-default secrets (postgres/minio creds, lakeFS key,
+        and the FORGYX/GOVERN HMAC signing keys) are refused whenever the deployment is NOT an explicit local
+        dev box: either env is outside the dev set, OR a non-local service host is configured (the 'forgot
+        LBX_ENV in prod' case). A purely-local dev box with dev creds is still allowed. This closes the
+        fail-open default where forgetting LBX_ENV shipped forgeable signing keys and public passwords."""
         weak = []
         if self.postgres.password == "labelox":
             weak.append("LBX_POSTGRES__PASSWORD")
         if self.minio.secret_key == "labelox123":
             weak.append("LBX_MINIO__SECRET_KEY")
+        if getattr(self.minio, "access_key", None) == "labelox":
+            weak.append("LBX_MINIO__ACCESS_KEY")
         if self.phase4.lakefs.secret_key.startswith("labeloxavlakefssecret"):
             weak.append("LBX_PHASE4__LAKEFS__SECRET_KEY")
         if self.forgyx.deploy_signing_key.startswith("labeloxforgyxdeploysigningkey"):
             weak.append("LBX_FORGYX__DEPLOY_SIGNING_KEY")
         if self.phase4.govern.attestation_key.startswith("labeloxavgovernattestationkey"):
             weak.append("LBX_PHASE4__GOVERN__ATTESTATION_KEY")
-        if weak:
+        if self.auth.enabled and self.auth.signing_key.startswith("labeloxavauthsigningkey"):
+            weak.append("LBX_AUTH__SIGNING_KEY")
+        if not weak:
+            return self
+        is_dev_env = self.env.lower() in self._DEV_ENVS
+        local_only = self.postgres.host in self._LOCAL_HOSTS
+        if not is_dev_env or not local_only:
             raise ValueError(
-                f"env '{self.env}' is not a dev env but still uses default credentials; set: {', '.join(weak)}"
+                f"default/weak credentials detected (env={self.env!r}, postgres host={self.postgres.host!r}); "
+                f"set real values for: {', '.join(weak)}"
             )
         return self
 

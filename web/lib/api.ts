@@ -52,6 +52,26 @@ import type {
   IntentVocab,
   TriageRow,
   UserRow,
+  UserCreated,
+  LabelConfig,
+  WebhookRow,
+  StorageSourceRow,
+  AssetRow,
+  AssetDetail,
+  AnnotationRow,
+  LabelProjectRow,
+  LabelJobRow,
+  BoardCell,
+  IssueRow,
+  ScorecardRow,
+  ExplorePredicate,
+  Facets,
+  ProjectionRow,
+  ProjectionPoints,
+  SavedView,
+  EvalRun,
+  ConfusionCell,
+  EvalPatchRow,
   CloudStatus,
   CloudOrphan,
 } from "./types";
@@ -96,6 +116,23 @@ async function put<T>(path: string, body: unknown): Promise<T> {
       body: JSON.stringify(body),
     });
     if (!r.ok) throw new Error(`PUT ${path} -> ${r.status} ${await r.text()}`);
+    return r.json();
+  } finally {
+    end();
+  }
+}
+
+// PATCH rather than PUT for partial updates: an annotation edit sends only the changed fields, so a client
+// that does not know about a column cannot blank it by omission.
+async function patch<T>(path: string, body: unknown): Promise<T> {
+  begin();
+  try {
+    const r = await fetch(path, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...userHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`PATCH ${path} -> ${r.status} ${await r.text()}`);
     return r.json();
   } finally {
     end();
@@ -506,7 +543,119 @@ export const api = {
   // Track (tracklet) editor
   // Operational layer: unified jobs, bulk review, UI-triggered autolabel
   users: () => get<UserRow[]>("/api/users"),
-  createUser: (name: string, role: string) => post<UserRow>("/api/users", { name, role }),
+  me: () => get<UserRow>("/api/users/me"),
+  createUser: (name: string, role: string) => post<UserCreated>("/api/users", { name, role }),
+
+  // ---- Integrations: webhooks and storage sources ----
+  integrationEvents: () => get<{ events: string[] }>("/api/integrations/events"),
+  webhooks: () => get<{ webhooks: WebhookRow[] }>("/api/integrations/webhooks"),
+  createWebhook: (url: string, events: string[]) =>
+    post<WebhookRow & { secret: string }>("/api/integrations/webhooks", { url, events }),
+  deleteWebhook: (id: string) => del<{ deleted: boolean }>(`/api/integrations/webhooks/${id}`),
+  storageSources: () => get<{ sources: StorageSourceRow[] }>("/api/integrations/sources"),
+  registerSource: (body: Record<string, unknown>) =>
+    post<StorageSourceRow>("/api/integrations/sources", body),
+  previewSource: (id: string) =>
+    get<{ uri: string; count?: number; keys?: string[]; detail?: string }>(
+      `/api/integrations/sources/${id}/preview`),
+  deleteSource: (id: string) => del<{ deleted: boolean }>(`/api/integrations/sources/${id}`),
+
+  // ---- Multi-modal assets and annotations ----
+  assetKinds: () => get<{ kinds: { kind: string; description: string }[] }>("/api/assets/kinds"),
+  setLabelConfig: (projectId: string, config: LabelConfig) =>
+    post<{ project_id: string; label_config: LabelConfig }>(
+      `/api/projects/${projectId}/label-config`, config),
+  createAssets: (project_id: string, items: Record<string, unknown>[]) =>
+    post<{ created: number; updated: number; assets: AssetRow[] }>("/api/assets", { project_id, items }),
+  projectAssets: (projectId: string, q: { state?: string; media_type?: string; limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v != null) p.set(k, String(v)); });
+    return get<{ total: number; assets: AssetRow[] }>(`/api/projects/${projectId}/assets?${p.toString()}`);
+  },
+  projectStats: (projectId: string) =>
+    get<{ assets_by_state: Record<string, number>; annotations_by_kind: Record<string, number>;
+          total_assets: number; total_annotations: number }>(`/api/projects/${projectId}/stats`),
+  asset: (assetId: string) => get<AssetDetail>(`/api/assets/${assetId}`),
+  setAssetState: (assetId: string, state: string) =>
+    post<AssetRow>(`/api/assets/${assetId}/state?state=${state}`, {}),
+  createAnnotation: (assetId: string, body: Record<string, unknown>) =>
+    post<AnnotationRow>(`/api/assets/${assetId}/annotations`, body),
+  updateAnnotation: (annotationId: string, body: Record<string, unknown>) =>
+    patch<AnnotationRow>(`/api/annotations/${annotationId}`, body),
+  deleteAnnotation: (annotationId: string) =>
+    del<{ deleted: boolean }>(`/api/annotations/${annotationId}`),
+
+  // ---- Labeling operations (projects, jobs, issues, scorecards) ----
+  lopProjects: () => get<{ projects: LabelProjectRow[] }>("/api/labelops/projects"),
+  lopCreateProject: (body: Record<string, unknown>) =>
+    post<LabelProjectRow>("/api/labelops/projects", body),
+  lopBoard: (projectId: string) =>
+    get<{ project_id: string; cells: BoardCell[]; open_load: { assignee: string; open_jobs: number }[] }>(
+      `/api/labelops/projects/${projectId}/board`),
+  lopCreateTask: (body: Record<string, unknown>) =>
+    post<{ task_id: string; n_frames: number; n_jobs: number; honeypots_seeded: number }>(
+      "/api/labelops/tasks", body),
+  lopJobs: (q: { project_id?: string; assignee_id?: string; stage?: string; state?: string } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v) p.set(k, String(v)); });
+    return get<{ jobs: LabelJobRow[] }>(`/api/labelops/jobs?${p.toString()}`);
+  },
+  lopMyJobs: () => get<{ jobs: LabelJobRow[] }>("/api/labelops/my-jobs"),
+  lopAssign: (jobId: string, assignee_id: string | null, expected_version?: number) =>
+    post<LabelJobRow>(`/api/labelops/jobs/${jobId}/assign`, { assignee_id, expected_version }),
+  lopSetState: (jobId: string, state: string, expected_version?: number) =>
+    post<LabelJobRow>(`/api/labelops/jobs/${jobId}/state`, { state, expected_version }),
+  lopSubmit: (jobId: string, expected_version?: number) =>
+    post<LabelJobRow & { honeypot_failed: boolean; min_honeypot_accuracy: number }>(
+      `/api/labelops/jobs/${jobId}/submit`, { expected_version }),
+  lopIssues: (q: { frame_id?: string; job_id?: string; object_id?: string; status?: string } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v) p.set(k, String(v)); });
+    return get<{ issues: IssueRow[] }>(`/api/labelops/issues?${p.toString()}`);
+  },
+  lopCreateIssue: (body: Record<string, unknown>) => post<IssueRow>("/api/labelops/issues", body),
+  lopIssue: (issueId: string) => get<IssueRow>(`/api/labelops/issues/${issueId}`),
+  lopComment: (issueId: string, body: string) =>
+    post<IssueRow>(`/api/labelops/issues/${issueId}/comment`, { body }),
+  lopResolveIssue: (issueId: string, reopen = false) =>
+    post<IssueRow>(`/api/labelops/issues/${issueId}/resolve?reopen=${reopen}`, {}),
+  lopScorecards: (project_id?: string) =>
+    get<{ scorecards: ScorecardRow[] }>(
+      `/api/labelops/scorecards${project_id ? `?project_id=${project_id}` : ""}`),
+
+  // ---- Explore workspace ----
+  exploreFacets: (predicate: ExplorePredicate) => post<Facets>("/api/explore/facets", predicate),
+  exploreSelect: (predicate: ExplorePredicate, level = "object", limit = 5000) =>
+    post<{ level: string; count: number; ids: string[] }>(
+      `/api/explore/select?level=${level}&limit=${limit}`, predicate),
+  exploreTag: (body: { level: string; predicate: ExplorePredicate; add?: string[]; remove?: string[] }) =>
+    post<{ matched: number; added: string[]; removed: string[] }>("/api/explore/tag", body),
+  exploreTagVocab: (level = "object") =>
+    get<{ level: string; tags: { tag: string; count: number }[] }>(`/api/explore/tags?level=${level}`),
+  exploreProjections: () => get<{ projections: ProjectionRow[] }>("/api/explore/projections"),
+  exploreFitProjection: (body: Record<string, unknown>) =>
+    post<{ projection_id?: string; method?: string; n?: number; clusters?: number; error?: string }>(
+      "/api/explore/projection", body),
+  exploreProjectionPoints: (id: string, limit = 50000) =>
+    get<ProjectionPoints>(`/api/explore/projection/${id}/points?limit=${limit}`),
+  exploreDeleteProjection: (id: string) => del<{ deleted: boolean }>(`/api/explore/projection/${id}`),
+  exploreViews: () => get<{ views: SavedView[] }>("/api/explore/views"),
+  exploreSaveView: (name: string, predicate: ExplorePredicate, description?: string) =>
+    post<{ slice_id: string; name: string }>("/api/explore/views", { name, predicate, description }),
+  exploreEvals: () => get<{ evals: EvalRun[] }>("/api/explore/evals"),
+  exploreRunEval: (gold_id: string, iou_thr = 0.5) =>
+    post<{ eval_id?: string; tp?: number; fp?: number; fn?: number; error?: string }>(
+      "/api/explore/eval", { gold_id, iou_thr }),
+  exploreEvalCells: (evalId: string) =>
+    get<{ eval_id: string; cells: ConfusionCell[] }>(`/api/explore/eval/${evalId}/cells`),
+  exploreEvalPatches: (evalId: string, q: { gt_class_id?: number | null; pred_class_id?: number | null; outcome?: string }) => {
+    const p = new URLSearchParams();
+    if (q.gt_class_id != null) p.set("gt_class_id", String(q.gt_class_id));
+    if (q.pred_class_id != null) p.set("pred_class_id", String(q.pred_class_id));
+    if (q.outcome) p.set("outcome", q.outcome);
+    return get<{ eval_id: string; count: number; patches: EvalPatchRow[] }>(
+      `/api/explore/eval/${evalId}/patches?${p.toString()}`);
+  },
   curationSummary: (session_id?: string) =>
     get<CurationSummary>("/api/curation/summary" + (session_id ? `?session_id=${session_id}` : "")),
   curationEmbed: (session_id?: string) =>

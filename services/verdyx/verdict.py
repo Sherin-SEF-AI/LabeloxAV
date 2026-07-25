@@ -22,7 +22,14 @@ def slice_verdict(champion: dict, challenger: dict, protected_slices: list[str],
     for sl in protected_slices:
         cp = (cp_slices.get(sl) or {}).get(slice_metric)
         chal = (ch_slices.get(sl) or {}).get(slice_metric)
-        if cp is not None and chal is not None and chal < cp - slice_drop_tol:
+        if cp is None:
+            continue  # champion never measured this slice; nothing to regress against
+        # Fail-closed (C6): a protected slice the champion measured but the challenger DROPPED is a regression,
+        # not a silent pass. Omitting the slice must not be a way to bypass the gate.
+        if chal is None:
+            regressed.append({"slice": sl, "from": round(cp, 4), "to": None,
+                              "drop": None, "reason": "unmeasured in challenger"})
+        elif chal < cp - slice_drop_tol:
             regressed.append({"slice": sl, "from": round(cp, 4), "to": round(chal, 4),
                               "drop": round(cp - chal, 4)})
 

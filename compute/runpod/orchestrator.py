@@ -93,15 +93,19 @@ class RunpodOrchestrator:
 
     def _gql(self, query: str, variables: dict | None = None) -> dict:
         try:
+            # Send the key in the Authorization header, never the URL: a query-string key lands in proxy/server
+            # access logs and in httpx.HTTPStatusError's message (which is wrapped into RunpodError and logged).
             r = httpx.post(
-                f"{GQL}?api_key={self._require_key()}",
+                GQL,
+                headers={"Authorization": f"Bearer {self._require_key()}"},
                 json={"query": query, "variables": variables or {}},
                 timeout=self._timeout,
             )
             r.raise_for_status()
             data = r.json()
         except httpx.HTTPError as exc:
-            raise RunpodError(f"runpod request failed: {exc}") from exc
+            # sanitize: never let a URL/token-bearing message escape into logs
+            raise RunpodError(f"runpod request failed: {type(exc).__name__}") from None
         if data.get("errors"):
             raise RunpodError(f"runpod graphql errors: {data['errors']}")
         return data["data"]

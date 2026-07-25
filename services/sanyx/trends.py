@@ -68,6 +68,12 @@ async def rig_trends(db: AsyncSession, vehicle_id: str, limit: int = 50, persist
                SessionHealth.indexer_version != "sanyx-stream")
         .order_by(SessionHealth.created_at.asc()).limit(limit))).scalars().all()
 
+    # One health record per session: a re-index or an operator override writes a second SessionHealth row for
+    # the same session, and counting both would double-weight that session in the trend. Keep the latest
+    # (created_at is ascending, so the last write for a session wins).
+    latest_by_session = {h.session_id: h for h in rows}
+    rows = sorted(latest_by_session.values(), key=lambda h: h.created_at)
+
     series: dict[str, list[float]] = {}
     for h in rows:
         for c in (h.checks or []):

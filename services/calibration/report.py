@@ -58,7 +58,14 @@ async def validate_session(session_id: UUID, imu_ts_ns: list[int] | None = None)
                             "reproj_error_px": intr["reproj_error_px"], "fov_check": intr["fov_check"],
                             "time_offset_ns": time_offset, "status": status})
 
-        db.add(CameraRig(vehicle_id=sess.vehicle_id, cameras=cam_entries))
+        # Upsert the rig for this vehicle: each validation run used to INSERT a new CameraRig row, so a vehicle
+        # accumulated a duplicate rig per validation. Update the existing row's cameras instead.
+        rig = (await db.execute(
+            select(CameraRig).where(CameraRig.vehicle_id == sess.vehicle_id))).scalars().first()
+        if rig is None:
+            db.add(CameraRig(vehicle_id=sess.vehicle_id, cameras=cam_entries))
+        else:
+            rig.cameras = cam_entries
         await db.commit()
 
     overall = "fail" if any(r["status"] == "fail" for r in results) else "pass"

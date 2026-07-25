@@ -75,6 +75,10 @@ def test_governance_end_to_end():
             st = await K.get_state(db)
             st.loop_enabled = st.auto_accept_enabled = st.auto_promote_enabled = True
             st.champion_version, st.paused_reason = None, None
+            # measured_precision aggregates ALL control samples, so clear any left by another test (or a prior
+            # failed run) to keep the "reviewed == 5" assertion hermetic.
+            from sqlalchemy import delete as _delete
+            await db.execute(_delete(ControlSample))
             await db.commit()
 
             # first model becomes champion (no incumbent)

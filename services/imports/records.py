@@ -29,6 +29,9 @@ class ImportObject:
     mask_polygons: list[list[float]] | None = None  # flattened [x,y,x,y,...] per polygon, pixel coords
     rot_deg: float = 0.0  # oriented-box rotation about the box centre (0 = axis-aligned)
     keypoints: dict | None = None  # COCO-style {"skeleton","points":[[x,y,v],...]} pose
+    # Open polyline ([[x,y],...] pixel) for linear features (curb, road_edge, barrier). Object.polyline is
+    # exported by several adapters, so without this the geometry silently degraded to a bare bbox on reimport.
+    polyline: list | None = None
 
 
 @dataclass

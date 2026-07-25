@@ -130,9 +130,12 @@ async def sam_propagate_object(object_id: UUID, n_frames: int = 12, direction: s
                     Frame.session_id == anchor.session_id, Frame.ts_ns > anchor.ts_ns)
                     .order_by(Frame.ts_ns.asc()).limit(n_frames))).scalars().all()
             else:
-                frames = list(reversed((await db.execute(select(Frame).where(
+                # Backward: walk from the anchor to progressively earlier frames (nearest-first), so optical
+                # flow sees small step-to-step motion. Reversing to ascending order made the first flow step
+                # jump from the anchor all the way to the farthest frame, breaking the track.
+                frames = (await db.execute(select(Frame).where(
                     Frame.session_id == anchor.session_id, Frame.ts_ns < anchor.ts_ns)
-                    .order_by(Frame.ts_ns.desc()).limit(n_frames))).scalars().all()))
+                    .order_by(Frame.ts_ns.desc()).limit(n_frames))).scalars().all()
             if not frames:
                 created[d] = []
                 continue

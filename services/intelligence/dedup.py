@@ -77,17 +77,22 @@ async def dedup_session(session_id: UUID, phash_hamming: int | None = None, dino
         if ra != rb:
             parent[ra] = rb
 
-    # stage 1 (pHash hamming) then stage 2 (DINOv3 cosine confirm)
-    for i in range(total):
-        fi = frames[i]
-        if fi["ph"] is None:
-            continue
-        for j in range(i + 1, total):
-            fj = frames[j]
-            if fj["ph"] is None:
-                continue
-            if (fi["ph"] - fj["ph"]) <= ph_thresh and float(fi["vec"] @ fj["vec"]) >= cos_thresh:
-                union(fi["id"], fj["id"])
+    # stage 1 (pHash hamming) then stage 2 (DINOv3 cosine confirm), computed as two batched matrices instead
+    # of the O(n^2) Python double loop: the same imagehash pHash values packed to bytes through the popcount
+    # Hamming kernel, and the same raw dot over the DINOv3 vectors. Bit-identical result, the pairwise cost on
+    # the GPU when available.
+    from core.accel.curation import hamming_matrix
+
+    valid = np.array([f["ph"] is not None for f in frames])
+    packed = np.stack([np.packbits(np.asarray(f["ph"].hash).ravel()) if f["ph"] is not None
+                       else np.zeros(8, dtype=np.uint8) for f in frames])
+    Hm = hamming_matrix(packed)                                  # (n, n) same as imagehash (ph_i - ph_j)
+    vecs = np.stack([f["vec"] for f in frames]).astype(np.float32)
+    S = vecs @ vecs.T                                           # same raw dot as fi.vec @ fj.vec
+    dup = (Hm <= ph_thresh) & (S >= cos_thresh)
+    dup &= valid[:, None] & valid[None, :]
+    for i, j in zip(*np.where(np.triu(dup, 1))):
+        union(frames[int(i)]["id"], frames[int(j)]["id"])
 
     groups: dict = defaultdict(list)
     for f in frames:

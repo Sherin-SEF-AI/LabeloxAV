@@ -1,8 +1,9 @@
-// Lightweight current-user (no password): the chosen identity lives in localStorage and rides on every
-// mutating request as the X-Lbx-User-Id header. Role drives the QA workflow (annotator submits for QA,
-// reviewer/admin approves).
+// Current-user credential: a signed Bearer token (issued by the API when the user is created) lives in
+// localStorage and rides on every request as the Authorization header. Role drives the QA workflow
+// (annotator submits for QA, reviewer/admin approves). The token is unforgeable, so identity can no longer
+// be self-asserted by echoing a user id.
 
-export type CurrentUser = { user_id: string; name: string; role: string };
+export type CurrentUser = { user_id: string; name: string; role: string; token?: string };
 
 const KEY = "lbx_user";
 let _cache: CurrentUser | null | undefined;
@@ -28,6 +29,9 @@ export function setUser(u: CurrentUser | null): void {
 
 export function userHeaders(): Record<string, string> {
   const u = getUser();
+  if (u?.token) return { Authorization: `Bearer ${u.token}` };
+  // No token (e.g. a dev backend with auth disabled): fall back to the legacy id header so attribution still
+  // works locally. With auth enabled server-side this header is ignored and the request is treated as anon.
   return u ? { "X-Lbx-User-Id": u.user_id } : {};
 }
 

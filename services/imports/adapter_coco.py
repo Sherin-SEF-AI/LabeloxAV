@@ -37,10 +37,18 @@ def parse(root: Path) -> list[ImportFrame]:
             bbox = [x, y, x + w, y + h]
             ext = ann.get("labelox") or {}
             name = ext.get("class_name") or cat_name.get(ann.get("category_id"), "object_fallback")
+            # Carry COCO polygon segmentation through as mask polygons (services.imports.run writes them to a
+            # mask blob). RLE segmentation (a dict) is not decoded here, so it is skipped rather than dropped
+            # silently under the guise of support.
+            seg = ann.get("segmentation")
+            mask_polygons = None
+            if isinstance(seg, list) and seg:
+                polys = [list(map(float, p)) for p in seg if isinstance(p, list) and len(p) >= 6]
+                mask_polygons = polys or None
             objs.append(ImportObject(
                 name=name, bbox=bbox, attrs=ext.get("attributes", {}),
                 track_ref=ext.get("track_id"), conf=float(ext.get("conf", 1.0)),
-                provenance=ext.get("provenance", {}),
+                provenance=ext.get("provenance", {}), mask_polygons=mask_polygons,
             ))
         ref = img.get("uri") or img.get("file_name")
         if not ref:

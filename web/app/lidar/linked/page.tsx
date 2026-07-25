@@ -99,7 +99,7 @@ export default function LinkedWorkspacePage() {
       <div className="flex h-full bg-[#0a0e14] text-neutral-200">
         <Inspector title="Controls" side="left" width="w-80">
           <div className="flex flex-col gap-3 p-4">
-            <form onSubmit={(e) => { e.preventDefault(); api.lidarClouds(sessionId.trim()).then((r) => setClouds(r.clouds)).catch((x) => setErr(String(x))); }}
+            <form onSubmit={(e) => { e.preventDefault(); if (!sessionId.trim()) { setErr("enter a session id"); return; } api.lidarClouds(sessionId.trim()).then((r) => setClouds(r.clouds)).catch((x) => setErr(String(x))); }}
               className="flex gap-2">
               <input value={sessionId} onChange={(e) => setSessionId(e.target.value)} placeholder="session id"
                 className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs" />

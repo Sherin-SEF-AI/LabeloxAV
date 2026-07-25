@@ -113,10 +113,14 @@ def test_propagate_and_revert(monkeypatch):
         async with get_sessionmaker()() as db:
             run = await commit_propagate(db, oid, span=10, created_by="t")
             assert run["created"] >= 1
+        # Scope to THIS test's propagation (provenance.propagated_from == oid): the source=="propagated"
+        # namespace is shared, so a prior run's leftover rows would otherwise fail these all(...) assertions.
+        from sqlalchemy import select
+        mine = select(Object).where(
+            Object.source == "propagated",
+            Object.provenance["propagated_from"].astext == str(oid))
         async with get_sessionmaker()() as db:
-            made = (await db.execute(
-                __import__("sqlalchemy").select(Object).where(Object.source == "propagated")
-            )).scalars().all()
+            made = (await db.execute(mine)).scalars().all()
             assert made and all(o.state in ("auto_accept", "review") for o in made)
             assert all((o.provenance or {}).get("propagated_from") == str(oid) for o in made)
         # revert deletes the propagated boxes
@@ -124,9 +128,7 @@ def test_propagate_and_revert(monkeypatch):
             rev = await revert_run(db, uuid.UUID(run["run_id"]))
             assert rev["reverted"] == run["created"]
         async with get_sessionmaker()() as db:
-            left = (await db.execute(
-                __import__("sqlalchemy").select(Object).where(Object.source == "propagated")
-            )).scalars().all()
+            left = (await db.execute(mine)).scalars().all()
             assert not left
 
     run_async(_flow())

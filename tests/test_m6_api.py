@@ -66,6 +66,12 @@ async def _seed_coro():
                          city="BLR", sensors={}, ontology_version="labelox-in-0.1.0"))
         db.add(Frame(frame_id=fid, session_id=sid, ts_ns=start, cam_id="cam_f", img_uri=img_uri,
                      width=640, height=480, quality=0.9))
+        # Flush the frame before its dependents (raw FK columns, no ORM relationship to order the inserts),
+        # then record a clean anonymization audit so the DPDPA pre-sale gate lets the export through.
+        await db.flush()
+        from db.models import PiiAudit
+        db.add(PiiAudit(frame_id=fid, session_id=sid, n_faces=0, n_plates=0, regions=[],
+                        method_version="test", ts_ns=start))
         db.add(Object(object_id=oid, frame_id=fid, class_id=6, bbox=[100, 100, 200, 200], conf=0.41,
                       attrs={}, source="fused", state="annotate",
                       provenance={"proposals": [{"path": "path_b_sam3", "model_version": "world+sam", "verdict": "agree"}],

@@ -79,11 +79,19 @@ def voxelize_occupancy(points, origin, bounds, voxel_size: float, min_points: in
     def inb(v):
         return 0 <= v[0] < dims[0] and 0 <= v[1] < dims[1] and 0 <= v[2] < dims[2]
 
-    counts: dict = {}
-    for p in np.asarray(points, dtype=float):
-        v = vox(p)
-        if inb(v):
-            counts[v] = counts.get(v, 0) + 1
+    # Vectorized voxel binning: floor all points to voxel indices at once, keep the in-bounds ones, and count
+    # unique voxels via np.unique. The old per-point Python loop was O(N) interpreter iterations over a cloud
+    # that can be millions of points.
+    pts = np.asarray(points, dtype=float).reshape(-1, 3)
+    if pts.shape[0]:
+        vi = np.floor((pts - np.array([xmin, ymin, zmin])) / voxel_size).astype(np.int64)
+        m = ((vi[:, 0] >= 0) & (vi[:, 0] < dims[0]) & (vi[:, 1] >= 0) & (vi[:, 1] < dims[1])
+             & (vi[:, 2] >= 0) & (vi[:, 2] < dims[2]))
+        vi = vi[m]
+        uniq, cnt = np.unique(vi, axis=0, return_counts=True)
+        counts = {tuple(int(x) for x in v): int(c) for v, c in zip(uniq, cnt, strict=False)}
+    else:
+        counts = {}
     occupied = {v for v, c in counts.items() if c >= min_points}
 
     free: set = set()

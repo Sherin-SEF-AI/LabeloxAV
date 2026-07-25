@@ -18,6 +18,14 @@ One ontology, 170 classes, tuned for the chaos that global datasets never saw: a
 
 A Blender-style dark workstation: neutral greys, a single blue accent that only appears on the active or primary control, rounded tool buttons, recessed value fields, and panels with named headers. Every control carries a tooltip and every panel a one line description, so the UI explains itself instead of assuming you already know it.
 
+**One chrome, every screen.** Every dashboard renders inside a single shared shell, so the frame is identical wherever you are: a menu bar, a titled header with the page's primary action, an optional filter band, and content that scrolls under fixed chrome. Jump anywhere with a **Cmd+K command palette** that fuzzy matches every destination, and press **?** on any page for a searchable keyboard-shortcut reference.
+
+![The application menu bar, with the File menu and its Import submenu open](docs/screenshots/menus.gif)
+
+The navigation is a **menu bar**, not a row of buttons: File, Edit, View, Label, Quality, Spatial, Window, Help. Sections split by dividers, icon on the left, shortcut right-aligned, submenus on hover. The reason is boring and practical: buttons compete for horizontal space and eventually force a scroll or an overflow chevron, while menus stay one row at any number of destinations. Adding a destination is one entry in `web/lib/menus.ts`. The command palette reads the same definition, so the menu and the palette cannot drift apart.
+
+![The File menu with the Import submenu open, showing the fourteen supported import formats](docs/screenshots/32-menubar.png)
+
 The whole engine is organized as **seven platforms** over one shared spine, navigable from a launcher and a platform switcher reachable anywhere. Data flows through them in flywheel order: ingest QA (SANYX), calibration (CALYX), curation and mining (SIEVYX), annotation (Labelox), offline pseudo truth (ORACLYX), evaluation (VERDYX), and edge deploy (FORGYX), then the loop closes as failures and coverage gaps feed the next collection and labeling cycle.
 
 ![The platform launcher: seven planes of the data engine, in flywheel order, each described](docs/screenshots/20-ui-platforms.png)
@@ -42,21 +50,49 @@ Labeling that data by hand is slow and expensive. The cases that actually matter
 
 ## What it does
 
-**One surface, every annotation primitive.** Boxes and oriented boxes, manual polygons, promptable SAM masks, pose and keypoint skeletons for pedestrians and cyclists, and 3D cuboids lifted from LiDAR, plus a measure tool and copy paste across frames. Edit lane splines and drivable area, read each object's derived dynamics, fix a wrong label in place, or add a brand new class on the fly. All keyboard driven. Here it is on a real Indian street, with a truck, an autorickshaw, a hatchback, and pedestrians.
+**One surface, every annotation primitive.** Boxes and oriented boxes, manual polygons, promptable SAM masks, pose and keypoint skeletons for pedestrians and cyclists, and 3D cuboids lifted from LiDAR, plus a measure tool and copy paste across frames. Edit lane splines and drivable area, read each object's derived dynamics, fix a wrong label in place, or add a brand new class on the fly. All keyboard driven. Here it is on a real Indian street: 55 objects on one frame, thirteen motorcycles, two autorickshaws and an e-rickshaw among them, each with its own calibrated confidence.
 
-<img width="1907" height="928" alt="image" src="https://github.com/user-attachments/assets/ad103a42-abf5-4794-951e-4ee3f19c0274" />
+![Annotation canvas on a real Indian street, 55 objects on one frame](docs/screenshots/07-annotation-canvas.png)
+
+**An editor that stays out of your way.** The workspace is built around a fixed-width icon **mode rail**, one entry per task: Objects, Lanes, Pose, 3D, Review. Switching mode swaps the tool strip, the default panel, and the canvas without ever changing the layout. The **tool strip** groups the current mode's tools behind a mode prefix with flyouts, so it stays a single row no matter how many tools a mode owns, and a new tool costs zero layout. A quiet **canvas HUD** shows the frame time and camera top-left; a floating **layers** cluster toggles overlays; a **bottom bar** carries zoom, live counts, shortcut hints, and the autosave status; and the **properties panel** on the right is contextual and collapses first on a narrow screen to give the canvas the full width. A top bar keeps the icon actions and a single primary **Confirm frame** button, and a **How it scales** popover explains, in place, how the layout absorbs new features by grouping and mode rather than by growing.
 
 **Start from raw data.** Drop in a folder of images, a whole batch of dashcam videos, or an mcap and it imports each into its own session with faces and plates blurred before anything reaches storage, then opens the first frame so you are annotating in seconds. The home shows live ingest progress across the batch, and sends you straight back to the highest priority frame left to label.
 
-**3D from LiDAR, without a 3D engine.** Point clouds rasterize to a bird's eye view you annotate with oriented boxes, and each box lifts back to a metric 3D cuboid using the points it encloses. It exports as real nuScenes 3D. The shot below is a real KITTI scan, annotated in the same editor.
+**3D from LiDAR, without a 3D engine.** Point clouds rasterize to a bird's eye view you annotate with oriented boxes, and each box lifts back to a metric 3D cuboid using the points it encloses. It exports as real nuScenes 3D. The shot below is the cuboid workspace with a real KITTI scan loaded: the three scans of the session on the left, the 3D view above, and the bird's eye view you draw boxes in below.
 
-![LiDAR bird's eye view annotation](docs/screenshots/11-lidar-inapp.png)
+![The cuboid annotation workspace with a real KITTI scan: 3D view above, bird's eye view below](docs/screenshots/11-lidar-inapp.png)
+
+**Tried on a public dataset, start to finish.** Three Velodyne HDL-64E scans from the KITTI object set were downloaded from a public mirror and pushed through the whole path: read, stored, served, and rendered. 362,543 points across the three, and the viewer draws all 115,384 of the first one without decimating.
+
+![The LiDAR viewer on real KITTI scans: 3D view, bird's eye view, and the cloud list](docs/screenshots/lidar-viewer.gif)
+
+*Cycling the three scans, then switching the colour channel between height, source and intensity. The panel reports `rendered 115,384 / decimated no`.*
+
+![The LiDAR viewer showing a KITTI scan in 3D and bird's eye view simultaneously](docs/screenshots/42-lidar-viewer.png)
+
+The processing is worth one honest detail. RANSAC ground segmentation put the road plane at **1.71 m, 1.68 m and 1.69 m** below the sensor on the three scans. KITTI mounts its Velodyne at roughly 1.73 m, so the fitted plane lands where the hardware actually sits, which is a much better check on the geometry than any number the code reports about itself. Ground came out at 31 to 64 percent of returns depending on how open the scene is, and voxel occupancy over a 80 by 80 by 6 metre volume took 0.08 to 0.15 s per scan.
+
+![Raw height-coloured returns beside the RANSAC ground and obstacle split](docs/screenshots/41-lidar-segmentation.png)
+
+*Left, raw returns coloured by height, with the Velodyne ring pattern on the road and buildings picked out along the kerb. Right, the same scan split by the fitted ground plane: blue is ground, orange is everything standing above it.*
+
+![Bird's eye view of three successive KITTI scans, raw and ground-segmented](docs/screenshots/lidar.gif)
+
+To be clear about scope: this is three frames from a public sample, not the full KITTI benchmark, and it exercises ingest, storage, serving, ground segmentation, occupancy and rendering. It does not train or evaluate a 3D detector.
 
 **Every camera at once, on one canvas.** A vehicle carries a rig of cameras, so the same object shows up in several views at the same instant. LabeloxAV groups the synchronized frames, then lets you switch the editor into a rig view, a grid, a surround strip ordered the way the cameras face, or a focus plus context layout, with no change of mode and every tool working exactly as before. A dropped frame shows as an empty tile instead of vanishing. Work happens in two tiers, gated on calibration and honest about which one is available: on any session you link the same object across views by hand or from a DINOv3 appearance suggestion, and the rig identity votes a class and flags a cross view disagreement for review; on a calibrated session you annotate once and project the box into the other views by geometry, lens aware for the narrow and fisheye lenses. Objects are then followed across time and cameras as one rig track, and a consistency check files the views that disagree straight into the review queue.
 
-![Synchronized multi camera annotation with rig identities and the two tier calibration gate](docs/screenshots/18-multicam-identities.png)
+There is no screenshot for this one, and that is the honest reason: every session in the ingested corpus is single-camera dashcam footage, so there is no real rig to photograph. The workspace runs, the sync grouping is real, and the tier logic is covered by tests, but until a genuine multi camera recording is ingested the surface has only ever been driven against synthetic sessions.
 
-*The rig view on a real two camera session: the focused camera keeps the full annotation canvas while the other camera rides along as context, the identities panel links one physical object across views, and the header shows the tier the session has earned (here TIER 2, calibrated, so annotate once and project is available) alongside the group and track controls.*
+**Explore the corpus as structure, not as a list.** Objects are laid out by embedding similarity (UMAP over the DINOv3 vectors, with HDBSCAN clusters), so lookalikes sit together and outliers sit apart. Lasso a region and act on it in bulk: tag it, save it as a view, or send it to review. A facet rail on the left cuts by class, state, source, confidence, scene axis, city and tag, and each facet is computed with its own clause dropped, so a bar always answers "how many would I get if I picked this instead" rather than collapsing to the value you already chose.
+
+![The Explore workspace: facet rail on the left with live counts over the ingested corpus](docs/screenshots/30-explore.png)
+
+*Real counts from the ingested corpus: 93,983 objects, with the state, source, confidence and weather facets computed under the current filter.*
+
+The filter you build here is the same predicate a curation slice stores, so a cut you like becomes a saved view and an export without being redefined.
+
+![The embedding cluster map on the analytics page: UMAP over DINOv3 frame embeddings](docs/screenshots/37-cluster-map.png)
 
 **Smart triage, not endless clicking.** Every detection gets a calibrated confidence and a reason. High confidence agrees get auto accepted. The uncertain, rare, and conflicting ones rise to the top of a priority queue. You spend your attention where it matters.
 
@@ -65,6 +101,24 @@ Labeling that data by hand is slow and expensive. The cases that actually matter
 **Active learning that asks for the right frames.** Instead of labeling random data, the engine ranks every candidate by how much it would teach the model: uncertainty, diversity, rarity, and error proneness combined into a single value score. Label the top of the list, skip the redundant easy frames.
 
 ![Active learning value queue](docs/screenshots/06-review-queue.png)
+
+**Run a labeling team, not just a tool.** Work is organized as projects, tasks, and assignable jobs. A job moves along two independent axes: a **stage** (annotation, validation, acceptance) for where it sits in the pipeline, and a **state** (new, in progress, completed, rejected) for how far along it is within that stage. Keeping them separate is what lets the board say "in validation, not yet started", which one collapsed status cannot express. Jobs reference frames by id and never copy them, so a job is a view over the corpus.
+
+A configurable fraction of each job is seeded with frames drawn from a sealed gold set. The annotator cannot tell them apart from real work, and on submit they are graded silently. A job that misses the project's accuracy floor is sent **back** in the same stage rather than advanced, because work that failed its own quality bar should not reach a reviewer looking like it passed.
+
+![The Projects board: jobs by stage and state, assignment, and annotator scorecards](docs/screenshots/31-projects.png)
+
+Reviewers leave **issues** anchored to a specific object, or to a region on a frame when the complaint is that something is *missing* and there is no object to point at. Scorecards report median time alongside the mean, because annotation times are heavily skewed and one interrupted session drags a mean well off what the work actually costs.
+
+**Where the model disagrees with ground truth, and what that looks like.** A confusion count tells you pedestrians are being called poles; it does not show you the pedestrians. Scoring the machine labels against a sealed gold set records every individual outcome, so a cell opens into the actual crops.
+
+![Model versus gold: per-cell true positives, false positives and misses against a sealed gold set](docs/screenshots/35-eval-drilldown.png)
+
+*A real run against a 400-object gold set. The largest cells are misses, not confusions: 105 pedestrians and 55 autorickshaws the machine labels never found on those frames. Clicking a row loads the crops behind it.*
+
+**Beyond driving frames.** The same project, job and issue machinery also drives audio, text, time series, documents and LLM-evaluation tasks, through a second spine (`Asset` and `Annotation`) that sits beside the driving corpus rather than inside it. A project declares its own labels and typed fields, and one editor renders the right canvas for the media type.
+
+![Text and NER labeling: spans coloured by label, with the project's declared labels and typed fields](docs/screenshots/34-multimodal-text.png)
 
 **A closed loop you can govern.** Corrections and mined hard cases feed a versioned training set. The model retrains, gets measured against a frozen gold set, and is promoted only if it beats the champion without regressing a safety class. Then it relabels the existing data, surfaces the errors that remain, and the cycle repeats. Over each turn the auto accept ceiling rises and human touches fall.
 
@@ -84,7 +138,12 @@ Every automated decision is in an audit log. A drift breach pauses promotion. On
 - **Multi sensor and spatial**: camera calibration validation, synchronized multi camera annotation on one canvas (rig frame groups, manual and appearance based cross view linking, annotate once and project across views when calibrated, and cross view track handoff with a consistency check), map assisted labeling from OpenStreetMap, and HD map generation exported to Lanelet2 and OpenDRIVE.
 - **Derived dynamics**: per object distance, speed, heading, time to collision, and a risk level, turning a perception dataset into one that supports planning and prediction.
 - **Self improvement**: active learning, annotation error detection, AI assisted relabeling, champion and challenger promotion that actually serves the promoted model, a kill switch that genuinely stops auto accept, control sample precision, drift detection with recovery, and a full audit trail.
-- **Export and import**: COCO, YOLO, KITTI, BDD100K, OpenLABEL, nuScenes (with real 3D when a cuboid exists), and a lossless Parquet round trip.
+- **A standing agent workforce**: an Agent Console that runs autonomous QA overnight (error sweeps, temporal repair, a reviewable fix queue) and an "Ask LabeloxAV" operations agent that turns a plain sentence into a plan over the real endpoints, pausing for confirmation on anything destructive. Agents only propose; the gates dispose, and every action is a reversible, audited run.
+- **A unified workstation**: every dashboard shares one dark, self explaining chrome, with a menu bar carrying every destination, a Cmd+K command palette that reads the same definition, and a press-? shortcut reference on every page. The frame editor is a mode-rail workspace (Objects, Lanes, Pose, 3D, Review) whose grouped tool strip stays a single row no matter how many tools a mode owns.
+- **Export and import**: COCO, YOLO, Pascal VOC, KITTI, BDD100K, OpenLABEL, nuScenes (with real 3D when a cuboid exists), CVAT XML, Label Studio JSON, and a lossless Parquet round trip. The CVAT and Label Studio adapters are written as mirrored pairs and tested by round trip, since a format adapter that only works one way is a trap.
+![Integrations: webhook subscriptions with their event list, and registered storage buckets](docs/screenshots/33-integrations.png)
+
+- **Integrations**: outbound webhooks signed with an HMAC per subscription (an unsigned webhook is an unauthenticated write into whatever it triggers), registered S3/GCS/Azure source locators that deliberately store no credentials, and a thin Python SDK and CLI over the same REST API the web app uses.
 - **Secure and versioned**: deny by default API auth with annotator, reviewer, and admin roles, git style branches and reviewed merges over the dataset, and a mandatory privacy gate.
 
 ---
@@ -142,15 +201,21 @@ Detectors live in a versioned registry, trained on the India Driving Dataset and
 | idd-yolo11n | YOLO11n | IDD | 0.34 | 0.67 | 0.30 |
 | roadscope-yolo11l | YOLO11l | general | 0.72 | 0.73 | 0.65 |
 
-The accurate IDD model reaches 0.44 mAP@50, a clear step over the earlier 0.39 baseline, while the tiny YOLO11n trades accuracy for speed so it can run on the vehicle. The model nails the common road agents and is weaker on the rare India specific long tail, which is exactly the gap the active learning loop is built to close. Every model is promoted only through the champion and challenger gate above.
+The IDD model reaches 0.44 mAP@50, up from an earlier 0.39 baseline, while the tiny YOLO11n trades accuracy for speed so it can run on the vehicle. These are modest numbers on a hard dataset: the models do reasonably on common road agents and poorly on the rare India specific long tail, which is the gap the active learning loop exists to close. Every model is promoted only through the champion and challenger gate above.
 
 ## Honest status
 
-This is a from scratch build of the full pipeline, end to end, backed by an automated test suite. The engine, the ontology, the closed loop, the governance, the maps, and the editor are real and verified.
+This is a from scratch build of the full pipeline, backed by an automated test suite. What follows separates what has been exercised on real data from what has only been written and type checked, because those are not the same claim.
 
-The real data path is proven and now populated. A full fleet of real dashcam drives has been ingested: 186 trips and 32,455 frames from Indian roads, with faces and plates blurred before anything reaches storage. Real semantic segmentation models run the drivable surface and lane geometry across that corpus through the cloud GPU seam, which is now a wired dispatch that starts a pod, runs the sweep, ingests the result, and stops the pod to cap billing, rather than a promise. India Driving Dataset frames are embedded so search and discovery run on real pixels, a real KITTI LiDAR scan is annotated to 3D cuboids and exported as nuScenes, and detectors in the registry are trained on the India Driving Dataset and reach a real baseline.
+**Exercised on real data.** A fleet of real dashcam drives is ingested: 186 trips and 32,455 frames from Indian roads, with faces and plates blurred before anything reaches storage. Counting everything in the database, including imported public datasets and test sessions, that comes to 40,221 frames and 93,983 objects, which is the number the explorer screenshots above are filtering over. Semantic segmentation models run drivable surface and lane geometry across it through the cloud GPU seam, which starts a pod, runs the sweep, ingests the result and stops the pod to cap billing. Frames are embedded, so search, discovery and the embeddings map run on real pixels. A real KITTI LiDAR scan is annotated to 3D cuboids and exported as nuScenes. Detectors in the registry are trained on the India Driving Dataset. The explorer, the faceted counts, bulk tagging, the job and honeypot workflow, the model-versus-gold drill-down, the CVAT and Label Studio round trips, and signed webhook delivery have each been driven end to end against this running stack.
 
-The test suite once wrote to the same database as production and left synthetic frames behind; that is now fixed at the source (isolated test database, CI, and an ingest gate that rejects corrupt frames), and the residue was quarantined. What is left is to run the full closed loop on the new corpus at scale: autolabel every drive, mine the hard cases, retrain, and watch the auto accept ceiling climb. The pixels are real now, and the loop runs on them.
+**Written and type checked, but not yet exercised on real media.** The audio (waveform and region) and document/OCR editors have no sample audio or scanned pages in the corpus to run against, so they are unproven in practice. Storage-source listing is implemented for S3-compatible stores only; GCS and Azure register as locators but return an explicit "listing not implemented" rather than keys.
+
+**Known gaps in the test suite.** 751 tests pass. Thirteen fail for reasons unrelated to correctness of the features above: some require services that are not running locally (lakeFS, Ollama, a video codec), and a cluster of four encode gate thresholds that no longer match the configured values. That last group is deliberately left failing rather than updated, because rewriting the assertions to match current behaviour would hide a real change to the auto-accept threshold if it was not intended.
+
+**Not yet done.** The full closed loop has not been run on the new corpus at scale: autolabel every drive, mine the hard cases, retrain, and watch the auto-accept ceiling move. The model-versus-gold numbers in this README (precision 0.034, recall 0.018 on a 400-object gold slice) are exactly the kind of result that loop exists to improve, and they are reported here unflattering and unrounded.
+
+The test suite once wrote to the same database as production and left synthetic frames behind. That is fixed at the source with an isolated test database, CI, and an ingest gate that rejects corrupt frames, and the residue was quarantined.
 
 ---
 
