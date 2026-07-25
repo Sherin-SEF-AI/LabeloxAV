@@ -73,6 +73,62 @@ async def object_neighbors(
     return [(str(oid), 1.0 - float(d)) for oid, d in rows]
 
 
+async def object_candidates(
+    db: AsyncSession, query_vec, *, k: int = 200, class_id: int | None = None,
+    exclude_object_id: UUID | None = None, session_id: UUID | None = None,
+    city: str | None = None,
+) -> list[dict]:
+    """Top-k object candidates with their vector and metadata in one query, for a reranking stage.
+
+    object_neighbors returns only (id, sim); a diversity or same-track filter needs the vector and the
+    object's track/class too, and issuing a follow-up query per candidate is what made find-similar feel
+    sluggish. This fetches everything the reranker needs at once: the crop vector (to measure candidate to
+    candidate similarity for dedup) and the class/track (to filter) alongside the score.
+    """
+    await _tune_recall(db)
+    dist = ObjectEmbedding.dino_vec.cosine_distance(list(map(float, query_vec))).label("d")
+    stmt = (select(ObjectEmbedding.object_id, dist, ObjectEmbedding.dino_vec,
+                   Object.class_id, Object.track_id, Object.frame_id, Object.conf)
+            .join(Object, Object.object_id == ObjectEmbedding.object_id))
+    if class_id is not None:
+        stmt = stmt.where(Object.class_id == class_id)
+    if exclude_object_id is not None:
+        stmt = stmt.where(ObjectEmbedding.object_id != exclude_object_id)
+    if session_id is not None or city is not None:
+        stmt = stmt.join(Frame, Frame.frame_id == Object.frame_id)
+        if session_id is not None:
+            stmt = stmt.where(Frame.session_id == session_id)
+        if city is not None:
+            stmt = stmt.join(DbSession, DbSession.session_id == Frame.session_id).where(DbSession.city == city)
+    rows = (await db.execute(stmt.order_by(dist).limit(k))).all()
+    return [{"object_id": str(oid), "sim": 1.0 - float(d), "vec": vec,
+             "class_id": cid, "track_id": str(tid) if tid else None,
+             "frame_id": str(fid), "conf": float(c) if c is not None else None}
+            for oid, d, vec, cid, tid, fid, c in rows]
+
+
+async def frame_candidates(
+    db: AsyncSession, query_vec, *, space: str = "dino", k: int = 200,
+    exclude_frame_id: UUID | None = None, session_id: UUID | None = None, city: str | None = None,
+) -> list[dict]:
+    """Top-k frame candidates with vector + scene metadata, the frame analogue of object_candidates."""
+    await _tune_recall(db)
+    col = FrameEmbedding.dino_vec if space == "dino" else FrameEmbedding.siglip_vec
+    dist = col.cosine_distance(list(map(float, query_vec))).label("d")
+    stmt = (select(FrameEmbedding.frame_id, dist, col, Frame.session_id, Frame.scene)
+            .join(Frame, Frame.frame_id == FrameEmbedding.frame_id).where(col.isnot(None)))
+    if exclude_frame_id is not None:
+        stmt = stmt.where(FrameEmbedding.frame_id != exclude_frame_id)
+    if session_id is not None:
+        stmt = stmt.where(Frame.session_id == session_id)
+    if city is not None:
+        stmt = stmt.join(DbSession, DbSession.session_id == Frame.session_id).where(DbSession.city == city)
+    rows = (await db.execute(stmt.order_by(dist).limit(k))).all()
+    return [{"frame_id": str(fid), "sim": 1.0 - float(d), "vec": vec,
+             "session_id": str(sid), "scene": scene}
+            for fid, d, vec, sid, scene in rows]
+
+
 async def fused_frame_neighbors(
     db: AsyncSession, dino_vec, siglip_vec, *, w_visual: float = 0.5, k: int = 24,
     exclude_frame_id: UUID | None = None, session_id: UUID | None = None, city: str | None = None,

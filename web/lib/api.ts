@@ -687,8 +687,12 @@ export const api = {
     post<{ candidates: number; by_kind: Record<string, number> }>(`/api/discovery/run?session_id=${session_id}`, {}),
   discoverySetState: (candidate_id: string, state: string, tag?: string) =>
     post<{ state: string }>(`/api/discovery/${candidate_id}/state`, { state, tag }),
-  searchSimilar: (body: { frame_id?: string; object_id?: string; image_b64?: string; mode?: "visual" | "semantic"; k?: number }) =>
-    post<SimilarResponse>("/api/search/similar", body),
+  searchSimilar: (body: {
+    frame_id?: string; object_id?: string; image_b64?: string;
+    mode?: "visual" | "semantic" | "fused"; k?: number;
+    min_sim?: number; diversity?: boolean; same_class?: boolean; exclude_track?: boolean;
+    city?: string; session_id?: string;
+  }) => post<SimilarResponse>("/api/search/similar", body),
   searchSemantic: (q: string, k = 24) =>
     get<{ query: string; filters: Record<string, string>; classes: string[]; count: number; results: SimilarResponse["results"] }>(
       `/api/search/semantic?q=${encodeURIComponent(q)}&k=${k}`),

@@ -163,19 +163,25 @@ async def search_objects_by_text(db: AsyncSession, query: str, limit: int = 24, 
     return await _decorate(db, chosen, scores)
 
 
-async def similar_objects(db: AsyncSession, object_id: str, limit: int = 12) -> list[dict]:
+async def similar_objects(db: AsyncSession, object_id: str, limit: int = 12,
+                          diversity: bool = True, min_sim: float = 0.0) -> list[dict]:
     # Find-similar reads the live DINOv3 ObjectEmbedding table via pgvector HNSW (the same source
     # /search/similar uses), not the legacy CLIP `Embedding` table, which the current pipeline no longer
-    # populates: an in-Python cosine over that dead table returned nothing.
-    from core.embeddings import object_neighbors
+    # populates: an in-Python cosine over that dead table returned nothing. Routed through the reranker so the
+    # object-page "similar" strip gets the same diversity dedup as the search page: without it, an object that
+    # is tracked across frames returns fifteen copies of itself.
     from db.models import ObjectEmbedding
+    from services.intelligence.search.similar import find_similar_objects
 
     emb = await db.get(ObjectEmbedding, UUID(object_id))
     if emb is None:
         return []
-    nbrs = await object_neighbors(db, emb.dino_vec, k=limit, exclude_object_id=UUID(object_id))
-    ids = [UUID(oid) for oid, _ in nbrs]
-    scores = {UUID(oid): s for oid, s in nbrs}
+    ob = await db.get(Object, UUID(object_id))
+    exclude_track = str(ob.track_id) if ob is not None and ob.track_id is not None else None
+    nbrs = await find_similar_objects(db, emb.dino_vec, k=limit, min_sim=min_sim, diversity=diversity,
+                                      exclude_object_id=UUID(object_id), exclude_track_id=exclude_track)
+    ids = [UUID(c["object_id"]) for c in nbrs]
+    scores = {UUID(c["object_id"]): c["sim"] for c in nbrs}
     return await _decorate(db, ids, scores)
 
 
