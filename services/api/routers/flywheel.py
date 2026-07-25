@@ -98,3 +98,57 @@ async def run(session_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
 async def lineage(deployment_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
     """Resolve a deployed model all the way back to its source sessions and their gate state, one query."""
     return await trace_lineage(db, deployment_id)
+
+
+@router.get("/flywheel/gate-directed")
+async def gate_directed_latest(budget: int = 500, db: AsyncSession = Depends(db_session)):
+    """Plan a batch for the most recent unpromoted run, so a caller can ask what to label next without first
+    having to know which run last failed the gate."""
+    from services.flywheel.gate_directed import plan_gate_batch
+    from services.flywheel.gate_signals import latest_blocked_run
+
+    run_id = await latest_blocked_run(db)
+    if run_id is None:
+        return {"run_id": None, "blocking": False, "allocations": [], "total_frames": 0,
+                "rationale": "no unpromoted training run to diagnose"}
+    return await plan_gate_batch(db, run_id, budget=budget)
+
+
+@router.get("/flywheel/gate-directed/{run_id}")
+async def gate_directed_plan(run_id: str, budget: int = 500, db: AsyncSession = Depends(db_session)):
+    """Diagnose why a training run cannot be promoted and plan the review batch that would unblock it.
+
+    Read-only: it reports which safety classes miss their recall floor or regressed, how the label budget
+    splits across them, and how many frames a reviewer would open. A run the gate does not block returns no
+    allocations rather than manufacturing work.
+    """
+    from services.flywheel.gate_directed import plan_gate_batch
+
+    try:
+        return await plan_gate_batch(db, run_id, budget=budget)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+class GateBatchIn(BaseModel):
+    project_id: str
+    budget: int = 500
+    jobs_of: int = 50
+
+
+@router.post("/flywheel/gate-directed/{run_id}/materialize")
+async def gate_directed_materialize(run_id: str, payload: GateBatchIn,
+                                    db: AsyncSession = Depends(db_session)):
+    """Create one labelops task per blocked safety class, holding exactly the frames worth reviewing.
+
+    These are review batches, not training data. Nothing here writes an accepted label: iteration 5 trained on
+    unreviewed machine labels and drove pedestrian recall from 0.73 to 0.004, which is the failure this
+    endpoint exists to route around.
+    """
+    from services.flywheel.gate_directed import materialize_gate_batch
+
+    try:
+        return await materialize_gate_batch(db, run_id, payload.project_id,
+                                            budget=payload.budget, jobs_of=payload.jobs_of)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
