@@ -737,7 +737,7 @@ export const api = {
   // M-MC.0 persisted frame groups + group-aware navigation
   multicamBuild: (sid: string) => post<{ n_groups: number; groups_out_of_tolerance: number; groups_with_missing_cam: number }>(`/api/multicam/groups/build?session_id=${sid}`, {}),
   multicamPersisted: (sid: string) => get<PersistedGroups>(`/api/multicam/groups/persisted?session_id=${sid}`),
-  multicamGroupAt: (sid: string, ts_ns: number) => get<FrameGroup>(`/api/multicam/group/at?session_id=${sid}&ts_ns=${ts_ns}`),
+  multicamGroupAt: (sid: string, ts_ns: number) => get<FrameGroup | null>(`/api/multicam/group/at?session_id=${sid}&ts_ns=${ts_ns}`),
   multicamGroupNav: (sid: string, gid: string, direction: "prev" | "next") => get<{ group: FrameGroup | null }>(`/api/multicam/group/nav?session_id=${sid}&group_id=${gid}&direction=${direction}`),
   multicamGroupConfirm: (gid: string, confirmed = true) => post<FrameGroup>(`/api/multicam/group/confirm?group_id=${gid}&confirmed=${confirmed}`, {}),
   // M-MC.2 rig identity + linked selection
