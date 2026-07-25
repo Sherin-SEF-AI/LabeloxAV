@@ -258,6 +258,14 @@ class IntelEmbedSettings(BaseModel):
     crop_margin: float = 0.15      # context margin around an object box for crop embeddings
     batch_size: int = 16
     device: str = "cuda:0"         # falls back to cpu when CUDA is unavailable (overnight backfill)
+    # Continuous embedder (services/intelligence/embed/daemon.py): the controller tick embeds a bounded slice
+    # of whatever is still unembedded, so find-similar coverage tracks new data instead of drifting to zero
+    # until someone remembers a backfill. Bounded per tick and VRAM-gated so it always yields the GPU to
+    # autolabel and training (the concurrency that starved the sweep is exactly what min_free_mb prevents).
+    daemon_enabled: bool = True
+    daemon_max_frames_per_tick: int = 400
+    daemon_max_objects_per_tick: int = 4000
+    daemon_min_free_mb: int = 4000   # skip this tick if free VRAM is below this; embed peak is ~3 GB
 
 
 class DedupSettings(BaseModel):
