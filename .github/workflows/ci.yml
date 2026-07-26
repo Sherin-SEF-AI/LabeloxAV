@@ -66,6 +66,14 @@ jobs:
       - name: Create venv + install dev deps (no GPU wheels)
         run: make install
 
+      # CPU torch + imagehash so the suite actually runs the accel/embedding/dedup paths in CI instead of
+      # erroring on a missing import. The runner has no GPU, so the CUDA (cu128) wheels the ml extra pins are
+      # wrong here; the CPU wheel satisfies `import torch` and the modules that only check torch is present.
+      - name: Install CPU torch + imagehash for the test suite
+        run: |
+          .venv/bin/uv pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/uv pip install imagehash==4.3.1
+
       - name: Start infra (postgis+pgvector, minio, redis, redpanda)
         run: make up
 

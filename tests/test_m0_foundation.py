@@ -14,7 +14,11 @@ def test_config_loads_yaml_defaults():
 
     s = Settings()
     assert s.gpu.mode in ("sequential", "concurrent")
-    assert s.gate.auto_accept == 0.95
+    # 0.45, not the original 0.95: commit a14d22c retuned the gate after VLM-judged calibration found the
+    # champion detector overconfident (~48% precise at top confidence), so calibrated confidence caps near
+    # 0.48 and 0.95 was unreachable. These are floors on the honest scale that stack with cross-path
+    # agreement + the quality reviewer + a VLM confirm for rare classes.
+    assert s.gate.auto_accept == 0.45
     assert s.postgres.async_dsn.startswith("postgresql+asyncpg://")
 
 

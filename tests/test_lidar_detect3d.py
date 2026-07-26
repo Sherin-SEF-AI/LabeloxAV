@@ -86,8 +86,9 @@ def test_gate_carries_ontology_and_fallback_discipline():
     gr = gate_cuboid(cub, class_id=fallback, conf_2d=0.99, frame_id=uuid.uuid4(), box_source="lifted",
                      agreement_2d=True)
     assert gr["state"] == "review" and gr["is_fallback"] and gr["is_rare"]
-    # below the review floor is a full annotate
-    gl = gate_cuboid(cub, class_id=car, conf_2d=0.30, frame_id=uuid.uuid4(), box_source="lifted",
+    # below the review floor is a full annotate. On the calibrated scale (commit a14d22c) 0.30 is now in the
+    # review band; a genuinely weak 0.05 is what falls through to annotate.
+    gl = gate_cuboid(cub, class_id=car, conf_2d=0.05, frame_id=uuid.uuid4(), box_source="lifted",
                      agreement_2d=True)
     assert gl["state"] == "annotate"
 

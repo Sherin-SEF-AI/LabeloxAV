@@ -39,9 +39,11 @@ def test_overlapping_detections_fuse_with_agreement():
     assert fo.obj.class_name == "sedan"
     assert fo.obj.provenance.agreement is True
     assert fo.mask is not None  # SAM mask preferred for geometry
-    assert fo.obj.conf >= 0.95
+    # On the calibrated scale (commit a14d22c) a confident agreed detection lands near ~0.48, not 0.95; the
+    # meaningful invariant is that it clears the auto-accept floor, which is what makes it auto-accept below.
+    assert fo.obj.conf >= get_settings().gate.auto_accept
     state = gate_object(fo.obj, get_ontology(), get_settings().gate)
-    assert state == GateState.auto_accept  # high conf, agreement, not rare
+    assert state == GateState.auto_accept  # clears the floor, has agreement, not rare
     # Governance kill switch (R1.3): with auto-accept disabled the same object falls to review.
     assert gate_object(fo.obj, get_ontology(), get_settings().gate,
                        auto_accept_enabled=False) == GateState.review
@@ -86,7 +88,10 @@ def test_rare_class_forces_review_even_at_high_confidence():
 def test_low_confidence_routes_to_annotate():
     eng = _engine()
     fid = uuid.uuid4()
-    a = RawDetection("path_a_yolo26", (100, 100, 130, 130), 0.30, "yolo11l.pt", "object_fallback", 45)
+    # Below review_low (0.08 on the calibrated scale) a pre-label is too weak to even review, so it routes to
+    # annotate. A raw 0.05 fallback calibrates to ~0 and lands there; the old 0.30 now calibrates into the
+    # review band, which is the retuned gate working as intended.
+    a = RawDetection("path_a_yolo26", (100, 100, 130, 130), 0.05, "yolo11l.pt", "object_fallback", 45)
     fo = eng.fuse_frame(fid, [a], [])[0]
     assert gate_object(fo.obj, get_ontology(), get_settings().gate) == GateState.annotate
 
