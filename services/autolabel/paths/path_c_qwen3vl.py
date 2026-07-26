@@ -38,6 +38,7 @@ class VlmResult:
     votes: int = 1
     agreement: float = 1.0     # fraction of votes that chose class_name
     raw: dict = field(default_factory=dict)
+    provider: str = ""         # which backend served this verdict (ollama | groq | groq:escalate), for provenance
 
 
 class VlmClient(Protocol):
@@ -112,14 +113,12 @@ class OllamaVlmClient:
 
 
 def make_vlm_client(settings: Settings | None = None) -> VlmClient:
-    settings = settings or get_settings()
-    backend = settings.models.vlm.backend
-    if backend == "ollama":
-        return OllamaVlmClient(settings)
-    raise NotImplementedError(
-        f"vlm backend '{backend}' not wired on this box; use 'ollama' "
-        "(transformers 4-bit needs a working bitsandbytes Blackwell binary)."
-    )
+    """The VLM client for the configured providers. Delegates to the router (Groq cloud + Ollama local with
+    fallback); when nothing is pointed at the cloud the router returns a plain OllamaVlmClient, identical to
+    the previous behaviour. Lazy import breaks the path_c <-> router cycle."""
+    from services.llm.router import make_vlm_client as _routed
+
+    return _routed(settings)
 
 
 def apply_vlm(obj, res: VlmResult, onto: Ontology, vlm_tag: str):
@@ -156,8 +155,11 @@ def apply_vlm(obj, res: VlmResult, onto: Ontology, vlm_tag: str):
             else:
                 verdict = "unsure"
 
+    # Record which provider served the verdict alongside the model tag, so a gate decision is traceable to
+    # ollama vs groq (vs the escalate provider) and the two can be compared on the gold set.
+    tag = f"{vlm_tag}@{res.provider}" if res.provider else vlm_tag
     obj.provenance.proposals.append(
-        PathProposal(path="path_c_qwen3vl", class_name=res.class_name, conf=None, verdict=verdict, model_version=vlm_tag)
+        PathProposal(path="path_c_qwen3vl", class_name=res.class_name, conf=None, verdict=verdict, model_version=tag)
     )
     if res.caption:
         obj.provenance.notes.append(f"caption: {res.caption}")
@@ -259,4 +261,5 @@ class VlmVerifier:
             class_name=majority, attrs=merged_attrs, caption=caption,
             confident=any(r.confident for r in winners),
             votes=votes, agreement=round(cnt / votes, 2),
+            provider=next((r.provider for r in winners if r.provider), ""),
         )

@@ -104,16 +104,14 @@ _LLM_ACTIONS = {"plan", "accept", "reconcile", "find", "revert"}
 
 
 def llm_parse(text: str, onto) -> Intent | None:
-    """Optional LLM augmentation for fuzzier phrasing. Asks the configured local LLM (the VLM model over
-    Ollama, text-only) to extract {action, classes, conf_min} as JSON, then resolves the classes against
-    the ontology exactly as the rule parser does. Returns None on any failure (LLM off/unreachable/bad
-    output) so the caller falls back to the deterministic rule parser -- no hard dependency."""
+    """Optional LLM augmentation for fuzzier phrasing. Extracts {action, classes, conf_min} as JSON via the
+    text router (Groq when text_provider=groq and a key is set, else the local Ollama model), then resolves
+    the classes against the ontology exactly as the rule parser does. Returns None on any failure (LLM
+    off/unreachable/bad output) so the caller falls back to the deterministic rule parser -- no hard
+    dependency, and no image ever leaves the box on this path."""
     try:
-        import json
-
-        import httpx
-
         from core.config import get_settings
+        from services.llm.router import route_text_json
 
         cfg = get_settings().models.vlm
         if not getattr(cfg, "enabled", False):
@@ -127,12 +125,9 @@ def llm_parse(text: str, onto) -> Intent | None:
             f'Command: "{text}". '
             'Respond with JSON only: {"action": "...", "classes": ["..."], "conf_min": null}.'
         )
-        payload = {"model": cfg.ollama_tag, "stream": False, "format": "json",
-                   "messages": [{"role": "user", "content": prompt}],
-                   "options": {"temperature": 0.0}}
-        resp = httpx.post(f"{cfg.ollama_url}/api/chat", json=payload, timeout=min(getattr(cfg, "timeout_s", 20), 20))
-        resp.raise_for_status()
-        data = json.loads(resp.json()["message"]["content"])
+        data = route_text_json(prompt, temperature=0.0)
+        if not data:
+            return None
         action = str(data.get("action", "")).lower()
         if action not in _LLM_ACTIONS:
             return None

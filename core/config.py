@@ -6,6 +6,7 @@ Access through get_settings(), which is cached for the process.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -121,6 +122,28 @@ class VlmSettings(BaseModel):
     vote_count: int = 1                # N-vote agreement (>1 enables adversarial verify across crops/temps)
     cross_vote_min: float = 0.6        # required agreement fraction to accept a cross-superclass override
     timeout_s: float = 60.0
+    # Provider routing (services/llm/router.py). ollama is the always-available local floor; groq is the fast
+    # cloud path. Text (nl/intent) and vision (Path C) are chosen independently so text can go cloud while
+    # vision stays local. A missing GROQ_API_KEY, a cloud failure, or an open circuit all fall back to ollama,
+    # so the cloud is never a hard dependency.
+    text_provider: str = "ollama"      # ollama | groq  (nl.py / intent, text-only, no media leaves the box)
+    vision_provider: str = "ollama"    # ollama | groq  (Path C VLM verifier)
+    escalate_provider: str | None = None  # optional stronger provider re-asked only on a not-confident verdict
+    allow_cloud_media: bool = True     # False keeps image crops local even when vision_provider=groq (data residency)
+    breaker_threshold: int = 3         # consecutive cloud failures before the circuit opens
+    breaker_cooldown_s: float = 60.0   # how long the circuit stays open before a half-open retry
+
+
+class GroqSettings(BaseModel):
+    """Groq cloud inference (OpenAI-compatible). Optional: an empty api_key means 'not configured' and the
+    router uses ollama, so local dev needs zero Groq setup. The key comes from the environment
+    (LBX_GROQ__API_KEY or GROQ_API_KEY), never stored in the app; it is an outbound credential, not a secret
+    that protects LabeloxAV, so it is not part of _require_prod_secrets."""
+    api_key: str = ""
+    base_url: str = "https://api.groq.com/openai/v1"
+    text_model: str = "llama-3.3-70b-versatile"
+    vision_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    timeout_s: float = 30.0
 
 
 class ClipSettings(BaseModel):
@@ -748,6 +771,15 @@ class Settings(BaseSettings):
     sanyx: SanyxSettings = SanyxSettings()     # SANYX ingest QA thresholds (data engine plane)
     calyx: CalyxSettings = CalyxSettings()     # CALYX calibration-drift thresholds (data engine plane)
     forgyx: ForgyxSettings = ForgyxSettings()  # FORGYX edge-deployment signing (data engine plane)
+    groq: GroqSettings = GroqSettings()        # optional Groq cloud inference (text + vision), ollama fallback
+
+    @model_validator(mode="after")
+    def _groq_key_from_env(self):
+        """Accept the conventional GROQ_API_KEY as well as LBX_GROQ__API_KEY, so setting the standard
+        environment variable just works. The explicit LBX form still wins if both are set."""
+        if not self.groq.api_key:
+            self.groq.api_key = os.environ.get("GROQ_API_KEY", "")
+        return self
 
     @classmethod
     def settings_customise_sources(
