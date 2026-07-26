@@ -11,6 +11,7 @@ import { api, lidarCloudPoints, type Cuboid3D, type LidarCloud, type LidarPoints
 import type { OntologyClass } from "@/lib/types";
 import type { ColorBy } from "@/components/lidar/PointCloudViewer";
 import PageShell from "@/components/shell/PageShell";
+import { useConfirm } from "@/components/ConfirmProvider";
 import Inspector from "@/components/shell/Inspector";
 import { StateBadge } from "@/components/StateBadge";
 
@@ -22,6 +23,7 @@ const DEFAULT_DIMS: Record<string, number[]> = {
 };
 
 export default function CuboidAnnotatePage() {
+  const confirm = useConfirm();
   const [sessionId, setSessionId] = useState("");
   const [clouds, setClouds] = useState<LidarCloud[]>([]);
   const [cloud, setCloud] = useState<LidarCloud | null>(null);
@@ -146,6 +148,7 @@ export default function CuboidAnnotatePage() {
   };
 
   const removeCuboid = async (id: string) => {
+    if (!(await confirm({ title: "Remove this 3D box?", danger: true, confirmLabel: "Remove" }))) return;
     try {
       await api.lidarDeleteCuboid(id);
       setCuboids((cs) => cs.filter((c) => c.object_3d_id !== id));
