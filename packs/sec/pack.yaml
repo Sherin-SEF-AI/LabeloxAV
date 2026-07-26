@@ -1,0 +1,11 @@
+# LabeloxSec domain pack manifest (human-facing; the code manifest in pack.py is the source of truth and the
+# registry checks the two agree). India CCTV / security footage. See docs/PACK_INTERFACE.md.
+id: sec
+display_name: "Security / CCTV (India)"
+version: "0.1.0"
+default_scene_model: static_camera
+capabilities:
+  - static_camera
+  - background_prior
+  - privacy_redaction
+ontology: ontology/sec/labelox_sec_v0.yaml

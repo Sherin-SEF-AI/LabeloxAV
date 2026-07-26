@@ -409,6 +409,13 @@ class OntologySettings(BaseModel):
     promotion_min_instances: int = 50  # verified (gate-accepted) instances a class must earn to re-enter
 
 
+class PacksSettings(BaseModel):
+    # The active domain pack for engine paths that are not yet per-session pack-routed (governance, curation).
+    # Defaults to 'av' so every legacy path resolves to the AV pack exactly as before. See packs/ and
+    # docs/PACK_INTERFACE.md.
+    default_pack: str = "av"
+
+
 class PathsSettings(BaseModel):
     scratch: str = ".scratch"
 
@@ -513,6 +520,10 @@ class GovernSettings(BaseModel):
     # redaction ran over every frame of a release. Dev default is refused in prod by _require_prod_secrets.
     attestation_key: str = "labeloxavgovernattestationkey0123456789"
     redaction_coverage_floor: float = 1.0  # a release proof passes only when every frame passed the PII gate
+    # Eval slices that must always be reported even if empty (VERDYX). Empty here means "use the active pack's
+    # eval_strata.protected_slices"; set it to override per deployment. (Adds the field verdyx/run.py already
+    # reads via getattr, so the pack default now flows through instead of a hardcoded fallback.)
+    protected_slices: list[str] = Field(default_factory=list)
 
 
 class RecallSettings(BaseModel):
@@ -768,6 +779,7 @@ class Settings(BaseSettings):
     training: TrainingSettings = TrainingSettings()
     cloud: CloudSettings = CloudSettings()
     ontology: OntologySettings = OntologySettings()
+    packs: PacksSettings = PacksSettings()      # active domain pack for non-session-routed engine paths
     paths: PathsSettings = PathsSettings()
     phase4: Phase4Settings = Phase4Settings()  # Phase 4 closed loop + governance
     auth: AuthSettings = AuthSettings()        # deny-by-default API auth

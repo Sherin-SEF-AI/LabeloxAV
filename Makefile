@@ -204,3 +204,7 @@ test: ## Run pytest
 fmt: ## Format and lint
 	$(RUN) ruff check --fix .
 	$(RUN) ruff format .
+
+.PHONY: lint-imports
+lint-imports: ## Enforce the engine-core-does-not-import-packs contract (.importlinter)
+	$(RUN) lint-imports

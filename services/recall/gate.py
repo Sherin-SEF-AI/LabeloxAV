@@ -9,8 +9,6 @@ promotion decision.
 
 from __future__ import annotations
 
-_VRU_ANIMAL = {"vru", "animal"}
-
 
 def _l1(name: str, onto) -> str | None:
     try:
@@ -20,7 +18,10 @@ def _l1(name: str, onto) -> str | None:
 
 
 def _is_safety(name: str, onto) -> bool:
-    return _l1(name, onto) in _VRU_ANIMAL
+    # The safety l1 set comes from the active domain pack (AV: {"vru","animal"}), not a local literal.
+    from services.domain import safety_l1
+
+    return _l1(name, onto) in safety_l1()
 
 
 def resolve_safety_drop(class_name: str, onto, cfg) -> float:

@@ -17,7 +17,11 @@ log = get_logger("verdyx.run")
 
 
 def _protected(cfg) -> list[str]:
-    return list(getattr(cfg, "protected_slices", []) or ["pedestrian_night", "autorickshaw_glare"])
+    # Config override wins; otherwise the active pack's eval_strata.protected_slices (AV:
+    # ["pedestrian_night", "autorickshaw_glare"]). GovernSettings.protected_slices now exists (defaults empty),
+    # so the pack default flows through instead of the old hardcoded literal.
+    from services.domain import protected_slices
+    return list(getattr(cfg, "protected_slices", []) or protected_slices())
 
 
 async def record_evaluation(db: AsyncSession, model_version: str, aggregate: dict, per_slice: dict,

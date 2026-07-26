@@ -23,12 +23,13 @@ from services.recall.gate import resolve_safety_drop, safety_recall_floor, safet
 
 log = get_logger("govern_champion")
 
-_VRU_ANIMAL = {"vru", "animal"}
-
-
 def _is_safety_class(name: str, onto) -> bool:
+    # The safety definition now comes from the active domain pack (AV: l1 in {"vru","animal"}), not a local
+    # literal. Byte-identical for AV; a non-AV pack brings its own safety superclasses.
+    from services.domain import safety_l1
+
     try:
-        return onto.by_name(name).l1 in _VRU_ANIMAL
+        return onto.by_name(name).l1 in safety_l1()
     except Exception:  # noqa: BLE001
         return False
 

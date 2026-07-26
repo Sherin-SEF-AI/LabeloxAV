@@ -15,27 +15,9 @@ from services.autolabel.paths.base import RawDetection
 
 log = get_logger("path_a")
 
-# COCO class name -> ontology class name. Ambiguous COCO 'car' defaults to sedan (the head guess);
-# fusion and the VLM refine it. Unmapped detections become object_fallback (never dropped).
-COCO_TO_ONTOLOGY: dict[str, str] = {
-    "person": "pedestrian",
-    "bicycle": "cycle",
-    "motorcycle": "motorcycle",
-    "car": "sedan",
-    "bus": "bus",
-    "truck": "truck",
-    "traffic light": "traffic_signal",
-    "stop sign": "traffic_sign",
-    "fire hydrant": "pole",
-    "bench": "object_fallback",
-    "cat": "object_fallback",
-    "dog": "dog",
-    "horse": "cattle",
-    "sheep": "goat",
-    "cow": "cattle",
-    "elephant": "object_fallback",
-    "bird": "object_fallback",
-}
+# The COCO -> ontology map now lives in the active domain pack (pack.autolabel_profile.coco_map). Ambiguous
+# COCO 'car' defaults to sedan (the head guess); fusion and the VLM refine it. Unmapped detections become
+# object_fallback (never dropped).
 
 
 class YoloPath:
@@ -64,7 +46,8 @@ class YoloPath:
         if self.onto.has_name(model_name):
             name = model_name
         else:
-            name = COCO_TO_ONTOLOGY.get(model_name, "object_fallback")
+            from services.domain import active_pack
+            name = active_pack().autolabel_profile.coco_map.get(model_name, "object_fallback")
             if not self.onto.has_name(name):
                 name = "object_fallback"
         return name, self.onto.by_name(name).id

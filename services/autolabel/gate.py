@@ -17,8 +17,6 @@ from core.config import GateSettings
 from core.schemas import GateState, Provenance, UnifiedObject
 from services.autolabel.ontology import Ontology
 
-_SAFETY_L1 = {"vru", "animal"}
-
 
 def is_rare(class_id: int, onto: Ontology) -> bool:
     c = onto.by_id(class_id)
@@ -26,8 +24,11 @@ def is_rare(class_id: int, onto: Ontology) -> bool:
 
 
 def class_auto_accept(class_id: int, onto: Ontology, cfg: GateSettings) -> float:
-    """Per-class auto-accept threshold: safety-critical classes near-certain, benign classes the default."""
-    return cfg.safety_auto_accept if onto.by_id(class_id).l1 in _SAFETY_L1 else cfg.auto_accept
+    """Per-class auto-accept threshold: safety-critical classes near-certain, benign classes the default.
+    Safety l1 comes from the active domain pack (AV: {"vru","animal"})."""
+    from services.domain import safety_l1
+
+    return cfg.safety_auto_accept if onto.by_id(class_id).l1 in safety_l1() else cfg.auto_accept
 
 
 def vlm_confirmed(prov: Provenance) -> bool:

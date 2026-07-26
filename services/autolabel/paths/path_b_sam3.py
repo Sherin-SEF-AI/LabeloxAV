@@ -23,12 +23,9 @@ from services.autolabel.paths.base import RawDetection, mask_to_bbox
 log = get_logger("path_b")
 
 # Open-vocab synonym expansion: some ontology class names are poor text prompts for YOLO-World (it was
-# trained on common nouns). "cattle" barely activates; "cow"/"buffalo"/"bull"/"ox" do. Prompt with the
-# synonyms too and map every one of them back to the single ontology class, so the long-tail rural classes
-# the champion is blind to actually get proposed. Keyed by ontology class name.
-_OPENVOCAB_SYNONYMS: dict[str, list[str]] = {
-    "cattle": ["cattle", "cow", "buffalo", "bull", "ox"],
-}
+# trained on common nouns). "cattle" barely activates; "cow"/"buffalo"/"bull"/"ox" do. The synonym map now
+# lives in the active domain pack (pack.autolabel_profile.openvocab_synonyms), keyed by ontology class name;
+# each phrase maps back to its single ontology class.
 
 
 class Sam3Path:
@@ -50,8 +47,10 @@ class Sam3Path:
         # like cattle). _phrase_classes[i] is the ontology class the i-th phrase resolves back to.
         self._phrases: list[str] = []
         self._phrase_classes: list = []
+        from services.domain import active_pack
+        synonyms = active_pack().autolabel_profile.openvocab_synonyms
         for c in self._classes:
-            for phrase in _OPENVOCAB_SYNONYMS.get(c.name, [c.name.replace("_", " ")]):
+            for phrase in synonyms.get(c.name, [c.name.replace("_", " ")]):
                 self._phrases.append(phrase)
                 self._phrase_classes.append(c)
         self.model_version = (

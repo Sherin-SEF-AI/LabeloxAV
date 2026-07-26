@@ -73,6 +73,7 @@ dev = [
     "ruff==0.8.4",
     "mypy==1.14.0",
     "foxglove-schemas-protobuf==0.3.0",
+    "import-linter==2.1",        # enforce the engine-core-does-not-import-packs contract (.importlinter)
 ]
 
 [project.scripts]
@@ -88,7 +89,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["core", "db", "services"]
+packages = ["core", "db", "services", "packs"]
 
 [tool.uv]
 # torch cu128 wheels come from the PyTorch CUDA index.

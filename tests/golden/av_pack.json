@@ -1,0 +1,320 @@
+{
+  "autolabel": {
+    "coco_map": {
+      "bench": "object_fallback",
+      "bicycle": "cycle",
+      "bird": "object_fallback",
+      "bus": "bus",
+      "car": "sedan",
+      "cat": "object_fallback",
+      "cow": "cattle",
+      "dog": "dog",
+      "elephant": "object_fallback",
+      "fire hydrant": "pole",
+      "horse": "cattle",
+      "motorcycle": "motorcycle",
+      "person": "pedestrian",
+      "sheep": "goat",
+      "stop sign": "traffic_sign",
+      "traffic light": "traffic_signal",
+      "truck": "truck"
+    },
+    "cross_anchors": [
+      "autorickshaw",
+      "e_auto",
+      "e_rickshaw",
+      "motorcycle",
+      "scooter",
+      "cycle",
+      "pedestrian",
+      "rider",
+      "cyclist",
+      "sedan",
+      "suv",
+      "hatchback",
+      "pickup",
+      "truck",
+      "lcv",
+      "bus",
+      "tempo",
+      "water_tanker",
+      "cattle",
+      "dog",
+      "push_cart",
+      "vendor_handcart",
+      "street_vendor"
+    ],
+    "disable_ego_hood_mask": false,
+    "openvocab_synonyms": {
+      "cattle": [
+        "cattle",
+        "cow",
+        "buffalo",
+        "bull",
+        "ox"
+      ]
+    },
+    "vlm_prompt_template": "You are labeling an object cropped from an Indian road scene for an autonomous-driving dataset. Identify the object and read its attributes."
+  },
+  "eval_strata": {
+    "critical_class_names": [
+      "cattle",
+      "cycle",
+      "motorcycle",
+      "pedestrian",
+      "rider"
+    ],
+    "dimensions": [
+      "weather",
+      "time_of_day",
+      "road_type",
+      "density"
+    ],
+    "protected_slices": [
+      "pedestrian_night",
+      "autorickshaw_glare"
+    ]
+  },
+  "forge_targets": [
+    {
+      "backend": "agx_orin_trt",
+      "backend_modules": [
+        "tensorrt"
+      ],
+      "export_format": "tensorrt",
+      "latency_budget_ms": 15.0,
+      "name": "agx_orin_trt",
+      "power_ceiling_w": 60.0,
+      "throttle_temp_c": 90.0
+    },
+    {
+      "backend": "orin_nano_trt",
+      "backend_modules": [
+        "tensorrt"
+      ],
+      "export_format": "tensorrt",
+      "latency_budget_ms": 40.0,
+      "name": "orin_nano_trt",
+      "power_ceiling_w": 15.0,
+      "throttle_temp_c": 85.0
+    },
+    {
+      "backend": "pi_hailo",
+      "backend_modules": [
+        "hailo_sdk_client"
+      ],
+      "export_format": "hailo",
+      "latency_budget_ms": 50.0,
+      "name": "pi_hailo",
+      "power_ceiling_w": 8.0,
+      "throttle_temp_c": 80.0
+    },
+    {
+      "backend": "sentrixai_litert",
+      "backend_modules": [
+        "ai_edge_litert"
+      ],
+      "export_format": "litert",
+      "latency_budget_ms": 33.0,
+      "name": "sentrixai_litert",
+      "power_ceiling_w": 6.0,
+      "throttle_temp_c": 80.0
+    }
+  ],
+  "manifest": {
+    "capabilities": [
+      "dynamics",
+      "ego_motion",
+      "inertial_qa",
+      "mono_depth",
+      "moving_camera",
+      "privacy_redaction"
+    ],
+    "default_scene_model": "moving_camera",
+    "display_name": "Autonomous Driving (India)",
+    "id": "av",
+    "version": "0.1.0"
+  },
+  "n_ingestion_adapters": 0,
+  "ontology": {
+    "custom_id_base": 200,
+    "fallback_ids": [
+      44,
+      45
+    ],
+    "governed_classes_sha256": "ee2e8607bbee11f4573219a87dfdf1cdcd5c8a53be1cac6916f77b099ad89a32",
+    "n_governed_classes": 166,
+    "stuff_l0": [
+      "ignore",
+      "surface"
+    ],
+    "stuff_names": [
+      "barricade_line",
+      "barrier",
+      "bmtc_bus_shelter",
+      "buildings",
+      "bus_shelter",
+      "construction_barrier",
+      "crash_barrier",
+      "debris",
+      "electric_line",
+      "excavation_pit",
+      "fallen_tree",
+      "fence",
+      "festival_pandal",
+      "fly_over",
+      "flyover_pillar",
+      "foot_overbridge",
+      "garbage_pile",
+      "guardrail",
+      "hoarding",
+      "median_barrier",
+      "metro_bus_stop",
+      "metro_pillar",
+      "overhead_water_tank",
+      "road_side_grill",
+      "roadside_shop",
+      "sandbag",
+      "school_bus_stop",
+      "shops",
+      "shrine",
+      "side_wall",
+      "telephone_booth",
+      "temp_barricade",
+      "temp_bus_stop",
+      "toll_booth",
+      "tree",
+      "vegetation",
+      "waterlogging"
+    ],
+    "supported_core": [
+      "autorickshaw",
+      "barrier",
+      "buffalo",
+      "bus",
+      "cattle",
+      "child",
+      "cycle",
+      "cyclist",
+      "dog",
+      "e_auto",
+      "e_rickshaw",
+      "goat",
+      "hatchback",
+      "lcv",
+      "mini_bus",
+      "minivan",
+      "moped",
+      "motorcycle",
+      "pedestrian",
+      "person",
+      "pickup",
+      "pole",
+      "rider",
+      "road_divider",
+      "school_bus",
+      "scooter",
+      "sedan",
+      "small_suv",
+      "speed_bump",
+      "suv",
+      "tempo",
+      "tractor",
+      "traffic_sign",
+      "traffic_signal",
+      "truck",
+      "water_tanker"
+    ],
+    "version": "labelox-in-0.1.0"
+  },
+  "privacy": {
+    "legal_regime": "DPDPA",
+    "redaction_targets": [
+      {
+        "detector": "face",
+        "name": "face"
+      },
+      {
+        "detector": "plate",
+        "name": "plate"
+      }
+    ]
+  },
+  "quality_profile": {
+    "image_checks": [
+      "dropped_frames",
+      "exposure",
+      "lens_contamination"
+    ],
+    "rootcause_signatures": [
+      "gps_urban_canyon_multipath",
+      "imu_thermal_drift",
+      "lens_fouling",
+      "loose_gmsl2_connector",
+      "sun_glare",
+      "time_sync_loss"
+    ],
+    "sensor_checks": [
+      {
+        "name": "time_sync",
+        "params": {}
+      },
+      {
+        "name": "gps",
+        "params": {}
+      },
+      {
+        "name": "imu",
+        "params": {
+          "accel_limit": 156.9,
+          "gyro_limit": 34.9
+        }
+      }
+    ]
+  },
+  "safety": {
+    "critical_class_names": [
+      "cattle",
+      "cycle",
+      "motorcycle",
+      "pedestrian",
+      "rider"
+    ],
+    "safety_class_names": [
+      "animal_handler",
+      "balloon_seller",
+      "buffalo",
+      "camel",
+      "cattle",
+      "child",
+      "construction_worker",
+      "cyclist",
+      "dog",
+      "donkey",
+      "elephant",
+      "goat",
+      "goat_herd",
+      "hawker",
+      "horse",
+      "monkey",
+      "pedestrian",
+      "person_carrying_load",
+      "person_with_umbrella",
+      "pig",
+      "poultry",
+      "religious_figure",
+      "rider",
+      "school_children_group",
+      "stray_cat",
+      "street_vendor",
+      "sweeper",
+      "traffic_police",
+      "wheelchair_user"
+    ],
+    "safety_l1": [
+      "animal",
+      "vru"
+    ]
+  },
+  "scene_model_present": true
+}

@@ -1,0 +1,207 @@
+{
+  "autolabel": {
+    "coco_map": {
+      "backpack": "backpack",
+      "bicycle": "bicycle",
+      "bus": "bus",
+      "car": "car",
+      "cat": "cat",
+      "dog": "dog",
+      "handbag": "bag",
+      "knife": "knife",
+      "motorcycle": "motorcycle",
+      "person": "person",
+      "suitcase": "suitcase",
+      "truck": "truck"
+    },
+    "cross_anchors": [
+      "person",
+      "security_guard",
+      "worker",
+      "delivery_person",
+      "child",
+      "bag",
+      "backpack",
+      "suitcase",
+      "abandoned_object",
+      "weapon",
+      "knife",
+      "firearm",
+      "lathi",
+      "dog",
+      "cattle",
+      "car",
+      "motorcycle",
+      "autorickshaw",
+      "bicycle",
+      "truck",
+      "bus"
+    ],
+    "disable_ego_hood_mask": true,
+    "openvocab_synonyms": {
+      "abandoned_object": [
+        "unattended bag",
+        "abandoned baggage",
+        "unattended object",
+        "suspicious package"
+      ],
+      "firearm": [
+        "firearm",
+        "gun",
+        "pistol",
+        "rifle",
+        "handgun"
+      ],
+      "lathi": [
+        "lathi",
+        "baton",
+        "stick",
+        "cane"
+      ],
+      "weapon": [
+        "weapon",
+        "gun",
+        "pistol",
+        "rifle",
+        "blade"
+      ]
+    },
+    "vlm_prompt_template": "You are labeling an object cropped from an Indian CCTV / security camera scene. Identify the object and read its attributes."
+  },
+  "eval_strata": {
+    "critical_class_names": [
+      "abandoned_object",
+      "firearm",
+      "knife",
+      "person",
+      "weapon"
+    ],
+    "dimensions": [
+      "camera_zone",
+      "time_of_day",
+      "occupancy",
+      "lighting"
+    ],
+    "protected_slices": [
+      "night_lowlight",
+      "crowd_occlusion"
+    ]
+  },
+  "forge_targets": [],
+  "manifest": {
+    "capabilities": [
+      "background_prior",
+      "privacy_redaction",
+      "static_camera"
+    ],
+    "default_scene_model": "static_camera",
+    "display_name": "Security / CCTV (India)",
+    "id": "sec",
+    "version": "0.1.0"
+  },
+  "n_ingestion_adapters": 1,
+  "ontology": {
+    "custom_id_base": 200,
+    "fallback_ids": [
+      40,
+      41
+    ],
+    "governed_classes_sha256": "a8fc53a5877afaddf732507006d21b19afffb839ac375fcf9decb6227b308550",
+    "n_governed_classes": 41,
+    "stuff_l0": [
+      "ignore",
+      "surface"
+    ],
+    "stuff_names": [
+      "barrier",
+      "boom_barrier",
+      "cctv_camera",
+      "door",
+      "fence",
+      "gate",
+      "signage",
+      "turnstile"
+    ],
+    "supported_core": [
+      "abandoned_object",
+      "autorickshaw",
+      "backpack",
+      "bag",
+      "bicycle",
+      "bus",
+      "car",
+      "cattle",
+      "child",
+      "delivery_person",
+      "dog",
+      "e_rickshaw",
+      "firearm",
+      "knife",
+      "lathi",
+      "motorcycle",
+      "person",
+      "security_guard",
+      "suitcase",
+      "truck",
+      "vendor",
+      "weapon",
+      "worker"
+    ],
+    "version": "labelox-sec-0.1.0"
+  },
+  "privacy": {
+    "legal_regime": "DPDPA",
+    "redaction_targets": [
+      {
+        "detector": "face",
+        "name": "face"
+      },
+      {
+        "detector": "plate",
+        "name": "plate"
+      }
+    ]
+  },
+  "quality_profile": {
+    "image_checks": [
+      "dropped_frames",
+      "exposure",
+      "lens_contamination"
+    ],
+    "rootcause_signatures": [
+      "camera_tampering",
+      "defocus",
+      "ir_cut_oscillation",
+      "sensor_banding",
+      "stream_dropout",
+      "timestamp_drift"
+    ],
+    "sensor_checks": []
+  },
+  "safety": {
+    "critical_class_names": [
+      "abandoned_object",
+      "firearm",
+      "knife",
+      "person",
+      "weapon"
+    ],
+    "safety_class_names": [
+      "child",
+      "delivery_person",
+      "firearm",
+      "knife",
+      "lathi",
+      "person",
+      "security_guard",
+      "vendor",
+      "weapon",
+      "worker"
+    ],
+    "safety_l1": [
+      "person",
+      "weapon"
+    ]
+  },
+  "scene_model_present": true
+}

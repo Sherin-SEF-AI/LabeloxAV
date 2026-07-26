@@ -78,16 +78,32 @@ class PiiAnonymizer:
             image_bgr[iy1:iy2, ix1:ix2] = cv2.GaussianBlur(roi, (k, k), 0)
 
     def anonymize(self, image_bgr: np.ndarray) -> PiiResult:
+        # Which image targets to redact, and in what order, comes from the active domain pack's privacy plane
+        # (AV: face then plate - byte-identical to the previous hardcoded order). A pack could subset (face
+        # only) or extend; an audio target (speech) is enforced on the export/audio path, not here.
+        from services.domain import redaction_targets
+
+        detectors: dict[str, FaceDetector | PlateDetector] = {"face": self.face, "plate": self.plate}
         regions: list[dict] = []
-        faces = self.face.detect(image_bgr)
-        plates = self.plate.detect(image_bgr)
-        for x1, y1, x2, y2, s in faces:
-            self._blur_region(image_bgr, x1, y1, x2, y2)
-            regions.append({"type": "face", "bbox": [round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1)], "score": round(s, 3)})
-        for x1, y1, x2, y2, s in plates:
-            self._blur_region(image_bgr, x1, y1, x2, y2)
-            regions.append({"type": "plate", "bbox": [round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1)], "score": round(s, 3)})
-        return PiiResult(n_faces=len(faces), n_plates=len(plates), regions=regions, method_version=self.method_version)
+        counts: dict[str, int] = {"face": 0, "plate": 0}
+        for target in redaction_targets():
+            det = detectors.get(target.detector)
+            if det is None:
+                if target.detector == "speech":
+                    continue  # audio target: enforced via SpeechSegment + the DPDPA export gate
+                raise RuntimeError(
+                    f"PiiAnonymizer has no detector for redaction target '{target.name}' "
+                    f"(detector={target.detector!r})"
+                )
+            found = det.detect(image_bgr)
+            counts[target.detector] = counts.get(target.detector, 0) + len(found)
+            for x1, y1, x2, y2, s in found:
+                self._blur_region(image_bgr, x1, y1, x2, y2)
+                regions.append({"type": target.name,
+                                "bbox": [round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1)],
+                                "score": round(s, 3)})
+        return PiiResult(n_faces=counts.get("face", 0), n_plates=counts.get("plate", 0),
+                         regions=regions, method_version=self.method_version)
 
 
 @lru_cache(maxsize=1)

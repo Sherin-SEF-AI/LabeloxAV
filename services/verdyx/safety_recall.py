@@ -6,14 +6,24 @@ records carrying a class, a TTC, and a detected flag, so the weighting is testab
 
 from __future__ import annotations
 
-# the India safety-critical classes: vulnerable road users and cattle
-CRITICAL_CLASSES = {0, 1, 2, 3, 8}   # pedestrian, rider, motorcycle, bicycle, cattle
+
+def _default_critical_ids() -> set[int]:
+    """The active pack's safety-critical classes, resolved to ids through the governed ontology. Replaces the
+    old hardcoded CRITICAL_CLASSES = {0,1,2,3,8}, which was 0-based and disagreed with the 1-based ontology
+    ids (latent bug #2 in docs/AV_ASSUMPTIONS.md); the classes are now named (pedestrian, rider, motorcycle,
+    cycle, cattle for AV) and resolved correctly."""
+    from services.autolabel.ontology import get_ontology
+    from services.domain import critical_class_ids
+
+    return critical_class_ids(get_ontology())
 
 
-def critical_object_recall(objects: list[dict]) -> dict:
-    """Recall restricted to the safety-critical classes. Each object is {class_id, detected}. Returns the
-    recall and the raw counts, so a headline mAP cannot hide a VRU regression."""
-    crit = [o for o in objects if o.get("class_id") in CRITICAL_CLASSES]
+def critical_object_recall(objects: list[dict], critical_ids: set[int] | None = None) -> dict:
+    """Recall restricted to the safety-critical classes. Each object is {class_id, detected}. `critical_ids`
+    defaults to the active pack's critical classes resolved to ids. Returns the recall and the raw counts, so a
+    headline mAP cannot hide a VRU regression."""
+    crit_ids = _default_critical_ids() if critical_ids is None else critical_ids
+    crit = [o for o in objects if o.get("class_id") in crit_ids]
     n = len(crit)
     hit = sum(1 for o in crit if o.get("detected"))
     return {"n_critical": n, "detected": hit, "recall": round(hit / n, 4) if n else None}
