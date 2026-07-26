@@ -231,6 +231,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Request metrics for /metrics (Prometheus). Registered as an http middleware so it times every request under
+# its route template.
+from services.api.metrics import MetricsMiddleware  # noqa: E402
+
+app.middleware("http")(MetricsMiddleware())
+
+
+@app.get("/metrics")
+async def metrics_endpoint():
+    """Prometheus scrape target: request rates/latencies (in-process) plus live corpus gauges (review-queue
+    depth, embedding backlog). Unauthenticated like a conventional metrics port; bind it internally in prod."""
+    from fastapi import Response
+
+    from services.api.metrics import render, sample_db_gauges
+
+    body = await render(await sample_db_gauges())
+    return Response(body, media_type="text/plain; version=0.0.4")
+
 
 @app.exception_handler(DpdpaRefusal)
 async def _dpdpa_handler(request, exc: DpdpaRefusal):
