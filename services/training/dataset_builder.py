@@ -35,6 +35,10 @@ class BuildSpec:
     max_per_class: int = 400        # balanced sampling cap (counters bus_shelter-style over-firing)
     val_frac: float = 0.2
     agreement_only: bool = False    # True = only cross-path-agreement objects (cleanest pseudo-labels)
+    # Restrict the trainset to specific object states. Empty = the old behaviour (everything not rejected).
+    # Passing the reviewed states (accepted/auto_accept/human/vlm_review) is what keeps the raw, unreviewed
+    # `review` labels out of training, which is exactly the pollution that collapsed loop-op-v5.
+    states: list[str] = field(default_factory=list)
     seed: int = 7
     route_prefix: str | None = None  # scope to a capture batch, e.g. "202606"
     cities: list[str] = field(default_factory=list)        # per-domain scoping (e.g. ["BLR"])
@@ -63,6 +67,8 @@ async def _select(spec: BuildSpec):
             .join(DbSession, Frame.session_id == DbSession.session_id)
             .where(Object.state != "rejected", Object.conf >= spec.conf_floor)
         )
+        if spec.states:
+            stmt = stmt.where(Object.state.in_(spec.states))
         if spec.route_prefix:
             stmt = stmt.where(DbSession.route.like(f"{spec.route_prefix}%"))
         if spec.cities:
