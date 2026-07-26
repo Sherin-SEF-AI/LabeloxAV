@@ -63,9 +63,18 @@ async def review_class(cn: str, per_class: int, min_conf: float, oversample: int
         by_frame[fid].append((oid, bbox))
         uri_of[fid] = uri
 
+    async def _persist(ids: list[UUID]) -> None:
+        if dry or not ids:
+            return
+        async with maker() as db:
+            await db.execute(update(Object).where(Object.object_id.in_(ids)).values(
+                state="accepted", source="vlm_review"))
+            await db.commit()
+
     confirmed = 0
     seen = 0
-    promoted_ids: list[UUID] = []
+    promoted = 0
+    pending: list[UUID] = []
     for fid, items in by_frame.items():
         if confirmed >= per_class:
             break
@@ -80,16 +89,17 @@ async def review_class(cn: str, per_class: int, min_conf: float, oversample: int
             # Confirmed only when the VLM's own choice is this class: detector + VLM agree.
             if res.class_name == cn:
                 confirmed += 1
-                promoted_ids.append(oid)
+                pending.append(oid)
+                # Persist in small batches so a mid-run interruption keeps its progress.
+                if len(pending) >= 50:
+                    await _persist(pending)
+                    promoted += len(pending)
+                    pending = []
+    await _persist(pending)
+    promoted += len(pending)
 
-    if not dry and promoted_ids:
-        async with maker() as db:
-            await db.execute(update(Object).where(Object.object_id.in_(promoted_ids)).values(
-                state="accepted", source="vlm_review"))
-            await db.commit()
-
-    log.info("vlm_review.class", cls=cn, seen=seen, confirmed=confirmed, promoted=0 if dry else len(promoted_ids))
-    return {"class": cn, "seen": seen, "confirmed": confirmed, "promoted": 0 if dry else len(promoted_ids)}
+    log.info("vlm_review.class", cls=cn, seen=seen, confirmed=confirmed, promoted=promoted)
+    return {"class": cn, "seen": seen, "confirmed": confirmed, "promoted": promoted}
 
 
 async def main() -> None:
