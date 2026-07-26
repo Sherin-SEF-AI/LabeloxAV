@@ -201,6 +201,7 @@ class ExportIn(BaseModel):
     states: list[str] | None = None
     class_names: list[str] | None = None
     cities: list[str] | None = None
+    vehicle_ids: list[str] | None = None
     session_id: str | None = None
     min_conf: float | None = None
     formats: list[str] = ["coco", "parquet"]
