@@ -8,4 +8,5 @@ capabilities:
   - static_camera
   - background_prior
   - privacy_redaction
+  - anpr
 ontology: ontology/sec/labelox_sec_v0.yaml

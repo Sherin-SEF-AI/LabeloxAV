@@ -19,6 +19,12 @@ def active_pack(pack_id: str | None = None) -> DomainPack:
     return get_pack(pack_id or default_pack_id())
 
 
+def has_capability(name: str, pack_id: str | None = None) -> bool:
+    """Whether the active pack declares a capability (e.g. 'anpr', 'static_camera'). Capability-gated features
+    consult this so a domain that does not authorise a feature never runs it."""
+    return name in active_pack(pack_id).manifest.capabilities
+
+
 def safety_l1(pack_id: str | None = None) -> frozenset[str]:
     """The l1 superclasses that define a safety-critical class for the active pack (AV: {'vru','animal'})."""
     return active_pack(pack_id).autolabel_profile.gate_policy.safety_l1
@@ -55,3 +61,21 @@ def redaction_targets(pack_id: str | None = None):
 def legal_regime(pack_id: str | None = None) -> str:
     """The active pack's privacy legal regime (AV: DPDPA)."""
     return active_pack(pack_id).privacy.legal_regime
+
+
+def forge_targets(pack_id: str | None = None):
+    """The active pack's edge deployment targets."""
+    return active_pack(pack_id).forge_targets
+
+
+def resolve_forge_target(name: str):
+    """Find an edge target by name across all loaded packs (AV Jetson silicon, Sec CCTV silicon, ...), or None.
+    FORGYX's per-target thermal/latency checks resolve a target's profile through this instead of a hardcoded
+    AV registry, so a pack's own hardware envelopes are honoured."""
+    from packs.registry import load_packs
+
+    for pack in load_packs().values():
+        for t in pack.forge_targets:
+            if t.name == name:
+                return t
+    return None

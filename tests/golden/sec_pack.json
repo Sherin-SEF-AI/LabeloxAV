@@ -87,9 +87,66 @@
       "crowd_occlusion"
     ]
   },
-  "forge_targets": [],
+  "forge_targets": [
+    {
+      "backend": "cvflow",
+      "backend_modules": [
+        "cvflow_toolchain"
+      ],
+      "export_format": "cvflow",
+      "latency_budget_ms": 33.0,
+      "name": "ambarella_cv5",
+      "power_ceiling_w": 5.0,
+      "throttle_temp_c": 105.0
+    },
+    {
+      "backend": "artpec",
+      "backend_modules": [
+        "axis_acap"
+      ],
+      "export_format": "artpec",
+      "latency_budget_ms": 33.0,
+      "name": "axis_artpec8",
+      "power_ceiling_w": 4.0,
+      "throttle_temp_c": 95.0
+    },
+    {
+      "backend": "hailo",
+      "backend_modules": [
+        "hailo_sdk_client"
+      ],
+      "export_format": "hef",
+      "latency_budget_ms": 10.0,
+      "name": "hailo8_m2",
+      "power_ceiling_w": 13.0,
+      "throttle_temp_c": 85.0
+    },
+    {
+      "backend": "openvino",
+      "backend_modules": [
+        "openvino"
+      ],
+      "export_format": "openvino",
+      "latency_budget_ms": 40.0,
+      "name": "openvino_myriadx",
+      "power_ceiling_w": 2.5,
+      "throttle_temp_c": 80.0
+    },
+    {
+      "backend": "onnxruntime",
+      "backend_modules": [
+        "onnxruntime"
+      ],
+      "export_format": "onnx",
+      "latency_budget_ms": 15.0,
+      "name": "x86_onnx_nvr",
+      "power_ceiling_w": 65.0,
+      "throttle_temp_c": 100.0
+    }
+  ],
   "manifest": {
     "capabilities": [
+      "anpr",
       "background_prior",
       "privacy_redaction",
       "static_camera"

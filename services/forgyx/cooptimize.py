@@ -7,13 +7,25 @@ exists); this is the planner that decides which configuration to build, so it is
 
 from __future__ import annotations
 
-# per-target latency budgets (ms, p95) and the compute envelope, keyed by the deployment target
+# per-target latency budgets (ms, p95), keyed by the deployment target. Legacy AV silicon registry; the
+# active-pack forge targets are consulted first, and this is the fallback for targets a pack does not declare.
 TARGET_BUDGET_MS = {
     "sentrixai_litert": 33.0,   # mobile, ~30 fps
     "agx_orin_trt": 15.0,       # high-end automotive
     "orin_nano_trt": 40.0,      # mid automotive
     "pi_hailo": 50.0,           # low-power edge
 }
+
+
+def _budget_for(target: str) -> float | None:
+    """The target's latency budget from any pack's forge targets, else the legacy AV registry. For an AV target
+    the pack value mirrors the registry, so the result is identical."""
+    from services.domain import resolve_forge_target
+
+    ft = resolve_forge_target(target)
+    if ft is not None:
+        return ft.latency_budget_ms
+    return TARGET_BUDGET_MS.get(target)
 
 
 def estimate_step(base_latency_ms: float, base_map50: float, prune: float, int8: bool) -> dict:
@@ -39,7 +51,7 @@ def plan_cooptimization(target: str, base_latency_ms: float, base_map50: float,
     target budget, then pick the one that clears it at the highest estimated accuracy. Returns the chosen
     configuration and the full ranked grid; feasible=False when nothing in the grid meets the budget (a signal
     to widen the grid or pick a smaller architecture)."""
-    budget = TARGET_BUDGET_MS.get(target)
+    budget = _budget_for(target)
     if budget is None:
         raise ValueError(f"unknown target {target}")
     grid = prune_grid if prune_grid is not None else [0.0, 0.2, 0.4, 0.6]

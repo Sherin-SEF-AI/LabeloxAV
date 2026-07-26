@@ -742,6 +742,20 @@ class ForgyxSettings(BaseModel):
     deploy_signing_key: str = "labeloxforgyxdeploysigningkey0123456789"
 
 
+class AnprSettings(BaseModel):
+    """ANPR-India (SEC-M7): a security-domain plate-reading capability, off by default and additionally gated
+    on the active pack declaring 'anpr' (so it can never run in the AV / DPDPA context). Reuses the plate
+    detector; the OCR is a wire seam (Qwen via Ollama, or the PaddleOCR pod)."""
+
+    enabled: bool = False
+    plate_weights: str = ".scratch/models/pii/plate_yolov8.pt"
+    plate_conf: float = 0.35
+    device: str = "cpu"
+    min_plate_area_frac: float = 0.0002   # ignore specks below this fraction of frame area
+    ocr_min_conf: float = 0.50            # drop a read the OCR is not confident about
+    ocr_backend: str = "qwen"             # qwen (Ollama) | pod (PaddleOCR Indic)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="LBX_",
@@ -789,6 +803,7 @@ class Settings(BaseSettings):
     sanyx: SanyxSettings = SanyxSettings()     # SANYX ingest QA thresholds (data engine plane)
     calyx: CalyxSettings = CalyxSettings()     # CALYX calibration-drift thresholds (data engine plane)
     forgyx: ForgyxSettings = ForgyxSettings()  # FORGYX edge-deployment signing (data engine plane)
+    anpr: AnprSettings = AnprSettings()        # ANPR-India (security domain; pack-gated on 'anpr')
     groq: GroqSettings = GroqSettings()        # optional Groq cloud inference (text + vision), ollama fallback
 
     @model_validator(mode="after")

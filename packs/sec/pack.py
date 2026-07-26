@@ -17,6 +17,7 @@ from core.config import REPO_ROOT
 from packs.base import (
     AutoLabelProfile,
     EvalStrataSpec,
+    ForgeTarget,
     GatePolicy,
     OntologySpec,
     Pack,
@@ -95,6 +96,28 @@ SEC_OPENVOCAB_SYNONYMS = {
 }
 
 
+# CCTV / security edge deployment targets (SEC-M9). FORGYX gate/packaging already accept opaque target
+# strings; these carry the per-target thermal, power, latency, and export profile the generic FORGYX checks
+# read. Representative envelopes for common security-camera / NVR silicon.
+SEC_FORGE_TARGETS = (
+    # Ambarella CV5: 4K AI vision SoC with the CVflow engine, common in edge security cameras.
+    ForgeTarget(name="ambarella_cv5", backend="cvflow", backend_modules=("cvflow_toolchain",),
+                throttle_temp_c=105.0, power_ceiling_w=5.0, latency_budget_ms=33.0, export_format="cvflow"),
+    # Axis ARTPEC-8 DLPU: in-camera deep-learning processing on Axis network cameras (ACAP).
+    ForgeTarget(name="axis_artpec8", backend="artpec", backend_modules=("axis_acap",),
+                throttle_temp_c=95.0, power_ceiling_w=4.0, latency_budget_ms=33.0, export_format="artpec"),
+    # Hailo-8 M.2: a 26-TOPS accelerator dropped into an NVR or edge box.
+    ForgeTarget(name="hailo8_m2", backend="hailo", backend_modules=("hailo_sdk_client",),
+                throttle_temp_c=85.0, power_ceiling_w=13.0, latency_budget_ms=10.0, export_format="hef"),
+    # Intel Movidius Myriad X VPU via OpenVINO: low-power in-camera inference.
+    ForgeTarget(name="openvino_myriadx", backend="openvino", backend_modules=("openvino",),
+                throttle_temp_c=80.0, power_ceiling_w=2.5, latency_budget_ms=40.0, export_format="openvino"),
+    # x86 software NVR running ONNX Runtime: the VMS-server path, ample thermal/power headroom.
+    ForgeTarget(name="x86_onnx_nvr", backend="onnxruntime", backend_modules=("onnxruntime",),
+                throttle_temp_c=100.0, power_ceiling_w=65.0, latency_budget_ms=15.0, export_format="onnx"),
+)
+
+
 def _build() -> Pack:
     # Load the ontology directly (not get_ontology("sec"), which would re-enter the registry that is mid-build).
     onto = load_ontology(_ONTOLOGY_PATH)
@@ -157,7 +180,7 @@ def _build() -> Pack:
         autolabel_profile=autolabel,
         eval_strata=eval_strata,
         quality_profile=build_quality_profile(),
-        forge_targets=(),  # CCTV silicon profiles (NVR SoCs, Ambarella, ARTPEC, x86) land in SEC-M9
+        forge_targets=SEC_FORGE_TARGETS,
         privacy=privacy,
         scene_model=StaticCameraSceneModelFactory(),
         ingestion_adapters=(StaticCameraIngestionAdapter(),),
