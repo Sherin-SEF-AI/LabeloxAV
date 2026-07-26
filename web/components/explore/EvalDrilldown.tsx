@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type GoldSetRow } from "@/lib/api";
+import { api, type GoldSetRow , humanizeError } from "@/lib/api";
 import type { ConfusionCell, EvalPatchRow, EvalRun } from "@/lib/types";
 
 // Model-versus-gold drill-down. The corrections table elsewhere on this page answers "what did humans fix";
@@ -59,7 +59,7 @@ export default function EvalDrilldown() {
         gt_class_id: c.gt_class_id, pred_class_id: c.pred_class_id, outcome: c.outcome,
       });
       setPatches(r.patches);
-    } catch (e) { flash(String(e)); }
+    } catch (e) { flash(humanizeError(e)); }
   };
 
   const runEval = async () => {
@@ -73,7 +73,7 @@ export default function EvalDrilldown() {
       setEvals(list.evals);
       if (r.eval_id) setEvalId(r.eval_id);
       flash(`tp ${r.tp} / fp ${r.fp} / fn ${r.fn}`);
-    } catch (e) { flash(String(e)); } finally { setBusy(false); }
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
   const run = evals.find((e) => e.eval_id === evalId);

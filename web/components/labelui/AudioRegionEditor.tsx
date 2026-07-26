@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { humanizeError } from "@/lib/api";
 import type { AnnotationRow, LabelConfig } from "@/lib/types";
 
 // Audio: a waveform you drag on to create a time region.
@@ -62,7 +63,7 @@ export default function AudioRegionEditor({
         setDuration(decoded.duration);
         ctx.close();
       } catch (e) {
-        if (!cancelled) setErr(String(e));
+        if (!cancelled) setErr(humanizeError(e));
       }
     })();
     return () => { cancelled = true; };

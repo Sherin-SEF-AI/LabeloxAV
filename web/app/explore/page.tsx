@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type {
   ExplorePredicate,
   Facets,
@@ -114,7 +114,7 @@ export default function ExplorePage() {
       const f = await api.exploreFacets(predicate);
       setFacets(f);
       if (projId) setPoints((await api.exploreProjectionPoints(projId)).points ?? []);
-    } catch (e) { flash(String(e)); } finally { setBusy(null); }
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(null); }
   };
 
   const saveView = async () => {
@@ -125,7 +125,7 @@ export default function ExplorePage() {
       await api.exploreSaveView(name, actionPredicate());
       setViews((await api.exploreViews()).views);
       flash(`saved view "${name}"`);
-    } catch (e) { flash(String(e)); } finally { setBusy(null); }
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(null); }
   };
 
   const fitProjection = async () => {
@@ -141,7 +141,7 @@ export default function ExplorePage() {
       setProjections(list.projections);
       if (r.projection_id) setProjId(r.projection_id);
       flash(`fitted ${r.n} points with ${r.method}${r.clusters ? `, ${r.clusters} clusters` : ""}`);
-    } catch (e) { flash(String(e)); } finally { setBusy(null); }
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(null); }
   };
 
   const sendToReview = async () => {
@@ -153,7 +153,7 @@ export default function ExplorePage() {
       // routes the selection into the review queue without changing any label.
       await api.bulkReview(ids, "confirm", undefined, "review");
       flash(`sent ${ids.length} objects to review`);
-    } catch (e) { flash(String(e)); } finally { setBusy(null); }
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(null); }
   };
 
   const selCount = selected.size || facets?.total || 0;

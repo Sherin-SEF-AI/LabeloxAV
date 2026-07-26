@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { CloudStatus, CloudOrphan } from "@/lib/types";
 import Icon from "@/components/shell/Icon";
 
@@ -33,19 +33,39 @@ export default function CloudControl() {
   const [, setTick] = useState(0);
   const lastPoll = useRef<number>(0);
 
-  const poll = useCallback(async () => {
-    try { const s = await api.cloudStatus(); setSt(s); lastPoll.current = Date.now(); } catch { /* keep last */ }
-  }, []);
   const pollOrphans = useCallback(async () => {
     try { const r = await api.cloudOrphans(); setOrphans(r.orphans); } catch { /* ignore */ }
   }, []);
+  // A one-shot refresh after a connect/disconnect action, so the meter reflects the new state immediately
+  // without waiting for the next adaptive tick.
+  const refresh = useCallback(async () => {
+    try { const s = await api.cloudStatus(); setSt(s); lastPoll.current = Date.now(); } catch { /* keep last */ }
+  }, []);
 
+  // Adaptive poll: only a live pod has a cost/uptime meter ticking that needs a 3s refresh. When the GPU is
+  // idle or disconnected (the usual state here) poll slowly, and back off further on error, so an idle tab is
+  // not firing a request every 3 seconds and a backend blip does not flood the console with retries.
   useEffect(() => {
-    poll(); pollOrphans();
-    const a = setInterval(poll, 3000);
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const LIVE = new Set(["connected", "running_job", "provisioning", "terminating", "pausing"]);
+    const loop = async () => {
+      if (!alive) return;
+      let delay = 20000;
+      try {
+        const s = await api.cloudStatus();
+        if (!alive) return;
+        setSt(s); lastPoll.current = Date.now();
+        delay = LIVE.has(s.state) ? 3000 : 20000;   // fast only while something is actually running
+      } catch {
+        delay = 30000;   // backend unreachable: keep the last value and back off
+      }
+      if (alive) timer = setTimeout(loop, delay);
+    };
+    loop(); pollOrphans();
     const b = setInterval(pollOrphans, 20000);
-    return () => { clearInterval(a); clearInterval(b); };
-  }, [poll, pollOrphans]);
+    return () => { alive = false; clearTimeout(timer); clearInterval(b); };
+  }, [pollOrphans]);
   // a 1s tick interpolates uptime + cost smoothly between polls so the meter never looks frozen
   useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
 
@@ -73,11 +93,11 @@ export default function CloudControl() {
 
   const doConnect = async () => {
     setConfirm(false); setBusy("connecting"); setErr(null);
-    try { setSt(await api.cloudConnect(st.hourly_usd)); } catch (e) { setErr(String(e)); } finally { setBusy(null); poll(); }
+    try { setSt(await api.cloudConnect(st.hourly_usd)); } catch (e) { setErr(humanizeError(e)); } finally { setBusy(null); refresh(); }
   };
   const doDisconnect = async (pause: boolean) => {
     setBusy("disconnecting"); setErr(null);
-    try { setSt(await api.cloudDisconnect(pause)); setOpen(false); } catch (e) { setErr(String(e)); } finally { setBusy(null); poll(); }
+    try { setSt(await api.cloudDisconnect(pause)); setOpen(false); } catch (e) { setErr(humanizeError(e)); } finally { setBusy(null); refresh(); }
   };
   const killOrphan = async (podId: string) => {
     try { await api.cloudTerminateOrphan(podId); } finally { pollOrphans(); }

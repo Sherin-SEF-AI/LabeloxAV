@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { humanizeError } from "@/lib/api";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import type { InspectorPanel } from "@/lib/api";
@@ -54,7 +55,7 @@ export default function PlotPanel({ panel }: { panel: InspectorPanel }) {
         });
         ro.observe(hostRef.current);
       } catch (e) {
-        if (alive) setStatus("plot load error: " + String(e));
+        if (alive) setStatus("plot load error: " + humanizeError(e));
       }
     })();
     return () => { alive = false; ro?.disconnect(); uRef.current?.destroy(); uRef.current = null; };

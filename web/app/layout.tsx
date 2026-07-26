@@ -4,6 +4,9 @@ import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 import GlobalLoadingBar from "@/components/GlobalLoadingBar";
+import AuthBootstrap from "@/components/AuthBootstrap";
+import Toaster from "@/components/Toaster";
+import ConfirmProvider from "@/components/ConfirmProvider";
 
 const display = Space_Grotesk({ subsets: ["latin"], variable: "--font-display" });
 
@@ -18,7 +21,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       style={{ "--font-body": "var(--font-geist-sans)", "--font-mono": "var(--font-geist-mono)" } as React.CSSProperties}>
       <body className="font-body bg-bg text-ink antialiased">
         <GlobalLoadingBar />
-        {children}
+        <AuthBootstrap />
+        <Toaster />
+        <ConfirmProvider>{children}</ConfirmProvider>
       </body>
     </html>
   );

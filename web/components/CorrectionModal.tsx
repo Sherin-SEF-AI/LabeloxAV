@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { CorrectionCandidate, CorrectionCoverage, CorrectionSuggestion } from "@/lib/types";
 
 // Interactive AI correction: after one fix (Truck->Bus, or an attribute), find visually-similar objects
@@ -52,7 +52,7 @@ export default function CorrectionModal({
       setSug(r);
       setSel(new Set(r.candidates.filter((c) => !c.already).map((c) => c.object_id))); // default-select non-already
     } catch (e) {
-      setMsg(String(e));
+      setMsg(humanizeError(e));
     } finally {
       setLoading(false);
     }
@@ -81,7 +81,7 @@ export default function CorrectionModal({
       onApplied?.(ids.length);
       onClose();
     } catch (e) {
-      setMsg(String(e));
+      setMsg(humanizeError(e));
       setApplying(false);
     }
   };

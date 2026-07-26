@@ -39,13 +39,16 @@ async def persisted_groups(session_id: str):
 
 @router.get("/multicam/group/at")
 async def group_at(session_id: str, ts_ns: int):
-    """The persisted group nearest a timestamp: how the workspace opens the rig view for a given frame."""
+    """The persisted group nearest a timestamp: how the workspace opens the rig view for a given frame.
+
+    Returns null (200) when the session has no group at that instant. That is the ordinary case for a
+    single-camera session, not an error: the frame editor asks this on every open to decide whether a rig
+    view is available, so a 404 here turns a normal "no rig" answer into a console error on every frame. This
+    matches group/nav below, which also returns its result rather than 404 when there is nothing to return.
+    """
     from services.multicam.sync import group_at_ts
 
-    g = await group_at_ts(UUID(session_id), ts_ns)
-    if g is None:
-        raise HTTPException(404, "no groups for session (build them first)")
-    return g
+    return await group_at_ts(UUID(session_id), ts_ns)
 
 
 @router.get("/multicam/group/nav")

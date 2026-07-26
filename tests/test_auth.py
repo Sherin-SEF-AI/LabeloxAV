@@ -112,3 +112,41 @@ def test_auth_gate(auth_on):
         # a tampered/garbage token -> 401
         assert c.post("/api/govern/controller/tick",
                       headers={"Authorization": "Bearer lbx1.deadbeef.deadbeef"}).status_code == 401
+
+
+@requires_infra
+def test_dev_login_hands_out_an_admin_token_locally(auth_on):
+    """dev-login is reachable without a token (it exists to hand out the first one), and the token it returns
+    clears the admin gate. This is the bootstrap that keeps a fresh browser from being locked out."""
+    s = get_settings()
+    assert s.env == "local"  # the tests run local; the route's guard is env == "local"
+    with _client() as c:
+        r = c.post("/api/auth/dev-login")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["role"] == "admin" and body["token"].startswith("lbx1.")
+        # the handed-out token actually authenticates against a gated read and an admin write
+        assert c.get("/api/users", headers={"Authorization": f"Bearer {body['token']}"}).status_code == 200
+        assert c.post("/api/govern/controller/tick",
+                      headers={"Authorization": f"Bearer {body['token']}"}).status_code not in (401, 403)
+
+
+@requires_infra
+def test_dev_login_is_invisible_when_not_local(auth_on):
+    """The env != local guard makes the route 404, so it cannot mint a token on a real deployment. Flipping
+    the flag off has the same effect. Both are restored after."""
+    s = get_settings()
+    with _client() as c:
+        prev_env = s.env
+        s.env = "staging"
+        try:
+            assert c.post("/api/auth/dev-login").status_code == 404
+        finally:
+            s.env = prev_env
+
+        prev_flag = s.auth.dev_login
+        s.auth.dev_login = False
+        try:
+            assert c.post("/api/auth/dev-login").status_code == 404
+        finally:
+            s.auth.dev_login = prev_flag

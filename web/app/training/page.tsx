@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, type ModelLine, type TrainingJob } from "@/lib/api";
+import { api, type ModelLine, type TrainingJob , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import RunsPanel from "@/components/training/RunsPanel";
@@ -80,7 +80,7 @@ export default function TrainingPage() {
       });
       refresh();
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
     }
   }
 

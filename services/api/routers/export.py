@@ -19,6 +19,7 @@ async def export(payload: ExportIn):
         states=payload.states,
         class_names=payload.class_names,
         cities=payload.cities,
+        vehicle_ids=payload.vehicle_ids,
         session_id=payload.session_id,
         min_conf=payload.min_conf,
         formats=payload.formats,

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { AssetRow, BoardCell, LabelJobRow, LabelProjectRow, ScorecardRow, UserRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 
@@ -70,7 +70,7 @@ export default function ProjectsPage() {
       ]);
       setCells(b.cells); setLoad(b.open_load); setJobs(j.jobs); setCards(s.scorecards);
       setAssets(as); setAnnKinds(st.annotations_by_kind ?? {});
-    } catch (e) { flash(String(e)); }
+    } catch (e) { flash(humanizeError(e)); }
   }, []);
 
   useEffect(() => {
@@ -97,7 +97,7 @@ export default function ProjectsPage() {
       setProjectId(p.project_id);
       setPName("");
       flash(`created "${p.name}"`);
-    } catch (e) { flash(String(e)); } finally { setBusy(false); }
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
   const createTask = async () => {
@@ -112,7 +112,7 @@ export default function ProjectsPage() {
       flash(`${t.n_frames} frames split into ${t.n_jobs} jobs, ${t.honeypots_seeded} honeypots seeded`);
       setTName("");
       await refreshProject(projectId);
-    } catch (e) { flash(String(e)); } finally { setBusy(false); }
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
   const addAsset = async () => {
@@ -126,14 +126,14 @@ export default function ProjectsPage() {
       setNewBody("");
       await refreshProject(projectId);
       flash("asset added");
-    } catch (e) { flash(String(e)); } finally { setBusy(false); }
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
   const assign = async (job: LabelJobRow, assignee: string) => {
     try {
       await api.lopAssign(job.job_id, assignee || null, job.version);
       await refreshProject(projectId);
-    } catch (e) { flash(String(e)); }
+    } catch (e) { flash(humanizeError(e)); }
   };
 
   const countAt = (stage: string, state: string) =>

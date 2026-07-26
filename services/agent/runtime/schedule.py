@@ -18,6 +18,20 @@ log = get_logger("agent.runtime.schedule")
 async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None) -> list[dict]:
     actions: list[dict] = []
 
+    # continuous embedder: every tick, drain a bounded slice of the unembedded backlog so find-similar
+    # coverage tracks new data instead of drifting to zero. Not gated to off-hours (coverage should stay
+    # current all day); it self-guards on free VRAM, so when a detector or a training run holds the card it
+    # yields this tick rather than competing.
+    try:
+        from services.intelligence.embed.daemon import maybe_embed_pending
+
+        e = await maybe_embed_pending(db)
+        if e.get("ran"):
+            actions.append({"action": "embed_pending", "frames": e.get("embedded_frames"),
+                            "objects": e.get("embedded_objects"), "remaining": e.get("pending_after")})
+    except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+        log.error("schedule.embed_daemon_failed", error=str(exc))
+
     # nightly patrol of the day's auto-accepts
     if offhours:
         try:

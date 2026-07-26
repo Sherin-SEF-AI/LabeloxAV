@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "@/lib/toast";
 import { useRouter } from "next/navigation";
-import { api, type GoldSetRow, type QualitySheet } from "@/lib/api";
+import { api, type GoldSetRow, type QualitySheet , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge } from "@/components/StateBadge";
 
@@ -59,7 +60,7 @@ export default function QualityPage() {
       await refreshGoldSets();
       setSelected(r.gold_id);
     } catch (e) {
-      alert(String(e));
+      toast(humanizeError(e));
     } finally {
       setBusy(null);
     }
@@ -69,9 +70,9 @@ export default function QualityPage() {
     setBusy("fit");
     try {
       const r = await api.fitCalibration({ gold_id: selected ?? undefined });
-      alert(`Fitted isotonic: ${r.n_train} pairs, ECE ${r.report.ece ?? "n/a"}\n${r.uri}`);
+      toast(`Fitted isotonic: ${r.n_train} pairs, ECE ${r.report.ece ?? "n/a"}\n${r.uri}`);
     } catch (e) {
-      alert(String(e));
+      toast(humanizeError(e));
     } finally {
       setBusy(null);
     }

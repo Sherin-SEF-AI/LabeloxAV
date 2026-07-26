@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { api, lidarCloudPoints, type Cuboid3D, type LidarCloud, type LidarPoints } from "@/lib/api";
+import { api, lidarCloudPoints, type Cuboid3D, type LidarCloud, type LidarPoints , humanizeError } from "@/lib/api";
 import type { OntologyClass } from "@/lib/types";
 import type { ColorBy } from "@/components/lidar/PointCloudViewer";
 import PageShell from "@/components/shell/PageShell";
@@ -50,7 +50,7 @@ export default function CuboidAnnotatePage() {
       setClouds(r.clouds);
       if (!r.clouds.length) setErr("No clouds in this session.");
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
     }
   }, []);
 
@@ -66,7 +66,7 @@ export default function CuboidAnnotatePage() {
       setData(pts);
       setCuboids(objs.objects);
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
     } finally {
       setBusy(false);
     }
@@ -87,7 +87,7 @@ export default function CuboidAnnotatePage() {
       if (!r.cuboids) setErr("No 2D objects on the synchronized frame to lift.");
       await reloadCuboids();
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
     } finally {
       setBusy(false);
     }
@@ -119,7 +119,7 @@ export default function CuboidAnnotatePage() {
       });
       patchLocal(id, saved);
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
       reloadCuboids();
     }
   };
@@ -141,7 +141,7 @@ export default function CuboidAnnotatePage() {
       setCuboids((cs) => [...cs, created]);
       setSelectedId(created.object_3d_id);
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
     }
   };
 
@@ -151,7 +151,7 @@ export default function CuboidAnnotatePage() {
       setCuboids((cs) => cs.filter((c) => c.object_3d_id !== id));
       setSelectedId(null);
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
     }
   };
 

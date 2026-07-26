@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { toast } from "@/lib/toast";
 
 // Outbound integrations: webhook subscriptions and registered storage buckets.
 //
@@ -41,6 +43,7 @@ export default function IntegrationsPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [freshSecret, setFreshSecret] = useState<{ url: string; secret: string } | null>(null);
+  const confirm = useConfirm();
 
   // webhook form
   const [url, setUrl] = useState("");
@@ -58,7 +61,7 @@ export default function IntegrationsPage() {
     try {
       const [e, s] = await Promise.all([api.integrationEvents(), api.storageSources()]);
       setEvents(e.events); setSources(s.sources);
-    } catch (err) { flash(String(err)); }
+    } catch (err) { flash(humanizeError(err)); }
     // Webhooks are admin-gated, so a non-admin simply sees an empty list rather than an error wall.
     try { setHooks((await api.webhooks()).webhooks); } catch { setHooks([]); }
   }, []);
@@ -73,7 +76,7 @@ export default function IntegrationsPage() {
       setFreshSecret({ url: wh.url, secret: wh.secret });
       setUrl(""); setPicked([]);
       await refresh();
-    } catch (e) { flash(String(e)); } finally { setBusy(false); }
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
   const addSource = async () => {
@@ -87,7 +90,7 @@ export default function IntegrationsPage() {
       setSName(""); setSBucket(""); setSPrefix(""); setSProfile("");
       await refresh();
       flash("source registered");
-    } catch (e) { flash(String(e)); } finally { setBusy(false); }
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
   const preview = async (id: string) => {
@@ -96,7 +99,7 @@ export default function IntegrationsPage() {
       const r = await api.previewSource(id);
       flash(r.detail ? r.detail : `${r.count ?? 0} objects under ${r.uri}`);
       await refresh();
-    } catch (e) { flash(String(e)); } finally { setBusy(false); }
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
   const highlight = params.get("tab") === "webhooks";
@@ -171,7 +174,7 @@ export default function IntegrationsPage() {
                       </td>
                       <td className="text-ink-3">{h.last_error ?? (h.last_status ?? "-")}</td>
                       <td className="text-right">
-                        <button onClick={async () => { await api.deleteWebhook(h.webhook_id); refresh(); }}
+                        <button onClick={async () => { if (!(await confirm({ title: "Remove this webhook?", body: h.url, danger: true, confirmLabel: "Remove" }))) return; try { await api.deleteWebhook(h.webhook_id); toast("Webhook removed", "success"); } catch (e) { toast(humanizeError(e), "error"); } refresh(); }}
                           className="text-ink-3 hover:text-block">remove</button>
                       </td>
                     </tr>
@@ -224,7 +227,7 @@ export default function IntegrationsPage() {
                       <td className="text-right space-x-2">
                         <button onClick={() => preview(s.source_id)} disabled={busy}
                           className="text-ink-3 hover:text-accent disabled:opacity-40">preview</button>
-                        <button onClick={async () => { await api.deleteSource(s.source_id); refresh(); }}
+                        <button onClick={async () => { if (!(await confirm({ title: "Remove this storage source?", body: s.name, danger: true, confirmLabel: "Remove" }))) return; try { await api.deleteSource(s.source_id); toast("Source removed", "success"); } catch (e) { toast(humanizeError(e), "error"); } refresh(); }}
                           className="text-ink-3 hover:text-block">remove</button>
                       </td>
                     </tr>

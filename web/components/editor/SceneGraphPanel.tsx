@@ -6,7 +6,7 @@
 // of the exportable VLM dataset. Nothing enters the dataset without human approval.
 
 import { useCallback, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import { Busy } from "@/components/Spinner";
 
 type Rel = Awaited<ReturnType<typeof api.relationsList>>[number];
@@ -27,20 +27,20 @@ export default function SceneGraphPanel({ frameId, embedded = false }: { frameId
   const propose = async () => {
     setBusy(true); setMsg(null);
     try { const r = await api.relationsPropose(frameId); setMsg(`proposed ${r.proposed} relation(s)`); await load(); }
-    catch (e) { setMsg("propose failed: " + String(e)); } finally { setBusy(false); }
+    catch (e) { setMsg("propose failed: " + humanizeError(e)); } finally { setBusy(false); }
   };
   const relStatus = async (id: string, status: string) => {
     setBusy(true);
-    try { await api.relationStatus(id, status); await load(); } catch (e) { setMsg(String(e)); } finally { setBusy(false); }
+    try { await api.relationStatus(id, status); await load(); } catch (e) { setMsg(humanizeError(e)); } finally { setBusy(false); }
   };
   const generate = async () => {
     setBusy(true); setMsg("generating grounded target (VLM)...");
     try { const r = await api.vlmTargetGenerate(frameId); setMsg(`generated a target from ${r.grounding.objects} objects, ${r.grounding.relations} relations`); await load(); }
-    catch (e) { setMsg("generate failed: " + String(e)); } finally { setBusy(false); }
+    catch (e) { setMsg("generate failed: " + humanizeError(e)); } finally { setBusy(false); }
   };
   const tgtStatus = async (id: string, status: string) => {
     setBusy(true);
-    try { await api.vlmTargetStatus(id, status); await load(); } catch (e) { setMsg(String(e)); } finally { setBusy(false); }
+    try { await api.vlmTargetStatus(id, status); await load(); } catch (e) { setMsg(humanizeError(e)); } finally { setBusy(false); }
   };
 
   return (

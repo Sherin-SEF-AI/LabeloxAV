@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "@/lib/toast";
 import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { api, lidarCloudPoints, type Cuboid3D, type LidarCloud, type LidarPoints } from "@/lib/api";
+import { api, lidarCloudPoints, type Cuboid3D, type LidarCloud, type LidarPoints , humanizeError } from "@/lib/api";
 import type { ColorBy } from "@/components/lidar/PointCloudViewer";
 import type { AdverseRegion, AlItem, ErrorCandidateRow, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, ProjectedCuboid, Relationship } from "@/lib/types";
 import { classColor } from "@/lib/colors";
@@ -136,6 +137,8 @@ export default function FrameEditor() {
   const [st, dispatch] = useEditor();
   const [meta, setMeta] = useState<FrameMeta | null>(null);
   const [onto, setOnto] = useState<Ontology | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [currentClass, setCurrentClass] = useState<OntologyClass | null>(null);
   const [panning, setPanning] = useState(false);
   const [cursor, setCursor] = useState<number[] | null>(null);
@@ -214,24 +217,34 @@ export default function FrameEditor() {
     setTimeout(() => setNotice(null), 3500);
   };
 
-  // load frame + objects + ontology
+  // load frame + objects + ontology. Wrapped so a transient backend failure surfaces a retry state instead of
+  // an uncaught promise rejection and a page stuck forever on "loading" (the three fetches share a Promise.all,
+  // so any one 500 rejects the whole load).
   useEffect(() => {
+    let live = true;
     (async () => {
-      const [m, objs, o] = await Promise.all([api.frame(id), api.frameObjects(id), api.ontology()]);
-      setMeta(m);
-      setOnto(o);
-      const eds: EdObject[] = objs.map((x) => ({
-        id: x.object_id, track_id: x.track_id, class_id: x.class_id, class_name: x.class_name, bbox: x.bbox,
-        mask: x.mask_polygons || [], attrs: {}, conf: x.conf, quality_score: x.quality_score, state: x.state, visible: true, version: x.version,
-        rot: x.rot_deg, keypoints: x.keypoints ?? undefined, polyline: x.polyline ?? undefined,
-        cuboid_3d: x.cuboid_3d ?? undefined,
-      }));
-      dispatch({ t: "load", objects: eds, viewport: { scale: 0, ox: 0, oy: 0 }, selectedId: focus });
-      const fc = (focus && eds.find((e) => e.id === focus)) || null;
-      setCurrentClass(fc ? o.classes.find((c) => c.id === fc.class_id) || o.classes[0] : o.classes[0]);
-      loadedRef.current = true;
+      setLoadError(null);
+      try {
+        const [m, objs, o] = await Promise.all([api.frame(id), api.frameObjects(id), api.ontology()]);
+        if (!live) return;
+        setMeta(m);
+        setOnto(o);
+        const eds: EdObject[] = objs.map((x) => ({
+          id: x.object_id, track_id: x.track_id, class_id: x.class_id, class_name: x.class_name, bbox: x.bbox,
+          mask: x.mask_polygons || [], attrs: {}, conf: x.conf, quality_score: x.quality_score, state: x.state, visible: true, version: x.version,
+          rot: x.rot_deg, keypoints: x.keypoints ?? undefined, polyline: x.polyline ?? undefined,
+          cuboid_3d: x.cuboid_3d ?? undefined,
+        }));
+        dispatch({ t: "load", objects: eds, viewport: { scale: 0, ox: 0, oy: 0 }, selectedId: focus });
+        const fc = (focus && eds.find((e) => e.id === focus)) || null;
+        setCurrentClass(fc ? o.classes.find((c) => c.id === fc.class_id) || o.classes[0] : o.classes[0]);
+        loadedRef.current = true;
+      } catch (e) {
+        if (live) setLoadError(humanizeError(e));
+      }
     })();
-  }, [id, focus, dispatch]);
+    return () => { live = false; };
+  }, [id, focus, dispatch, reloadKey]);
 
   // M-MC.1: resolve the synchronized frame group this frame belongs to, so the rig view can show the sibling
   // cameras. Uses the persisted groups; if none exist yet for the session it builds them once on demand.
@@ -262,7 +275,7 @@ export default function FrameEditor() {
   const confirmRigGroup = async () => {
     if (!rigGroup) return;
     try { const g = await api.multicamGroupConfirm(rigGroup.groupId); setRigGroup((s) => s && { ...s, confirmed: g.confirmed }); flash("group confirmed"); }
-    catch (e) { flash("confirm group failed: " + String(e)); }
+    catch (e) { flash("confirm group failed: " + humanizeError(e)); }
   };
   // group-aware prev/next: jump to the adjacent synchronized group, keeping the same camera focused when it has
   // a frame there (else the group's first available camera), preserving the rig layout.
@@ -274,7 +287,7 @@ export default function FrameEditor() {
       const fids = r.group.frame_ids;
       const target = fids[meta.cam_id] ?? Object.values(fids)[0];
       if (target) router.push(`/frame/${target}?rig=${rigLayout}`);
-    } catch (e) { flash("group nav failed: " + String(e)); }
+    } catch (e) { flash("group nav failed: " + humanizeError(e)); }
   };
   const rigEditable = mode !== "lanes" && mode !== "lidar3d";
 
@@ -296,7 +309,7 @@ export default function FrameEditor() {
       const inView = (r.targets || []).filter((t) => t.in_view).length;
       flash(`propagated to ${r.created?.length ?? 0} view(s)${r.metric ? ` · ${r.metric.range_m}m` : ""}${inView ? "" : " (out of view)"}`);
       setRigPanel(true); setRigRefresh((n) => n + 1);
-    } catch (e) { flash("propagate failed: " + String(e)); }
+    } catch (e) { flash("propagate failed: " + humanizeError(e)); }
   };
 
   const selected = st.objects.find((o) => o.id === st.selectedId) || null;
@@ -309,7 +322,7 @@ export default function FrameEditor() {
       await api.relateObject(linkFrom, { to_object_id: toId, kind: linkKind });
       setRelationships(await api.frameRelationships(id).catch(() => []));
       flash(`linked: ${linkKind}`);
-    } catch (e) { flash("link failed: " + String(e)); }
+    } catch (e) { flash("link failed: " + humanizeError(e)); }
     setLinkFrom(null);
   };
   const doSelect = (oid: string | null) => {
@@ -330,7 +343,7 @@ export default function FrameEditor() {
       dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
         bbox: [pt[0] - 40, pt[1] - 40, pt[0] + 40, pt[1] + 40], mask: [], cuboid_3d: cub, attrs: {},
         conf: 1, state: "accepted", visible: true, isNew: true } });
-    } catch (e) { flash("could not place cuboid: " + String(e)); }
+    } catch (e) { flash("could not place cuboid: " + humanizeError(e)); }
   };
   // Auto-detect the class of a freshly-drawn object from its crop (SigLIP2 zero-shot over the ontology), so
   // a SAM box or wand click picks the class for you. Overrides the palette class; you can still relabel.
@@ -359,7 +372,7 @@ export default function FrameEditor() {
           bbox: box, mask: r.polygons, attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
         autoClassify(nid, box);
       }
-    } catch (e) { flash(String(e).includes("503") ? "GPU busy (training)" : "magic-wand failed"); }
+    } catch (e) { flash(humanizeError(e).includes("503") ? "GPU busy (training)" : "magic-wand failed"); }
   };
   // brush/eraser: compose the stroke stamps into the selected object's mask (or a new object)
   const onBrushStroke = async (ops: { op: string; center: number[]; radius: number }[]) => {
@@ -372,7 +385,7 @@ export default function FrameEditor() {
         dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
           bbox: bboxOfPolys(r.polygons), mask: r.polygons, attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
       }
-    } catch (e) { flash("brush failed: " + String(e)); }
+    } catch (e) { flash("brush failed: " + humanizeError(e)); }
   };
   // superpixel: add the clicked SLIC cell to the active mask
   const pickSuperpixel = (pt: number[]) => {
@@ -457,11 +470,11 @@ export default function FrameEditor() {
   const segRoad = useCallback(async () => {
     flash("segmenting road surface...");
     try { await api.segmentDrivable(id); await loadLayers(); flash("drivable area updated"); }
-    catch (e) { flash("segment road failed: " + String(e)); }
+    catch (e) { flash("segment road failed: " + humanizeError(e)); }
   }, [id, loadLayers]);
   const genLanes = useCallback(async () => {
     try { const r = await api.proposeLanes(id); await loadLayers(); flash(`proposed ${r.proposed} lanes (${r.model})`); }
-    catch (e) { flash("propose lanes failed: " + String(e)); }
+    catch (e) { flash("propose lanes failed: " + humanizeError(e)); }
   }, [id, loadLayers]);
 
   // Lanes mode mounts LaneCanvas (a fit-to-width Konva stage), so it needs the raster image and a scale.
@@ -513,7 +526,7 @@ export default function FrameEditor() {
         const [pts, objs] = await Promise.all([lidarCloudPoints(near.cloud_id, { variant: "raw", max: 300000 }), api.lidarObjects3d(near.cloud_id)]);
         if (cancelled) return;
         setCloud3d(near); setPts3d(pts); setCub3d(objs.objects); setLidarMsg(null);
-      } catch (e) { if (!cancelled) setLidarMsg("cloud load failed: " + String(e)); }
+      } catch (e) { if (!cancelled) setLidarMsg("cloud load failed: " + humanizeError(e)); }
     })();
     return () => { cancelled = true; };
   }, [mode, meta, cloud3d]);
@@ -530,7 +543,7 @@ export default function FrameEditor() {
         ground_snap: Boolean(fields.attrs && (fields.attrs as Record<string, unknown>).ground_snap), expected_version: cur.version,
       });
       patchCub(cid, saved);
-    } catch (e) { setLidarMsg("save failed: " + String(e)); }
+    } catch (e) { setLidarMsg("save failed: " + humanizeError(e)); }
   };
   const moveCub = (cid: string, x: number, y: number, commit: boolean) => {
     const cur = cub3d.find((c) => c.object_3d_id === cid); if (!cur) return;
@@ -542,14 +555,14 @@ export default function FrameEditor() {
     try {
       const created = await api.lidarCreateCuboid(cloud3d.cloud_id, { class_id: cls.id, center: [12, 0, 1], dims: CUBOID_DIMS[cls.name] || [4, 1.8, 1.5], yaw: 0, ground_snap: true });
       setCub3d((cs) => [...cs, created]); setCubSel(created.object_3d_id);
-    } catch (e) { setLidarMsg("add failed: " + String(e)); }
+    } catch (e) { setLidarMsg("add failed: " + humanizeError(e)); }
   };
-  const delCub = async (cid: string) => { try { await api.lidarDeleteCuboid(cid); setCub3d((cs) => cs.filter((c) => c.object_3d_id !== cid)); setCubSel(null); } catch (e) { setLidarMsg("delete failed: " + String(e)); } };
+  const delCub = async (cid: string) => { try { await api.lidarDeleteCuboid(cid); setCub3d((cs) => cs.filter((c) => c.object_3d_id !== cid)); setCubSel(null); } catch (e) { setLidarMsg("delete failed: " + humanizeError(e)); } };
   const aiLift3d = async () => {
     if (!cloud3d) return;
     setLidarMsg("lifting 2D objects to 3D...");
     try { const r = await api.lidarLiftCloud(cloud3d.cloud_id); const objs = await api.lidarObjects3d(cloud3d.cloud_id); setCub3d(objs.objects); setLidarMsg(r.cuboids ? `lifted ${r.cuboids} cuboids` : "no 2D objects to lift"); }
-    catch (e) { setLidarMsg("lift failed: " + String(e)); }
+    catch (e) { setLidarMsg("lift failed: " + humanizeError(e)); }
   };
 
   // Review mode: lazily load the value queue (this frame's items ranked first) and the error candidates.
@@ -576,12 +589,16 @@ export default function FrameEditor() {
     // top of unsaved edits would silently drop them, so require an explicit save first.
     if (o.dirty) { flash("save your edits first (Cmd S), then accept or reject"); return; }
     try {
-      const r = await api.review(o.id, { action: newState === "accepted" ? "accept" : "reject", state: newState, expected_version: o.version });
+      // No expected_version here on purpose: this is a pure accept/reject decision, and unsaved edits are
+      // already blocked above, so there is nothing to clobber. Gating the human's decision on a version that
+      // a background re-autolabel or embed pass may have bumped just produced spurious 409s. The optimistic
+      // lock still guards the geometry-edit path (adjust_geometry), where a concurrent box edit does matter.
+      const r = await api.review(o.id, { action: newState === "accepted" ? "accept" : "reject", state: newState });
       dispatch({ t: "reviewed", id: o.id, state: newState, version: r.version });
       setAlItems((s) => s.filter((it) => it.object_id !== o.id)); // drop the handled item so the queue advances
       flash(newState);
       advanceReview(o.id);
-    } catch (e) { flash("review failed: " + String(e)); }
+    } catch (e) { flash("review failed: " + humanizeError(e)); }
   };
   // Move to the next value-queue item (excluding the one just handled): select it if it is on this frame,
   // else jump to its frame. Never re-selects an already-reviewed item.
@@ -638,7 +655,7 @@ export default function FrameEditor() {
         setEditOpen(false); setEditSearch(""); setSearch("");
         flash(cls.existed ? `class "${cls.name}" already existed, applied` : `added custom class "${cls.name}"`);
       } catch (e) {
-        flash("could not add class: " + String(e));
+        flash("could not add class: " + humanizeError(e));
       }
     },
     [relabelSelected],
@@ -689,7 +706,7 @@ export default function FrameEditor() {
         dispatch({ t: "candidate", polys: r.polygons });
         if (!r.polygons.length) flash("SAM found nothing here");
       } catch (e) {
-        const msg = String(e);
+        const msg = humanizeError(e);
         flash(msg.includes("503") ? "GPU busy (training). Box tools still work." : "segment failed");
       }
     },
@@ -726,7 +743,7 @@ export default function FrameEditor() {
       // st.deleted, and the autosave effect retries the same failing delete every 700ms forever.
       for (const oid of st.deleted) {
         try { await api.deleteObject(oid); }
-        catch (e) { if (!String(e).includes("404")) throw e; }
+        catch (e) { if (!humanizeError(e).includes("404")) throw e; }
       }
       const remap: Record<string, string> = {};
       const versions: Record<string, number> = {};
@@ -757,7 +774,7 @@ export default function FrameEditor() {
       flash("saved");
       setCuboids(await api.frameCuboids(id).catch(() => [])); // refresh projected cuboid wireframes
     } catch (e) {
-      const msg = String(e);
+      const msg = humanizeError(e);
       lastFailRef.current = pendingSig();         // do not auto-retry this exact set until something changes
       flash(msg.includes("409") ? "conflict: another annotator changed this object; reload to continue" : "save failed: " + msg);
     } finally {
@@ -901,6 +918,20 @@ export default function FrameEditor() {
     [onto, search],
   );
 
+  if (loadError && (!meta || !onto)) return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="panel px-5 py-4 text-center space-y-3 max-w-sm">
+        <div className="text-ink font-medium">Couldn&apos;t load this frame</div>
+        <div className="font-mono text-[11px] text-ink-3">{loadError}</div>
+        <div className="flex items-center justify-center gap-2">
+          <button onClick={() => setReloadKey((k) => k + 1)}
+            className="border border-accent text-accent px-3 py-1.5 font-mono text-xs hover:bg-accent/10">Retry</button>
+          <button onClick={() => router.push("/")}
+            className="border border-line text-ink-2 px-3 py-1.5 font-mono text-xs hover:border-accent">Home</button>
+        </div>
+      </div>
+    </div>
+  );
   if (!meta || !onto) return <div className="min-h-screen flex items-center justify-center font-mono text-ink-3">loading frame...</div>;
 
   // The focused annotation canvas, hoisted so single-frame and rig (M-MC.1) views share one instance and every
@@ -919,7 +950,7 @@ export default function FrameEditor() {
       onDrawPolygon={(pts) => { if (currentClass) { const nid = tmpId(); const bb = bboxOfPolys([pts]); dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox: bb, mask: [pts], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } }); autoClassify(nid, bb); } }}
       onDrawPolyline={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [], polyline: Array.from({ length: pts.length / 2 }, (_, i) => [pts[2 * i], pts[2 * i + 1]]), attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
       adverse={adverse}
-      onDrawAdverse={async (pts) => { try { await api.createAdverse(id, { geometry: pts, condition: adverseCond }); setAdverse(await api.listAdverse(id).catch(() => [])); flash(`tagged ${adverseCond}`); } catch (e) { flash("region failed: " + String(e)); } }}
+      onDrawAdverse={async (pts) => { try { await api.createAdverse(id, { geometry: pts, condition: adverseCond }); setAdverse(await api.listAdverse(id).catch(() => [])); flash(`tagged ${adverseCond}`); } catch (e) { flash("region failed: " + humanizeError(e)); } }}
       cuboids={layers.cuboids ? cuboids : []}
       onPlaceCuboid={placeCuboid}
       onMagicWand={runMagicWand}
@@ -1083,7 +1114,7 @@ export default function FrameEditor() {
                   <option value="panoptic">panoptic</option>
                 </select>
                 <button title="run dense segmentation (SAM-everything + VLM) on this frame"
-                  onClick={async () => { flash("segmenting..."); try { const r = await api.autoSegment(id, segKind); setSegUrl(`/api/frames/${id}/segment/overlay?kind=${segKind}&t=${Date.now()}`); flash(`segmented ${segKind} (${Object.keys(r.coverage).length} classes${r.n_instances ? ", " + r.n_instances + " instances" : ""})`); } catch (e) { flash("segment failed: " + String(e)); } }}
+                  onClick={async () => { flash("segmenting..."); try { const r = await api.autoSegment(id, segKind); setSegUrl(`/api/frames/${id}/segment/overlay?kind=${segKind}&t=${Date.now()}`); flash(`segmented ${segKind} (${Object.keys(r.coverage).length} classes${r.n_instances ? ", " + r.n_instances + " instances" : ""})`); } catch (e) { flash("segment failed: " + humanizeError(e)); } }}
                   className="w-full border border-line px-1 py-0.5 text-ink-3 hover:border-accent">auto-seg</button>
               </>
             } />}
@@ -1510,7 +1541,7 @@ export default function FrameEditor() {
                 title={selected.isNew ? "save the frame first, then propagate" : "optical-flow propagate this box across the next 12 frames as a track to confirm"}
                 onClick={async () => {
                   const r = await api.propagateObject(selected.id, 12);
-                  alert(r.created ? `propagated forward ${r.created} frames (track ${r.track_id?.slice(0, 8)}). Open the track to review/confirm.` : `could not propagate: ${r.reason || "no motion"}`);
+                  toast(r.created ? `propagated forward ${r.created} frames (track ${r.track_id?.slice(0, 8)}). Open the track to review/confirm.` : `could not propagate: ${r.reason || "no motion"}`);
                 }}
                 className="w-full mb-1 font-mono text-[10px] border border-line text-ink-2 px-1.5 py-1 hover:border-accent disabled:opacity-40">
                 propagate forward 12 frames →

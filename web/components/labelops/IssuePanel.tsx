@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { IssueRow } from "@/lib/types";
 
 // Issue threads for the frame currently open in the editor. A reviewer rejecting a job teaches nobody
@@ -35,7 +35,7 @@ export default function IssuePanel({ frameId, objectId }: { frameId: string; obj
     try {
       const r = await api.lopIssues({ frame_id: frameId, ...(showResolved ? {} : { status: "open" }) });
       setIssues(r.issues);
-    } catch (e) { setErr(String(e)); }
+    } catch (e) { setErr(humanizeError(e)); }
   }, [frameId, showResolved]);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -51,11 +51,11 @@ export default function IssuePanel({ frameId, objectId }: { frameId: string; obj
       });
       setBody("");
       await refresh();
-    } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+    } catch (e) { setErr(humanizeError(e)); } finally { setBusy(false); }
   };
 
   const openThread = async (i: IssueRow) => {
-    try { setOpen(await api.lopIssue(i.issue_id)); } catch (e) { setErr(String(e)); }
+    try { setOpen(await api.lopIssue(i.issue_id)); } catch (e) { setErr(humanizeError(e)); }
   };
 
   const addComment = async () => {
@@ -64,7 +64,7 @@ export default function IssuePanel({ frameId, objectId }: { frameId: string; obj
     try {
       setOpen(await api.lopComment(open.issue_id, reply.trim()));
       setReply("");
-    } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+    } catch (e) { setErr(humanizeError(e)); } finally { setBusy(false); }
   };
 
   const toggleResolve = async (i: IssueRow) => {
@@ -73,7 +73,7 @@ export default function IssuePanel({ frameId, objectId }: { frameId: string; obj
       const updated = await api.lopResolveIssue(i.issue_id, i.status === "resolved");
       if (open?.issue_id === i.issue_id) setOpen(updated);
       await refresh();
-    } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+    } catch (e) { setErr(humanizeError(e)); } finally { setBusy(false); }
   };
 
   return (

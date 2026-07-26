@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, type AuditReport, type PromotionProposalRow } from "@/lib/api";
+import { api, type AuditReport, type PromotionProposalRow , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { Spinner } from "@/components/Spinner";
 
@@ -46,7 +46,7 @@ export default function AgentConsole() {
         if (n > 0) setTimeout(() => poll(n - 1), 5000);
       };
       void r; poll(60);
-    } catch (e) { setMsg("audit failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("audit failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -58,7 +58,7 @@ export default function AgentConsole() {
       // poll a couple of times for results
       setTimeout(load, 6000); setTimeout(load, 15000);
       void r;
-    } catch (e) { setMsg("sweep failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("sweep failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -79,7 +79,7 @@ export default function AgentConsole() {
         if (n > 0) setTimeout(() => poll(n - 1), 4000);
       };
       poll(60);
-    } catch (e) { setMsg("relabel failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("relabel failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -88,7 +88,7 @@ export default function AgentConsole() {
     try {
       const r = await api.estimateEgoMasks();
       setMsg(`ego-hood masks: ${r.with_hood}/${r.cameras} cameras have a detected hood${r.no_hood.length ? ` (no hood: ${r.no_hood.slice(0, 4).join(", ")})` : ""}`);
-    } catch (e) { setMsg("ego-mask estimation failed: " + String(e)); }
+    } catch (e) { setMsg("ego-mask estimation failed: " + humanizeError(e)); }
     finally { setBusy(null); }
   };
   const backfillPii = async () => {
@@ -96,7 +96,7 @@ export default function AgentConsole() {
     try {
       await api.piiBackfill(2000);
       setMsg("PII backfill running in the background: blurring faces/plates on pre-gate frames, overwriting the stored image in place");
-    } catch (e) { setMsg("PII backfill failed (needs plate/face weights): " + String(e)); }
+    } catch (e) { setMsg("PII backfill failed (needs plate/face weights): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
   const redetectAll = async () => {
@@ -104,7 +104,7 @@ export default function AgentConsole() {
     try {
       const r = await api.redetectAll(true);
       setMsg(`full re-detection started (run ${r.run_id.slice(0, 8)}): PII backfill, then re-run every session with thing/stuff + ego-hood + de-dup + oversize gates, one at a time on the GPU`);
-    } catch (e) { setMsg("re-detection failed (GPU may be reserved for training): " + String(e)); }
+    } catch (e) { setMsg("re-detection failed (GPU may be reserved for training): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -115,7 +115,7 @@ export default function AgentConsole() {
       if (!p.counts.relabels) { setMsg(`no safe track-flip relabels (scanned ${p.counts.tracks} tracks, ${p.counts.flipped_tracks} flipped, ${p.counts.skipped_static ?? 0} corrupt)`); return; }
       const r = await api.agentTemporalRepair();
       setMsg(`temporal auto-repair: relabeled ${r.relabeled} outliers to their track majority (reversible, run ${r.run_id.slice(0, 8)})`);
-    } catch (e) { setMsg("repair failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("repair failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -128,13 +128,13 @@ export default function AgentConsole() {
     const t = ask.trim(); if (!t) return;
     setBusy("ask"); setMsg(null);
     try { const r = await api.agentAsk(t); setAskResult({ understood: r.understood, count: r.count }); }
-    catch (e) { setMsg("query failed: " + String(e)); }
+    catch (e) { setMsg("query failed: " + humanizeError(e)); }
     finally { setBusy(null); }
   };
   const doReport = async () => {
     setBusy("report"); setMsg(null);
     try { setReport(await api.agentReport()); }
-    catch (e) { setMsg("report failed: " + String(e)); }
+    catch (e) { setMsg("report failed: " + humanizeError(e)); }
     finally { setBusy(null); }
   };
   const mine = async (what: "scenarios" | "disagreements") => {
@@ -142,20 +142,20 @@ export default function AgentConsole() {
     try {
       if (what === "scenarios") { const r = await api.agentMineScenarios(); setMsg(`mined ${r.persisted} safety scenarios (${Object.entries(r.by_kind).map(([k, n]) => `${k}:${n}`).join(", ") || "none"}) — see Scenarios`); }
       else { const r = await api.agentMineDisagreements(); setMsg(`mined ${r.persisted} model-disagreement frames${r.top[0] ? ` (top: ${r.top[0].tag})` : ""} — see Scenarios`); }
-    } catch (e) { setMsg("mine failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("mine failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
   const coverage = async () => {
     setBusy("coverage"); setMsg(null);
     try { const r = await api.agentCoverage(); setGaps(r.gaps); }
-    catch (e) { setMsg("coverage failed: " + String(e)); }
+    catch (e) { setMsg("coverage failed: " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
   const cycle = async () => {
     setBusy("cycle"); setMsg(null);
     try { const r = await api.agentTrainingCycle(true); setMsg(`flywheel cycle (dry-run): would auto-accept ${r.tick.auto_accept}, review ${r.tick.review}, annotate ${r.tick.annotate} across ${r.tick.frames} top-value frames`); }
-    catch (e) { setMsg("cycle failed (needs reviewer role): " + String(e)); }
+    catch (e) { setMsg("cycle failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
   const drift = async () => {
@@ -166,13 +166,13 @@ export default function AgentConsole() {
         : r.status === "healthy" ? `champion healthy on gold (${r.current_map} vs baseline ${r.baseline_map})`
         : r.status === "cannot_evaluate" ? `champion ${r.champion} (baseline mAP ${r.baseline_map}) — gold set not materialized here`
         : "no champion registered");
-    } catch (e) { setMsg("gold-drift check failed: " + String(e)); }
+    } catch (e) { setMsg("gold-drift check failed: " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
   const act = async (c: Cand, kind: "confirm" | "dismiss") => {
     try { await (kind === "confirm" ? api.errorConfirm(c.candidate_id) : api.errorDismiss(c.candidate_id)); load(); }
-    catch (e) { setMsg(String(e)); }
+    catch (e) { setMsg(humanizeError(e)); }
   };
 
   const [driftDiag, setDriftDiag] = useState<{ report: { hypothesis: string; proposed_action: { kind: string } } | null } | null>(null);
@@ -184,7 +184,7 @@ export default function AgentConsole() {
       if (!r.breached.length) { setMsg("no drift breach right now - governance is holding within tolerance"); return; }
       setMsg(`drift breach (${r.breached.join(", ")}) - investigating root cause in the background`);
       setTimeout(() => api.agentDriftLatest().then(setDriftDiag).catch(() => {}), 4000);
-    } catch (e) { setMsg("drift investigation failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("drift investigation failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -194,7 +194,7 @@ export default function AgentConsole() {
     try {
       const r = kind === "datasheet" ? await api.agentDocDatasheet() : await api.agentDocWeekly();
       setDoc(r.markdown); setMsg(`${kind} drafted and stored (${r.uri.split("/").slice(-2).join("/")})`);
-    } catch (e) { setMsg("doc generation failed: " + String(e)); }
+    } catch (e) { setMsg("doc generation failed: " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -205,7 +205,7 @@ export default function AgentConsole() {
   const scanOntology = async () => {
     setBusy("ontscan"); setMsg(null);
     try { const r = await api.agentOntologyScan(40); setMsg(`scanned ${r.scanned} fallbacks -> ${r.proposals} promotion proposals`); await loadProps(); }
-    catch (e) { setMsg("ontology scan failed (needs reviewer role): " + String(e)); }
+    catch (e) { setMsg("ontology scan failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
   const decide = async (id: string, action: "approve" | "reject") => {
@@ -217,7 +217,7 @@ export default function AgentConsole() {
         const r = await api.agentOntologyApprove(id, nm); setMsg(`minted ${r.name} (#${r.class_id}), relabeled ${r.relabeled} - reversible run ${r.run_id.slice(0, 8)}`);
       } else { await api.agentOntologyReject(id); setMsg("proposal rejected"); }
       await loadProps();
-    } catch (e) { setMsg("decision failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("decision failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -227,13 +227,13 @@ export default function AgentConsole() {
   const planFleet = async () => {
     setBusy("fleet"); setMsg(null);
     try { const r = await api.agentFleetPlan(); setMsg(`fused ${r.gaps} gaps + ${r.vehicles} vehicles -> ${r.orders} collection orders`); await loadOrders(); }
-    catch (e) { setMsg("fleet plan failed (needs reviewer role): " + String(e)); }
+    catch (e) { setMsg("fleet plan failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
   const dispatchOrder = async (id: string) => {
     setBusy(id); setMsg(null);
     try { await api.agentFleetDispatch(id, "dispatched"); await loadOrders(); }
-    catch (e) { setMsg("dispatch failed (needs reviewer role): " + String(e)); }
+    catch (e) { setMsg("dispatch failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -243,7 +243,7 @@ export default function AgentConsole() {
     if (!buyer.trim()) return;
     setBusy("buyer"); setMsg(null);
     try { setBuyerRes(await api.agentBuyerSpec(buyer.trim(), confirm, confirm ? "buyer-" + Date.now() : undefined)); if (confirm) setMsg("slice composed, sealed export launched, datasheet drafted"); }
-    catch (e) { setMsg("buyer spec failed (needs reviewer role): " + String(e)); }
+    catch (e) { setMsg("buyer spec failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -253,7 +253,7 @@ export default function AgentConsole() {
     if (!ops.trim()) return;
     setBusy("ops"); setMsg(null);
     try { setOpsRes(await api.agentOpsAsk(ops.trim(), confirm)); }
-    catch (e) { setMsg("ops failed (needs reviewer role): " + String(e)); }
+    catch (e) { setMsg("ops failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 

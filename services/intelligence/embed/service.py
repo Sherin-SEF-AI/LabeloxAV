@@ -9,7 +9,7 @@ from uuid import UUID
 
 import cv2
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
 from core.config import get_settings
 from core.embeddings import model_versions
@@ -40,8 +40,10 @@ async def embed_frames(session_id: UUID | None = None, limit: int | None = None,
         if session_id is not None:
             stmt = stmt.where(Frame.session_id == session_id)
         if only_missing:
-            stmt = stmt.where(Frame.frame_id.notin_(
-                select(FrameEmbedding.frame_id).where(FrameEmbedding.dino_vec.isnot(None))))
+            # NOT EXISTS, not NOT IN: the membership test over the whole id set takes minutes at corpus scale;
+            # a hash anti-join on the embedding PK is sub-second (see services/intelligence/embed/daemon.py).
+            stmt = stmt.where(~exists().where(FrameEmbedding.frame_id == Frame.frame_id,
+                                              FrameEmbedding.dino_vec.isnot(None)))
         if limit:
             stmt = stmt.limit(limit)
         rows = (await db.execute(stmt)).all()
@@ -76,7 +78,7 @@ async def embed_objects(session_id: UUID | None = None, limit: int | None = None
         if session_id is not None:
             stmt = stmt.where(Frame.session_id == session_id)
         if only_missing:
-            stmt = stmt.where(Object.object_id.notin_(select(ObjectEmbedding.object_id)))
+            stmt = stmt.where(~exists().where(ObjectEmbedding.object_id == Object.object_id))
         if limit:
             stmt = stmt.limit(limit)
         rows = (await db.execute(stmt)).all()

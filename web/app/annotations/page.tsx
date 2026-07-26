@@ -1,11 +1,14 @@
 "use client";
 
+export const dynamic = "force-dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { SessionRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
+import Pager from "@/components/shell/Pager";
+import { usePager } from "@/lib/usePager";
 import { StateBadge } from "@/components/StateBadge";
 
 // The "open annotation" browser: every capture session as a card with review progress and a
@@ -102,7 +105,9 @@ function SessionCard({
 
 export default function AnnotationsPage() {
   const router = useRouter();
+  const { offset, limit, setOffset } = usePager(24);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<Record<string, SessionStats>>({});
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
@@ -111,10 +116,13 @@ export default function AnnotationsPage() {
     (async () => {
       setLoading(true);
       try {
-        const rows = await api.sessions();
-        setSessions(rows);
+        // Paginated: the corpus has 2000+ sessions, so the list pages through them with a real total instead
+        // of silently showing only the first window.
+        const page = await api.sessionsPage({ limit, offset });
+        setSessions(page.sessions);
+        setTotal(page.total);
         const results = await Promise.all(
-          rows.map((s) => api.sessionStats(s.session_id).catch(() => null)),
+          page.sessions.map((s) => api.sessionStats(s.session_id).catch(() => null)),
         );
         const map: Record<string, SessionStats> = {};
         results.forEach((st) => {
@@ -127,7 +135,7 @@ export default function AnnotationsPage() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [offset, limit]);
 
   function flash(text: string) {
     setMsg(text);
@@ -164,6 +172,7 @@ export default function AnnotationsPage() {
     <PageShell
       active="ANNOTATIONS"
       title="annotations"
+      meta={total > 0 ? <Pager offset={offset} limit={limit} total={total} onOffset={setOffset} /> : undefined}
       right={
         msg ? (
           <span className="panel px-3 py-1.5 font-mono text-[11px] text-warn">{msg}</span>

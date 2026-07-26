@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 
 // New Annotation: upload a folder of images (zip), a video, or an mcap; import it into a fresh
@@ -82,7 +82,7 @@ export default function NewAnnotationPage() {
       setStatus("uploading file to storage...");
       uri = await api.uploadMultipart(file, setUploadFrac);
     } catch (e) {
-      setErr("upload failed: " + String(e));
+      setErr("upload failed: " + humanizeError(e));
       setPhase("idle");
       return;
     }
@@ -100,7 +100,7 @@ export default function NewAnnotationPage() {
       });
       jobId = res.job_id;
     } catch (e) {
-      setErr("could not start import: " + String(e));
+      setErr("could not start import: " + humanizeError(e));
       setPhase("idle");
       return;
     }
@@ -138,7 +138,7 @@ export default function NewAnnotationPage() {
         }, 2000);
       });
     } catch (e) {
-      setErr("import error: " + String(e));
+      setErr("import error: " + humanizeError(e));
       setPhase("idle");
       return;
     }
@@ -150,7 +150,7 @@ export default function NewAnnotationPage() {
       const { frame_id } = await api.firstFrame(sessionId);
       router.push("/frame/" + frame_id);
     } catch (e) {
-      const msg = String(e);
+      const msg = humanizeError(e);
       // A 404 means the session imported but has no frames to open yet.
       if (msg.includes("404")) {
         setStatus("session created, but it has no frames to open.");

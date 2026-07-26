@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSmartBack } from "@/lib/nav";
 import { api, type SimilarObject } from "@/lib/api";
 import type { ObjectDetail, Ontology } from "@/lib/types";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
@@ -14,6 +15,7 @@ const AnnotationCanvas = dynamic(() => import("@/components/AnnotationCanvas"), 
 
 export default function ObjectPage({ params }: { params: { id: string } }) {
   const router = useRouter();
+  const goBack = useSmartBack();
   const [onto, setOnto] = useState<Ontology | null>(null);
   const [obj, setObj] = useState<ObjectDetail | null>(null);
   const [cls, setCls] = useState<string>("");
@@ -64,7 +66,7 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
       time_spent_ms: Date.now() - t0,
     });
     setFlash(true);
-    setTimeout(() => router.push("/"), 140);
+    setTimeout(goBack, 140);
   }, [obj, cls, attrs, router, t0]);
 
   useEffect(() => {
@@ -74,7 +76,7 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
       if (e.key === "Enter") save();
       else if (e.key === " ") {
         e.preventDefault();
-        router.push("/");
+        goBack();
       } else if (/^[1-9]$/.test(e.key)) {
         const idx = parseInt(e.key, 10) - 1;
         if (shortlist[idx]) setCls(shortlist[idx]);
@@ -105,7 +107,7 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
             <button onClick={save} className="border border-pass text-pass px-3 py-1 font-mono hover:bg-pass/10">
               SAVE ⏎
             </button>
-            <button onClick={() => router.push("/")} className="border border-line text-ink-2 px-3 py-1 font-mono hover:text-ink">
+            <button onClick={goBack} className="border border-line text-ink-2 px-3 py-1 font-mono hover:text-ink">
               SKIP ␣
             </button>
           </div>

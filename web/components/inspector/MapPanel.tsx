@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { humanizeError } from "@/lib/api";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useClock } from "@/lib/inspector/clock";
@@ -55,7 +56,7 @@ export default function MapPanel() {
         map.fitBounds(b, { padding: 30, maxZoom: 17, duration: 0 });
         trackRef.current = { t, lat, lon };
       } catch (e) {
-        if (alive) setNote("map load error: " + String(e));
+        if (alive) setNote("map load error: " + humanizeError(e));
       }
     });
     return () => { alive = false; ro.disconnect(); map.remove(); mapRef.current = null; };

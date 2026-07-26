@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { toast } from "@/lib/toast";
+import { api , humanizeError } from "@/lib/api";
 import type { UserRow } from "@/lib/types";
 import { getUser, setUser, type CurrentUser } from "@/lib/user";
 
@@ -47,7 +48,7 @@ export default function UserPicker() {
       // Store the freshly-issued token: it is this user's credential going forward.
       pick(u, u.token);
     } catch (e) {
-      alert(String(e));
+      toast(humanizeError(e));
     }
   }
 
@@ -63,7 +64,7 @@ export default function UserPicker() {
       setToken("");
     } catch (e) {
       setUser(cur);
-      alert(`invalid token: ${String(e)}`);
+      toast(`invalid token: ${humanizeError(e)}`);
     }
   }
 

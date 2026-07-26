@@ -80,12 +80,76 @@ import type {
 // user (X-Lbx-User-Id) for attribution.
 import { userHeaders } from "./user";
 import { begin, end } from "./progress";
+import { toast } from "./toast";
+
+// A typed request failure carrying the HTTP status and a human message, so a page can show "You're signed
+// out" instead of "GET /api/datasets -> 401". humanize() maps the common statuses; the raw server detail is
+// kept on .detail for a developer who wants it.
+export class ApiError extends Error {
+  status: number;
+  detail: string;
+  constructor(status: number, method: string, path: string, detail: string) {
+    super(humanize(status, path, detail));
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+function humanize(status: number, path: string, detail: string): string {
+  const what = path.replace(/^\/api\//, "").split("?")[0].split("/")[0] || "the server";
+  if (status === 401) return "You're signed out. Sign in to continue.";
+  if (status === 403) return "You don't have permission to do that.";
+  if (status === 404) return `Not found: ${what}.`;
+  if (status === 409) return detail || "That conflicts with the current state.";
+  if (status === 422) return detail || "Some input was invalid.";
+  if (status === 503) return "The service is busy (the GPU may be in use). Try again shortly.";
+  if (status >= 500) return `Something went wrong loading ${what}. Please retry.`;
+  return detail || `Request failed (${status}).`;
+}
+
+// Session handling in one place: a 401 means the stored token is gone or dead. Announce it once (a flag on
+// window prevents a flood of toasts when many mount-time calls 401 together) and send the user to sign in.
+let sessionExpiredAnnounced = false;
+function onUnauthorized() {
+  if (sessionExpiredAnnounced || typeof window === "undefined") return;
+  sessionExpiredAnnounced = true;
+  toast("You're signed out. Redirecting to sign in.", "warn");
+  const here = window.location.pathname;
+  if (here !== "/login") {
+    setTimeout(() => { window.location.href = `/login?next=${encodeURIComponent(here)}`; }, 800);
+  }
+}
+
+async function fail(r: Response, method: string, path: string): Promise<never> {
+  let detail = "";
+  try {
+    const raw = (await r.text()).slice(0, 500);
+    // FastAPI errors are {"detail": ...}. Pull the human string out of that so a message like
+    // "object changed since you loaded it" surfaces instead of the raw JSON envelope.
+    try {
+      const j = JSON.parse(raw);
+      const d = j?.detail;
+      detail = typeof d === "string" ? d : d?.detail ?? (d ? JSON.stringify(d) : raw);
+    } catch { detail = raw; }
+  } catch { /* body already consumed */ }
+  if (r.status === 401) onUnauthorized();
+  throw new ApiError(r.status, method, path, detail);
+}
+
+// Turn any caught value into a user-facing string. Pages use this instead of String(e) so the message is the
+// humanized one, not the raw error text.
+export function humanizeError(e: unknown): string {
+  if (e instanceof ApiError) return e.message;
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
 
 async function get<T>(path: string): Promise<T> {
   begin();
   try {
     const r = await fetch(path, { cache: "no-store", headers: { ...userHeaders() } });
-    if (!r.ok) throw new Error(`GET ${path} -> ${r.status}`);
+    if (!r.ok) return fail(r, "GET", path);
     return r.json();
   } finally {
     end();
@@ -100,7 +164,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
       headers: { "Content-Type": "application/json", ...userHeaders() },
       body: JSON.stringify(body),
     });
-    if (!r.ok) throw new Error(`POST ${path} -> ${r.status} ${await r.text()}`);
+    if (!r.ok) return fail(r, "POST", path);
     return r.json();
   } finally {
     end();
@@ -115,7 +179,7 @@ async function put<T>(path: string, body: unknown): Promise<T> {
       headers: { "Content-Type": "application/json", ...userHeaders() },
       body: JSON.stringify(body),
     });
-    if (!r.ok) throw new Error(`PUT ${path} -> ${r.status} ${await r.text()}`);
+    if (!r.ok) return fail(r, "PUT", path);
     return r.json();
   } finally {
     end();
@@ -132,7 +196,7 @@ async function patch<T>(path: string, body: unknown): Promise<T> {
       headers: { "Content-Type": "application/json", ...userHeaders() },
       body: JSON.stringify(body),
     });
-    if (!r.ok) throw new Error(`PATCH ${path} -> ${r.status} ${await r.text()}`);
+    if (!r.ok) return fail(r, "PATCH", path);
     return r.json();
   } finally {
     end();
@@ -143,7 +207,7 @@ async function del<T>(path: string): Promise<T> {
   begin();
   try {
     const r = await fetch(path, { method: "DELETE", headers: { ...userHeaders() } });
-    if (!r.ok) throw new Error(`DELETE ${path} -> ${r.status} ${await r.text()}`);
+    if (!r.ok) return fail(r, "DELETE", path);
     return r.json();
   } finally {
     end();
@@ -329,6 +393,13 @@ export const api = {
   ontology: () => get<Ontology>("/api/ontology"),
   addClass: (name: string) => post<OntologyClass & { existed: boolean }>("/api/ontology/classes", { name }),
   sessions: () => get<SessionRow[]>("/api/sessions"),
+  sessionsPage: (opts: { limit?: number; offset?: number; vehicle_id?: string } = {}) => {
+    const p = new URLSearchParams();
+    if (opts.limit != null) p.set("limit", String(opts.limit));
+    if (opts.offset != null) p.set("offset", String(opts.offset));
+    if (opts.vehicle_id) p.set("vehicle_id", opts.vehicle_id);
+    return get<{ total: number; offset: number; limit: number; sessions: SessionRow[] }>(`/api/sessions/page?${p}`);
+  },
   sessionStats: (id: string) => get<{ session_id: string; frames: number; objects: number; by_state: Record<string, number>; done: number; progress: number }>(`/api/sessions/${id}/stats`),
   firstFrame: (id: string) => get<{ frame_id: string }>(`/api/sessions/${id}/first-frame`),
   // M4.0/M4.1 review queue
@@ -687,8 +758,12 @@ export const api = {
     post<{ candidates: number; by_kind: Record<string, number> }>(`/api/discovery/run?session_id=${session_id}`, {}),
   discoverySetState: (candidate_id: string, state: string, tag?: string) =>
     post<{ state: string }>(`/api/discovery/${candidate_id}/state`, { state, tag }),
-  searchSimilar: (body: { frame_id?: string; object_id?: string; image_b64?: string; mode?: "visual" | "semantic"; k?: number }) =>
-    post<SimilarResponse>("/api/search/similar", body),
+  searchSimilar: (body: {
+    frame_id?: string; object_id?: string; image_b64?: string;
+    mode?: "visual" | "semantic" | "fused"; k?: number;
+    min_sim?: number; diversity?: boolean; same_class?: boolean; exclude_track?: boolean;
+    city?: string; session_id?: string;
+  }) => post<SimilarResponse>("/api/search/similar", body),
   searchSemantic: (q: string, k = 24) =>
     get<{ query: string; filters: Record<string, string>; classes: string[]; count: number; results: SimilarResponse["results"] }>(
       `/api/search/semantic?q=${encodeURIComponent(q)}&k=${k}`),
@@ -737,7 +812,7 @@ export const api = {
   // M-MC.0 persisted frame groups + group-aware navigation
   multicamBuild: (sid: string) => post<{ n_groups: number; groups_out_of_tolerance: number; groups_with_missing_cam: number }>(`/api/multicam/groups/build?session_id=${sid}`, {}),
   multicamPersisted: (sid: string) => get<PersistedGroups>(`/api/multicam/groups/persisted?session_id=${sid}`),
-  multicamGroupAt: (sid: string, ts_ns: number) => get<FrameGroup>(`/api/multicam/group/at?session_id=${sid}&ts_ns=${ts_ns}`),
+  multicamGroupAt: (sid: string, ts_ns: number) => get<FrameGroup | null>(`/api/multicam/group/at?session_id=${sid}&ts_ns=${ts_ns}`),
   multicamGroupNav: (sid: string, gid: string, direction: "prev" | "next") => get<{ group: FrameGroup | null }>(`/api/multicam/group/nav?session_id=${sid}&group_id=${gid}&direction=${direction}`),
   multicamGroupConfirm: (gid: string, confirmed = true) => post<FrameGroup>(`/api/multicam/group/confirm?group_id=${gid}&confirmed=${confirmed}`, {}),
   // M-MC.2 rig identity + linked selection

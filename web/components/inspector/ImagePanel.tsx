@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, type InspectorPanel } from "@/lib/api";
+import { api, type InspectorPanel , humanizeError } from "@/lib/api";
 import { useClock } from "@/lib/inspector/clock";
 import { useMcap } from "@/lib/inspector/mcapContext";
 
@@ -48,7 +48,7 @@ export default function ImagePanel({ panel, onFrame }: { panel: InspectorPanel; 
           setAnn(null);
         }
       } catch (e) {
-        setNote("image read error: " + String(e));
+        setNote("image read error: " + humanizeError(e));
       } finally {
         busy.current = false;
         if (pending.current !== null) { const n = pending.current; pending.current = null; run(n); }

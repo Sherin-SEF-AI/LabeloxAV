@@ -64,6 +64,10 @@ async def main() -> None:
     ap.add_argument("--limit-sessions", type=int, default=None, help="cap sessions this run")
     ap.add_argument("--frame-limit", type=int, default=None, help="cap frames per session")
     ap.add_argument("--redo", action="store_true", help="include sessions that already have objects")
+    ap.add_argument("--embed", action="store_true",
+                    help="embed each session's frames + object crops after autolabel, so it is searchable "
+                         "immediately (find-similar needs DINOv3/SigLIP2 vectors, which autolabel alone does "
+                         "not write). Runs after autolabel has unloaded its detectors, so no VRAM clash.")
     ap.add_argument("--progress", default=".scratch/autolabel_fleet_progress.jsonl")
     ap.add_argument("--dry-run", action="store_true", help="report the plan and exit")
     args = ap.parse_args()
@@ -94,6 +98,12 @@ async def main() -> None:
             auto += int(by_state.get("auto_accept", 0))
             done += 1
             rec = {"session": str(sid), "frames": nf, "ok": True, "secs": round(time.time() - t0, 1), **summary}
+            if args.embed:
+                # After autolabel: embed the frames and the object crops so this session is searchable at once.
+                from services.intelligence.embed.service import embed_session
+
+                emb = await embed_session(sid, only_missing=True)
+                rec["embedded"] = emb
         except Exception as exc:  # noqa: BLE001
             # One bad session (missing image, decode failure) must not end an 18-hour sweep.
             failed += 1

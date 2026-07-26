@@ -2,6 +2,7 @@
 
 import TopNav from "@/components/TopNav";
 import PageHeaderBar from "./PageHeaderBar";
+import Breadcrumbs, { type Crumb } from "./Breadcrumbs";
 
 // The single dashboard chrome wrapper. Renders TopNav (its {active, right} contract preserved verbatim, so
 // the menu bar + Cmd+K palette keep working), then an optional title/primary-action bar, then an
@@ -10,7 +11,7 @@ import PageHeaderBar from "./PageHeaderBar";
 // omitted entirely when there is nothing to show in it, so a page that only wants the wrapped TopNav still
 // gets consistent structure without an empty band. Content scrolls under fixed chrome.
 
-export default function PageShell({ active, title, subtitle, right, primaryAction, meta, filters, children }: {
+export default function PageShell({ active, title, subtitle, right, primaryAction, meta, filters, crumbs, children }: {
   active: string;
   title?: string;
   subtitle?: string;
@@ -18,6 +19,7 @@ export default function PageShell({ active, title, subtitle, right, primaryActio
   primaryAction?: React.ReactNode;
   meta?: React.ReactNode;
   filters?: React.ReactNode;
+  crumbs?: Crumb[];   // explicit trail for pages with real context (a frame that knows its session); else auto
   children: React.ReactNode;
 }) {
   const showBar = Boolean(title || primaryAction || meta || subtitle);
@@ -26,6 +28,10 @@ export default function PageShell({ active, title, subtitle, right, primaryActio
       {/* The header crumb only appears when the page has no title bar of its own, so the location is never
           spelled out twice in two different styles directly above itself. */}
       <TopNav active={active} right={right} showCrumb={!showBar} />
+      {/* The breadcrumb trail: history-aware back + the path to here, on every wrapped page. */}
+      <div className="flex items-center px-4 py-1.5 border-b hairline shrink-0 overflow-x-auto no-scrollbar">
+        <Breadcrumbs items={crumbs} />
+      </div>
       {showBar && <PageHeaderBar title={title ?? active} subtitle={subtitle} meta={meta} primaryAction={primaryAction} />}
       {filters && (
         <div className="flex items-center gap-2 px-4 py-2 border-b hairline shrink-0 font-mono text-[11px] overflow-x-auto no-scrollbar">

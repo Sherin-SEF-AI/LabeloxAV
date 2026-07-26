@@ -44,6 +44,7 @@ class SliceSpec(BaseModel):
     states: list[str] | None = None        # e.g. ["accepted", "auto_accept"]
     class_names: list[str] | None = None
     cities: list[str] | None = None
+    vehicle_ids: list[str] | None = None  # export a whole fleet (all its sessions) in one commit
     min_conf: float | None = None
     has_mask: bool | None = None
     session_id: str | None = None
@@ -69,6 +70,8 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
             stmt = stmt.where(Object.mask_uri.isnot(None))
         if spec.cities:
             stmt = stmt.where(DbSession.city.in_(spec.cities))
+        if spec.vehicle_ids:
+            stmt = stmt.where(DbSession.vehicle_id.in_(spec.vehicle_ids))
         if spec.session_id:
             stmt = stmt.where(DbSession.session_id == UUID(spec.session_id))
         if spec.class_names:
@@ -78,11 +81,14 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
             stmt = stmt.limit(spec.limit)
 
         rows = (await db.execute(stmt)).all()
-        # attach each object's outgoing relationships (rider_of, towed_by, member_of, ...) for export
+        # attach each object's outgoing relationships (rider_of, towed_by, member_of, ...) for export.
+        # Batch the id list: a whole-fleet export has hundreds of thousands of objects, and a single IN clause
+        # over all of them blows past Postgres's 65535-parameter limit (the query simply fails). Chunk it.
         rel_map: dict[str, list] = {}
-        if rows:
+        oids = [o.object_id for o, _, _ in rows]
+        for i in range(0, len(oids), 10000):
             rel_rows = (await db.execute(select(ObjectRelationship).where(
-                ObjectRelationship.from_object_id.in_([o.object_id for o, _, _ in rows])))).scalars().all()
+                ObjectRelationship.from_object_id.in_(oids[i:i + 10000])))).scalars().all()
             for r in rel_rows:
                 rel_map.setdefault(str(r.from_object_id), []).append(
                     {"to_object_id": str(r.to_object_id), "kind": r.kind})

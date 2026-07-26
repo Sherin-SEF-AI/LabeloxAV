@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { api, lidarCloudPoints, type Cuboid3D, type LidarCloud, type LidarPoints } from "@/lib/api";
+import { api, lidarCloudPoints, type Cuboid3D, type LidarCloud, type LidarPoints , humanizeError } from "@/lib/api";
 import type { OntologyClass } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import Inspector from "@/components/shell/Inspector";
@@ -60,7 +60,7 @@ export default function LinkedWorkspacePage() {
       for (const [id, bbox] of entries) if (bbox) map[id] = bbox;
       setProjections(map);
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
     }
   }, []);
 
@@ -78,7 +78,7 @@ export default function LinkedWorkspacePage() {
       await api.lidarLinkCloud(cloud.cloud_id);
       await openCloud(cloud);
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
     }
   };
 
@@ -89,7 +89,7 @@ export default function LinkedWorkspacePage() {
       await api.lidarBatchCorrect(ids, classId);
       if (cloud) await openCloud(cloud);
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
     }
   };
 

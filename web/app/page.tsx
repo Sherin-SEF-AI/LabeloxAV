@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { DatasetRow, SessionRow, TriageRow } from "@/lib/types";
 import { ConfBar, StateBadge } from "@/components/StateBadge";
 import PageShell from "@/components/shell/PageShell";
@@ -20,32 +20,72 @@ const BANDS = [
   { key: "submitted", label: "QA queue", hint: "submitted work awaiting approval" },
 ];
 
-// A compact overview number (sessions, queue size, datasets ...). accent draws the eye to the one that
-// represents work waiting on you.
-function Stat({ label, value, sub, loading, accent }: { label: string; value: number | string; sub?: string; loading?: boolean; accent?: boolean }) {
+// Count a number up to its target on mount, so a stat lands with a little motion instead of snapping into
+// place. Cheap: one rAF loop, eased, and it respects reduced-motion by jumping straight to the value.
+function useCountUp(target: number, ms = 900): number {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (typeof window === "undefined") { setN(target); return; }
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduce || target <= 0) { setN(target); return; }
+    let raf = 0; const t0 = performance.now();
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - t0) / ms);
+      const eased = 1 - Math.pow(1 - p, 3);   // easeOutCubic
+      setN(Math.round(target * eased));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, ms]);
+  return n;
+}
+
+// An overview stat: a labelled figure with an icon, counting up on load and lifting on hover. The accent
+// variant marks the one number that represents work waiting on you.
+function Stat({ label, value, sub, icon, loading, accent, delay = 0 }: {
+  label: string; value: number | string; sub?: string; icon: string; loading?: boolean; accent?: boolean; delay?: number;
+}) {
+  const numeric = typeof value === "number";
+  const counted = useCountUp(numeric ? (value as number) : 0);
+  const shown = loading ? null : numeric ? counted.toLocaleString() : value;
   return (
-    <div className={`panel px-4 py-3 ${accent ? "border-accent/40" : ""}`}>
-      <div className="font-mono text-[10px] uppercase tracking-wide text-ink-3">{label}</div>
-      <div className={`font-mono text-2xl mt-1 tabular-nums ${accent ? "text-accent" : "text-ink"}`}>
-        {loading ? <span className="text-ink-3 animate-pulse">···</span> : value}
+    <div style={{ "--d": `${delay}ms` } as React.CSSProperties}
+      className={`fade-up lift panel relative overflow-hidden px-4 py-3 ${accent ? "border-accent/40" : ""}`}>
+      {accent && <span className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-accent to-accent-2" aria-hidden />}
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-[10px] uppercase tracking-wide text-ink-3">{label}</span>
+        <span className={accent ? "text-accent" : "text-ink-3"}><Icon name={icon} size={14} /></span>
       </div>
-      {sub ? <div className="font-mono text-[11px] text-ink-3 mt-0.5">{sub}</div> : null}
+      <div className={`font-display font-semibold text-3xl mt-1.5 tabular-nums leading-none ${accent ? "text-accent" : "text-ink"}`}>
+        {loading ? <span className="text-ink-3 animate-pulse">···</span> : shown}
+      </div>
+      {sub ? <div className="font-mono text-[11px] text-ink-3 mt-1">{sub}</div> : null}
     </div>
   );
 }
 
-// A compact launcher tile into one of the platform's workflows. Single row so the six of them form a slim
-// strip (the full description rides in the tooltip); primary marks the recommended next step.
-function ActionCard({ title, desc, icon, onClick, primary }: { title: string; desc: string; icon: string; onClick: () => void; primary?: boolean }) {
+// A launcher tile into one of the platform's workflows: an icon in a tinted chip, a title and a one-line
+// description, that lifts and slides its arrow on hover. primary marks the recommended next step.
+function ActionCard({ title, desc, icon, onClick, primary, delay = 0 }: {
+  title: string; desc: string; icon: string; onClick: () => void; primary?: boolean; delay?: number;
+}) {
   return (
-    <button
-      onClick={onClick}
-      title={desc}
-      className={`panel flex items-center gap-2 px-3 py-2.5 transition-colors group focus:outline-none focus:border-accent ${primary ? "border-accent/50 hover:border-accent" : "hover:border-accent"}`}
-    >
-      <span className={`flex shrink-0 transition-colors ${primary ? "text-accent" : "text-ink-3 group-hover:text-accent"}`}><Icon name={icon} size={16} /></span>
-      <span className="text-ink text-[13px] font-medium truncate">{title}</span>
-      <span className="ml-auto text-ink-3 group-hover:text-accent transition-colors text-xs">&rarr;</span>
+    <button onClick={onClick} title={desc}
+      style={{ "--d": `${delay}ms` } as React.CSSProperties}
+      className={`fade-up lift panel group flex items-start gap-3 px-3.5 py-3 text-left focus:outline-none focus:border-accent ${primary ? "border-accent/50" : ""}`}>
+      <span className={`grid place-items-center w-8 h-8 rounded shrink-0 transition-colors ${
+        primary ? "bg-accent/15 text-accent" : "bg-bg-2 text-ink-3 group-hover:text-accent group-hover:bg-accent/10"}`}>
+        <Icon name={icon} size={16} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="text-ink text-[13px] font-medium">{title}</span>
+          {primary && <span className="font-mono text-[9px] uppercase tracking-wide text-accent border border-accent/40 rounded px-1 leading-tight">next</span>}
+        </span>
+        <span className="block text-ink-3 text-[11px] leading-snug mt-0.5 line-clamp-2">{desc}</span>
+      </span>
+      <span className="text-ink-3 group-hover:text-accent transition-transform group-hover:translate-x-0.5 text-xs mt-0.5">&rarr;</span>
     </button>
   );
 }
@@ -73,6 +113,7 @@ export default function HomePage() {
   const router = useRouter();
   const [rows, setRows] = useState<TriageRow[]>([]);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [sessionTotal, setSessionTotal] = useState(0);
   const [datasets, setDatasets] = useState<DatasetRow[]>([]);
   const [session, setSession] = useState<string>("");
   const [states, setStates] = useState<string>("review,annotate");
@@ -104,7 +145,10 @@ export default function HomePage() {
   }, [states, session]);
 
   useEffect(() => {
+    // The dropdown needs the session rows (capped), but the stat should show the true fleet size, so read
+    // the real total from the paginated endpoint rather than the length of a capped list.
     api.sessions().then(setSessions).catch(() => {});
+    api.sessionsPage({ limit: 1 }).then((p) => setSessionTotal(p.total)).catch(() => {});
     api.datasets().then(setDatasets).catch(() => {});
     api.ontology().then((o) => setClasses(o.classes.map((c) => c.name))).catch(() => {});
     setRole(getUser()?.role);
@@ -140,7 +184,7 @@ export default function HomePage() {
         setSel(new Set());
         load();
       } catch (e) {
-        setMsg(String(e));
+        setMsg(humanizeError(e));
       }
     },
     [sel, load],
@@ -152,7 +196,7 @@ export default function HomePage() {
       const r = await api.startAutolabel(session, undefined, "local");
       setMsg(r.status === "queued-cloud" ? "queued for the cloud A100 - see Jobs" : "autolabel queued - watch it on Jobs");
     } catch (e) {
-      setMsg(String(e).includes("503") ? "GPU busy (training). Try after it finishes." : String(e));
+      setMsg(humanizeError(e).includes("503") ? "GPU busy (training). Try after it finishes." : humanizeError(e));
     }
   }, [session]);
 
@@ -162,7 +206,7 @@ export default function HomePage() {
       await api.startVlmQa(session);
       setMsg("VLM auto-QA running - it flags likely-wrong labels into the QA queue + fills attributes");
     } catch (e) {
-      setMsg(String(e).includes("503") ? "GPU busy (training). Try after it finishes." : String(e));
+      setMsg(humanizeError(e).includes("503") ? "GPU busy (training). Try after it finishes." : humanizeError(e));
     }
   }, [session]);
 
@@ -172,7 +216,7 @@ export default function HomePage() {
       const r = await api.recognizeSigns(session);
       setMsg(`typed ${r.recognized} signs (Indian taxonomy), ${r.text_bearing} text-bearing routed to OCR`);
     } catch (e) {
-      setMsg(String(e));
+      setMsg(humanizeError(e));
     }
   }, [session]);
 
@@ -243,56 +287,61 @@ export default function HomePage() {
           ) : null}
 
           {/* Welcome + the one action that matters: pick up where the queue left off */}
-          <div className="flex flex-wrap items-end justify-between gap-4 shrink-0">
+          <div className="fade-up flex flex-wrap items-end justify-between gap-4 shrink-0">
             <div>
-              <h1 className="text-xl text-ink font-semibold">Welcome back{role ? `, ${role}` : ""}</h1>
-              <p className="text-ink-3 text-sm mt-1 max-w-xl">
+              <h1 className="font-display text-2xl text-ink font-semibold tracking-tight">
+                Welcome back{role ? <span className="text-accent">, {role}</span> : ""}
+              </h1>
+              <p className="text-ink-3 text-sm mt-1.5 max-w-xl">
                 Multimodal annotation for autonomous driving. Pick up your review queue, or jump into a workflow.
               </p>
             </div>
             <button
               onClick={() => open(shownRows[0] ?? rows[0])}
               disabled={!rows.length}
-              className="flex items-center gap-2 bg-accent text-bg font-medium text-sm px-4 py-2.5 rounded hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+              className="sheen lift flex items-center gap-2.5 bg-gradient-to-b from-accent-2 to-accent text-white font-medium text-sm px-5 py-2.5 rounded shadow-lg shadow-accent/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none shrink-0"
             >
               <Icon name="confirm" size={16} />
               {rows.length ? "Continue reviewing" : "Queue is clear"}
-              {rows.length ? <span className="font-mono text-[11px] opacity-80 tabular-nums">{rows.length} queued</span> : null}
+              {rows.length ? <span className="font-mono text-[11px] bg-white/20 rounded px-1.5 py-0.5 tabular-nums">{rows.length} queued</span> : null}
             </button>
           </div>
 
-          {/* At-a-glance stats */}
+          {/* At-a-glance stats: staggered entrance, count-up numbers, lift on hover */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
-            <Stat label="In your queue" value={rows.length} sub={activeBand?.label.toLowerCase()} loading={loading} accent />
-            <Stat label="Sessions" value={sessions.length} sub={`${cities} cit${cities === 1 ? "y" : "ies"}`} loading={!sessions.length && loading} />
-            <Stat label="Datasets" value={datasets.length} sub={datasets.length ? "sealed exports" : "none yet"} />
-            <Stat label="Your role" value={role ?? "annotator"} sub="what you can approve" />
+            <Stat icon="review" label="In your queue" value={rows.length} sub={activeBand?.label.toLowerCase()} loading={loading} accent delay={0} />
+            <Stat icon="layers" label="Sessions" value={sessionTotal || sessions.length} sub={`${cities} cit${cities === 1 ? "y" : "ies"}`} loading={!sessions.length && loading} delay={60} />
+            <Stat icon="target" label="Datasets" value={datasets.length} sub={datasets.length ? "sealed exports" : "none yet"} delay={120} />
+            <Stat icon="activity" label="Your role" value={role ?? "annotator"} sub="what you can approve" delay={180} />
           </div>
 
-          {/* Workflow launcher: a slim single-row strip */}
+          {/* Workflow launcher */}
           <div className="shrink-0">
-            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-1.5">Jump to a workflow</h2>
+            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Jump to a workflow</h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
-              <ActionCard primary icon="review" title="Review" desc="Work through model proposals ranked by what matters most." onClick={() => document.getElementById("queue")?.scrollIntoView({ behavior: "smooth" })} />
-              <ActionCard icon="plus" title="Import" desc="Bring in dashcam video or sensor logs to annotate." onClick={() => router.push("/import")} />
-              <ActionCard icon="activity" title="Analytics" desc="See labeling progress, agreement, and coverage." onClick={() => router.push("/analytics")} />
-              <ActionCard icon="layers" title="Datasets" desc="Seal and export a versioned dataset (COCO, YOLO, ...)." onClick={() => router.push("/datasets")} />
-              <ActionCard icon="route" title="Jobs" desc="Watch autolabel, training, and import jobs live." onClick={() => router.push("/jobs")} />
-              <ActionCard icon="target" title="Curation" desc="Find the highest-value frames to label next." onClick={() => router.push("/curation")} />
+              <ActionCard primary icon="review" title="Review" desc="Work through model proposals ranked by what matters." onClick={() => document.getElementById("queue")?.scrollIntoView({ behavior: "smooth" })} delay={0} />
+              <ActionCard icon="plus" title="Import" desc="Bring in dashcam video or sensor logs to annotate." onClick={() => router.push("/import")} delay={50} />
+              <ActionCard icon="activity" title="Analytics" desc="Labeling progress, agreement, and coverage." onClick={() => router.push("/analytics")} delay={100} />
+              <ActionCard icon="layers" title="Datasets" desc="Seal and export a versioned dataset (COCO, YOLO)." onClick={() => router.push("/datasets")} delay={150} />
+              <ActionCard icon="route" title="Jobs" desc="Watch autolabel, training, and import jobs live." onClick={() => router.push("/jobs")} delay={200} />
+              <ActionCard icon="target" title="Curation" desc="Find the highest-value frames to label next." onClick={() => router.push("/curation")} delay={250} />
             </div>
           </div>
 
           {/* Review queue */}
-          <div id="queue" className="panel flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div id="queue" className="fade-up panel flex-1 min-h-0 flex flex-col overflow-hidden" style={{ "--d": "300ms" } as React.CSSProperties}>
             <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b hairline">
               <div>
-                <div className="text-ink font-medium">Your review queue</div>
-                <div className="text-ink-3 text-xs">{activeBand?.hint} &middot; ranked by uncertainty and rarity</div>
+                <div className="text-ink font-medium flex items-center gap-2">
+                  <span className="text-accent"><Icon name="review" size={15} /></span>
+                  Your review queue
+                </div>
+                <div className="text-ink-3 text-xs mt-0.5">{activeBand?.hint} &middot; ranked by uncertainty and rarity</div>
               </div>
-              <div className="flex items-center gap-1 ml-auto font-mono text-[11px]">
+              <div className="flex items-center gap-0.5 ml-auto font-mono text-[11px] bg-bg-2 rounded p-0.5">
                 {BANDS.map((b) => (
                   <button key={b.key} onClick={() => setStates(b.key)} title={b.hint}
-                    className={`px-2 py-1 border ${states === b.key ? "border-accent text-ink" : "border-line text-ink-3 hover:text-ink"}`}>
+                    className={`px-2.5 py-1 rounded transition-colors ${states === b.key ? "bg-accent text-white" : "text-ink-3 hover:text-ink"}`}>
                     {b.label}
                   </button>
                 ))}
@@ -386,7 +435,8 @@ export default function HomePage() {
                 <tbody>
                   {shownRows.map((r, i) => (
                     <tr key={r.object_id} onClick={() => { setCursor(i); open(r); }} onMouseEnter={() => setCursor(i)}
-                      className={`border-b hairline cursor-pointer ${sel.has(r.object_id) ? "bg-bg-2" : i === cursor ? "bg-panel" : "hover:bg-bg-2"}`}>
+                      data-active={i === cursor}
+                      className={`rail border-b hairline cursor-pointer transition-colors ${sel.has(r.object_id) ? "bg-accent/5" : i === cursor ? "bg-bg-2" : "hover:bg-bg-2/60"}`}>
                       <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}>
                         <input type="checkbox" checked={sel.has(r.object_id)} onChange={() => toggle(r.object_id)} />
                       </td>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { CurationSummary } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 
@@ -55,7 +55,7 @@ export default function CurationPage() {
       await api.curationEmbed();
       setMsg("embedding frames (DINOv2) in the background - the count climbs as it runs");
     } catch (e) {
-      setMsg(String(e).includes("503") ? "GPU busy (training). Try after it finishes." : String(e));
+      setMsg(humanizeError(e).includes("503") ? "GPU busy (training). Try after it finishes." : humanizeError(e));
     } finally {
       setBusy(false);
     }

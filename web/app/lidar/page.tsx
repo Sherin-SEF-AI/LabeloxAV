@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { api, lidarCloudPoints, type LidarCloud, type LidarPoints } from "@/lib/api";
+import { api, lidarCloudPoints, type LidarCloud, type LidarPoints , humanizeError } from "@/lib/api";
 import type { ColorBy } from "@/components/lidar/PointCloudViewer";
 import PageShell from "@/components/shell/PageShell";
 import Inspector from "@/components/shell/Inspector";
@@ -45,7 +45,7 @@ export default function LidarViewerPage() {
       setClouds(r.clouds);
       if (!r.clouds.length) setErr("No clouds in this session. Build one from its camera frames below.");
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
       setClouds([]);
     }
   }, []);
@@ -58,7 +58,7 @@ export default function LidarViewerPage() {
       const d = await lidarCloudPoints(cloud.cloud_id, { variant: v, max, full: isFull });
       setData(d);
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
     } finally {
       setBusy(false);
     }
@@ -80,7 +80,7 @@ export default function LidarViewerPage() {
       setSegData(sp);
       setColorBy("segment");
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
     } finally {
       setBusy(false);
     }
@@ -105,7 +105,7 @@ export default function LidarViewerPage() {
       if (r.clouds === 0) setErr("No camera frame groups to build from in this session.");
       await loadClouds(sessionId);
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
     } finally {
       setBusy(false);
     }

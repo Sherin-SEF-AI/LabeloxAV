@@ -82,22 +82,39 @@ def _session_origin(s) -> str:
     return "other"
 
 
+def _session_row(s) -> dict:
+    return {
+        "session_id": str(s.session_id),
+        "vehicle_id": s.vehicle_id,
+        "city": s.city,
+        "route": s.route,
+        "start_ts_ns": s.start_ts_ns,
+        "end_ts_ns": s.end_ts_ns,
+        "ontology_version": s.ontology_version,
+        "origin": _session_origin(s),
+    }
+
+
 @router.get("/sessions")
 async def sessions(db: AsyncSession = Depends(db_session), limit: int = Query(200, ge=1, le=1000)):
     rows = (await db.execute(select(DbSession).order_by(DbSession.created_at.desc()).limit(limit))).scalars().all()
-    return [
-        {
-            "session_id": str(s.session_id),
-            "vehicle_id": s.vehicle_id,
-            "city": s.city,
-            "route": s.route,
-            "start_ts_ns": s.start_ts_ns,
-            "end_ts_ns": s.end_ts_ns,
-            "ontology_version": s.ontology_version,
-            "origin": _session_origin(s),
-        }
-        for s in rows
-    ]
+    return [_session_row(s) for s in rows]
+
+
+@router.get("/sessions/page")
+async def sessions_page(db: AsyncSession = Depends(db_session),
+                        limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
+                        vehicle_id: str | None = None):
+    """Paginated session list with a total, so the browser can page through all 2000+ drives instead of
+    being silently capped at the first window. Optional vehicle_id narrows to one fleet."""
+    base = select(DbSession)
+    if vehicle_id:
+        base = base.where(DbSession.vehicle_id == vehicle_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    rows = (await db.execute(
+        base.order_by(DbSession.created_at.desc()).offset(offset).limit(limit))).scalars().all()
+    return {"total": int(total), "offset": offset, "limit": limit,
+            "sessions": [_session_row(s) for s in rows]}
 
 
 @router.get("/sessions/{session_id}/stats")
