@@ -137,6 +137,8 @@ export default function FrameEditor() {
   const [st, dispatch] = useEditor();
   const [meta, setMeta] = useState<FrameMeta | null>(null);
   const [onto, setOnto] = useState<Ontology | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [currentClass, setCurrentClass] = useState<OntologyClass | null>(null);
   const [panning, setPanning] = useState(false);
   const [cursor, setCursor] = useState<number[] | null>(null);
@@ -215,24 +217,34 @@ export default function FrameEditor() {
     setTimeout(() => setNotice(null), 3500);
   };
 
-  // load frame + objects + ontology
+  // load frame + objects + ontology. Wrapped so a transient backend failure surfaces a retry state instead of
+  // an uncaught promise rejection and a page stuck forever on "loading" (the three fetches share a Promise.all,
+  // so any one 500 rejects the whole load).
   useEffect(() => {
+    let live = true;
     (async () => {
-      const [m, objs, o] = await Promise.all([api.frame(id), api.frameObjects(id), api.ontology()]);
-      setMeta(m);
-      setOnto(o);
-      const eds: EdObject[] = objs.map((x) => ({
-        id: x.object_id, track_id: x.track_id, class_id: x.class_id, class_name: x.class_name, bbox: x.bbox,
-        mask: x.mask_polygons || [], attrs: {}, conf: x.conf, quality_score: x.quality_score, state: x.state, visible: true, version: x.version,
-        rot: x.rot_deg, keypoints: x.keypoints ?? undefined, polyline: x.polyline ?? undefined,
-        cuboid_3d: x.cuboid_3d ?? undefined,
-      }));
-      dispatch({ t: "load", objects: eds, viewport: { scale: 0, ox: 0, oy: 0 }, selectedId: focus });
-      const fc = (focus && eds.find((e) => e.id === focus)) || null;
-      setCurrentClass(fc ? o.classes.find((c) => c.id === fc.class_id) || o.classes[0] : o.classes[0]);
-      loadedRef.current = true;
+      setLoadError(null);
+      try {
+        const [m, objs, o] = await Promise.all([api.frame(id), api.frameObjects(id), api.ontology()]);
+        if (!live) return;
+        setMeta(m);
+        setOnto(o);
+        const eds: EdObject[] = objs.map((x) => ({
+          id: x.object_id, track_id: x.track_id, class_id: x.class_id, class_name: x.class_name, bbox: x.bbox,
+          mask: x.mask_polygons || [], attrs: {}, conf: x.conf, quality_score: x.quality_score, state: x.state, visible: true, version: x.version,
+          rot: x.rot_deg, keypoints: x.keypoints ?? undefined, polyline: x.polyline ?? undefined,
+          cuboid_3d: x.cuboid_3d ?? undefined,
+        }));
+        dispatch({ t: "load", objects: eds, viewport: { scale: 0, ox: 0, oy: 0 }, selectedId: focus });
+        const fc = (focus && eds.find((e) => e.id === focus)) || null;
+        setCurrentClass(fc ? o.classes.find((c) => c.id === fc.class_id) || o.classes[0] : o.classes[0]);
+        loadedRef.current = true;
+      } catch (e) {
+        if (live) setLoadError(humanizeError(e));
+      }
     })();
-  }, [id, focus, dispatch]);
+    return () => { live = false; };
+  }, [id, focus, dispatch, reloadKey]);
 
   // M-MC.1: resolve the synchronized frame group this frame belongs to, so the rig view can show the sibling
   // cameras. Uses the persisted groups; if none exist yet for the session it builds them once on demand.
@@ -906,6 +918,20 @@ export default function FrameEditor() {
     [onto, search],
   );
 
+  if (loadError && (!meta || !onto)) return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="panel px-5 py-4 text-center space-y-3 max-w-sm">
+        <div className="text-ink font-medium">Couldn&apos;t load this frame</div>
+        <div className="font-mono text-[11px] text-ink-3">{loadError}</div>
+        <div className="flex items-center justify-center gap-2">
+          <button onClick={() => setReloadKey((k) => k + 1)}
+            className="border border-accent text-accent px-3 py-1.5 font-mono text-xs hover:bg-accent/10">Retry</button>
+          <button onClick={() => router.push("/")}
+            className="border border-line text-ink-2 px-3 py-1.5 font-mono text-xs hover:border-accent">Home</button>
+        </div>
+      </div>
+    </div>
+  );
   if (!meta || !onto) return <div className="min-h-screen flex items-center justify-center font-mono text-ink-3">loading frame...</div>;
 
   // The focused annotation canvas, hoisted so single-frame and rig (M-MC.1) views share one instance and every
