@@ -5,6 +5,8 @@ import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 import GlobalLoadingBar from "@/components/GlobalLoadingBar";
 import AuthBootstrap from "@/components/AuthBootstrap";
+import Toaster from "@/components/Toaster";
+import ConfirmProvider from "@/components/ConfirmProvider";
 
 const display = Space_Grotesk({ subsets: ["latin"], variable: "--font-display" });
 
@@ -20,7 +22,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-body bg-bg text-ink antialiased">
         <GlobalLoadingBar />
         <AuthBootstrap />
-        {children}
+        <Toaster />
+        <ConfirmProvider>{children}</ConfirmProvider>
       </body>
     </html>
   );

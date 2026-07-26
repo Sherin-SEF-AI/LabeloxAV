@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { SimilarResponse } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 
@@ -73,7 +73,7 @@ function SearchBody() {
         setRes(await api.searchSimilar({ object_id: query.id, ...controls() }));
       }
     } catch (e) {
-      setNote(String(e));
+      setNote(humanizeError(e));
     } finally {
       setBusy(false);
     }

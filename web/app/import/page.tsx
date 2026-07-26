@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, type ImportJob } from "@/lib/api";
+import { api, type ImportJob , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 
@@ -89,7 +89,7 @@ export default function ImportPage() {
       setFiles([]);
       refresh();
     } catch (e) {
-      setErr(String(e));
+      setErr(humanizeError(e));
       setPhase("idle");
     }
   }
@@ -241,7 +241,7 @@ export default function ImportPage() {
                           const r = await api.inspectorLichtblick(j.session_id!);
                           window.open(r.url, "_blank", "noopener");
                         } catch (e) {
-                          setErr("Open in Lichtblick failed (no MCAP for this session, or Lichtblick is not running): " + String(e));
+                          setErr("Open in Lichtblick failed (no MCAP for this session, or Lichtblick is not running): " + humanizeError(e));
                         }
                       }}
                       title="full-power MCAP inspection in the self-hosted Lichtblick"

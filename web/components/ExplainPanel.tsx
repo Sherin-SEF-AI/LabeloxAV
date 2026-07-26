@@ -6,7 +6,7 @@
 // what the fusion and gate already recorded, so a reviewer or a buyer can see why a label was accepted.
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import { Busy } from "@/components/Spinner";
 import type { ObjectExplanation } from "@/lib/types";
 
@@ -24,7 +24,7 @@ export default function ExplainPanel({ objectId }: { objectId: string }) {
     let live = true;
     setEx(null);
     setErr(null);
-    api.explainObject(objectId).then((e) => live && setEx(e)).catch((e) => live && setErr(String(e)));
+    api.explainObject(objectId).then((e) => live && setEx(e)).catch((e) => live && setErr(humanizeError(e)));
     return () => { live = false; };
   }, [objectId]);
 

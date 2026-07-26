@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { humanizeError } from "@/lib/api";
 import { useClock } from "@/lib/inspector/clock";
 import { useMcap } from "@/lib/inspector/mcapContext";
 
@@ -23,7 +24,7 @@ export default function RawPanel({ topic }: { topic: string }) {
         const m = await mcap.latestAt(topic, ns);
         setText(m ? JSON.stringify(m.value, null, 2) : "(no message at or before this time)");
       } catch (e) {
-        setText("read error: " + String(e));
+        setText("read error: " + humanizeError(e));
       } finally {
         busy.current = false;
         if (pending.current !== null) { const n = pending.current; pending.current = null; run(n); }

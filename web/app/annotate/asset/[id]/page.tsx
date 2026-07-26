@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { AssetDetail } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import { FieldsForm, LabelChips } from "@/components/labelui/LabelPicker";
@@ -29,7 +29,7 @@ export default function AssetEditor() {
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 4000); };
 
   const load = useCallback(async () => {
-    try { setAsset(await api.asset(id)); } catch (e) { flash(String(e)); }
+    try { setAsset(await api.asset(id)); } catch (e) { flash(humanizeError(e)); }
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
@@ -47,7 +47,7 @@ export default function AssetEditor() {
     try {
       await api.createAnnotation(id, { kind, label, payload, fields });
       await load();
-    } catch (e) { flash(String(e)); } finally { setBusy(false); }
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   }, [id, label, fields, load]);
 
   const remove = async (annotationId: string) => {
@@ -56,13 +56,13 @@ export default function AssetEditor() {
       await api.deleteAnnotation(annotationId);
       if (selectedId === annotationId) setSelectedId(null);
       await load();
-    } catch (e) { flash(String(e)); } finally { setBusy(false); }
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
   const markLabeled = async () => {
     setBusy(true);
     try { await api.setAssetState(id, "labeled"); await load(); flash("marked labeled"); }
-    catch (e) { flash(String(e)); } finally { setBusy(false); }
+    catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
   const series = useMemo(() => {

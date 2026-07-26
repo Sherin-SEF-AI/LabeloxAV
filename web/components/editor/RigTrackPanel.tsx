@@ -6,7 +6,7 @@
 // review queue); those tracks are marked here so the reviewer can jump straight to them.
 
 import { useCallback, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { RigTrackRow, RigTrackTimeline } from "@/lib/types";
 
 export default function RigTrackPanel({ sessionId, onClose, onOpenInstant }: {
@@ -25,7 +25,7 @@ export default function RigTrackPanel({ sessionId, onClose, onOpenInstant }: {
     try {
       await api.multicamRigTracksBuild(sessionId).catch(() => undefined);  // chain identities into tracks first
       setTracks((await api.multicamRigTracks(sessionId)).tracks);
-    } catch (e) { setErr(String(e)); }
+    } catch (e) { setErr(humanizeError(e)); }
     finally { setBusy(false); }
   }, [sessionId]);
 
@@ -35,7 +35,7 @@ export default function RigTrackPanel({ sessionId, onClose, onOpenInstant }: {
     if (open === tid) { setOpen(null); setTimeline(null); return; }
     setOpen(tid);
     try { setTimeline(await api.multicamRigTrackTimeline(sessionId, tid)); }
-    catch (e) { setErr("timeline failed: " + String(e)); }
+    catch (e) { setErr("timeline failed: " + humanizeError(e)); }
   };
   const consistency = async () => {
     setBusy(true); setErr(null);
@@ -43,7 +43,7 @@ export default function RigTrackPanel({ sessionId, onClose, onOpenInstant }: {
       const r = await api.multicamConsistencyCheck(sessionId);
       setErr(`consistency: ${r.inconsistent_objects} inconsistent object(s) across ${r.n_tracks} track(s) queued for review`);
       await refresh();
-    } catch (e) { setErr("consistency check failed: " + String(e)); }
+    } catch (e) { setErr("consistency check failed: " + humanizeError(e)); }
     finally { setBusy(false); }
   };
 

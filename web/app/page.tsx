@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { DatasetRow, SessionRow, TriageRow } from "@/lib/types";
 import { ConfBar, StateBadge } from "@/components/StateBadge";
 import PageShell from "@/components/shell/PageShell";
@@ -140,7 +140,7 @@ export default function HomePage() {
         setSel(new Set());
         load();
       } catch (e) {
-        setMsg(String(e));
+        setMsg(humanizeError(e));
       }
     },
     [sel, load],
@@ -152,7 +152,7 @@ export default function HomePage() {
       const r = await api.startAutolabel(session, undefined, "local");
       setMsg(r.status === "queued-cloud" ? "queued for the cloud A100 - see Jobs" : "autolabel queued - watch it on Jobs");
     } catch (e) {
-      setMsg(String(e).includes("503") ? "GPU busy (training). Try after it finishes." : String(e));
+      setMsg(humanizeError(e).includes("503") ? "GPU busy (training). Try after it finishes." : humanizeError(e));
     }
   }, [session]);
 
@@ -162,7 +162,7 @@ export default function HomePage() {
       await api.startVlmQa(session);
       setMsg("VLM auto-QA running - it flags likely-wrong labels into the QA queue + fills attributes");
     } catch (e) {
-      setMsg(String(e).includes("503") ? "GPU busy (training). Try after it finishes." : String(e));
+      setMsg(humanizeError(e).includes("503") ? "GPU busy (training). Try after it finishes." : humanizeError(e));
     }
   }, [session]);
 
@@ -172,7 +172,7 @@ export default function HomePage() {
       const r = await api.recognizeSigns(session);
       setMsg(`typed ${r.recognized} signs (Indian taxonomy), ${r.text_bearing} text-bearing routed to OCR`);
     } catch (e) {
-      setMsg(String(e));
+      setMsg(humanizeError(e));
     }
   }, [session]);
 

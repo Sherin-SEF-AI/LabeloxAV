@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { DatasetDetail, DatasetRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import { SkeletonRows } from "@/components/Spinner";
@@ -59,7 +59,7 @@ export default function DatasetsPage() {
       setMsg("export queued - watch it on Jobs, it appears here when sealed");
       refresh();
     } catch (e) {
-      setMsg(String(e));
+      setMsg(humanizeError(e));
     }
   }
 

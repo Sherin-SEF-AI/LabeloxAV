@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type AgentPlan } from "@/lib/api";
+import { api, type AgentPlan , humanizeError } from "@/lib/api";
 import { Busy } from "@/components/Spinner";
 
 // The frame agent, surfaced in the editor. It runs a dry-run plan first (writes nothing), shows what it
@@ -32,7 +32,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
       const r = await api.agentCopilotBatchFix(copilot.candidates, copilot.pattern.to_class);
       setMsg(`batch-fixed ${r.relabeled} similar ${copilot.pattern.from_name} -> ${copilot.pattern.to_name}, routed to review (reversible)`);
       setCopilot(null); onApplied?.();
-    } catch (e) { setMsg("batch fix failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("batch fix failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -45,7 +45,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
       const by = Object.entries(r.counts.by_attr).map(([k, n]) => `${k}:${n}`).join(", ");
       setMsg(`filled ${r.counts.attrs_filled} attrs on ${r.objects_updated} objects (${by})`);
       onApplied?.();
-    } catch (e) { setMsg("attribute fill failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("attribute fill failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -58,7 +58,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
       const r = await api.agentRelabel(frameId);
       setMsg(`relabeled ${r.relabeled} (${r.counts.relabel_keep} fixed, ${r.counts.relabel_review} to review): ${preview}`);
       onApplied?.();
-    } catch (e) { setMsg("relabel failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("relabel failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -70,7 +70,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
       const r = await api.agentCuboids(frameId);
       setMsg(`fit ${r.attached} 3D boxes (${r.counts.auto_accept} auto, ${r.counts.review} review, ${r.counts.skip} skipped)`);
       onApplied?.();
-    } catch (e) { setMsg("fit 3D failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("fit 3D failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -83,7 +83,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
       const r = await api.agentCrossCam(selectedId);
       setMsg(r.created ? `propagated to ${r.created} camera view${r.created > 1 ? "s" : ""}` : "not visible in any other camera");
       onApplied?.();
-    } catch (e) { setMsg("cross-camera failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("cross-camera failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -96,7 +96,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
       const r = await api.agentPropagate(selectedId);
       setMsg(`tracked across ${r.created} frames (${r.counts.auto_accept} auto, ${r.counts.review} review${p.counts.appearance_used ? "" : ", no drift model"})`);
       onApplied?.();
-    } catch (e) { setMsg("auto-track failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("auto-track failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -108,14 +108,14 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
       const r = await api.agentCommand(frameId, text);
       setMsg(r.summary);
       if (["accept", "revert"].includes(r.intent.action) && !r.blocked) onApplied?.();
-    } catch (e) { setMsg("command failed: " + String(e)); }
+    } catch (e) { setMsg("command failed: " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
   const doPlan = async () => {
     setBusy("plan"); setMsg(null); setRunId(null);
     try { setPlan(await api.agentPlan(frameId)); }
-    catch (e) { setMsg("plan failed: " + String(e)); }
+    catch (e) { setMsg("plan failed: " + humanizeError(e)); }
     finally { setBusy(null); }
   };
   const doCommit = async () => {
@@ -126,7 +126,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
       setMsg(`committed: ${r.applied} changed`);
       setPlan(null);
       onApplied?.();
-    } catch (e) { setMsg("commit failed (needs reviewer role): " + String(e)); }
+    } catch (e) { setMsg("commit failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
   const doRevert = async () => {
@@ -137,7 +137,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
       setMsg(`reverted ${r.reverted}${r.skipped ? `, skipped ${r.skipped}` : ""}`);
       setRunId(null);
       onApplied?.();
-    } catch (e) { setMsg("revert failed: " + String(e)); }
+    } catch (e) { setMsg("revert failed: " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 

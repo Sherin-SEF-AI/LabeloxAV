@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { DiscoveryCandidate, SessionRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge } from "@/components/StateBadge";
@@ -37,7 +37,7 @@ export default function DiscoveryPage() {
       setMsg(`found ${r.candidates} candidates (${Object.entries(r.by_kind).map(([k, v]) => `${k}:${v}`).join(", ")})`);
       await load();
     } catch (e) {
-      setMsg(String(e));
+      setMsg(humanizeError(e));
     } finally {
       setBusy(false);
     }

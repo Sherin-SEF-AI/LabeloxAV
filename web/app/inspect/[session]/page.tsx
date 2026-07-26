@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useClock } from "@/lib/inspector/clock";
-import { api, type InspectorEvent, type InspectorPanel, type InspectorTopic } from "@/lib/api";
+import { api, type InspectorEvent, type InspectorPanel, type InspectorTopic , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { Spinner } from "@/components/Spinner";
 import { ClockProvider } from "@/lib/inspector/clock";
@@ -86,9 +86,9 @@ export default function InspectorWorkspace() {
         setPanels(def ? def.panels.map((p) => ({ ...p, id: `p${++PANEL_SEQ}` })) : defaultPanels(lay.config_default, idxTopics.length ? idxTopics : m.topics().map((t) => ({ name: t.topic, schema: t.schema, count: 0, rate: 0, first_ts: 0, last_ts: 0 }))));
       } catch (e) {
         // a session ingested from images/video/imagery has no MCAP; say so plainly instead of a raw 409
-        if (live) setErr(/409/.test(String(e))
+        if (live) setErr(/409/.test(humanizeError(e))
           ? "This session has no MCAP recording to inspect. The Session Inspector applies to sessions ingested from an .mcap file."
-          : String(e));
+          : humanizeError(e));
       } finally {
         if (live) setLoading(false);
       }
@@ -105,7 +105,7 @@ export default function InspectorWorkspace() {
       await api.inspectorSaveLayout(name, panels.map(({ type, topic, field }) => ({ id: "", type, topic, field })), true);
       setLayouts((await api.inspectorLayouts()).layouts);
       setSaveName("");
-    } catch (e) { setErr("save layout failed: " + String(e)); }
+    } catch (e) { setErr("save layout failed: " + humanizeError(e)); }
   };
   const loadLayout = (id: string) => {
     const l = layouts.find((x) => x.layout_id === id);
@@ -114,7 +114,7 @@ export default function InspectorWorkspace() {
 
   const openLichtblick = async () => {
     try { const r = await api.inspectorLichtblick(sessionId); window.open(r.url, "_blank", "noopener"); }
-    catch (e) { setErr("Open in Lichtblick failed: " + String(e)); }
+    catch (e) { setErr("Open in Lichtblick failed: " + humanizeError(e)); }
   };
 
   const vColor = verdict === "pass" ? "text-pass border-pass" : verdict === "warn" ? "text-warn border-warn" : verdict === "fail" ? "text-block border-block" : "text-ink-3 border-line";

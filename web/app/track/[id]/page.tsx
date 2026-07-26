@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { useSmartBack } from "@/lib/nav";
+import { api , humanizeError } from "@/lib/api";
 import type { IntentVocab, Ontology, Track } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import BackButton from "@/components/BackButton";
@@ -14,6 +15,7 @@ import PageHeaderBar from "@/components/shell/PageHeaderBar";
 
 export default function TrackEditor() {
   const router = useRouter();
+  const goBack = useSmartBack();
   const { id } = useParams<{ id: string }>();
   const [track, setTrack] = useState<Track | null>(null);
   const [onto, setOnto] = useState<Ontology | null>(null);
@@ -41,22 +43,22 @@ export default function TrackEditor() {
   const proposeIntent = useCallback(async () => {
     setBusy(true);
     try { const r = await api.intentPropose(id); setMsg(r.proposed.length ? `proposed: ${r.proposed.join(", ")}` : "no geometric intent (left unknown)"); await load(); }
-    catch (e) { setMsg(String(e)); } finally { setBusy(false); }
+    catch (e) { setMsg(humanizeError(e)); } finally { setBusy(false); }
   }, [id, load]);
   const vlmIntent = useCallback(async () => {
     setBusy(true); setMsg("asking the VLM...");
     try { const r = await api.intentVlm(id); setMsg(r.proposed ? `VLM proposed: ${r.proposed}` : `VLM: ${r.reason ?? "unclear (unknown)"}`); await load(); }
-    catch (e) { setMsg(String(e)); } finally { setBusy(false); }
+    catch (e) { setMsg(humanizeError(e)); } finally { setBusy(false); }
   }, [id, load]);
   const setIntent = useCallback(async (intent: string) => {
     if (!intentKind) return;
     setBusy(true);
     try { await api.intentSet(id, intent, intentKind); setMsg(intent === "unknown" ? "cleared intent" : `confirmed intent: ${intent}`); await load(); }
-    catch (e) { setMsg(String(e)); } finally { setBusy(false); }
+    catch (e) { setMsg(humanizeError(e)); } finally { setBusy(false); }
   }, [id, intentKind, load]);
 
   useEffect(() => {
-    load().catch((e) => setMsg(String(e)));
+    load().catch((e) => setMsg(humanizeError(e)));
   }, [load]);
 
   const relabel = useCallback(
@@ -67,7 +69,7 @@ export default function TrackEditor() {
         setMsg(`relabeled ${r.relabeled} frames to ${className}`);
         await load();
       } catch (e) {
-        setMsg(String(e));
+        setMsg(humanizeError(e));
       } finally {
         setBusy(false);
       }
@@ -80,9 +82,9 @@ export default function TrackEditor() {
     setBusy(true);
     try {
       await api.deleteTrack(id);
-      router.push("/");
+      goBack();
     } catch (e) {
-      setMsg(String(e));
+      setMsg(humanizeError(e));
       setBusy(false);
     }
   }, [id, router]);
@@ -94,7 +96,7 @@ export default function TrackEditor() {
       setMsg(r.created ? `interpolated ${r.created} gap frames (confirm them in the editor)` : "no gaps to fill");
       await load();
     } catch (e) {
-      setMsg(String(e));
+      setMsg(humanizeError(e));
     } finally {
       setBusy(false);
     }

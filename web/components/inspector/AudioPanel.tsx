@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { humanizeError } from "@/lib/api";
 import { useClock } from "@/lib/inspector/clock";
 import { useMcap } from "@/lib/inspector/mcapContext";
 
@@ -29,7 +30,7 @@ export default function AudioPanel({ topic }: { topic: string }) {
         ampsRef.current = { t, amp };
         setNote("");
         draw();
-      } catch (e) { if (alive) setNote("audio load error: " + String(e)); }
+      } catch (e) { if (alive) setNote("audio load error: " + humanizeError(e)); }
     })();
     return () => { alive = false; };
   }, [mcap, topic, clock.startNs]);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { CalibDetail, CalibResolved, CalibSession, SessionRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import Inspector from "@/components/shell/Inspector";
@@ -48,7 +48,7 @@ export default function CalibrationPage() {
   const ingest = async (fn: () => Promise<unknown>, label: string) => {
     setIng(label + "...");
     try { await fn(); await loadResolved(pick); setIng(label + " done"); }
-    catch (e) { setIng(label + " failed: " + String(e)); }
+    catch (e) { setIng(label + " failed: " + humanizeError(e)); }
   };
   const applySpec = () => ingest(() => api.calibrationSetSpec(pick, { [specCam]: {
     ...(focalMode === "fov" ? { hfov_deg: Number(focalVal) } : { fx: Number(focalVal) }),
@@ -59,7 +59,7 @@ export default function CalibrationPage() {
     try {
       const r = await api.calibrationExtrinsics(pick);
       setIng(r.checked ? `extrinsics: worst ${r.worst_sampson_px ?? "-"} px Sampson` : `extrinsics: ${r.reason}`);
-    } catch (e) { setIng("extrinsics failed: " + String(e)); }
+    } catch (e) { setIng("extrinsics failed: " + humanizeError(e)); }
   };
   const runImport = () => ingest(() => api.calibrationImport(pick, { cam_id: impCam, format: "kitti", calib_text: impText }), "import");
 

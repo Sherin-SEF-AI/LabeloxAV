@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { CloudStatus, CloudOrphan } from "@/lib/types";
 import Icon from "@/components/shell/Icon";
 
@@ -73,11 +73,11 @@ export default function CloudControl() {
 
   const doConnect = async () => {
     setConfirm(false); setBusy("connecting"); setErr(null);
-    try { setSt(await api.cloudConnect(st.hourly_usd)); } catch (e) { setErr(String(e)); } finally { setBusy(null); poll(); }
+    try { setSt(await api.cloudConnect(st.hourly_usd)); } catch (e) { setErr(humanizeError(e)); } finally { setBusy(null); poll(); }
   };
   const doDisconnect = async (pause: boolean) => {
     setBusy("disconnecting"); setErr(null);
-    try { setSt(await api.cloudDisconnect(pause)); setOpen(false); } catch (e) { setErr(String(e)); } finally { setBusy(null); poll(); }
+    try { setSt(await api.cloudDisconnect(pause)); setOpen(false); } catch (e) { setErr(humanizeError(e)); } finally { setBusy(null); poll(); }
   };
   const killOrphan = async (podId: string) => {
     try { await api.cloudTerminateOrphan(podId); } finally { pollOrphans(); }

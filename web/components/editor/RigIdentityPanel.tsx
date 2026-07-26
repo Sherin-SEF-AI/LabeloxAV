@@ -7,7 +7,7 @@
 // This tier needs no calibration: linking is identity only, never a geometric projection.
 
 import { useCallback, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import type { LinkSuggestion, RigObjectsResponse } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 
@@ -25,7 +25,7 @@ export default function RigIdentityPanel({ sessionId, groupId, onClose, onSelect
 
   const refresh = useCallback(async () => {
     try { setData(await api.multicamRigObjects(sessionId, groupId)); }
-    catch (e) { setErr(String(e)); }
+    catch (e) { setErr(humanizeError(e)); }
   }, [sessionId, groupId]);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -36,25 +36,25 @@ export default function RigIdentityPanel({ sessionId, groupId, onClose, onSelect
     if (sel.size < 2) return;
     setBusy(true); setErr(null);
     try { await api.multicamLink({ session_id: sessionId, group_id: groupId, object_ids: [...sel], source: "manual" }); setSel(new Set()); await refresh(); }
-    catch (e) { setErr("link failed: " + String(e)); }
+    catch (e) { setErr("link failed: " + humanizeError(e)); }
     finally { setBusy(false); }
   };
   const acceptSuggestion = async (s: LinkSuggestion) => {
     setBusy(true); setErr(null);
     try { await api.multicamLink({ session_id: sessionId, group_id: groupId, object_ids: [s.a, s.b], source: "appearance" }); setSuggestions((x) => (x ? x.filter((y) => y !== s) : x)); await refresh(); }
-    catch (e) { setErr("accept failed: " + String(e)); }
+    catch (e) { setErr("accept failed: " + humanizeError(e)); }
     finally { setBusy(false); }
   };
   const unlink = async (oid: string) => {
     setBusy(true); setErr(null);
     try { await api.multicamUnlink(oid); await refresh(); }
-    catch (e) { setErr("unlink failed: " + String(e)); }
+    catch (e) { setErr("unlink failed: " + humanizeError(e)); }
     finally { setBusy(false); }
   };
   const suggest = async () => {
     setBusy(true); setErr(null);
     try { const r = await api.multicamSuggestLinks(sessionId, groupId); setSuggestions(r.suggestions); }
-    catch (e) { setErr("suggest failed: " + String(e)); }
+    catch (e) { setErr("suggest failed: " + humanizeError(e)); }
     finally { setBusy(false); }
   };
 

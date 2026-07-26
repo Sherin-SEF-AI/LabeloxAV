@@ -6,7 +6,7 @@
 // landing on a reviewable, reversible agent run. Language proposes; the gate disposes.
 
 import { useState } from "react";
-import { api } from "@/lib/api";
+import { api , humanizeError } from "@/lib/api";
 import { Busy } from "@/components/Spinner";
 
 type Preview = Awaited<ReturnType<typeof api.nlEditPreview>>;
@@ -31,7 +31,7 @@ export default function BulkEditBar({ frameId, sessionId, onApplied, embedded = 
       const body = scope === "session" && sessionId ? { command: cmd, session_id: sessionId, use_vlm: useVlm }
         : { command: cmd, frame_id: frameId, use_vlm: useVlm };
       setPreview(await api.nlEditPreview(body));
-    } catch (e) { setMsg("preview failed: " + String(e)); }
+    } catch (e) { setMsg("preview failed: " + humanizeError(e)); }
     finally { setBusy(false); }
   };
 
@@ -43,7 +43,7 @@ export default function BulkEditBar({ frameId, sessionId, onApplied, embedded = 
       setMsg(`${r.operation}: ${r.edited} object(s) applied, routed to ${r.routed_to} (reversible run ${r.run_id.slice(0, 8)})`);
       setPreview(null); setCmd("");
       onApplied?.();
-    } catch (e) { setMsg("apply failed: " + String(e)); }
+    } catch (e) { setMsg("apply failed: " + humanizeError(e)); }
     finally { setBusy(false); }
   };
 
