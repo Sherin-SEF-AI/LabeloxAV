@@ -577,7 +577,11 @@ export default function FrameEditor() {
     // top of unsaved edits would silently drop them, so require an explicit save first.
     if (o.dirty) { flash("save your edits first (Cmd S), then accept or reject"); return; }
     try {
-      const r = await api.review(o.id, { action: newState === "accepted" ? "accept" : "reject", state: newState, expected_version: o.version });
+      // No expected_version here on purpose: this is a pure accept/reject decision, and unsaved edits are
+      // already blocked above, so there is nothing to clobber. Gating the human's decision on a version that
+      // a background re-autolabel or embed pass may have bumped just produced spurious 409s. The optimistic
+      // lock still guards the geometry-edit path (adjust_geometry), where a concurrent box edit does matter.
+      const r = await api.review(o.id, { action: newState === "accepted" ? "accept" : "reject", state: newState });
       dispatch({ t: "reviewed", id: o.id, state: newState, version: r.version });
       setAlItems((s) => s.filter((it) => it.object_id !== o.id)); // drop the handled item so the queue advances
       flash(newState);

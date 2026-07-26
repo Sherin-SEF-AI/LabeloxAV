@@ -123,7 +123,16 @@ function onUnauthorized() {
 
 async function fail(r: Response, method: string, path: string): Promise<never> {
   let detail = "";
-  try { detail = (await r.text()).slice(0, 300); } catch { /* body already consumed */ }
+  try {
+    const raw = (await r.text()).slice(0, 500);
+    // FastAPI errors are {"detail": ...}. Pull the human string out of that so a message like
+    // "object changed since you loaded it" surfaces instead of the raw JSON envelope.
+    try {
+      const j = JSON.parse(raw);
+      const d = j?.detail;
+      detail = typeof d === "string" ? d : d?.detail ?? (d ? JSON.stringify(d) : raw);
+    } catch { detail = raw; }
+  } catch { /* body already consumed */ }
   if (r.status === 401) onUnauthorized();
   throw new ApiError(r.status, method, path, detail);
 }
