@@ -737,6 +737,12 @@ class Settings(BaseSettings):
         env_nested_delimiter="__",
         extra="ignore",
         yaml_file=str(DEFAULT_CONFIG),
+        # Read the repo .env directly (absolute, so cwd does not matter). settings_customise_sources already
+        # lists dotenv_settings, but that source is inert without env_file; wiring it here makes .env actually
+        # "consumed by the app" as the file claims, so LBX_-prefixed entries (e.g. LBX_GROQ__API_KEY) work
+        # without the process having to source .env first. Unprefixed compose vars are ignored (extra=ignore).
+        env_file=str(REPO_ROOT / ".env"),
+        env_file_encoding="utf-8",
     )
 
     env: str = "local"
