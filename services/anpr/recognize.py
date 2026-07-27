@@ -19,7 +19,7 @@ from services.anpr.india_format import PlateParse, parse_plate
 log = get_logger("anpr")
 
 Region = tuple[float, float, float, float, float]         # x1, y1, x2, y2, detector_score
-OcrReader = Callable[[np.ndarray], tuple[str, float]]     # crop -> (text, ocr_confidence)
+OcrReader = Callable[[np.ndarray], tuple[str, float | None]]  # crop -> (text, ocr_confidence|None)
 
 
 @dataclass(frozen=True)
@@ -27,7 +27,7 @@ class PlateRead:
     bbox: tuple[float, float, float, float]
     det_conf: float
     ocr_text: str
-    ocr_conf: float
+    ocr_conf: float | None   # None when the backend reports no calibrated score
     parse: PlateParse
 
 
@@ -80,7 +80,14 @@ def recognize_plates(
         if crop.size == 0:
             continue
         text, ocr_conf = read(crop)
-        if ocr_conf < cfg.ocr_min_conf or not text:
+        if not text:
+            continue
+        # An unmeasured read cannot clear a confidence floor. It is kept (the text is still evidence) but
+        # carries ocr_conf=None so every downstream sees "unscored" instead of a fabricated number, and a
+        # deployment that requires a measured score can reject it explicitly.
+        if ocr_conf is not None and ocr_conf < cfg.ocr_min_conf:
+            continue
+        if ocr_conf is None and cfg.require_measured_ocr_conf:
             continue
         reads.append(PlateRead(bbox=(x1, y1, x2, y2), det_conf=score, ocr_text=text,
                                ocr_conf=ocr_conf, parse=parse_plate(text)))
@@ -89,7 +96,7 @@ def recognize_plates(
     return reads
 
 
-def _default_ocr(crop_bgr: np.ndarray) -> tuple[str, float]:
+def _default_ocr(crop_bgr: np.ndarray) -> tuple[str, float | None]:
     from services.anpr.ocr import default_plate_ocr
 
     return default_plate_ocr(crop_bgr)

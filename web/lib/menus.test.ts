@@ -28,6 +28,22 @@ describe("navigation menus", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
+  // The command palette renders one row per destination keyed by href+label. Since hrefs repeat by design,
+  // that pair is what must be unique or React reconciliation breaks on duplicate keys.
+  it("href and label together are unique across destinations", () => {
+    const pairs = MENU_DESTINATIONS.map((d) => `${d.href}::${d.label}`);
+    expect(new Set(pairs).size).toBe(pairs.length);
+  });
+
+  // Deep-linked menu entries carry a query string the destination page must read. These went inert once
+  // (all fourteen import-format entries landed on the default), so the contract is pinned here: any
+  // destination with a query string is listed, and lib/useQueryParam is how a page honours it.
+  it("query-string destinations are the known deep links", () => {
+    const withQuery = MENU_DESTINATIONS.filter((d) => d.href.includes("?"));
+    const params = new Set(withQuery.map((d) => new URL(d.href, "http://x").searchParams.keys().next().value));
+    expect([...params].sort()).toEqual(["format", "mine", "panel", "rig", "tab"]);
+  });
+
   it("item keys are unique within each menu", () => {
     for (const m of MENUS) {
       const keys = m.items.map((i) => i.key);

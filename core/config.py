@@ -761,6 +761,10 @@ class AnprSettings(BaseModel):
     device: str = "cpu"
     min_plate_area_frac: float = 0.0002   # ignore specks below this fraction of frame area
     ocr_min_conf: float = 0.50            # drop a read the OCR is not confident about
+    # The local generative-VLM wire exposes no calibrated per-read score, so it reports None rather than a
+    # constant that would make ocr_min_conf a no-op. Unscored reads are kept by default (the text is still
+    # evidence, flagged unscored downstream); a deployment that must gate on a real score sets this true.
+    require_measured_ocr_conf: bool = False
     ocr_backend: str = "qwen"             # qwen (Ollama) | pod (PaddleOCR Indic)
 
 

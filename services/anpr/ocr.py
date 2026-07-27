@@ -25,8 +25,10 @@ _PROMPT = (
 )
 
 
-def default_plate_ocr(crop_bgr: np.ndarray) -> tuple[str, float]:
-    """Return (text, confidence) for a plate crop. Backend is config-driven; failures return ("", 0.0)."""
+def default_plate_ocr(crop_bgr: np.ndarray) -> tuple[str, float | None]:
+    """Return (text, confidence) for a plate crop. Confidence is None when the backend exposes no calibrated
+    score (the local generative-VLM wire): a constant stand-in would turn anpr.ocr_min_conf into a no-op that
+    merely looked like a gate. Backend is config-driven; failures return ("", None)."""
     cfg = get_settings().anpr
     if cfg.ocr_backend == "pod":
         raise NotImplementedError(
@@ -34,7 +36,7 @@ def default_plate_ocr(crop_bgr: np.ndarray) -> tuple[str, float]:
     return _read_qwen(crop_bgr)
 
 
-def _read_qwen(crop_bgr: np.ndarray) -> tuple[str, float]:
+def _read_qwen(crop_bgr: np.ndarray) -> tuple[str, float | None]:
     import httpx
 
     vlm = get_settings().models.vlm
@@ -49,7 +51,7 @@ def _read_qwen(crop_bgr: np.ndarray) -> tuple[str, float]:
         resp.raise_for_status()
         data = json.loads(resp.json()["message"]["content"])
         text = (data.get("text") or "").strip()
-        return text, (0.8 if text else 0.0)
+        return text, None   # unmeasured: a generative VLM exposes no calibrated score
     except Exception as exc:  # noqa: BLE001 - an unreachable OCR wire means "no read", never a crash
         log.warning("anpr.ocr_unavailable", error=str(exc))
-        return "", 0.0
+        return "", None

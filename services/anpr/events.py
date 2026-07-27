@@ -21,7 +21,7 @@ def _read_payload(read: PlateRead, camera_id: str | None, session_id: str | None
         "session_id": session_id,
         "bbox": list(read.bbox),
         "det_conf": round(read.det_conf, 4),
-        "ocr_conf": round(read.ocr_conf, 4),
+        "ocr_conf": (round(read.ocr_conf, 4) if read.ocr_conf is not None else None),
         "plate": {
             "text": p.normalized,
             "raw": read.ocr_text,

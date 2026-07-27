@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api , humanizeError } from "@/lib/api";
 import type {
@@ -13,6 +13,7 @@ import type {
 import PageShell from "@/components/shell/PageShell";
 import EmbeddingMap, { type ColorBy } from "@/components/explore/EmbeddingMap";
 import FacetRail from "@/components/explore/FacetRail";
+import { useQueryParam } from "@/lib/useQueryParam";
 
 // The Explore workspace: see the corpus as structure, cut it by facets, lasso what looks alike, and act on
 // the selection in bulk. The filter you build here IS a saved view and an export spec, because it is the same
@@ -28,6 +29,11 @@ const COLOR_MODES: { key: ColorBy; label: string }[] = [
 ];
 
 export default function ExplorePage() {
+  // useSearchParams (via useQueryParam) forces a CSR bailout Next requires be under Suspense.
+  return <Suspense fallback={null}><ExploreBody /></Suspense>;
+}
+
+function ExploreBody() {
   const router = useRouter();
   const [predicate, setPredicate] = useState<ExplorePredicate>({});
   const [facets, setFacets] = useState<Facets | null>(null);
@@ -39,6 +45,8 @@ export default function ExplorePage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [hover, setHover] = useState<ProjectionPoint | null>(null);
   const [views, setViews] = useState<SavedView[]>([]);
+  // Edit > Saved views deep-links here; highlight the rail so the menu entry lands somewhere visible
+  const focusViews = useQueryParam("panel") === "views";
   const [tagText, setTagText] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -255,8 +263,10 @@ export default function ExplorePage() {
         </section>
 
         {/* saved views */}
-        <aside className="w-52 shrink-0 border-l hairline overflow-auto no-scrollbar p-1.5">
-          <div className="font-mono text-[10px] uppercase text-ink-3 px-1.5 py-1">saved views</div>
+        <aside className={`w-52 shrink-0 border-l hairline overflow-auto no-scrollbar p-1.5 ${
+          focusViews ? "ring-1 ring-accent bg-head/30" : ""}`}>
+          <div className={`font-mono text-[10px] uppercase px-1.5 py-1 ${
+            focusViews ? "text-accent" : "text-ink-3"}`}>saved views</div>
           {views.length === 0 && (
             <div className="px-1.5 font-mono text-[11px] text-ink-3">
               none yet. filter, then save.
