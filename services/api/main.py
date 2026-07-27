@@ -52,6 +52,7 @@ from services.api.routers import (
     objects,
     objects3d,
     ocr,
+    predictions,
     quality,
     recall,
     relabel,
@@ -118,10 +119,33 @@ async def _cloud_watchdog():
         await asyncio.sleep(30)
 
 
+def _assert_auth_floors(app: FastAPI) -> int:
+    """Fail closed at startup: refuse to boot if any mounted /api read is public without being in the tiny
+    approved allowlist. The route-table test enforces this on every commit, but a deployment that skipped the
+    test (or a route mounted dynamically) still cannot silently expose corpus data, presigned URLs, or the
+    user list. Writes need no check here: they can never reach a route without clearing the token gate, since
+    _required_role never returns an anonymous floor. Returns the count of routes inspected."""
+    checked = 0
+    leaked: list[str] = []
+    for route in app.routes:
+        methods = getattr(route, "methods", None) or set()
+        path = getattr(route, "path", "")
+        if not path.startswith("/api/"):
+            continue
+        checked += 1
+        if ("GET" in methods or "HEAD" in methods) and _is_public_read(path) \
+                and not path.startswith(_APPROVED_PUBLIC_READ_PREFIXES):
+            leaked.append(path)
+    if leaked:
+        raise RuntimeError(f"public read routes without an approved floor: {sorted(leaked)}")
+    return checked
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(get_settings().log_level)
-    log.info("api.startup")
+    checked = _assert_auth_floors(app)
+    log.info("api.startup", api_routes_checked=checked)
     watchdog = asyncio.create_task(_cloud_watchdog())
     try:
         yield
@@ -140,7 +164,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="LabeloxAV", version="0.1.0", lifespan=lifespan)
 
-# Role floor by path prefix for mutating requests. Reads (GET/HEAD) are always open.
+# Role floor by path prefix for mutating requests.
 _ADMIN_PREFIXES = ("/api/govern", "/api/users")
 _REVIEWER_PREFIXES = (
     "/api/review", "/api/export", "/api/datasets", "/api/relabel", "/api/imports", "/api/curation",
@@ -148,14 +172,32 @@ _REVIEWER_PREFIXES = (
     # C7: model promotion, paid-GPU control, and corpus-wide re-detection are not annotator actions.
     "/api/training", "/api/cloud", "/api/autolabel",
 )
-# Reads under these prefixes are NOT open: they mint presigned download URLs (dataset exfiltration, C2) or
-# expose the governance state / audit log / user list (info disclosure). GET here still needs the role floor.
-_READ_GATED_PREFIXES = ("/api/govern", "/api/datasets", "/api/users", "/api/export")
+
+# Reads fail closed. A GET is open only if its path is in this small allowlist; everything else under /api/
+# needs a valid token. This is the inversion of the old denylist: previously a new read route was open unless
+# someone remembered to add it to a gated-prefix list, so a route that mints presigned download URLs or
+# returns governance state could leak by omission. With the allowlist a new read route is gated automatically
+# and has to be opted into public access deliberately. The frontend rides the Authorization header on every
+# request (web/lib/api.ts userHeaders), so gating reads does not lock out a signed-in user. Only /api/health
+# is public: it is the load-balancer liveness probe. Non-/api paths (openapi.json, /docs, /metrics) are not
+# ours to gate and pass through below. openapi is the API's own schema, deliberately public.
+_PUBLIC_READ_PREFIXES = ("/api/health",)
+
+# The security-reviewed baseline the startup backstop checks the operative allowlist against. It is a separate
+# constant on purpose: widening _PUBLIC_READ_PREFIXES to expose a data route also has to widen this reviewed
+# baseline, so a public read can never be opened without a deliberate edit here. Keep the two in sync only when
+# the exposure is intended.
+_APPROVED_PUBLIC_READ_PREFIXES = ("/api/health",)
 
 
 # Self-service routes: gated (need a valid token) but reachable by any authenticated user, so they must not
 # inherit the admin/reviewer floor of their prefix. GET /users/me lets a user resolve their own identity.
 _SELF_PATHS = ("/api/users/me",)
+
+
+def _is_public_read(path: str) -> bool:
+    """A read that is reachable without a token. Kept tiny and explicit so the fail-closed default holds."""
+    return path.startswith(_PUBLIC_READ_PREFIXES)
 
 
 def _required_role(path: str) -> str:
@@ -169,9 +211,9 @@ def _required_role(path: str) -> str:
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Deny-by-default: every mutating /api request needs a valid signed Bearer token, with role floors by
-    path. Reads are open EXCEPT under _READ_GATED_PREFIXES (which leak data or presigned download URLs). A new
-    write route added later is gated automatically (fails closed)."""
+    """Deny-by-default: every /api request, read or write, needs a valid signed Bearer token unless its path is
+    a public read (_is_public_read) or an explicit bootstrap exception below. Role floors apply by path. A new
+    route added later, read or write, is gated automatically (fails closed)."""
 
     async def dispatch(self, request, call_next):
         settings = get_settings()
@@ -179,9 +221,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         method = request.method
         path = request.url.path
-        read = method in ("GET", "HEAD", "OPTIONS")
-        gated_read = read and path.startswith(_READ_GATED_PREFIXES)
-        if (read and not gated_read) or path == "/api/health" or not path.startswith("/api/"):
+        # CORS preflight carries no credentials by design; the CORS layer answers it, but allow it here too so
+        # the auth gate never turns a preflight into a 401. Non-/api paths are not ours to gate.
+        if method == "OPTIONS" or not path.startswith("/api/"):
+            return await call_next(request)
+        if method in ("GET", "HEAD") and _is_public_read(path):
             return await call_next(request)
 
         from sqlalchemy import func, select
@@ -327,6 +371,7 @@ app.include_router(agent.router, prefix="/api", tags=["agent"])
 app.include_router(meta.router, prefix="/api", tags=["meta"])
 app.include_router(triage.router, prefix="/api", tags=["triage"])
 app.include_router(objects.router, prefix="/api", tags=["objects"])
+app.include_router(predictions.router, prefix="/api", tags=["predictions"])
 app.include_router(review.router, prefix="/api", tags=["review"])
 app.include_router(intelligence.router, prefix="/api", tags=["intelligence"])
 app.include_router(search.router, prefix="/api", tags=["search"])

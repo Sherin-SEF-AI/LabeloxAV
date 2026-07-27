@@ -86,7 +86,43 @@ async def evaluate_on_gold(db: AsyncSession, model_version: str, gold_id: str) -
 
         data_yaml = await materialize_for_model(gold_id, names_list)
         # 3. score (thread: GPU val pass)
-        return await loop.run_in_executor(None, _score_yaml, local, data_yaml, gold_id, imgsz)
+        metrics = await loop.run_in_executor(None, _score_yaml, local, data_yaml, gold_id, imgsz)
+        # 4. reconcile against the prediction plane: run inference once, score it, and compare map50 to ap50 on
+        #    the SAME gold set + model. Two harnesses that disagree beyond epsilon is a measurement fault, so
+        #    flag the metrics divergent (the champion gate refuses to promote on that flag). Degrades silently
+        #    when inference is unavailable (no GPU / weights), keeping the val-pass result.
+        await _reconcile_with_prediction_plane(db, model_version, gold_id, metrics)
+        return metrics
     except Exception as exc:  # noqa: BLE001
         log.warning("gold_eval.failed", model_version=model_version, gold_id=gold_id, error=str(exc))
         return None
+
+
+async def _reconcile_with_prediction_plane(db: AsyncSession, model_version: str, gold_id: str,
+                                           metrics: dict) -> None:
+    from services.analytics.evaluation import evaluate_gold_patches
+    from services.verdyx.inference_run import run_inference_on_gold
+
+    try:
+        run_id = await run_inference_on_gold(db, model_version, gold_id)
+        if run_id is None:
+            metrics["reconcile"] = "prediction plane unavailable (weights/GPU); val-pass only"
+            return
+        pp = await evaluate_gold_patches(db, gold_id, run_id=run_id)
+        ap50 = pp.get("ap50")
+        val_map50 = metrics.get("map50")
+        if ap50 is None or val_map50 is None:
+            metrics["reconcile"] = "one harness produced no comparable number"
+            return
+        eps = get_settings().phase4.govern.harness_reconcile_epsilon
+        delta = abs(float(val_map50) - float(ap50))
+        metrics["prediction_plane_ap50"] = ap50
+        metrics["prediction_plane_run_id"] = run_id
+        metrics["harness_delta"] = round(delta, 4)
+        if delta > eps:
+            metrics["harness_divergent"] = True
+            log.error("gold_eval.harness_divergence", model_version=model_version, gold_id=gold_id,
+                      val_map50=val_map50, prediction_plane_ap50=ap50, delta=round(delta, 4), epsilon=eps)
+    except Exception as exc:  # noqa: BLE001 - a reconcile failure must not crash the promotion path
+        log.warning("gold_eval.reconcile_failed", model_version=model_version, gold_id=gold_id, error=str(exc))
+        metrics["reconcile"] = f"reconcile error: {type(exc).__name__}"

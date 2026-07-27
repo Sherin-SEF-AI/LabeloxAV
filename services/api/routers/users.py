@@ -20,7 +20,9 @@ _ROLES = {"admin", "reviewer", "annotator"}
 
 
 def _token_for(user: User) -> str:
-    return mint_token(user.user_id, get_settings().auth.signing_key)
+    s = get_settings()
+    return mint_token(user.user_id, s.auth.signing_key, token_version=user.token_version,
+                      ttl_seconds=s.auth.token_ttl_seconds)
 
 
 async def _with_counts(db: AsyncSession, users: list[User]) -> list[dict]:
@@ -69,8 +71,8 @@ async def create_user(payload: UserCreateIn, db: AsyncSession = Depends(db_sessi
 @router.post("/users/{user_id}/token")
 async def reissue_token(user_id: str, _admin=Depends(require_role("admin")),
                         db: AsyncSession = Depends(db_session)):
-    """Re-issue a user's Bearer token (e.g. after a lost credential). Admin-only. Because tokens are stateless,
-    this does not revoke the old one; rotate the server signing key to invalidate all outstanding tokens."""
+    """Re-issue a user's Bearer token (e.g. after a lost credential). Admin-only. To also invalidate the old
+    token, call POST /users/{id}/revoke-tokens first, which bumps the user's token_version."""
     from uuid import UUID
 
     try:
@@ -80,3 +82,21 @@ async def reissue_token(user_id: str, _admin=Depends(require_role("admin")),
     if u is None:
         raise HTTPException(404, "user not found")
     return {"user_id": str(u.user_id), "name": u.name, "role": u.role, "token": _token_for(u)}
+
+
+@router.post("/users/{user_id}/revoke-tokens")
+async def revoke_tokens(user_id: str, _admin=Depends(require_role("admin")),
+                        db: AsyncSession = Depends(db_session)) -> dict:
+    """Revoke every outstanding token for a user by incrementing its token_version. The next request carrying
+    an old token fails verification and the user must obtain a fresh one. Per-user, no session store."""
+    from uuid import UUID
+
+    try:
+        u = await db.get(User, UUID(user_id))
+    except ValueError:
+        raise HTTPException(400, "invalid user id") from None
+    if u is None:
+        raise HTTPException(404, "user not found")
+    u.token_version = (u.token_version or 1) + 1
+    await db.commit()
+    return {"user_id": str(u.user_id), "token_version": u.token_version, "revoked": True}

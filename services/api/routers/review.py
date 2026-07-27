@@ -72,7 +72,8 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
         obj = await db.get(Object, _UUID(oid))
         if obj is None:
             continue
-        before = {"class_id": obj.class_id, "bbox": list(obj.bbox), "attrs": dict(obj.attrs or {}), "state": obj.state}
+        before = {"class_id": obj.class_id, "bbox": list(obj.bbox), "attrs": dict(obj.attrs or {}), "state": obj.state,
+                  "source": obj.source, "conf": obj.conf, "provenance": dict(obj.provenance or {})}
         if cid is not None:
             obj.class_id = cid
         if payload.attrs:
@@ -110,6 +111,11 @@ async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = D
         "bbox": list(obj.bbox),
         "attrs": dict(obj.attrs or {}),
         "state": obj.state,
+        # Capture the prediction provenance the review is about to overwrite. Without source/conf here the
+        # original detection is unrecoverable, and the eval harness can never reconstruct a PR curve for it.
+        "source": obj.source,
+        "conf": obj.conf,
+        "provenance": dict(obj.provenance or {}),
     }
 
     if payload.class_name is not None:

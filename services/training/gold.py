@@ -164,6 +164,18 @@ def _materialize_aligned(gold_id: str, objs: list[dict], onto, names_list: list[
     return str(data_yaml), n_frames
 
 
+def align_model_to_ontology(model_names, onto=None) -> list[int | None]:
+    """Map a model's class order to ontology class ids: index i (the model's i-th output class) -> the ontology
+    id of that class name, or None when the model emits a class the ontology does not have. This is the single
+    alignment both the gold materialiser and the inference runner use, so a prediction's class and a gold
+    label's class are always compared in the same id space rather than by two independently-derived mappings."""
+    onto = onto or get_ontology()
+    names_list = (
+        [model_names[i] for i in range(len(model_names))] if isinstance(model_names, dict) else list(model_names)
+    )
+    return [onto.by_name(n).id if onto.has_name(n) else None for n in names_list]
+
+
 async def materialize_for_model(gold_id: str, model_names) -> str:
     """Re-materialize the sealed gold objects into a val split aligned to a model's class order."""
     names_list = (

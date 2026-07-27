@@ -21,10 +21,20 @@ from core.config import get_settings
 from core.logging import get_logger
 from db.models import User
 from services.api.auth_token import mint_token
-from services.api.deps import db_session
+from services.api.deps import db_session, require_user
 
 router = APIRouter()
 log = get_logger("auth")
+
+
+@router.post("/auth/refresh")
+async def refresh(user=Depends(require_user)) -> dict:
+    """Mint a fresh token for the currently authenticated user so the web app can roll silently before the
+    current one lapses. Requires a currently valid token: an expired or revoked token cannot refresh itself."""
+    s = get_settings()
+    return {"user_id": str(user.user_id), "role": user.role,
+            "token": mint_token(user.user_id, s.auth.signing_key, token_version=user.token_version,
+                                ttl_seconds=s.auth.token_ttl_seconds)}
 
 
 @router.post("/auth/dev-login")
@@ -48,4 +58,6 @@ async def dev_login(db: AsyncSession = Depends(db_session)) -> dict:
         log.info("auth.dev_login_seeded_admin", user=str(admin.user_id))
 
     return {"user_id": str(admin.user_id), "name": admin.name, "role": admin.role,
-            "token": mint_token(admin.user_id, settings.auth.signing_key)}
+            "token": mint_token(admin.user_id, settings.auth.signing_key,
+                                token_version=admin.token_version,
+                                ttl_seconds=settings.auth.token_ttl_seconds)}

@@ -508,6 +508,8 @@ class GovernSettings(BaseModel):
     # M4.4 governance. Safety is never automated to zero.
     safety_affinity_min: float = 0.8     # affinity_cost >= this is a safety-critical confusion (VRU vs non-VRU = 1.0)
     safe_miou_max_drop: float = 0.0      # a challenger may not regress Safe-mIoU at all
+    harness_reconcile_epsilon: float = 0.05  # val-pass mAP50 and prediction-plane AP50 may differ by at most this
+                                             # on the same gold set + model, else the metrics are flagged divergent
     min_map_uplift: float = 0.005        # challenger must strictly beat champion mAP by at least this (no ties)
     control_sample_rate: float = 0.02    # fraction of auto-accepts mirrored to human control review
     control_precision_floor: float = 0.97  # measured auto-accept precision below this pauses auto-promotion
@@ -572,6 +574,12 @@ class AuthSettings(BaseModel):
     # locked out by deny-by-default auth. Hard-gated to env == "local" in the route, so it cannot mint a
     # token on any real deployment no matter how this flag is set. Turn off to exercise the real login path.
     dev_login: bool = True
+    # Token time-to-live. A leaked token is valid at most this long; the web app refreshes silently before it
+    # lapses. Default 12 hours.
+    token_ttl_seconds: int = 43200
+    # Accept the legacy lbx1 tokens (no expiry, no revocation) during a migration window. Off by default and
+    # refused on any non-local deployment by _require_prod_secrets: a legacy token cannot be expired or revoked.
+    accept_legacy_tokens: bool = False
 
 
 class LidarSettings(BaseModel):
@@ -843,6 +851,20 @@ class Settings(BaseSettings):
         dev box: either env is outside the dev set, OR a non-local service host is configured (the 'forgot
         LBX_ENV in prod' case). A purely-local dev box with dev creds is still allowed. This closes the
         fail-open default where forgetting LBX_ENV shipped forgeable signing keys and public passwords."""
+        is_dev_env = self.env.lower() in self._DEV_ENVS
+        non_local = not (is_dev_env and self.postgres.host in self._LOCAL_HOSTS)
+
+        # Auth policy on a real deployment: authentication must be ON, and legacy tokens (which cannot expire or
+        # be revoked) must be OFF. A DPDPA-scoped corpus with auth off is an open door; leaning on the redaction
+        # plane for access control is the wrong control.
+        if non_local and not self.auth.enabled:
+            raise ValueError(
+                f"auth is disabled on a non-local deployment (env={self.env!r}); set LBX_AUTH__ENABLED=true")
+        if non_local and self.auth.accept_legacy_tokens:
+            raise ValueError(
+                f"legacy tokens accepted on a non-local deployment (env={self.env!r}); "
+                "set LBX_AUTH__ACCEPT_LEGACY_TOKENS=false (legacy tokens cannot expire or be revoked)")
+
         weak = []
         if self.postgres.password == "labelox":
             weak.append("LBX_POSTGRES__PASSWORD")

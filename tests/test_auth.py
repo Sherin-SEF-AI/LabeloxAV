@@ -1,6 +1,6 @@
-"""API auth gate (R1.1): deny-by-default for mutating routes, role floors, reads stay open.
-Requires infra (DB). The rest of the suite runs with auth disabled (see conftest); this file turns it
-on explicitly to exercise the middleware."""
+"""API auth gate (R1.1, R2.2): deny-by-default for reads and writes, role floors, only a tiny allowlist of
+public reads. Requires infra (DB). The rest of the suite runs with auth disabled (see conftest); this file
+turns it on explicitly to exercise the middleware."""
 
 from __future__ import annotations
 
@@ -81,8 +81,12 @@ def _bearer(user_id: str) -> dict:
 def test_auth_gate(auth_on):
     admin_id, rev_id, ann_id = run_async(_seed_users_coro())
     with _client() as c:
-        # reads stay open even with auth on
-        assert c.get("/api/ontology").status_code == 200
+        # reads now fail closed: an unauthenticated data read is 401, not open (R2.2 allowlist inversion)
+        assert c.get("/api/ontology").status_code == 401
+        # a signed-in user reads fine (the frontend rides the token on every GET)
+        assert c.get("/api/ontology", headers=_bearer(rev_id)).status_code == 200
+        # health stays public: it is the load-balancer liveness probe
+        assert c.get("/api/health").status_code == 200
 
         # mutating route with no identity -> 401
         assert c.post("/api/govern/controller/tick").status_code == 401
@@ -124,7 +128,7 @@ def test_dev_login_hands_out_an_admin_token_locally(auth_on):
         r = c.post("/api/auth/dev-login")
         assert r.status_code == 200
         body = r.json()
-        assert body["role"] == "admin" and body["token"].startswith("lbx1.")
+        assert body["role"] == "admin" and body["token"].startswith("lbx2.")
         # the handed-out token actually authenticates against a gated read and an admin write
         assert c.get("/api/users", headers={"Authorization": f"Bearer {body['token']}"}).status_code == 200
         assert c.post("/api/govern/controller/tick",

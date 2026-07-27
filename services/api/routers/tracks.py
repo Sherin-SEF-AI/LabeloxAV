@@ -119,7 +119,8 @@ async def relabel_track(track_id: UUID, payload: RelabelTrackIn, db: AsyncSessio
     if not rows:
         raise HTTPException(404, "track not found or has no objects")
     for o in rows:
-        before = {"class_id": o.class_id, "bbox": list(o.bbox), "attrs": dict(o.attrs or {}), "state": o.state}
+        before = {"class_id": o.class_id, "bbox": list(o.bbox), "attrs": dict(o.attrs or {}), "state": o.state,
+                  "source": o.source, "conf": o.conf, "provenance": dict(o.provenance or {})}
         o.class_id = cid
         o.source = "human"
         o.state = payload.state

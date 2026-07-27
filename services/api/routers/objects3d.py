@@ -170,6 +170,10 @@ async def edit_object3d(object_3d_id: uuid.UUID, body: Cuboid3DEdit, db: AsyncSe
     if body.ground_snap:
         pc = await db.get(PointCloud, o.cloud_id)
         o.center = snap_to_ground(o.center, o.dims, await _ground_plane(db, pc))
+    # The 3D edit path keeps no Review row, so stash the machine provenance this human edit overwrites into
+    # the object's own provenance blob. Without this the original source/conf is lost and the prediction is
+    # unrecoverable, exactly the destructive-mutation defect the 2D review path had.
+    o.provenance = {**(o.provenance or {}), "reviewed_from": {"source": o.source, "conf": o.conf}}
     o.source = "human"
     o.state = "accepted"
     o.is_keyframe = True

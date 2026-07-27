@@ -83,6 +83,7 @@ lbx-export = "services.export.dataset:main"
 lbx-import = "services.imports.run:main"
 lbx-gold = "services.training.gold:main"
 lbx-train-worker = "services.training.worker:main"
+lbx-infer = "services.verdyx.inference_run:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
 from db.session import get_sessionmaker
-from services.api.auth_token import bearer_uid
+from services.api.auth_token import bearer_payload
 
 # Role hierarchy: a higher rank satisfies any floor at or below it. admin is the superuser.
 ROLE_RANK = {"annotator": 1, "reviewer": 2, "admin": 3}
@@ -26,35 +26,37 @@ async def db_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-def _uid_from_credentials(authorization: str | None, x_lbx_user_id: str | None) -> str | None:
-    """Resolve the acting user_id. The real credential is a signed Bearer token (unforgeable). The legacy
-    plaintext X-Lbx-User-Id header is honored ONLY when auth is disabled (unit tests); with auth enabled it is
-    ignored, so a caller cannot self-assert an identity by echoing a UUID from the public user list (C1)."""
-    settings = get_settings()
-    uid = bearer_uid(authorization, settings.auth.signing_key)
-    if uid:
-        return uid
-    if not settings.auth.enabled and x_lbx_user_id:
-        return x_lbx_user_id
-    return None
-
-
 async def current_user(
     authorization: str | None = Header(default=None),
     x_lbx_user_id: str | None = Header(default=None),
     db: AsyncSession = Depends(db_session),
 ):
-    """The acting user, identified by a signed Bearer token. Returns the User row or None. Open (read)
-    endpoints may receive None."""
+    """The acting user, identified by a signed Bearer token. Returns the User row or None. Verifies the token
+    signature and expiry, then enforces revocation: a v2 token whose token_version does not match the user row
+    is rejected. The legacy plaintext X-Lbx-User-Id header is honored ONLY when auth is disabled (unit tests).
+    Open (read) endpoints may receive None."""
     from db.models import User
 
-    uid = _uid_from_credentials(authorization, x_lbx_user_id)
-    if not uid:
+    settings = get_settings()
+    payload = bearer_payload(authorization, settings.auth.signing_key,
+                             accept_legacy=settings.auth.accept_legacy_tokens)
+    if payload is not None:
+        uid = payload.uid
+    elif not settings.auth.enabled and x_lbx_user_id:
+        uid = x_lbx_user_id
+    else:
         return None
     try:
-        return await db.get(User, UUID(uid))
+        user = await db.get(User, UUID(uid))
     except Exception:  # noqa: BLE001
         return None
+    if user is None:
+        return None
+    # Revocation: a v2 token must carry the user's current token_version. Legacy tokens (tv None) and the
+    # auth-disabled header path carry no version and skip this check.
+    if payload is not None and not payload.legacy and payload.token_version != user.token_version:
+        return None
+    return user
 
 
 async def require_user(user=Depends(current_user)):
