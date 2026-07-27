@@ -100,7 +100,7 @@ from services.api.routers import (
 from services.api.routers import (
     verdyx as verdyx_router,
 )
-from services.export.dataset import DpdpaRefusal
+from services.export.dataset import DpdpaRefusal, UnknownExportFormat
 
 log = get_logger("api")
 
@@ -300,6 +300,14 @@ async def _dpdpa_handler(request, exc: DpdpaRefusal):
     # server fault: return 422 with the per-session blockers instead of letting it escape as a 500.
     payload = exc.args[0] if exc.args else {"detail": "DPDPA pre-sale gate refused export"}
     return JSONResponse(payload, status_code=422)
+
+
+@app.exception_handler(UnknownExportFormat)
+async def _unknown_format_handler(request, exc: UnknownExportFormat):
+    # Requesting a format no adapter implements is a client error, not a server fault. It used to be ignored
+    # silently, which shipped a commit claiming formats the archive never contained; now it is a 400 naming
+    # the unsupported target and the supported set.
+    return JSONResponse({"detail": str(exc)}, status_code=400)
 
 
 @app.get("/api/health")

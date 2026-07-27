@@ -10,30 +10,31 @@ import { useEffect, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
 import { HintBar } from "@/components/ui/kit";
 import { PLATFORMS_ORDERED, type Platform } from "@/platforms/registry";
+import { apiGet } from "@/lib/api";
 
 // a lightweight live-state probe per platform: {text, tone} or null
 async function probe(id: string): Promise<{ text: string; tone: string } | null> {
   try {
     if (id === "sanyx") {
-      const d = await fetch("/api/sanyx/board?limit=500").then((r) => r.json());
-      const q = (d.sessions ?? []).filter((s: { decision: string }) => s.decision === "quarantine").length;
+      const d = await apiGet<{ sessions?: { decision: string | null }[] }>("/api/sanyx/board?limit=500");
+      const q = (d.sessions ?? []).filter((s) => s.decision === "quarantine").length;
       const run = (d.sessions ?? []).filter((s: { decision: string | null }) => s.decision).length;
       return { text: `${run} scored · ${q} quarantined`, tone: q ? "warn" : "pass" };
     }
     if (id === "sievyx") {
-      const d = await fetch("/api/sievyx/composition?top_n=200").then((r) => r.json());
+      const d = await apiGet<{ n?: number }>("/api/sievyx/composition?top_n=200");
       return { text: `${d.n ?? 0} in priority window`, tone: "neutral" };
     }
     if (id === "oraclyx") {
-      const d = await fetch("/api/oraclyx/board").then((r) => r.json());
+      const d = await apiGet<{ total?: number }>("/api/oraclyx/board");
       return { text: `${d.total ?? 0} pseudo-labels`, tone: "neutral" };
     }
     if (id === "forgyx") {
-      const d = await fetch("/api/forgyx/benchmarks").then((r) => r.json());
+      const d = await apiGet<{ benchmarks?: unknown[] }>("/api/forgyx/benchmarks");
       return { text: `${(d.benchmarks ?? []).length} benchmarks`, tone: "neutral" };
     }
     if (id === "verdyx") {
-      const d = await fetch("/api/verdyx/pairs").then((r) => r.json());
+      const d = await apiGet<{ pairs?: { verdict: string }[] }>("/api/verdyx/pairs");
       const rej = (d.pairs ?? []).filter((p: { verdict: string }) => p.verdict === "reject").length;
       return { text: `${(d.pairs ?? []).length} verdicts · ${rej} reject`, tone: rej ? "block" : "neutral" };
     }
@@ -75,7 +76,7 @@ function Tile({ p }: { p: Platform }) {
 export default function PlatformLauncher() {
   const [inSync, setInSync] = useState<boolean | null>(null);
   useEffect(() => {
-    fetch("/api/platforms").then((r) => r.json()).then((d) => {
+    apiGet<{ platforms?: { id: string }[] }>("/api/platforms").then((d) => {
       const ids = (d.platforms ?? []).map((p: { id: string }) => p.id);
       setInSync(PLATFORMS_ORDERED.every((p) => ids.includes(p.id)));
     }).catch(() => setInSync(false));

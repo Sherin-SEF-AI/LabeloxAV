@@ -219,6 +219,17 @@ async function del<T>(path: string): Promise<T> {
   }
 }
 
+// The auth-aware request primitives, exported so no page has to hand-roll a bare fetch. A raw
+// fetch("/api/...") sends no Authorization header, so under the deny-by-default read gate it 401s and (when
+// the caller swallows the error) renders a silently blank page. Every data call must go through these.
+// The deliberate exceptions are the credential-bootstrap paths that cannot carry a token yet: the login page,
+// AuthBootstrap, and the refresh call in lib/user.ts.
+export const apiGet = get;
+export const apiPost = post;
+export const apiPut = put;
+export const apiPatch = patch;
+export const apiDelete = del;
+
 // SAM segment supports point prompts (with fg/bg labels) and/or a box prompt. Returns 503 if a
 // training job holds the GPU; callers surface that as a non-blocking notice.
 export type SegmentPrompt = { points?: number[][]; labels?: number[]; box?: number[]; precise?: boolean };

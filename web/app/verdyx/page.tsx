@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
+import { apiGet } from "@/lib/api";
 
 type Row = { slice: string; champion: number | null; challenger: number | null; delta: number | null; state: string };
 const STATE: Record<string, string> = { better: "text-pass", worse: "text-block", same: "text-ink-3" };
@@ -20,13 +21,13 @@ export default function VerdyxMatrix() {
   const load = useCallback(async () => {
     if (!champion || !challenger) return;
     setErr(null);
-    const r = await fetch(`/api/verdyx/matrix?champion=${encodeURIComponent(champion)}&challenger=${encodeURIComponent(challenger)}`).then((x) => x.json());
+    const r = await apiGet<{ error?: string; rows?: Row[] }>(`/api/verdyx/matrix?champion=${encodeURIComponent(champion)}&challenger=${encodeURIComponent(challenger)}`);
     if (r.error) { setErr(r.error); setRows(null); } else setRows(r.rows ?? []);
   }, [champion, challenger]);
 
   // prefill from a real evaluated pair and compare immediately, so the matrix is populated out of the box
   useEffect(() => {
-    fetch("/api/verdyx/pairs").then((r) => r.json()).then((d) => {
+    apiGet<{ pairs?: { champion: string; challenger: string }[] }>("/api/verdyx/pairs").then((d) => {
       const pair = (d.pairs ?? [])[0];
       if (pair) { setChampion(pair.champion); setChallenger(pair.challenger); }
     }).catch(() => {});
