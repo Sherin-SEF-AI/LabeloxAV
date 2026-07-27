@@ -5,7 +5,7 @@ gate stays in services/govern/champion and consumes these verdicts. Mounted unde
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Evaluation
 from services.api.deps import db_session
 from services.verdyx.run import matrix, record_evaluation
-from services.verdyx.safety_recall import critical_object_recall, near_miss_slice, ttc_weighted_recall
+from services.verdyx.safety_recall import (
+    critical_object_recall,
+    near_miss_slice,
+    ttc_weighted_recall,
+)
 from services.verdyx.shadow import regression_triage
 from services.verdyx.stats import bootstrap_ci, paired_significance
 
@@ -79,7 +83,11 @@ async def shadow_triage(payload: TriageIn):
 class EvalIn(BaseModel):
     model_version: str
     aggregate: dict                 # {map50, map, precision, recall, safe_miou}
-    per_slice: dict                 # {slice_id: {map, precision, recall}}
+    # Per-slice metrics are COMPUTED from the prediction plane when run_id is given (the trustworthy path).
+    # Supplying them directly is retained only for backfilling a historical evaluation, and is recorded as
+    # caller-supplied so a hand-typed number is never mistaken for a measured one.
+    per_slice: dict | None = None
+    run_id: str | None = None       # the InferenceRun to score; with gold_id this computes per_slice
     challenger_of: str | None = None
     release_commit: str | None = None
     gold_id: str | None = None
@@ -88,10 +96,34 @@ class EvalIn(BaseModel):
 
 @router.post("/verdyx/evaluate")
 async def evaluate(payload: EvalIn, db: AsyncSession = Depends(db_session)):
-    """Record a per-slice evaluation and compute the protected-slice verdict governance consumes."""
-    return await record_evaluation(db, payload.model_version, payload.aggregate, payload.per_slice,
-                                   challenger_of=payload.challenger_of, release_commit=payload.release_commit,
-                                   gold_id=payload.gold_id, protected=payload.protected)
+    """Record a per-slice evaluation and compute the protected-slice verdict governance consumes.
+
+    Given run_id + gold_id the slice metrics are computed here from the immutable prediction plane, so the
+    safety gate reads numbers derived from the model it is judging. Previously per_slice arrived in the
+    request body and nothing in the tree produced it, which made the protected-slice gate only as trustworthy
+    as the JSON someone typed.
+    """
+    per_slice = payload.per_slice or {}
+    source = "caller_supplied"
+    if payload.run_id and payload.gold_id:
+        from services.verdyx.slice_eval import compute_slice_metrics
+
+        computed = await compute_slice_metrics(db, payload.gold_id, run_id=payload.run_id,
+                                               slice_ids=payload.protected)
+        if "error" in computed:
+            raise HTTPException(status_code=400, detail=computed["error"])
+        per_slice, source = computed, "computed_from_prediction_plane"
+    elif not per_slice:
+        raise HTTPException(
+            status_code=400,
+            detail="supply run_id + gold_id to compute per-slice metrics, or per_slice to backfill one")
+
+    result = await record_evaluation(db, payload.model_version, payload.aggregate, per_slice,
+                                     challenger_of=payload.challenger_of,
+                                     release_commit=payload.release_commit,
+                                     gold_id=payload.gold_id, protected=payload.protected)
+    result["per_slice_source"] = source
+    return result
 
 
 @router.get("/verdyx/pairs")
