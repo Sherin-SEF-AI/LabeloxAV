@@ -4,8 +4,7 @@ A four-part audit (backend, frontend, ML pipeline, ops and enterprise) produced 
 tracks. It records what is fixed, what is not, and for each open item what specifically is needed. Nothing
 here is marked done unless there is a test that fails without the fix.
 
-Commits: `61f618d`, `03320b6`, `35151be`, `4994abc`, `02a1cf8`, `c438bb7`, `e65760e`.
-Suite at the time of writing: 951 passing, 4 xfailed, failures limited to `tests/KNOWN_FAILURES.md`.
+Suite at the time of writing: 1039 passing, 4 xfailed, failures limited to `tests/KNOWN_FAILURES.md`.
 
 ---
 
@@ -41,6 +40,21 @@ Suite at the time of writing: 951 passing, 4 xfailed, failures limited to `tests
 | `GET /users` was unbounded and ran a full review-table aggregation on every page mount | Paginated with a ceiling, envelope with total, aggregation scoped to the returned users | `tests/test_editor_api.py` |
 | No error boundary anywhere: one render throw white-screened the app | `error.tsx`, `global-error.tsx`, `not-found.tsx` | (build-verified) |
 | The runbook told operators to compare against a baseline that did not exist | `tests/KNOWN_FAILURES.md` plus a test that keeps it accurate | `tests/test_known_failures.py` |
+
+### Capability gaps closed
+
+| Gap | Fix | Test |
+| --- | --- | --- |
+| Evaluation was 2D-box only: masks, cuboids, tracks, and lanes could be labelled but never scored | Mask AP plus a boundary F1 (IoU is dominated by an object's interior, so a mask can score well while tracing badly), 3D and BEV AP with translation and orientation error, MOTA/IDF1/HOTA, and CULane-style lane F1. All four matchers mirror the box matcher so the numbers are comparable | `tests/test_eval_metrics.py` |
+| Training had one task plugin, so masks and keypoints could never improve a model | `SegmentationTask` and `PoseTask`, each gating on its own metric rather than the box number and starting from a head-appropriate checkpoint | `tests/test_training_tasks.py` |
+| No hyperparameter search of any kind | Grid and random sweeps over ordinary training jobs, capped with truncation reported, ranked with unscored trials excluded rather than scored zero | `tests/test_training_sweep.py` |
+| A crashed run restarted at epoch zero, discarding every epoch already paid for | Resumes from its checkpoint, and the resume is recorded on the job | same |
+| Only the latest metric point was kept, so a run's shape was unreadable afterwards | The whole curve is retained, bounded | same |
+| No realtime anywhere: nine polling loops, and ingest progress scraped from a log file with a regex | Server-sent events push on change; the browser cannot set a header on EventSource, so a token in the query string is accepted for `/api/events/` alone and nowhere else | `tests/test_sse_events.py` |
+| Editor had no multi-select, so every batch action went through the agent bar | `selectedIds` alongside `selectedId`, so single-object panels keep working; bulk hide, lock, and delete | `web/components/editor/useEditor.test.ts` |
+| Per-object visibility was honoured by the canvas but hardcoded true with no UI, and hiding marked the object dirty | Eye and lock controls; visibility no longer queues a save or consumes an undo step | same |
+| The editor was strictly frame-at-a-time, so every temporal judgement was a sequence of blind single steps | A filmstrip of neighbouring frames from the same camera, counts fetched in one query | endpoint verified against the corpus |
+| Retention was computed and never enforced; `retention_until` could not even be set through the API | A sweep and a single-subject erasure that removes frames, annotations, audits, and blobs, both defaulting to a dry run, each returning a tamper-evident certificate | `tests/test_retention_erasure.py` |
 
 ### Reachability and round-trips
 
@@ -88,16 +102,16 @@ ingest.
 
 | Gap | What it needs |
 | --- | --- |
-| Training supports detection only | A `SegmentationTask` (masks exist and export already), then classification, pose, lane, and 3D plugins. Each needs its own dataset builder and its own eval. |
-| No segmentation, lane, 3D, or tracking evaluation metrics | Mask IoU and mask AP (the Triton kernel exists and is unused by eval), lane F1 at distance, 3D and BEV AP, and MOTA/IDF1/HOTA. `services/verdyx/track_metrics.py` implements three tracking statistics and has zero callers; wiring it needs gold with guaranteed track ids, which the gold sealer does not currently guarantee. |
-| No HPO, no resume from checkpoint, no experiment tracking | A sweep job type over child jobs; `resume=True` plus checkpoint discovery on orphan restart; a wandb or mlflow integration. |
+| Classification, lane, and 3D training plugins | Detection, segmentation, and pose are done. These three need their own dataset builders; the 3D one additionally needs the learned detector above. |
+| Experiment tracking (wandb or mlflow) | The metric curve is now persisted per job, which covers reading a run back; an external tracker is still absent. |
+| Tracking metrics are not yet wired to a gold set | The metrics exist and are tested, but scoring a real tracker needs gold with guaranteed track ids, which the gold sealer does not currently produce. |
 | Masks, lanes, drivable surfaces, and HD-map elements cannot leave the system in any format | Export adapters for each. The 3D exporter exists but no UI calls it. |
 | Exports are fully buffered in memory inside the API process | Chunked writing and a streaming response. |
-| Editor has no multi-select, no per-object hide/lock wiring, no video filmstrip | Multi-select is a state change from `selectedId` to a set, plus marquee selection and bulk operations. Hide/lock is wired in the canvas already and needs only UI. |
+| Canvas marquee selection | Multi-select, bulk actions, hide, lock, and the filmstrip are done. Dragging a rubber-band box on the canvas itself (as opposed to selecting from the object list) is still outstanding. |
 | Active learning cannot select frames the detector missed entirely | Candidates come from existing `Object` rows, so a false-negative frame is unreachable. Needs a frame-level candidate source. |
 | Per-session pack routing is deferred, so multi-domain is architecture rather than behaviour | Thread `Session.pack_id` through the `services/domain` helpers at every call site. |
-| No realtime anywhere; nine polling intervals stand in for it | An SSE endpoint for job and progress events plus an `EventSource` hook. |
-| Retention is computed and never enforced; no erasure workflow; no PII access log | `retention_until` is not settable through the API and no purge executor exists. Erasure needs a subject index and a cascade that covers object storage, not only database rows. |
+| The remaining eight polling loops | The stream and the hook exist and the jobs page uses them; the other pages still poll. |
+| No PII access log | Retention and erasure are done. Recording who viewed personal data (as opposed to what the redactor detected) is still absent. |
 
 ### Requires a product decision before implementation
 
