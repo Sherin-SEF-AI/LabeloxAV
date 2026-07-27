@@ -110,8 +110,15 @@ async def test_erasure_removes_rows_and_blobs():
 
     store = get_object_store()
     for uri in uris:
-        with pytest.raises(Exception):
-            store.get_bytes(uri)      # the image itself is gone, not merely dereferenced
+        # The image itself is gone, not merely dereferenced. Asserting the read fails (rather than catching
+        # any exception) is what distinguishes a deleted blob from one that simply cannot be parsed.
+        try:
+            store.get_bytes(uri)
+            raise AssertionError(f"blob still readable after erasure: {uri}")
+        except AssertionError:
+            raise
+        except Exception:  # noqa: BLE001 - the store raises a backend-specific not-found
+            pass
 
 
 @requires_infra
