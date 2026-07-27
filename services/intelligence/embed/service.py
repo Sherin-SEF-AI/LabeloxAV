@@ -96,9 +96,14 @@ async def embed_objects(session_id: UUID | None = None, limit: int | None = None
         if not crops:
             continue
         dvecs = dinov3.encode_images(crops)
+        # SigLIP2 alongside DINOv3: DINOv3 is the stronger pure-visual space (find-similar, dedup), but it
+        # has no text tower, so a crop embedded only with it can never be retrieved by a phrase. Encoding
+        # both here is what makes text-to-object search possible, and both come from one crop decode.
+        svecs = siglip2.encode_images(crops)
         async with maker() as db:
-            for oid, dv in zip(oids, dvecs, strict=False):
-                await db.merge(ObjectEmbedding(object_id=oid, dino_vec=dv.tolist(), model_versions=mv))
+            for oid, dv, sv in zip(oids, dvecs, svecs, strict=False):
+                await db.merge(ObjectEmbedding(object_id=oid, dino_vec=dv.tolist(),
+                                               siglip_vec=sv.tolist(), model_versions=mv))
             await db.commit()
         n += len(oids)
         log.info("embed.objects.progress", embedded=n, total=len(rows))

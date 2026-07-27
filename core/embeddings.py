@@ -73,6 +73,53 @@ async def object_neighbors(
     return [(str(oid), 1.0 - float(d)) for oid, d in rows]
 
 
+async def object_neighbors_by_text(
+    db: AsyncSession, query_text: str, *, k: int = 24, class_id: int | None = None,
+    session_id: UUID | None = None, min_sim: float | None = None,
+) -> list[tuple[str, float]]:
+    """Top-k object crops matching a text query, through the shared SigLIP2 image-text space.
+
+    This is the query the crop plane could not answer before: ObjectEmbedding carried only a DINOv3 vector,
+    and DINOv3 has no text tower, so a phrase could retrieve whole frames but never the objects inside them.
+    SigLIP2 embeds images and text into one space, so a text vector and a crop vector are directly comparable
+    and the search is one ANN query rather than a frame search followed by manual inspection.
+
+    Crops whose siglip_vec has not been backfilled yet are skipped rather than treated as distant: a null is
+    an absence of evidence, and ranking it as a poor match would push genuinely unembedded objects to the
+    bottom as though they had been considered.
+    """
+    from services.intelligence.embed import siglip2
+
+    await _tune_recall(db)
+    vec = _prompt_vector(query_text, siglip2)
+    dist = ObjectEmbedding.siglip_vec.cosine_distance(vec).label("d")
+    stmt = select(ObjectEmbedding.object_id, dist).where(ObjectEmbedding.siglip_vec.isnot(None))
+    if class_id is not None or session_id is not None:
+        stmt = stmt.join(Object, Object.object_id == ObjectEmbedding.object_id)
+        if class_id is not None:
+            stmt = stmt.where(Object.class_id == class_id)
+        if session_id is not None:
+            stmt = stmt.join(Frame, Frame.frame_id == Object.frame_id).where(Frame.session_id == session_id)
+    rows = (await db.execute(stmt.order_by(dist).limit(k))).all()
+    hits = [(str(oid), 1.0 - float(d)) for oid, d in rows]
+    # No similarity floor by default: "the k nearest" should return k. An implicit floor silently returns
+    # fewer than asked for, which reads as "nothing else matched" when really the caller was never told.
+    # A caller that wants a floor sets one.
+    return hits if min_sim is None else [h for h in hits if h[1] >= min_sim]
+
+
+def _prompt_vector(query_text: str, siglip2) -> list[float]:
+    """Encode a query with the caption-style prompt SigLIP was trained on.
+
+    A bare noun phrase sits off the distribution of the captions the model saw, and the standard remedy
+    (used already by the crop classifier) is to wrap it in a caption template. Doing it here too keeps
+    text-to-object retrieval consistent with text-to-frame and measurably improves ranking on short queries.
+    """
+    text = query_text.strip()
+    prompt = text if text.lower().startswith(("a photo", "a picture")) else f"a photo of {text}"
+    return [float(x) for x in siglip2.encode_text(prompt)]
+
+
 async def object_candidates(
     db: AsyncSession, query_vec, *, k: int = 200, class_id: int | None = None,
     exclude_object_id: UUID | None = None, session_id: UUID | None = None,

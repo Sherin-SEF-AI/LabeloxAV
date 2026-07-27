@@ -152,15 +152,28 @@ async def _decorate(db: AsyncSession, ids: list[UUID], scores: dict[UUID, float]
     return out
 
 
-async def search_objects_by_text(db: AsyncSession, query: str, limit: int = 24, session_id: str | None = None) -> list[dict]:
-    ids, mat = await _load_matrix(db, session_id)
-    if not ids:
+async def search_objects_by_text(db: AsyncSession, query: str, limit: int = 24,
+                                 session_id: str | None = None) -> list[dict]:
+    """Find object crops matching a phrase, through the indexed SigLIP2 image-text space.
+
+    This used to load the entire legacy CLIP `Embedding` table into memory and cosine it in Python. That table
+    is no longer populated by the pipeline (see similar_objects below, which was moved off it for the same
+    reason), so the search quietly returned nothing on a live corpus, and even when populated it was a full
+    scan rather than an index lookup.
+
+    It now runs as a pgvector ANN query over ObjectEmbedding.siglip_vec, which is the same plane find-similar
+    uses and is backfilled by the embedding daemon. Crops not yet embedded are skipped rather than ranked, so
+    an unembedded object is absent rather than appearing as a poor match.
+    """
+    from core.embeddings import object_neighbors_by_text
+
+    hits = await object_neighbors_by_text(
+        db, query, k=limit, session_id=UUID(session_id) if session_id else None)
+    if not hits:
         return []
-    q = encode_text(query)
-    top = cosine_topk(q, mat, limit)
-    chosen = [ids[i] for i, _ in top]
-    scores = {ids[i]: s for i, s in top}
-    return await _decorate(db, chosen, scores)
+    ids = [UUID(oid) for oid, _ in hits]
+    scores = {UUID(oid): float(sim) for oid, sim in hits}
+    return await _decorate(db, ids, scores)
 
 
 async def similar_objects(db: AsyncSession, object_id: str, limit: int = 12,
