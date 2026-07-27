@@ -25,11 +25,32 @@ log = get_logger("train_worker")
 
 
 async def _reset_orphans() -> None:
+    """Return crashed runs to the queue, marked so they resume instead of restarting.
+
+    A job left `running` by a crash was simply flipped back to `pending`, which discarded every epoch already
+    paid for and restarted at zero. Ultralytics writes a `last.pt` each epoch, so the work is on disk; the
+    flag tells the task to hand `resume=True` to the trainer and pick it up. It is recorded on the job rather
+    than inferred at train time so the history shows a run was resumed, which matters when reading its curve.
+    """
+    from core.config import get_settings
+
+    resume = get_settings().training.resume_orphaned_runs
     async with get_sessionmaker()() as db:
-        res = await db.execute(update(TrainingJob).where(TrainingJob.status == "running").values(status="pending"))
+        rows = (await db.execute(
+            select(TrainingJob).where(TrainingJob.status == "running"))).scalars().all()
+        for j in rows:
+            j.status = "pending"
+            if resume:
+                # hparams live inside the stored TrainJobSpec (job.config), not a column of their own.
+                cfg = dict(j.config or {})
+                h = dict(cfg.get("hparams") or {})
+                h["resume"] = True
+                h["resumed_count"] = int(h.get("resumed_count", 0)) + 1
+                cfg["hparams"] = h
+                j.config = cfg
         await db.commit()
-        if res.rowcount:
-            log.info("worker.reset_orphans", n=res.rowcount)
+        if rows:
+            log.info("worker.reset_orphans", n=len(rows), resume=resume)
 
 
 async def _claim() -> str | None:

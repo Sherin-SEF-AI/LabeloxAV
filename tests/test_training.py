@@ -98,13 +98,21 @@ async def test_cloud_job_not_claimed_by_local_worker():
     local_id = await enqueue_job(TrainJobSpec(purpose="local-test-line", compute_target="local",
                                               dataset_spec={"limit": 5}))
     claimed = await _claim()
-    assert claimed == local_id  # the local worker skips the cloud job, claims the local one
+    # The claim is oldest-first over a shared test database that earlier runs also enqueue into, so the job
+    # claimed here is not necessarily the one just created. What this test is actually about is that the
+    # cloud job is never the one claimed and that whatever is claimed is a local job.
+    assert claimed is not None and claimed != cloud_id
+    async with get_sessionmaker()() as db:
+        claimed_job = await db.get(TrainingJob, uuid.UUID(claimed))
+        assert claimed_job.compute_target == "local"
+    assert local_id is not None
 
     async with get_sessionmaker()() as db:
         cj = await db.get(TrainingJob, uuid.UUID(cloud_id))
         assert cj.status == "pending"  # cloud job untouched by the local worker
-        # cleanup
-        for jid in (cloud_id, local_id):
+        # cleanup, including whatever was actually claimed: a job left `running` makes the autolabel
+        # endpoints return 503 ("GPU reserved for a training job") for every later test in the suite.
+        for jid in (cloud_id, local_id, claimed):
             row = await db.get(TrainingJob, uuid.UUID(jid))
             if row:
                 await db.delete(row)

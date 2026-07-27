@@ -9,6 +9,7 @@ import csv
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from core.config import get_settings
@@ -56,12 +57,54 @@ async def tasks():
     return list_tasks()
 
 
+class SweepIn(BaseModel):
+    name: str = "sweep"
+    space: dict[str, list] = Field(default_factory=dict)   # {"epochs": [10,20], "imgsz": [640,960]}
+    method: str = "grid"                                    # grid | random
+    max_trials: int = 16
+    seed: int = 7
+    base: dict = Field(default_factory=dict)                # shared TrainJobSpec payload
+
+
+@router.post("/training/sweep")
+async def start_sweep_endpoint(payload: SweepIn, user=Depends(current_user)):
+    """Enqueue one training job per hyperparameter point.
+
+    Trials are ordinary training jobs so they inherit gating, cancellation, and progress. None of them
+    auto-promote: the winner has to be chosen by comparing trials, and promoting whichever finished first
+    would make that a function of scheduling order.
+    """
+    from services.training.sweep import start_sweep
+
+    try:
+        get_task((payload.base or {}).get("task_type", "detection"))
+        return await start_sweep(name=payload.name, space=payload.space, base=payload.base,
+                                 method=payload.method, max_trials=payload.max_trials, seed=payload.seed)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/training/sweep/{name}")
+async def sweep_status(name: str, metric: str = "map50"):
+    """The ranking for a sweep, with an honest count of trials that produced no metric."""
+    from services.training.sweep import summarize_sweep
+
+    async with get_sessionmaker()() as db:
+        rows = (await db.execute(
+            select(TrainingJob).where(TrainingJob.notes.like(f"sweep '{name}' %"))
+            .order_by(TrainingJob.created_at))).scalars().all()
+    results = [{"job_id": str(j.job_id), "status": j.status, "hparams": j.hparams or {},
+                "metrics": j.metrics or {}} for j in rows]
+    return {"sweep": name, **summarize_sweep(results, metric),
+            "trials_detail": [{"job_id": r["job_id"], "status": r["status"]} for r in results]}
+
+
 @router.post("/training/start")
 async def start(payload: TrainingStartIn, user=Depends(current_user)):
     try:
         get_task(payload.task_type)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     spec = payload.model_dump()
     # C7: auto-promotion is a governance action (equivalent to /govern/promote, which is admin-only). A
     # reviewer may enqueue training, but only an admin may request that its result promote a champion.

@@ -362,6 +362,14 @@ class TrainingSettings(BaseModel):
     default_batch: int = 12
     advisory_lock_key: int = 815  # Postgres advisory-lock id used as the GPU mutex across processes
     vram_required_mb: int = 4000  # preflight floor before a train starts (small jobs need ~3-4 GB)
+    # Task-specific base checkpoints. A segmentation or pose run must start from a checkpoint that already
+    # has the right head: fine-tuning a detection checkpoint would train a mask or keypoint head from
+    # scratch, which needs far more data than a corpus of human-corrected labels typically holds.
+    segmentation_weights: str = "yolo11n-seg.pt"
+    pose_weights: str = "yolo11n-pose.pt"
+    # A crashed run resumes from its last checkpoint instead of restarting at epoch 0. The worker resets an
+    # orphaned job to pending; without this that discarded every epoch already paid for.
+    resume_orphaned_runs: bool = True
 
 
 class CloudSettings(BaseModel):

@@ -96,6 +96,15 @@ async def _apply_progress(job_id, d: dict) -> None:
         if "metrics" in d:
             m = dict(j.metrics or {})
             m["live"] = d["metrics"]
+            # Keep the whole curve, not only the latest point. Only the last epoch was retained, so the
+            # shape of a run (early plateau, late collapse, the epoch a metric peaked) was unreadable
+            # afterwards without parsing ultralytics' CSV off disk, which does not survive a cleanup.
+            curve = list(m.get("curve") or [])
+            if "epoch" in d:
+                curve.append({"epoch": d["epoch"], **d["metrics"]})
+                # Bound it: a long sweep should not grow a row without limit. The last 500 epochs is far
+                # more than any run here, and dropping from the front keeps the recent shape.
+                m["curve"] = curve[-500:]
             j.metrics = m
         await db.commit()
 
