@@ -299,6 +299,10 @@ class User(Base):
     user_id: Mapped[uuid.UUID] = _uuid_pk()
     name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="annotator")  # admin|reviewer|annotator
+    # Per-user token revocation with no session store: every token carries this version, and the verifier
+    # rejects a token whose version does not match. Incrementing it invalidates every token for this user at
+    # once, without rotating the global signing key (which would log out everyone).
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -429,7 +433,13 @@ class EvalPatch(Base):
     patch_id: Mapped[uuid.UUID] = _uuid_pk()
     eval_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)  # one evaluation run
     gold_id: Mapped[str | None] = mapped_column(String(128))       # the sealed gold set it scored against
+    # model_version is now derived from the InferenceRun the patch was scored against, never caller-supplied
+    # (a caller-supplied version was the misattribution source: it named a model the scored rows never came from).
     model_version: Mapped[str | None] = mapped_column(String(128))
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("inference_run.run_id", ondelete="CASCADE"))
+    # A false positive / true positive patch is now a Prediction row; a false negative is the missed gold Object.
+    prediction_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("prediction.prediction_id", ondelete="CASCADE"))
     object_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("object.object_id", ondelete="CASCADE"))
     frame_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
@@ -443,6 +453,65 @@ class EvalPatch(Base):
     __table_args__ = (
         Index("ix_eval_patch_eval", "eval_id"),
         Index("ix_eval_patch_cell", "eval_id", "gt_class_id", "pred_class_id"),
+    )
+
+
+class InferenceRun(Base):
+    """The immutable prediction plane (measurement spine). A named model scores a set of frames ONCE, and every
+    detection it produced is persisted verbatim under this run. This exists because the old harness drew
+    "predictions" from live corpus rows (Object.source in the machine sources); but human review mutates that
+    row in place (source becomes "human"), so every correct detection a human confirmed was erased from the
+    prediction population, and eval scored only the residue humans rejected. Predictions must therefore live in
+    their own append-only plane that review never touches: inference writes Prediction rows, review writes
+    Object rows, and the two never share a row. A run is keyed by (model_version, gold_id, code_sha, params)
+    so the same evaluation is reproducible and de-duplicated rather than recomputed against drifting state."""
+
+    __tablename__ = "inference_run"
+
+    run_id: Mapped[uuid.UUID] = _uuid_pk()
+    model_version: Mapped[str] = mapped_column(
+        String(128), ForeignKey("model_registry.model_version", ondelete="CASCADE"), nullable=False)
+    gold_id: Mapped[str | None] = mapped_column(String(128))   # set when the run scores a sealed gold set
+    frame_count: Mapped[int] = mapped_column(Integer, default=0)
+    params: Mapped[dict] = mapped_column(JSONB, default=dict)   # imgsz, conf_floor, nms_iou, device, pack_id, ontology_version
+    code_sha: Mapped[str | None] = mapped_column(String(40))    # git sha of the tree that produced the run
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")  # running | complete | failed
+
+    __table_args__ = (Index("ix_inference_run_model_gold", "model_version", "gold_id"),)
+
+
+class Prediction(Base):
+    """One raw model detection under an InferenceRun. Append-only: the hard invariant is that no code path
+    outside the inference writer (services/verdyx/inference_run.py) may UPDATE or DELETE a Prediction row.
+    Human review never writes here; it writes Object. Keeping the full raw score (conf, unthresholded) is
+    deliberate: evaluation needs the whole distribution to compute a PR curve and pick an operating point, so
+    inference runs at a low conf floor and gating happens at scoring time, not at inference time."""
+
+    __tablename__ = "prediction"
+
+    prediction_id: Mapped[uuid.UUID] = _uuid_pk()
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("inference_run.run_id", ondelete="CASCADE"), nullable=False)
+    frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"), nullable=False)
+    class_id: Mapped[int] = mapped_column(ForeignKey("ontology_class.id"), nullable=False)
+    bbox: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)  # xyxy pixel, same as Object.bbox
+    # Raw model score. Nullable ONLY for a reconstructed run (predictions backfilled from review history, where
+    # the original confidence was never captured); a real inference run always writes it. A null conf makes a
+    # PR curve / AP uncomputable, which is exactly why the eval refuses AP for a reconstructed run.
+    conf: Mapped[float | None] = mapped_column(Float)
+    conf_calibrated: Mapped[float | None] = mapped_column(Float)             # post-isotonic, when calibrated
+    rot_deg: Mapped[float] = mapped_column(Float, default=0.0)
+    mask_uri: Mapped[str | None] = mapped_column(Text)
+    mask_encoding: Mapped[str | None] = mapped_column(String(16))
+    cuboid_3d: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_prediction_run", "run_id"),
+        Index("ix_prediction_frame", "frame_id"),
+        Index("ix_prediction_run_frame", "run_id", "frame_id"),
     )
 
 

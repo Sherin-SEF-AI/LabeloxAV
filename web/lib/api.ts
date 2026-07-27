@@ -78,7 +78,7 @@ import type {
 
 // Same-origin: next.config rewrites /api/* to the FastAPI backend. Every request carries the current
 // user (X-Lbx-User-Id) for attribution.
-import { userHeaders } from "./user";
+import { userHeaders, refreshTokenIfNeeded } from "./user";
 import { begin, end } from "./progress";
 import { toast } from "./toast";
 
@@ -148,6 +148,7 @@ export function humanizeError(e: unknown): string {
 async function get<T>(path: string): Promise<T> {
   begin();
   try {
+    await refreshTokenIfNeeded();
     const r = await fetch(path, { cache: "no-store", headers: { ...userHeaders() } });
     if (!r.ok) return fail(r, "GET", path);
     return r.json();
@@ -159,6 +160,7 @@ async function get<T>(path: string): Promise<T> {
 async function post<T>(path: string, body: unknown): Promise<T> {
   begin();
   try {
+    await refreshTokenIfNeeded();
     const r = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...userHeaders() },
@@ -174,6 +176,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 async function put<T>(path: string, body: unknown): Promise<T> {
   begin();
   try {
+    await refreshTokenIfNeeded();
     const r = await fetch(path, {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...userHeaders() },
@@ -191,6 +194,7 @@ async function put<T>(path: string, body: unknown): Promise<T> {
 async function patch<T>(path: string, body: unknown): Promise<T> {
   begin();
   try {
+    await refreshTokenIfNeeded();
     const r = await fetch(path, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...userHeaders() },
@@ -206,6 +210,7 @@ async function patch<T>(path: string, body: unknown): Promise<T> {
 async function del<T>(path: string): Promise<T> {
   begin();
   try {
+    await refreshTokenIfNeeded();
     const r = await fetch(path, { method: "DELETE", headers: { ...userHeaders() } });
     if (!r.ok) return fail(r, "DELETE", path);
     return r.json();

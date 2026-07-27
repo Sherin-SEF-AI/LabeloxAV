@@ -146,21 +146,41 @@ async def save_view(payload: ViewIn, _user=Depends(require_role("annotator"))):
 
 class EvalIn(BaseModel):
     gold_id: str
-    pred_sources: list[str] | None = None
+    run_id: str | None = None            # score an existing inference run
+    model_version: str | None = None     # or run inference for this model, then score it
     iou_thr: float = 0.5
-    model_version: str | None = None
+    score_thr: float = 0.0
 
 
 @router.post("/explore/eval")
 async def run_eval(payload: EvalIn, _user=Depends(require_role("reviewer")),
                    db: AsyncSession = Depends(db_session)):
-    """Score machine labels against a sealed gold set, recording every individual tp/fp/fn so the confusion
-    matrix can be opened cell by cell."""
+    """Score an inference run against a sealed gold set, recording every individual tp/fp/fn so the confusion
+    matrix can be opened cell by cell. Predictions come from the immutable prediction plane, never live corpus
+    state. Pass a run_id to score an existing run, or a model_version to run inference on the gold set first."""
     from services.analytics import evaluation as eval_svc
 
+    run_id = payload.run_id
+    if run_id is None:
+        if not payload.model_version:
+            raise HTTPException(400, "run_id or model_version is required")
+        from services.verdyx.inference_run import run_inference_on_gold
+
+        run_id = await run_inference_on_gold(db, payload.model_version, payload.gold_id)
+        if run_id is None:
+            raise HTTPException(400, "inference produced no run (model weights unavailable)")
     return await eval_svc.evaluate_gold_patches(
-        db, payload.gold_id, pred_sources=payload.pred_sources,
-        iou_thr=payload.iou_thr, model_version=payload.model_version)
+        db, payload.gold_id, run_id=run_id, iou_thr=payload.iou_thr, score_thr=payload.score_thr)
+
+
+@router.get("/explore/gold/{gold_id}/provenance")
+async def gold_provenance(gold_id: str, _user=Depends(require_role("reviewer")),
+                          db: AsyncSession = Depends(db_session)):
+    """The confirmed-detection vs drawn-from-scratch split of a gold set, so the eval UI never again conflates
+    a model miss with a detection a human simply confirmed."""
+    from services.analytics import evaluation as eval_svc
+
+    return await eval_svc.gold_provenance_report(db, gold_id)
 
 
 @router.get("/explore/evals")

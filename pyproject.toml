@@ -83,6 +83,7 @@ lbx-export = "services.export.dataset:main"
 lbx-import = "services.imports.run:main"
 lbx-gold = "services.training.gold:main"
 lbx-train-worker = "services.training.worker:main"
+lbx-infer = "services.verdyx.inference_run:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -107,6 +108,15 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
+# Test tiers, so the fast pure-unit set can be run without infra. A test that needs a real Postgres/MinIO is
+# marked `db`, one that needs a GPU or model weights `gpu`, and one that reaches Redis or other services
+# `infra`. `make test-unit` deselects all three. Most of the suite is already infra-gated with a runtime
+# skipif; the markers make the same intent declarative and selectable.
+markers = [
+    "db: needs a real Postgres (and usually MinIO) database",
+    "gpu: needs a CUDA GPU or downloaded model weights",
+    "infra: needs Redis or another running service",
+]
 
 [tool.ruff]
 line-length = 100
@@ -115,3 +125,9 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI's dependency injection is expressed as Depends()/Query()/Header()/File() called in argument
+# defaults. That is the framework's sanctioned idiom, not the mutable-default-argument bug B008 targets, so it
+# is ignored on the API layer where those calls live. This is not lint debt; it is how FastAPI is written.
+"services/api/**" = ["B008"]

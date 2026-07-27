@@ -250,7 +250,7 @@ def test_eval_patches_capture_confusion_and_misses():
     prediction must be an fp with no gt class, and an unmatched gold object must be an fn."""
     import uuid as _uuid
 
-    from db.models import GoldSet, Object
+    from db.models import GoldSet, InferenceRun, ModelRegistry, Object, Prediction
     from db.session import get_sessionmaker
     from services.analytics.evaluation import (
         cell_patches,
@@ -274,24 +274,29 @@ def test_eval_patches_capture_confusion_and_misses():
                                object_ids=[str(o) for o in oids], n_objects=3, n_frames=1,
                                ontology_version="test"))
 
-                # Predictions on the same frame:
+                # Predictions on the same frame, in the immutable prediction plane under one inference run:
                 #  - exact overlap of gold[0] but WRONG class  -> off-diagonal confusion
                 #  - exact overlap of gold[1] with RIGHT class -> tp
                 #  - a box overlapping nothing                 -> fp
                 #  gold[2] gets no prediction                  -> fn
-                db.add(Object(object_id=_uuid.uuid4(), frame_id=_uuid.UUID(fid), class_id=cids[2],
-                              bbox=[0.0, 0.0, 5.0, 5.0], conf=0.9, source="fused", state="auto_accept",
-                              attrs={}, provenance={}))
-                db.add(Object(object_id=_uuid.uuid4(), frame_id=_uuid.UUID(fid), class_id=cids[1],
-                              bbox=[10.0, 0.0, 15.0, 5.0], conf=0.8, source="fused", state="auto_accept",
-                              attrs={}, provenance={}))
-                db.add(Object(object_id=_uuid.uuid4(), frame_id=_uuid.UUID(fid), class_id=cids[0],
-                              bbox=[500.0, 400.0, 520.0, 420.0], conf=0.7, source="fused",
-                              state="auto_accept", attrs={}, provenance={}))
+                model_v = f"m-explore-{_uuid.uuid4().hex[:8]}"
+                db.add(ModelRegistry(model_version=model_v, weights_uri="s3://w.pt"))
+                await db.flush()
+                run = InferenceRun(run_id=_uuid.uuid4(), model_version=model_v, gold_id=gold_id,
+                                   status="complete", params={"imgsz": 640})
+                db.add(run)
+                await db.flush()
+                run_id = str(run.run_id)
+                db.add(Prediction(run_id=run.run_id, frame_id=_uuid.UUID(fid), class_id=cids[2],
+                                  bbox=[0.0, 0.0, 5.0, 5.0], conf=0.9))
+                db.add(Prediction(run_id=run.run_id, frame_id=_uuid.UUID(fid), class_id=cids[1],
+                                  bbox=[10.0, 0.0, 15.0, 5.0], conf=0.8))
+                db.add(Prediction(run_id=run.run_id, frame_id=_uuid.UUID(fid), class_id=cids[0],
+                                  bbox=[500.0, 400.0, 520.0, 420.0], conf=0.7))
                 await db.commit()
 
             async with get_sessionmaker()() as db:
-                res = await evaluate_gold_patches(db, gold_id, iou_thr=0.5)
+                res = await evaluate_gold_patches(db, gold_id, run_id=run_id, iou_thr=0.5)
                 eval_id = res["eval_id"]
                 assert res["tp"] == 1, res
                 assert res["fn"] == 1, res
@@ -309,7 +314,8 @@ def test_eval_patches_capture_confusion_and_misses():
                 got = await cell_patches(db, eval_id, gt_class_id=cell["gt_class_id"],
                                          pred_class_id=cell["pred_class_id"])
                 assert got["count"] >= 1
-                assert got["patches"][0]["crop_url"].startswith("/api/objects/")
+                # the confusion patch is now a prediction, cropped from the prediction plane
+                assert got["patches"][0]["crop_url"].startswith("/api/predictions/")
 
                 # misses are recorded with no predicted class
                 misses = await cell_patches(db, eval_id, outcome="fn")

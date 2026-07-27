@@ -69,9 +69,12 @@ def _client():
     from fastapi.testclient import TestClient
 
     from services.api.main import app
+    from _authutil import auth_headers
 
     _clear_db_cache()
-    return TestClient(app)
+    c = TestClient(app)
+    c.headers.update(auth_headers("admin"))  # auth is on by default; drive the gated surface as an admin
+    return c
 
 
 @requires_infra
@@ -224,8 +227,10 @@ def test_users_and_attribution():
         assert u["role"] == "reviewer"
         assert c.post("/api/users", json={"name": uname}).status_code == 409  # duplicate name
         oid = c.post(f"/api/frames/{f1}/objects", json={"class_name": "sedan", "bbox": [1, 1, 5, 5]}).json()["object_id"]
-        # review AS this user via the header -> attributed to them
-        r = c.post(f"/api/objects/{oid}/review", json={"action": "reject"}, headers={"X-Lbx-User-Id": u["user_id"]})
+        # review AS this user via their own token -> attributed to them (the token identifies the actor; the
+        # client's default admin token is overridden for this one request by headers_for)
+        from _authutil import headers_for
+        r = c.post(f"/api/objects/{oid}/review", json={"action": "reject"}, headers=headers_for(u["user_id"]))
         assert r.status_code == 200
         users = {x["name"]: x for x in c.get("/api/users").json()}
         assert users[uname]["reviews"] >= 1

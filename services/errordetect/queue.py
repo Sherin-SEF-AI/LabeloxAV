@@ -81,7 +81,8 @@ async def confirm_error(db: AsyncSession, candidate_id: str, apply_proposed: boo
     if obj is None:
         return {"error": "object not found"}
 
-    before = {"class_id": obj.class_id, "state": obj.state, "source": obj.source}
+    before = {"class_id": obj.class_id, "state": obj.state, "source": obj.source,
+              "conf": obj.conf, "provenance": dict(obj.provenance or {})}
     if apply_proposed and c.proposed_label and c.proposed_label.get("class_id") is not None:
         obj.class_id = int(c.proposed_label["class_id"])
         obj.state, obj.source = "accepted", "human"

@@ -1,5 +1,13 @@
 """Persist fused + gated objects: masks to MinIO (polygon JSON), object rows to Postgres, and an
 object.gated event per object. The object row is the join hub for the provenance walk.
+
+Re-run idempotency decision (explicit): re-running autolabel on a frame clears not only the fused and
+auto_accept rows it produced last time, but also the interpolated / propagated / relabel rows DERIVED from
+that prior machine pass (track interpolation, cross-camera propagation, machine re-inference). Those are
+artifacts of a pass that no longer exists; keeping them leaves stale rows attributed to a model whose output
+was replaced, polluting every corpus count. They are re-derived by the propagate/interpolate pass over the new
+output, so clearing is safe. Human-reviewed objects (source='human') and recall candidates awaiting review are
+never touched.
 """
 
 from __future__ import annotations
@@ -24,7 +32,12 @@ log = get_logger("persist")
 
 # Re-running autolabel on a frame must replace only its own machine output, never human work. These are
 # the machine-written sources; an object a human has touched becomes source="human" and is preserved.
-_MACHINE_SOURCES = (ObjectSource.fused.value, ObjectSource.auto_accept.value)
+# Machine-derived rows cleared on an autolabel re-run (see the module docstring for the decision). The three
+# string sources are written by the interpolate/propagate/relabel passes and are not ObjectSource enum members.
+_MACHINE_SOURCES = (
+    ObjectSource.fused.value, ObjectSource.auto_accept.value,
+    "interpolated", "propagated", "relabel",
+)
 
 
 def _mask_key(session_id, frame_id, object_id) -> str:

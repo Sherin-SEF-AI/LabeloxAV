@@ -88,9 +88,12 @@ def _client():
     from fastapi.testclient import TestClient
 
     from services.api.main import app
+    from _authutil import auth_headers
 
     _clear_db_cache()
-    return TestClient(app)
+    c = TestClient(app)
+    c.headers.update(auth_headers("admin"))  # auth is on by default; drive the gated surface as an admin
+    return c
 
 
 @requires_infra

@@ -45,6 +45,20 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
     floor); it defaults to the configured phase4.recall."""
     if rcfg is None:
         rcfg = get_settings().phase4.recall
+
+    # Refuse untrustworthy metrics before any comparison. A reconstructed run has no real confidence
+    # distribution (its predictions were backfilled from review history), so its AP/PR are not computable and
+    # must never gate a promotion. Divergent harnesses (the val-pass and the prediction plane disagreeing on
+    # the same gold set beyond tolerance) is a measurement fault, not a result; fail closed on it.
+    if challenger.get("reconstructed"):
+        return {"promote": False, "beats_map": False, "map_delta": 0.0, "safe_ok": False, "safety_ok": False,
+                "regressed_safety": [], "recall_ok": False,
+                "reasons": ["challenger metrics are from a reconstructed run (no real inference); refused"]}
+    if challenger.get("harness_divergent"):
+        return {"promote": False, "beats_map": False, "map_delta": 0.0, "safe_ok": False, "safety_ok": False,
+                "regressed_safety": [], "recall_ok": False,
+                "reasons": ["the val-pass and prediction-plane harnesses diverge beyond tolerance; refused"]}
+
     map_c, map_ch = _map(challenger), _map(champion or {})
     beats_map = map_c >= map_ch + cfg.min_map_uplift
 

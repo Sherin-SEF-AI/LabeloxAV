@@ -99,14 +99,18 @@ def test_cuboid_crud_ground_snap_and_locking():
     from services.api.main import app
     from services.autolabel.ontology import get_ontology
 
+    from _authutil import auth_headers
+
     _clear()
     cloud_id, _ = asyncio.run(_seed_cloud())
+    admin_hdr = auth_headers("admin")              # seed the admin + mint the token before the TestClient loop
     _clear()                                       # rebuild the engine for the TestClient's event loop
     sedan = get_ontology().by_name("sedan").id
     try:
         # the context-manager form holds one event loop across every request (else the async engine binds
         # to a per-request loop that is closed by the next request)
         with TestClient(app) as c:
+            c.headers.update(admin_hdr)            # auth on by default; drive the gated surface as admin
             created = c.post(f"/api/lidar/clouds/{cloud_id}/objects3d", json={
                 "class_id": sedan, "center": [12.0, 0.0, 9.0], "dims": [4.0, 1.8, 1.5], "yaw": 0.3,
                 "ground_snap": True}).json()

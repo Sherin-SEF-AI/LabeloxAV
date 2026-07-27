@@ -9,9 +9,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# The bulk of the suite predates API auth and drives endpoints without a user header. Default auth off
-# for tests; test_auth.py re-enables it explicitly to exercise the gate.
-os.environ.setdefault("LBX_AUTH__ENABLED", "false")
+# Auth is ON by default so the suite exercises the production posture: a test that drives the HTTP surface
+# must carry a signed token, exactly as a real client does. The handful of TestClient tests use the helpers
+# in tests/_authutil.py to seed a user and attach a Bearer header. Service-level tests (the bulk of the
+# suite) never touch the middleware, so this does not affect them. A file that needs the gate off asks for
+# it explicitly (LBX_AUTH__ENABLED override) rather than relying on a global default that never ships.
+os.environ.setdefault("LBX_AUTH__ENABLED", "true")
 
 # The test corpus is face-only (no license plates) and ships no plate model, so the mandatory-plate gate
 # is relaxed here. test_pii_gate.py constructs PiiSettings(plate_mandatory=True) explicitly to verify it.
@@ -24,10 +27,18 @@ os.environ.setdefault("LBX_POSTGRES__DB", "labeloxav_test")
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _provision_test_db():
+def _provision_test_db(request):
     """Create the isolated test database (if missing) and bring it to the head schema once per session, so
     tests run against a real-schema DB that is never the production corpus. Refuses unless the target db
-    name looks like a test db: a guard against accidentally pointing the suite at production."""
+    name looks like a test db: a guard against accidentally pointing the suite at production.
+
+    Skipped when the selected run has no db-marked test (e.g. make test-unit): the pure-unit tier must run
+    without a Postgres. Tests that truly need the DB carry the `db` marker; the marker both selects them out
+    of the unit tier and triggers provisioning here."""
+    if not any(item.get_closest_marker("db") for item in request.session.items):
+        yield
+        return
+
     import subprocess
 
     import psycopg
