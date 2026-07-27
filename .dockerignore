@@ -1,0 +1,70 @@
+# What must never reach the Docker build context.
+#
+# Without this file the context is ~28 GB (an 18 GB scratch directory, a 9 GB host virtualenv, node_modules,
+# demo videos, model weights), the build spends minutes just uploading it, and `COPY . .` bakes all of it
+# into the image. The .env exclusion is the important one: it holds the generated secrets, and an image
+# carrying them would leak every credential to anyone who pulls it.
+
+# Secrets and local configuration. Never in an image.
+.env
+.env.*
+!.env.example
+.admin-token
+*.pem
+*.key
+
+# Host virtualenv. The image builds its own with the right interpreter and platform wheels; copying the
+# host one in would shadow it with binaries compiled for a different base.
+.venv/
+venv/
+
+# Runtime scratch: exports, training runs, downloaded weights, intermediate artifacts. Regenerated on demand
+# and by far the largest directory in the tree. .perception_work holds cloud-perception sweep intermediates
+# and is nearly a gigabyte on a box that has run one.
+.scratch/
+scratch/
+.perception_work/
+
+# Web build inputs and outputs. web/Dockerfile runs `npm ci` and `next build` itself, so copying these in
+# would both bloat the context and risk a node_modules built for the host's platform.
+web/node_modules/
+web/.next/
+web/out/
+node_modules/
+
+# Model weights. Ultralytics fetches what it needs on first use, and the compose file mounts a named volume
+# at /app/models so they persist across rebuilds instead of being baked into every image layer.
+*.pt
+*.onnx
+*.engine
+models/
+# Ultralytics writes training runs here (weights, plots, results.csv). Output, not input.
+runs/
+
+# Version control and CI.
+.git/
+.github/
+.gitignore
+
+# Media and documentation that no runtime path reads.
+demos/
+docs/screenshots/
+*.mp4
+*.gif
+
+# Python and tooling caches.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.import_linter_cache/
+*.egg-info/
+htmlcov/
+.coverage
+
+# Editor and OS noise.
+.vscode/
+.idea/
+.DS_Store
+*.swp

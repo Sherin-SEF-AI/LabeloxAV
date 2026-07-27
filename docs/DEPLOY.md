@@ -1,0 +1,178 @@
+# Deploying LabeloxAV
+
+One command on a machine with Docker:
+
+```bash
+git clone https://github.com/Sherin-SEF-AI/LabeloxAV.git
+cd LabeloxAV
+./scripts/install.sh
+```
+
+It generates the secrets, builds the images, brings up the database and object store, applies the schema,
+seeds the ontology, starts the API and the web app, waits for readiness, creates the first administrator, and
+prints the token to sign in with. Open `http://localhost:3000`.
+
+Re-running is safe. It never rotates a secret that already exists and never creates a second administrator.
+
+---
+
+## What it needs
+
+- Docker with the Compose v2 plugin, and a running daemon.
+- ~20 GB of disk. Images, model weights, and the corpus add up, and running out during an import corrupts it.
+- ~8 GB of RAM for the services. The GPU paths (auto-labeling, embeddings, training) need more and a CUDA
+  device; see [GPU](#gpu) below.
+
+No GPU is required to install. Without one, the annotation, review, governance, export, and search surfaces
+all work; the model paths that need CUDA refuse rather than producing a fabricated result.
+
+---
+
+## What the installer does, and why
+
+**It generates the secrets rather than asking for them.** `core/config.py` refuses the built-in dev defaults
+on any deployment that is not an explicit local dev box, and refuses to *boot* rather than run insecurely,
+because a known signing key lets anyone mint an admin token. That is the right behaviour, but it means a
+first run would otherwise fail listing seven variables the operator has never seen. Asking a human to invent
+seven high-entropy strings is also how you get seven weak ones. They are written to `.env` with mode 600.
+
+**It waits on `/api/readyz`, not `/api/health`.** Health returns 200 with a degraded body so an operator can
+see *which* dependency is down. Readiness returns 503 until every dependency answers. Waiting on health would
+declare success while Postgres was still starting.
+
+**Migrations run as their own one-shot container.** A migration failure shows up as a failed container rather
+than an API crash loop, and two API replicas can never race the same migration.
+
+**It refuses to overwrite a local-development `.env`.** The dev file carries the well-known credentials on
+purpose. Converting it in place would leave a machine that neither runs as a dev box nor boots as a
+deployment, with the reason buried in a config validator.
+
+---
+
+## Everyday operation
+
+The deployment is the base compose file plus the application overlay. `make` wraps the pair:
+
+```bash
+make app-down     # stop, keeping all data
+make app-up       # start again
+make app-logs     # follow the API logs
+
+# the same thing without make
+docker compose -f docker-compose.yml -f docker-compose.app.yml up -d
+
+# stop and DESTROY the corpus, the object store, and every annotation
+docker compose -f docker-compose.yml -f docker-compose.app.yml down -v
+```
+
+Plain `docker compose up` uses only the base file and starts infrastructure alone, which is the development
+workflow: services in Docker, code on the host. That is why the application lives in an overlay rather than
+behind a profile: the overlay demands the deployment secrets, and requiring them in the base file would break
+every compose command for a developer who has none.
+
+### Signing in when the token is lost
+
+Every credential is issued through the API, issuing one needs an admin token, and the bootstrap that let the
+first user be created without one closes as soon as that user exists. The recovery path runs on the server,
+where possession of the signing key is the authority:
+
+```bash
+make token                       # mints one for `admin`
+make token NAME=alice            # or for anyone else
+
+# the same thing without make, plus the two other modes
+docker compose -f docker-compose.yml -f docker-compose.app.yml exec api \
+  python -m scripts.mint_token --list
+
+# a token leaked: invalidate every one already issued to that user, then mint a fresh one
+docker compose -f docker-compose.yml -f docker-compose.app.yml exec api \
+  python -m scripts.mint_token --name admin --revoke-existing
+```
+
+### Adding people
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.app.yml exec api \
+  python -m scripts.mint_token --name alice --role reviewer --create
+```
+
+Roles are `annotator`, `reviewer`, `admin`, and a higher role satisfies any floor below it.
+
+---
+
+## Serving to more than one machine
+
+The defaults assume you are sitting at the machine. Two things must change when you are not.
+
+**`LBX_MINIO__PUBLIC_ENDPOINT`** is what a browser is handed for a presigned download. Inside the compose
+network the object store is `minio:9000`, which a browser cannot resolve, so this has to be an address the
+browser can actually reach. Getting it wrong produces download links that 404 in a way that looks like
+missing data rather than a misconfiguration:
+
+```bash
+LBX_MINIO__PUBLIC_ENDPOINT=https://labelox.example.com/s3
+```
+
+**TLS.** Nothing here terminates TLS, and the app is served over plain HTTP on ports 3000 and 8000. Put a
+reverse proxy in front of it for anything beyond a trusted network: tokens live in browser storage and ride
+on every request, so an unencrypted hop is an exposed credential. If the proxy is nginx, keep
+`proxy_buffering off` on `/api/events/` or the server-sent event streams arrive in bursts instead of live
+(the app already sends `X-Accel-Buffering: no`, which nginx honours).
+
+---
+
+## GPU
+
+The installer builds the CPU serving image. The paths that need CUDA (auto-labeling, embeddings, training,
+LiDAR inference) live in a second image built from the same tree:
+
+```bash
+docker build -t labeloxav/gpu --target gpu .
+```
+
+Run it on a machine with the NVIDIA container toolkit and point it at the same Postgres and MinIO. The
+scheduling model assumes one GPU: the training worker takes a Postgres advisory lock as a global mutex, so a
+second worker refuses to start rather than two runs contending for the same device.
+
+---
+
+## Upgrading
+
+```bash
+git pull
+./scripts/install.sh          # rebuilds, migrates, restarts; secrets and data are untouched
+```
+
+Every migration in this repo has a working `downgrade`, so `alembic downgrade -1` steps back if an upgrade
+misbehaves. Take a backup first regardless.
+
+---
+
+## Backups
+
+`make backup` dumps Postgres. **It does not back up the object store**, which holds every frame, mask, point
+cloud, and export, so a Postgres-only restore gives you a corpus of dangling references. Mirror the MinIO
+volume as well:
+
+```bash
+docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip > backup-db.sql.gz
+docker run --rm -v labeloxav_miniodata:/data -v "$PWD:/out" alpine \
+  tar czf /out/backup-blobs.tar.gz -C /data .
+```
+
+Store both off the machine. Restoring one without the other is not a restore.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause |
+| --- | --- |
+| Installer stops at "the API did not become ready" | `make app-logs`. Usually a dependency still starting, or a port already in use. |
+| `required variable ... is missing a value` | `.env` is incomplete. Re-run the installer; it fills what is absent and leaves what is present. |
+| Reads return 401 | Working as intended: authentication is deny-by-default for reads as well as writes. Sign in. |
+| Download links 404 | `LBX_MINIO__PUBLIC_ENDPOINT` points somewhere the browser cannot reach. See above. |
+| Ports already in use | Set `WEB_PORT`, `API_PORT`, `POSTGRES_PORT`, `MINIO_PORT` in `.env` and re-run. |
+| A model path refuses instead of running | Expected without a GPU. The refusal names what is missing; it never fabricates a result. |
+
+More in [`RUNBOOK.md`](RUNBOOK.md).

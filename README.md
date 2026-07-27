@@ -198,7 +198,35 @@ The pattern generalises: a third domain is a third pack, not a third fork.
 
 ---
 
-## Quick start
+## Install it
+
+One command on any machine with Docker:
+
+```bash
+git clone https://github.com/Sherin-SEF-AI/LabeloxAV.git
+cd LabeloxAV
+./scripts/install.sh
+```
+
+It generates the secrets, builds the images, brings up the database and object store, applies the schema,
+seeds the ontology, starts the API and the web app, waits for readiness, creates the first administrator, and
+prints the token to sign in with. Open `http://localhost:3000`. Re-running is safe: it never rotates a secret
+that already exists and never creates a second administrator.
+
+No GPU is needed to install. Without one the annotation, review, governance, export, and search surfaces all
+work; the model paths that need CUDA refuse rather than fabricating a result. See
+[`docs/DEPLOY.md`](docs/DEPLOY.md) for GPU, serving to other machines, TLS, upgrades, and backups.
+
+The installer generates the secrets rather than asking for them because the app refuses to boot on the
+built-in defaults anywhere that is not a local dev box, so a first run would otherwise fail listing seven
+variables the operator has never seen. Asking a person to invent seven high-entropy strings is also how you
+get seven weak ones.
+
+---
+
+## Develop on it
+
+Infrastructure in Docker, code on the host:
 
 ```bash
 # bring up the infrastructure (Postgres, MinIO, Redis, Redpanda, lakeFS)
@@ -267,6 +295,7 @@ The test suite once wrote to the same database as production and left synthetic 
 | --- | --- |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The map: the Session/Frame/Object spine, the two planes and why annotation and model output never share a row, the closed loop end to end, the domain-pack split, and the auth model. |
 | [`docs/MEASUREMENT.md`](docs/MEASUREMENT.md) | How a metric is produced and why it can be trusted. Read this before touching anything that produces or consumes a model number; it is the document that would have caught the prediction-plane defect. |
+| [`docs/DEPLOY.md`](docs/DEPLOY.md) | Installing and running it with Docker: the one-command installer, signing in, serving to other machines, TLS, GPU, upgrades, and backups. |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operating it: bring-up, auth bootstrap, the measurement-and-promotion sequence, the test tiers, and troubleshooting. |
 | [`docs/REMEDIATION_STATUS.md`](docs/REMEDIATION_STATUS.md) | What a codebase audit found, what is fixed (each with the test that fails without it), and what is open with what it needs. |
 | [`docs/adr/`](docs/adr/) | Decision records. ADR-0001 is the immutable prediction plane and the alternatives rejected. |

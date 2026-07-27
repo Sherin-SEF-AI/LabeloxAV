@@ -1,0 +1,107 @@
+# LabeloxAV application overlay: the API, the web app, and the one-shot migration.
+#
+# Deliberately a separate file from docker-compose.yml rather than a profile inside it. The services below
+# use required-variable interpolation (${VAR:?...}) so a missing secret fails immediately with the name of
+# the variable, instead of starting a container that refuses to boot for a reason buried in a config
+# validator. Compose validates interpolation across the whole file it loads, so putting these in the base
+# file would break every plain `docker compose` command for a developer running infrastructure only.
+#
+# Used as an overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.app.yml up -d
+#
+# scripts/install.sh does this for you, and generates the secrets these require.
+
+name: labeloxav
+
+services:
+  # Every service reads its credentials from .env. install.sh generates strong values there, because
+  # core/config.py refuses the dev defaults on any non-local deployment: a known signing key lets anyone
+  # mint an admin token, so the app will not boot with one rather than run insecurely.
+
+  # One-shot: bring the schema to head and seed the ontology before the API serves anything. Separate from
+  # the API service so a migration failure is visible as a failed container instead of a crash loop, and so
+  # two API replicas could never race the same migration.
+  migrate:
+    build:
+      context: .
+      target: api
+    image: labeloxav/api:${LBX_VERSION:-latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &app_env
+      LBX_ENV: ${LBX_ENV:-production}
+      LBX_POSTGRES__HOST: postgres
+      LBX_POSTGRES__PORT: 5432
+      LBX_POSTGRES__USER: ${POSTGRES_USER:-labelox}
+      LBX_POSTGRES__PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      LBX_POSTGRES__DB: ${POSTGRES_DB:-labeloxav}
+      LBX_MINIO__ENDPOINT: http://minio:9000
+      # What the browser is handed for a presigned download. Inside the network MinIO is `minio:9000`,
+      # which a browser cannot resolve, so this must be the externally reachable address or every download
+      # link 404s in a way that looks like missing data rather than a misconfiguration.
+      LBX_MINIO__PUBLIC_ENDPOINT: ${LBX_MINIO__PUBLIC_ENDPOINT:-http://localhost:${MINIO_PORT:-9000}}
+      LBX_MINIO__ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      LBX_MINIO__SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      LBX_MINIO__BUCKET: ${MINIO_BUCKET:-labeloxav}
+      LBX_REDIS__HOST: redis
+      LBX_REDPANDA__BROKERS: redpanda:29092
+      LBX_PHASE4__LAKEFS__ENDPOINT: http://lakefs:8000
+      LBX_PHASE4__LAKEFS__ACCESS_KEY: ${LAKEFS_ACCESS_KEY:-AKIALABELOXAVKEY01}
+      LBX_PHASE4__LAKEFS__SECRET_KEY: ${LAKEFS_SECRET_KEY:?set LAKEFS_SECRET_KEY in .env}
+      LBX_AUTH__SIGNING_KEY: ${LBX_AUTH__SIGNING_KEY:?set LBX_AUTH__SIGNING_KEY in .env}
+      LBX_FORGYX__DEPLOY_SIGNING_KEY: ${LBX_FORGYX__DEPLOY_SIGNING_KEY:?set LBX_FORGYX__DEPLOY_SIGNING_KEY in .env}
+      LBX_PHASE4__GOVERN__ATTESTATION_KEY: ${LBX_PHASE4__GOVERN__ATTESTATION_KEY:?set LBX_PHASE4__GOVERN__ATTESTATION_KEY in .env}
+      LBX_LOG_LEVEL: ${LBX_LOG_LEVEL:-INFO}
+    command: >
+      /bin/sh -c "alembic upgrade head && python scripts/seed_ontology.py && echo 'schema ready'"
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      target: api
+    image: labeloxav/api:${LBX_VERSION:-latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment: *app_env
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      # Model weights and scratch survive a container rebuild; re-downloading them on every deploy is slow
+      # and, on a metered link, expensive.
+      - apimodels:/app/models
+      - apiscratch:/app/.scratch
+    restart: unless-stopped
+    mem_limit: 4g
+
+  web:
+    build:
+      context: ./web
+      args:
+        # Baked into the route manifest at build time; see web/Dockerfile for why runtime is too late.
+        LBX_API_URL: ${LBX_WEB_API_URL:-http://api:8000}
+    image: labeloxav/web:${LBX_VERSION:-latest}
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      # Next proxies /api to the backend server-side, so the browser stays same-origin and never needs to
+      # reach the API host directly. Inside the network that is the service name.
+      LBX_API_URL: http://api:8000
+      NODE_ENV: production
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    restart: unless-stopped
+    mem_limit: 1g
+
+volumes:
+  apimodels:
+  apiscratch:

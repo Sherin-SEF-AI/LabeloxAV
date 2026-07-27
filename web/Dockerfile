@@ -8,7 +8,16 @@ WORKDIR /web
 COPY package.json package-lock.json* ./
 RUN npm ci
 COPY . .
+# Next compiles rewrite destinations into .next/routes-manifest.json during the build, so LBX_API_URL has to
+# be present HERE. Setting it only at runtime leaves the manifest pointing at the build-time default
+# (127.0.0.1:8000), and every proxied /api call from the browser fails with ECONNREFUSED even though the
+# variable is visibly set in the running container. Defaults to the compose service name.
+ARG LBX_API_URL=http://api:8000
+ENV LBX_API_URL=${LBX_API_URL}
 RUN npm run build
+# `public/` is optional in Next and this app ships no static assets, so create it if absent: a bare COPY of a
+# missing directory fails the build outright, which is a confusing way to learn there were no favicons.
+RUN mkdir -p /web/public
 
 FROM node:20-slim AS run
 WORKDIR /web
