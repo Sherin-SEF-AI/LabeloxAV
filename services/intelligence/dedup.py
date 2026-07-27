@@ -91,7 +91,7 @@ async def dedup_session(session_id: UUID, phash_hamming: int | None = None, dino
     S = vecs @ vecs.T                                           # same raw dot as fi.vec @ fj.vec
     dup = (Hm <= ph_thresh) & (S >= cos_thresh)
     dup &= valid[:, None] & valid[None, :]
-    for i, j in zip(*np.where(np.triu(dup, 1))):
+    for i, j in zip(*np.where(np.triu(dup, 1)), strict=False):
         union(frames[int(i)]["id"], frames[int(j)]["id"])
 
     groups: dict = defaultdict(list)
