@@ -124,8 +124,9 @@ async def run_loop(
 @click.option("--data-yaml", default=None, help="train directly on this YOLO data.yaml, skip corpus build")
 @click.option("--drop", "drop_classes", multiple=True, help="ontology class to exclude (repeatable)")
 @click.option("--include", "include_classes", multiple=True, help="restrict the trainset to these ontology classes (repeatable); keeps the taxonomy aligned with the base model for a fair baseline eval")
+@click.option("--states", "states", default=None, help="comma-separated object states to train on, e.g. accepted,auto_accept,human,vlm_review; keeps raw unreviewed 'review' labels out (the loop-op-v5 pollution)")
 @click.option("--promote/--no-promote", default=False)
-def main(name, base_weights, epochs, imgsz, batch, route_prefix, agreement_only, max_per_class, conf_floor, idd_dir, data_yaml, drop_classes, include_classes, promote) -> None:
+def main(name, base_weights, epochs, imgsz, batch, route_prefix, agreement_only, max_per_class, conf_floor, idd_dir, data_yaml, drop_classes, include_classes, states, promote) -> None:
     settings = get_settings()
     setup_logging(settings.log_level)
     base = base_weights or settings.models.yolo.weights
@@ -133,6 +134,7 @@ def main(name, base_weights, epochs, imgsz, batch, route_prefix, agreement_only,
         name=name, conf_floor=conf_floor, max_per_class=max_per_class, agreement_only=agreement_only,
         route_prefix=route_prefix, idd_dir=idd_dir, drop_classes=list(drop_classes),
         include_classes=list(include_classes),
+        states=[s.strip() for s in states.split(",") if s.strip()] if states else [],
     )
     summary = asyncio.run(run_loop(spec, base, epochs, imgsz, promote, data_yaml=data_yaml, batch=batch))
     click.echo(summary)

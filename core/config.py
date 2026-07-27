@@ -6,6 +6,7 @@ Access through get_settings(), which is cached for the process.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -121,6 +122,28 @@ class VlmSettings(BaseModel):
     vote_count: int = 1                # N-vote agreement (>1 enables adversarial verify across crops/temps)
     cross_vote_min: float = 0.6        # required agreement fraction to accept a cross-superclass override
     timeout_s: float = 60.0
+    # Provider routing (services/llm/router.py). ollama is the always-available local floor; groq is the fast
+    # cloud path. Text (nl/intent) and vision (Path C) are chosen independently so text can go cloud while
+    # vision stays local. A missing GROQ_API_KEY, a cloud failure, or an open circuit all fall back to ollama,
+    # so the cloud is never a hard dependency.
+    text_provider: str = "ollama"      # ollama | groq  (nl.py / intent, text-only, no media leaves the box)
+    vision_provider: str = "ollama"    # ollama | groq  (Path C VLM verifier)
+    escalate_provider: str | None = None  # optional stronger provider re-asked only on a not-confident verdict
+    allow_cloud_media: bool = True     # False keeps image crops local even when vision_provider=groq (data residency)
+    breaker_threshold: int = 3         # consecutive cloud failures before the circuit opens
+    breaker_cooldown_s: float = 60.0   # how long the circuit stays open before a half-open retry
+
+
+class GroqSettings(BaseModel):
+    """Groq cloud inference (OpenAI-compatible). Optional: an empty api_key means 'not configured' and the
+    router uses ollama, so local dev needs zero Groq setup. The key comes from the environment
+    (LBX_GROQ__API_KEY or GROQ_API_KEY), never stored in the app; it is an outbound credential, not a secret
+    that protects LabeloxAV, so it is not part of _require_prod_secrets."""
+    api_key: str = ""
+    base_url: str = "https://api.groq.com/openai/v1"
+    text_model: str = "llama-3.3-70b-versatile"
+    vision_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    timeout_s: float = 30.0
 
 
 class ClipSettings(BaseModel):
@@ -386,6 +409,13 @@ class OntologySettings(BaseModel):
     promotion_min_instances: int = 50  # verified (gate-accepted) instances a class must earn to re-enter
 
 
+class PacksSettings(BaseModel):
+    # The active domain pack for engine paths that are not yet per-session pack-routed (governance, curation).
+    # Defaults to 'av' so every legacy path resolves to the AV pack exactly as before. See packs/ and
+    # docs/PACK_INTERFACE.md.
+    default_pack: str = "av"
+
+
 class PathsSettings(BaseModel):
     scratch: str = ".scratch"
 
@@ -490,6 +520,10 @@ class GovernSettings(BaseModel):
     # redaction ran over every frame of a release. Dev default is refused in prod by _require_prod_secrets.
     attestation_key: str = "labeloxavgovernattestationkey0123456789"
     redaction_coverage_floor: float = 1.0  # a release proof passes only when every frame passed the PII gate
+    # Eval slices that must always be reported even if empty (VERDYX). Empty here means "use the active pack's
+    # eval_strata.protected_slices"; set it to override per deployment. (Adds the field verdyx/run.py already
+    # reads via getattr, so the pack default now flows through instead of a hardcoded fallback.)
+    protected_slices: list[str] = Field(default_factory=list)
 
 
 class RecallSettings(BaseModel):
@@ -708,12 +742,32 @@ class ForgyxSettings(BaseModel):
     deploy_signing_key: str = "labeloxforgyxdeploysigningkey0123456789"
 
 
+class AnprSettings(BaseModel):
+    """ANPR-India (SEC-M7): a security-domain plate-reading capability, off by default and additionally gated
+    on the active pack declaring 'anpr' (so it can never run in the AV / DPDPA context). Reuses the plate
+    detector; the OCR is a wire seam (Qwen via Ollama, or the PaddleOCR pod)."""
+
+    enabled: bool = False
+    plate_weights: str = ".scratch/models/pii/plate_yolov8.pt"
+    plate_conf: float = 0.35
+    device: str = "cpu"
+    min_plate_area_frac: float = 0.0002   # ignore specks below this fraction of frame area
+    ocr_min_conf: float = 0.50            # drop a read the OCR is not confident about
+    ocr_backend: str = "qwen"             # qwen (Ollama) | pod (PaddleOCR Indic)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="LBX_",
         env_nested_delimiter="__",
         extra="ignore",
         yaml_file=str(DEFAULT_CONFIG),
+        # Read the repo .env directly (absolute, so cwd does not matter). settings_customise_sources already
+        # lists dotenv_settings, but that source is inert without env_file; wiring it here makes .env actually
+        # "consumed by the app" as the file claims, so LBX_-prefixed entries (e.g. LBX_GROQ__API_KEY) work
+        # without the process having to source .env first. Unprefixed compose vars are ignored (extra=ignore).
+        env_file=str(REPO_ROOT / ".env"),
+        env_file_encoding="utf-8",
     )
 
     env: str = "local"
@@ -739,6 +793,7 @@ class Settings(BaseSettings):
     training: TrainingSettings = TrainingSettings()
     cloud: CloudSettings = CloudSettings()
     ontology: OntologySettings = OntologySettings()
+    packs: PacksSettings = PacksSettings()      # active domain pack for non-session-routed engine paths
     paths: PathsSettings = PathsSettings()
     phase4: Phase4Settings = Phase4Settings()  # Phase 4 closed loop + governance
     auth: AuthSettings = AuthSettings()        # deny-by-default API auth
@@ -748,6 +803,16 @@ class Settings(BaseSettings):
     sanyx: SanyxSettings = SanyxSettings()     # SANYX ingest QA thresholds (data engine plane)
     calyx: CalyxSettings = CalyxSettings()     # CALYX calibration-drift thresholds (data engine plane)
     forgyx: ForgyxSettings = ForgyxSettings()  # FORGYX edge-deployment signing (data engine plane)
+    anpr: AnprSettings = AnprSettings()        # ANPR-India (security domain; pack-gated on 'anpr')
+    groq: GroqSettings = GroqSettings()        # optional Groq cloud inference (text + vision), ollama fallback
+
+    @model_validator(mode="after")
+    def _groq_key_from_env(self):
+        """Accept the conventional GROQ_API_KEY as well as LBX_GROQ__API_KEY, so setting the standard
+        environment variable just works. The explicit LBX form still wins if both are set."""
+        if not self.groq.api_key:
+            self.groq.api_key = os.environ.get("GROQ_API_KEY", "")
+        return self
 
     @classmethod
     def settings_customise_sources(

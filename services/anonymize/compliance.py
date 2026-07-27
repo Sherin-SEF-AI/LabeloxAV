@@ -14,10 +14,12 @@ from core.logging import get_logger
 log = get_logger("dpdpa")
 
 
-def evaluate_dpdpa(export_frame_ids: set, audited_frame_ids: set, speech_segments: list[dict]) -> dict:
-    """Fail-closed DPDPA verdict. Blocks if any frame in scope was never anonymized (no PiiAudit row means an
-    un-redacted face or plate, refuse not warn) or any personal speech segment is not redacted. speech_segments:
-    [{is_personal, redacted}]. Returns {pass, blockers}."""
+def evaluate_dpdpa(export_frame_ids: set, audited_frame_ids: set, speech_segments: list[dict],
+                   regime: str = "DPDPA") -> dict:
+    """Fail-closed privacy verdict for the active legal regime (`regime`, from the pack; AV: DPDPA). Blocks if
+    any frame in scope was never anonymized (no PiiAudit row means an un-redacted face or plate, refuse not
+    warn) or any personal speech segment is not redacted. speech_segments: [{is_personal, redacted}]. Returns
+    {pass, blockers, regime}."""
     blockers = []
     unaudited = export_frame_ids - audited_frame_ids
     if unaudited:
@@ -28,7 +30,7 @@ def evaluate_dpdpa(export_frame_ids: set, audited_frame_ids: set, speech_segment
     if unredacted_speech:
         blockers.append({"kind": "unredacted_speech", "count": len(unredacted_speech),
                          "detail": "personal speech segments not masked"})
-    return {"pass": len(blockers) == 0, "blockers": blockers}
+    return {"pass": len(blockers) == 0, "blockers": blockers, "regime": regime}
 
 
 async def dpdpa_export_gate(session_id, export_frame_ids: list) -> dict:
@@ -38,13 +40,15 @@ async def dpdpa_export_gate(session_id, export_frame_ids: list) -> dict:
 
     from db.models import PiiAudit, SpeechSegment
     from db.session import get_sessionmaker
+    from services.domain import legal_regime
+
     fids = {str(f) for f in export_frame_ids}
     async with get_sessionmaker()() as db:
         audited = {str(f) for f in (await db.execute(
             select(PiiAudit.frame_id).where(PiiAudit.session_id == session_id))).scalars().all()}
         speech = [{"is_personal": s.is_personal, "redacted": s.redacted} for s in (await db.execute(
             select(SpeechSegment).where(SpeechSegment.session_id == session_id))).scalars().all()]
-    verdict = evaluate_dpdpa(fids, audited, speech)
+    verdict = evaluate_dpdpa(fids, audited, speech, regime=legal_regime())
     log.info("dpdpa.gate", session=str(session_id), frames=len(fids), passed=verdict["pass"],
              blockers=len(verdict["blockers"]))
     return verdict

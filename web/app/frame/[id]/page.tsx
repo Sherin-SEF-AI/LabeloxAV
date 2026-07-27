@@ -12,6 +12,7 @@ import { acceptState, getUser, setUser } from "@/lib/user";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
 import { PERSON_17 } from "@/lib/skeleton";
 import BackButton from "@/components/BackButton";
+import { useConfirm } from "@/components/ConfirmProvider";
 import { ObjectSourceBadge } from "@/components/SourceBadge";
 import CorrectionModal, { type CorrectionChange } from "@/components/CorrectionModal";
 import ToolStrip from "@/components/shell/ToolStrip";
@@ -130,6 +131,7 @@ function overlapFrac(box: number[], ref: number[]): number {
 
 export default function FrameEditor() {
   const router = useRouter();
+  const confirm = useConfirm();
   const { id } = useParams<{ id: string }>();
   const focus = useSearchParams().get("focus");
   const rigParam = useSearchParams().get("rig");   // M-MC.1 deep link: keep rig view + layout across camera focus
@@ -510,7 +512,11 @@ export default function FrameEditor() {
   };
   const setLaneType = (t: string) => { if (laneSel) setLanes((ls) => ls.map((l) => l.lane_id === laneSel ? { ...l, lane_type: t, dirty: true } : l)); };
   const toggleLaneEgo = () => { if (laneSel) setLanes((ls) => ls.map((l) => ({ ...l, is_ego: l.lane_id === laneSel ? !l.is_ego : l.is_ego, dirty: l.lane_id === laneSel ? true : l.dirty }))); };
-  const delLane = async () => { if (laneSel) { await api.deleteLane(laneSel); setLaneSel(null); await loadLayers(); flash("lane deleted"); } };
+  const delLane = async () => {
+    if (!laneSel) return;
+    if (!(await confirm({ title: "Delete this lane?", danger: true, confirmLabel: "Delete" }))) return;
+    await api.deleteLane(laneSel); setLaneSel(null); await loadLayers(); flash("lane deleted");
+  };
   const propagateLanes = async () => { const r = await api.propagateLanes(id, 8); flash(`propagated to ${r.created} lane-frames`); };
 
   // 3D mode: load the session cloud nearest this frame's timestamp, then its points and 3D cuboids.

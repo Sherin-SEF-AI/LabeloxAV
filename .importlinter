@@ -1,0 +1,24 @@
+# Architectural contract: the engine core (core, services, db) must not statically import a concrete domain
+# pack (packs.av, and future packs.sec, ...). The only bridge is packs.registry, which discovers and
+# dynamically loads packs via importlib, so no static engine->concrete-pack edge exists. packs.base (the
+# contract) and packs.registry (the bridge) are shared and may be imported by the engine.
+#
+# Run: lint-imports  (installed by the dev extra). Enforced in CI (lint job).
+
+[importlinter]
+root_packages =
+    core
+    services
+    db
+    packs
+
+[importlinter:contract:engine-not-import-concrete-packs]
+name = Engine core must not import concrete packs (only packs.base / packs.registry)
+type = forbidden
+source_modules =
+    core
+    services
+    db
+forbidden_modules =
+    packs.av
+    packs.sec

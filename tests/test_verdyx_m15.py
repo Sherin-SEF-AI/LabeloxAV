@@ -36,10 +36,16 @@ def test_fragmentation_and_id_switches():
 
 
 def test_safety_weighted_recall():
+    # Use real ontology ids: critical_object_recall now resolves the pack's critical classes to ids through
+    # the governed ontology (was the 0-based hardcoded {0,1,2,3,8}, latent bug #2). pedestrian is critical,
+    # sedan is not.
+    from services.autolabel.ontology import get_ontology
+    onto = get_ontology()
+    ped, car = onto.by_name("pedestrian").id, onto.by_name("sedan").id
     objs = [
-        {"object_id": "p1", "class_id": 0, "detected": True, "ttc_s": 1.0},    # imminent VRU, detected
-        {"object_id": "p2", "class_id": 0, "detected": False, "ttc_s": 1.5},   # imminent VRU, MISSED
-        {"object_id": "c1", "class_id": 4, "detected": True, "ttc_s": 5.0},    # distant car, detected
+        {"object_id": "p1", "class_id": ped, "detected": True, "ttc_s": 1.0},    # imminent VRU, detected
+        {"object_id": "p2", "class_id": ped, "detected": False, "ttc_s": 1.5},   # imminent VRU, MISSED
+        {"object_id": "c1", "class_id": car, "detected": True, "ttc_s": 5.0},    # distant car, detected
     ]
     crit = critical_object_recall(objs)
     assert crit["n_critical"] == 2 and crit["recall"] == 0.5

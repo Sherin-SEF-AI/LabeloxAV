@@ -18,6 +18,8 @@ Everything is numpy + scipy (both already in the stack); no heavy dependency is 
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
 
@@ -38,9 +40,23 @@ __all__ = [
     "fundamental_matrix",
     "sampson_distance",
     "epipolar_residual",
+    "Plane",
 ]
 
 _EPS = 1e-9
+
+
+@dataclass(frozen=True)
+class Plane:
+    """An oriented plane {x : normal . x + offset = 0}, in some named reference frame. The road ground plane a
+    moving-camera scene model exposes is one of these; a static-camera scene model has no single such plane."""
+    normal: tuple[float, float, float]
+    offset: float
+    frame: str = "reference"
+
+    def signed_distance(self, point: np.ndarray) -> float:
+        n = np.asarray(self.normal, dtype=np.float64)
+        return float(n @ np.asarray(point, dtype=np.float64).reshape(3) + self.offset)
 
 
 def _as_points(p: np.ndarray, dim: int) -> np.ndarray:

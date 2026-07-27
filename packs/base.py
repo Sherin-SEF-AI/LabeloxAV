@@ -1,0 +1,353 @@
+"""The DomainPack contract.
+
+This is the code form of docs/PACK_INTERFACE.md. It is pure contract: only stdlib + typing at runtime, so
+the engine core and the base-only CI job can import it without pulling a pack or any ML dependency. Concrete
+packs live under packs/<id>/ and are reached only through packs.registry.
+
+Two kinds of surface live here:
+
+* Data surfaces (dataclasses) - the values the audit found baked into engine code (ontology facts, the safety
+  l1 set, the VLM prompt, the forge silicon registries, the eval strata). A pack supplies these as data.
+* Behavioural surfaces (Protocols) - the genuine forks the audit found (the moving-vs-static scene model, the
+  ingestion adapter, the privacy gates). SEC-M1 defines them; the AV pack fills the ones already consumed
+  (ontology, safety) and leaves scene_model / ingestion_adapters for SEC-M2 (typed Optional, not stubbed).
+
+See docs/AV_ASSUMPTIONS.md for the file:line origin of every value.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    # Engine types used only for annotating the behavioural protocols. Under TYPE_CHECKING so importing the
+    # contract never imports the engine (keeps the one-way dependency and avoids import cycles). With
+    # `from __future__ import annotations` every annotation below is a string and is never evaluated at
+    # runtime, so the contract module stays stdlib-only.
+    from collections.abc import Iterator
+
+    import numpy as np
+
+    from core.geometry import Plane
+    from services.autolabel.ontology import Ontology
+    from services.calibration.resolve import Calibration
+
+
+# --------------------------------------------------------------------------------------------------------
+# Small value types
+# --------------------------------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class SizeBound:
+    """Per-superclass instance-box area bounds as a fraction of frame area (autolabel quality reviewer)."""
+    min_area_frac: float
+    max_area_frac: float
+
+
+@dataclass(frozen=True)
+class GatePolicy:
+    """The confidence-gate policy surfaces the audit found AV-specific (services/autolabel/gate.py:20).
+
+    safety_l1: l1 superclasses that must never auto-accept without the safety path.
+    rare_needs_review: a rare class (india or fallback) requires human/VLM confirmation before it counts.
+    """
+    safety_l1: frozenset[str]
+    rare_needs_review: bool = True
+
+
+@dataclass(frozen=True)
+class StratumDimension:
+    """One eval-slice axis. Empty `values` means the axis is open-ended / discovered at runtime."""
+    name: str
+    values: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SensorCheck:
+    """A SANYX inertial/timing check with its limits (was hardcoded in services/sanyx/checks.py:167)."""
+    name: str
+    params: Mapping[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RootCauseSignature:
+    """A SANYX fault signature + remedy (was the AV fault table in services/sanyx/rootcause.py:14)."""
+    name: str
+    remedy: str
+
+
+@dataclass(frozen=True)
+class RedactionTarget:
+    """A privacy redaction target (face, plate, speech, ...). `detector` names the engine detector to use."""
+    name: str
+    detector: str
+
+
+# --------------------------------------------------------------------------------------------------------
+# Data surfaces
+# --------------------------------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class PackManifest:
+    """Pack identity and the capability switches planes consult to skip cleanly on an absent signal."""
+    id: str
+    version: str
+    display_name: str
+    capabilities: frozenset[str]
+    default_scene_model: str  # "moving_camera" | "static_camera"
+
+
+@dataclass(frozen=True)
+class OntologySpec:
+    """The taxonomy plus the ontology facts the audit found in code rather than in the governed YAML.
+
+    yaml_path is the governed, versioned artifact (unchanged for AV). stuff_names / stuff_l0 externalise the
+    panoptic split that was a frozenset in services/autolabel/ontology.py:31. supported_core externalises
+    core/config.py:396. superclass_map / size_priors are consumed when the quality reviewer moves behind the
+    pack in SEC-M5; they are None until then (honest incremental fill, not a stub).
+    """
+    yaml_path: str
+    stuff_names: frozenset[str]
+    stuff_l0: frozenset[str]
+    supported_core: frozenset[str]
+    custom_id_base: int
+    superclass_map: Mapping[str, str] | None = None       # SEC-M5
+    size_priors: Mapping[str, SizeBound] | None = None     # SEC-M5
+
+
+@dataclass(frozen=True)
+class AutoLabelProfile:
+    """The five swappable auto-label surfaces (docs/AV_ASSUMPTIONS.md section 5), consumed in SEC-M5.
+
+    vlm_prompt_template is the domain preamble hardcoded at path_c_qwen3vl.py:64. cross_anchors,
+    coco_map, openvocab_synonyms mirror the path constants. gate_policy is the gate's safety/rare rule.
+    disable_ego_hood_mask is True for a static-camera pack (no moving-vehicle bonnet to mask).
+    """
+    vlm_prompt_template: str
+    cross_anchors: tuple[str, ...]
+    coco_map: Mapping[str, str]
+    openvocab_synonyms: Mapping[str, tuple[str, ...]]
+    gate_policy: GatePolicy
+    disable_ego_hood_mask: bool = False
+
+
+@dataclass(frozen=True)
+class EvalStrataSpec:
+    """Eval slice axes + protected slices + the safety-critical class list, by name (fixes the id-based
+    CRITICAL_CLASSES in services/verdyx/safety_recall.py:10). Consumed in SEC-M3/M4.
+    """
+    dimensions: tuple[StratumDimension, ...]
+    protected_slices: tuple[str, ...]
+    critical_class_names: frozenset[str]
+
+
+@dataclass(frozen=True)
+class QualityProfile:
+    """SANYX profile: the reused image checks + the domain sensor checks + the fault table. Consumed SEC-M2."""
+    image_checks: tuple[str, ...]
+    sensor_checks: tuple[SensorCheck, ...]
+    rootcause_signatures: tuple[RootCauseSignature, ...]
+
+
+@dataclass(frozen=True)
+class ForgeTarget:
+    """One edge hardware profile, replacing the AV silicon registries (services/forgyx/*). FORGYX gate and
+    packaging already accept opaque `name` strings; only these registries were AV-shaped.
+    """
+    name: str
+    backend: str
+    backend_modules: tuple[str, ...]
+    throttle_temp_c: float
+    power_ceiling_w: float
+    latency_budget_ms: float
+    export_format: str
+
+
+@dataclass(frozen=True)
+class PrivacyPlaneSpec:
+    """The redaction targets + legal regime for a pack. The behavioural PrivacyPlane gates (ingest/export)
+    already exist as the engine anonymize organ; SEC-M6 binds them to these targets. AV is never None here
+    (it runs face+plate redaction today), correcting the mission's `PrivacyPlane | None`.
+    """
+    redaction_targets: tuple[RedactionTarget, ...]
+    legal_regime: str
+
+
+# --------------------------------------------------------------------------------------------------------
+# Behavioural surfaces (Protocols)
+# --------------------------------------------------------------------------------------------------------
+
+@runtime_checkable
+class SafetyPolicy(Protocol):
+    """Replaces the `{"vru","animal"}` literal copy-pasted across six+ files (AV_ASSUMPTIONS section 6)."""
+    def is_safety_class(self, class_name: str) -> bool: ...
+    def affinity_cost(self, a_id: int, b_id: int) -> float: ...
+    def critical_class_names(self) -> frozenset[str]: ...
+
+
+@runtime_checkable
+class SceneModel(Protocol):
+    """Per-camera geometry. MovingCameraSceneModel (AV) vs StaticCameraSceneModel (Sec); the fork the audit
+    located at services/calibration/resolve.py. `reference` is the ego frame for a moving camera and the fixed
+    world frame for a static camera - is_static() tells them apart.
+    """
+    def is_static(self) -> bool: ...
+    def rotation(self) -> np.ndarray: ...                                          # Calibration.R(): cam=(ref-t)@R
+    def extrinsic(self) -> np.ndarray: ...                                          # SE(3) reference<-camera
+    def camera_pose(self, world_from_reference: np.ndarray | None = None) -> np.ndarray: ...  # SE(3) world<-camera
+    def ground_plane(self) -> Plane | None: ...
+
+
+@runtime_checkable
+class SceneModelFactory(Protocol):
+    """Builds a SceneModel from a resolved per-camera Calibration."""
+    def build(self, calib: Calibration) -> SceneModel: ...
+
+
+@dataclass(frozen=True)
+class IngestSource:
+    """A pack-agnostic handle to raw captures: a video file, an image directory, an RTSP URL, an MCAP, ..."""
+    media_type: str
+    uri: str
+    cam_id: str
+    meta: Mapping[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class FrameDraft:
+    """One decoded frame on its way to a Frame row. ego_speed is None for a static camera."""
+    ts_ns: int
+    cam_id: str
+    image_bgr: np.ndarray
+    ego_speed: float | None = None
+    lat: float | None = None
+    lon: float | None = None
+
+
+@dataclass(frozen=True)
+class SessionDraft:
+    """Session-level metadata for a capture. vehicle_id is None for a static-camera pack (no ego vehicle);
+    pack_id routes the session to its pack; cam_id is the stable camera identity."""
+    pack_id: str
+    cam_id: str
+    vehicle_id: str | None = None
+    city: str | None = None
+    route: str | None = None
+
+
+@runtime_checkable
+class IngestionAdapter(Protocol):
+    """Turns a domain's raw captures into a SessionDraft + a stream of FrameDrafts. The engine writes the rows;
+    the adapter only knows how to decode this domain's sources and which schema fields it populates."""
+    media_types: frozenset[str]
+    def can_handle(self, source: IngestSource) -> bool: ...
+    def read(self, source: IngestSource) -> tuple[SessionDraft, Iterator[FrameDraft]]: ...
+
+
+@runtime_checkable
+class PrivacyPlane(Protocol):
+    """The two privacy chokepoints (blur-before-storage; refuse-un-redacted-export). Bound in SEC-M6."""
+    def ingest_gate(self, frame: object) -> object: ...
+    def export_gate(self, clip: object) -> object: ...
+
+
+# --------------------------------------------------------------------------------------------------------
+# The pack
+# --------------------------------------------------------------------------------------------------------
+
+@runtime_checkable
+class DomainPack(Protocol):
+    """The contract a concrete pack satisfies. Attribute-only Protocol: any object exposing these fields is a
+    DomainPack (runtime_checkable checks presence). scene_model / ingestion_adapters are Optional / empty until
+    SEC-M2 wires the scene-model fork; every other surface is real in SEC-M1.
+    """
+    manifest: PackManifest
+    ontology: OntologySpec
+    safety_policy: SafetyPolicy
+    autolabel_profile: AutoLabelProfile
+    eval_strata: EvalStrataSpec
+    quality_profile: QualityProfile
+    forge_targets: Sequence[ForgeTarget]
+    privacy: PrivacyPlaneSpec
+    scene_model: SceneModelFactory | None
+    ingestion_adapters: Sequence[IngestionAdapter]
+
+
+@dataclass(frozen=True)
+class Pack:
+    """Concrete DomainPack container. A pack module builds one of these and exposes it as `PACK`. Using a
+    frozen dataclass (rather than each pack hand-rolling attributes) gives every pack the same shape and lets
+    the registry validate structurally.
+    """
+    manifest: PackManifest
+    ontology: OntologySpec
+    safety_policy: SafetyPolicy
+    autolabel_profile: AutoLabelProfile
+    eval_strata: EvalStrataSpec
+    quality_profile: QualityProfile
+    forge_targets: tuple[ForgeTarget, ...]
+    privacy: PrivacyPlaneSpec
+    scene_model: SceneModelFactory | None = None            # SEC-M2
+    ingestion_adapters: tuple[IngestionAdapter, ...] = ()   # SEC-M2
+
+
+def superclass_affinity_cost(onto: Ontology, a_id: int, b_id: int, safety_l1: frozenset[str]) -> float:
+    """Generic safety cost of confusing class a for class b, in [0, 1], parameterised by a pack's safety l1
+    set. Mirrors the AV safe-mIoU cost tree (services/training/safe_miou.py) but with the safety superclasses
+    supplied rather than the hardcoded `{"vru","animal"}`, so a non-AV pack gets a real, safety-aware affinity.
+    """
+    BACKGROUND_ID = -1
+    if a_id == b_id:
+        return 0.0
+    if a_id == BACKGROUND_ID or b_id == BACKGROUND_ID:
+        real = b_id if a_id == BACKGROUND_ID else a_id
+        try:
+            return 1.0 if onto.by_id(real).l1 in safety_l1 else 0.5
+        except KeyError:
+            return 0.5
+    ca, cb = onto.by_id(a_id), onto.by_id(b_id)
+    a_safety, b_safety = ca.l1 in safety_l1, cb.l1 in safety_l1
+    if a_safety != b_safety:
+        cost = 1.0                      # a safety-critical class confused with anything non-safety
+    elif ca.l1 == cb.l1:
+        cost = 0.2
+    elif ca.l0 == cb.l0:
+        cost = 0.5
+    else:
+        cost = 0.8
+    if ca.india or cb.india or ca.l1 == "fallback" or cb.l1 == "fallback":
+        cost = min(1.0, cost + 0.1)
+    return cost
+
+
+def make_safety_policy(onto: Ontology, safety_l1: frozenset[str], critical_names: frozenset[str],
+                       affinity: Callable[[Ontology, int, int], float] | None = None) -> SafetyPolicy:
+    """Build the standard ontology-backed SafetyPolicy. Kept in the contract module (not a specific pack) so
+    every pack that defines safety by an l1 superclass set gets the identical, tested implementation.
+
+    `affinity` computes the safety cost of confusing two class ids. It defaults to the AV safe-mIoU cost, so
+    the AV number is byte-identical to today's governance; a non-AV pack passes its own (e.g. a partial of
+    superclass_affinity_cost bound to its safety_l1), since the AV cost hardcodes the VRU/animal semantics.
+    """
+    if affinity is None:
+        from services.training.safe_miou import affinity_cost
+        affinity_fn: Callable[[Ontology, int, int], float] = affinity_cost
+    else:
+        affinity_fn = affinity
+
+    class _OntologySafetyPolicy:
+        def is_safety_class(self, class_name: str) -> bool:
+            try:
+                return onto.by_name(class_name).l1 in safety_l1
+            except Exception:  # noqa: BLE001 - an unknown name is simply not a safety class
+                return False
+
+        def affinity_cost(self, a_id: int, b_id: int) -> float:
+            return affinity_fn(onto, a_id, b_id)
+
+        def critical_class_names(self) -> frozenset[str]:
+            return critical_names
+
+    return _OntologySafetyPolicy()

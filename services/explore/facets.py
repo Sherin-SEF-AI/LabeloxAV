@@ -18,14 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.logging import get_logger
 from db.models import Frame, Object
 from db.models import Session as DbSession
+from services.curation.slices import (
+    _SCENE_AXES,  # single source for the scene axes (was duplicated here)
+)
 from services.explore.query import frame_clauses, object_clauses, object_select
 
 log = get_logger("explore_facets")
 
 # Confidence buckets, chosen to straddle the gate thresholds so a curator can see the review band directly.
 _CONF_BUCKETS = [(0.0, 0.3), (0.3, 0.5), (0.5, 0.7), (0.7, 0.9), (0.9, 1.01)]
-
-_SCENE_AXES = ("weather", "time_of_day", "road_type", "density")
 
 
 def _without(pred: dict, *keys: str) -> dict:

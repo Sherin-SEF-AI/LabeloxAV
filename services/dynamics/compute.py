@@ -21,6 +21,7 @@ from core.logging import get_logger
 from db.models import Frame, Object, ObjectDynamics
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
+from services.domain import safety_l1
 from services.hdmap.georef import ipm_pixel_to_vehicle
 
 log = get_logger("dynamics")
@@ -30,7 +31,6 @@ TTC_HIGH_S = 1.5      # below this is an imminent-collision risk
 TTC_MED_S = 4.0
 MAX_SPEED_KMH = 150.0  # physically-plausible ceiling; a larger delta is a tracking/IPM artifact, not a speed
 DT_MIN_S, DT_MAX_S = 0.05, 2.0  # usable frame gap for a finite difference
-_VRU = {"vru", "animal"}
 
 
 def _risk(ttc: float | None, distance: float | None, is_vru: bool, closing_mps: float | None) -> str:
@@ -114,7 +114,7 @@ async def compute_session_dynamics(session_id: UUID) -> dict:
         for oid, r in recs.items():
             d = dyn.get(oid, {})
             try:
-                is_vru = onto.by_id(r["cid"]).l1 in _VRU
+                is_vru = onto.by_id(r["cid"]).l1 in safety_l1()
             except Exception:  # noqa: BLE001 -- an OOD class_id must not crash the whole session
                 is_vru = False
             closing_mps = (d["closing"] / MPS_TO_KMH) if d.get("closing") is not None else None

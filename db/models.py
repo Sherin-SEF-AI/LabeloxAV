@@ -71,7 +71,11 @@ class Session(Base):
     __tablename__ = "session"
 
     session_id: Mapped[uuid.UUID] = _uuid_pk()
-    vehicle_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    # The domain pack this session belongs to (routes it to its ontology/scene model/etc). Nullable with an
+    # 'av' server default so every pre-pack row backfills to the AV pack.
+    pack_id: Mapped[str | None] = mapped_column(String(32), server_default="av")
+    # Nullable since SEC-M2: a static-camera (CCTV) session has no ego vehicle. The AV ingestion still sets it.
+    vehicle_id: Mapped[str | None] = mapped_column(String(64))
     start_ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
     end_ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
     city: Mapped[str | None] = mapped_column(String(64))

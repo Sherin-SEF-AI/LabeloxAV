@@ -37,6 +37,10 @@ EVENTS = (
     "issue.opened", "issue.resolved",
     "asset.labeled", "annotation.created",
     "export.completed", "model.promoted", "drift.breached",
+    # Security-domain events (SEC-M8): a downstream consumer (e.g. Sentigon) subscribes to these to react to
+    # what a static-camera deployment sees. Emitted from the security path (services/anpr/events.py); the
+    # webhook mechanism itself is domain-neutral.
+    "anpr.read", "anpr.watchlist_hit", "security.event",
 )
 
 TIMEOUT_S = 5.0

@@ -1,0 +1,82 @@
+version: "labelox-sec-0.1.0"   # LabeloxSec: India CCTV / security-footage actors. ids 1-41 frozen.
+hierarchy_levels: 3
+
+# Security-scene attributes. Global; an object's l1 subclass restricts which apply (attribute_scope below).
+attributes:
+  occlusion:      { type: enum, values: [0, 25, 50, 75, 100] }
+  truncation:     { type: float, range: [0.0, 1.0] }
+  posture:        { type: enum, values: [standing, sitting, lying, crouching, running] }
+  carrying:       { type: bool }                # the person is carrying an object/bag
+  face_covered:   { type: bool }                # helmet, mask, or hood obscuring the face
+  loitering:      { type: bool }                # dwelling beyond a normal transit time
+  direction:      { type: enum, values: [entering, exiting, crossing, stationary] }
+  brandishing:    { type: bool }                # a weapon that is drawn / in use, not merely present
+  unattended:     { type: bool }                # baggage with no associated person nearby
+
+# Per-subclass (l1) applicable-attribute allowlist. A subclass not listed means all attributes apply.
+attribute_scope:
+  person:  [occlusion, truncation, posture, carrying, face_covered, loitering, direction]
+  weapon:  [occlusion, truncation, brandishing]
+  baggage: [occlusion, truncation, unattended, carrying]
+  vehicle: [occlusion, truncation, direction]
+  animal:  [occlusion, truncation, direction]
+
+classes:
+  # ---- people (l1=person: the security-critical actor) ----
+  - { id: 1,  name: person,           l0: living,  l1: person,  india: false }
+  - { id: 2,  name: security_guard,   l0: living,  l1: person,  india: true }
+  - { id: 3,  name: worker,           l0: living,  l1: person,  india: false }
+  - { id: 4,  name: child,            l0: living,  l1: person,  india: false }
+  - { id: 5,  name: delivery_person,  l0: living,  l1: person,  india: true }
+  - { id: 6,  name: vendor,           l0: living,  l1: person,  india: true }
+
+  # ---- animals ----
+  - { id: 7,  name: dog,              l0: living,  l1: animal,  india: false }
+  - { id: 8,  name: cattle,           l0: living,  l1: animal,  india: true }
+  - { id: 9,  name: cat,              l0: living,  l1: animal,  india: false }
+  - { id: 10, name: monkey,           l0: living,  l1: animal,  india: true }
+
+  # ---- vehicles ----
+  - { id: 11, name: car,              l0: vehicle, l1: vehicle, india: false }
+  - { id: 12, name: motorcycle,       l0: vehicle, l1: vehicle, india: false }
+  - { id: 13, name: bicycle,          l0: vehicle, l1: vehicle, india: false }
+  - { id: 14, name: autorickshaw,     l0: vehicle, l1: vehicle, india: true }
+  - { id: 15, name: truck,            l0: vehicle, l1: vehicle, india: false }
+  - { id: 16, name: bus,              l0: vehicle, l1: vehicle, india: false }
+  - { id: 17, name: e_rickshaw,       l0: vehicle, l1: vehicle, india: true }
+  - { id: 18, name: handcart,         l0: vehicle, l1: vehicle, india: true }
+
+  # ---- threat items (l1=weapon: the other security-critical class) ----
+  - { id: 19, name: weapon,           l0: object,  l1: weapon,  india: false }
+  - { id: 20, name: knife,            l0: object,  l1: weapon,  india: false }
+  - { id: 21, name: firearm,          l0: object,  l1: weapon,  india: false }
+  - { id: 22, name: lathi,            l0: object,  l1: weapon,  india: true }
+
+  # ---- baggage / carried objects ----
+  - { id: 23, name: bag,              l0: object,  l1: baggage, india: false }
+  - { id: 24, name: backpack,         l0: object,  l1: baggage, india: false }
+  - { id: 25, name: suitcase,         l0: object,  l1: baggage, india: false }
+  - { id: 26, name: box,              l0: object,  l1: baggage, india: false }
+  - { id: 27, name: abandoned_object, l0: object,  l1: baggage, india: false }
+
+  # ---- fixed scene infrastructure (stuff: never an instance box in the usual flow) ----
+  - { id: 28, name: gate,             l0: infra,   l1: infrastructure, india: false }
+  - { id: 29, name: door,             l0: infra,   l1: infrastructure, india: false }
+  - { id: 30, name: barrier,          l0: infra,   l1: infrastructure, india: false }
+  - { id: 31, name: fence,            l0: infra,   l1: infrastructure, india: false }
+  - { id: 32, name: turnstile,        l0: infra,   l1: infrastructure, india: false }
+  - { id: 33, name: boom_barrier,     l0: infra,   l1: infrastructure, india: true }
+  - { id: 34, name: cctv_camera,      l0: infra,   l1: infrastructure, india: false }
+  - { id: 35, name: signage,          l0: infra,   l1: infrastructure, india: false }
+
+  # ---- surfaces (stuff by l0) ----
+  - { id: 36, name: wall,             l0: surface, l1: surface, india: false }
+  - { id: 37, name: floor,            l0: surface, l1: surface, india: false }
+  - { id: 38, name: ceiling,          l0: surface, l1: surface, india: false }
+
+  # ---- ignore ----
+  - { id: 39, name: ignore_region,    l0: ignore,  l1: ignore,  india: false }
+
+  # ---- honest fallbacks (an ungrounded detection folds here, never invented) ----
+  - { id: 40, name: object_fallback,  l0: object,  l1: fallback, india: false }
+  - { id: 41, name: person_fallback,  l0: living,  l1: fallback, india: false }

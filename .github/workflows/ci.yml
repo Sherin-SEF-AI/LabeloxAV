@@ -34,6 +34,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Import contract (import-linter, blocking)
+        # The engine core (core, services, db) must not statically import a concrete domain pack; the only
+        # bridge is packs.registry. This is a structural invariant of the multi-domain refactor, so it gates.
+        run: .venv/bin/lint-imports
+
       - name: Ruff
         # Informational: the tree carries pre-existing lint debt, so ruff reports without gating (fix forward).
         continue-on-error: true
@@ -51,7 +56,7 @@ jobs:
       - name: Type check (mypy)
         # Informational while the tree is annotated incrementally; surfaces regressions without gating.
         continue-on-error: true
-        run: .venv/bin/mypy services core db --ignore-missing-imports || true
+        run: .venv/bin/mypy services core db packs --ignore-missing-imports || true
 
   test:
     needs: lint
@@ -65,6 +70,14 @@ jobs:
 
       - name: Create venv + install dev deps (no GPU wheels)
         run: make install
+
+      # CPU torch + imagehash so the suite actually runs the accel/embedding/dedup paths in CI instead of
+      # erroring on a missing import. The runner has no GPU, so the CUDA (cu128) wheels the ml extra pins are
+      # wrong here; the CPU wheel satisfies `import torch` and the modules that only check torch is present.
+      - name: Install CPU torch + imagehash for the test suite
+        run: |
+          .venv/bin/uv pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/uv pip install imagehash==4.3.1
 
       - name: Start infra (postgis+pgvector, minio, redis, redpanda)
         run: make up

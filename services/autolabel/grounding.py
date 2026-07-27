@@ -22,11 +22,13 @@ log = get_logger("grounding")
 
 
 def supported_core_ids(onto: Ontology | None = None) -> set[int]:
-    """The curated supported core (config) plus the fallback classes, resolved to ids. Names absent from
+    """The curated supported core plus the fallback classes, resolved to ids. The core now comes from the
+    active domain pack (pack.ontology.supported_core; AV mirrors config, byte-identical). Names absent from
     the active ontology are skipped, so the list is safe to evolve independently of the YAML."""
+    from services.domain import active_pack
+
     onto = onto or get_ontology()
-    s = get_settings()
-    ids = {onto.by_name(n).id for n in s.ontology.supported_core if onto.has_name(n)}
+    ids = {onto.by_name(n).id for n in active_pack().ontology.supported_core if onto.has_name(n)}
     ids |= set(onto.fallback_ids())
     return ids
 

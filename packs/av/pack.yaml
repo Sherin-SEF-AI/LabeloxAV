@@ -1,0 +1,14 @@
+# AV domain pack manifest (human-facing; the code manifest in pack.py is the source of truth and the
+# registry checks the two agree). See docs/PACK_INTERFACE.md.
+id: av
+display_name: "Autonomous Driving (India)"
+version: "0.1.0"
+default_scene_model: moving_camera
+capabilities:
+  - moving_camera
+  - ego_motion
+  - dynamics
+  - mono_depth
+  - inertial_qa
+  - privacy_redaction
+ontology: ontology/labelox_in_v0.yaml

@@ -222,9 +222,28 @@ def normalize_class_name(name: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", collapsed)
 
 
-@lru_cache(maxsize=1)
-def get_ontology() -> Ontology:
-    return load_ontology()
+def get_ontology(pack_id: str = "av") -> Ontology:
+    """The ontology for a domain pack. Defaults to the AV pack, whose ontology is the governed
+    labelox_in_v0.yaml resolved from config, identical to the historical single-ontology behaviour (every
+    existing no-arg caller resolves here). A non-AV pack resolves its ontology path through the pack
+    registry. Cache is keyed by pack id, so multiple packs coexist in one process."""
+    return _get_ontology_cached(pack_id or "av")
+
+
+@lru_cache(maxsize=None)
+def _get_ontology_cached(pack_id: str) -> Ontology:
+    if pack_id == "av":
+        return load_ontology()  # byte-identical to the pre-pack behaviour: same YAML, same sidecar merge
+    # The registry is the sanctioned bridge to a concrete pack; import it lazily so the AV path never
+    # touches it and no static engine->pack edge exists.
+    from packs.registry import get_pack
+
+    return load_ontology(get_pack(pack_id).ontology.yaml_path)
+
+
+# Preserve the historical `get_ontology.cache_clear()` call surface (add_custom_class, tests) now that the
+# cache lives on the inner function.
+get_ontology.cache_clear = _get_ontology_cached.cache_clear  # type: ignore[attr-defined]
 
 
 def add_custom_class(name: str, l0: str = "object", l1: str = "custom", india: bool = True) -> dict:
@@ -244,5 +263,5 @@ def add_custom_class(name: str, l0: str = "object", l1: str = "custom", india: b
     path = _custom_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(customs, indent=2, sort_keys=True))
-    get_ontology.cache_clear()
+    _get_ontology_cached.cache_clear()
     return {"id": new_id, "name": norm, "l0": l0, "l1": l1, "india": bool(india), "existed": False}

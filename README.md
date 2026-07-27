@@ -171,6 +171,28 @@ HD maps, calibration, dynamics            Active learning
 
 ---
 
+## Multi-domain: one engine, two domains
+
+The engine is no longer single-domain. Everything domain-specific lives behind a `DomainPack` contract, so the same spine (ingest QA, calibration, curation, auto-label, pseudo-truth, eval, edge deploy) runs a second domain without a fork. The AV data engine is now the `av` pack; **LabeloxSec**, for India CCTV and security footage, is the `sec` pack. Both load in one process; the engine core imports no concrete pack, and CI enforces that with an import contract. A per-pack golden digest freezes every surface, so the AV pack is provably byte-identical after the refactor: a hard parity gate.
+
+What a pack carries: its ontology, its safety definition, its auto-label profile (VLM prompt, anchors, class maps), its eval strata, its scene model, its ingestion adapter, its privacy plane, and its edge targets. The AV pack keeps the moving-camera world (ego-motion, the road ground plane, the VRU/animal safety set, DPDPA face and plate redaction, Jetson silicon). The Sec pack swaps in a **static-camera scene model** with a per-camera background prior, a security ontology (person, weapon, baggage, animals, infrastructure), a person-and-weapon safety set, CCTV forge targets (Ambarella, Axis ARTPEC, Hailo, OpenVINO, x86 ONNX), and **ANPR-India**.
+
+**The static camera fork.** A fixed camera has no ego-motion but a stable background a moving camera never has. The static scene model derives a per-camera background prior (temporal median), and everything that differs from it is foreground: a model-free "what moved" signal for curation and events.
+
+![LabeloxSec static-camera scene model: background prior and foreground detection](docs/screenshots/50-labeloxsec-static-camera.png)
+
+*The static-camera pipeline running live on the Sec pack code: a fixed-camera frame, the recovered background prior (temporal median, moving objects averaged out), the foreground mask, and the detections. Input here is procedural; the algorithms are the shipped pack code.*
+
+**ANPR-India, and the compliance line it draws.** LabeloxSec reads Indian number plates for an authorised security purpose. The AV engine does the exact opposite: plates are personal data under the DPDPA, blurred by the privacy plane and never read. That contradiction is resolved by the pack: ANPR is gated on the `sec` capability and *refuses under the AV pack*, so plate reading can never run in the privacy-first context. The plate-format kernel (state, RTO district, series, number; standard, Bharat-series, diplomatic marks, validated against the real RTO codes) is pure and fully tested; the OCR is a wired model seam, never a fabricated reader.
+
+![LabeloxSec ANPR-India: plate parsing and the pack capability gate](docs/screenshots/51-labeloxsec-anpr.png)
+
+*ANPR-India running live: the Sec pack authorises the read and parses the mark; the AV pack is refused by the capability gate; and the India format kernel across standard, Bharat-series, diplomatic, and invalid plates.*
+
+The pattern generalises: a third domain is a third pack, not a third fork.
+
+---
+
 ## Quick start
 
 ```bash

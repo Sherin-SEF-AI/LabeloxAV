@@ -38,6 +38,7 @@ class VlmResult:
     votes: int = 1
     agreement: float = 1.0     # fraction of votes that chose class_name
     raw: dict = field(default_factory=dict)
+    provider: str = ""         # which backend served this verdict (ollama | groq | groq:escalate), for provenance
 
 
 class VlmClient(Protocol):
@@ -61,9 +62,13 @@ def crop_object(image_bgr: np.ndarray, bbox: tuple[float, float, float, float], 
 
 
 def _build_prompt(shortlist: list[str], attr_schema: dict) -> str:
+    # The domain preamble comes from the active pack (AV: the Indian-road-scene prompt); the rest of the
+    # instruction is generic. Byte-identical for AV.
+    from services.domain import active_pack
+
+    template = active_pack().autolabel_profile.vlm_prompt_template
     return (
-        "You are labeling an object cropped from an Indian road scene for an autonomous-driving "
-        "dataset. Identify the object and read its attributes.\n"
+        f"{template}\n"
         f"Choose exactly one class from this list: {shortlist}.\n"
         f"Attribute schema (return only those that apply): {json.dumps(attr_schema)}.\n"
         'Respond with strict JSON only, no prose: '
@@ -112,14 +117,12 @@ class OllamaVlmClient:
 
 
 def make_vlm_client(settings: Settings | None = None) -> VlmClient:
-    settings = settings or get_settings()
-    backend = settings.models.vlm.backend
-    if backend == "ollama":
-        return OllamaVlmClient(settings)
-    raise NotImplementedError(
-        f"vlm backend '{backend}' not wired on this box; use 'ollama' "
-        "(transformers 4-bit needs a working bitsandbytes Blackwell binary)."
-    )
+    """The VLM client for the configured providers. Delegates to the router (Groq cloud + Ollama local with
+    fallback); when nothing is pointed at the cloud the router returns a plain OllamaVlmClient, identical to
+    the previous behaviour. Lazy import breaks the path_c <-> router cycle."""
+    from services.llm.router import make_vlm_client as _routed
+
+    return _routed(settings)
 
 
 def apply_vlm(obj, res: VlmResult, onto: Ontology, vlm_tag: str):
@@ -156,8 +159,11 @@ def apply_vlm(obj, res: VlmResult, onto: Ontology, vlm_tag: str):
             else:
                 verdict = "unsure"
 
+    # Record which provider served the verdict alongside the model tag, so a gate decision is traceable to
+    # ollama vs groq (vs the escalate provider) and the two can be compared on the gold set.
+    tag = f"{vlm_tag}@{res.provider}" if res.provider else vlm_tag
     obj.provenance.proposals.append(
-        PathProposal(path="path_c_qwen3vl", class_name=res.class_name, conf=None, verdict=verdict, model_version=vlm_tag)
+        PathProposal(path="path_c_qwen3vl", class_name=res.class_name, conf=None, verdict=verdict, model_version=tag)
     )
     if res.caption:
         obj.provenance.notes.append(f"caption: {res.caption}")
@@ -178,16 +184,6 @@ class VlmVerifier:
         # the VLM cannot "confirm" an ungrounded class (e.g. a fixed-class sibling like bus_shelter).
         self.supported_ids = supported_ids
 
-    # Cross-superclass road actors a detection is most likely to actually be (India-weighted). Always
-    # offered to the VLM so it can fix gross mislabels across superclasses, e.g. autorickshaw read as
-    # sedan, or a person-on-a-scooter read as pedestrian.
-    CROSS_ANCHORS = [
-        "autorickshaw", "e_auto", "e_rickshaw", "motorcycle", "scooter", "cycle",
-        "pedestrian", "rider", "cyclist", "sedan", "suv", "hatchback", "pickup",
-        "truck", "lcv", "bus", "tempo", "water_tanker", "cattle", "dog",
-        "push_cart", "vendor_handcart", "street_vendor",
-    ]
-
     def _shortlist(self, class_id: int) -> list[str]:
         c = self.onto.by_id(class_id)
 
@@ -197,9 +193,12 @@ class VlmVerifier:
 
         # current class first, then the cross-superclass anchors (guaranteed presence), then L1
         # siblings for fine within-superclass refinement, then the fallback. All restricted to the
-        # grounded set so the VLM cannot confirm an ungrounded class.
+        # grounded set so the VLM cannot confirm an ungrounded class. Anchors come from the active pack.
+        from services.domain import active_pack
+
+        anchors = active_pack().autolabel_profile.cross_anchors
         ordered = [c.name]
-        ordered += [n for n in self.CROSS_ANCHORS if self.onto.has_name(n) and grounded(n)]
+        ordered += [n for n in anchors if self.onto.has_name(n) and grounded(n)]
         ordered += [k.name for k in self.onto.classes if k.l1 == c.l1 and grounded(k.name)]
         ordered.append("object_fallback")
         names = list(dict.fromkeys(ordered))  # dedup, preserve order
@@ -259,4 +258,5 @@ class VlmVerifier:
             class_name=majority, attrs=merged_attrs, caption=caption,
             confident=any(r.confident for r in winners),
             votes=votes, agreement=round(cnt / votes, 2),
+            provider=next((r.provider for r in winners if r.provider), ""),
         )
