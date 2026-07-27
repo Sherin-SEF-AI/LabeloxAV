@@ -102,6 +102,10 @@ jobs:
       - name: Typecheck (tsc --noEmit, blocking)
         run: npx tsc --noEmit
 
+      - name: Unit floor (vitest, blocking)
+        # Pure-logic unit tests (token-expiry decoding, nav menu wiring). Fast, no DOM.
+        run: npm test
+
       - name: Production build (next build, blocking)
         run: npm run build
 
