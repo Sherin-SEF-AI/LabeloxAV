@@ -45,6 +45,13 @@ class BuildSpec:
     include_classes: list[str] = field(default_factory=list)  # specialized detector: ONLY these classes
     idd_dir: str | None = None       # external YOLO dataset to merge as the IDD anchor
     drop_classes: list[str] = field(default_factory=list)
+    # Split validation at the session boundary, not per frame. Consecutive dashcam frames are
+    # near-duplicates, so a per-frame split leaks the training distribution into validation and inflates
+    # the reported mAP. Set False only to reproduce a historical build.
+    group_split_by_session: bool = True
+    # Refuse to build if the trainset would contain objects that are also in this sealed gold set. Training
+    # on the yardstick makes every gold metric meaningless, and nothing previously prevented it.
+    exclude_gold_id: str | None = None
 
 
 async def _select(spec: BuildSpec):
@@ -62,7 +69,7 @@ async def _select(spec: BuildSpec):
     maker = get_sessionmaker()
     async with maker() as db:
         stmt = (
-            select(Object, Frame.frame_id, Frame.img_uri, Frame.width, Frame.height)
+            select(Object, Frame.frame_id, Frame.img_uri, Frame.width, Frame.height, Frame.session_id)
             .join(Frame, Object.frame_id == Frame.frame_id)
             .join(DbSession, Frame.session_id == DbSession.session_id)
             .where(Object.state != "rejected", Object.conf >= spec.conf_floor)
@@ -76,7 +83,7 @@ async def _select(spec: BuildSpec):
         rows = (await db.execute(stmt)).all()
 
     cand = []
-    for obj, frame_id, img_uri, w, h in rows:
+    for obj, frame_id, img_uri, w, h, session_id in rows:
         if obj.class_id in fallback_ids or obj.class_id in drop_ids:
             continue
         if include_ids and obj.class_id not in include_ids:
@@ -86,10 +93,85 @@ async def _select(spec: BuildSpec):
             continue
         is_gold = obj.source == "human" and obj.state == "accepted"
         cand.append({
-            "frame_id": str(frame_id), "img_uri": img_uri, "w": w, "h": h,
+            "frame_id": str(frame_id), "session_id": str(session_id), "img_uri": img_uri, "w": w, "h": h,
             "class_id": obj.class_id, "bbox": list(obj.bbox), "agree": agree, "gold": is_gold,
+            "object_id": str(obj.object_id),
         })
     return cand
+
+
+def _split_val_frames(by_frame: dict[str, list[dict]], gold_frames: set[str], n_val: int,
+                      rng: random.Random, *, group_by_session: bool) -> set[str]:
+    """Choose the validation frames, grouping whole sessions together by default.
+
+    A per-frame random split puts consecutive frames of the same drive on both sides. Dashcam frames a
+    fraction of a second apart are near-duplicates, so the model effectively validates on images it trained
+    on and the reported mAP is optimistic by an unknown margin. Splitting at the session boundary makes
+    validation measure generalisation to an unseen drive, which is the number anyone actually wants.
+
+    Sessions are taken whole, smallest-first, until the frame budget is met, so the realised validation size
+    lands close to the requested fraction instead of overshooting on one huge session.
+    """
+    if n_val <= 0:
+        return set()
+    if not group_by_session:
+        frames = list(by_frame)
+        rng.shuffle(frames)
+        non_gold = [f for f in frames if f not in gold_frames]
+        val_set = set(list(gold_frames)[:n_val])
+        for f in non_gold:
+            if len(val_set) >= n_val:
+                break
+            val_set.add(f)
+        return val_set
+
+    sessions: dict[str, list[str]] = {}
+    for fid, objs in by_frame.items():
+        sessions.setdefault(objs[0].get("session_id") or "unknown", []).append(fid)
+
+    order = sorted(sessions)
+    rng.shuffle(order)
+    # Prefer sessions that carry gold frames: gold is the honest yardstick and belongs on the val side.
+    order.sort(key=lambda sid: (not any(f in gold_frames for f in sessions[sid]), len(sessions[sid])))
+
+    val_set: set[str] = set()
+    for sid in order:
+        if len(val_set) >= n_val:
+            break
+        val_set.update(sessions[sid])
+    # With a single session there is nothing to hold out at session granularity; fall back to a frame split
+    # rather than emitting an empty validation set (which would silently disable validation entirely).
+    if len(sessions) < 2:
+        return _split_val_frames(by_frame, gold_frames, n_val, rng, group_by_session=False)
+    return val_set
+
+
+async def _exclude_gold_objects(cand: list[dict], gold_id: str | None) -> tuple[list[dict], int]:
+    """Drop any candidate that is a member of the named sealed gold set.
+
+    Training and gold both draw from the same Object table with overlapping predicates (human-reviewed,
+    accepted), so the same object could sit in the trainset and in the yardstick at once. A model trained on
+    its own gold set scores against memorised examples and every gold metric it produces is meaningless.
+    Nothing previously enforced disjointness; naming a gold set here does.
+    """
+    if not gold_id:
+        return cand, 0
+    from db.models import GoldSet
+
+    maker = get_sessionmaker()
+    async with maker() as db:
+        gold = await db.get(GoldSet, gold_id)
+    if gold is None:
+        raise ValueError(f"exclude_gold_id '{gold_id}' does not exist; refusing to build a trainset that "
+                         "cannot be proven disjoint from the yardstick")
+    gold_object_ids = {str(o) for o in (gold.object_ids or [])}
+    if not gold_object_ids:
+        return cand, 0
+    kept = [c for c in cand if c.get("object_id") not in gold_object_ids]
+    dropped = len(cand) - len(kept)
+    if dropped:
+        log.info("trainset.gold_excluded", gold_id=gold_id, dropped=dropped)
+    return kept, dropped
 
 
 def _cap_per_class(cand: list[dict], max_per_class: int, seed: int) -> list[dict]:
@@ -119,6 +201,7 @@ async def build_training_dataset(spec: BuildSpec) -> dict:
         (out / sub).mkdir(parents=True, exist_ok=True)
 
     cand = await _select(spec)
+    cand, excluded_gold = await _exclude_gold_objects(cand, spec.exclude_gold_id)
     cand = _cap_per_class(cand, spec.max_per_class, spec.seed)
 
     # Class vocabulary = union of corpus classes and (if merging) the IDD anchor's classes, so IDD
@@ -143,15 +226,8 @@ async def build_training_dataset(spec: BuildSpec) -> dict:
 
     frames = list(by_frame)
     rng = random.Random(spec.seed)
-    rng.shuffle(frames)
-    non_gold = [f for f in frames if f not in gold_frames]
     n_val = max(1, int(len(frames) * spec.val_frac)) if len(frames) > 4 else 0
-    # gold frames go to val first, then fill from non-gold
-    val_set = set(list(gold_frames)[:n_val])
-    for f in non_gold:
-        if len(val_set) >= n_val:
-            break
-        val_set.add(f)
+    val_set = _split_val_frames(by_frame, gold_frames, n_val, rng, group_by_session=spec.group_split_by_session)
 
     n_train_obj = n_val_obj = 0
     for fid, objs in by_frame.items():
@@ -193,6 +269,11 @@ async def build_training_dataset(spec: BuildSpec) -> dict:
         "classes": len(names), "n_train_images": n_train_imgs, "n_val_images": n_val_imgs,
         "n_train_objects": n_train_obj, "n_val_objects": n_val_obj,
         "gold_frames": len(gold_frames), "ontology_version": onto.version,
+        # Provenance of the split itself, so a reported metric can be traced to how it was validated.
+        "split": "session_grouped" if spec.group_split_by_session else "per_frame",
+        "val_sessions": len({by_frame[f][0].get("session_id") for f in val_set}) if val_set else 0,
+        "excluded_gold_id": spec.exclude_gold_id,
+        "excluded_gold_objects": excluded_gold,
     }
     log.info("trainset.built", **{k: result[k] for k in ("classes", "n_train_images", "n_val_images")})
     return result
