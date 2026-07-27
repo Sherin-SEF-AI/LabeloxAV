@@ -31,6 +31,9 @@ Suite at the time of writing: 951 passing, 4 xfailed, failures limited to `tests
 
 | Gap | Fix | Test |
 | --- | --- | --- |
+| Text-to-object search did not exist; the function that claimed to do it read a table the pipeline no longer populates and scanned it in Python | SigLIP2 vector per crop with an HNSW index (migration 0073); search is one ANN query | `tests/test_text_to_object_search.py` |
+| OCR search was an unanchored ILIKE, a sequential scan on every query | pg_trgm GIN index; the query is unchanged | (index asserted by the migration round-trip) |
+| ONNX export, quantization, and benchmarking were unreachable: no dependency group contained the backends | `edge` extra pins onnx, onnxruntime, onnxslim; a real export runs and is benchmarked | `tests/test_forgyx_onnx.py` |
 | Webhook URLs were validated only as "starts with http", giving any authenticated caller an SSRF primitive | Private, loopback, link-local, reserved, and multicast targets refused; re-checked immediately before each fetch, which also closes DNS rebinding; internal receivers are an explicit opt-in | `tests/test_webhook_hardening.py` |
 | Webhook signature covered the body alone, so a captured delivery replayed forever | Timestamp bound into the signed material and published in a header; legacy form still verifies | same |
 | Webhook delivery was a single POST with no retry | Backoff retry on transport failure and 5xx/429, never on 4xx; every attempt recorded | same |
@@ -57,21 +60,29 @@ not been done.
 
 ### Needs hardware or a runtime this environment does not have
 
+An earlier version of this document over-used this heading. Two entries (ONNX backends, the OCR index) were
+listed as blocked when the stated blocker was itself the fix, and one (text-to-object search) was listed as
+blocked on a long backfill when the schema and query work was the actual deliverable. Those are now done. The
+entries that remain here are ones where a specific piece of hardware or a paid resource is genuinely absent.
+
 | Gap | What it needs |
 | --- | --- |
 | No learned 3D detector in the loop; the running path lifts 2D boxes geometrically | OpenPCDet or Pointcept installed and a pod-side entrypoint. The wrappers raise `NativeDetectionUnavailable` honestly today. Also needs real LiDAR rather than monocular pseudo-LiDAR, whose scale error the cuboids inherit. |
 | 3D semantic segmentation is cuboid membership plus a ground plane | PTv3 inference wrapper, which is genuinely unwritten, plus the runtime above. |
 | Cloud training, autolabel, relabel, and HD-map fusion all park in `queued-cloud` forever | A pod-side worker and the MinIO/workspace data-movement contract that is currently prose in a docstring. Requires a provisioned GPU pod to develop against. |
-| ONNX, TensorRT, LiteRT, and Hailo export are dead code | Those backends are in no dependency group, so `capabilities.require()` fails for every target on a stock install. Needs the deps and hardware to verify against. |
+| TensorRT, LiteRT, and Hailo export | These need a device toolchain (Jetson, Android/LiteRT, Hailo SDK). The capability gate refuses them by name rather than fabricating a result, which is the correct behaviour. ONNX and ONNX Runtime were wrongly listed here and are now done: they are pure-CPU wheels, so the blocker was self-inflicted. |
 | Multi-GPU and distributed training | The worker holds a Postgres advisory lock as a global GPU mutex by design; multi-GPU needs that scheduling model redesigned, and more than one GPU to test on. |
 
 ### Needs a schema migration and a backfill run
 
 | Gap | What it needs |
 | --- | --- |
-| No text-to-object search | A `siglip_vec` column on `ObjectEmbedding`, an HNSW index, and a backfill over existing crops. The migration is small; the backfill is a long GPU job over the corpus. |
-| OCR search is an unindexed `ILIKE '%...%'` | A `pg_trgm` GIN index on `Object.ocr_text`. |
 | Notifications do not exist: issue comments, job assignments, kill-switch, drift, and SLO breaches are all silent | A notification table, an API, a bell in the shell, and emitters at each event site. |
+
+Text-to-object search and the OCR index were in this section and are now done (migration 0073). The
+outstanding part is operational, not structural: existing crops need their `siglip_vec` backfilled by
+running the embedder over the corpus, which the daemon does incrementally. New crops are embedded on
+ingest.
 
 ### Substantial feature work
 
