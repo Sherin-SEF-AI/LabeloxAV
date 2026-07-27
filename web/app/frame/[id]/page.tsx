@@ -29,6 +29,7 @@ import ShortcutOverlay from "@/components/shell/ShortcutOverlay";
 import IssuePanel from "@/components/labelops/IssuePanel";
 import CloudControl from "@/components/shell/CloudControl";
 import { MODES, type ToolGroup } from "@/lib/editor/registry";
+import Filmstrip from "@/components/editor/Filmstrip";
 
 // Frame-centric professional annotation editor. Pan/zoom canvas, draw + edit boxes, SAM-assisted masks,
 // layers panel, class palette, attributes, keyboard-driven, batched save. Operational Materialism tokens.
@@ -1111,6 +1112,13 @@ export default function FrameEditor() {
           ) : (
             editorCanvasEl
           )}
+          {/* Nearby frames, under the canvas where a scrubber belongs. Hidden in the 3D and rig views, whose
+              canvases are not a single camera's timeline. */}
+          {mode !== "lidar3d" && !rigView && (
+            <div className="absolute bottom-0 left-0 right-0 z-10">
+              <Filmstrip frameId={id} onPick={gotoFrame} />
+            </div>
+          )}
           {mode !== "lidar3d" && <FloatingLayers layers={layers} meta={layerMeta} onToggle={(k) => setLayers((s) => ({ ...s, [k]: !s[k as keyof typeof s] }))}
             extra={
               <>
@@ -1686,16 +1694,28 @@ export default function FrameEditor() {
                         <span className="w-3 text-right">{collapsed ? "+" : "−"}</span>
                       </button>
                       {!collapsed && objs.map((o) => (
-                        <div key={o.id} onClick={() => dispatch({ t: "select", id: o.id })}
-                          className={`flex items-center gap-1.5 pl-3 pr-1 py-0.5 cursor-pointer font-mono text-[11px] ${o.id === st.selectedId ? "bg-line text-ink" : "text-ink-3 hover:text-ink-2"}`}>
-                          <button onClick={(e) => { e.stopPropagation(); dispatch({ t: "update", id: o.id, patch: { visible: !o.visible } }); }}
+                        <div key={o.id}
+                          onClick={(e) => {
+                            // Ctrl/Cmd or Shift extends the selection, matching every other list in every
+                            // other tool; a plain click still selects exactly one.
+                            if (e.ctrlKey || e.metaKey || e.shiftKey) dispatch({ t: "toggleSelect", id: o.id });
+                            else dispatch({ t: "select", id: o.id });
+                          }}
+                          className={`flex items-center gap-1.5 pl-3 pr-1 py-0.5 cursor-pointer font-mono text-[11px] ${st.selectedIds.includes(o.id) ? "bg-line text-ink" : "text-ink-3 hover:text-ink-2"}`}>
+                          <button title={o.visible ? "hide" : "show"} aria-label={o.visible ? "hide object" : "show object"}
+                            onClick={(e) => { e.stopPropagation(); dispatch({ t: "setVisible", ids: [o.id], visible: !o.visible }); }}
                             className={o.visible ? "text-ink-2" : "text-ink-3"}>{o.visible ? "●" : "○"}</button>
+                          <button title={o.locked ? "unlock" : "lock"} aria-label={o.locked ? "unlock object" : "lock object"}
+                            onClick={(e) => { e.stopPropagation(); dispatch({ t: "setLocked", ids: [o.id], locked: !o.locked }); }}
+                            className={o.locked ? "text-warn" : "text-ink-3 hover:text-ink-2"}>{o.locked ? "L" : "l"}</button>
                           <span className="truncate flex-1">{o.id.startsWith("tmp-") ? "new" : o.id.slice(0, 8)}{o.isNew ? " *" : ""}</span>
                           {o.quality_score != null && <span title={`label quality ${o.quality_score.toFixed(2)}`}
                             className={`w-1.5 h-1.5 rounded-full shrink-0 ${o.quality_score >= 0.4 ? "bg-pass" : o.quality_score >= 0.25 ? "bg-warn" : "bg-block"}`} />}
                           <ConfBar conf={o.conf} />
                           {o.mask.length > 0 && <span className="text-info" title="has mask">&#9670;</span>}
-                          <button onClick={(e) => { e.stopPropagation(); dispatch({ t: "delete", id: o.id }); }} className="text-ink-3 hover:text-block">x</button>
+                          <button onClick={(e) => { e.stopPropagation(); dispatch({ t: "delete", id: o.id }); }}
+                            disabled={o.locked} aria-label="delete object"
+                            className={o.locked ? "text-line cursor-not-allowed" : "text-ink-3 hover:text-block"}>x</button>
                         </div>
                       ))}
                     </div>
@@ -1707,6 +1727,32 @@ export default function FrameEditor() {
           )}
           </div>
           </>)}
+
+          {/* Bulk actions on a multi-selection. Before this, selection was a single id, so every batch
+              operation had to go through the natural-language agent bar: there was no way to pick three
+              boxes and delete or reclassify them directly. */}
+          {st.selectedIds.length > 1 && (
+            <div className="panel px-2 py-1.5 flex items-center gap-2 font-mono text-[11px]" role="toolbar"
+                 aria-label="bulk actions">
+              <span className="text-ink-2">{st.selectedIds.length} selected</span>
+              <button onClick={() => dispatch({ t: "setVisible", ids: st.selectedIds, visible: false })}
+                className="px-1.5 py-0.5 border border-line hover:border-accent">hide</button>
+              <button onClick={() => dispatch({ t: "setVisible", ids: st.selectedIds, visible: true })}
+                className="px-1.5 py-0.5 border border-line hover:border-accent">show</button>
+              <button onClick={() => dispatch({ t: "setLocked", ids: st.selectedIds, locked: true })}
+                className="px-1.5 py-0.5 border border-line hover:border-accent">lock</button>
+              <button
+                onClick={async () => {
+                  // Confirm before a destructive batch: a mis-swept marquee can hold far more than intended,
+                  // and this is not a single undoable box.
+                  if (!(await confirm({ title: `Delete ${st.selectedIds.length} objects?`, danger: true,
+                                        confirmLabel: "Delete" }))) return;
+                  for (const id of st.selectedIds) dispatch({ t: "delete", id });
+                  dispatch({ t: "select", id: null });
+                }}
+                className="px-1.5 py-0.5 border border-line text-block hover:border-block ml-auto">delete</button>
+            </div>
+          )}
 
           {/* Issue threads for this frame, anchored to the selected object when there is one. Frame-scoped
               so it stays available in every mode: a problem worth reporting does not depend on which tool

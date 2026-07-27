@@ -309,6 +309,48 @@ async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
     ]
 
 
+@router.get("/frames/{frame_id}/filmstrip")
+async def frame_filmstrip(frame_id: str, span: int = 12, db: AsyncSession = Depends(db_session)):
+    """The frames on either side of this one, in capture order, for the editor's filmstrip.
+
+    The editor could only step one frame at a time through prev/next, so a reviewer had no way to see what
+    was coming or to jump several frames back to where an object first appeared. That made every temporal
+    judgement (is this the same vehicle, when did the occlusion start) a sequence of blind single steps.
+
+    Ordered by ts_ns and restricted to the same camera: a multi-camera rig interleaves frames from every
+    camera at nearly the same timestamp, and mixing them would make the strip jump viewpoint every tile.
+    """
+    frame = await db.get(Frame, UUID(frame_id))
+    if frame is None:
+        raise HTTPException(404, "frame not found")
+    span = max(1, min(span, 40))
+
+    async def _side(newer: bool) -> list:
+        cond = Frame.ts_ns > frame.ts_ns if newer else Frame.ts_ns < frame.ts_ns
+        order = Frame.ts_ns.asc() if newer else Frame.ts_ns.desc()
+        rows = (await db.execute(
+            select(Frame.frame_id, Frame.ts_ns)
+            .where(Frame.session_id == frame.session_id, Frame.cam_id == frame.cam_id, cond)
+            .order_by(order).limit(span))).all()
+        return list(rows)
+
+    before = list(reversed(await _side(False)))
+    after = await _side(True)
+    tiles = [*before, (frame.frame_id, frame.ts_ns), *after]
+
+    # Object counts in one query rather than one per tile: a 25-tile strip would otherwise issue 25 round
+    # trips every time the reviewer moved a frame.
+    ids = [fid for fid, _ in tiles]
+    counts = dict((await db.execute(
+        select(Object.frame_id, func.count()).where(Object.frame_id.in_(ids))
+        .group_by(Object.frame_id))).all())
+
+    return {"frame_id": frame_id, "cam_id": frame.cam_id, "frames": [
+        {"frame_id": str(fid), "ts_ns": int(ts), "n_objects": int(counts.get(fid, 0)),
+         "image_url": f"/api/frames/{fid}/image", "current": str(fid) == frame_id}
+        for fid, ts in tiles]}
+
+
 @router.get("/frames/{frame_id}")
 async def get_frame(frame_id: str, db: AsyncSession = Depends(db_session)):
     """Frame meta for the editor: dimensions, image url, object count, and prev/next frame in the
