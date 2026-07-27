@@ -13,6 +13,7 @@ NumPy is the oracle; the torch path mirrors it for large prediction sets on the 
 from __future__ import annotations
 
 import numpy as np
+import numpy.typing as npt
 
 try:
     import torch
@@ -25,7 +26,7 @@ _N_POINTS = 101
 _IOU_50_95 = tuple(round(x, 2) for x in np.arange(0.5, 1.0, 0.05))  # 0.5, 0.55, ..., 0.95
 
 
-def _ap_np(scores: np.ndarray, tp: np.ndarray, n_gt: int) -> float:
+def _ap_np(scores: npt.NDArray[np.float64], tp: npt.NDArray[np.bool_], n_gt: int) -> float:
     order = np.argsort(-scores, kind="stable")
     tp_sorted = tp[order].astype(np.float64)
     cum_tp = np.cumsum(tp_sorted)
@@ -41,7 +42,8 @@ def _ap_np(scores: np.ndarray, tp: np.ndarray, n_gt: int) -> float:
     return ap / _N_POINTS
 
 
-def _ap_torch(scores: np.ndarray, tp: np.ndarray, n_gt: int) -> float:  # pragma: no cover - GPU path
+def _ap_torch(scores: npt.NDArray[np.float64], tp: npt.NDArray[np.bool_],
+              n_gt: int) -> float:  # pragma: no cover - GPU path
     s = torch.as_tensor(scores, dtype=torch.float64, device="cuda")
     t = torch.as_tensor(tp, dtype=torch.float64, device="cuda")
     order = torch.argsort(s, descending=True, stable=True)
@@ -58,21 +60,23 @@ def _ap_torch(scores: np.ndarray, tp: np.ndarray, n_gt: int) -> float:  # pragma
     return ap / _N_POINTS
 
 
-def average_precision(scores, tp, n_gt: int, device=None) -> float | None:
+def average_precision(scores: npt.ArrayLike, tp: npt.ArrayLike, n_gt: int,
+                      device: str | None = None) -> float | None:
     """101-point interpolated AP for one class. `scores` and `tp` are per prediction (any order); `n_gt` is the
     number of ground-truth objects of the class. Returns None when n_gt == 0 (AP undefined)."""
     if n_gt <= 0:
         return None
-    scores = np.asarray(scores, dtype=np.float64).reshape(-1)
-    tp = np.asarray(tp).reshape(-1).astype(bool)
-    if scores.size == 0:
+    s = np.asarray(scores, dtype=np.float64).reshape(-1)
+    t = np.asarray(tp).reshape(-1).astype(bool)
+    if s.size == 0:
         return 0.0
     if device is not None and str(device) != "cpu" and _HAS_TORCH and torch.cuda.is_available():
-        return _ap_torch(scores, tp, n_gt)
-    return _ap_np(scores, tp, n_gt)
+        return _ap_torch(s, t, n_gt)
+    return _ap_np(s, t, n_gt)
 
 
-def mean_ap(per_class: dict[int, tuple], gt_counts: dict[int, int], device=None) -> tuple[float, dict[int, float]]:
+def mean_ap(per_class: dict[int, tuple[npt.ArrayLike, npt.ArrayLike]], gt_counts: dict[int, int],
+            device: str | None = None) -> tuple[float, dict[int, float]]:
     """mAP and per-class AP. `per_class` maps class_id -> (scores, tp); `gt_counts` maps class_id -> n_gt.
     Classes with no ground truth are skipped, so the mean is over classes that actually appear."""
     aps: dict[int, float] = {}

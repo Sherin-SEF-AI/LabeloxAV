@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
@@ -36,6 +36,12 @@ function Section({ title, children, right }: { title: string; children: React.Re
 }
 
 export default function IntegrationsPage() {
+  // useSearchParams forces a client-side-render bailout, which Next requires be under a Suspense boundary or
+  // the static prerender of this route fails the build. Match the pattern used by login and search.
+  return <Suspense fallback={null}><IntegrationsBody /></Suspense>;
+}
+
+function IntegrationsBody() {
   const params = useSearchParams();
   const [hooks, setHooks] = useState<Webhook[]>([]);
   const [sources, setSources] = useState<Source[]>([]);

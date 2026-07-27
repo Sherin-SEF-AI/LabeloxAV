@@ -1,7 +1,7 @@
 "use client";
 
 export const dynamic = "force-dynamic";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -104,6 +104,12 @@ function SessionCard({
 }
 
 export default function AnnotationsPage() {
+  // usePager reads the query string via useSearchParams, which forces a client-side-render bailout that Next
+  // requires be under a Suspense boundary or the static prerender of this route fails the build.
+  return <Suspense fallback={null}><AnnotationsBody /></Suspense>;
+}
+
+function AnnotationsBody() {
   const router = useRouter();
   const { offset, limit, setOffset } = usePager(24);
   const [sessions, setSessions] = useState<SessionRow[]>([]);

@@ -9,7 +9,6 @@ negative, which is what produced the 0.034 / 0.018 artifact.
 from __future__ import annotations
 
 import uuid
-from uuid import UUID
 
 import pytest
 from sqlalchemy import select

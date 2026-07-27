@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.accel.projection import gpu_available, project_world_batch  # noqa: F401 (re-export gpu_available)
+from core.accel.projection import (  # noqa: F401 (re-export gpu_available)
+    gpu_available,
+    project_world_batch,
+)
 
 
 def reprojection_residuals(points_world, uv_obs, T_cam_world, K, dist=None, model="pinhole", z_min=1e-9,
