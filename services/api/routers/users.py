@@ -5,7 +5,7 @@ user is itself role-gated, so a token can only originate from an already-authori
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,17 +26,36 @@ def _token_for(user: User) -> str:
 
 
 async def _with_counts(db: AsyncSession, users: list[User]) -> list[dict]:
+    """Attach each user's review count.
+
+    The aggregation is scoped to the users being returned. It used to GROUP BY over the entire review table,
+    which on a corpus with hundreds of thousands of reviews is a full scan run on every page mount of the web
+    shell, to produce counts for at most a screenful of users.
+    """
+    if not users:
+        return []
+    ids = [u.user_id for u in users]
     counts = dict((await db.execute(
-        select(Review.user_id, func.count()).where(Review.user_id.isnot(None)).group_by(Review.user_id)
+        select(Review.user_id, func.count()).where(Review.user_id.in_(ids)).group_by(Review.user_id)
     )).all())
     return [{"user_id": str(u.user_id), "name": u.name, "role": u.role, "reviews": int(counts.get(u.user_id, 0))}
             for u in users]
 
 
 @router.get("/users")
-async def list_users(db: AsyncSession = Depends(db_session)):
-    users = (await db.execute(select(User).order_by(User.created_at))).scalars().all()
-    return await _with_counts(db, users)
+async def list_users(limit: int = Query(200, ge=1, le=500), offset: int = Query(0, ge=0),
+                     db: AsyncSession = Depends(db_session)):
+    """Paginated, and bounded by a ceiling the caller cannot raise. The list was previously unbounded, so it
+    grew without limit as the team did and a caller could not page through it.
+
+    Newest first: on a paginated admin list the recently added users are the ones an operator is looking for,
+    and oldest-first would bury a just-created account on the last page.
+    """
+    users = (await db.execute(
+        select(User).order_by(User.created_at.desc()).offset(offset).limit(limit))).scalars().all()
+    total = (await db.execute(select(func.count()).select_from(User))).scalar_one()
+    rows = await _with_counts(db, users)
+    return {"total": int(total), "offset": offset, "limit": limit, "users": rows}
 
 
 @router.get("/users/me")

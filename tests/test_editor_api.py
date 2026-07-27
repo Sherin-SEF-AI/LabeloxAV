@@ -232,7 +232,8 @@ def test_users_and_attribution():
         from _authutil import headers_for
         r = c.post(f"/api/objects/{oid}/review", json={"action": "reject"}, headers=headers_for(u["user_id"]))
         assert r.status_code == 200
-        users = {x["name"]: x for x in c.get("/api/users").json()}
+        # the endpoint returns a paginated envelope now, not a bare array
+        users = {x["name"]: x for x in c.get("/api/users").json()["users"]}
         assert users[uname]["reviews"] >= 1
 
 
