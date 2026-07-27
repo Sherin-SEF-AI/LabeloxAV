@@ -178,16 +178,16 @@ _REVIEWER_PREFIXES = (
 # someone remembered to add it to a gated-prefix list, so a route that mints presigned download URLs or
 # returns governance state could leak by omission. With the allowlist a new read route is gated automatically
 # and has to be opted into public access deliberately. The frontend rides the Authorization header on every
-# request (web/lib/api.ts userHeaders), so gating reads does not lock out a signed-in user. Only /api/health
-# is public: it is the load-balancer liveness probe. Non-/api paths (openapi.json, /docs, /metrics) are not
+# request (web/lib/api.ts userHeaders), so gating reads does not lock out a signed-in user. Only the two
+# load-balancer probes are public (/api/health liveness, /api/readyz readiness): a probe cannot carry a token. Non-/api paths (openapi.json, /docs, /metrics) are not
 # ours to gate and pass through below. openapi is the API's own schema, deliberately public.
-_PUBLIC_READ_PREFIXES = ("/api/health",)
+_PUBLIC_READ_PREFIXES = ("/api/health", "/api/readyz")
 
 # The security-reviewed baseline the startup backstop checks the operative allowlist against. It is a separate
 # constant on purpose: widening _PUBLIC_READ_PREFIXES to expose a data route also has to widen this reviewed
 # baseline, so a public read can never be opened without a deliberate edit here. Keep the two in sync only when
 # the exposure is intended.
-_APPROVED_PUBLIC_READ_PREFIXES = ("/api/health",)
+_APPROVED_PUBLIC_READ_PREFIXES = ("/api/health", "/api/readyz")
 
 
 # Self-service routes: gated (need a valid token) but reachable by any authenticated user, so they must not
@@ -349,6 +349,20 @@ async def health():
     await _check("minio", _minio())
     overall = "ok" if all(v == "ok" for v in deps.values()) else "degraded"
     return {"status": overall, "deps": deps}
+
+
+@app.get("/api/readyz")
+async def readyz():
+    """Readiness probe: 200 only when every dependency is reachable, 503 otherwise.
+
+    /api/health is a liveness probe and deliberately returns 200 with a degraded body so an operator can see
+    which dependency is down. A load balancer reading that as healthy would keep routing traffic to a node
+    whose Postgres is gone, so readiness needs its own endpoint that actually fails. Public for the same
+    reason /api/health is: a probe cannot carry a token.
+    """
+    body = await health()
+    ready = body["status"] == "ok"
+    return JSONResponse(body, status_code=200 if ready else 503)
 
 
 @app.get("/api/metrics")

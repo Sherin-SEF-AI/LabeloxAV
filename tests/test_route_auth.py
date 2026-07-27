@@ -41,8 +41,12 @@ def test_sensitive_reads_are_gated():
         assert not _is_public_read(path), f"{path} must require a token to read"
 
 
-def test_health_stays_public():
+def test_only_the_probes_stay_public():
+    # Both load-balancer probes are public because a probe cannot carry a token. readyz exists because
+    # health returns 200 with a degraded body (so an operator sees which dependency is down), which a load
+    # balancer would read as healthy and keep routing to a node whose Postgres is gone.
     assert _is_public_read("/api/health")
+    assert _is_public_read("/api/readyz")
 
 
 def test_startup_backstop_passes_on_the_real_app():
