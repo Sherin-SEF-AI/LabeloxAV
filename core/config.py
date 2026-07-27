@@ -582,6 +582,15 @@ class AuthSettings(BaseModel):
     accept_legacy_tokens: bool = False
 
 
+class IntegrationsSettings(BaseModel):
+    # A webhook URL is attacker-controlled input the server then fetches with its own network position, so an
+    # unrestricted one is an SSRF primitive: it can reach cloud instance metadata or an internal object store.
+    # Private, loopback, and link-local targets are refused by default. A self-hosted deployment whose
+    # receiver genuinely lives on an internal network turns this on deliberately, and the test suite needs it
+    # because its receivers are on localhost.
+    allow_private_webhook_targets: bool = False
+
+
 class LidarSettings(BaseModel):
     # 3D LiDAR module. The BluRabbit fleet is camera only, so pseudo-LiDAR (camera depth lift) is the
     # default source; real LiDAR and public datasets normalize to the same internal cloud.
@@ -809,6 +818,7 @@ class Settings(BaseSettings):
     paths: PathsSettings = PathsSettings()
     phase4: Phase4Settings = Phase4Settings()  # Phase 4 closed loop + governance
     auth: AuthSettings = AuthSettings()        # deny-by-default API auth
+    integrations: IntegrationsSettings = IntegrationsSettings()   # outbound webhook safety
     lidar: LidarSettings = LidarSettings()     # 3D LiDAR module (ingestion, clean, viewer)
     inspector: InspectorSettings = InspectorSettings()  # Session Inspector (MCAP viewer + health)
     labelox: LabeloxSettings = LabeloxSettings()

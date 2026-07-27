@@ -20,6 +20,10 @@ os.environ.setdefault("LBX_AUTH__ENABLED", "true")
 # is relaxed here. test_pii_gate.py constructs PiiSettings(plate_mandatory=True) explicitly to verify it.
 os.environ.setdefault("LBX_PII__PLATE_MANDATORY", "false")
 
+# Webhook receivers in the suite are on localhost, which the SSRF guard refuses by default (a webhook URL is
+# attacker-controlled input the server fetches with its own network position). Opt in for tests only.
+os.environ.setdefault("LBX_INTEGRATIONS__ALLOW_PRIVATE_WEBHOOK_TARGETS", "true")
+
 # ISOLATION: the suite seeds synthetic sessions/frames/objects and commits them. Point it at a dedicated
 # test database so it never writes to the production corpus (which had accumulated ~1600 synthetic noise
 # sessions from prior runs against the live DB). Override LBX_POSTGRES__DB in CI to change the name.
