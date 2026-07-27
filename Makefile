@@ -197,8 +197,12 @@ web: ## Run the Next.js review UI
 	cd web && npm install && npm run dev
 
 .PHONY: test
-test: ## Run pytest
+test: ## Run pytest (full suite; needs infra up)
 	$(RUN) pytest -q
+
+.PHONY: test-unit
+test-unit: ## Run the fast pure-unit tier (no Postgres/MinIO/GPU/Redis)
+	$(RUN) pytest -q -m "not db and not gpu and not infra" -p no:cacheprovider
 
 .PHONY: fmt
 fmt: ## Format and lint
