@@ -31,6 +31,7 @@ from services.api.routers import (
     drivable,
     dynamics,
     errordetect,
+    events,
     explore,
     export,
     govern,
@@ -236,7 +237,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         # The credential is a signed token in the Authorization header, not a plaintext user id: an attacker
         # who reads the public user list cannot mint one without the server signing key (C1).
-        uid = bearer_uid(request.headers.get("authorization"), settings.auth.signing_key)
+        authz = request.headers.get("authorization")
+        # SSE is the one exception. The browser EventSource API cannot set a request header at all, so an
+        # event stream has no way to present a bearer token except in the URL. This is accepted ONLY for the
+        # /api/events/ prefix, and those streams carry job progress and nothing sensitive, because a URL can
+        # reach a proxy or access log in a way a header does not. Everywhere else the header is the only
+        # accepted form, so this does not widen the credential surface generally.
+        if not authz and path.startswith("/api/events/"):
+            qs_token = request.query_params.get("token")
+            if qs_token:
+                authz = f"Bearer {qs_token}"
+        uid = bearer_uid(authz, settings.auth.signing_key)
         role = None
         if uid:
             try:
@@ -413,6 +424,7 @@ app.include_router(training.router, prefix="/api", tags=["training"])
 app.include_router(tracks.router, prefix="/api", tags=["tracks"])
 app.include_router(autolabel.router, prefix="/api", tags=["autolabel"])
 app.include_router(jobs.router, prefix="/api", tags=["jobs"])
+app.include_router(events.router, prefix="/api", tags=["events"])
 app.include_router(labelops.router, prefix="/api", tags=["labelops"])
 app.include_router(assets.router, prefix="/api", tags=["assets"])
 app.include_router(integrations.router, prefix="/api", tags=["integrations"])

@@ -7,6 +7,7 @@ import type { JobRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import { Spinner, SkeletonRows } from "@/components/Spinner";
+import { useJobStream } from "@/lib/useEventStream";
 
 // Unified jobs dashboard: import, training, and autolabel jobs in one live stream. The single place
 // to watch everything the engine is doing.
@@ -17,12 +18,32 @@ export default function JobsPage() {
   const [kind, setKind] = useState<string>("all");
   const [loading, setLoading] = useState(true);
 
+  // Live via server-sent events. This page used to re-fetch every two seconds forever, whether or not
+  // anything had changed and whether or not the tab was even visible. The stream pushes only on change; the
+  // one-off fetch below still runs so the table renders immediately on a cold load and so the page still
+  // works if the stream cannot connect.
+  const { data: stream, connected } = useJobStream();
+
   useEffect(() => {
-    const refresh = () => api.jobs().then((j) => { setJobs(j); setLoading(false); }).catch(() => setLoading(false));
-    refresh();
-    const t = setInterval(refresh, 2000);
-    return () => clearInterval(t);
+    api.jobs().then((j) => { setJobs(j); setLoading(false); }).catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!stream) return;
+    setJobs((prev) => {
+      // The stream carries status and progress per job id; merge onto the rows already rendered rather than
+      // replacing them, so the richer fields the REST shape provides are not lost on every tick.
+      const live = new Map<string, { status: string; progress?: number | null }>();
+      for (const rows of Object.values(stream)) {
+        for (const r of rows) live.set(r.job_id, { status: r.status, progress: r.progress });
+      }
+      return prev.map((j) => {
+        const u = live.get(j.job_id);
+        return u ? { ...j, status: u.status, progress: u.progress ?? j.progress } : j;
+      });
+    });
+    setLoading(false);
+  }, [stream]);
 
   const kinds = ["all", "import", "training", "autolabel"];
   const shown = kind === "all" ? jobs : jobs.filter((j) => j.kind === kind);
@@ -42,7 +63,15 @@ export default function JobsPage() {
   return (
     <PageShell
       active="JOBS"
-      right={loading ? <Spinner label="loading jobs" /> : <span className="text-ink-3">{active} active</span>}
+      right={loading ? <Spinner label="loading jobs" /> : (
+        <span className="flex items-center gap-2 text-ink-3">
+          {/* Say whether the page is live. A silently dead stream looks identical to an idle system, so a
+              stalled dot is the difference between "nothing is happening" and "you are not being told". */}
+          <span className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-pass" : "bg-ink-3"}`}
+                title={connected ? "live" : "not connected; showing last known state"} />
+          <span>{active} active</span>
+        </span>
+      )}
       filters={filters}
     >
       <div className="p-4">
