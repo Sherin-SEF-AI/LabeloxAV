@@ -855,6 +855,11 @@ class GoldSet(Base):
     n_frames: Mapped[int] = mapped_column(Integer, default=0)
     ontology_version: Mapped[str] = mapped_column(String(64), nullable=False)
     metrics: Mapped[dict] = mapped_column(JSONB, default=dict)  # eval cached at seal time (optional)
+    # Sealed track ids, present only when the set was sealed with track continuity guaranteed. A tracking
+    # metric scored against a set without this is scored against association labels that may not exist, so
+    # the evaluator refuses rather than reporting a number built on absent ground truth.
+    track_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    tracks_sealed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     data_yaml_uri: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -2089,3 +2094,180 @@ class PlateRead(Base):
     watchlist_severity: Mapped[str | None] = mapped_column(String(16))
     pack_id: Mapped[str] = mapped_column(String(32), nullable=False, default="sec")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Identity, notification, and access-record tables.
+#
+# Until now the only credential was an admin-minted token: there was no way for a person to obtain access
+# themselves, no second factor, and no route to a corporate directory. That is the single largest blocker to
+# a real deployment, and it is why these tables exist.
+# ---------------------------------------------------------------------------------------------------
+
+
+class UserCredential(Base):
+    """A password and its second factor, kept off the User row.
+
+    Separate from `app_user` on purpose. The user row is read on every authenticated request to resolve a
+    role, and a hash that expensive to compare has no business travelling with it. Keeping the secret in its
+    own table also means a query that lists users cannot accidentally select it.
+    """
+
+    __tablename__ = "user_credential"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="CASCADE"), primary_key=True)
+    # scrypt, with its parameters and salt encoded in the string, so a future cost increase can be rolled
+    # per user rather than forcing a global reset.
+    password_hash: Mapped[str | None] = mapped_column(Text)
+    password_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Failed-attempt throttling lives here rather than in a cache: a lockout that a process restart clears
+    # is not a lockout.
+    failed_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # TOTP. The secret is only usable once confirmed: a half-enrolled factor that already blocked sign-in
+    # would lock a user out of their own account with an authenticator they never finished setting up.
+    totp_secret: Mapped[str | None] = mapped_column(Text)
+    totp_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Single-use recovery codes, stored hashed for the same reason the password is.
+    recovery_hashes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # The last TOTP step accepted, so a code cannot be replayed inside its own validity window.
+    last_totp_step: Mapped[int | None] = mapped_column(BigInteger)
+
+    # Federated identity. Set when the account signs in through OIDC; a matching issuer+subject is the
+    # authority, never the email, which a directory can reassign to a different person.
+    oidc_issuer: Mapped[str | None] = mapped_column(Text)
+    oidc_subject: Mapped[str | None] = mapped_column(Text)
+    email: Mapped[str | None] = mapped_column(String(320))
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_user_credential_oidc", "oidc_issuer", "oidc_subject", unique=True),
+        Index("ix_user_credential_email", "email"),
+    )
+
+
+class PasswordReset(Base):
+    """A single-use, expiring reset token.
+
+    Stored as a hash, so a database read cannot be turned into an account takeover, and consumed on use so a
+    token recovered from a mailbox later is inert.
+    """
+
+    __tablename__ = "password_reset"
+
+    reset_id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Notification(Base):
+    """One thing that happened which somebody needs to know about.
+
+    Issue comments, job completions, gate blocks, drift breaches, and SLO alarms were all silent: the system
+    knew, and no one was told unless they happened to be looking at the right page. A notification is
+    addressed to a user, or to a role when the audience is "whoever is on duty".
+    """
+
+    __tablename__ = "notification"
+
+    notification_id: Mapped[uuid.UUID] = _uuid_pk()
+    # Exactly one of these is set. A user-addressed notification is personal; a role-addressed one is a duty
+    # queue, and is marked read per user in `notification_read` rather than on the row itself.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="CASCADE"), index=True)
+    role: Mapped[str | None] = mapped_column(String(16), index=True)
+
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, default="info")  # info|warn|critical
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    # Where clicking it goes. A notification you cannot act on is just noise.
+    href: Mapped[str | None] = mapped_column(Text)
+    # What it is about, so a second event on the same subject can supersede rather than pile up.
+    subject_type: Mapped[str | None] = mapped_column(String(32))
+    subject_id: Mapped[str | None] = mapped_column(String(64))
+    meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 server_default=func.now(), index=True)
+
+    __table_args__ = (
+        Index("ix_notification_user_unread", "user_id", "read_at"),
+        Index("ix_notification_subject", "subject_type", "subject_id"),
+    )
+
+
+class NotificationRead(Base):
+    """Per-user read state for a role-addressed notification, which has no single owner to mark."""
+
+    __tablename__ = "notification_read"
+
+    notification_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("notification.notification_id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="CASCADE"), primary_key=True)
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PiiAccessLog(Base):
+    """Who looked at personal data, and at what.
+
+    `PiiAudit` records what the redactor found. This records what a human saw. A DPDPA or GDPR enquiry asks
+    both, and the second question had no answer: an unredacted frame could be fetched by any authenticated
+    reviewer and nothing recorded that it happened.
+    """
+
+    __tablename__ = "pii_access_log"
+
+    access_id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="SET NULL"), index=True)
+    user_name: Mapped[str | None] = mapped_column(String(64))
+    # Kept even when the subject row is deleted, because the fact of access outlives the data accessed and
+    # is exactly what an erasure enquiry needs to see.
+    subject_type: Mapped[str] = mapped_column(String(32), nullable=False)   # frame|plate_read|speech|export
+    subject_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("session.session_id", ondelete="SET NULL"), index=True)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)         # view|download|export|read_plate
+    pii_kinds: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # ["face","plate","speech"]
+    redacted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    route: Mapped[str | None] = mapped_column(Text)
+    pack_id: Mapped[str | None] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 server_default=func.now(), index=True)
+
+    __table_args__ = (Index("ix_pii_access_user_time", "user_id", "created_at"),)
+
+
+class ActivityEvent(Base):
+    """What a person did, in order, so they can answer "what did I do today" without reading five tables.
+
+    Reviews, objects, jobs, and exports each already record their own history, but none of them is a
+    timeline: there was no way to see a shift's work as one sequence, and no way for a lead to see a team's.
+    """
+
+    __tablename__ = "activity_event"
+
+    event_id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="CASCADE"), index=True)
+    user_name: Mapped[str | None] = mapped_column(String(64))
+    verb: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    subject_type: Mapped[str | None] = mapped_column(String(32))
+    subject_id: Mapped[str | None] = mapped_column(String(64))
+    summary: Mapped[str | None] = mapped_column(Text)
+    href: Mapped[str | None] = mapped_column(Text)
+    meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 server_default=func.now(), index=True)
+
+    __table_args__ = (Index("ix_activity_user_time", "user_id", "created_at"),)

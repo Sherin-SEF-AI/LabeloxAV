@@ -83,6 +83,46 @@ POLL_INTERVAL_S = 2.0
 HEARTBEAT_EVERY = 15
 
 
+# ---------------------------------------------------------------- wakeups
+#
+# The streams above poll the database, which is the right default: one query per interval serves every
+# connected client. But an event a user is waiting on (a notification, a finished job) should not sit for a
+# whole interval, so an emitter can nudge the topic and the next tick happens immediately.
+#
+# In-process only, and deliberately so. Every stream still polls, so a nudge that never arrives (because it
+# was raised in a different worker) costs latency and never a lost event. A cross-process bus here would
+# make correctness depend on the bus being up, which is a worse failure than being a second late.
+
+_wakes: dict[str, asyncio.Event] = {}
+
+
+def _wake_event(topic: str) -> asyncio.Event:
+    ev = _wakes.get(topic)
+    if ev is None:
+        ev = _wakes[topic] = asyncio.Event()
+    return ev
+
+
+def publish(topic: str, payload: dict | None = None) -> None:
+    """Nudge a topic so its streams tick now instead of on their next interval. Never raises: an emitter
+    must not fail because nobody is listening."""
+    try:
+        _wake_event(topic).set()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _sleep_or_wake(topic: str, seconds: float) -> None:
+    """Wait out the poll interval, but return early if someone publishes to this topic."""
+    ev = _wake_event(topic)
+    try:
+        await asyncio.wait_for(ev.wait(), timeout=seconds)
+    except TimeoutError:
+        return
+    finally:
+        ev.clear()
+
+
 def _sse(event: str, data: dict) -> str:
     """One SSE frame. The double newline is the record separator; without it the client buffers forever."""
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
@@ -140,7 +180,7 @@ async def job_events():
                 elif ticks % HEARTBEAT_EVERY == 0:
                     yield ": keepalive\n\n"
                 ticks += 1
-                await asyncio.sleep(POLL_INTERVAL_S)
+                await _sleep_or_wake("jobs", POLL_INTERVAL_S)
         except (asyncio.CancelledError, GeneratorExit):
             # The client went away. Starlette closes the generator, which is how a disconnect reaches us;
             # this loop stops here rather than querying forever on behalf of a closed tab.
@@ -196,6 +236,57 @@ async def training_job_events(job_id: str):
                 yield _sse("done", {"job_id": job_id, "status": snap["status"]})
                 return
             await asyncio.sleep(POLL_INTERVAL_S)
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no",
+    })
+
+
+@router.get("/events/notifications")
+async def notification_events(request: Request):
+    """Stream this user's unread count and newest notifications, so the bell updates without a poll.
+
+    Scoped to the caller. A notification stream that pushed everyone's events to everyone would leak who is
+    being assigned what, which on a corpus with a review hierarchy is real information about people.
+    """
+    from starlette.responses import StreamingResponse
+
+    from services import notify
+
+    user = await require_stream_user(request)
+    if user is None:
+        # Auth disabled (unit tests): nothing to scope to, so there is nothing honest to stream.
+        async def empty() -> AsyncIterator[str]:
+            yield _sse("notifications", {"unread": 0, "notifications": []})
+
+        return StreamingResponse(empty(), media_type="text/event-stream")
+
+    async def gen() -> AsyncIterator[str]:
+        last: str | None = None
+        ticks = 0
+        maker = get_sessionmaker()
+        try:
+            while True:
+                async with maker() as session:
+                    fresh = await session.get(type(user), user.user_id)
+                    if fresh is None:
+                        break
+                    unread = await notify.unread_count(session, fresh)
+                    listing = await notify.list_for(session, fresh, limit=10)
+                snap = {"unread": int(unread), "notifications": listing["notifications"]}
+                payload = json.dumps(snap, default=str, sort_keys=True)
+                if payload != last:
+                    last = payload
+                    yield _sse("notifications", snap)
+                elif ticks % HEARTBEAT_EVERY == 0:
+                    yield ": keepalive\n\n"
+                ticks += 1
+                await _sleep_or_wake("notifications", POLL_INTERVAL_S * 2)
+        except (asyncio.CancelledError, GeneratorExit):
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning("events.notification_stream_failed", error=str(exc))
+            yield _sse("error", {"detail": "stream ended"})
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no",

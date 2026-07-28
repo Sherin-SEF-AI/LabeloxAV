@@ -24,3 +24,4 @@ AUDIT.md
 !docs/screenshots/*.png
 web/.design-ref/
 .perception_work/
+demos/

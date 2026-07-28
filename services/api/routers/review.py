@@ -177,6 +177,20 @@ async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = D
     )
     await db.commit()
 
+    # The activity feed. Recorded here rather than derived from the review table later because the feed is
+    # one timeline across reviews, drawings, jobs, and exports, and reconstructing that by unioning five
+    # tables at read time is what made "what did I do today" unanswerable.
+    from services.activity import record_activity
+
+    _verbs = {"confirm": "confirmed", "reject": "rejected", "create": "created_object"}
+    await record_activity(
+        db, user_id=uid, user_name=reviewer,
+        verb=_verbs.get(payload.action, "reviewed"),
+        subject_type="object", subject_id=str(obj.object_id),
+        summary=f"{payload.action} {onto.by_id(obj.class_id).name}",
+        href=f"/frame/{obj.frame_id}",
+        meta={"action": payload.action, "state": obj.state})
+
     return {
         "object_id": str(obj.object_id),
         "class_id": obj.class_id,

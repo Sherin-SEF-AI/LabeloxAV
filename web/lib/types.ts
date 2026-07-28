@@ -534,3 +534,74 @@ export type SecStats = {
   unscored_reads: number;
   top_states: Record<string, number>;
 };
+
+
+// The inbox: what happened, who did what, and who looked at personal data. Mirrors services/notify.py,
+// services/activity.py, and services/govern/pii_access.py.
+export type NotificationRow = {
+  notification_id: string;
+  kind: string;
+  severity: string;              // info | warn | critical
+  title: string;
+  body: string | null;
+  href: string | null;
+  subject_type: string | null;
+  subject_id: string | null;
+  role: string | null;
+  user_id: string | null;
+  meta: Record<string, unknown>;
+  created_at: string | null;
+  read: boolean;
+};
+
+export type ActivityEvent = {
+  event_id: string;
+  user_id: string | null;
+  user_name: string | null;
+  verb: string;
+  label: string;                 // the human phrasing, so the feed is not raw identifiers
+  subject_type: string | null;
+  subject_id: string | null;
+  summary: string | null;
+  href: string | null;
+  meta: Record<string, unknown>;
+  created_at: string | null;
+};
+
+export type ActivitySummary = {
+  hours: number;
+  total: number;
+  by_verb: Record<string, number>;
+  labels: Record<string, string>;
+  active_people: number;
+};
+
+export type PiiAccessRow = {
+  access_id: string;
+  user_id: string | null;
+  user_name: string | null;
+  subject_type: string;
+  subject_id: string;
+  session_id: string | null;
+  action: string;
+  pii_kinds: string[];
+  // The number a policy is actually written about: viewing a blurred frame is ordinary work, viewing the
+  // original is the thing being governed.
+  redacted: boolean;
+  route: string | null;
+  pack_id: string | null;
+  created_at: string | null;
+};
+
+export type Profile = {
+  user_id: string;
+  name: string;
+  role: string;
+  email: string | null;
+  has_password: boolean;
+  mfa_enabled: boolean;
+  sso: boolean;
+  sso_issuer: string | null;
+  recovery_codes_left: number;
+  created_at: string | null;
+};

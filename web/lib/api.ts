@@ -74,6 +74,11 @@ import type {
   EvalPatchRow,
   CloudStatus,
   CloudOrphan,
+  NotificationRow,
+  ActivityEvent,
+  ActivitySummary,
+  PiiAccessRow,
+  Profile,
   SecPack,
   SecSession,
   SecStats,
@@ -665,6 +670,45 @@ export const api = {
     get<{ uri: string; count?: number; keys?: string[]; detail?: string }>(
       `/api/integrations/sources/${id}/preview`),
   deleteSource: (id: string) => del<{ deleted: boolean }>(`/api/integrations/sources/${id}`),
+
+  // ---- Inbox: notifications, activity, and the access log ----
+  notifications: (limit = 50, unreadOnly = false) =>
+    get<{ total: number; notifications: NotificationRow[] }>(
+      `/api/notifications?limit=${limit}&unread_only=${unreadOnly}`),
+  notificationCount: () => get<{ unread: number }>("/api/notifications/count"),
+  markNotificationRead: (id: string) =>
+    post<{ marked: boolean }>(`/api/notifications/${id}/read`, {}),
+  markAllNotificationsRead: () => post<{ marked: number }>("/api/notifications/read-all", {}),
+
+  activity: (q: { mine?: boolean; user_id?: string; verb?: string; since_hours?: number;
+                  limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v != null && v !== "") p.set(k, String(v)); });
+    return get<{ total: number; events: ActivityEvent[] }>(`/api/activity?${p.toString()}`);
+  },
+  activitySummary: (hours = 24, mine = true) =>
+    get<ActivitySummary>(`/api/activity/summary?hours=${hours}&mine=${mine}`),
+
+  piiAccess: (q: { user_id?: string; subject_id?: string; action?: string; since_hours?: number;
+                   limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v != null && v !== "") p.set(k, String(v)); });
+    return get<{ total: number; accesses: PiiAccessRow[] }>(`/api/govern/pii-access?${p.toString()}`);
+  },
+  piiAccessSummary: (hours = 168) =>
+    get<{ hours: number; accesses: number; unredacted: number;
+          by_action: Record<string, number>; by_user: Record<string, number> }>(
+      `/api/govern/pii-access/summary?hours=${hours}`),
+
+  // ---- Identity self-service ----
+  profile: () => get<Profile>("/api/auth/profile"),
+  changePassword: (current_password: string | null, new_password: string) =>
+    post<{ token: string }>("/api/auth/password/change", { current_password, new_password }),
+  mfaSetup: () => post<{ secret: string; otpauth_uri: string }>("/api/auth/mfa/setup", {}),
+  mfaConfirm: (code: string) =>
+    post<{ token: string; recovery_codes: string[] }>("/api/auth/mfa/confirm", { code }),
+  mfaDisable: (password: string) => post<{ mfa_enabled: boolean }>("/api/auth/mfa/disable", { password }),
+  revokeSessions: () => post<{ token: string }>("/api/auth/sessions/revoke", {}),
 
   // ---- LabeloxSec: the security domain (ANPR, watchlist, static-camera sessions) ----
   // Every call here is capability-gated server side, so a deployment on the AV pack gets a 403 rather than a

@@ -37,7 +37,9 @@ from services.api.routers import (
     export,
     govern,
     hdmap,
+    identity_routes,
     imports,
+    inbox,
     inertial,
     inspector,
     integrations,
@@ -139,6 +141,12 @@ def _assert_auth_floors(app: FastAPI) -> int:
         if ("GET" in methods or "HEAD" in methods) and _is_public_read(path) \
                 and not path.startswith(_APPROVED_PUBLIC_READ_PREFIXES):
             leaked.append(path)
+    # Every unauthenticated credential route must be one that actually exists, or the allowlist is drifting
+    # away from the route table and naming something that no longer means anything.
+    mounted = {getattr(r, "path", "") for r in app.routes}
+    missing = sorted(p for p in _CREDENTIAL_PATHS if p not in mounted)
+    if missing:
+        raise RuntimeError(f"credential allowlist names routes that are not mounted: {missing}")
     if leaked:
         raise RuntimeError(f"public read routes without an approved floor: {sorted(leaked)}")
     return checked
@@ -198,9 +206,37 @@ _APPROVED_PUBLIC_READ_PREFIXES = ("/api/health", "/api/readyz")
 _SELF_PATHS = ("/api/users/me",)
 
 
+# The credential routes: how somebody who holds no token obtains one. A sign-in route behind the token gate
+# is a deadlock, so these are reachable unauthenticated by necessity rather than by preference.
+#
+# Listed exactly, never by prefix. "/api/auth" as a prefix would silently expose every future route added
+# under it, including the ones that change a password or disable a second factor. Each entry below carries
+# its own protection: login and reset answer identically for a real and an absent account, signup refuses
+# unless the operator enabled it or the deployment has no users at all, and the OIDC pair are worthless
+# without the provider's signature.
+_CREDENTIAL_PATHS = frozenset({
+    "/api/auth/methods",              # which methods exist; configuration, never account existence
+    "/api/auth/login",
+    "/api/auth/login/mfa",            # finishing a sign-in that login itself began
+    "/api/auth/mfa/setup-pending",    # enrolment forced at the door, before any token exists
+    "/api/auth/mfa/confirm",
+    "/api/auth/signup",
+    "/api/auth/password/reset-request",
+    "/api/auth/password/reset",
+    "/api/auth/oidc/start",
+    "/api/auth/oidc/callback",
+    "/api/auth/logout",               # clearing cookies must work even with a lapsed token
+})
+
+
 def _is_public_read(path: str) -> bool:
     """A read that is reachable without a token. Kept tiny and explicit so the fail-closed default holds."""
     return path.startswith(_PUBLIC_READ_PREFIXES)
+
+
+def _is_credential_path(path: str) -> bool:
+    """A route somebody with no token must reach in order to get one."""
+    return path in _CREDENTIAL_PATHS
 
 
 
@@ -230,6 +266,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if method == "OPTIONS" or not path.startswith("/api/"):
             return await call_next(request)
         if method in ("GET", "HEAD") and _is_public_read(path):
+            return await call_next(request)
+        # The credential routes. Reaching a sign-in page requires no token by definition; each of these is
+        # individually listed and individually defended, rather than a prefix that would swallow whatever
+        # gets added under /api/auth next.
+        if _is_credential_path(path):
             return await call_next(request)
 
         from sqlalchemy import func, select
@@ -476,6 +517,8 @@ app.include_router(forgyx_router.router, prefix="/api", tags=["forgyx"])
 app.include_router(auth_router.router, prefix="/api", tags=["auth"])
 app.include_router(flywheel_router.router, prefix="/api", tags=["flywheel"])
 app.include_router(hardening_router.router, prefix="/api", tags=["hardening"])
+app.include_router(identity_routes.router, prefix="/api", tags=["identity"])
+app.include_router(inbox.router, prefix="/api", tags=["inbox"])
 app.include_router(security.router, prefix="/api", tags=["security"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])

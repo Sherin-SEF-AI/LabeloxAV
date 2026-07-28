@@ -12,7 +12,7 @@ domain and permits in the other.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -144,15 +144,30 @@ async def delete_watchlist(entry_id: str, db: AsyncSession = Depends(db_session)
 # ---------------------------------------------------------------- reads
 
 @router.get("/security/reads")
-async def get_reads(session_id: str | None = None, camera_id: str | None = None,
+async def get_reads(request: Request, user=Depends(require_role("reviewer")),
+                    session_id: str | None = None, camera_id: str | None = None,
                     plate: str | None = None, state_code: str | None = None, hits_only: bool = False,
                     limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
                     db: AsyncSession = Depends(db_session)):
-    """The read feed, most recent first, filterable and paged."""
-    from services.anpr.store import list_reads
+    """The read feed, most recent first, filterable and paged.
 
-    return await list_reads(db, session_id=session_id, camera_id=camera_id, plate=plate,
-                            state_code=state_code, hits_only=hits_only, limit=limit, offset=offset)
+    Reading this list is reading registration marks, which are personal data under DPDPA, so the access is
+    recorded. This is the one place in the application where the plain text of somebody's plate is shown to
+    a human on purpose, which makes it exactly the access an enquiry will ask about.
+    """
+    from services.anpr.store import list_reads
+    from services.govern.pii_access import record_access
+
+    out = await list_reads(db, session_id=session_id, camera_id=camera_id, plate=plate,
+                           state_code=state_code, hits_only=hits_only, limit=limit, offset=offset)
+    if out.get("reads"):
+        await record_access(
+            db, subject_type="plate_read", subject_id=(session_id or camera_id or "feed"),
+            action="read_plate", user=user, session_id=session_id, pii_kinds=["plate"],
+            # Unredacted, and recorded as such: the whole point of the security console is that the mark is
+            # legible. Logging it as redacted would make the number that matters read as zero.
+            redacted=False, route=str(request.url.path), pack_id="sec")
+    return out
 
 
 @router.get("/security/stats")

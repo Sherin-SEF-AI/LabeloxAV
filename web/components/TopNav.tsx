@@ -8,6 +8,7 @@ import ShortcutOverlay from "./shell/ShortcutOverlay";
 import CloudControl from "./shell/CloudControl";
 import MenuBar from "./shell/MenuBar";
 import Icon from "./shell/Icon";
+import NotificationBell from "./shell/NotificationBell";
 import { MENU_DESTINATIONS } from "@/lib/menus";
 
 // The application header, Blender-style: a menu bar carrying every destination, then a quiet breadcrumb, then
@@ -71,6 +72,7 @@ export default function TopNav({ active, right, showCrumb = true }: {
         </button>
         <PlatformSwitcher />
         <CloudControl />
+        <NotificationBell />
         <UserPicker />
       </div>
 

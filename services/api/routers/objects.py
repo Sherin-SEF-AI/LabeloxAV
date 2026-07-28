@@ -483,7 +483,16 @@ async def sam_propagate(object_id: str, frames: int = 12, direction: str = "both
 
 
 @router.get("/frames/{frame_id}/image")
-async def frame_image(frame_id: str, db: AsyncSession = Depends(db_session)):
+async def frame_image(frame_id: str, db: AsyncSession = Depends(db_session),
+                      user=Depends(current_user)):
+    """The frame image, and a record that somebody looked at it.
+
+    A frame is where the personal data in this corpus actually lives: faces and registration marks are in
+    the pixels. `pii_audit` records what the redactor found in a frame; until this, nothing recorded who
+    then viewed it, so the system could describe its personal data and not say who had seen it. The record
+    is written only when the frame is known to contain some, so ordinary empty road scenes do not bury the
+    accesses that matter.
+    """
     frame = await db.get(Frame, UUID(frame_id))
     if frame is None:
         raise HTTPException(404, "frame not found")
@@ -491,7 +500,30 @@ async def frame_image(frame_id: str, db: AsyncSession = Depends(db_session)):
         data = get_object_store().get_bytes(frame.img_uri)
     except Exception as exc:  # noqa: BLE001  (missing/unreadable blob -> 404, never a 500 that breaks the editor)
         raise HTTPException(404, "frame image unavailable") from exc
+
+    await _log_frame_view(db, frame, user)
     return Response(content=data, media_type="image/jpeg")
+
+
+async def _log_frame_view(db: AsyncSession, frame, user) -> None:
+    """Record the view when the frame carries personal data. Never raises: evidence about a request must
+    not be able to fail the request."""
+    try:
+        from db.models import PiiAudit
+        from services.govern.pii_access import record_access
+
+        audit = await db.get(PiiAudit, frame.frame_id)
+        if audit is None or (int(audit.n_faces or 0) + int(audit.n_plates or 0)) == 0:
+            return
+        kinds = (["face"] * bool(audit.n_faces)) + (["plate"] * bool(audit.n_plates))
+        await record_access(
+            db, subject_type="frame", subject_id=str(frame.frame_id), action="view",
+            user=user, session_id=frame.session_id, pii_kinds=kinds,
+            # The served image is the redacted one: the privacy plane blurs on ingest, so what a reviewer
+            # sees is already masked. Recording it as unredacted would inflate every count that matters.
+            redacted=True, route=f"/api/frames/{frame.frame_id}/image")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 @router.get("/objects/{object_id}/crop")

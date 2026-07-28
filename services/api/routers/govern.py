@@ -167,7 +167,24 @@ async def registry_list(task: str | None = None, db: AsyncSession = Depends(db_s
 
 @router.post("/govern/promote")
 async def promote(model_version: str, task: str = "detection", db: AsyncSession = Depends(db_session)):
-    return await evaluate_and_promote(db, model_version, task)
+    """Attempt a promotion, and tell somebody how it went.
+
+    A blocked promotion was the loop's quietest failure: the gate refused, the reason was recorded, and
+    unless a reviewer happened to open this page it could sit unnoticed for a day while the flywheel idled.
+    """
+    from services.notify import notify
+
+    result = await evaluate_and_promote(db, model_version, task)
+    promoted = bool(result.get("promoted"))
+    await notify(
+        db, kind="model_promoted" if promoted else "promotion_blocked",
+        severity="info" if promoted else "warn",
+        title=(f"{task} model {model_version} promoted" if promoted
+               else f"{task} promotion blocked: {model_version}"),
+        body=result.get("reason") or result.get("detail"),
+        href="/govern", subject_type="model", subject_id=model_version,
+        meta={"task": task, "metrics": result.get("metrics") or {}})
+    return result
 
 
 # ---- control sample ----
@@ -198,7 +215,21 @@ class DriftIn(BaseModel):
 
 @router.post("/govern/drift/scan")
 async def drift_scan(payload: DriftIn, db: AsyncSession = Depends(db_session)):
-    return await run_drift_scan(db, payload.ref_sessions, payload.cur_sessions)
+    """Scan for drift, and raise it if it breached.
+
+    Superseded rather than appended: drift re-evaluates on a schedule, so an unresolved breach would
+    otherwise produce a fresh line every cycle until the bell was pure noise.
+    """
+    from services.notify import notify
+
+    result = await run_drift_scan(db, payload.ref_sessions, payload.cur_sessions)
+    if result.get("breached"):
+        await notify(db, kind="drift_breach", severity="warn",
+                     title="input drift breached its threshold",
+                     body=f"worst axis {result.get('worst_axis')} at {result.get('worst_score')}",
+                     href="/govern", subject_type="drift", subject_id="input",
+                     meta={k: result.get(k) for k in ("worst_axis", "worst_score", "threshold")})
+    return result
 
 
 @router.post("/govern/controller/tick")
@@ -219,12 +250,26 @@ class EngageIn(BaseModel):
 
 @router.post("/govern/killswitch/engage")
 async def killswitch_engage(payload: EngageIn, db: AsyncSession = Depends(db_session)):
-    return await K.engage(db, payload.reason, payload.task)
+    """Stop the loop, and say so loudly. Critical severity: this is the one event where a person finding
+    out an hour later is itself the incident."""
+    from services.notify import notify
+
+    result = await K.engage(db, payload.reason, payload.task)
+    await notify(db, kind="kill_switch", severity="critical", role="admin",
+                 title=f"kill switch engaged on {payload.task}", body=payload.reason,
+                 href="/govern", subject_type="killswitch", subject_id=payload.task)
+    return result
 
 
 @router.post("/govern/killswitch/release")
 async def killswitch_release(db: AsyncSession = Depends(db_session)):
-    return await K.release(db)
+    from services.notify import notify
+
+    result = await K.release(db)
+    await notify(db, kind="kill_switch", severity="info", role="admin",
+                 title="kill switch released", body="the loop is running again", href="/govern",
+                 subject_type="killswitch", subject_id="released", supersede=False)
+    return result
 
 
 @router.get("/govern/audit")

@@ -589,6 +589,39 @@ class AuthSettings(BaseModel):
     # refused on any non-local deployment by _require_prod_secrets: a legacy token cannot be expired or revoked.
     accept_legacy_tokens: bool = False
 
+    # ---- how a person actually signs in ----
+    # Local passwords. On by default: without them the only credential is an admin-minted token, which is
+    # what made this undeployable. A directory-only deployment turns this off so no local password exists
+    # to be phished or reused.
+    password_login: bool = True
+    # Whether an unauthenticated visitor may create their own account. Off by default: on a corpus holding
+    # personal data, open registration is a decision an operator makes deliberately, not a default they
+    # discover. When on, the account is created at self_signup_role and an admin promotes from there.
+    self_signup: bool = False
+    self_signup_role: str = "annotator"
+    # Restrict self-signup to a set of email domains, e.g. ["example.com"]. Empty means no restriction,
+    # which is only sensible on a closed network.
+    self_signup_domains: list[str] = []
+    # Require a second factor for these roles once they have enrolled one. Reviewers and admins can approve
+    # labels and promote models, so their accounts are worth more than an annotator's.
+    mfa_required_roles: list[str] = ["admin"]
+
+    # ---- OIDC / SSO ----
+    # Set issuer and client_id to enable. The client secret is optional because a public client with PKCE
+    # is a valid and increasingly common configuration.
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
+    oidc_scopes: str = "openid email profile"
+    # Where the provider sends the browser back. Must match the registration at the provider exactly.
+    oidc_redirect_uri: str = "http://localhost:3000/api/auth/oidc/callback"
+    # Role given to an account created on its first federated sign-in.
+    oidc_default_role: str = "annotator"
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return bool(self.oidc_issuer and self.oidc_client_id)
+
 
 class IntegrationsSettings(BaseModel):
     # A webhook URL is attacker-controlled input the server then fetches with its own network position, so an

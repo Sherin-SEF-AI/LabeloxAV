@@ -56,6 +56,16 @@ async def create_issue(db: AsyncSession, *, kind: str = "comment", body: str | N
 
     await emit("issue.opened", {"issue_id": str(issue.issue_id), "kind": kind,
                                 "object_id": object_id, "frame_id": frame_id})
+
+    # An issue nobody is told about is a note to self. Addressed to the reviewer role rather than a person,
+    # because who picks it up is a duty rota, not a property of the issue.
+    from services.notify import notify
+
+    await notify(db, kind="issue_opened", severity="warn" if kind != "comment" else "info",
+                 title=f"{kind.replace('_', ' ')} raised",
+                 body=(body or "").strip()[:280] or None,
+                 href=(f"/frame/{frame_id}" if frame_id else f"/object/{object_id}"),
+                 subject_type="issue", subject_id=str(issue.issue_id), supersede=False)
     return await get_issue(db, str(issue.issue_id))
 
 

@@ -170,6 +170,20 @@ export const MENUS: Menu[] = [
     ],
   },
   {
+    // The account and its trail. These were unreachable because they did not exist: the only credential was
+    // an admin-minted token, so there was nothing to manage and nowhere to see what you had done.
+    key: "account",
+    label: "Account",
+    items: [
+      { key: "profile", label: "Your account", icon: "user", href: "/profile",
+        hint: "password, two-factor, sessions" },
+      { key: "activity", label: "Activity", icon: "activity", href: "/activity",
+        hint: "what you and the team have done" },
+      { key: "pii-access", label: "PII access log", icon: "shield", href: "/govern/pii-access",
+        hint: "who viewed personal data (admin)", separatorBefore: true },
+    ],
+  },
+  {
     key: "window",
     label: "Window",
     items: [
