@@ -14,6 +14,14 @@ import type {
   CalibResolved,
   CalibSession,
   EgoState,
+  EventTaxonomy,
+  DrivingEvent,
+  DrivingEventList,
+  DrivingEventSummary,
+  DeriveResult,
+  DerivePreview,
+  LaneLinkResult,
+  SegmentEditResult,
   InertialEvents,
   Confusions,
   CorrectionCoverage,
@@ -1177,6 +1185,52 @@ export const api = {
   cloudDisconnect: (pause = false) => post<CloudStatus>("/api/cloud/disconnect", { pause }),
   cloudOrphans: () => get<{ orphans: CloudOrphan[] }>("/api/cloud/orphans"),
   cloudTerminateOrphan: (podId: string) => post<{ terminated: string }>("/api/cloud/orphans/terminate", { pod_id: podId }),
+
+  // ---- Driving events: lane behaviour, signal phases, and the rulings on them ------------------------
+  eventTaxonomy: () => get<EventTaxonomy>(`/api/events/taxonomy`),
+  drivingEvents: (
+    sessionId: string,
+    opts?: { kind?: string; state?: string; severity?: string; trackId?: string; limit?: number },
+  ) => {
+    const q = new URLSearchParams();
+    if (opts?.kind) q.set("kind", opts.kind);
+    if (opts?.state) q.set("state", opts.state);
+    if (opts?.severity) q.set("severity", opts.severity);
+    if (opts?.trackId) q.set("track_id", opts.trackId);
+    if (opts?.limit) q.set("limit", String(opts.limit));
+    return get<DrivingEventList>(`/api/sessions/${sessionId}/driving-events?${q.toString()}`);
+  },
+  drivingEventSummary: (sessionId: string) =>
+    get<DrivingEventSummary>(`/api/sessions/${sessionId}/driving-events/summary`),
+  deriveDrivingEvents: (sessionId: string, pruneStale = true) =>
+    post<DeriveResult>(
+      `/api/sessions/${sessionId}/driving-events/derive?prune_stale=${pruneStale}`, {}),
+  previewDrivingEvents: (sessionId: string) =>
+    post<DerivePreview>(`/api/sessions/${sessionId}/driving-events/preview`, {}),
+  linkSessionLanes: (sessionId: string, apply = true) =>
+    post<LaneLinkResult>(`/api/sessions/${sessionId}/lanes/link?apply=${apply}`, {}),
+  ruleOnDrivingEvent: (eventId: string, verdict: "confirm" | "reject", note?: string) =>
+    post<DrivingEvent>(`/api/driving-events/${eventId}/${verdict}`, { note: note || null }),
+  createDrivingEvent: (
+    sessionId: string,
+    body: {
+      kind: string;
+      t_start_ns: number;
+      t_end_ns?: number | null;
+      track_id?: string | null;
+      frame_id?: string | null;
+      payload?: Record<string, unknown>;
+    },
+  ) => post<DrivingEvent>(`/api/sessions/${sessionId}/driving-events`, body),
+  trackDrivingEvents: (trackId: string) =>
+    get<DrivingEventList>(`/api/tracks/${trackId}/driving-events`),
+
+  // ---- Dense semantic raster: the human correction path ----------------------------------------------
+  editFrameSegmentation: (
+    frameId: string,
+    body: { kind?: string; classes: { class_name: string; polygons: number[][] }[]; replace?: boolean },
+  ) => put<SegmentEditResult>(`/api/frames/${frameId}/segment`, body),
+
 };
 
 export type TrainingJob = {

@@ -872,3 +872,100 @@ export type ReasonerRerun = {
   }[];
   truncated_examples: number;
 };
+
+// ---- Driving events ----------------------------------------------------------------------------------
+
+export type EventKindSpec = {
+  kind: string;
+  modality: string;
+  shape: "interval" | "point";
+  anchor: "track" | "frame" | "session";
+  severity: "info" | "notable" | "violation";
+  derived: boolean;
+  description: string;
+  payload: string[];
+};
+
+export type EventTaxonomy = {
+  version: string;
+  kinds: EventKindSpec[];
+  severities: string[];
+  signal_phase_graph: Record<string, string[]>;
+};
+
+export type DrivingEvent = {
+  event_id: string;
+  session_id: string;
+  kind: string;
+  modality: string;
+  t_start_ns: number;
+  t_end_ns: number | null;
+  track_id: string | null;
+  frame_id: string | null;
+  conf: number | null;
+  severity: string;
+  payload: Record<string, unknown>;
+  source: string;
+  state: string;
+  version: number;
+};
+
+export type DrivingEventList = {
+  session_id?: string;
+  track_id?: string;
+  count: number;
+  // The session origin, so an absolute capture timestamp can be shown as an offset into the drive.
+  session_start_ns?: number | null;
+  events: DrivingEvent[];
+};
+
+export type DrivingEventSummary = {
+  session_id: string;
+  total: number;
+  by_kind: Record<string, number>;
+  by_state: Record<string, number>;
+  by_severity: Record<string, number>;
+  violations: number;
+};
+
+export type DeriveResult = {
+  session_id: string;
+  derived: number;
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  pruned_stale: number;
+  skipped_reviewed: number;
+  rejected_by_taxonomy: number;
+  by_kind: Record<string, number>;
+};
+
+export type DerivePreview = {
+  session_id: string;
+  derived: number;
+  by_kind: Record<string, number>;
+  events: Record<string, unknown>[];
+  truncated: number;
+};
+
+export type LaneLinkResult = {
+  session_id: string;
+  lanes: number;
+  already_linked?: number;
+  linked: number;
+  identities: number;
+  multi_frame_identities: number;
+  frame_width?: number;
+  dry_run: boolean;
+  detail?: string;
+};
+
+export type SegmentEditResult = {
+  frame_id: string;
+  kind: string;
+  source: string;
+  coverage: Record<string, number>;
+  labelled_fraction: number;
+  replaced: boolean;
+  unknown_classes: string[];
+};

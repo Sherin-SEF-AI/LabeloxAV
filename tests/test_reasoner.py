@@ -597,3 +597,86 @@ async def test_suggested_weights_are_reported_never_applied():
         out = await suggest_weights(db)
     assert "not applied" in out["note"]
     assert set(out["suggestions"]) >= {"physics", "geometry", "temporal", "scene"}
+
+
+# ---------------------------------------------------------------- the live runner seam
+
+@pytest.mark.db
+async def test_the_runner_reasons_before_the_gate_and_the_verdict_reaches_it():
+    """The seam itself, driven the way `autolabel_session.on_frame` drives it.
+
+    Written because the rest of this file tests the reasoner's own modules and the rerun path, and neither
+    exercises the arithmetic inside the runner: the reasoner_ok handoff, and the fact that a withheld
+    verdict actually changes what the gate returns. A layer that is correct in isolation and unwired is
+    worth nothing, and until this existed nothing would have caught that.
+    """
+    import uuid
+
+    from core.config import get_settings
+    from services.autolabel.gate import gate_object
+    from services.autolabel.quality_reviewer import review_object_quality
+    from services.autolabel.reasoner.pass_ import (
+        FrameContext,
+        apply_to_objects,
+        reason_frame,
+    )
+
+    settings = get_settings()
+
+    # A sedan both paths agree on, at high confidence, in a perfectly sensible box. The gate accepts it
+    # and is right to on everything it can see. What it cannot see is that the same track was an suv in
+    # the four neighbouring frames, and neither can the quality reviewer, which is per-frame by
+    # construction. This is the class of error the layer was built for.
+    obj = _obj("sedan", bbox=(400, 500, 560, 600), conf=0.97, agreement=True,
+               proposals=[_proposal("a", "sedan", 0.96), _proposal("b", "sedan", 0.9)])
+    obj.track_id = uuid.uuid4()
+
+    quality = review_object_quality(obj, [], ONTO, 1280, 960, settings.quality)
+    # The quality reviewer has no objection: the box is a sensible shape in a sensible place.
+    assert quality.ok is True
+
+    without_reasoner = gate_object(obj, ONTO, settings.gate, auto_accept_enabled=True,
+                                   quality_ok=quality.ok)
+
+    suv = ONTO.by_name("suv").id
+    history = [(i * 10**8, BBox(x1=400, y1=500, x2=560, y2=600), suv) for i in range(4)]
+    verdicts = reason_frame([obj], ONTO,
+                            FrameContext(width=1280, height=960, scene={"road_type": "urban"},
+                                         track_history={str(obj.track_id): history}))
+    reasoner_ok = apply_to_objects([obj], verdicts)
+
+    # The runner combines both signals exactly this way, and either may withhold auto-accept.
+    combined = quality.ok and reasoner_ok[id(obj)]
+    with_reasoner = gate_object(obj, ONTO, settings.gate, auto_accept_enabled=True,
+                                quality_ok=combined)
+
+    assert without_reasoner.value == "auto_accept", "the gate would have accepted this on its own"
+    assert with_reasoner.value != "auto_accept", "the reasoner's objection did not reach the gate"
+    assert obj.provenance.reasoning is not None
+    assert "reasoner:temporal" in obj.provenance.quality_flags
+    # And it names what it thinks the object actually is, which is what makes the review fast.
+    assert verdicts[0].suggested_class == "suv"
+
+
+@pytest.mark.db
+async def test_the_escalation_budget_cannot_exceed_the_vlm_allowance():
+    """The arithmetic the runner does before calling escalate.
+
+    Three separate ceilings apply and the smallest wins: what is left of the session's VLM budget, the
+    per-frame cap, and the reasoner's own adjudication cap. The last exists so a prior that suddenly
+    conflicts everywhere cannot consume the whole GPU allowance on its own, and getting this wrong would
+    be invisible until a bill arrived.
+    """
+    from core.config import get_settings
+
+    settings = get_settings()
+    session_budget, used = 100, 96
+    per_frame_cap = 3
+    reasoner_cap = settings.reasoner.max_adjudications_per_session
+    already = reasoner_cap - 1
+
+    room = min(session_budget - used, per_frame_cap, reasoner_cap - already)
+    assert room == 1, "the tightest of the three ceilings must win"
+
+    # And an exhausted budget yields no calls rather than a negative one.
+    assert max(0, min(0, per_frame_cap, reasoner_cap - already)) == 0

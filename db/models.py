@@ -1041,9 +1041,17 @@ class TimelineEvent(Base):
     event_id: Mapped[uuid.UUID] = _uuid_pk()
     session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
     kind: Mapped[str] = mapped_column(String(40), nullable=False)
-    modality: Mapped[str] = mapped_column(String(16), nullable=False)        # imu|audio|scene|geo|crossmodal
+    modality: Mapped[str] = mapped_column(String(16), nullable=False)  # imu|audio|scene|geo|crossmodal|driving
     t_start_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
     t_end_ns: Mapped[int | None] = mapped_column(BigInteger)                 # null = a point event
+    # What the event is about. Nullable because an inertial spike or an audio region is genuinely about the
+    # session alone; SET NULL rather than CASCADE because a confirmed event is a finding about the drive and
+    # should outlive the track that suggested it.
+    track_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("track.track_id", ondelete="SET NULL"))
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("frame.frame_id", ondelete="SET NULL"))
+    conf: Mapped[float | None] = mapped_column(Float)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="human")  # human|auto|correlated
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="review")  # review|confirmed|rejected
@@ -1051,7 +1059,9 @@ class TimelineEvent(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_timeline_event_session_t", "session_id", "t_start_ns"),)
+    __table_args__ = (Index("ix_timeline_event_session_t", "session_id", "t_start_ns"),
+                      Index("ix_timeline_event_track", "track_id"),
+                      Index("ix_timeline_event_session_kind", "session_id", "kind"))
 
 
 class SpeechSegment(Base):

@@ -908,6 +908,16 @@ class LabeloxClient:
         return self._call("POST", f"/api/discovery/{candidate_id}/state",
                           params=None, json_body=body)
 
+    def post_driving_events_by_event_id_confirm(self, event_id: str, body: Any = None) -> Any:
+        """Confirm"""
+        return self._call("POST", f"/api/driving-events/{event_id}/confirm",
+                          params=None, json_body=body)
+
+    def post_driving_events_by_event_id_reject(self, event_id: str, body: Any = None) -> Any:
+        """Reject"""
+        return self._call("POST", f"/api/driving-events/{event_id}/reject",
+                          params=None, json_body=body)
+
     def post_dynamics_compute(self, session_id: str) -> Any:
         """Compute"""
         return self._call("POST", f"/api/dynamics/compute",
@@ -1317,6 +1327,11 @@ class LabeloxClient:
         """Auto Segment"""
         return self._call("POST", f"/api/frames/{frame_id}/segment",
                           params={"kind": kind}, json_body=None)
+
+    def put_frames_by_frame_id_segment(self, frame_id: str, body: Any = None) -> Any:
+        """Edit Segment"""
+        return self._call("PUT", f"/api/frames/{frame_id}/segment",
+                          params=None, json_body=body)
 
     def get_frames_by_frame_id_segment_labelids_png(self, frame_id: str, kind: str | None = 'semantic') -> Any:
         """Segment Labelids"""
@@ -2618,6 +2633,31 @@ class LabeloxClient:
         return self._call("GET", f"/api/sessions/page",
                           params={"limit": limit, "offset": offset, "vehicle_id": vehicle_id}, json_body=None)
 
+    def get_sessions_by_session_id_driving_events(self, session_id: str, kind: Any | None = None, state: Any | None = None, severity: Any | None = None, track_id: Any | None = None, limit: int | None = 2000) -> Any:
+        """List Driving Events"""
+        return self._call("GET", f"/api/sessions/{session_id}/driving-events",
+                          params={"kind": kind, "state": state, "severity": severity, "track_id": track_id, "limit": limit}, json_body=None)
+
+    def post_sessions_by_session_id_driving_events(self, session_id: str, body: Any = None) -> Any:
+        """Create"""
+        return self._call("POST", f"/api/sessions/{session_id}/driving-events",
+                          params=None, json_body=body)
+
+    def post_sessions_by_session_id_driving_events_derive(self, session_id: str, prune_stale: bool | None = True) -> Any:
+        """Derive"""
+        return self._call("POST", f"/api/sessions/{session_id}/driving-events/derive",
+                          params={"prune_stale": prune_stale}, json_body=None)
+
+    def post_sessions_by_session_id_driving_events_preview(self, session_id: str) -> Any:
+        """Preview"""
+        return self._call("POST", f"/api/sessions/{session_id}/driving-events/preview",
+                          params=None, json_body=None)
+
+    def get_sessions_by_session_id_driving_events_summary(self, session_id: str) -> Any:
+        """Summary"""
+        return self._call("GET", f"/api/sessions/{session_id}/driving-events/summary",
+                          params=None, json_body=None)
+
     def get_sessions_by_session_id_egostate(self, session_id: str) -> Any:
         """Ego State"""
         return self._call("GET", f"/api/sessions/{session_id}/egostate",
@@ -2657,6 +2697,11 @@ class LabeloxClient:
         """Inertial Events"""
         return self._call("GET", f"/api/sessions/{session_id}/inertial_events",
                           params=None, json_body=None)
+
+    def post_sessions_by_session_id_lanes_link(self, session_id: str, apply: bool | None = True) -> Any:
+        """Link Lanes"""
+        return self._call("POST", f"/api/sessions/{session_id}/lanes/link",
+                          params={"apply": apply}, json_body=None)
 
     def get_sessions_by_session_id_qa_consistency(self, session_id: str) -> Any:
         """Qa Consistency"""
@@ -2772,6 +2817,11 @@ class LabeloxClient:
         """Attribute Timeline"""
         return self._call("GET", f"/api/tracks/{track_id}/attribute-timeline",
                           params={"key": key}, json_body=None)
+
+    def get_tracks_by_track_id_driving_events(self, track_id: str) -> Any:
+        """Track Events"""
+        return self._call("GET", f"/api/tracks/{track_id}/driving-events",
+                          params=None, json_body=None)
 
     def post_tracks_by_track_id_intent_propose(self, track_id: str) -> Any:
         """Intent Propose"""
@@ -2996,4 +3046,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 582 routes generated from the server schema.
+# 592 routes generated from the server schema.

@@ -9,6 +9,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,6 +106,96 @@ def _load_npz(store, uri: str):
         return np.load(io.BytesIO(store.get_bytes(uri)))["arr"]
     except Exception:  # noqa: BLE001
         return None
+
+
+class ClassPolygons(BaseModel):
+    """One class and the regions the annotator painted for it, flattened [x,y,x,y,...] per ring."""
+
+    class_name: str
+    polygons: list[list[float]] = []
+
+
+class SegmentEditIn(BaseModel):
+    """A human edit to a frame's dense raster.
+
+    `replace` distinguishes the two things an annotator can mean. False lays the edit over what is there,
+    which is what correcting one region means. True treats the payload as the whole frame, which is what
+    starting over means. Defaulting to False keeps the destructive reading behind an explicit choice.
+    """
+
+    kind: str = "semantic"
+    classes: list[ClassPolygons] = []
+    replace: bool = False
+
+
+@router.put("/frames/{frame_id}/segment", dependencies=[Depends(require_role("annotator"))])
+async def edit_segment(frame_id: str, body: SegmentEditIn, db: AsyncSession = Depends(db_session)):
+    """Write a human correction of the dense raster, from polygons drawn on the canvas.
+
+    The path that makes the semantic layer a label rather than a visualisation. Marks the row source=human,
+    which is what the export gate and the training set selection read to prefer a corrected raster over a
+    proposed one.
+    """
+    import numpy as np
+
+    from services.segment2d.edit import (
+        coverage_of,
+        merge_onto_existing,
+        rasterize_class_polygons,
+        store_labels,
+    )
+
+    if body.kind not in ("semantic", "panoptic"):
+        raise HTTPException(400, "kind must be semantic or panoptic")
+    frame = await db.get(Frame, UUID(frame_id))
+    if frame is None:
+        raise HTTPException(404, "frame not found")
+    w, h = int(frame.width or 0), int(frame.height or 0)
+    if w <= 0 or h <= 0:
+        raise HTTPException(400, "frame has no recorded size, so a raster cannot be sized to it")
+
+    onto, store = get_ontology(), get_object_store()
+    store.ensure_bucket()
+
+    def name_to_id(name: str):
+        return onto.by_name(name).id if onto.has_name(name) else None
+
+    def id_to_name(cid: int):
+        try:
+            return onto.by_id(cid).name
+        except Exception:  # noqa: BLE001
+            return None
+
+    edit, unknown = rasterize_class_polygons(
+        [c.model_dump() for c in body.classes], w, h, name_to_id=name_to_id)
+
+    row = (await db.execute(select(FrameSegmentation).where(
+        FrameSegmentation.frame_id == frame.frame_id,
+        FrameSegmentation.kind == body.kind))).scalars().first()
+
+    labels = edit
+    if not body.replace and row is not None:
+        base = _load_npz(store, row.labels_uri)
+        labels = merge_onto_existing(None if base is None else np.asarray(base), edit)
+
+    labels_uri, overlay_uri = store_labels(store, frame.session_id, frame.frame_id,
+                                           body.kind, labels)
+    coverage = coverage_of(labels, id_to_name)
+
+    if row is None:
+        row = FrameSegmentation(frame_id=frame.frame_id, kind=body.kind, labels_uri=labels_uri,
+                                overlay_uri=overlay_uri, coverage=coverage, segments={},
+                                source="human", model_version="human",
+                                ontology_version=onto.version)
+        db.add(row)
+    else:
+        row.labels_uri, row.overlay_uri, row.coverage = labels_uri, overlay_uri, coverage
+        row.source, row.model_version, row.ontology_version = "human", "human", onto.version
+    await db.commit()
+
+    return {"frame_id": frame_id, "kind": body.kind, "source": "human", "coverage": coverage,
+            "labelled_fraction": round(float(np.count_nonzero(labels)) / float(labels.size), 4),
+            "replaced": body.replace, "unknown_classes": unknown}
 
 
 @router.get("/frames/{frame_id}/segment")

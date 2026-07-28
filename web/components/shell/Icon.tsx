@@ -87,4 +87,6 @@ export const MODE_ICON: Record<string, string> = {
   pose: "person",
   lidar3d: "cuboid",
   review: "clipboard",
+  semantic: "layers",
+  events: "activity",
 };
