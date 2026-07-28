@@ -20,11 +20,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import get_settings
 from core.logging import get_logger
 from db.models import User
-from services.api.auth_token import mint_token
+from services.api.auth_token import mint_media_token, mint_token
 from services.api.deps import db_session, require_user
 
 router = APIRouter()
 log = get_logger("auth")
+
+# Fifteen minutes. Long enough that a review session does not stall re-minting between frames, short enough
+# that a cookie captured from a proxy log is dead before anyone reads that log.
+MEDIA_TOKEN_TTL_SECONDS = 900
 
 
 @router.post("/auth/refresh")
@@ -35,6 +39,22 @@ async def refresh(user=Depends(require_user)) -> dict:
     return {"user_id": str(user.user_id), "role": user.role,
             "token": mint_token(user.user_id, s.auth.signing_key, token_version=user.token_version,
                                 ttl_seconds=s.auth.token_ttl_seconds)}
+
+
+@router.post("/auth/media-token")
+async def media_token(user=Depends(require_user)) -> dict:
+    """Issue the short-lived, image-only credential the browser puts in a cookie.
+
+    Requires the full session token, so this is not a way to obtain access, only a way to downgrade access
+    the caller already has into something safe to send automatically on every <img> request. The TTL is
+    minutes: the cookie rides on requests whose URLs land in access logs and Referer headers, and a
+    credential in that position should expire before it is worth stealing.
+    """
+    s = get_settings()
+    ttl = MEDIA_TOKEN_TTL_SECONDS
+    return {"token": mint_media_token(user.user_id, s.auth.signing_key,
+                                      token_version=user.token_version, ttl_seconds=ttl),
+            "expires_in": ttl}
 
 
 @router.post("/auth/dev-login")

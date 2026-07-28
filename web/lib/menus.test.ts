@@ -41,7 +41,8 @@ describe("navigation menus", () => {
   it("query-string destinations are the known deep links", () => {
     const withQuery = MENU_DESTINATIONS.filter((d) => d.href.includes("?"));
     const params = new Set(withQuery.map((d) => new URL(d.href, "http://x").searchParams.keys().next().value));
-    expect([...params].sort()).toEqual(["format", "mine", "panel", "rig", "tab"]);
+    // hits: the LabeloxSec console opens with its watchlist-hit filter already applied.
+    expect([...params].sort()).toEqual(["format", "hits", "mine", "panel", "rig", "tab"]);
   });
 
   it("item keys are unique within each menu", () => {

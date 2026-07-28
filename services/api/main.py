@@ -14,6 +14,7 @@ from starlette.responses import JSONResponse
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
 from services.api.deps import role_rank
+from services.api.media import MEDIA_COOKIE, is_media_read
 from services.api.routers import (
     activelearn,
     adverse,
@@ -202,6 +203,7 @@ def _is_public_read(path: str) -> bool:
     return path.startswith(_PUBLIC_READ_PREFIXES)
 
 
+
 def _required_role(path: str) -> str:
     if path in _SELF_PATHS:
         return "annotator"
@@ -249,6 +251,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if qs_token:
                 authz = f"Bearer {qs_token}"
         uid = bearer_uid(authz, settings.auth.signing_key)
+
+        # Image subresources: an <img> cannot set a header, so accept the media cookie for those paths and
+        # only those. bearer_uid above has already refused a media token presented as a Bearer, so this is
+        # the single place the restricted credential is honoured, and it can buy nothing but an image.
+        if uid is None and method in ("GET", "HEAD") and is_media_read(path):
+            from services.api.auth_token import MEDIA_SCOPE, verify_token
+
+            cookie = request.cookies.get(MEDIA_COOKIE)
+            payload = verify_token(cookie, settings.auth.signing_key) if cookie else None
+            if payload is not None and payload.scope == MEDIA_SCOPE:
+                uid = payload.uid
+
         role = None
         if uid:
             try:

@@ -25,6 +25,9 @@ export function setUser(u: CurrentUser | null): void {
     if (u) localStorage.setItem(KEY, JSON.stringify(u));
     else localStorage.removeItem(KEY);
   }
+  // The media cookie is bound to whoever minted it. Dropping it on any identity change is what stops the
+  // next user inheriting the previous one's image access, and stops it outliving a sign-out.
+  clearMediaCookie();
 }
 
 export function userHeaders(): Record<string, string> {
@@ -77,6 +80,10 @@ let _refreshing: Promise<void> | null = null;
 export async function refreshTokenIfNeeded(withinSeconds = 3600): Promise<void> {
   const u = getUser();
   if (!u?.token) return;
+  // Awaited, not fired off: every image URL arrives inside a JSON response that came through this path, so
+  // minting here means the cookie is always in place before the first <img> is even constructed. After the
+  // first call it is a timestamp comparison.
+  await ensureMediaCookie();
   const exp = decodeExp(u.token);
   if (exp === null || Date.now() / 1000 < exp - withinSeconds) return; // absent expiry or still fresh
   if (_refreshing) return _refreshing;
@@ -97,4 +104,62 @@ export async function refreshTokenIfNeeded(withinSeconds = 3600): Promise<void> 
     }
   })();
   return _refreshing;
+}
+
+// ---- The media cookie ----
+// An <img src> cannot set an Authorization header, so under the deny-by-default read gate every frame image,
+// crop, and mask overlay 401s and the canvas renders blank while the JSON around it loads fine. A cookie is
+// the only credential a browser attaches to a subresource request by itself.
+//
+// What goes in it is deliberately not the session token. The server mints a separate media-scoped token that
+// authorises GET on the image routes and nothing else, and it expires in minutes, because a cookie rides on
+// URLs that reach proxies, access logs, and Referer headers. SameSite=Strict keeps it off cross-site
+// requests, and Path=/api keeps it off page navigations entirely.
+
+const MEDIA_COOKIE = "lbx_media";
+let _mediaAt = 0;                 // epoch ms when the current cookie was minted
+let _mediaTtlMs = 900_000;        // replaced by whatever TTL the server actually issued
+let _minting: Promise<void> | null = null;
+
+function setCookie(name: string, value: string, maxAgeSeconds: number): void {
+  if (typeof document === "undefined") return;
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie =
+    `${name}=${value}; Path=/api; Max-Age=${maxAgeSeconds}; SameSite=Strict${secure}`;
+}
+
+export function clearMediaCookie(): void {
+  _mediaAt = 0;
+  setCookie(MEDIA_COOKIE, "", 0);
+}
+
+// Mint (or re-mint) the media cookie. Re-mints at two thirds of its life so an image request never races the
+// expiry, and deduplicates concurrent callers the way refreshTokenIfNeeded does. Best effort: a failure
+// leaves images 401ing, which the caller sees, rather than blocking the page.
+export async function ensureMediaCookie(): Promise<void> {
+  const u = getUser();
+  if (!u?.token || typeof document === "undefined") return;
+  if (_mediaAt && Date.now() - _mediaAt < _mediaTtlMs * 0.66) return;
+  if (_minting) return _minting;
+  _minting = (async () => {
+    try {
+      const r = await fetch("/api/auth/media-token", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${u.token}` },
+      });
+      if (r.ok) {
+        const body = await r.json();
+        if (body?.token) {
+          _mediaTtlMs = (Number(body.expires_in) || 900) * 1000;
+          setCookie(MEDIA_COOKIE, body.token, Number(body.expires_in) || 900);
+          _mediaAt = Date.now();
+        }
+      }
+    } catch {
+      // leave it absent; images will 401 visibly rather than the page failing to render
+    } finally {
+      _minting = null;
+    }
+  })();
+  return _minting;
 }
