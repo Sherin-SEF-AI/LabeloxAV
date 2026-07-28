@@ -2027,3 +2027,65 @@ class FlywheelCycle(Base):
     collection_tasks: Mapped[list] = mapped_column(JSONB, default=list)  # [{cell, priority, target_count, reason}]
     rationale: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PlateWatchlist(Base):
+    """A registration mark a security deployment is watching for (LabeloxSec).
+
+    Deployment state, not reference data: a stolen-vehicle list or an access allow-list belongs to the site,
+    not to the product. Stored on the normalised form because that is the only thing matching can be done on
+    reliably ("KA 01 AB 1234", "ka-01-ab-1234" and "KA01AB1234" are one mark), with the raw text kept so an
+    operator sees what they typed.
+    """
+
+    __tablename__ = "plate_watchlist"
+
+    entry_id: Mapped[uuid.UUID] = _uuid_pk()
+    plate_normalized: Mapped[str] = mapped_column(String(16), nullable=False, unique=True, index=True)
+    plate_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    # info: log it. warn: surface it. critical: page someone. The severity travels with the hit so a
+    # downstream consumer does not have to re-derive urgency from the reason text.
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, default="warn")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    added_by: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PlateRead(Base):
+    """One plate read by the ANPR path (LabeloxSec).
+
+    This is personal data. It exists only under a pack that declares the `anpr` capability; the AV pack does
+    the opposite and blurs plates without ever reading them, and the capability gate refuses ANPR there. The
+    session FK cascades so an erasure request removes these with the rest of the session's data rather than
+    leaving plate text behind, which would defeat the erasure.
+
+    ocr_conf is nullable on purpose: a generative-VLM reader exposes no calibrated score, and a fabricated
+    number would make a confidence filter look meaningful when it is not.
+    """
+
+    __tablename__ = "plate_read"
+
+    read_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"), index=True)
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("frame.frame_id", ondelete="CASCADE"), index=True)
+    camera_id: Mapped[str | None] = mapped_column(String(64), index=True)
+
+    plate_normalized: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    plate_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    plate_type: Mapped[str] = mapped_column(String(16), nullable=False)   # standard|bh_series|diplomatic|invalid
+    state_code: Mapped[str | None] = mapped_column(String(4))
+    rto_district: Mapped[str | None] = mapped_column(String(8))
+    valid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    det_conf: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    ocr_conf: Mapped[float | None] = mapped_column(Float)                # None = unmeasured, never faked
+    format_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    bbox: Mapped[list[float] | None] = mapped_column(ARRAY(Float))
+
+    watchlist_hit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    watchlist_severity: Mapped[str | None] = mapped_column(String(16))
+    pack_id: Mapped[str] = mapped_column(String(32), nullable=False, default="sec")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

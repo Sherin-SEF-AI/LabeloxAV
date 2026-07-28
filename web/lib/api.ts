@@ -74,6 +74,11 @@ import type {
   EvalPatchRow,
   CloudStatus,
   CloudOrphan,
+  SecPack,
+  SecSession,
+  SecStats,
+  WatchlistEntry,
+  PlateReadRow,
 } from "./types";
 
 // Same-origin: next.config rewrites /api/* to the FastAPI backend. Every request carries the current
@@ -660,6 +665,28 @@ export const api = {
     get<{ uri: string; count?: number; keys?: string[]; detail?: string }>(
       `/api/integrations/sources/${id}/preview`),
   deleteSource: (id: string) => del<{ deleted: boolean }>(`/api/integrations/sources/${id}`),
+
+  // ---- LabeloxSec: the security domain (ANPR, watchlist, static-camera sessions) ----
+  // Every call here is capability-gated server side, so a deployment on the AV pack gets a 403 rather than a
+  // plate console that appears to work. secPack() is what the page reads first to decide what to render.
+  secPack: (packId = "sec") => get<SecPack>(`/api/security/pack?pack_id=${packId}`),
+  secSessions: (limit = 100, offset = 0) =>
+    get<{ total: number; offset: number; limit: number; sessions: SecSession[] }>(
+      `/api/security/sessions?limit=${limit}&offset=${offset}`),
+  secWatchlist: (activeOnly = true) =>
+    get<{ entries: WatchlistEntry[] }>(`/api/security/watchlist?active_only=${activeOnly}`),
+  secAddWatch: (plate: string, reason: string | null, severity: string) =>
+    post<WatchlistEntry>("/api/security/watchlist", { plate, reason, severity }),
+  secRemoveWatch: (entryId: string) =>
+    del<{ removed: boolean; plate?: string }>(`/api/security/watchlist/${entryId}`),
+  secReads: (q: { session_id?: string; camera_id?: string; plate?: string; state_code?: string;
+                  hits_only?: boolean; limit?: number; offset?: number } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v != null && v !== "") p.set(k, String(v)); });
+    return get<{ total: number; offset: number; limit: number; reads: PlateReadRow[] }>(
+      `/api/security/reads?${p.toString()}`);
+  },
+  secStats: () => get<SecStats>("/api/security/stats"),
 
   // ---- Multi-modal assets and annotations ----
   assetKinds: () => get<{ kinds: { kind: string; description: string }[] }>("/api/assets/kinds"),

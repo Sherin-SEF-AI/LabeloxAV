@@ -59,6 +59,7 @@ from services.api.routers import (
     relabel,
     review,
     search,
+    security,
     segment_assist,
     segmentation,
     signs,
@@ -461,5 +462,6 @@ app.include_router(forgyx_router.router, prefix="/api", tags=["forgyx"])
 app.include_router(auth_router.router, prefix="/api", tags=["auth"])
 app.include_router(flywheel_router.router, prefix="/api", tags=["flywheel"])
 app.include_router(hardening_router.router, prefix="/api", tags=["hardening"])
+app.include_router(security.router, prefix="/api", tags=["security"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])

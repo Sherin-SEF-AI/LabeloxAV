@@ -469,3 +469,68 @@ export type CloudStatus = {
   configured: boolean;      // is RUNPOD_API_KEY set on the backend
 };
 export type CloudOrphan = { pod_id: string; gpu_type: string | null; uptime_s: number; est_cost: number };
+
+// LabeloxSec: the security domain. These mirror services/api/routers/security.py, which is capability-gated
+// rather than role-gated alone: reading a registration mark is lawful for an authorised security deployment
+// and is exactly what the AV pack must never do, because under DPDPA a plate is personal data the privacy
+// plane blurs.
+export type SecPack = {
+  pack_id: string;
+  name: string;
+  capabilities: string[];
+  anpr_authorised: boolean;
+  static_camera: boolean;
+  safety_classes: string[];
+  available_packs: string[];
+};
+
+export type SecSession = {
+  session_id: string;
+  camera_id: string | null;
+  city: string | null;
+  start_ts_ns: number | null;
+  pack_id: string | null;
+  plate_reads: number;
+};
+
+export type WatchlistEntry = {
+  entry_id: string;
+  plate: string;            // the normalised mark, which is what matching runs on
+  plate_raw: string;
+  reason: string | null;
+  severity: string;         // info | warn | critical
+  active: boolean;
+  added_by: string | null;
+  created_at: string | null;
+};
+
+export type PlateReadRow = {
+  read_id: string;
+  session_id: string | null;
+  frame_id: string | null;
+  camera_id: string | null;
+  plate: string;
+  plate_raw: string;
+  plate_type: string;
+  state_code: string | null;
+  rto_district: string | null;
+  valid: boolean;
+  det_conf: number;
+  // null when the reader exposes no calibrated score. The console says so rather than showing a number that
+  // would make a confidence filter look meaningful when it is not.
+  ocr_conf: number | null;
+  format_confidence: number;
+  bbox: number[] | null;
+  watchlist_hit: boolean;
+  watchlist_severity: string | null;
+  created_at: string | null;
+};
+
+export type SecStats = {
+  reads: number;
+  watchlist_hits: number;
+  valid_format: number;
+  watchlist_size: number;
+  unscored_reads: number;
+  top_states: Record<string, number>;
+};

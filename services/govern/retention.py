@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from core.storage import get_object_store
-from db.models import ConsentRecord, Frame, Object, PiiAudit
+from db.models import ConsentRecord, Frame, Object, PiiAudit, PlateRead
 from db.models import Session as DbSession
 from services.govern.audit import record
 
@@ -61,8 +61,14 @@ async def _session_footprint(db: AsyncSession, session_id: uuid.UUID) -> dict:
     n_pii = int((await db.execute(
         select(func.count()).select_from(PiiAudit)
         .where(PiiAudit.session_id == session_id))).scalar_one())
+    # Plate reads are the most sensitive field a security session holds, and the FK already cascades them
+    # away. Counting them here is what makes the certificate say so: an erasure certificate that omits the
+    # plate text it removed cannot answer the request it exists to answer.
+    n_plate_reads = int((await db.execute(
+        select(func.count()).select_from(PlateRead)
+        .where(PlateRead.session_id == session_id))).scalar_one())
     return {"frames": len(frame_ids), "objects": n_objects, "pii_audits": n_pii,
-            "frame_ids": [str(f) for f in frame_ids]}
+            "plate_reads": n_plate_reads, "frame_ids": [str(f) for f in frame_ids]}
 
 
 def _certificate(kind: str, session_id: str, footprint: dict, blobs_deleted: int,
@@ -79,6 +85,9 @@ def _certificate(kind: str, session_id: str, footprint: dict, blobs_deleted: int
         "frames": footprint["frames"],
         "objects": footprint["objects"],
         "pii_audits": footprint["pii_audits"],
+        # Inside the digested body, not alongside it: a count that the digest does not cover could be edited
+        # afterwards to claim no plate text was held, which is the one claim this certificate must not allow.
+        "plate_reads": footprint.get("plate_reads", 0),
         "blobs_deleted": blobs_deleted,
     }
     body["digest"] = hashlib.sha256(

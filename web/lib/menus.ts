@@ -157,6 +157,19 @@ export const MENUS: Menu[] = [
     ],
   },
   {
+    // The second domain. LabeloxSec is a pack, not a platform: it changes what the same spine is authorised to
+    // do rather than adding another stage to the loop, which is why it lives in its own menu instead of the
+    // platform switcher.
+    key: "security",
+    label: "Security",
+    items: [
+      { key: "labeloxsec", label: "LabeloxSec console", icon: "flag", href: "/labeloxsec",
+        hint: "plate reads, watchlist, static-camera sessions" },
+      { key: "sec-hits", label: "Watchlist hits", icon: "activity", href: "/labeloxsec?hits=1",
+        hint: "reads that matched a watched mark" },
+    ],
+  },
+  {
     key: "window",
     label: "Window",
     items: [
