@@ -15,10 +15,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import secrets
+import socket
+import time
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from sqlalchemy import select
@@ -45,21 +48,89 @@ EVENTS = (
 
 TIMEOUT_S = 5.0
 MAX_FAILURES = 20          # after this many consecutive failures the subscription deactivates itself
+RETRY_BACKOFF_S = (0.5, 2.0, 6.0)   # three retries; a transient 5xx or timeout should not lose the event
+REPLAY_WINDOW_S = 300      # how old a signed delivery may be before a receiver should reject it
 
 
-def sign(secret: str, body: bytes) -> str:
-    return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+def sign(secret: str, body: bytes, timestamp: int | None = None) -> str:
+    """Sign the body, binding a timestamp into the signature.
+
+    Signing the body alone makes a captured delivery replayable forever: an attacker who records one request
+    can resend it indefinitely and it still verifies. Including the timestamp in the signed material, and
+    publishing it in the header, lets a receiver reject anything older than its tolerance, which is why
+    Stripe and GitHub do it this way. The v1 form (body only) stays accepted by verify() so existing
+    receivers keep working.
+    """
+    if timestamp is None:
+        return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    signed = f"{timestamp}.".encode() + body
+    return f"t={timestamp},sha256=" + hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
 
 
-def verify(secret: str, body: bytes, signature: str) -> bool:
-    """Constant-time check, for receivers implemented against this same helper."""
-    return hmac.compare_digest(sign(secret, body), signature or "")
+def verify(secret: str, body: bytes, signature: str, *, now: int | None = None,
+           tolerance_s: int = REPLAY_WINDOW_S) -> bool:
+    """Constant-time check, for receivers implemented against this same helper.
+
+    Accepts both the timestamped form (t=...,sha256=...) and the legacy body-only form. For the timestamped
+    form the age is checked as well, so a replayed capture outside the tolerance fails even though its
+    signature is arithmetically correct.
+    """
+    sig = signature or ""
+    if sig.startswith("t="):
+        try:
+            ts_part, _ = sig.split(",", 1)
+            ts = int(ts_part[2:])
+        except (ValueError, IndexError):
+            return False
+        current = int(time.time()) if now is None else now
+        if abs(current - ts) > tolerance_s:
+            return False
+        return hmac.compare_digest(sign(secret, body, ts), sig)
+    return hmac.compare_digest(sign(secret, body), sig)
+
+
+def _is_safe_webhook_url(url: str) -> tuple[bool, str]:
+    """Refuse URLs that point back into our own infrastructure.
+
+    A webhook URL is attacker-controlled input that the server then fetches with its own network position, so
+    an unrestricted one turns the API into an SSRF proxy: http://169.254.169.254/ reaches cloud instance
+    credentials, and http://localhost:9000/ reaches MinIO. Only public hosts are accepted, and the check is on
+    the resolved address rather than the hostname so a name pointing at a private range is caught too.
+    """
+    from urllib.parse import urlparse
+
+    from core.config import get_settings
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False, "webhook url must be http or https"
+    host = parsed.hostname
+    if not host:
+        return False, "webhook url has no host"
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        # Unresolvable at this moment is not proof of safety, but it is not proof of danger either: DNS may
+        # simply not have propagated yet. The authoritative check runs again at delivery time (below), which
+        # is the only moment that matters and which also closes DNS rebinding, where a name resolves public
+        # at subscription time and private when we actually fetch it.
+        return True, ""
+    if get_settings().integrations.allow_private_webhook_targets:
+        return True, ""   # deliberately opted in: an internal receiver on a self-hosted network
+    for info in infos:
+        addr = ipaddress.ip_address(info[4][0])
+        if (addr.is_private or addr.is_loopback or addr.is_link_local
+                or addr.is_reserved or addr.is_multicast or addr.is_unspecified):
+            return False, (f"webhook url resolves to a non-public address ({addr}); refusing to let a "
+                           "subscription reach internal infrastructure")
+    return True, ""
 
 
 async def create_webhook(db: AsyncSession, *, url: str, events: list[str] | None = None,
                          project_id: str | None = None, secret: str | None = None) -> dict:
-    if not url.lower().startswith(("http://", "https://")):
-        raise ValueError("webhook url must be http or https")
+    ok, why = _is_safe_webhook_url(url)
+    if not ok:
+        raise ValueError(why)
     for e in events or []:
         if e not in EVENTS:
             raise ValueError(f"unknown event {e!r} (known: {sorted(EVENTS)})")
@@ -99,21 +170,64 @@ async def delete_webhook(db: AsyncSession, webhook_id: str) -> dict:
     return {"deleted": True}
 
 
-async def _deliver_one(wh_id: UUID, url: str, secret: str | None, body: bytes) -> None:
-    """One delivery, recording the outcome on the subscription. Never raises at the caller."""
-    status, err = None, None
-    try:
-        headers = {"Content-Type": "application/json", "User-Agent": "labeloxav-webhook/1"}
-        if secret:
-            headers["X-Labelox-Signature"] = sign(secret, body)
-        async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
-            r = await client.post(url, content=body, headers=headers)
-            status = r.status_code
-            if r.status_code >= 400:
-                err = f"HTTP {r.status_code}"
-    except Exception as exc:  # noqa: BLE001
-        err = type(exc).__name__          # sanitized: the url may embed a token
+def _should_retry(status: int | None) -> bool:
+    """Retry a transport failure or a server-side error; never retry a 4xx.
 
+    A 4xx means the receiver understood and rejected the request, so repeating it changes nothing and only
+    amplifies load. A timeout or a 5xx is the case where the event was genuinely lost in transit and where a
+    retry is the difference between delivered and silently dropped. 429 is included because it is an explicit
+    "try again".
+    """
+    if status is None:
+        return True                       # transport failure: connection refused, DNS, timeout
+    return status >= 500 or status == 429
+
+
+async def _deliver_one(wh_id: UUID, url: str, secret: str | None, body: bytes) -> None:
+    """One delivery with bounded retries, recording the outcome. Never raises at the caller.
+
+    Delivery used to be a single POST: one timeout or one 502 and the event was gone forever, with no retry,
+    no record of what was attempted, and no way to replay. Now a retryable failure is retried with backoff and
+    every attempt is written to the delivery log, so a missed event is visible and re-sendable instead of
+    being lost silently.
+    """
+    status, err = None, None
+    attempts = 0
+    for attempt, delay in enumerate((0.0, *RETRY_BACKOFF_S)):
+        if delay:
+            await asyncio.sleep(delay)
+        attempts = attempt + 1
+        status, err = None, None
+        # Re-check immediately before the fetch, not only at subscription time. A name that resolved to a
+        # public address when the webhook was created can resolve to 169.254.169.254 now (DNS rebinding), and
+        # the fetch is the moment our network position is actually lent out.
+        safe, why = _is_safe_webhook_url(url)
+        if not safe:
+            await _record_attempt(wh_id, None, "blocked_unsafe_target", attempt + 1)
+            log.warning("webhook.blocked_unsafe_target", webhook=str(wh_id), reason=why)
+            return
+        try:
+            ts = int(time.time())
+            headers = {"Content-Type": "application/json", "User-Agent": "labeloxav-webhook/1",
+                       "X-Labelox-Timestamp": str(ts), "X-Labelox-Event-Id": str(uuid4())}
+            if secret:
+                headers["X-Labelox-Signature"] = sign(secret, body, ts)
+            async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
+                r = await client.post(url, content=body, headers=headers)
+                status = r.status_code
+                if r.status_code >= 400:
+                    err = f"HTTP {r.status_code}"
+        except Exception as exc:  # noqa: BLE001
+            err = type(exc).__name__      # sanitized: the url may embed a token
+
+        if not err or not _should_retry(status):
+            break
+
+    await _record_attempt(wh_id, status, err, attempts)
+
+
+async def _record_attempt(wh_id: UUID, status: int | None, err: str | None, attempts: int) -> None:
+    """Persist the outcome of a delivery on the subscription row."""
     try:
         async with get_sessionmaker()() as db:
             wh = await db.get(Webhook, wh_id)
@@ -131,6 +245,8 @@ async def _deliver_one(wh_id: UUID, url: str, secret: str | None, body: bytes) -
             else:
                 wh.failure_count = 0
             await db.commit()
+        log.info("webhook.delivered" if not err else "webhook.delivery_failed",
+                 webhook=str(wh_id), status=status, attempts=attempts, error=err)
     except Exception as exc:  # noqa: BLE001
         log.warning("webhook.status_write_failed", webhook=str(wh_id), error=str(exc))
 

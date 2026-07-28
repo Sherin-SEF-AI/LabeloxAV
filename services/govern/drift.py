@@ -39,36 +39,105 @@ async def _class_hist(db: AsyncSession, session_ids: list[str] | None, n_classes
     return hist
 
 
+def ontology_class_slots() -> int:
+    """How many class slots the label histogram must cover: the highest ontology id plus one.
+
+    This was hardcoded to 64 while the ontology carries ~170 classes, so every class with an id at or above
+    64 was silently dropped from the histogram and could not contribute to the metric. A distribution shift
+    confined to those classes was structurally invisible.
+    """
+    from services.autolabel.ontology import get_ontology
+
+    ids = [c.id for c in get_ontology().classes]
+    return (max(ids) + 1) if ids else 1
+
+
 async def label_distribution_drift(db: AsyncSession, ref_sessions: list[str], cur_sessions: list[str],
-                                   n_classes: int = 64) -> dict:
-    ref = await _class_hist(db, ref_sessions, n_classes)
-    cur = await _class_hist(db, cur_sessions, n_classes)
+                                   n_classes: int | None = None) -> dict:
+    slots = n_classes or ontology_class_slots()
+    ref = await _class_hist(db, ref_sessions, slots)
+    cur = await _class_hist(db, cur_sessions, slots)
     val = psi(ref.tolist(), cur.tolist())
     breach = val >= get_settings().phase4.govern.drift_psi_breach
-    return {"metric": "label_distribution", "value": round(val, 4), "breach": breach}
+    return {"metric": "label_distribution", "value": round(val, 4), "breach": breach, "class_slots": slots}
 
 
-async def _embedding_proj_hist(db: AsyncSession, session_ids: list[str] | None, axis: np.ndarray,
-                               bins: np.ndarray) -> np.ndarray:
-    q = select(FrameEmbedding.dino_vec).join(Frame, Frame.frame_id == FrameEmbedding.frame_id).where(
-        FrameEmbedding.dino_vec.isnot(None))
+def projection_axes(dim: int, k: int, seed: int = 20260727) -> np.ndarray:
+    """k deterministic random unit vectors in R^dim, as a (k, dim) matrix.
+
+    Drift in a 768-dimensional embedding space cannot be seen through one fixed coordinate: the previous
+    implementation projected onto basis vector 0, which measures a single arbitrary feature and is blind to
+    a shift in any of the other 767 directions (and to any shift orthogonal to that one axis). Random
+    projections are the standard remedy: by Johnson-Lindenstrauss, a distributional difference survives a
+    modest number of random projections with high probability, so taking the worst PSI across k axes is a
+    sensitive multivariate test that stays cheap and, being seeded, stays reproducible across runs.
+    """
+    rng = np.random.default_rng(seed)
+    axes = rng.normal(size=(k, dim)).astype(np.float32)
+    axes /= np.linalg.norm(axes, axis=1, keepdims=True)
+    return axes
+
+
+async def _embedding_matrix(db: AsyncSession, session_ids: list[str] | None, limit: int) -> np.ndarray:
+    """Sample embeddings for a window. Ordered by frame_id so the sample is a deterministic slice rather
+    than whatever Postgres returned first, which made the metric depend on physical row order."""
+    q = (select(FrameEmbedding.dino_vec)
+         .join(Frame, Frame.frame_id == FrameEmbedding.frame_id)
+         .where(FrameEmbedding.dino_vec.isnot(None)))
     if session_ids:
         q = q.where(Frame.session_id.in_(session_ids))
-    vals = [float(np.asarray(v, dtype=np.float32) @ axis) for v in (await db.execute(q.limit(5000))).scalars()]
-    if not vals:
-        return np.zeros(len(bins) - 1)
-    return np.histogram(vals, bins=bins)[0].astype(float)
+    q = q.order_by(FrameEmbedding.frame_id).limit(limit)
+    rows = [np.asarray(v, dtype=np.float32) for v in (await db.execute(q)).scalars()]
+    return np.vstack(rows) if rows else np.zeros((0, 0), dtype=np.float32)
 
 
-async def input_embedding_drift(db: AsyncSession, ref_sessions: list[str], cur_sessions: list[str]) -> dict:
-    axis = np.zeros(768, dtype=np.float32)
-    axis[0] = 1.0  # a fixed projection axis keeps the metric stable across runs
-    bins = np.linspace(-1.0, 1.0, 11)
-    ref = await _embedding_proj_hist(db, ref_sessions, axis, bins)
-    cur = await _embedding_proj_hist(db, cur_sessions, axis, bins)
-    val = psi(ref.tolist(), cur.tolist())
-    breach = val >= get_settings().phase4.govern.drift_psi_breach
-    return {"metric": "input_embedding", "value": round(val, 4), "breach": breach}
+def _quantile_bins(ref_vals: np.ndarray, n_bins: int = 10) -> np.ndarray:
+    """Bin edges from the reference distribution's quantiles.
+
+    Fixed edges over [-1, 1] put nearly every projection value into one or two bins, which drives PSI to ~0
+    regardless of the data. Quantile edges spread the reference evenly across bins, which is how PSI is
+    conventionally computed and what gives the statistic its sensitivity.
+    """
+    qs = np.linspace(0.0, 1.0, n_bins + 1)
+    edges = np.quantile(ref_vals, qs)
+    edges[0], edges[-1] = -np.inf, np.inf
+    # collapse duplicate interior edges (a degenerate reference) so np.histogram stays valid
+    return np.unique(edges)
+
+
+async def input_embedding_drift(db: AsyncSession, ref_sessions: list[str], cur_sessions: list[str],
+                                k_axes: int = 32, sample_limit: int = 5000) -> dict:
+    """Multivariate embedding drift: PSI over k random projections, reported at the worst axis.
+
+    Breaching on the maximum (not the mean) is deliberate: drift concentrated in a few directions is exactly
+    the case a mean would wash out, and a drifting subspace is still a drifting world.
+    """
+    ref_m = await _embedding_matrix(db, ref_sessions, sample_limit)
+    cur_m = await _embedding_matrix(db, cur_sessions, sample_limit)
+    thresh = get_settings().phase4.govern.drift_psi_breach
+    if ref_m.size == 0 or cur_m.size == 0 or ref_m.shape[1] != cur_m.shape[1]:
+        # Not enough evidence to make a claim. Report unmeasured rather than a comforting 0.0.
+        return {"metric": "input_embedding", "value": 0.0, "breach": False, "measured": False,
+                "reason": "no embeddings in one of the windows"}
+
+    axes = projection_axes(ref_m.shape[1], k_axes)
+    ref_p, cur_p = ref_m @ axes.T, cur_m @ axes.T          # (n_ref, k), (n_cur, k)
+    per_axis: list[float] = []
+    for j in range(axes.shape[0]):
+        bins = _quantile_bins(ref_p[:, j])
+        if len(bins) < 3:                                   # degenerate axis, no usable binning
+            continue
+        r = np.histogram(ref_p[:, j], bins=bins)[0].astype(float)
+        c = np.histogram(cur_p[:, j], bins=bins)[0].astype(float)
+        per_axis.append(psi(r.tolist(), c.tolist()))
+    if not per_axis:
+        return {"metric": "input_embedding", "value": 0.0, "breach": False, "measured": False,
+                "reason": "degenerate embedding distribution"}
+
+    worst, mean = float(np.max(per_axis)), float(np.mean(per_axis))
+    return {"metric": "input_embedding", "value": round(worst, 4), "breach": worst >= thresh,
+            "measured": True, "mean_psi": round(mean, 4), "axes": len(per_axis),
+            "n_ref": int(ref_m.shape[0]), "n_cur": int(cur_m.shape[0])}
 
 
 async def control_precision_drift(db: AsyncSession) -> dict:

@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api , humanizeError } from "@/lib/api";
 import type { AssetRow, BoardCell, LabelJobRow, LabelProjectRow, ScorecardRow, UserRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
+import { useQueryFlag } from "@/lib/useQueryParam";
+import { getUser } from "@/lib/user";
 
 // The labeling-operations board: who is doing what, where it is stuck, and whether the work is any good.
 // stage runs left to right; state is the column within a stage, so "in validation, not yet started" is a
@@ -33,12 +35,19 @@ function Section({ title, children, right }: { title: string; children: React.Re
 }
 
 export default function ProjectsPage() {
+  // useSearchParams (via useQueryParam) forces a CSR bailout Next requires be under Suspense.
+  return <Suspense fallback={null}><ProjectsBody /></Suspense>;
+}
+
+function ProjectsBody() {
   const router = useRouter();
   const [projects, setProjects] = useState<LabelProjectRow[]>([]);
   const [projectId, setProjectId] = useState("");
   const [cells, setCells] = useState<BoardCell[]>([]);
   const [load, setLoad] = useState<{ assignee: string; open_jobs: number }[]>([]);
   const [jobs, setJobs] = useState<LabelJobRow[]>([]);
+  // Label > My jobs deep-links ?mine=1; filter the board to the signed-in user instead of showing all
+  const mineOnly = useQueryFlag("mine");
   const [users, setUsers] = useState<UserRow[]>([]);
   const [cards, setCards] = useState<ScorecardRow[]>([]);
   const [busy, setBusy] = useState(false);
@@ -68,10 +77,13 @@ export default function ProjectsPage() {
         api.lopBoard(pid), api.lopJobs({ project_id: pid }), api.lopScorecards(pid),
         api.projectAssets(pid), api.projectStats(pid),
       ]);
-      setCells(b.cells); setLoad(b.open_load); setJobs(j.jobs); setCards(s.scorecards);
+      setCells(b.cells); setLoad(b.open_load); setCards(s.scorecards);
+      // ?mine=1 (Label > My jobs) narrows the board to the signed-in user's assignments
+      const me = getUser()?.user_id;
+      setJobs(mineOnly && me ? j.jobs.filter((x) => x.assignee_id === me) : j.jobs);
       setAssets(as); setAnnKinds(st.annotations_by_kind ?? {});
     } catch (e) { flash(humanizeError(e)); }
-  }, []);
+  }, [mineOnly]);
 
   useEffect(() => {
     api.lopProjects().then((r) => {

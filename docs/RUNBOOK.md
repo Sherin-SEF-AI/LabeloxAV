@@ -27,7 +27,8 @@ Auth is on by default. A fresh browser has no token, so:
   outstanding token for them.
 
 If reads start returning 401 after an upgrade, that is the fail-closed default working: the caller needs a
-token. Only `/api/health` is public.
+token. Only the load-balancer probes are public: `/api/health` (liveness, always 200 with a status body)
+and `/api/readyz` (readiness, 503 unless every dependency answers).
 
 ## The measurement and promotion flow
 
@@ -72,10 +73,12 @@ The suite provisions and uses `labeloxav_test` and refuses to run against any da
 contain "test": the durable guard against the test-pollution that once corrupted the dev corpus. Markers `db`,
 `gpu`, and `infra` select the tiers; `make test-unit` deselects all three.
 
-Known pre-existing, environmental failures (tracked separately, not regressions): the four encode-gate tests
-are `xfail(strict=True)` because synthetic random-noise frames are rejected by the quality gate; a few
-corpus-pollution and ollama-gated VLM tests fail depending on accumulated test data and local model
-availability. Compare a run against that baseline rather than expecting zero failures.
+The suite is not green, and the baseline is recorded in `tests/KNOWN_FAILURES.md`: a run that fails only
+tests named there is at baseline, anything else is a regression. `tests/test_known_failures.py` keeps that
+list from rotting (every name must still exist, every xfail must be documented, every category must state
+what would fix it). Three categories: synthetic frames rejected by the ingest quality gate (xfailed), tests
+that assert on corpus-wide statistics against a shared database and so depend on execution order, and tests
+needing a local Ollama.
 
 ## Troubleshooting
 

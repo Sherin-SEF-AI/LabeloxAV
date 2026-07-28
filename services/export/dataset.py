@@ -30,9 +30,11 @@ from services.export.adapter_coco import write_coco
 from services.export.adapter_cvat import write_cvat
 from services.export.adapter_kitti import write_kitti
 from services.export.adapter_labelstudio import write_labelstudio
+from services.export.adapter_mapillary import write_mapillary
 from services.export.adapter_nuscenes import write_nuscenes
 from services.export.adapter_openlabel import write_openlabel
 from services.export.adapter_parquet import write_parquet
+from services.export.adapter_pascalvoc import write_pascalvoc
 from services.export.adapter_yolo import write_yolo
 from services.export.records import ExportRecord
 
@@ -165,6 +167,51 @@ class DpdpaRefusal(Exception):
     """Raised when the unified DPDPA pre-sale gate refuses an export (un-redacted face, plate, or speech)."""
 
 
+class UnknownExportFormat(ValueError):
+    """Raised when an export requests a format no adapter implements. The old dispatch chain ignored these
+    silently, so the caller got a 200 and a commit that claimed a format the archive never contained."""
+
+
+# One entry per supported target. The adapters have slightly different signatures, so each is wrapped to the
+# uniform (records, onto, store, out_dir) shape; the wrapper owns the per-format subdirectory name. Adding a
+# format means adding it here, which is also what makes it accepted by validate_formats.
+_WRITERS = {
+    "coco": lambda rec, onto, store, d: write_coco(rec, onto, store, d / "coco"),
+    "yolo": lambda rec, onto, store, d: write_yolo(rec, onto, d),
+    "openlabel": lambda rec, onto, store, d: write_openlabel(rec, onto, store, d / "openlabel"),
+    "nuscenes": lambda rec, onto, store, d: write_nuscenes(rec, onto, d / "nuscenes"),
+    "kitti": lambda rec, onto, store, d: write_kitti(rec, onto, d / "kitti"),
+    "bdd": lambda rec, onto, store, d: write_bdd(rec, onto, d / "bdd"),
+    "cvat": lambda rec, onto, store, d: write_cvat(rec, onto, store, d / "cvat"),
+    "labelstudio": lambda rec, onto, store, d: write_labelstudio(rec, onto, store, d / "labelstudio"),
+    "pascalvoc": lambda rec, onto, store, d: write_pascalvoc(rec, onto, d / "pascalvoc"),
+    "mapillary": lambda rec, onto, store, d: write_mapillary(rec, onto, d / "mapillary"),
+}
+
+# Parquet is always written (lossless provenance) and so is accepted but never dispatched.
+SUPPORTED_EXPORT_FORMATS = frozenset(_WRITERS) | {"parquet"}
+
+
+def validate_formats(formats: list[str]) -> None:
+    """Refuse an export naming a format no adapter implements, before any work is done. Fail loud: a silently
+    dropped format ships a dataset that claims contents it does not have."""
+    unknown = [f for f in formats if f not in SUPPORTED_EXPORT_FORMATS]
+    if unknown:
+        raise UnknownExportFormat(
+            f"unsupported export format(s): {sorted(unknown)}; "
+            f"supported: {sorted(SUPPORTED_EXPORT_FORMATS)}"
+        )
+
+
+def _requested(formats: list[str]) -> list[str]:
+    """The dispatchable formats in request order, de-duplicated. Parquet is filtered out (always written)."""
+    seen: list[str] = []
+    for f in formats:
+        if f in _WRITERS and f not in seen:
+            seen.append(f)
+    return seen
+
+
 async def _dpdpa_pre_sale_gate(records) -> None:
     """The single fail-closed compliance gate in the export path. Refuses, does not warn."""
     from collections import defaultdict
@@ -185,6 +232,7 @@ async def _dpdpa_pre_sale_gate(records) -> None:
 
 
 async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
+    validate_formats(spec.formats)   # refuse an unsupported target before any work is done
     settings = get_settings()
     onto = get_ontology()
     store = get_object_store()
@@ -199,22 +247,14 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
     written: list[Path] = []
     # The Parquet sidecar is always emitted (lossless provenance), regardless of requested formats.
     written.append(write_parquet(records, out_dir / "parquet"))
-    if "coco" in spec.formats:
-        written.append(write_coco(records, onto, store, out_dir / "coco"))
-    if "yolo" in spec.formats:
-        written.append(write_yolo(records, onto, out_dir))
-    if "openlabel" in spec.formats:
-        written.append(write_openlabel(records, onto, store, out_dir / "openlabel"))
-    if "nuscenes" in spec.formats:
-        written.append(write_nuscenes(records, onto, out_dir / "nuscenes"))
-    if "kitti" in spec.formats:
-        written.append(write_kitti(records, onto, out_dir / "kitti"))
-    if "bdd" in spec.formats:
-        written.append(write_bdd(records, onto, out_dir / "bdd"))
-    if "cvat" in spec.formats:
-        written.append(write_cvat(records, onto, store, out_dir / "cvat"))
-    if "labelstudio" in spec.formats:
-        written.append(write_labelstudio(records, onto, store, out_dir / "labelstudio"))
+    # Dispatch through the writer registry rather than a chain of ifs. The chain silently ignored any format
+    # it had no branch for, so a request for an unsupported target returned 200, wrote only the Parquet
+    # sidecar, and then recorded the never-written format on the commit as if it had been delivered. The
+    # registry is validated up front (validate_formats) so an unsupported target is refused, and only the
+    # formats actually written are recorded below.
+    for fmt in _requested(spec.formats):
+        written.append(_WRITERS[fmt](records, onto, store, out_dir))
+    delivered = ["parquet", *_requested(spec.formats)]
 
     prefix = f"datasets/{spec.name}/{commit_id}"
     export_uris = _upload_dir(store, prefix, out_dir)
@@ -234,7 +274,7 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
                     ontology_version=onto.version,
                     export_uris={k: v for k, v in list(export_uris.items())[:50]},
                     content_fingerprint=seal_content_fingerprint(spec, records, onto.version),
-                    notes=f"slice '{spec.name}' formats={spec.formats}",
+                    notes=f"slice '{spec.name}' formats={delivered}",   # what was written, not what was asked for
                 )
             )
             await db.commit()

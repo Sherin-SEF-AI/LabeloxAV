@@ -66,7 +66,10 @@ async def segment_frame(frame_id: UUID, db: AsyncSession = Depends(db_session)):
         raise HTTPException(500, "could not decode frame image")
     out = segment_drivable(img)
     uri = await _store_mask(db, frame, out["classes"], out["width"], out["height"], out["coverage"], out["model"], "proposed")
-    return {"frame_id": str(frame_id), "coverage": out["coverage"], "mask_uri": uri, "model": out["model"]}
+    # unestimated_classes tells the caller which surface classes this backend cannot measure, so a 0.0
+    # coverage is not misread as "measured and absent" (the geometric fallback cannot see unpaved surface).
+    return {"frame_id": str(frame_id), "coverage": out["coverage"], "mask_uri": uri, "model": out["model"],
+            "unestimated_classes": out.get("unestimated_classes", [])}
 
 
 @router.get("/frames/{frame_id}/drivable")

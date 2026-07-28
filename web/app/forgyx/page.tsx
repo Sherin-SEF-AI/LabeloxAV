@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
+import { apiGet } from "@/lib/api";
 
 type Bench = {
   benchmark_id: string; model_version: string; target: string; latency_ms: Record<string, number>;
@@ -21,9 +22,9 @@ export default function ForgyxPareto() {
   const [deploys, setDeploys] = useState<Deploy[]>([]);
 
   useEffect(() => {
-    fetch("/api/forgyx/capabilities").then((r) => r.json()).then((d) => setCaps(d.targets ?? {})).catch(() => {});
-    fetch("/api/forgyx/benchmarks").then((r) => r.json()).then((d) => setBenches(d.benchmarks ?? [])).catch(() => {});
-    fetch("/api/forgyx/deployments").then((r) => r.json()).then((d) => setDeploys(d.deployments ?? [])).catch(() => {});
+    apiGet<{ targets?: Record<string, boolean> }>("/api/forgyx/capabilities").then((d) => setCaps(d.targets ?? {})).catch(() => {});
+    apiGet<{ benchmarks?: Bench[] }>("/api/forgyx/benchmarks").then((d) => setBenches(d.benchmarks ?? [])).catch(() => {});
+    apiGet<{ deployments?: Deploy[] }>("/api/forgyx/deployments").then((d) => setDeploys(d.deployments ?? [])).catch(() => {});
   }, []);
 
   // scatter geometry: x = p95 latency (lower better), y = accuracy (higher better)

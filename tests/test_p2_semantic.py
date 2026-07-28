@@ -74,23 +74,24 @@ async def _seed_with_images(n=4) -> uuid.UUID:
 @requires_gpu
 @pytest.mark.asyncio
 async def test_embeddings_compute_text_search_and_similar():
-    from db.models import Embedding
+    from db.models import ObjectEmbedding
     from db.session import get_sessionmaker
     from sqlalchemy import func, select
-    from services.intelligence.embeddings import (
-        compute_session_embeddings,
-        search_objects_by_text,
-        similar_objects,
-    )
+    from services.intelligence.embed.service import embed_objects
+    from services.intelligence.embeddings import search_objects_by_text, similar_objects
 
     sid = await _seed_with_images(4)
-    res = await compute_session_embeddings(sid)
-    assert res["embedded"] == 4
+    # The production embedder, which writes the ObjectEmbedding plane (DINOv3 for visual similarity, SigLIP2
+    # for text). Text search used to read the legacy CLIP `Embedding` table instead, which this pipeline no
+    # longer populates, so on a live corpus it returned nothing.
+    res = await embed_objects(sid, only_missing=False)
+    assert res["embedded_objects"] == 4
 
     maker = get_sessionmaker()
     async with maker() as db:
-        n = (await db.execute(select(func.count()).select_from(Embedding))).scalar_one()
-        assert n >= 4
+        n = (await db.execute(select(func.count()).select_from(ObjectEmbedding)
+                              .where(ObjectEmbedding.siglip_vec.isnot(None)))).scalar_one()
+        assert n >= 4, "text search needs a SigLIP vector per crop"
 
         hits = await search_objects_by_text(db, "a red traffic object", limit=4, session_id=str(sid))
         assert len(hits) == 4

@@ -379,6 +379,10 @@ class ObjectEmbedding(Base):
         ForeignKey("object.object_id", ondelete="CASCADE"), primary_key=True
     )
     dino_vec: Mapped[list[float]] = mapped_column(Vector(768), nullable=False)
+    # SigLIP2 is a joint image-text space, so this is what makes a crop retrievable by a text query. DINOv3
+    # has no text tower, so with only that vector "cattle at night" could match frames but never objects.
+    # Nullable: the embedding daemon backfills it, and an object without one is still image-searchable.
+    siglip_vec: Mapped[list[float] | None] = mapped_column(Vector(1152), nullable=True)
     model_versions: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

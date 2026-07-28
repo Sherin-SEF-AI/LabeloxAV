@@ -145,6 +145,12 @@ export const MENUS: Menu[] = [
     label: "Spatial",
     items: [
       { key: "lidar", label: "LiDAR", icon: "lidar3d", href: "/lidar", hint: "point cloud explorer" },
+      // These two workspaces existed but had no inbound link from anywhere in the app, so the 3D cuboid
+      // editor and the 3D-to-2D linked view were reachable only by typing a URL.
+      { key: "lidar-annotate", label: "3D cuboids", icon: "lidar3d", href: "/lidar/annotate",
+        hint: "annotate cuboids on a point cloud" },
+      { key: "lidar-linked", label: "3D to camera", icon: "lidar3d", href: "/lidar/linked",
+        hint: "cuboid projected onto its camera view" },
       { key: "map", label: "HD map", icon: "route", href: "/map", hint: "fused map and provenance" },
       { key: "inertial", label: "Inertial", icon: "activity", href: "/inertial",
         hint: "ego state, events, maneuvers" },

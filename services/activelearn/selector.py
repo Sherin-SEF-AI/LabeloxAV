@@ -13,7 +13,7 @@ This is pure scoring over existing probabilities and embeddings; it runs locally
 from __future__ import annotations
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
@@ -57,7 +57,12 @@ async def score_candidates(db: AsyncSession, session_id: str | None = None, pool
         # class-focused mining: scope the pool to specific ontology classes (e.g. safety classes the
         # champion gate is blocked on) so the value ranking is computed within that class set.
         q = q.where(Object.class_id.in_(class_ids))
-    q = q.limit(pool_limit)
+    # Order before limiting. An unordered LIMIT hands back whatever Postgres reads first, so the "pool" was an
+    # arbitrary slice of a corpus far larger than pool_limit and every downstream value ranking inherited that
+    # bias, silently and irreproducibly. Ordering by confidence distance from the decision boundary keeps the
+    # objects a value ranking is most likely to care about, and ties break on object_id so the pool is stable
+    # across runs rather than shifting with physical row order.
+    q = q.order_by(func.abs(Object.conf - 0.5), Object.object_id).limit(pool_limit)
     rows = (await db.execute(q)).all()
     if not rows:
         return []

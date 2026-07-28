@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
 import LineChart from "@/components/charts/LineChart";
+import { apiGet } from "@/lib/api";
 
 type Point = { session_id: string; created_at: string | null; severity: string; rotation_deg: number; translation_m: number };
 const SEV: Record<string, string> = { ok: "text-pass", drift_detected: "text-warn", block: "text-block" };
@@ -16,7 +17,7 @@ export default function CalyxTimeline() {
   const [timeline, setTimeline] = useState<Point[]>([]);
 
   const load = useCallback(async () => {
-    const r = await fetch(`/api/calyx/rig/${encodeURIComponent(vehicle)}/history`).then((x) => x.json());
+    const r = await apiGet<{ timeline?: Point[] }>(`/api/calyx/rig/${encodeURIComponent(vehicle)}/history`);
     setTimeline(r.timeline ?? []);
   }, [vehicle]);
   useEffect(() => { load(); }, [load]);

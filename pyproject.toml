@@ -67,6 +67,20 @@ ml = [
     "umap-learn==0.5.12",        # 2D projection for the analytics cluster map (M1.7)
     "scikit-image==0.24.0",      # SLIC superpixels for interactive region-fill (Plane 1 B3)
 ]
+# Edge optimization (FORGYX). ONNX and ONNX Runtime are pure-CPU wheels that install anywhere, so the
+# export/quantize/benchmark path is exercisable on any machine. The remaining FORGYX targets (TensorRT,
+# LiteRT, Hailo) genuinely require a device toolchain and are deliberately NOT here: services/forgyx/
+# capabilities.py gates each target on its backend being importable and raises rather than fabricating a
+# result. Previously none of these backends were in any dependency group, so every target failed that gate
+# on a stock install and the whole subsystem was unreachable code.
+edge = [
+    "onnx==1.17.0",
+    "onnxruntime==1.20.1",
+    # Ultralytics tries to pip-install this mid-export when it is absent, which fails on a PEP 668 managed
+    # interpreter and silently degrades the export to an unsimplified graph. Pinning it here keeps the
+    # exported model the simplified one and keeps the export offline-safe.
+    "onnxslim==0.1.34",
+]
 dev = [
     "pytest==8.3.4",
     "pytest-asyncio==0.25.0",

@@ -362,6 +362,14 @@ class TrainingSettings(BaseModel):
     default_batch: int = 12
     advisory_lock_key: int = 815  # Postgres advisory-lock id used as the GPU mutex across processes
     vram_required_mb: int = 4000  # preflight floor before a train starts (small jobs need ~3-4 GB)
+    # Task-specific base checkpoints. A segmentation or pose run must start from a checkpoint that already
+    # has the right head: fine-tuning a detection checkpoint would train a mask or keypoint head from
+    # scratch, which needs far more data than a corpus of human-corrected labels typically holds.
+    segmentation_weights: str = "yolo11n-seg.pt"
+    pose_weights: str = "yolo11n-pose.pt"
+    # A crashed run resumes from its last checkpoint instead of restarting at epoch 0. The worker resets an
+    # orphaned job to pending; without this that discarded every epoch already paid for.
+    resume_orphaned_runs: bool = True
 
 
 class CloudSettings(BaseModel):
@@ -582,6 +590,15 @@ class AuthSettings(BaseModel):
     accept_legacy_tokens: bool = False
 
 
+class IntegrationsSettings(BaseModel):
+    # A webhook URL is attacker-controlled input the server then fetches with its own network position, so an
+    # unrestricted one is an SSRF primitive: it can reach cloud instance metadata or an internal object store.
+    # Private, loopback, and link-local targets are refused by default. A self-hosted deployment whose
+    # receiver genuinely lives on an internal network turns this on deliberately, and the test suite needs it
+    # because its receivers are on localhost.
+    allow_private_webhook_targets: bool = False
+
+
 class LidarSettings(BaseModel):
     # 3D LiDAR module. The BluRabbit fleet is camera only, so pseudo-LiDAR (camera depth lift) is the
     # default source; real LiDAR and public datasets normalize to the same internal cloud.
@@ -761,6 +778,10 @@ class AnprSettings(BaseModel):
     device: str = "cpu"
     min_plate_area_frac: float = 0.0002   # ignore specks below this fraction of frame area
     ocr_min_conf: float = 0.50            # drop a read the OCR is not confident about
+    # The local generative-VLM wire exposes no calibrated per-read score, so it reports None rather than a
+    # constant that would make ocr_min_conf a no-op. Unscored reads are kept by default (the text is still
+    # evidence, flagged unscored downstream); a deployment that must gate on a real score sets this true.
+    require_measured_ocr_conf: bool = False
     ocr_backend: str = "qwen"             # qwen (Ollama) | pod (PaddleOCR Indic)
 
 
@@ -805,6 +826,7 @@ class Settings(BaseSettings):
     paths: PathsSettings = PathsSettings()
     phase4: Phase4Settings = Phase4Settings()  # Phase 4 closed loop + governance
     auth: AuthSettings = AuthSettings()        # deny-by-default API auth
+    integrations: IntegrationsSettings = IntegrationsSettings()   # outbound webhook safety
     lidar: LidarSettings = LidarSettings()     # 3D LiDAR module (ingestion, clean, viewer)
     inspector: InspectorSettings = InspectorSettings()  # Session Inspector (MCAP viewer + health)
     labelox: LabeloxSettings = LabeloxSettings()

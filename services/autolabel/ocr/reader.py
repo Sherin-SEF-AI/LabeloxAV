@@ -48,8 +48,10 @@ def is_plate_excluded(region_bbox, plates: list, thresh: float) -> bool:
     return any(_iou(region_bbox, p) >= thresh for p in plates)
 
 
-def read_text(crop_bgr: np.ndarray) -> tuple[str, str, float]:
-    """Return (text, lang, conf). Pod: PaddleOCR Indic. Local: Qwen via Ollama."""
+def read_text(crop_bgr: np.ndarray) -> tuple[str, str, float | None]:
+    """Return (text, lang, conf). conf is None when the backend reports no calibrated score (the local VLM
+    path); callers must treat None as 'unmeasured', never as a number. Pod: PaddleOCR Indic (real per-line
+    confidence). Local: Qwen via Ollama (unscored)."""
     cfg = get_settings().models.ocr
     if cfg.backend == "pod":
         raise NotImplementedError(
@@ -58,7 +60,15 @@ def read_text(crop_bgr: np.ndarray) -> tuple[str, str, float]:
     return _read_qwen(crop_bgr)
 
 
-def _read_qwen(crop_bgr: np.ndarray) -> tuple[str, str, float]:
+def _read_qwen(crop_bgr: np.ndarray) -> tuple[str, str, float | None]:
+    """Read text with the local VLM. The confidence is None, not a number.
+
+    A generative VLM returns no token-level score we can calibrate, so any float here would be invented. This
+    used to return a constant 0.8 for every non-empty read, which was then compared against models.ocr.conf:
+    a constant on one side of a threshold makes the threshold a no-op that merely looked like a quality gate.
+    Returning None makes "unmeasured" explicit, and the caller decides what to do with an unscored read
+    instead of being misled by a fabricated one.
+    """
     import base64
 
     import httpx
@@ -66,7 +76,7 @@ def _read_qwen(crop_bgr: np.ndarray) -> tuple[str, str, float]:
     vlm = get_settings().models.vlm
     ok, buf = cv2.imencode(".jpg", crop_bgr)
     if not ok:
-        return "", "", 0.0
+        return "", "", None
     b64 = base64.b64encode(buf.tobytes()).decode()
     prompt = ('Read any text printed on this road sign or board. Reply with strict JSON only: '
               '{"text": "<the text, empty if none>", "lang": "<en|hi|ta|te|kn|other>"}.')
@@ -77,10 +87,10 @@ def _read_qwen(crop_bgr: np.ndarray) -> tuple[str, str, float]:
         resp.raise_for_status()
         data = json.loads(resp.json()["message"]["content"])
         text = (data.get("text") or "").strip()
-        return text, (data.get("lang") or "en"), (0.8 if text else 0.0)
+        return text, (data.get("lang") or "en"), None   # unmeasured: see docstring
     except Exception as exc:  # noqa: BLE001
         log.warning("ocr.read_failed", error=str(exc))
-        return "", "", 0.0
+        return "", "", None
 
 
 def _decode(store, uri):
@@ -108,7 +118,7 @@ async def ocr_session(session_id: UUID, limit: int | None = None) -> dict:
         for audit in (await db.execute(select(PiiAudit).where(PiiAudit.session_id == session_id))).scalars():
             plates_by_frame[audit.frame_id] = plate_bboxes(audit.regions)
 
-    n, excluded, found = 0, 0, 0
+    n, excluded, found, unmeasured = 0, 0, 0, 0
     last_uri, last_img = None, None
     async with maker() as db:
         for obj, uri, frame_id in rows:
@@ -126,13 +136,29 @@ async def ocr_session(session_id: UUID, limit: int | None = None) -> dict:
                 continue
             text, lang, conf = read_text(crop_object(last_img, tuple(obj.bbox), margin))
             n += 1
-            if text and conf >= cfg.conf:
+            if not text:
+                continue
+            # An unmeasured read (conf is None, the local VLM path) cannot clear a confidence threshold, so it
+            # is stored with a null conf and flagged unverified rather than being waved through by a made-up
+            # score. A measured read still has to clear models.ocr.conf.
+            if conf is None:
+                o = await db.get(Object, obj.object_id)
+                o.ocr_text, o.ocr_lang, o.ocr_conf = text, lang, None
+                prov = dict(o.provenance or {})
+                prov["ocr"] = {"conf_measured": False, "backend": cfg.backend, "needs_verification": True}
+                o.provenance = prov
+                unmeasured += 1
+                found += 1
+            elif conf >= cfg.conf:
                 o = await db.get(Object, obj.object_id)
                 o.ocr_text, o.ocr_lang, o.ocr_conf = text, lang, conf
+                prov = dict(o.provenance or {})
+                prov["ocr"] = {"conf_measured": True, "backend": cfg.backend}
+                o.provenance = prov
                 found += 1
         await db.commit()
 
     out = {"session_id": str(session_id), "ocr_attempted": n, "text_found": found,
-           "plate_excluded": excluded, "backend": cfg.backend}
+           "unmeasured_conf": unmeasured, "plate_excluded": excluded, "backend": cfg.backend}
     log.info("ocr.done", **out)
     return out

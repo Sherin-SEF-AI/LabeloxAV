@@ -20,6 +20,7 @@ import ScoreBar from "@/components/shell/ScoreBar";
 import { api } from "@/lib/api";
 import type { ProductivityReport } from "@/lib/types";
 import type { Confusions } from "@/lib/types";
+import { apiGet } from "@/lib/api";
 
 // The sales sheet: corpus totals, class distribution and long-tail coverage, label-source mix
 // (auto-accepted vs human-touched), scenario coverage, and the review-agreement loop signal.
@@ -76,8 +77,8 @@ export default function AnalyticsPage() {
   }, []);
 
   const exportReport = async () => {
-    const r = await fetch("/api/analytics/report");
-    const blob = new Blob([JSON.stringify(await r.json(), null, 2)], { type: "application/json" });
+    const report = await apiGet<unknown>("/api/analytics/report");
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;

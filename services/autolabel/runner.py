@@ -171,22 +171,48 @@ async def fetch_frames(session_id: UUID, limit: int | None) -> list[FrameMeta]:
 
 def _local_champion_weights(weights_uri: str) -> str | None:
     """Resolve a champion's weights_uri to a local file path Path A can load: a local path is used
-    as-is, otherwise the blob is pulled from the object store into a scratch cache."""
-    import re
+    as-is, otherwise the blob is pulled from the object store into a scratch cache.
+
+    The cache is keyed by the sha256 of the blob's *uri* plus the digest of its bytes, not by the basename.
+    Keying on the basename meant two different champions both exported as "best.pt" shared one cache entry,
+    so a promotion could silently keep serving the previous model's weights. The digest is also written
+    alongside and re-verified on a cache hit, so a truncated or corrupted download is detected rather than
+    loaded as a model.
+    """
+    import hashlib
     from pathlib import Path
 
     p = Path(weights_uri)
     if p.exists() and p.is_file():
         return str(p)
+
+    cache = get_settings().scratch_path() / "models" / "champion"
+    cache.mkdir(parents=True, exist_ok=True)
+    # Content-addressed by uri: distinct champions never collide even with identical basenames.
+    key = hashlib.sha256(weights_uri.encode()).hexdigest()[:16]
+    dest = cache / f"{key}.pt"
+    digest_file = dest.with_suffix(".sha256")
+
+    if dest.exists() and digest_file.exists():
+        want = digest_file.read_text().strip()
+        got = hashlib.sha256(dest.read_bytes()).hexdigest()
+        if got == want:
+            return str(dest)
+        log.warning("champion.weights_cache_corrupt", uri=weights_uri, expected=want[:12], got=got[:12])
+        dest.unlink(missing_ok=True)
+        digest_file.unlink(missing_ok=True)
+
     try:
         data = get_object_store().get_bytes(weights_uri)
     except Exception:  # noqa: BLE001
         log.warning("champion.weights_unreadable", uri=weights_uri)
         return None
-    cache = get_settings().scratch_path() / "models" / "champion"
-    cache.mkdir(parents=True, exist_ok=True)
-    dest = cache / (re.sub(r"[^A-Za-z0-9._-]", "_", weights_uri.split("/")[-1]) or "champion.pt")
+    if not data:
+        log.warning("champion.weights_empty", uri=weights_uri)
+        return None
     dest.write_bytes(data)
+    digest_file.write_text(hashlib.sha256(data).hexdigest())
+    log.info("champion.weights_cached", uri=weights_uri, bytes=len(data), key=key)
     return str(dest)
 
 

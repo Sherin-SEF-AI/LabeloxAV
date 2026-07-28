@@ -20,6 +20,9 @@ export type EdObject = {
   quality_score?: number | null; // M-F.1 composite label-quality signal [0,1]
   state: string;
   visible: boolean;
+  // A locked object is visible but not editable: it cannot be selected by a marquee, moved, or deleted.
+  // Reviewers use it to pin work they have already checked while cleaning up around it.
+  locked?: boolean;
   isNew?: boolean;
   dirty?: boolean;
   version?: number; // optimistic-lock version from the server; sent back on save to detect stale writes
@@ -35,6 +38,10 @@ type Snapshot = { objects: EdObject[]; deleted: string[] };
 
 export type EditorState = Snapshot & {
   selectedId: string | null;
+  // Additional ids selected alongside selectedId. Kept separate from selectedId rather than replacing it so
+  // every existing single-object surface (the properties panel, the class picker, the geometry handles) keeps
+  // working unchanged and operates on the primary selection, while bulk actions read selectedIds.
+  selectedIds: string[];
   tool: Tool;
   viewport: Viewport;
   candidate: number[][] | null; // SAM candidate polygons (image coords)
@@ -48,6 +55,10 @@ export type Action =
   | { t: "tool"; tool: Tool }
   | { t: "viewport"; viewport: Viewport }
   | { t: "select"; id: string | null }
+  | { t: "selectMany"; ids: string[]; additive?: boolean }
+  | { t: "toggleSelect"; id: string }
+  | { t: "setVisible"; ids: string[]; visible: boolean }
+  | { t: "setLocked"; ids: string[]; locked: boolean }
   | { t: "candidate"; polys: number[][] | null }
   | { t: "add"; obj: EdObject }
   | { t: "update"; id: string; patch: Partial<EdObject> }
@@ -109,13 +120,16 @@ export function isDirty(s: EditorState): boolean {
   return s.deleted.length > 0 || s.objects.some((o) => o.isNew || o.dirty);
 }
 
-function reducer(s: EditorState, a: Action): EditorState {
+// Exported for tests: this is the module where a bug corrupts annotations silently rather than throwing,
+// so it is worth being able to drive it directly.
+export function editorReducer(s: EditorState, a: Action): EditorState {
   switch (a.t) {
     case "load":
       return {
         objects: uniqById(a.objects),
         deleted: [],
         selectedId: a.selectedId ?? null,
+        selectedIds: a.selectedId ? [a.selectedId] : [],
         tool: "select",
         viewport: a.viewport,
         candidate: null,
@@ -128,7 +142,33 @@ function reducer(s: EditorState, a: Action): EditorState {
     case "viewport":
       return { ...s, viewport: a.viewport };
     case "select":
-      return { ...s, selectedId: a.id, touched: a.id && !s.touched.includes(a.id) ? [...s.touched, a.id] : s.touched };
+      return { ...s, selectedId: a.id, selectedIds: a.id ? [a.id] : [],
+               touched: a.id && !s.touched.includes(a.id) ? [...s.touched, a.id] : s.touched };
+    case "selectMany": {
+      // A locked object is deliberately excluded here rather than filtered at each action site: a marquee
+      // that swept one up would otherwise let a bulk delete remove the very thing the lock was protecting.
+      const lockable = new Set(s.objects.filter((o) => !o.locked).map((o) => o.id));
+      const incoming = a.ids.filter((id) => lockable.has(id));
+      const ids = a.additive ? Array.from(new Set([...s.selectedIds, ...incoming])) : incoming;
+      return { ...s, selectedIds: ids, selectedId: ids[0] ?? null,
+               touched: Array.from(new Set([...s.touched, ...ids])) };
+    }
+    case "toggleSelect": {
+      const has = s.selectedIds.includes(a.id);
+      const ids = has ? s.selectedIds.filter((x) => x !== a.id) : [...s.selectedIds, a.id];
+      return { ...s, selectedIds: ids, selectedId: ids[ids.length - 1] ?? null,
+               touched: s.touched.includes(a.id) ? s.touched : [...s.touched, a.id] };
+    }
+    case "setVisible":
+      // Visibility is a view concern, not an edit: it must not mark the object dirty or enter undo history,
+      // or hiding a box to see behind it would queue a pointless save and consume an undo step.
+      return { ...s, objects: s.objects.map((o) =>
+        a.ids.includes(o.id) ? { ...o, visible: a.visible } : o) };
+    case "setLocked":
+      return { ...s, objects: s.objects.map((o) => (a.ids.includes(o.id) ? { ...o, locked: a.locked } : o)),
+               // Deselect anything just locked, so the next keystroke cannot edit it.
+               selectedIds: a.locked ? s.selectedIds.filter((id) => !a.ids.includes(id)) : s.selectedIds,
+               selectedId: a.locked && a.ids.includes(s.selectedId ?? "") ? null : s.selectedId };
     case "candidate":
       return { ...s, candidate: a.polys };
     case "add":
@@ -205,6 +245,7 @@ const INITIAL: EditorState = {
   objects: [],
   deleted: [],
   selectedId: null,
+  selectedIds: [],
   tool: "select",
   viewport: { scale: 1, ox: 0, oy: 0 },
   candidate: null,
@@ -214,5 +255,5 @@ const INITIAL: EditorState = {
 };
 
 export function useEditor() {
-  return useReducer(reducer, INITIAL);
+  return useReducer(editorReducer, INITIAL);
 }

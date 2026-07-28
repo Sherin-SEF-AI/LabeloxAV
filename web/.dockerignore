@@ -1,0 +1,18 @@
+# The web image runs `npm ci` and `next build` itself, so the two heaviest directories in this tree are not
+# only unnecessary in the context, they are actively wrong to copy: node_modules may hold binaries built for
+# the host platform, and a stale .next would be overwritten by the build anyway.
+
+node_modules/
+.next/
+out/
+
+# Secrets and local env.
+.env
+.env.*
+!.env.example
+
+# Caches and noise.
+.turbo/
+coverage/
+*.log
+.DS_Store

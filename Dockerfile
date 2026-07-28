@@ -22,10 +22,16 @@ COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
 WORKDIR /app
 # Install base deps first (cached until pyproject changes), then the source.
 COPY pyproject.toml README.md ./
-RUN uv venv && uv pip install -e "."
+# --no-cache: uv otherwise leaves its downloaded wheels in /root/.cache, which was 2.3GB of an
+# image that never reads them again.
+RUN uv venv && uv pip install --no-cache -e "."
 COPY . .
 
+# PYTHONPATH: running a script by path (`python scripts/x.py`) puts scripts/ on sys.path rather than the
+# working directory, so `import core` fails even though the package is right there. Setting it explicitly
+# makes every entry form work: -m, by path, and an interactive shell.
 ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
     LBX_ENV=production
 
@@ -44,8 +50,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
 WORKDIR /app
 COPY pyproject.toml README.md ./
 # The ml extra pins the cu128 wheels this base matches.
-RUN uv venv --python 3.11 && uv pip install -e ".[ml]"
+RUN uv venv --python 3.11 && uv pip install --no-cache -e ".[ml]"
 COPY . .
-ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 LBX_ENV=production
+ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app PYTHONUNBUFFERED=1 LBX_ENV=production
 EXPOSE 8000
 CMD ["uvicorn", "services.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

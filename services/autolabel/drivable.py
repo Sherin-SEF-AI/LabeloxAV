@@ -114,7 +114,9 @@ def _segment_seg(image_bgr: np.ndarray) -> dict:
         m = np.isin(labels, ids) if ids else np.zeros_like(labels, bool)
         classes[cls] = _surface_polys(m)
         cov[cls] = round(float(m.sum()) / total, 4)
-    return {"classes": classes, "coverage": cov, "width": w, "height": h, "model": tag}
+    # Every surface class is genuinely estimated on this path, so nothing is unestimated.
+    return {"classes": classes, "coverage": cov, "width": w, "height": h, "model": tag,
+            "unestimated_classes": []}
 
 
 def _raster(polys: list, w: int, h: int) -> np.ndarray:
@@ -147,6 +149,11 @@ def _segment_local(image_bgr: np.ndarray) -> dict:
         "coverage": {"drivable": round(float(dm.sum()) / total, 4),
                      "non_drivable": round(float(non_driv.sum()) / total, 4), "fallback": 0.0},
         "width": w, "height": h, "model": "trapezoid:local",
+        # A perspective trapezoid carries no appearance information, so it cannot distinguish unpaved
+        # drivable-fallback surface from paved road. Reporting fallback as a bare 0.0 would read as
+        # "no unpaved surface here", which is exactly wrong for the India ODD this class exists for.
+        # Naming it unestimated keeps the empty result from being mistaken for a measurement.
+        "unestimated_classes": ["fallback"],
     }
 
 

@@ -14,6 +14,7 @@ import PageShell from "@/components/shell/PageShell";
 import { useConfirm } from "@/components/ConfirmProvider";
 import Inspector from "@/components/shell/Inspector";
 import { StateBadge } from "@/components/StateBadge";
+import SessionPicker from "@/components/lidar/SessionPicker";
 
 const PointCloudViewer = dynamic(() => import("@/components/lidar/PointCloudViewer"), { ssr: false });
 
@@ -170,11 +171,7 @@ export default function CuboidAnnotatePage() {
       <div className="flex h-full bg-[#0a0e14] text-neutral-200">
         <Inspector title="Cuboid annotation" side="left" width="w-80">
           <div className="flex flex-col gap-3 p-4">
-        <form onSubmit={(e) => { e.preventDefault(); loadClouds(sessionId); }} className="flex gap-2">
-          <input value={sessionId} onChange={(e) => setSessionId(e.target.value)} placeholder="session id"
-            className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs" />
-          <button className="rounded bg-cyan-700 px-3 py-1 text-xs hover:bg-cyan-600">Load</button>
-        </form>
+<SessionPicker value={sessionId} onChange={setSessionId} onLoad={loadClouds} />
 
         {clouds.length > 0 && (
           <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">

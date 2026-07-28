@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
+import { apiGet } from "@/lib/api";
 
 type Board = { total: number; auto_accepted: number; routed_to_human: number; auto_accept_rate: number };
 
@@ -14,8 +15,8 @@ export default function OraclyxBoard() {
   const [b, setB] = useState<Board | null>(null);
   const [distill, setDistill] = useState<number | null>(null);
   useEffect(() => {
-    fetch("/api/oraclyx/board").then((r) => r.json()).then(setB).catch(() => {});
-    fetch("/api/oraclyx/distillation").then((r) => r.json()).then((d) => setDistill(d.n)).catch(() => {});
+    apiGet<Board>("/api/oraclyx/board").then(setB).catch(() => {});
+    apiGet<{ n: number }>("/api/oraclyx/distillation").then((d) => setDistill(d.n)).catch(() => {});
   }, []);
 
   const auto = b?.auto_accepted ?? 0;

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { api , humanizeError } from "@/lib/api";
 import type { DatasetDetail, DatasetRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import { SkeletonRows } from "@/components/Spinner";
+import { useQueryParam } from "@/lib/useQueryParam";
 
 // Datasets + delivery: seal a versioned dataset (a background export job) and download the formats.
 // This is the "product out" surface - how labeled data leaves the engine.
@@ -21,6 +22,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export default function DatasetsPage() {
+  // useSearchParams (via useQueryParam) forces a CSR bailout Next requires be under Suspense.
+  return <Suspense fallback={null}><DatasetsBody /></Suspense>;
+}
+
+function DatasetsBody() {
   const [rows, setRows] = useState<DatasetRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<string | null>(null);
@@ -30,7 +36,10 @@ export default function DatasetsPage() {
   // export form
   const [name, setName] = useState("delivery-v1");
   const [states, setStates] = useState("accepted");
-  const [fmts, setFmts] = useState<string[]>(["coco", "parquet"]);
+  const qsFormat = useQueryParam("format");
+  // the File > Export menu deep-links a target format; preselect it alongside the lossless sidecar
+  const [fmts, setFmts] = useState<string[]>(
+    qsFormat ? [qsFormat, "parquet"] : ["coco", "parquet"]);
 
   async function refresh() {
     try {

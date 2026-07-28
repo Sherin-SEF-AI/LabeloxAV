@@ -219,6 +219,17 @@ async function del<T>(path: string): Promise<T> {
   }
 }
 
+// The auth-aware request primitives, exported so no page has to hand-roll a bare fetch. A raw
+// fetch("/api/...") sends no Authorization header, so under the deny-by-default read gate it 401s and (when
+// the caller swallows the error) renders a silently blank page. Every data call must go through these.
+// The deliberate exceptions are the credential-bootstrap paths that cannot carry a token yet: the login page,
+// AuthBootstrap, and the refresh call in lib/user.ts.
+export const apiGet = get;
+export const apiPost = post;
+export const apiPut = put;
+export const apiPatch = patch;
+export const apiDelete = del;
+
 // SAM segment supports point prompts (with fg/bg labels) and/or a box prompt. Returns 503 if a
 // training job holds the GPU; callers surface that as a non-blocking notice.
 export type SegmentPrompt = { points?: number[][]; labels?: number[]; box?: number[]; precise?: boolean };
@@ -444,6 +455,11 @@ export const api = {
   // Frame-centric editor
   frame: (id: string) => get<FrameMeta>(`/api/frames/${id}`),
   frameObjects: (id: string) => get<FrameObject[]>(`/api/frames/${id}/objects`),
+  // Neighbouring frames for the editor filmstrip: same camera, capture order, with object counts.
+  frameFilmstrip: (id: string, span = 12) =>
+    get<{ frame_id: string; cam_id: string; frames: { frame_id: string; ts_ns: number;
+          n_objects: number; image_url: string; current: boolean }[] }>(
+      `/api/frames/${id}/filmstrip?span=${span}`),
   explainObject: (id: string) => get<ObjectExplanation>(`/api/objects/${id}/explain`),
   // M-F.5 scene-graph relations + VLM dataset generation
   sceneGraphVocab: () => get<{ relations: string[]; geometric: string[]; vlm_or_human: string[] }>(`/api/scene-graph/vocab`),
@@ -618,7 +634,16 @@ export const api = {
     post<{ created: number; track_id: string }>(`/api/tracks/${track_id}/interpolate`, {}),
   // Track (tracklet) editor
   // Operational layer: unified jobs, bulk review, UI-triggered autolabel
-  users: () => get<UserRow[]>("/api/users"),
+  // Paginated envelope. The endpoint used to return a bare array with no bound, so the list grew with the
+  // team and no client could page it. usersPage exposes the envelope; users() keeps the array shape the
+  // existing pickers expect by returning the first page.
+  usersPage: (opts: { limit?: number; offset?: number } = {}) => {
+    const p = new URLSearchParams();
+    if (opts.limit != null) p.set("limit", String(opts.limit));
+    if (opts.offset != null) p.set("offset", String(opts.offset));
+    return get<{ total: number; offset: number; limit: number; users: UserRow[] }>(`/api/users?${p}`);
+  },
+  users: async (): Promise<UserRow[]> => (await get<{ users: UserRow[] }>("/api/users")).users,
   me: () => get<UserRow>("/api/users/me"),
   createUser: (name: string, role: string) => post<UserCreated>("/api/users", { name, role }),
 

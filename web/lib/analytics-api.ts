@@ -50,10 +50,13 @@ export type ReviewAgreement = {
   }[];
 };
 
+// Routed through the shared client so every analytics read carries the Bearer token, gets the humanized
+// error, and triggers the sign-in redirect on 401. A bare fetch here made the whole analytics dashboard
+// render blank once reads became deny-by-default.
+import { apiGet } from "./api";
+
 async function get<T>(path: string): Promise<T> {
-  const r = await fetch(path, { cache: "no-store" });
-  if (!r.ok) throw new Error(`GET ${path} -> ${r.status}`);
-  return r.json();
+  return apiGet<T>(path);
 }
 
 function qs(session_id?: string): string {

@@ -3,11 +3,12 @@ drift scan, the controller tick, the kill switch, and the audit log."""
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-
-import uuid
 
 from services.api.deps import db_session
 from services.govern import killswitch as K
@@ -49,12 +50,61 @@ class ConsentIn(BaseModel):
     session_id: uuid.UUID
     consent_status: str              # granted|denied|unknown
     legal_basis: str | None = None
+    # The retention deadline. This field did not exist and the handler dropped the parameter, so every
+    # consent record carried a null deadline, retention_status returned "retain" forever, and the retention
+    # feature was unreachable end to end.
+    retention_until: datetime | None = None
 
 
 @router.post("/govern/consent")
 async def consent(payload: ConsentIn, db: AsyncSession = Depends(db_session)):
     """Set a session's consent/retention record; export is refused later unless consent is 'granted'."""
-    return await set_consent(db, payload.session_id, payload.consent_status, payload.legal_basis)
+    return await set_consent(db, payload.session_id, payload.consent_status, payload.legal_basis,
+                             retention_until=payload.retention_until)
+
+
+@router.get("/govern/retention/due")
+async def retention_due(db: AsyncSession = Depends(db_session)):
+    """Sessions past their retention deadline. Readable on its own so an operator can see what a sweep would
+    erase before anything is deleted."""
+    from services.govern.retention import expired_sessions
+
+    return {"sessions": await expired_sessions(db)}
+
+
+class RetentionSweepIn(BaseModel):
+    # Defaults to a dry run: an irreversible bulk delete that runs the first time someone calls it to see
+    # what it does is a trap.
+    dry_run: bool = True
+    limit: int = 50
+
+
+@router.post("/govern/retention/sweep")
+async def retention_sweep(payload: RetentionSweepIn, db: AsyncSession = Depends(db_session)):
+    """Erase every session past its retention deadline, returning a certificate per erasure."""
+    from services.govern.retention import run_retention_sweep
+
+    return await run_retention_sweep(db, dry_run=payload.dry_run, limit=payload.limit)
+
+
+class EraseIn(BaseModel):
+    session_id: uuid.UUID
+    reason: str = "data subject erasure request"
+    dry_run: bool = True
+
+
+@router.post("/govern/erase")
+async def erase(payload: EraseIn, db: AsyncSession = Depends(db_session)):
+    """Erase one session on request: frames, annotations, PII audits, and image blobs.
+
+    This is the data-subject erasure path, which did not exist: the only deletion in the system was a
+    per-object endpoint, nothing walked from a subject to its data, and nothing covered object storage, which
+    database cascades do not reach. Returns a signed certificate, because a deletion that leaves no evidence
+    it happened cannot be shown to a regulator.
+    """
+    from services.govern.retention import erase_session
+
+    return await erase_session(db, payload.session_id, reason=payload.reason, dry_run=payload.dry_run)
 
 
 @router.get("/govern/consent/{consent_status}/gate")

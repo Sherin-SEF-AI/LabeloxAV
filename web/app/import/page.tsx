@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, type ImportJob , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
+import { useQueryParam } from "@/lib/useQueryParam";
 
 // Upload a dataset (any size) straight to storage, then import it. The file goes browser -> MinIO via
 // presigned multipart; the API only signs and runs the import as a background job. PII (Gate A) runs
@@ -35,8 +36,16 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export default function ImportPage() {
+  // useSearchParams (via useQueryParam) forces a CSR bailout Next requires be under Suspense.
+  return <Suspense fallback={null}><ImportBody /></Suspense>;
+}
+
+function ImportBody() {
   const router = useRouter();
-  const [format, setFormat] = useState("coco");
+  const qsFormat = useQueryParam("format");
+  // the File > Import menu deep-links a format per entry; honour it instead of always defaulting to coco
+  const [format, setFormat] = useState(
+    qsFormat && (FORMATS as readonly string[]).includes(qsFormat) ? qsFormat : "coco");
   const [vehicle, setVehicle] = useState("IMPORT-01");
   const [city, setCity] = useState("BLR");
   const [files, setFiles] = useState<File[]>([]);

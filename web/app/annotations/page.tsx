@@ -10,6 +10,7 @@ import PageShell from "@/components/shell/PageShell";
 import Pager from "@/components/shell/Pager";
 import { usePager } from "@/lib/usePager";
 import { StateBadge } from "@/components/StateBadge";
+import { useQueryFlag } from "@/lib/useQueryParam";
 
 // The "open annotation" browser: every capture session as a card with review progress and a
 // state breakdown. "open" jumps to the first frame; "resume queue" jumps to the highest-priority
@@ -49,11 +50,13 @@ function SessionCard({
   stats,
   onOpen,
   onResume,
+  rigMode,
 }: {
   session: SessionRow;
   stats: SessionStats | undefined;
   onOpen: (s: SessionRow) => void;
   onResume: (s: SessionRow) => void;
+  rigMode: boolean;
 }) {
   return (
     <div className="panel p-3 space-y-2">
@@ -98,6 +101,14 @@ function SessionCard({
         >
           resume queue
         </button>
+        {rigMode && (
+          <Link
+            href={`/annotate/multicam/${session.session_id}`}
+            className="font-mono text-xs border border-accent text-accent px-2 py-0.5 hover:bg-accent/10"
+          >
+            rig view
+          </Link>
+        )}
       </div>
     </div>
   );
@@ -110,6 +121,8 @@ export default function AnnotationsPage() {
 }
 
 function AnnotationsBody() {
+  // Label > Multi-camera deep-links ?rig=1; surface the rig workspace entry for the listed sessions
+  const rigMode = useQueryFlag("rig");
   const router = useRouter();
   const { offset, limit, setOffset } = usePager(24);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
@@ -217,6 +230,7 @@ function AnnotationsBody() {
                 stats={stats[s.session_id]}
                 onOpen={onOpen}
                 onResume={onResume}
+                rigMode={rigMode}
               />
             ))}
           </div>

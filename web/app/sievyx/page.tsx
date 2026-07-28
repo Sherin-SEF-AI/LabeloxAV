@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
+import { apiGet } from "@/lib/api";
 
 type Composition = {
   n: number;
@@ -20,7 +21,7 @@ const BAND_COLOR: Record<string, string> = { high: "bg-pass", medium: "bg-warn",
 
 export default function SievyxComposition() {
   const [c, setC] = useState<Composition | null>(null);
-  useEffect(() => { fetch("/api/sievyx/composition?top_n=800").then((r) => r.json()).then(setC).catch(() => {}); }, []);
+  useEffect(() => { apiGet<Composition>("/api/sievyx/composition?top_n=800").then(setC).catch(() => {}); }, []);
 
   return (
     <PageShell active="SIEVYX" title="SIEVYX queue composition"

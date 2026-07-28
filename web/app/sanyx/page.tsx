@@ -6,6 +6,7 @@
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
+import { apiGet, apiPost } from "@/lib/api";
 
 type Check = { name: string; status: string; score: number | null; detail: string; evidence: Record<string, unknown> };
 type Row = {
@@ -22,7 +23,7 @@ export default function SanyxBoard() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const r = await fetch("/api/sanyx/board?limit=200").then((x) => x.json());
+    const r = await apiGet<{ sessions?: Row[] }>("/api/sanyx/board?limit=200");
     setRows(r.sessions ?? []);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -30,7 +31,7 @@ export default function SanyxBoard() {
   const run = async (id: string) => {
     setBusy(id);
     try {
-      const rep = await fetch(`/api/sanyx/session/${id}/run`, { method: "POST" }).then((x) => x.json());
+      const rep = await apiPost<{ checks?: Check[] }>(`/api/sanyx/session/${id}/run`, {});
       setReport((m) => ({ ...m, [id]: rep.checks ?? [] }));
       setOpen(id);
       await load();
@@ -41,7 +42,7 @@ export default function SanyxBoard() {
     if (open === id) { setOpen(null); return; }
     setOpen(id);
     if (!report[id]) {
-      const rep = await fetch(`/api/sanyx/session/${id}`).then((x) => (x.ok ? x.json() : null));
+      const rep = await apiGet<{ checks?: Check[] }>(`/api/sanyx/session/${id}`).catch(() => null);
       if (rep) setReport((m) => ({ ...m, [id]: rep.checks ?? [] }));
     }
   };

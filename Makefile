@@ -196,6 +196,26 @@ api-reload: ## Run the backend with hot-reload (frontend/API iteration only; GPU
 web: ## Run the Next.js review UI
 	cd web && npm install && npm run dev
 
+.PHONY: install-docker
+install-docker: ## Deploy the whole product with Docker (generates secrets, migrates, creates the admin)
+	./scripts/install.sh
+
+.PHONY: app-up
+app-up: ## Start the deployed app (infra + api + web)
+	docker compose -f docker-compose.yml -f docker-compose.app.yml up -d
+
+.PHONY: app-down
+app-down: ## Stop the deployed app, keeping all data
+	docker compose -f docker-compose.yml -f docker-compose.app.yml down
+
+.PHONY: app-logs
+app-logs: ## Follow the API logs
+	docker compose -f docker-compose.yml -f docker-compose.app.yml logs -f api
+
+.PHONY: token
+token: ## Mint an API token from the server (recovery when the admin token is lost). NAME=alice
+	docker compose -f docker-compose.yml -f docker-compose.app.yml exec api python -m scripts.mint_token --name $(or $(NAME),admin)
+
 .PHONY: test
 test: ## Run pytest (full suite; needs infra up)
 	$(RUN) pytest -q
