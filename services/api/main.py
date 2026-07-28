@@ -33,6 +33,7 @@ from services.api.routers import (
     dynamics,
     errordetect,
     events,
+    experiments,
     explore,
     export,
     govern,
@@ -517,6 +518,7 @@ app.include_router(forgyx_router.router, prefix="/api", tags=["forgyx"])
 app.include_router(auth_router.router, prefix="/api", tags=["auth"])
 app.include_router(flywheel_router.router, prefix="/api", tags=["flywheel"])
 app.include_router(hardening_router.router, prefix="/api", tags=["hardening"])
+app.include_router(experiments.router, prefix="/api", tags=["experiments"])
 app.include_router(identity_routes.router, prefix="/api", tags=["identity"])
 app.include_router(inbox.router, prefix="/api", tags=["inbox"])
 app.include_router(security.router, prefix="/api", tags=["security"])

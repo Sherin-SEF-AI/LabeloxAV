@@ -3,7 +3,11 @@ frames (Object.source=="human" AND state=="accepted"). This is the distribution 
 lives in (NOT IDD, which is a different rig). Sealing freezes the exact object list and materializes a
 YOLO val split the eval harness points at.
 
-Seam: gold objects carry no guaranteed track_id, so MOTA/IDF1 are documented-not-built here.
+Tracking: a sealed set records its objects' track ids and whether every one of them had a track, on
+`tracks_sealed`. MOTA, IDF1 and HOTA already existed and were tested, and could never be run against
+anything, because association metrics need ground-truth identities and this sealer did not keep them. A set
+without complete identities reports tracks_sealed=false and the evaluator refuses rather than scoring
+against association labels that are not there.
 
     python -m services.training.gold --name fleet-v1 --city BLR
 """
@@ -65,7 +69,11 @@ async def _fetch_gold(spec: GoldSpec) -> list[dict]:
         rows = (await db.execute(stmt)).all()
     return [
         {"object_id": str(o.object_id), "frame_id": str(fid), "img_uri": uri, "w": w, "h": h,
-         "class_id": o.class_id, "bbox": list(o.bbox)}
+         "class_id": o.class_id, "bbox": list(o.bbox),
+         # Carried through the whole sealing path so a tracking evaluation has ground-truth identities.
+         # Without it MOTA and IDF1 have nothing to associate against.
+         "track_id": str(o.track_id) if o.track_id else None,
+         "ts_ns": None}
         for o, fid, uri, w, h in rows
     ]
 
@@ -200,6 +208,12 @@ async def seal_gold(spec: GoldSpec) -> dict:
     gold_id = _gold_id(spec, object_ids, onto.version)
     data_yaml, n_frames = _materialize(gold_id, objs, onto)
 
+    # A tracking metric associates predicted identities with true ones, so it needs every gold object to
+    # carry a track. Partial identities are worse than none: the objects without one look like new tracks
+    # in every frame and the resulting MOTA is a number about the gap in the labels, not about the tracker.
+    track_ids = [o.get("track_id") for o in objs]
+    tracks_sealed = bool(track_ids) and all(t for t in track_ids)
+
     maker = get_sessionmaker()
     async with maker() as db:
         existing = await db.get(GoldSet, gold_id)
@@ -207,12 +221,15 @@ async def seal_gold(spec: GoldSpec) -> dict:
             db.add(GoldSet(
                 gold_id=gold_id, name=spec.name, spec=spec.model_dump(), object_ids=object_ids,
                 n_objects=len(object_ids), n_frames=n_frames, ontology_version=onto.version,
+                track_ids=[t or "" for t in track_ids], tracks_sealed=tracks_sealed,
                 data_yaml_uri=data_yaml, notes=f"sealed from {len(object_ids)} human-accepted objects",
             ))
             await db.commit()
 
     result = {"gold_id": gold_id, "name": spec.name, "n_objects": len(object_ids),
-              "n_frames": n_frames, "data_yaml": data_yaml, "ontology_version": onto.version}
+              "n_frames": n_frames, "data_yaml": data_yaml, "ontology_version": onto.version,
+              "tracks_sealed": tracks_sealed,
+              "objects_with_track": sum(1 for t in track_ids if t)}
     log.info("gold.sealed", **{k: result[k] for k in ("gold_id", "n_objects", "n_frames")})
     return result
 

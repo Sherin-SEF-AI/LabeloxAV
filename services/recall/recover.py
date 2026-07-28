@@ -178,7 +178,7 @@ def fn_value(c: FusedRecall, is_rare: bool, in_rare_frame: bool) -> float:
     """The recovery value of a candidate. base is the strongest channel prior; multi-channel agreement,
     a rare class, and a rare-scenario frame each add. These are priors, corrected by the human verdict
     over time, the same way the isotonic gate is corrected by reviewed labels."""
-    base = max((_CHANNEL_PRIOR.get(ch, 0.0) for ch in c.channels), default=0.0)
+    base = max((channel_reliability(ch) for ch in c.channels), default=0.0)
     v = base
     if len(c.channels) >= 2:
         v += 0.15
@@ -328,9 +328,69 @@ def _build_backends():
     return build_backends()
 
 
-def fit_channel_reliability(db):
-    """STUB (closed-loop follow-on, not wired into fn_value yet). RecallCandidate.status carries the
-    human verdict on each recovered miss. Given enough confirmed and rejected candidates per channel,
-    this should replace _CHANNEL_PRIOR with measured per-channel confirmed-rates, closing the recall
-    loop the same way the isotonic curve closes the precision loop. Left unwired by design."""
-    raise NotImplementedError("fit_channel_reliability is a specified closed-loop stub, not yet wired")
+# Where measured reliabilities are cached once fitted. Process-local rather than a table because it is
+# derived state: it is recomputed from the verdicts on demand, and a stale copy in the database would
+# outlive the evidence it was fitted from.
+_MEASURED_RELIABILITY: dict[str, float] = {}
+
+# Below this many verdicts a channel's confirmed-rate is noise. Three confirmations out of three is not a
+# reliability of 1.0, it is a reliability of "we have seen three", and promoting it over the prior would
+# make the queue swing on a handful of reviews.
+_MIN_VERDICTS = 20
+
+
+async def fit_channel_reliability(db, *, min_verdicts: int = _MIN_VERDICTS,
+                                  apply: bool = True) -> dict:
+    """Replace the hand-set channel priors with the confirmed-rate each channel actually achieves.
+
+    `RecallCandidate.status` carries the human verdict on every recovered miss, so the system has been
+    accumulating exactly the evidence needed to know how much each recovery channel is worth and has been
+    ranking with three numbers somebody guessed. This closes the recall loop the way the isotonic curve
+    closes the precision one.
+
+    Two deliberate choices:
+
+    - **Laplace smoothing, not a raw ratio.** A channel with four confirmations out of four would otherwise
+      score 1.0 and dominate the ranking on almost no evidence.
+    - **A thin channel keeps its prior.** Below `min_verdicts` the measurement is reported but not applied,
+      because replacing a considered guess with a noisier one is not an improvement.
+    """
+    from sqlalchemy import select
+
+    from db.models import RecallCandidate
+
+    rows = (await db.execute(
+        select(RecallCandidate.channels, RecallCandidate.status)
+        .where(RecallCandidate.status.in_(("confirmed", "rejected"))))).all()
+
+    tally: dict[str, dict[str, int]] = {}
+    for channels, status in rows:
+        for ch in (channels or []):
+            t = tally.setdefault(ch, {"confirmed": 0, "rejected": 0})
+            t["confirmed" if status == "confirmed" else "rejected"] += 1
+
+    measured: dict[str, dict] = {}
+    for ch, t in tally.items():
+        n = t["confirmed"] + t["rejected"]
+        # Laplace: one imaginary observation each way, so a small sample is pulled toward 0.5 rather than
+        # to whichever extreme it happened to land on.
+        rate = (t["confirmed"] + 1) / (n + 2)
+        measured[ch] = {"confirmed": t["confirmed"], "rejected": t["rejected"], "n": n,
+                        "rate": round(rate, 4), "prior": _CHANNEL_PRIOR.get(ch),
+                        "applied": bool(apply and n >= min_verdicts)}
+
+    if apply:
+        for ch, m in measured.items():
+            if m["applied"]:
+                _MEASURED_RELIABILITY[ch] = float(m["rate"])
+
+    log.info("recall.reliability_fitted", channels=len(measured),
+             applied=sum(1 for m in measured.values() if m["applied"]))
+    return {"channels": measured, "min_verdicts": min_verdicts,
+            "in_effect": dict(_MEASURED_RELIABILITY),
+            "unmeasured": sorted(set(_CHANNEL_PRIOR) - set(measured))}
+
+
+def channel_reliability(channel: str) -> float:
+    """The value of a channel: measured where there is enough evidence, the hand-set prior otherwise."""
+    return _MEASURED_RELIABILITY.get(channel, _CHANNEL_PRIOR.get(channel, 0.0))

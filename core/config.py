@@ -367,6 +367,12 @@ class TrainingSettings(BaseModel):
     # scratch, which needs far more data than a corpus of human-corrected labels typically holds.
     segmentation_weights: str = "yolo11n-seg.pt"
     pose_weights: str = "yolo11n-pose.pt"
+    # A crop classifier starts from a classification checkpoint: the head shape has to match the task, and
+    # starting a classifier from a detection checkpoint discards the pretrained head entirely.
+    classification_weights: str = "yolo11n-cls.pt"
+    # Named so the 3D task can report what it would load, and refuse by name rather than by silence. There
+    # is no 3D detector in this environment; see services/training/tasks/detect3d.py.
+    detect3d_weights: str = "openpcdet-pointpillars.pth"
     # A crashed run resumes from its last checkpoint instead of restarting at epoch 0. The worker resets an
     # orphaned job to pending; without this that discarded every epoch already paid for.
     resume_orphaned_runs: bool = True

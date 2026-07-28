@@ -510,10 +510,15 @@ class Prediction(Base):
     mask_uri: Mapped[str | None] = mapped_column(Text)
     mask_encoding: Mapped[str | None] = mapped_column(String(16))
     cuboid_3d: Mapped[dict | None] = mapped_column(JSONB)
+    # The identity a tracker assigned, when the run was a tracker rather than a per-frame detector. Null for
+    # a detection run, and that nullness is what tells the tracking evaluator there is nothing to associate,
+    # rather than it scoring a detector as a tracker with an identity switch on every frame.
+    track_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         Index("ix_prediction_run", "run_id"),
+        Index("ix_prediction_track", "run_id", "track_id"),
         Index("ix_prediction_frame", "frame_id"),
         Index("ix_prediction_run_frame", "run_id", "frame_id"),
     )
@@ -2271,3 +2276,60 @@ class ActivityEvent(Base):
                                                  server_default=func.now(), index=True)
 
     __table_args__ = (Index("ix_activity_user_time", "user_id", "created_at"),)
+
+
+class Experiment(Base):
+    """A named line of training work, and the runs under it.
+
+    The per-job metric curve already answered "how did this run go". It could not answer "is this family of
+    runs getting better", which is the question a person actually asks between iterations, because nothing
+    tied runs together: comparing two meant reading two job rows and remembering which hyperparameters went
+    with which. An external tracker (wandb, mlflow) is the usual answer and would put the loop's own history
+    outside the loop, where the gate cannot read it.
+    """
+
+    __tablename__ = "experiment"
+
+    experiment_id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    task_type: Mapped[str] = mapped_column(String(32), nullable=False, default="detection")
+    description: Mapped[str | None] = mapped_column(Text)
+    # What is being varied and what is held fixed, so a comparison between two runs is interpretable rather
+    # than a diff of every hyperparameter at once.
+    hypothesis: Mapped[str | None] = mapped_column(Text)
+    tags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    created_by: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ExperimentRun(Base):
+    """One training job's place in an experiment, with the numbers that make it comparable.
+
+    Denormalised from `training_job` on purpose. A job row is mutable operational state (status, progress,
+    the live metric), and an experiment record is a fixed claim about a finished run: what it scored, on
+    which gold set, against which baseline. Reading the comparison off mutable rows would let a later job
+    edit-in-place change what an earlier comparison said.
+    """
+
+    __tablename__ = "experiment_run"
+
+    run_id: Mapped[uuid.UUID] = _uuid_pk()
+    experiment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("experiment.experiment_id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("training_job.job_id", ondelete="SET NULL"), index=True)
+    label: Mapped[str | None] = mapped_column(String(128))
+    hparams: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    dataset_spec: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    metrics: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # The whole curve, not just the endpoint, so a run that peaked and then overfit is distinguishable from
+    # one that never learned.
+    curve: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    gold_id: Mapped[str | None] = mapped_column(String(128))
+    baseline_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    notes: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_experiment_run_exp_started", "experiment_id", "started_at"),)
