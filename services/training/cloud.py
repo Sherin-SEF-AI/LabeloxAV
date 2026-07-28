@@ -44,10 +44,70 @@ async def mark_queued_for_cloud(job_id) -> None:
     log.info("training.queued_for_cloud", job_id=str(job_id))
 
 
-async def dispatch_cloud_job(job_id) -> None:
-    """Entry point for the cloud executor (next directive). Intentionally not wired this turn: it
-    documents the contract above and fails loud rather than pretending to train."""
-    raise NotImplementedError(
-        "cloud dispatch is the next directive. Provision the pod (make cloud-provision) and implement "
-        "the MinIO <-> /workspace data sync per the contract in services/training/cloud.py."
-    )
+async def dispatch_cloud_job(job_id, *, dataset_dir=None, entrypoint: str = "train_yolo") -> dict:
+    """Publish a job's workspace so a pod can claim it, and mark the job dispatched.
+
+    Steps 2 and 4 of the contract above, which is the half that runs on this side of the network. Steps 1,
+    3 and 5 are the pod's, and they need a provisioned GPU that this environment does not have.
+
+    Deliberately not a fake executor. Nothing here claims the job trained: it publishes the dataset and the
+    manifest, and the job stays visibly awaiting a pod. When a pod picks it up and pushes results back,
+    `collect_cloud_results` brings the weights into the same registry as a local run.
+    """
+    from pathlib import Path
+
+    from services.cloud.transfer import push_workspace
+
+    job_id = str(job_id)
+    async with get_sessionmaker()() as db:
+        j = await db.get(TrainingJob, uuid.UUID(job_id))
+        if j is None:
+            raise ValueError(f"training job {job_id} not found")
+        spec = dict(j.dataset_spec or {})
+        hparams = dict(j.hparams or {})
+        task_type = j.task_type
+
+    if dataset_dir is None:
+        raise ValueError(
+            "dispatch_cloud_job needs the built dataset directory. Build it locally first (the task "
+            "plugin's build_dataset), then dispatch: the pod trains, it does not query this database.")
+
+    pushed = push_workspace(
+        Path(dataset_dir), job_id=job_id, kind="training", entrypoint=entrypoint,
+        args={"task_type": task_type, "hparams": hparams, "dataset_spec": spec})
+
+    async with get_sessionmaker()() as db:
+        j = await db.get(TrainingJob, uuid.UUID(job_id))
+        if j is not None:
+            j.stage = "dispatched-cloud"
+            j.result = {"note": "workspace published; awaiting a pod", **pushed}
+            await db.commit()
+    log.info("training.dispatched_to_cloud", job_id=job_id, **pushed)
+    return pushed
+
+
+async def collect_cloud_results(job_id) -> dict:
+    """Bring a finished cloud run's weights home, so it joins the same registry as a local run.
+
+    Step 4 of the contract. Returns without changing the job when nothing has been pushed yet, because a pod
+    that has not finished is the normal case rather than an error.
+    """
+    from services.cloud.transfer import fetch_results, weights_uri
+
+    job_id = str(job_id)
+    results = fetch_results(job_id, "training")
+    if not results["ready"]:
+        return {"ready": False, "job_id": job_id, "detail": "the pod has not pushed results yet"}
+
+    uri = weights_uri(job_id, "training")
+    async with get_sessionmaker()() as db:
+        j = await db.get(TrainingJob, uuid.UUID(job_id))
+        if j is None:
+            raise ValueError(f"training job {job_id} not found")
+        j.stage = "done"
+        j.status = "done"
+        j.result = {**(j.result or {}), "weights_uri": uri, "artifacts": results["files"]}
+        await db.commit()
+    log.info("training.cloud_results_collected", job_id=job_id, weights=uri)
+    return {"ready": True, "job_id": job_id, "weights_uri": uri,
+            "artifacts": len(results["files"])}

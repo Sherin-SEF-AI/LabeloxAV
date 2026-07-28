@@ -35,6 +35,12 @@ from services.export.adapter_nuscenes import write_nuscenes
 from services.export.adapter_openlabel import write_openlabel
 from services.export.adapter_parquet import write_parquet
 from services.export.adapter_pascalvoc import write_pascalvoc
+from services.export.adapter_scene import (
+    write_drivable,
+    write_hdmap,
+    write_lanes,
+    write_masks,
+)
 from services.export.adapter_yolo import write_yolo
 from services.export.records import ExportRecord
 
@@ -186,10 +192,21 @@ _WRITERS = {
     "labelstudio": lambda rec, onto, store, d: write_labelstudio(rec, onto, store, d / "labelstudio"),
     "pascalvoc": lambda rec, onto, store, d: write_pascalvoc(rec, onto, d / "pascalvoc"),
     "mapillary": lambda rec, onto, store, d: write_mapillary(rec, onto, d / "mapillary"),
+    # Masks are object-derived like the rest, so this one fits the same signature.
+    "masks": lambda rec, onto, store, d: write_masks(rec, onto, store, d / "masks"),
+}
+
+# Scene-level targets. Separate registry because these are not derived from ExportRecord at all: a lane, a
+# drivable surface and a map element are not Objects, which is exactly why none of them could ever leave the
+# system. They take the frame ids of the slice instead, and they are async because they read their own rows.
+_SCENE_WRITERS = {
+    "lanes": lambda fids, store, d, commit: write_lanes(fids, d / "lanes"),
+    "drivable": lambda fids, store, d, commit: write_drivable(fids, store, d / "drivable"),
+    "hdmap": lambda fids, store, d, commit: write_hdmap(d / "hdmap", commit),
 }
 
 # Parquet is always written (lossless provenance) and so is accepted but never dispatched.
-SUPPORTED_EXPORT_FORMATS = frozenset(_WRITERS) | {"parquet"}
+SUPPORTED_EXPORT_FORMATS = frozenset(_WRITERS) | frozenset(_SCENE_WRITERS) | {"parquet"}
 
 
 def validate_formats(formats: list[str]) -> None:
@@ -208,6 +225,15 @@ def _requested(formats: list[str]) -> list[str]:
     seen: list[str] = []
     for f in formats:
         if f in _WRITERS and f not in seen:
+            seen.append(f)
+    return seen
+
+
+def _requested_scene(formats: list[str]) -> list[str]:
+    """The scene-level targets in request order, de-duplicated."""
+    seen: list[str] = []
+    for f in formats:
+        if f in _SCENE_WRITERS and f not in seen:
             seen.append(f)
     return seen
 
@@ -254,7 +280,14 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
     # formats actually written are recorded below.
     for fmt in _requested(spec.formats):
         written.append(_WRITERS[fmt](records, onto, store, out_dir))
-    delivered = ["parquet", *_requested(spec.formats)]
+
+    # Scene-level targets read their own rows for the frames in this slice, so they cannot be driven from
+    # the object records the object adapters share.
+    frame_ids = sorted({str(r.frame_id) for r in records if r.frame_id})
+    for fmt in _requested_scene(spec.formats):
+        written.append(await _SCENE_WRITERS[fmt](frame_ids, store, out_dir, commit_id))
+
+    delivered = ["parquet", *_requested(spec.formats), *_requested_scene(spec.formats)]
 
     prefix = f"datasets/{spec.name}/{commit_id}"
     export_uris = _upload_dir(store, prefix, out_dir)
