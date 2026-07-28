@@ -75,6 +75,9 @@ import type {
   CloudStatus,
   CloudOrphan,
   NotificationRow,
+  ReasoningTrace,
+  ReasonerAttribution,
+  ReasonerRerun,
   Campaign,
   CampaignDetail,
   CampaignTick,
@@ -687,6 +690,33 @@ export const api = {
   ocrRegion: (uri: string, bbox: number[]) =>
     post<{ text: string; lang: string; conf: number | null; measured: boolean }>(
       "/api/ocr/region", { uri, bbox }),
+
+  // ---- The reasoning layer: what it decided, why, and whether it is any good ----
+  reasonerTrace: (objectId: string) =>
+    get<{ found: boolean; reasoning: ReasoningTrace | null; state?: string; detail?: string }>(
+      `/api/reasoner/trace/${objectId}`),
+  reasonerAttribution: (sinceHours?: number) =>
+    get<ReasonerAttribution>(
+      `/api/reasoner/attribution${sinceHours ? `?since_hours=${sinceHours}` : ""}`),
+  reasonerOutcomes: (sinceHours?: number) =>
+    get<{ reasoned: number; by_decision: Record<string, { total: number; reviewed: number;
+          corrected: number; error_rate: number | null }>; headline?: string }>(
+      `/api/reasoner/outcomes${sinceHours ? `?since_hours=${sinceHours}` : ""}`),
+  reasonerWeights: () =>
+    get<{ suggestions: Record<string, Record<string, unknown>>; based_on: number; note: string }>(
+      "/api/reasoner/weights"),
+  reasonerCoverage: () =>
+    get<{ objects: number; sampled: number; reasoned_in_sample: number; fraction: number }>(
+      "/api/reasoner/coverage"),
+  reasonerPriors: () =>
+    get<{ classes_with_height: string[]; classes_with_aspect: string[]; never_on_road: string[];
+          confusable_pairs: string[][]; overhead_classes: string[]; loaded: boolean; detail: string }>(
+      "/api/reasoner/priors"),
+  reasonerExplain: (body: Record<string, unknown>) =>
+    post<ReasoningTrace & { class_name: string; reasons: string[] }>("/api/reasoner/explain", body),
+  reasonerRerun: (sessionId: string, apply = false, limit = 1500) =>
+    post<ReasonerRerun>(
+      `/api/reasoner/rerun/${sessionId}?apply=${apply}&limit=${limit}`, {}),
 
   // ---- Campaigns: the improvement loop, run by the system ----
   campaigns: (status?: string) =>

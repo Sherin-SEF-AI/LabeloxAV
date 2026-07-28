@@ -2338,6 +2338,46 @@ class LabeloxClient:
         return self._call("GET", f"/api/readyz",
                           params=None, json_body=None)
 
+    def get_reasoner_attribution(self, since_hours: Any | None = None) -> Any:
+        """Attribution"""
+        return self._call("GET", f"/api/reasoner/attribution",
+                          params={"since_hours": since_hours}, json_body=None)
+
+    def get_reasoner_coverage(self) -> Any:
+        """Coverage"""
+        return self._call("GET", f"/api/reasoner/coverage",
+                          params=None, json_body=None)
+
+    def post_reasoner_explain(self, body: Any = None) -> Any:
+        """Explain"""
+        return self._call("POST", f"/api/reasoner/explain",
+                          params=None, json_body=body)
+
+    def get_reasoner_outcomes(self, since_hours: Any | None = None) -> Any:
+        """Outcomes"""
+        return self._call("GET", f"/api/reasoner/outcomes",
+                          params={"since_hours": since_hours}, json_body=None)
+
+    def get_reasoner_priors(self) -> Any:
+        """Priors"""
+        return self._call("GET", f"/api/reasoner/priors",
+                          params=None, json_body=None)
+
+    def post_reasoner_rerun_by_session_id(self, session_id: str, limit: int | None = 500, apply: bool | None = False) -> Any:
+        """Rerun"""
+        return self._call("POST", f"/api/reasoner/rerun/{session_id}",
+                          params={"limit": limit, "apply": apply}, json_body=None)
+
+    def get_reasoner_trace_by_object_id(self, object_id: str) -> Any:
+        """Trace"""
+        return self._call("GET", f"/api/reasoner/trace/{object_id}",
+                          params=None, json_body=None)
+
+    def get_reasoner_weights(self, since_hours: Any | None = None) -> Any:
+        """Suggested Weights"""
+        return self._call("GET", f"/api/reasoner/weights",
+                          params={"since_hours": since_hours}, json_body=None)
+
     def get_recall_candidates(self, status: str | None = 'pending', session_id: Any | None = None, limit: int | None = 200) -> Any:
         """Candidates"""
         return self._call("GET", f"/api/recall/candidates",
@@ -2956,4 +2996,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 574 routes generated from the server schema.
+# 582 routes generated from the server schema.

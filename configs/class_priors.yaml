@@ -1,0 +1,128 @@
+# Physical and contextual priors, per ontology class.
+#
+# These are the facts about the world that a single-frame detector has no access to and that make most of
+# its confident mistakes checkable: a pedestrian is about 1.7m tall, an autorickshaw is not 12m long, and a
+# boat does not appear on the Outer Ring Road. The reasoner (services/autolabel/reasoner/) turns each of
+# these into evidence for or against a detection.
+#
+# Data rather than code on purpose. Every number here is an empirical claim about India's roads that a
+# domain expert should be able to argue with and correct without touching Python, and a class added to the
+# ontology should be able to gain a prior the same way.
+#
+# Absent means unknown, never zero. A class with no entry produces no physics evidence rather than evidence
+# against, because "we have no prior for this" and "this is impossible" are completely different findings
+# and conflating them would demote every new class the moment it was added.
+
+# Height in metres: [typical_min, typical_max]. Generous rather than tight: the check exists to catch a
+# pedestrian detected two pixels tall at ten metres, not to argue about whether somebody is 1.62 or 1.78.
+heights_m:
+  pedestrian: [1.2, 2.1]        # includes children; a 1.2m floor rather than an adult-only 1.5
+  rider: [1.3, 2.2]             # seated but upright on a two-wheeler
+  cycle: [0.9, 1.4]
+  motorcycle: [0.9, 1.6]
+  scooter: [0.9, 1.5]
+  moped: [0.9, 1.5]
+  delivery_rider_bike: [1.2, 2.2]
+  autorickshaw: [1.6, 2.2]
+  e_rickshaw: [1.6, 2.3]
+  cycle_rickshaw: [1.4, 2.0]
+  hatchback: [1.3, 1.8]
+  sedan: [1.3, 1.7]
+  suv: [1.5, 2.1]
+  van: [1.7, 2.6]
+  pickup: [1.6, 2.2]
+  minibus: [2.2, 3.2]
+  bus: [2.8, 4.2]
+  school_bus: [2.8, 4.0]
+  truck: [2.5, 4.2]
+  tractor: [2.0, 3.2]
+  cattle: [1.0, 1.8]
+  dog: [0.3, 0.9]
+  goat: [0.4, 0.9]
+  traffic_signal: [0.6, 1.6]
+  traffic_sign: [0.4, 1.5]
+  pole: [3.0, 12.0]
+  street_light: [4.0, 12.0]
+
+# Width-over-height of the image box, as seen from a road-level camera: [min, max]. A vehicle seen head-on
+# and the same vehicle seen side-on differ a great deal, so these are wide; they catch a box that is ten
+# times wider than tall, not a slightly unusual viewing angle.
+aspect_wh:
+  pedestrian: [0.15, 1.3]       # a walking person is tall; 1.3 allows arms out and heavy foreshortening
+  rider: [0.3, 1.8]
+  cycle: [0.4, 2.5]
+  motorcycle: [0.4, 2.6]
+  scooter: [0.4, 2.4]
+  autorickshaw: [0.5, 2.2]
+  e_rickshaw: [0.5, 2.2]
+  hatchback: [0.7, 3.0]
+  sedan: [0.7, 3.4]
+  suv: [0.7, 3.0]
+  van: [0.6, 3.2]
+  bus: [0.5, 5.0]               # a bus seen side-on is genuinely very wide
+  truck: [0.5, 5.0]
+  cattle: [0.5, 2.8]
+  dog: [0.5, 2.5]
+  traffic_signal: [0.15, 1.2]
+  traffic_sign: [0.3, 2.0]
+  pole: [0.02, 0.5]             # a pole is far taller than wide by definition
+
+# Which classes make sense on which road types, from Frame.scene.road_type. Only implausible combinations
+# are listed; everything unlisted is plausible. Listing what is implausible rather than what is allowed is
+# deliberate: an allow-list would silently demote every class nobody thought to add.
+implausible_on_road_type:
+  highway:
+    # Not impossible in India, and that is exactly why these are evidence rather than a veto: a cow on a
+    # national highway is a real and dangerous event that the loop must be able to label.
+    - cycle_rickshaw
+    - cycle
+  service_road: []
+  urban: []
+  rural: []
+
+# Classes that cannot appear on a road at all under any scene. These are the detector confusions that
+# produce a confident boat or aeroplane on a Bengaluru street, and they carry far more weight than a
+# road-type mismatch.
+never_on_road:
+  - boat
+  - aeroplane
+  - train
+  - bed
+  - toilet
+  - refrigerator
+
+# Classes that legitimately sit above the horizon and must never be demoted for it.
+overhead_classes:
+  - traffic_signal
+  - traffic_sign
+  - pole
+  - street_light
+  - sign_board
+  - hoarding
+  - overbridge
+
+# Pairs the detector genuinely confuses in this ODD, with the evidence that separates them. Used to route a
+# Tier 2 adjudication at the specific distinction rather than asking an open question, which is what makes
+# the reasoner's answer usable.
+confusable_pairs:
+  - [autorickshaw, e_rickshaw]
+  - [autorickshaw, delivery_rider_bike]
+  - [motorcycle, scooter]
+  - [scooter, moped]
+  - [hatchback, sedan]
+  - [sedan, suv]
+  - [van, minibus]
+  - [minibus, bus]
+  - [truck, bus]
+  - [pedestrian, rider]
+  - [cattle, dog]
+  - [cycle, motorcycle]
+
+# How far a tracked object may plausibly move between consecutive frames, as a fraction of its own box
+# diagonal. Beyond this it is a different object wearing the same track id, which is an association error
+# rather than a detection error and needs saying so.
+max_centroid_jump_ratio: 1.5
+
+# How much a tracked object's area may change between consecutive frames. A vehicle approaching the camera
+# grows steadily; doubling in one frame is a box collapsing onto a different thing.
+max_area_ratio_jump: 2.2

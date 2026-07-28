@@ -98,6 +98,12 @@ class Provenance(BaseModel):
     # Fusion de-duplication: the lower-confidence same-object boxes this one absorbed (class + conf each),
     # so a merged duplicate is auditable rather than silently dropped.
     merged_duplicates: list[dict] = Field(default_factory=list)
+    # The reasoning trace: which checks ran before this became a label, what each found, and what was
+    # decided. Structured rather than prose because it has to be read back: attribution measures each
+    # check's precision from these weights, and a sentence cannot be measured. Absent on an object
+    # annotated before the reasoner existed or with it turned off, which is why it is optional rather
+    # than defaulting to an empty dict that would look like "reasoned, found nothing".
+    reasoning: dict | None = None
 
 
 class UnifiedObject(BaseModel):

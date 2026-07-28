@@ -61,6 +61,7 @@ from services.api.routers import (
     ocr,
     predictions,
     quality,
+    reasoner,
     recall,
     relabel,
     review,
@@ -522,6 +523,7 @@ app.include_router(auth_router.router, prefix="/api", tags=["auth"])
 app.include_router(flywheel_router.router, prefix="/api", tags=["flywheel"])
 app.include_router(hardening_router.router, prefix="/api", tags=["hardening"])
 app.include_router(campaigns.router, prefix="/api", tags=["campaigns"])
+app.include_router(reasoner.router, prefix="/api", tags=["reasoner"])
 app.include_router(edge.router, prefix="/api", tags=["edge"])
 app.include_router(experiments.router, prefix="/api", tags=["experiments"])
 app.include_router(secv2.router, prefix="/api", tags=["security"])

@@ -212,6 +212,30 @@ class CalibrateSettings(BaseModel):
                                      # method=isotonic so a calibrated 0.95 means ~95% precision (M9)
 
 
+class ReasonerSettings(BaseModel):
+    """The reasoning layer between detection and label.
+
+    On by default. The Tier 1 checks are deterministic and cost microseconds, and the failure they catch
+    (a confident wrong label auto-accepted into the training set) is the one that has actually hurt this
+    corpus. Turning it off is for measuring what it is worth, not for running without it.
+    """
+
+    enabled: bool = True
+    # Which collectors to run. Empty means all of them; naming a subset is how a check under suspicion is
+    # isolated without editing code.
+    checks: list[str] = []
+    # Whether a conflicted detection may escalate to the VLM. Separate from the VLM's own enable flag,
+    # because a deployment may want the free Tier 1 checks and not the GPU cost of Tier 2.
+    adjudicate: bool = True
+    # Ceiling on Tier 2 calls per session, on top of the VLM budget. The reasoner escalates only conflicted
+    # objects, which should be a small fraction; a ceiling here means a bad prior that suddenly conflicts
+    # everywhere cannot silently consume the whole GPU budget.
+    max_adjudications_per_session: int = 200
+    # Write the full trace onto provenance. Off would make the layer unauditable and unmeasurable, so it
+    # exists only for a deployment with a hard storage constraint.
+    record_trace: bool = True
+
+
 class GateSettings(BaseModel):
     auto_accept: float = 0.95          # benign default; calibrated, so this is a precision floor
     safety_auto_accept: float = 0.99   # M-Q.4: safety-critical classes (VRU, animal) must be near-certain
@@ -851,6 +875,7 @@ class Settings(BaseSettings):
     fusion: FusionSettings = FusionSettings()
     calibrate: CalibrateSettings = CalibrateSettings()
     gate: GateSettings = GateSettings()
+    reasoner: ReasonerSettings = ReasonerSettings()
     quality: QualitySettings = QualitySettings()
     intelligence: IntelligenceSettings = IntelligenceSettings()
     intel: IntelSettings = IntelSettings()  # Data Intelligence Layer (Phase 1)

@@ -132,6 +132,8 @@ export const MENUS: Menu[] = [
     items: [
       { key: "quality", label: "Quality sheet", icon: "check", href: "/quality",
         hint: "gold set and gate metrics" },
+      { key: "reasoner", label: "Reasoning layer", icon: "target", href: "/reasoner",
+        hint: "what ran before each label, and whether it was right" },
       { key: "calibration", label: "Calibration", icon: "ruler", href: "/calibration",
         hint: "camera validation" },
       { key: "training", label: "Training", icon: "activity", href: "/training",

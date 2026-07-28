@@ -809,3 +809,66 @@ export type EdgeFleet = {
   // over the devices still talking.
   silent_devices: number;
 };
+
+
+// The reasoning layer. Mirrors services/autolabel/reasoner/.
+//
+// A finding carries its own sentence as well as its weight, because every one of these ends up in front
+// of a reviewer or an auditor, and a number nobody can read is a number nobody can trust.
+export type ReasoningFinding = {
+  check: string;               // physics | geometry | temporal | scene | cross_model | corpus_memory
+  weight: number;              // positive supports the label, negative argues against it
+  detail: string;
+  suggests: string | null;
+};
+
+export type ReasoningTrace = {
+  // accept | review | adjudicate | reject | abstain. Abstain means nothing could be assessed, which is
+  // deliberately distinct from having assessed it and found nothing wanting.
+  decision: string;
+  score: number;
+  conflict: number;
+  detector_conf: number;
+  suggested_class: string | null;
+  question: string | null;
+  findings: ReasoningFinding[];
+};
+
+export type ReasonerAttribution = {
+  objects: number;
+  reasoned: number;
+  reviewed: number;
+  decisions: Record<string, number>;
+  checks: Record<string, {
+    fired_against: number;
+    fired_for: number;
+    precision_against: number | null;
+    precision_for: number | null;
+    measured: boolean;
+    correct_against: number;
+    correct_for: number;
+  }>;
+  min_samples: number;
+  caveat: string;
+};
+
+export type ReasonerRerun = {
+  session_id: string;
+  objects: number;
+  frames: number;
+  decisions: Record<string, number>;
+  would_demote: number;
+  auto_accepted: number;
+  // The number that matters: dividing by every object understates the intervention by an order of
+  // magnitude, because most objects were never auto-accepted in the first place.
+  demote_rate_of_auto_accepted: number | null;
+  demote_rate_of_all: number;
+  applied: number;
+  skipped_human_decisions: number;
+  dry_run: boolean;
+  examples: {
+    object_id: string; frame_id: string; class_name: string; state: string;
+    decision: string; suggested_class: string | null; reasons: string[];
+  }[];
+  truncated_examples: number;
+};
