@@ -605,3 +605,207 @@ export type Profile = {
   recovery_codes_left: number;
   created_at: string | null;
 };
+
+// Campaigns: the improvement loop run by the system. Mirrors services/flywheel/campaign.py.
+export type Campaign = {
+  campaign_id: string;
+  name: string;
+  class_name: string;
+  task_type: string;
+  target_metric: string;
+  target_value: number;
+  label_budget: number;
+  labels_spent: number;
+  max_iterations: number;
+  patience: number;
+  status: string;              // pending | running | blocked | succeeded | exhausted | stopped
+  iteration: number;
+  stalled_iterations: number;
+  best_value: number | null;
+  // True by default. A loop that can promote with no person in it is a different product with a
+  // different risk profile, so autopilot is opted into one stage at a time.
+  require_approval: boolean;
+  autopilot_stages: string[];
+  created_by: string | null;
+  notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type CampaignStep = {
+  step_id: string;
+  iteration: number;
+  stage: string;               // mine | judge | label | train | evaluate | promote
+  status: string;
+  detail: Record<string, unknown>;
+  metrics: Record<string, number>;
+  awaiting: string | null;
+  job_id: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type CampaignDetail = Campaign & {
+  steps: CampaignStep[];
+  next_stage: string;
+  halt_reason: string | null;
+};
+
+export type CampaignTick = {
+  campaign: Campaign;
+  action: string;              // ran | waiting | awaiting_approval | halted | failed | none
+  stage?: string;
+  awaiting?: string;
+  detail?: string;
+  step?: CampaignStep;
+};
+
+// The lineage DAG. `rank` is the column a renderer puts a node in, computed server side so the layout is
+// the same in every client rather than reinvented per view.
+export type LineageNode = {
+  id: string;
+  kind: string;                // session | dataset | gold | training_job | model | promotion | deployment
+  label: string;
+  meta: Record<string, unknown>;
+  // A node an edge points at that is no longer there. Rendered as a break, because a missing gold set is
+  // a fact about the lineage rather than an absence to smooth over.
+  incomplete: boolean;
+  rank: number;
+};
+
+export type LineageGraph = {
+  nodes: LineageNode[];
+  edges: { source: string; target: string; kind: string }[];
+  kinds: string[];
+  root: string;
+  sessions_shown?: number;
+  sessions_truncated?: boolean;
+  detail?: string;
+};
+
+// Tracklets: a track as a timeline with its keyframes marked.
+export type TrackletSample = {
+  frame_id: string;
+  object_id: string;
+  ts_ns: number;
+  bbox: number[];
+  is_keyframe: boolean;
+  source: string;
+  state: string;
+};
+
+export type Tracklet = {
+  track_id: string;
+  class_id: number;
+  class_name: string;
+  first_ts_ns: number;
+  last_ts_ns: number;
+  length: number;
+  keyframes: number;
+  // The number an annotator is optimising: how many frames one correction covers.
+  frames_per_keyframe: number | null;
+  samples: TrackletSample[];
+  intents: unknown[];
+};
+
+// LabeloxSec v2.
+export type CameraZone = {
+  zone_id: string;
+  camera_id: string;
+  session_id: string | null;
+  name: string;
+  kind: string;                // area | line
+  points: number[][];
+  rule: string;                // enter | exit | dwell | cross
+  dwell_seconds: number | null;
+  classes: string[];
+  severity: string;
+  active: boolean;
+  created_by: string | null;
+  created_at: string | null;
+};
+
+export type SecurityIncident = {
+  incident_id: string;
+  camera_id: string | null;
+  session_id: string | null;
+  zone_id: string | null;
+  kind: string;
+  severity: string;
+  title: string;
+  summary: string | null;
+  start_ts_ns: number;
+  end_ts_ns: number;
+  duration_s: number;
+  evidence: Record<string, unknown>;
+  plate: string | null;
+  person_identity: string | null;
+  status: string;              // open | ack | closed
+  acknowledged_by: string | null;
+  created_at: string | null;
+};
+
+export type PersonIdentityRow = {
+  identity_id: string;
+  n_tracks: number;
+  cameras: string[];
+  first_ts_ns: number | null;
+  last_ts_ns: number | null;
+  // The signature itself is never returned: it is the only thing that could be matched against another
+  // system's database, and exporting it would defeat the boundary re-identification is built around.
+  signature_dim: number;
+};
+
+// Edge feedback: what the field says about what the bench passed.
+export type EdgeDeviceRow = {
+  device_id: string;
+  name: string | null;
+  hardware: string | null;
+  runtime: string | null;
+  artifact_id: string | null;
+  model_version: string | null;
+  fleet: string | null;
+  last_seen_at: string | null;
+  live: boolean;
+  meta: Record<string, unknown>;
+};
+
+export type EdgeFieldReport = {
+  artifact_id: string;
+  hours: number;
+  devices: number;
+  live_devices: number;
+  windows: number;
+  inferences: number;
+  dropped_frames: number;
+  field: {
+    latency_p50_ms: number | null;
+    latency_p95_ms: number | null;
+    worst_throttled_fraction: number;
+    temp_c_max: number | null;
+  };
+  bench: Record<string, unknown>;
+  // The product: either number alone is uninteresting, the gap between them is the finding.
+  latency_ratio: number | null;
+  confidence_drift: number | null;
+  findings: { kind: string; severity: string; detail: string }[];
+  fleet_significant: boolean;
+  min_devices: number;
+};
+
+export type EdgeFleet = {
+  hours: number;
+  artifacts: {
+    artifact_id: string;
+    windows: number;
+    devices: number;
+    latency_p95_ms: number | null;
+    latency_ratio: number | null;
+    findings: number;
+    fleet_significant: boolean;
+  }[];
+  devices: number;
+  // A fleet whose devices have gone quiet looks identical to a healthy one in every average computed
+  // over the devices still talking.
+  silent_devices: number;
+};

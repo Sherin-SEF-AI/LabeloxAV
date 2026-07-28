@@ -135,6 +135,11 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# The generated client is emitted from the API's own OpenAPI schema by scripts/generate_sdk.py. Linting it
+# would mean either hand-editing a file whose whole point is that it is regenerated, or teaching the
+# generator every style rule. Its correctness is checked by parsing it and by `--check` in CI, which is the
+# property that actually matters: that it matches the server.
+extend-exclude = ["sdk/generated_client.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

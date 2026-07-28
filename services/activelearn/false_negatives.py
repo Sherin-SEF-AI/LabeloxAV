@@ -243,3 +243,167 @@ async def mine_false_negatives(db: AsyncSession, *, session_id: str | None = Non
         "weights": w,
         "candidates": [c.__dict__ for c in kept],
     }
+
+
+# ---------------------------------------------------------------- the champion sweep
+
+async def champion_sweep(db: AsyncSession, *, session_id: str | None = None,
+                         conf_floor: float = 0.05, accept_threshold: float = 0.5,
+                         limit: int = 500, top_k: int = 100,
+                         weights_path: str | None = None) -> dict:
+    """Run the champion at a very low confidence over frames it currently reports nothing in.
+
+    The four signals above infer a miss from what is around a frame. This measures one directly: take the
+    frames the detector produced nothing in at the deployed threshold, run it again with the threshold
+    dropped to almost zero, and see what it was nearly willing to say. A frame where the champion has a
+    0.3 pedestrian it never surfaced is a false negative with the evidence attached, not an inference from
+    its neighbours.
+
+    Expensive, which is why it is separate and bounded. It decodes and runs a model over every frame it
+    considers, so it is a sweep somebody schedules rather than something the queue does on every read.
+
+    Refuses rather than degrading when no champion is available. A sweep that silently fell back to a
+    weaker model would produce a candidate list about that model instead, and nothing in the output would
+    say so.
+    """
+    from db.models import Frame, Object
+
+    stmt = (select(Frame.frame_id, Frame.session_id, Frame.img_uri, func.count(Object.object_id))
+            .select_from(Frame)
+            .outerjoin(Object, (Object.frame_id == Frame.frame_id) & (Object.state != "rejected"))
+            .group_by(Frame.frame_id, Frame.session_id, Frame.img_uri)
+            .having(func.count(Object.object_id) == 0)
+            .limit(min(max(limit, 1), 5000)))
+    if session_id:
+        stmt = stmt.where(Frame.session_id == uuid.UUID(session_id))
+    rows = (await db.execute(stmt)).all()
+    if not rows:
+        return {"considered": 0, "candidates": [], "detail": "every frame already carries a detection"}
+
+    try:
+        detector = await _load_champion(db, weights_path)
+    except FalseNegativeSweepUnavailable:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise FalseNegativeSweepUnavailable(
+            f"no champion detector is loadable ({type(exc).__name__}), so a low-confidence sweep would "
+            "measure a different model than the one deployed. Promote a model, or pass weights_path.") from exc
+
+    from core.storage import get_object_store
+    from services.autolabel.ontology import get_ontology
+
+    store = get_object_store()
+    onto = get_ontology()
+    out: list[dict] = []
+    unreadable = 0
+
+    for frame_id, sess_id, img_uri, _n in rows:
+        try:
+            import cv2
+            import numpy as np
+
+            buf = np.frombuffer(store.get_bytes(img_uri), dtype=np.uint8)
+            img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        except Exception:  # noqa: BLE001
+            img = None
+        if img is None:
+            unreadable += 1
+            continue
+
+        try:
+            preds = detector.predict(img, conf=conf_floor, verbose=False)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("fn_sweep.predict_failed", frame=str(frame_id), error=str(exc))
+            continue
+
+        found = []
+        for box in _iter_boxes(preds):
+            conf, cls_idx, bbox = box
+            # Only what sits below the accept threshold. Anything above it should already have become an
+            # Object, and if it did not, that is an ingest bug rather than a labelling candidate.
+            if conf >= accept_threshold:
+                continue
+            name = _class_name(onto, detector, cls_idx)
+            found.append({"class_name": name, "conf": round(float(conf), 4),
+                          "bbox": [round(float(v), 1) for v in bbox]})
+
+        if not found:
+            continue
+        found.sort(key=lambda f: -f["conf"])
+        out.append({
+            "frame_id": str(frame_id), "session_id": str(sess_id),
+            # Ranked by the best near-miss: a frame the model almost saw something in is more likely to
+            # hold a real object than one with a dozen detections at 0.06.
+            "score": found[0]["conf"],
+            "near_misses": len(found), "proposals": found[:10],
+            "reasons": ["champion near-miss"],
+        })
+
+    out.sort(key=lambda c: c["score"], reverse=True)
+    kept = out[:max(1, top_k)]
+    log.info("fn_sweep.done", considered=len(rows), with_near_misses=len(out), kept=len(kept))
+    return {
+        "considered": len(rows), "with_near_misses": len(out),
+        "truncated": max(0, len(out) - len(kept)), "unreadable_frames": unreadable,
+        "conf_floor": conf_floor, "accept_threshold": accept_threshold,
+        "candidates": kept,
+    }
+
+
+class FalseNegativeSweepUnavailable(RuntimeError):
+    """No champion is loadable, so a sweep would measure the wrong model."""
+
+
+async def _load_champion(db: AsyncSession, weights_path: str | None):
+    """The deployed detector, or an explicit override. Raises rather than falling back.
+
+    Resolved through the registry and the same content-addressed weights cache the autolabel runner uses,
+    so a sweep runs the bytes that are actually serving rather than whatever file happens to be named
+    best.pt on this machine.
+    """
+    from ultralytics import YOLO
+
+    if weights_path:
+        return YOLO(weights_path)
+
+    from services.autolabel.runner import _local_champion_weights
+    from services.govern.registry import get_champion
+
+    champion = await get_champion(db, "detection")
+    if champion is None or not champion.weights_uri:
+        raise FalseNegativeSweepUnavailable(
+            "no detection champion is registered, so there is no deployed model to sweep with. Promote "
+            "one, or pass weights_path explicitly.")
+    local = _local_champion_weights(champion.weights_uri)
+    if not local:
+        raise FalseNegativeSweepUnavailable(
+            f"the champion's weights could not be fetched from {champion.weights_uri!r}")
+    return YOLO(local)
+
+
+def _iter_boxes(preds):
+    """Flatten an ultralytics result into (conf, class_index, xyxy) triples."""
+    for res in preds if isinstance(preds, list) else [preds]:
+        boxes = getattr(res, "boxes", None)
+        if boxes is None:
+            continue
+        for i in range(len(boxes)):
+            try:
+                conf = float(boxes.conf[i])
+                cls_idx = int(boxes.cls[i])
+                xyxy = [float(v) for v in boxes.xyxy[i]]
+            except Exception:  # noqa: BLE001
+                continue
+            yield conf, cls_idx, xyxy
+
+
+def _class_name(onto, detector, cls_idx: int) -> str:
+    """The model's own class name, mapped to the ontology where it exists.
+
+    Not silently renamed. A model emitting a class the ontology does not have is a real situation (a
+    COCO-pretrained checkpoint emits "bicycle" where this ontology says "cycle"), and reporting the model's
+    word marked as unmapped is more useful than pretending it said something it did not.
+    """
+    names = getattr(detector, "names", None) or {}
+    raw = names.get(cls_idx, f"class_{cls_idx}") if isinstance(names, dict) else f"class_{cls_idx}"
+    return raw if onto.has_name(raw) else f"{raw} (unmapped)"

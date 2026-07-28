@@ -75,6 +75,17 @@ import type {
   CloudStatus,
   CloudOrphan,
   NotificationRow,
+  Campaign,
+  CampaignDetail,
+  CampaignTick,
+  LineageGraph,
+  Tracklet,
+  CameraZone,
+  SecurityIncident,
+  PersonIdentityRow,
+  EdgeFleet,
+  EdgeDeviceRow,
+  EdgeFieldReport,
   ActivityEvent,
   ActivitySummary,
   PiiAccessRow,
@@ -676,6 +687,96 @@ export const api = {
   ocrRegion: (uri: string, bbox: number[]) =>
     post<{ text: string; lang: string; conf: number | null; measured: boolean }>(
       "/api/ocr/region", { uri, bbox }),
+
+  // ---- Campaigns: the improvement loop, run by the system ----
+  campaigns: (status?: string) =>
+    get<{ campaigns: Campaign[] }>(`/api/campaigns${status ? `?status=${status}` : ""}`),
+  createCampaign: (body: Record<string, unknown>) => post<Campaign>("/api/campaigns", body),
+  campaign: (id: string) => get<CampaignDetail>(`/api/campaigns/${id}`),
+  tickCampaign: (id: string, dryRun = false) =>
+    post<CampaignTick>(`/api/campaigns/${id}/tick?dry_run=${dryRun}`, {}),
+  approveCampaignStage: (id: string, stage: string) =>
+    post<CampaignTick>(`/api/campaigns/${id}/approve?stage=${stage}`, {}),
+  stopCampaign: (id: string) => post<Campaign>(`/api/campaigns/${id}/stop`, {}),
+
+  // ---- Lineage: the DAG behind a model, a session, or a dataset ----
+  modelLineage: (modelVersion: string) =>
+    get<LineageGraph>(`/api/lineage/model/${encodeURIComponent(modelVersion)}`),
+  sessionLineage: (sessionId: string) => get<LineageGraph>(`/api/lineage/session/${sessionId}`),
+  datasetLineage: (commitId: string) => get<LineageGraph>(`/api/lineage/dataset/${commitId}`),
+
+  // ---- Tracklets: draw once, correct where it drifts ----
+  tracklet: (trackId: string) => get<Tracklet>(`/api/tracklets/${trackId}`),
+  // Distinct from setKeyframe above, which only flips the flag on the M2.5 path. This one also carries a
+  // corrected box, and correcting necessarily makes the frame a keyframe.
+  setTrackletKeyframe: (objectId: string, bbox: number[] | null, isKeyframe = true) =>
+    post<{ object_id: string; is_keyframe: boolean }>(
+      `/api/tracklets/objects/${objectId}/keyframe`, { bbox, is_keyframe: isKeyframe }),
+  deriveTracklet: (trackId: string, method = "linear") =>
+    post<{ updated: number; keyframes: number; method: string }>(
+      `/api/tracklets/${trackId}/derive?method=${method}`, {}),
+  propagateTracklet: (objectId: string, direction = "both", frames = 12) =>
+    post<{ created: number }>(
+      `/api/tracklets/objects/${objectId}/propagate?direction=${direction}&frames=${frames}`, {}),
+  setTrackAttributes: (trackId: string, attrs: Record<string, unknown>) =>
+    post<{ objects: number }>(`/api/tracklets/${trackId}/attributes`, { attrs }),
+  suggestKeyframes: (trackId: string, budget = 8) =>
+    get<{ suggestions: { object_id: string; frame_id: string; curvature: number }[] }>(
+      `/api/tracklets/${trackId}/suggest-keyframes?budget=${budget}`),
+  trackletStats: (sessionId?: string) =>
+    get<{ tracked_objects: number; keyframes: number; tracks: number;
+          frames_per_keyframe: number | null }>(
+      `/api/tracklets/stats/summary${sessionId ? `?session_id=${sessionId}` : ""}`),
+
+  // ---- LabeloxSec v2: zones, incidents, identities, live ingest ----
+  secZones: (cameraId?: string) =>
+    get<{ zones: CameraZone[] }>(`/api/sec/zones${cameraId ? `?camera_id=${cameraId}` : ""}`),
+  createSecZone: (body: Record<string, unknown>) => post<CameraZone>("/api/sec/zones", body),
+  deleteSecZone: (id: string) => del<{ removed: boolean }>(`/api/sec/zones/${id}`),
+  evaluateSecSession: (sessionId: string) =>
+    post<{ zones: number; incidents: number; tracks: number }>(
+      `/api/sec/sessions/${sessionId}/evaluate`, {}),
+  secIncidents: (q: { camera_id?: string; kind?: string; status?: string; severity?: string;
+                      since_hours?: number; limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v != null && v !== "") p.set(k, String(v)); });
+    return get<{ total: number; incidents: SecurityIncident[] }>(`/api/sec/incidents?${p}`);
+  },
+  acknowledgeIncident: (id: string, close = false) =>
+    post<SecurityIncident>(`/api/sec/incidents/${id}/acknowledge?close=${close}`, {}),
+  stitchPlates: (sessionId: string) =>
+    post<{ attached: number; reads: number }>(`/api/sec/sessions/${sessionId}/stitch-plates`, {}),
+  secIdentities: (minCameras = 1) =>
+    get<{ identities: PersonIdentityRow[]; total: number }>(
+      `/api/sec/identities?min_cameras=${minCameras}`),
+  forgetIdentity: (id: string) => del<{ forgotten: boolean }>(`/api/sec/identities/${id}`),
+  linkIdentities: (sessionId: string) =>
+    post<{ tracks: number; matched: number; cross_camera: number }>(
+      `/api/sec/sessions/${sessionId}/link-identities`, {}),
+  rtspIngest: (body: Record<string, unknown>) =>
+    post<{ session_id: string; frames: number }>("/api/sec/rtsp/ingest", body),
+
+  // ---- Edge: what the field says about what the bench passed ----
+  edgeFleet: (hours = 24) => get<EdgeFleet>(`/api/edge/fleet?hours=${hours}`),
+  edgeDevices: (fleet?: string) =>
+    get<{ devices: EdgeDeviceRow[] }>(`/api/edge/devices${fleet ? `?fleet=${fleet}` : ""}`),
+  edgeFieldReport: (artifactId: string, hours = 168) =>
+    get<EdgeFieldReport>(`/api/edge/artifacts/${artifactId}/field?hours=${hours}`),
+  edgeFieldGate: (artifactId: string, hours = 168) =>
+    get<EdgeFieldReport & { verdict: string; detail: string }>(
+      `/api/edge/artifacts/${artifactId}/gate?hours=${hours}`),
+
+  // ---- Resumable exports ----
+  exportProgress: (jobId: string) =>
+    get<{ status: string; progress: number; records_written: number; total_records: number;
+          chunks_done: number; resumable: boolean }>(`/api/exports/${jobId}/progress`),
+  resumableExports: () =>
+    get<{ resumable: { job_id: string; name: string; progress: number }[] }>("/api/exports/resumable"),
+  resumeExport: (jobId: string) => post<{ status: string }>(`/api/exports/${jobId}/resume`, {}),
+  championSweep: (sessionId?: string, topK = 100) =>
+    post<{ considered: number; with_near_misses: number;
+           candidates: { frame_id: string; score: number; proposals: unknown[] }[] }>(
+      `/api/activelearn/champion-sweep?top_k=${topK}${sessionId ? `&session_id=${sessionId}` : ""}`, {}),
 
   // ---- Inbox: notifications, activity, and the access log ----
   notifications: (limit = 50, unreadOnly = false) =>
