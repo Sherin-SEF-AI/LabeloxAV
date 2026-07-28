@@ -4,7 +4,7 @@ A four-part audit (backend, frontend, ML pipeline, ops and enterprise) produced 
 tracks. It records what is fixed, what is not, and for each open item what specifically is needed. Nothing
 here is marked done unless there is a test that fails without the fix.
 
-Suite at the time of writing: 1039 passing, 4 xfailed, failures limited to `tests/KNOWN_FAILURES.md`.
+Suite at the time of writing: 1,144 passing, 4 xfailed, failures limited to `tests/KNOWN_FAILURES.md`.
 
 ---
 
@@ -73,6 +73,46 @@ Each item states what it needs. These are not hidden behind optimistic language:
 not been done.
 
 ### Needs hardware or a runtime this environment does not have
+
+Three entries remain, and all three are genuinely absent hardware rather than undone work. Everything else
+previously in this section has been built.
+
+| Gap | What it needs |
+| --- | --- |
+| No learned 3D detector in the loop | OpenPCDet or Pointcept, and a CUDA device. The KITTI dataset builder is now complete (`services/training/tasks/detect3d.py`), so the corpus is trainable the moment a runtime exists; `train()` refuses by name rather than training a 2D model on 3D labels and reporting an mAP that would look like progress. Also needs real LiDAR: the running path lifts cuboids from monocular depth, whose scale error they inherit. |
+| 3D semantic segmentation is cuboid membership plus a ground plane | PTv3 inference, plus the runtime above. |
+| Multi-GPU and distributed training | The worker holds a Postgres advisory lock as a global GPU mutex by design. Changing that needs the scheduling model redesigned and more than one GPU to test on. |
+
+Cloud execution is no longer wholly blocked. The MinIO-to-workspace data-movement contract is implemented
+and tested (`services/cloud/transfer.py`): a job's dataset is published with a checksummed manifest written
+last, and results come home pattern-filtered. Steps 1, 3 and 5 (provision, run, stop) remain the pod's and
+need a provisioned GPU; a dispatched job is visibly awaiting a pod rather than reported as trained.
+
+TensorRT, LiteRT and Hailo export still need a device toolchain and are refused by name.
+
+---
+
+## Closed since the last revision
+
+| Was open | Now |
+| --- | --- |
+| No password, OAuth, OIDC, SSO or MFA; the only credential path was admin-issued tokens | Local passwords (scrypt), TOTP with replay protection and recovery codes, OIDC with PKCE and full id-token verification, self-service signup, reset and profile. `tests/test_identity.py` |
+| Notifications did not exist | `Notification` plus a bell fed by SSE, and emitters at six real event sites. A repeated condition supersedes rather than piling up. `tests/test_inbox.py` |
+| No PII access log | `pii_access_log` records who viewed personal data and whether it was redacted, admin-only, storing no copy of what it tracks. same |
+| No activity feed | `activity_event` plus `/activity`. same |
+| Classification, lane and 3D training plugins | All three built; 3D builds and refuses to train. `tests/test_ml_gaps.py` |
+| Tracking metrics not wired to gold | The sealer records track ids and a `tracks_sealed` flag; a partially-identified set is refused rather than scored. same |
+| Active learning could not select frames the detector missed | Four-signal frame-level candidate source. same |
+| No experiment tracking | `experiment` / `experiment_run`, in the loop rather than beside it. same |
+| `fit_channel_reliability` was a stub | Fitted from the human verdicts, Laplace smoothed, a thin channel keeps its prior. same |
+| Masks, lanes, drivable and HD-map could not leave the system | Cityscapes labelIds, CULane, BDD masks, GeoJSON. `tests/test_export_and_cloud.py` |
+| Exports fully buffered in memory | Streamed ZIP, ZIP64, one file in flight. same |
+| Dataset diffing was count-level only | Object- and class-level comparison, with an ontology change flagged. same |
+| Canvas marquee selection | Enclosed-not-touched, honouring the lock flag. |
+| The remaining eight polling loops | Seven converted; two timers remain and both are documented as deliberate. |
+| No bulk keyboard review mode | `/review/rapid`. |
+| No user self-service, onboarding, activity view, i18n or responsive layout | All built. English, Hindi, Kannada, Tamil. |
+
 
 An earlier version of this document over-used this heading. Two entries (ONNX backends, the OCR index) were
 listed as blocked when the stated blocker was itself the fix, and one (text-to-object search) was listed as
