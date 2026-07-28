@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import { useJobStream } from "@/lib/useEventStream";
 import { api , humanizeError } from "@/lib/api";
 import type { DatasetDetail, DatasetRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
@@ -51,11 +52,10 @@ function DatasetsBody() {
     }
   }
 
-  useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 3000);
-    return () => clearInterval(t);
-  }, []);
+  // Export jobs are on the shared stream, so a sealing dataset updates as it seals rather than on a timer.
+  const jobStream = useJobStream();
+  useEffect(() => { refresh(); }, []);
+  useEffect(() => { if (jobStream.data) refresh(); }, [jobStream.data]);
 
   useEffect(() => {
     if (open) api.dataset(open).then(setDetail).catch(() => setDetail(null));

@@ -951,6 +951,11 @@ export default function FrameEditor() {
       lanes={lanes} drivable={drivable} layers={layers}
       onViewport={(viewport) => dispatch({ t: "viewport", viewport })}
       onSelect={doSelect}
+      selectedIds={st.selectedIds}
+      // Marquee selection. The reducer already excluded locked objects and the canvas already knew how to
+      // draw a rubber band; what was missing was the gesture on empty canvas that connects the two, so
+      // picking six of forty vehicles meant six trips to the object list while they were all on screen.
+      onSelectMany={(ids, additive) => dispatch({ t: "selectMany", ids, additive })}
       relationships={relationships}
       onUpdateBbox={(oid, bbox, rot) => dispatch({ t: "update", id: oid, patch: rot !== undefined ? { bbox, rot } : { bbox } })}
       onDrawBox={(bbox) => { if (currentClass) { const nid = tmpId(); dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox, mask: [], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } }); autoClassify(nid, bbox); } }}
@@ -979,9 +984,13 @@ export default function FrameEditor() {
   );
 
   return (
-    <div className="h-screen flex flex-col">
+    // min-w-0 and overflow-hidden on the root: a flex column otherwise adopts the widest child's intrinsic
+    // width, so the unwrappable top bar widened the entire page and the body scrolled sideways instead of
+    // the bar scrolling inside itself. On a tablet that pushed the canvas off screen entirely.
+    <div className="h-[100dvh] flex flex-col min-w-0 overflow-hidden">
       {/* TOP BAR: identity, frame context, global actions, confirm (the design's 46px top bar) */}
-      <header className="flex items-center gap-3 px-3 h-[46px] border-b hairline shrink-0">
+      <header className="flex items-center gap-3 px-3 h-[46px] border-b hairline shrink-0
+                         min-w-0 overflow-x-auto no-scrollbar">
         <BackButton />
         <button onClick={() => router.push("/")} className="flex items-baseline gap-px" title="home (triage)">
           <span className="font-display font-bold text-[15px] tracking-tight text-ink">Labelox</span>
@@ -1294,7 +1303,12 @@ export default function FrameEditor() {
             <span className="mt-2 [writing-mode:vertical-rl] font-display text-[10px] uppercase tracking-wider text-ink-3">Properties</span>
           </div>
         ) : (
-        <aside className="w-[340px] shrink-0 border-l hairline flex flex-col min-h-0">
+          // Fixed width on a desktop, an overlay on anything narrower. At 340px fixed, a 768px tablet is
+          // left with 428px of canvas, which is not an annotation surface; the collapse toggle above
+          // already exists, so below the breakpoint the panel floats over the canvas instead of eating it.
+          <aside className="w-[340px] shrink-0 border-l hairline flex flex-col min-h-0
+                          max-lg:absolute max-lg:right-0 max-lg:top-0 max-lg:bottom-0 max-lg:z-30
+                          max-lg:bg-panel max-lg:shadow-xl">
           <div className="h-[38px] shrink-0 flex items-center gap-2 px-3 border-b hairline">
             <span className="font-display font-semibold text-[12.5px] text-ink">
               {selected ? selected.class_name : mode === "review" ? "Review" : mode === "lanes" ? "Lanes" : mode === "lidar3d" ? "Cuboids" : "Properties"}
@@ -1765,7 +1779,8 @@ export default function FrameEditor() {
       </div>
 
       {/* BOTTOM BAR: zoom, shortcut hints, counts, save status (the design's 28px bottom bar) */}
-      <footer className="h-7 shrink-0 flex items-center border-t hairline font-mono text-[10.5px] text-ink-3">
+      <footer className="h-7 shrink-0 flex items-center border-t hairline font-mono text-[10.5px] text-ink-3
+                         min-w-0 overflow-x-auto no-scrollbar">
         <div className="flex items-center h-full border-r hairline px-1">
           <button onClick={() => zoomBy(1 / 1.2)} title="zoom out" className="w-6 h-5 flex items-center justify-center rounded text-ink-2 hover:bg-line/50"><Icon name="zoomOut" size={14} /></button>
           <span className="min-w-[38px] text-center text-ink-2">{Math.round(st.viewport.scale * 100) || 0}%</span>

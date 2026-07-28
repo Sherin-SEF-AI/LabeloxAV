@@ -3,6 +3,7 @@ import { Space_Grotesk } from "next/font/google";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import "./globals.css";
+import Onboarding from "@/components/shell/Onboarding";
 import GlobalLoadingBar from "@/components/GlobalLoadingBar";
 import AuthBootstrap from "@/components/AuthBootstrap";
 import Toaster from "@/components/Toaster";
@@ -24,6 +25,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AuthBootstrap />
         <Toaster />
         <ConfirmProvider>{children}</ConfirmProvider>
+        {/* Shown once per person, only when signed in. Mounted here rather than per page so it does not
+            depend on which page they happen to land on first. */}
+        <Onboarding />
       </body>
     </html>
   );

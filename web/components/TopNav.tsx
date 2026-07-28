@@ -56,8 +56,10 @@ export default function TopNav({ active, right, showCrumb = true }: {
         </button>
       </div>
 
-      {/* the menu bar: every destination lives here, so the header never grows */}
-      <MenuBar />
+      {/* The menu bar: every destination lives here, so the header never grows. Hidden below the tablet
+          breakpoint, where nine top-level menus would wrap the header onto three lines; the command
+          palette beside it reaches every one of the same destinations by name. */}
+      <div className="hidden md:contents"><MenuBar /></div>
 
       {showCrumb && <Crumb active={active} />}
 
@@ -68,7 +70,7 @@ export default function TopNav({ active, right, showCrumb = true }: {
           data-tip="Command palette: jump to any page"
           className="btn text-[11px] gap-1.5 h-7">
           <Icon name="search" size={12} />
-          <kbd className="text-ink-3">Cmd K</kbd>
+          <kbd className="text-ink-3 hidden sm:inline">Cmd K</kbd>
         </button>
         <PlatformSwitcher />
         <CloudControl />

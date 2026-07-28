@@ -15,6 +15,10 @@ import type { ActivityEvent, ActivitySummary } from "@/lib/types";
 
 const WINDOWS: [string, number][] = [["today", 24], ["3 days", 72], ["week", 168], ["month", 720]];
 
+// Relative time is computed from the clock, so the server renders one string and the client renders a
+// different one a moment later, which React reports as a hydration mismatch. `mounted` below defers the
+// relative form until after hydration; the absolute time is shown first, which is correct rather than a
+// placeholder.
 function ago(iso: string | null): string {
   if (!iso) return "";
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -31,7 +35,13 @@ export default function ActivityPage() {
   const [mine, setMine] = useState(true);
   const [hours, setHours] = useState(24);
   const [verb, setVerb] = useState("");
-  const me = getUser();
+  const [mounted, setMounted] = useState(false);
+  // getUser reads localStorage, which does not exist during the server render, so reading it in the render
+  // body makes the server emit "me" and the client emit the user's name. Deferred to after mount for the
+  // same reason the relative times are.
+  const me = mounted ? getUser() : null;
+
+  useEffect(() => { setMounted(true); }, []);
 
   const load = useCallback(async () => {
     try {
@@ -123,7 +133,7 @@ export default function ActivityPage() {
               {events.map((e) => (
                 <li key={e.event_id} className="px-3 py-2 flex items-start gap-3">
                   <span className="font-mono text-[10px] text-ink-4 w-20 shrink-0 pt-0.5">
-                    {ago(e.created_at)}
+                    {mounted ? ago(e.created_at) : (e.created_at?.slice(11, 16) ?? "")}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="font-mono text-[11.5px] text-ink">

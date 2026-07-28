@@ -671,6 +671,12 @@ export const api = {
       `/api/integrations/sources/${id}/preview`),
   deleteSource: (id: string) => del<{ deleted: boolean }>(`/api/integrations/sources/${id}`),
 
+  // Read one region of a document page. Separate from ocrRun, which walks a session's sign objects: a
+  // document page is an Asset with hand-drawn regions, so there is nothing for the session path to iterate.
+  ocrRegion: (uri: string, bbox: number[]) =>
+    post<{ text: string; lang: string; conf: number | null; measured: boolean }>(
+      "/api/ocr/region", { uri, bbox }),
+
   // ---- Inbox: notifications, activity, and the access log ----
   notifications: (limit = 50, unreadOnly = false) =>
     get<{ total: number; notifications: NotificationRow[] }>(

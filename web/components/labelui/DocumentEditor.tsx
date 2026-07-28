@@ -17,6 +17,9 @@ type Props = {
   onCreate: (bbox: [number, number, number, number]) => void;
   onSelect: (id: string | null) => void;
   selectedId: string | null;
+  // Fill a region's transcription from the OCR reader. Optional so the editor still works where no reader
+  // is configured, rather than showing a button that always fails.
+  onTranscribe?: (annotationId: string, bbox: number[]) => Promise<void>;
 };
 
 function colorFor(config: LabelConfig, label: string | null): string {
@@ -24,12 +27,13 @@ function colorFor(config: LabelConfig, label: string | null): string {
 }
 
 export default function DocumentEditor({
-  uri, annotations, config, activeLabel, onCreate, onSelect, selectedId,
+  uri, annotations, config, activeLabel, onCreate, onSelect, selectedId, onTranscribe,
 }: Props) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [nat, setNat] = useState({ w: 0, h: 0 });
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [reading, setReading] = useState<string | null>(null);
 
   const boxes = annotations.filter((a) => a.kind === "bbox");
 
@@ -106,9 +110,28 @@ export default function DocumentEditor({
             className="absolute border-2 border-accent bg-accent/10 pointer-events-none" />
         )}
       </div>
-      <div className="font-mono text-[11px] text-ink-3 mt-2">
-        {boxes.length} regions{nat.w ? ` - page ${nat.w}x${nat.h}` : ""}
-        {!activeLabel && " - pick a label, then drag a region"}
+      <div className="font-mono text-[11px] text-ink-3 mt-2 flex items-center gap-3 flex-wrap">
+        <span>
+          {boxes.length} regions{nat.w ? ` - page ${nat.w}x${nat.h}` : ""}
+          {!activeLabel && " - pick a label, then drag a region"}
+        </span>
+        {onTranscribe && selectedId && (
+          // Assist, not automation. The reader fills the field and the annotator keeps it or fixes it,
+          // which is the right division: the local reader returns no calibrated confidence, so accepting
+          // its output unread would put an unverified transcription in the corpus looking verified.
+          <button
+            disabled={reading !== null}
+            onClick={async () => {
+              const box = boxes.find((b) => b.annotation_id === selectedId);
+              if (!box) return;
+              setReading(selectedId);
+              try { await onTranscribe(selectedId, box.payload.bbox as number[]); }
+              finally { setReading(null); }
+            }}
+            className="border border-line px-1.5 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
+            {reading ? "reading..." : "read this region"}
+          </button>
+        )}
       </div>
     </div>
   );

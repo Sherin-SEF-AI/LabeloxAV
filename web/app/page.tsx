@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useJobStream } from "@/lib/useEventStream";
 import { api , humanizeError } from "@/lib/api";
 import type { DatasetRow, SessionRow, TriageRow } from "@/lib/types";
 import { ConfBar, StateBadge } from "@/components/StateBadge";
@@ -153,12 +154,15 @@ export default function HomePage() {
     api.ontology().then((o) => setClasses(o.classes.map((c) => c.name))).catch(() => {});
     setRole(getUser()?.role);
   }, []);
+  // Ingest progress rides the shared job stream. It used to poll every three seconds on every open tab,
+  // and the endpoint behind it scraped a log file with a regex, which reports a quiet system rather than
+  // an error the moment the API runs in a different container from the ingest script.
+  const jobStream = useJobStream();
+  useEffect(() => { api.ingestProgress().then(setIngest).catch(() => {}); }, []);
   useEffect(() => {
-    const f = () => api.ingestProgress().then(setIngest).catch(() => {});
-    f();
-    const t = setInterval(f, 3000);
-    return () => clearInterval(t);
-  }, []);
+    const live = jobStream.data?.ingest?.[0];
+    if (live) setIngest(live as typeof ingest);
+  }, [jobStream.data]);
   useEffect(() => {
     load();
     setSel(new Set());

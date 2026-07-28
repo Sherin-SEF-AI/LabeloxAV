@@ -63,10 +63,16 @@ export default function CloudControl() {
       if (alive) timer = setTimeout(loop, delay);
     };
     loop(); pollOrphans();
+    // The last two timers in the app, and both are deliberate. Pod state lives in RunPod's API, not in this
+    // database, so there is no row for the server to watch and push from: an SSE stream here would be the
+    // same poll moved server-side, run once per connected client, against a rate-limited third party.
+    // Adaptive instead, and it slows to 20s the moment nothing is running.
     const b = setInterval(pollOrphans, 20000);
     return () => { alive = false; clearTimeout(timer); clearInterval(b); };
   }, [pollOrphans]);
-  // a 1s tick interpolates uptime + cost smoothly between polls so the meter never looks frozen
+  // A 1s tick that interpolates uptime and cost between polls so the meter never looks frozen. Local
+  // arithmetic on values already held, not a network call: converting it to an event would mean asking the
+  // server what time it is once a second.
   useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
 
   if (!st) return null;

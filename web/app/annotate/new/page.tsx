@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
+import { watchImportJob } from "@/lib/useEventStream";
 
 // New Annotation: upload a folder of images (zip), a video, or an mcap; import it into a fresh
 // session, then jump straight into the frame editor on the first frame. The bytes go browser ->
@@ -105,37 +106,21 @@ export default function NewAnnotationPage() {
       return;
     }
 
-    // c. Poll the import job until it is done or errors out.
+    // c. Follow the import job on the shared event stream until it finishes.
+    //
+    // The server pushes on change, so the wizard's progress bar moves when the import moves rather than on
+    // a two-second tick that ran whether or not anything had happened. The terminal state is fetched once
+    // at the end because the stream carries status and progress and not the session id the wizard needs to
+    // navigate to; asking for it on every frame would put a full job record on the wire for each update.
     let sessionId: string;
     try {
-      sessionId = await new Promise<string>((resolve, reject) => {
-        const t = setInterval(async () => {
-          try {
-            const job = await api.importStatus(jobId);
-            setProgress(job.progress || 0);
-            const frames = job.counts?.frames ?? 0;
-            const objects = job.counts?.objects ?? 0;
-            setStatus(
-              `import ${job.status} - ${((job.progress || 0) * 100).toFixed(0)}% - ${frames} frames / ${objects} objects`,
-            );
-            if (job.status === "error") {
-              clearInterval(t);
-              reject(new Error(job.error || "import failed"));
-              return;
-            }
-            if (job.status === "done") {
-              clearInterval(t);
-              if (!job.session_id) {
-                reject(new Error("import done but no session was created"));
-                return;
-              }
-              resolve(job.session_id);
-            }
-          } catch (e) {
-            clearInterval(t);
-            reject(e);
-          }
-        }, 2000);
+      sessionId = await watchImportJob(jobId, (job) => {
+        setProgress(job.progress || 0);
+        const frames = job.counts?.frames ?? 0;
+        const objects = job.counts?.objects ?? 0;
+        setStatus(
+          `import ${job.status} - ${((job.progress || 0) * 100).toFixed(0)}% - ${frames} frames / ${objects} objects`,
+        );
       });
     } catch (e) {
       setErr("import error: " + humanizeError(e));

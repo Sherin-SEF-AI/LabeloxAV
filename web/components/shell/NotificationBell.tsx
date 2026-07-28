@@ -24,6 +24,10 @@ const SEV_DOT: Record<string, string> = {
   critical: "bg-block",
 };
 
+// Relative time is computed from the clock, so the server renders one string and the client renders a
+// different one a moment later, which React reports as a hydration mismatch. `mounted` below defers the
+// relative form until after hydration; the absolute time is shown first, which is correct rather than a
+// placeholder.
 function ago(iso: string | null): string {
   if (!iso) return "";
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -38,7 +42,10 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<NotificationRow[]>([]);
   const [unread, setUnread] = useState(0);
+  const [mounted, setMounted] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setMounted(true); }, []);
 
   const stream = useEventStream<{ unread: number; notifications: NotificationRow[] }>(
     "/api/events/notifications", "notifications");
@@ -128,7 +135,7 @@ export default function NotificationBell() {
                         <div className="font-mono text-[11.5px] text-ink truncate">{n.title}</div>
                         {n.body && <div className="font-mono text-[10.5px] text-ink-3 line-clamp-2">{n.body}</div>}
                         <div className="font-mono text-[9.5px] text-ink-4">
-                          {n.kind.replace(/_/g, " ")} · {ago(n.created_at)}
+                          {n.kind.replace(/_/g, " ")} · {mounted ? ago(n.created_at) : ""}
                         </div>
                       </div>
                     </div>

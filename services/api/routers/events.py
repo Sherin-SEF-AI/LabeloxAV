@@ -147,7 +147,19 @@ async def _job_snapshot(db: AsyncSession) -> dict:
         rows = (await db.execute(
             select(model).order_by(model.created_at.desc()).limit(10))).scalars().all()
         out[key] = [{"job_id": str(r.job_id), "status": r.status,
-                     "progress": getattr(r, "progress", None)} for r in rows]
+                     "progress": getattr(r, "progress", None),
+                     "counts": getattr(r, "counts", None) or {},
+                     "error": getattr(r, "error", None)} for r in rows]
+
+    # Ingest progress rides the same stream rather than getting one of its own. It is the signal the home
+    # page shows while a fleet sweep runs, and it used to be scraped out of a log file with a regex, which
+    # breaks the moment the API runs in a different container from the ingest script.
+    try:
+        from services.ingest.progress import read_progress, with_frame_count
+
+        out["ingest"] = [await with_frame_count(db, await read_progress(db))]
+    except Exception:  # noqa: BLE001 - an absent progress source must not take the whole stream down
+        out["ingest"] = []
 
     return out
 

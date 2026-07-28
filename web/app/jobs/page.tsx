@@ -34,8 +34,10 @@ export default function JobsPage() {
       // The stream carries status and progress per job id; merge onto the rows already rendered rather than
       // replacing them, so the richer fields the REST shape provides are not lost on every tick.
       const live = new Map<string, { status: string; progress?: number | null }>();
-      for (const rows of Object.values(stream)) {
-        for (const r of rows) live.set(r.job_id, { status: r.status, progress: r.progress });
+      // Only the job-shaped keys. `ingest` rides the same stream and is a progress summary rather than a
+      // list of jobs, so folding it in here would key the map on undefined.
+      for (const key of ["training", "import", "export", "autolabel"] as const) {
+        for (const r of stream[key] ?? []) live.set(r.job_id, { status: r.status, progress: r.progress });
       }
       return prev.map((j) => {
         const u = live.get(j.job_id);
