@@ -83,8 +83,12 @@ async def classify_session_lanes(db, session_id, *, apply: bool = True,
                 changed += 1
             lane.lane_type = lane_type
             lane.marking_conf = conf
-            lane.model_version = MODEL_VERSION
-            lane.provenance = {**(lane.provenance or {}), "linetype": evidence.as_dict()}
+            # model_version records what proposed the geometry, and this pass proposed no geometry. Writing
+            # the classifier's version here destroys the record of which detector drew the line, which is
+            # exactly what happened on the first backfill: 4,554 lanes lost the proposer they came from.
+            # The classifier identifies itself inside its own evidence instead.
+            lane.provenance = {**(lane.provenance or {}),
+                               "linetype": {**evidence.as_dict(), "model": MODEL_VERSION}}
 
     if apply:
         await db.commit()

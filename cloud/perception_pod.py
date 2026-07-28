@@ -54,9 +54,16 @@ def _build_marking_ids(id2label: dict) -> list[int]:
     return [int(i) for i, lab in id2label.items() if any(k in str(lab).lower() for k in _MARKING)]
 
 
-def _lanes_from_marking_mask(mask, min_pixels=80, min_height=20, n_points=8, max_lanes=8):
+def _lanes_from_marking_mask(mask, min_pixels=20, min_height=8, n_points=8, max_lanes=10000):
     """Cluster a lane-marking mask into per-line control-point polylines. Inlined mirror of the tested
-    services/autolabel/lane/marking.py (perception_pod.py is scp'd standalone, so it cannot import it)."""
+    services/autolabel/lane/marking.py (perception_pod.py is scp'd standalone, so it cannot import it).
+
+    The thresholds are sized for a dash, not for a whole lane, and that is the point. A dashed line is one
+    component per dash, so the old whole-lane minimums discarded the short ones outright: a lane with 14px
+    dashes came back as nothing at all. Fragments are returned as found and regrouped into lanes on ingest,
+    where `group_collinear` can see the frame width and the fits together. Filtering a fragment here for
+    being fragment-sized is throwing away the evidence that it was ever a lane.
+    """
     import cv2
     m = np.asarray(mask).astype(np.uint8)
     n_labels, labels = cv2.connectedComponents(m)
@@ -140,6 +147,8 @@ def _perceive(seg, pil_img, want_lanes: bool) -> dict:
     out = {"drivable": {"classes": classes, "coverage": cov, "width": w, "height": h, "model": tag}}
     if want_lanes:
         if marking_ids:
+            # Fragments, deliberately. Ingest groups the dashes of a lane back together; doing it here
+            # would need the same code on both sides of an scp.
             out["lanes"] = _lanes_from_marking_mask(np.isin(labels, marking_ids))
         else:
             out["lanes"], out["lane_error"] = [], "no lane-marking class in this model (use a Mapillary model)"

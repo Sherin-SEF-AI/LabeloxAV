@@ -269,3 +269,37 @@ async def test_an_unmeasured_lane_type_cannot_make_a_crossing_an_offence():
     assert "lane_change" in kinds(None), "never measured is not evidence of an offence"
     assert "lane_change" in kinds(0.2), "measured and unsure is not evidence either"
     assert "lane_change_illegal" in kinds(0.9), "measured and sure is"
+
+
+@pytest.mark.db
+async def test_typing_does_not_clobber_the_model_that_proposed_the_geometry():
+    """model_version says which detector drew the line. The typing pass draws nothing, so writing its own
+    version there erases the provenance of the proposer, which is what the first backfill did to 4,554
+    lanes before this was caught."""
+    from sqlalchemy import select
+
+    from db.models import Frame, Lane
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.intelligence.lane_typing import classify_session_lanes
+
+    async with get_sessionmaker()() as db:
+        s = DbSession(vehicle_id="veh-prov", city="BLR", start_ts_ns=0, end_ts_ns=10**9,
+                      sensors={}, ontology_version="labelox-in-0.1.0")
+        db.add(s)
+        await db.flush()
+        f = Frame(session_id=s.session_id, ts_ns=0, cam_id="cam_f", img_uri="s3://missing",
+                  width=1280, height=720, quality=0.9)
+        db.add(f)
+        await db.flush()
+        db.add(Lane(frame_id=f.frame_id, session_id=s.session_id,
+                    control_points=[[300.0, 300.0], [300.0, 700.0]], lane_type="solid",
+                    is_ego=False, source="proposed", model_version="clrernet:local"))
+        await db.commit()
+        sid = s.session_id
+
+    async with get_sessionmaker()() as db:
+        await classify_session_lanes(db, sid, apply=True, reclassify=True)
+        lane = (await db.execute(select(Lane).where(Lane.session_id == sid))).scalars().first()
+
+    assert lane.model_version == "clrernet:local", "the proposer's identity survives typing"
