@@ -153,7 +153,10 @@ def test_a_weave_is_reported_once_and_not_also_as_two_lane_changes():
 def test_the_lane_type_decides_whether_a_crossing_is_an_offence():
     obs = _obs([-40, -30, -12, 25, 40, 55, 60])
     for lane_type, expected in (("dashed", "lane_change"), ("solid", "lane_change_illegal")):
-        series = {("t", "l"): _ObsSeries(lane_type=lane_type, lane_id="l", is_ego=False, obs=obs)}
+        # A measured type. Without one, no crossing is an offence whatever the line says it is, which the
+        # next test covers.
+        series = {("t", "l"): _ObsSeries(lane_type=lane_type, lane_id="l", is_ego=False,
+                                         type_conf=0.9, obs=obs)}
         got = [e for e in derive_lane_events(series, frame_width=FRAME_W)
                if e["kind"].startswith("lane_change")]
         assert len(got) == 1 and got[0]["kind"] == expected
@@ -516,3 +519,114 @@ async def test_the_list_carries_the_session_origin_so_a_time_can_be_read():
     assert out["session_start_ns"] == origin
     offset_s = (out["events"][0]["t_start_ns"] - out["session_start_ns"]) / 1e9
     assert offset_s == pytest.approx(12.3)
+
+
+@pytest.mark.db
+async def test_reclassifying_an_event_corrects_it_instead_of_filing_a_second_one():
+    """The bug the lane classifier exposed. Identity keyed on the kind meant a crossing that stopped being an
+    offence was recorded again as an ordinary lane change, next to the offence it replaced, and the corpus
+    held one crossing twice with contradictory severities."""
+    from sqlalchemy import select
+
+    from db.models import Session as DbSession
+    from db.models import TimelineEvent
+    from db.session import get_sessionmaker
+    from services.intelligence.driving_events import _identity, persist_driving_events
+
+    # Same occurrence, different reading: the identity must not distinguish them.
+    assert _identity("lane_change_illegal", "t", 5) == _identity("lane_change", "t", 5)
+    # Genuinely different occurrences still are.
+    assert _identity("lane_change", "t", 5) != _identity("lane_weave", "t", 5)
+
+    async with get_sessionmaker()() as db:
+        s = DbSession(vehicle_id="veh-reclass", city="BLR", start_ts_ns=0, end_ts_ns=10**9,
+                      sensors={}, ontology_version="labelox-in-0.1.0")
+        db.add(s)
+        await db.flush()
+        db.add(TimelineEvent(session_id=s.session_id, kind="lane_change_illegal",
+                             modality="driving", t_start_ns=0, t_end_ns=100, payload={},
+                             source="auto", state="review"))
+        await db.commit()
+        sid = s.session_id
+
+    # The session has no lanes, so nothing derives and the stale candidate is pruned rather than duplicated.
+    async with get_sessionmaker()() as db:
+        out = await persist_driving_events(db, sid)
+        rows = (await db.execute(
+            select(TimelineEvent).where(TimelineEvent.session_id == sid))).scalars().all()
+    assert out["pruned_stale"] == 1
+    assert rows == []
+
+
+@pytest.mark.db
+async def test_a_ruling_whose_evidence_changed_is_flagged_not_overwritten_and_not_hidden():
+    """A person confirmed a violation when every lane was typed solid by default. Once the paint was actually
+    read the line may not be one. Overwriting their verdict undoes their work; keeping it silently preserves a
+    conclusion whose premise is gone."""
+    from sqlalchemy import select
+
+    from db.models import Frame, Lane, Object, OntologyClass, TimelineEvent, Track
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.intelligence.driving_events import persist_driving_events
+
+    async with get_sessionmaker()() as db:
+        cls_id = (await db.execute(
+            select(OntologyClass.id).where(OntologyClass.name == "sedan"))).scalar()
+        if cls_id is None:
+            pytest.skip("the ontology in this database has no sedan class")
+        s = DbSession(vehicle_id="veh-evid", city="BLR", start_ts_ns=0, end_ts_ns=10**10,
+                      sensors={}, ontology_version="labelox-in-0.1.0")
+        db.add(s)
+        await db.flush()
+        track = Track(session_id=s.session_id, class_id=cls_id, first_ts_ns=0,
+                      last_ts_ns=10 * 100 * MS)
+        db.add(track)
+        await db.flush()
+
+        ref = uuid.uuid4()
+        offsets = [-60.0, -50.0, -20.0, 40.0, 60.0, 70.0, 80.0]
+        first_ts = None
+        for i, off in enumerate(offsets):
+            f = Frame(session_id=s.session_id, ts_ns=i * 100 * MS, cam_id="cam_f",
+                      img_uri="s3://x", width=1280, height=960, quality=0.9)
+            db.add(f)
+            await db.flush()
+            if first_ts is None:
+                first_ts = 0
+            # A lane the paint says is dashed, but with real confidence, so crossing it is not an offence.
+            db.add(Lane(frame_id=f.frame_id, session_id=s.session_id, track_ref=ref,
+                        control_points=[[640.0, 300.0], [640.0, 900.0]], lane_type="dashed",
+                        is_ego=False, source="proposed", marking_conf=0.9))
+            cx = 640.0 + off
+            db.add(Object(frame_id=f.frame_id, track_id=track.track_id, class_id=cls_id,
+                          bbox=[cx - 30, 700.0, cx + 30, 800.0], conf=0.9, source="fused",
+                          attrs={}, state="review"))
+        await db.commit()
+        sid = s.session_id
+
+    async with get_sessionmaker()() as db:
+        first = await persist_driving_events(db, sid)
+    assert first["by_kind"].get("lane_change") == 1, "a dashed crossing is a manoeuvre, not an offence"
+
+    # Somebody confirms it, then the line is retyped as solid.
+    async with get_sessionmaker()() as db:
+        row = (await db.execute(select(TimelineEvent).where(
+            TimelineEvent.session_id == sid))).scalars().first()
+        row.state = "confirmed"
+        await db.execute(
+            Lane.__table__.update().where(Lane.session_id == sid).values(lane_type="solid"))
+        await db.commit()
+        event_id = row.event_id
+
+    async with get_sessionmaker()() as db:
+        second = await persist_driving_events(db, sid)
+        still = await db.get(TimelineEvent, event_id)
+        rows = (await db.execute(
+            select(TimelineEvent).where(TimelineEvent.session_id == sid))).scalars().all()
+
+    assert len(rows) == 1, "the reclassification must not file a second record"
+    assert still.kind == "lane_change", "a person's ruling is not overwritten"
+    assert still.state == "confirmed"
+    assert still.provenance["evidence_changed"]["would_now_be"] == "lane_change_illegal"
+    assert second["reviewed_with_changed_evidence"], "and it is reported rather than hidden"

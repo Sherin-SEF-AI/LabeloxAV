@@ -1778,6 +1778,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/labelox/reconcile/parity",
                           params=None, json_body=body)
 
+    def get_lanes_type_coverage(self) -> Any:
+        """Lane Type Coverage"""
+        return self._call("GET", f"/api/lanes/type-coverage",
+                          params=None, json_body=None)
+
     def delete_lanes_by_lane_id(self, lane_id: str) -> Any:
         """Delete Lane"""
         return self._call("DELETE", f"/api/lanes/{lane_id}",
@@ -2698,6 +2703,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/sessions/{session_id}/inertial_events",
                           params=None, json_body=None)
 
+    def post_sessions_by_session_id_lanes_classify(self, session_id: str, apply: bool | None = True, reclassify: bool | None = False) -> Any:
+        """Classify Lanes"""
+        return self._call("POST", f"/api/sessions/{session_id}/lanes/classify",
+                          params={"apply": apply, "reclassify": reclassify}, json_body=None)
+
     def post_sessions_by_session_id_lanes_link(self, session_id: str, apply: bool | None = True) -> Any:
         """Link Lanes"""
         return self._call("POST", f"/api/sessions/{session_id}/lanes/link",
@@ -3046,4 +3056,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 592 routes generated from the server schema.
+# 594 routes generated from the server schema.

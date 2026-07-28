@@ -96,6 +96,28 @@ async def link_lanes(session_id: UUID, apply: bool = True, db: AsyncSession = De
     return await link_lanes_for_session(db, session_id, apply=apply)
 
 
+@router.post("/sessions/{session_id}/lanes/classify", dependencies=[Depends(require_role("annotator"))])
+async def classify_lanes(session_id: UUID, apply: bool = True, reclassify: bool = False,
+                         db: AsyncSession = Depends(db_session)):
+    """Read each lane's type off the frame it was drawn on.
+
+    The other half of the lane prerequisite, alongside linking. Linking says which crossings exist; typing
+    says which of them are offences. A lane a person typed is never overwritten, and `reclassify` decides
+    whether lanes already measured are looked at again, which is what a threshold change needs.
+    """
+    from services.intelligence.lane_typing import classify_session_lanes
+
+    return await classify_session_lanes(db, session_id, apply=apply, reclassify=reclassify)
+
+
+@router.get("/lanes/type-coverage")
+async def lane_type_coverage(db: AsyncSession = Depends(db_session)):
+    """How much of the corpus carries a measured lane type rather than the old hardcoded default."""
+    from services.intelligence.lane_typing import corpus_type_summary
+
+    return await corpus_type_summary(db)
+
+
 class RulingIn(BaseModel):
     """A human decision on a candidate. note is free text kept on the event for the next reader."""
 

@@ -326,6 +326,31 @@ export type LaneRow = {
   is_ego: boolean;
   source: string;
   model_version: string | null;
+  // How strongly the paint supported the type. Null means nobody measured it, which is not the same as
+  // measured and uncertain: every lane written before the classifier existed carries a hardcoded default.
+  marking_conf?: number | null;
+  measured?: boolean;
+};
+
+export type LaneTypeResult = {
+  session_id: string;
+  lanes: number;
+  measured?: number;
+  changed_type?: number;
+  unreadable_frames_lanes?: number;
+  frames_decoded?: number;
+  by_type?: Record<string, number>;
+  mean_confidence?: number | null;
+  distinct_types?: number;
+  dry_run?: boolean;
+  detail?: string;
+};
+
+export type LaneTypeCoverage = {
+  total: number;
+  measured: number;
+  unmeasured: number;
+  by_type: Record<string, { count: number; mean_confidence: number | null }>;
 };
 
 export type DiscoveryCandidate = {
@@ -904,6 +929,9 @@ export type DrivingEvent = {
   frame_id: string | null;
   conf: number | null;
   severity: string;
+  // Set when a person ruled on this and the evidence underneath has since changed. Their verdict stands;
+  // this says the premise moved, so somebody can go and look.
+  evidence_changed?: { was: string; would_now_be: string } | null;
   payload: Record<string, unknown>;
   source: string;
   state: string;

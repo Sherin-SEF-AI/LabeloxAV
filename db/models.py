@@ -268,13 +268,21 @@ class Lane(Base):
     session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
     track_ref: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # same lane across frames
     control_points: Mapped[list] = mapped_column(JSONB, nullable=False)  # [[x,y],...] control points
-    lane_type: Mapped[str] = mapped_column(String(16), nullable=False)   # solid|dashed|double|road_edge|implicit|fallback
+    # unknown is a real value and the honest one: the type was measured and the paint did not say. It is not
+    # in illegal_to_cross, so a crossing of an unmeasurable line derives as a manoeuvre rather than an
+    # offence, which is the safe direction when the evidence is a smear of grey pixels.
+    lane_type: Mapped[str] = mapped_column(String(16), nullable=False)   # solid|dashed|double|road_edge|implicit|fallback|unknown
     is_ego: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="proposed")  # proposed|human|propagated
     model_version: Mapped[str | None] = mapped_column(String(64))
+    # How strongly the paint supported the type. Null means nobody measured it, which is different from
+    # measured-and-uncertain and has to stay distinguishable.
+    marking_conf: Mapped[float | None] = mapped_column(Float)
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=sql_text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_lane_frame", "frame_id"), Index("ix_lane_track_ref", "track_ref"))
+    __table_args__ = (Index("ix_lane_frame", "frame_id"), Index("ix_lane_track_ref", "track_ref"),
+                      Index("ix_lane_session_conf", "session_id", "marking_conf"))
 
 
 class DrivableMask(Base):

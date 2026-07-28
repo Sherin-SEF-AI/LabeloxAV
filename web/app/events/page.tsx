@@ -10,6 +10,8 @@ import type {
   EventKindSpec,
   EventTaxonomy,
   LaneLinkResult,
+  LaneTypeCoverage,
+  LaneTypeResult,
 } from "@/lib/types";
 
 // What happened on the road, as opposed to what was in the frame.
@@ -76,12 +78,15 @@ export default function EventsPage() {
   const [events, setEvents] = useState<DrivingEvent[]>([]);
   const [linkResult, setLinkResult] = useState<LaneLinkResult | null>(null);
   const [originNs, setOriginNs] = useState<number | null>(null);
+  const [typeResult, setTypeResult] = useState<LaneTypeResult | null>(null);
+  const [coverage, setCoverage] = useState<LaneTypeCoverage | null>(null);
   const [severity, setSeverity] = useState("");
   const [state, setState] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.eventTaxonomy().then(setTaxonomy).catch((e) => toast(humanizeError(e), "error"));
+    api.laneTypeCoverage().then(setCoverage).catch(() => setCoverage(null));
   }, []);
 
   const load = useCallback(async () => {
@@ -143,6 +148,22 @@ export default function EventsPage() {
     }
   }
 
+  async function classifyLanes() {
+    if (!sessionId.trim()) return;
+    setBusy(true);
+    try {
+      const r = await api.classifySessionLanes(sessionId.trim(), { reclassify: true });
+      setTypeResult(r);
+      const kinds = Object.entries(r.by_type ?? {}).map(([k, n]) => `${k} ${n}`).join(", ");
+      toast(`typed ${r.measured ?? 0} lanes: ${kinds || "nothing measurable"}`, "success");
+      setCoverage(await api.laneTypeCoverage());
+    } catch (e) {
+      toast(humanizeError(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function rule(ev: DrivingEvent, verdict: "confirm" | "reject") {
     try {
       const updated = await api.ruleOnDrivingEvent(ev.event_id, verdict);
@@ -182,14 +203,55 @@ export default function EventsPage() {
         <button className="btn" onClick={() => void linkLanes()} disabled={busy || !sessionId.trim()}>
           link lanes
         </button>
+        <button className="btn" onClick={() => void classifyLanes()} disabled={busy || !sessionId.trim()}>
+          type lanes
+        </button>
       </div>
 
       <p className="font-mono text-[10px] text-ink-3 max-w-[76ch]">
         Deriving is safe to repeat: a matching candidate updates in place rather than duplicating, anything a
         person has ruled on is left alone, and a candidate the geometry no longer implies is removed. Lane
         linking gives a lane an identity across frames, which is what a crossing is measured against; without
-        it every lane exists in one frame only and no crossing can be seen.
+        it every lane exists in one frame only and no crossing can be seen. Typing reads each line off its
+        own paint, which is what decides whether crossing it was a manoeuvre or an offence; an unmeasured
+        line never makes a crossing a violation, because a type nobody looked at is not evidence.
       </p>
+
+      {coverage && (
+        <div className="flex flex-wrap gap-2">
+          <Stat label="lanes" value={coverage.total} />
+          <Stat
+            label="type measured"
+            value={coverage.measured}
+            hint="the rest carry the old default"
+            tone={coverage.measured > 0 ? "text-pass" : "text-warn"}
+          />
+          <Stat
+            label="unmeasured"
+            value={coverage.unmeasured}
+            tone={coverage.unmeasured > 0 ? "text-warn" : "text-ink-3"}
+          />
+          {Object.entries(coverage.by_type).map(([kind, v]) => (
+            <Stat
+              key={kind}
+              label={kind}
+              value={v.count}
+              hint={v.mean_confidence == null ? "never measured" : `conf ${v.mean_confidence.toFixed(2)}`}
+            />
+          ))}
+        </div>
+      )}
+
+      {typeResult && (
+        <p className="font-mono text-[10px] text-ink-3">
+          this session: {typeResult.measured ?? 0} lanes typed over{" "}
+          {typeResult.frames_decoded ?? 0} frames, {typeResult.changed_type ?? 0} changed type
+          {typeResult.unreadable_frames_lanes
+            ? `, ${typeResult.unreadable_frames_lanes} left unmeasured because their frame could not be read`
+            : ""}
+          .
+        </p>
+      )}
 
       {linkResult && (
         <div className="flex flex-wrap gap-2">
@@ -276,7 +338,14 @@ export default function EventsPage() {
                     {ev.conf == null ? "-" : ev.conf.toFixed(2)}
                   </td>
                   <td className="px-2 py-1 text-ink-3">{detailOf(ev.payload)}</td>
-                  <td className={`px-2 py-1 ${STATE_TONE[ev.state] ?? ""}`}>{ev.state}</td>
+                  <td className={`px-2 py-1 ${STATE_TONE[ev.state] ?? ""}`}>
+                    {ev.state}
+                    {ev.evidence_changed && (
+                      <div className="text-warn text-[10px]" title="the evidence under this ruling changed">
+                        evidence moved: now reads {ev.evidence_changed.would_now_be}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-2 py-1 whitespace-nowrap">
                     {ev.state === "review" && (
                       <>

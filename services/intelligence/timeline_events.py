@@ -27,6 +27,10 @@ def event_row(e) -> dict:
             "track_id": str(e.track_id) if e.track_id else None,
             "frame_id": str(e.frame_id) if e.frame_id else None,
             "conf": e.conf, "severity": severity_of(e.kind),
+            # A ruling whose evidence has since changed. Carried on the row rather than left in provenance
+            # because a reviewer looking at a list of confirmed events has no other way to see that one of
+            # them rests on a premise that no longer holds.
+            "evidence_changed": (e.provenance or {}).get("evidence_changed"),
             "payload": e.payload, "source": e.source, "state": e.state, "version": e.version}
 
 

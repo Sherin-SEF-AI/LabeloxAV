@@ -5,10 +5,17 @@ corrected, after signal states are relabelled, after a threshold in the taxonomy
 the second run would double every event and the third would triple it, and the rates every mining and safety
 surface computes would drift upward with nothing but the number of times somebody pressed the button.
 
-So a derived event has an identity that is not its row id: (kind, track, start). Re-deriving updates the
-payload and confidence of a matching row and inserts only what is genuinely new. Events a human has ruled on
-are left exactly as they are, for the same reason the reasoner's rerun leaves them alone: a person's decision
-is the output of the loop, and a machine that revisits it is undoing the work the loop exists to collect.
+So a derived event has an identity that is not its row id: (family, track, start). The family and not the
+kind, because the kind is a reading of the occurrence rather than the occurrence itself. That distinction was
+learned the hard way: when the lane classifier arrived, crossings that had derived as offences correctly
+became ordinary manoeuvres, and a kind-keyed identity filed each one as a new event beside the old, leaving
+one crossing in the corpus twice with contradictory severities.
+
+Events a human has ruled on are left exactly as they are, for the same reason the reasoner's rerun leaves
+them alone: a person's decision is the output of the loop, and a machine that revisits it is undoing the work
+the loop exists to collect. When the evidence under such a ruling changes, the ruling stands and gains a note
+saying so, and the count comes back to the caller. Silently keeping a verdict whose premise has gone is as
+wrong as silently overwriting it.
 
 Stale candidates are the other half. If a re-derivation no longer produces an event that a previous run
 proposed, the geometry changed and the old candidate is wrong. Leaving it would mean a corrected lane still
@@ -21,7 +28,12 @@ from __future__ import annotations
 import uuid as _uuid
 
 from core.logging import get_logger
-from services.intelligence.event_taxonomy import TaxonomyError, kind_spec, validate
+from services.intelligence.event_taxonomy import (
+    TaxonomyError,
+    family_of,
+    kind_spec,
+    validate,
+)
 
 log = get_logger("driving_events")
 
@@ -31,11 +43,16 @@ MODALITY = "driving"
 def _identity(kind: str, track_id, t_start_ns: int) -> tuple:
     """What makes two derivations the same event.
 
+    The family rather than the kind, because the kind is a *reading* of the occurrence and readings change.
+    When the lane classifier landed, crossings that had derived as offences correctly became ordinary
+    manoeuvres, and keying on the kind meant each one was filed as a new event beside the old one instead of
+    correcting it: the corpus ended up holding a single crossing twice, once as a violation and once not.
+
     Start time rather than the interval, because a re-derivation that sees one more frame of a lane change
     legitimately extends the end while being the same crossing. Keying on the interval would make every such
     extension a new event.
     """
-    return (str(kind), str(track_id) if track_id else None, int(t_start_ns))
+    return (family_of(str(kind)), str(track_id) if track_id else None, int(t_start_ns))
 
 
 async def derive_events(db, session_id) -> list[dict]:
@@ -74,7 +91,8 @@ async def persist_driving_events(db, session_id, *, prune_stale: bool = True) ->
                                     TimelineEvent.source == "auto"))).scalars().all()
     by_identity = {_identity(e.kind, e.track_id, e.t_start_ns): e for e in existing}
 
-    inserted = updated = unchanged = skipped_reviewed = rejected = 0
+    inserted = updated = unchanged = skipped_reviewed = rejected = reclassified = 0
+    evidence_changed: list[dict] = []
     seen: set[tuple] = set()
 
     for c in candidates:
@@ -105,13 +123,30 @@ async def persist_driving_events(db, session_id, *, prune_stale: bool = True) ->
 
         if row.state in ("confirmed", "rejected"):
             skipped_reviewed += 1
+            if row.kind != c["kind"]:
+                # A person ruled on this when the evidence said something else. Overwriting their decision
+                # would undo the work the loop exists to collect; leaving it silently would keep a ruling
+                # whose premise no longer holds. So it is neither: the row keeps its verdict and gains a note
+                # saying what changed underneath it, and the count comes back so somebody can go and look.
+                row.provenance = {**(row.provenance or {}),
+                                  "evidence_changed": {"was": row.kind, "would_now_be": c["kind"],
+                                                       "payload": c.get("payload") or {}}}
+                evidence_changed.append({"event_id": str(row.event_id), "state": row.state,
+                                         "was": row.kind, "would_now_be": c["kind"]})
             continue
 
-        changed = (row.t_end_ns != c.get("t_end_ns") or row.payload != (c.get("payload") or {})
-                   or row.conf != c.get("conf"))
+        changed = (row.kind != c["kind"] or row.t_end_ns != c.get("t_end_ns")
+                   or row.payload != (c.get("payload") or {}) or row.conf != c.get("conf"))
         if not changed:
             unchanged += 1
             continue
+        if row.kind != c["kind"]:
+            # The same occurrence, read differently. Corrected in place, which is the whole reason identity
+            # is the family and not the kind.
+            reclassified += 1
+            row.provenance = {**(row.provenance or {}), "reclassified_from": row.kind,
+                              "severity": (kind_spec(c["kind"]) or {}).get("severity", "info")}
+            row.kind = c["kind"]
         row.t_end_ns = c.get("t_end_ns")
         row.payload = c.get("payload") or {}
         row.conf = c.get("conf")
@@ -138,6 +173,9 @@ async def persist_driving_events(db, session_id, *, prune_stale: bool = True) ->
     return {"session_id": str(sid), "derived": len(candidates), "inserted": inserted,
             "updated": updated, "unchanged": unchanged, "pruned_stale": pruned,
             "skipped_reviewed": skipped_reviewed, "rejected_by_taxonomy": rejected,
+            "reclassified": reclassified,
+            # Rulings a person made on evidence that has since changed. Not overruled and not hidden.
+            "reviewed_with_changed_evidence": evidence_changed,
             "by_kind": dict(sorted(counts.items()))}
 
 

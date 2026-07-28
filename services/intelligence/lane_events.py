@@ -152,6 +152,9 @@ class _ObsSeries:
     lane_type: str
     lane_id: str
     is_ego: bool
+    # How sure anything is that the lane is the type it claims. None means nobody ever measured it, which is
+    # the state every lane was in before the classifier existed and is not the same as measured-and-unsure.
+    type_conf: float | None = None
     obs: list[Observation] = field(default_factory=list)
 
 
@@ -169,6 +172,7 @@ def derive_lane_events(series_by_pair: dict[tuple[str, str], _ObsSeries], *,
     weave_window = int(p.get("weave_window_ns", 4_000_000_000))
     straddle_min = int(p.get("straddle_min_frames", 6))
     illegal = set(p.get("illegal_to_cross") or [])
+    min_type_conf = float(p.get("min_type_conf_for_violation", 0.5))
 
     events: list[dict] = []
     for (track_id, _lane_ref), s in series_by_pair.items():
@@ -188,7 +192,12 @@ def derive_lane_events(series_by_pair: dict[tuple[str, str], _ObsSeries], *,
         for c in crossings:
             if id(c) in spanned:
                 continue
-            kind = "lane_change_illegal" if s.lane_type in illegal else "lane_change"
+            # Calling a crossing an offence is a stronger claim than reporting the manoeuvre, and it rests
+            # entirely on knowing what was crossed. A lane type that was never measured, or measured weakly,
+            # cannot carry it: the crossing is still reported, just not as a violation.
+            type_known = s.type_conf is not None and s.type_conf >= min_type_conf
+            illegal_line = s.lane_type in illegal and type_known
+            kind = "lane_change_illegal" if illegal_line else "lane_change"
             direction = "right" if c.to_side == "right" else "left"
             events.append({
                 "kind": kind, "track_id": track_id, "frame_id": c.start_frame_id,
@@ -199,7 +208,8 @@ def derive_lane_events(series_by_pair: dict[tuple[str, str], _ObsSeries], *,
                 "conf": round(min(1.0, 0.5 + 0.5 * (c.frames - min_after) / max(1, min_after)), 3),
                 "payload": {"direction": direction, "lane_type": s.lane_type, "lane_id": s.lane_id,
                             "from_side": c.from_side, "to_side": c.to_side, "frames": c.frames,
-                            "is_ego_lane": s.is_ego},
+                            "is_ego_lane": s.is_ego, "lane_type_conf": s.type_conf,
+                            "lane_type_measured": s.type_conf is not None},
             })
 
         for w in weaves:
@@ -240,7 +250,7 @@ async def build_series(db, session_id) -> tuple[dict[tuple[str, str], _ObsSeries
 
     lane_rows = (await db.execute(
         select(Lane.lane_id, Lane.frame_id, Lane.track_ref, Lane.control_points,
-               Lane.lane_type, Lane.is_ego)
+               Lane.lane_type, Lane.is_ego, Lane.marking_conf)
         .where(Lane.session_id == sid, Lane.track_ref.isnot(None)))).all()
 
     if not lane_rows:
@@ -251,15 +261,16 @@ async def build_series(db, session_id) -> tuple[dict[tuple[str, str], _ObsSeries
             return {}, 0
         lane_rows = (await db.execute(
             select(Lane.lane_id, Lane.frame_id, Lane.track_ref, Lane.control_points,
-                   Lane.lane_type, Lane.is_ego)
+                   Lane.lane_type, Lane.is_ego, Lane.marking_conf)
             .where(Lane.session_id == sid, Lane.track_ref.isnot(None)))).all()
     if not lane_rows:
         return {}, 0
 
     lanes_by_frame: dict[str, list] = {}
-    for lane_id, frame_id, track_ref, cps, lane_type, is_ego in lane_rows:
+    for lane_id, frame_id, track_ref, cps, lane_type, is_ego, mconf in lane_rows:
         lanes_by_frame.setdefault(str(frame_id), []).append(
-            (str(lane_id), str(track_ref), cps, str(lane_type), bool(is_ego)))
+            (str(lane_id), str(track_ref), cps, str(lane_type), bool(is_ego),
+             None if mconf is None else float(mconf)))
 
     obj_rows = (await db.execute(
         select(Object.track_id, Object.bbox, Frame.frame_id, Frame.ts_ns, Frame.width)
@@ -275,14 +286,15 @@ async def build_series(db, session_id) -> tuple[dict[tuple[str, str], _ObsSeries
         if not lanes or not bbox or len(bbox) < 4:
             continue
         ground = ((float(bbox[0]) + float(bbox[2])) / 2.0, float(bbox[3]))
-        for lane_id, track_ref, cps, lane_type, is_ego in lanes:
+        for lane_id, track_ref, cps, lane_type, is_ego, mconf in lanes:
             off = signed_offset(ground, cps)
             if off is None:
                 continue
             key = (str(track_id), track_ref)
             s = series.get(key)
             if s is None:
-                s = series[key] = _ObsSeries(lane_type=lane_type, lane_id=lane_id, is_ego=is_ego)
+                s = series[key] = _ObsSeries(lane_type=lane_type, lane_id=lane_id, is_ego=is_ego,
+                                             type_conf=mconf)
             s.obs.append(Observation(ts_ns=int(ts_ns or 0), frame_id=str(frame_id), offset=off))
 
     return series, width

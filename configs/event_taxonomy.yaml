@@ -14,6 +14,10 @@
 #             claim from "this is interesting" and is what the mining and safety-case surfaces filter on.
 #   derived   whether a deriver can propose this, or it is human-only. A human-only kind is deliberate: no
 #             geometry we have can see intent, so near-miss intent stays a human judgement.
+#   family    what physical occurrence this kind describes. Two kinds in one family are two readings of the
+#             same event, not two events: a crossing is a crossing whether or not the line turned out to be
+#             one it was legal to cross. Re-deriving keys on the family, so a reclassification updates the
+#             record in place instead of filing a second one beside it.
 #   payload   fields the deriver writes and the editor shows. Documented here so a consumer never has to
 #             read the deriver to find out what it can rely on.
 
@@ -25,6 +29,7 @@ kinds:
 
   lane_change:
     modality: driving
+    family: lane_crossing
     shape: interval
     anchor: track
     severity: notable
@@ -34,6 +39,7 @@ kinds:
 
   lane_change_illegal:
     modality: driving
+    family: lane_crossing
     shape: interval
     anchor: track
     severity: violation
@@ -43,6 +49,7 @@ kinds:
 
   lane_weave:
     modality: driving
+    family: lane_weave
     shape: interval
     anchor: track
     severity: violation
@@ -54,6 +61,7 @@ kinds:
 
   lane_straddle:
     modality: driving
+    family: lane_straddle
     shape: interval
     anchor: track
     severity: notable
@@ -65,6 +73,7 @@ kinds:
 
   signal_phase:
     modality: driving
+    family: signal_phase
     shape: interval
     anchor: track
     severity: info
@@ -74,6 +83,7 @@ kinds:
 
   signal_transition_invalid:
     modality: driving
+    family: signal_transition
     shape: point
     anchor: track
     severity: notable
@@ -85,6 +95,7 @@ kinds:
 
   signal_flicker:
     modality: driving
+    family: signal_flicker
     shape: interval
     anchor: track
     severity: notable
@@ -96,6 +107,7 @@ kinds:
 
   near_miss:
     modality: driving
+    family: near_miss
     shape: interval
     anchor: track
     severity: notable
@@ -105,6 +117,7 @@ kinds:
 
   ego_hard_brake:
     modality: driving
+    family: ego_hard_brake
     shape: interval
     anchor: session
     severity: notable
@@ -114,6 +127,7 @@ kinds:
 
   right_of_way_violation:
     modality: driving
+    family: right_of_way_violation
     shape: interval
     anchor: track
     severity: violation
@@ -123,6 +137,7 @@ kinds:
 
   wrong_way:
     modality: driving
+    family: wrong_way
     shape: interval
     anchor: track
     severity: violation
@@ -155,5 +170,12 @@ lane:
   # Sitting inside this band of the boundary for straddle_min_frames is straddling.
   straddle_band_frac: 0.008
   straddle_min_frames: 6
-  # Lane types a crossing of which is a violation rather than a manoeuvre.
+  # Lane types a crossing of which is a violation rather than a manoeuvre. `unknown` is deliberately absent:
+  # a line whose paint could not be read is not evidence of an offence, and the safe direction when the
+  # evidence is a smear of grey pixels is the lesser claim.
   illegal_to_cross: [solid, double]
+  # How sure the line-type classifier has to be before a crossing is called an offence. Below this the
+  # crossing is still reported, as an ordinary lane change: the manoeuvre happened either way, and only the
+  # accusation depends on knowing what was crossed. A lane typed before this field existed has no measured
+  # confidence at all, and those are treated as unmeasured rather than as confident.
+  min_type_conf_for_violation: 0.5

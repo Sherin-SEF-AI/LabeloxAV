@@ -64,6 +64,19 @@ def severity_of(kind: str) -> str:
     return str((kind_spec(kind) or {}).get("severity") or "info")
 
 
+def family_of(kind: str) -> str:
+    """Which physical occurrence this kind describes.
+
+    Two kinds in one family are two readings of the same happening, not two happenings. A crossing is a
+    crossing whether or not the line turned out to be one it was legal to cross, and keying a stored event on
+    its kind meant reclassifying it filed a second record beside the first rather than correcting it.
+
+    Falls back to the kind itself, so a kind that forgets to declare a family is its own family and behaves
+    exactly as it did before rather than silently merging with something else.
+    """
+    return str((kind_spec(kind) or {}).get("family") or kind)
+
+
 def signal_phase_graph() -> dict[str, list[str]]:
     return {str(k): [str(v) for v in (vs or [])]
             for k, vs in (load_taxonomy().get("signal_phase_graph") or {}).items()}
@@ -125,6 +138,7 @@ def describe() -> dict:
             "shape": spec.get("shape", "interval"),
             "anchor": spec.get("anchor", "session"),
             "severity": spec.get("severity", "info"),
+            "family": spec.get("family", kind),
             "derived": bool(spec.get("derived")),
             "description": spec.get("description", ""),
             "payload": list(spec.get("payload") or []),

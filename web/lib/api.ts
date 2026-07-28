@@ -21,6 +21,8 @@ import type {
   DeriveResult,
   DerivePreview,
   LaneLinkResult,
+  LaneTypeResult,
+  LaneTypeCoverage,
   SegmentEditResult,
   InertialEvents,
   Confusions,
@@ -1209,6 +1211,11 @@ export const api = {
     post<DerivePreview>(`/api/sessions/${sessionId}/driving-events/preview`, {}),
   linkSessionLanes: (sessionId: string, apply = true) =>
     post<LaneLinkResult>(`/api/sessions/${sessionId}/lanes/link?apply=${apply}`, {}),
+  classifySessionLanes: (sessionId: string, opts?: { apply?: boolean; reclassify?: boolean }) =>
+    post<LaneTypeResult>(
+      `/api/sessions/${sessionId}/lanes/classify?apply=${opts?.apply ?? true}` +
+      `&reclassify=${opts?.reclassify ?? false}`, {}),
+  laneTypeCoverage: () => get<LaneTypeCoverage>(`/api/lanes/type-coverage`),
   ruleOnDrivingEvent: (eventId: string, verdict: "confirm" | "reject", note?: string) =>
     post<DrivingEvent>(`/api/driving-events/${eventId}/${verdict}`, { note: note || null }),
   createDrivingEvent: (
