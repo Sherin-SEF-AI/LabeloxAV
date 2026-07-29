@@ -8,6 +8,10 @@ One ontology, 170 classes, tuned for the chaos that global datasets never saw: a
 
 ![The home dashboard with a real fleet ingested](docs/screenshots/00-home.png)
 
+
+<img width="1920" height="930" alt="image" src="https://github.com/user-attachments/assets/b68e1a19-94fe-4e9c-a5a0-5b47599e356f" />
+
+
 *The home dashboard: a full fleet of real dashcam drives ingested and ready (186 trips, 32,455 frames from Indian roads), with the review queue surfacing the long tail the models struggle on, police vans, vendor handcarts, autorickshaws, ranked by uncertainty and rarity so attention goes where it matters.*
 
 ![Fleet analytics](docs/screenshots/01-analytics.png)
