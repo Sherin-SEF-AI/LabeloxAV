@@ -24,6 +24,7 @@ from services.api.routers import (
     autolabel,
     calibration,
     campaigns,
+    checkpoints,
     cloud,
     collaborate,
     corrections,
@@ -512,6 +513,7 @@ app.include_router(lidar_scene.router, prefix="/api", tags=["lidar"])
 app.include_router(drivable.router, prefix="/api", tags=["drivable"])
 app.include_router(inertial.router, prefix="/api", tags=["inertial"])
 app.include_router(driving_events.router, prefix="/api", tags=["driving-events"])
+app.include_router(checkpoints.router, prefix="/api", tags=["checkpoints"])
 app.include_router(inspector.router, prefix="/api", tags=["inspector"])
 app.include_router(sanyx_router.router, prefix="/api", tags=["sanyx"])
 app.include_router(calyx_router.router, prefix="/api", tags=["calyx"])

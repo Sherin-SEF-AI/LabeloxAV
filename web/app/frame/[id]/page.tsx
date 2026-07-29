@@ -29,7 +29,9 @@ import ShortcutOverlay from "@/components/shell/ShortcutOverlay";
 import IssuePanel from "@/components/labelops/IssuePanel";
 import CloudControl from "@/components/shell/CloudControl";
 import { MODES, type ToolGroup } from "@/lib/editor/registry";
+import type { SelectHow } from "@/components/editor/useEditor";
 import Filmstrip from "@/components/editor/Filmstrip";
+import HistoryPanel from "@/components/editor/HistoryPanel";
 
 // Frame-centric professional annotation editor. Pan/zoom canvas, draw + edit boxes, SAM-assisted masks,
 // layers panel, class palette, attributes, keyboard-driven, batched save. Operational Materialism tokens.
@@ -101,6 +103,20 @@ const MODE_GROUPS: Record<string, ToolGroup[]> = {
 };
 const MODE_TOOLS: Record<string, string[]> = Object.fromEntries(
   Object.entries(MODE_GROUPS).map(([m, gs]) => [m, gs.flatMap((g) => g.tools.map((t) => t.key))]));
+
+// Ways to pick a set that are not "drag a box round them". A dense frame holds forty vehicles and the
+// useful selections are almost never contiguous: every autorickshaw, everything the model was unsure
+// about, everything nobody has looked at yet.
+const SELECTIONS: { how: SelectHow; label: string; value?: string | number; hint: string; key?: string }[] = [
+  { how: "all", label: "all", hint: "every visible, unlocked object", key: "⌘A" },
+  { how: "none", label: "none", hint: "clear the selection", key: "Esc" },
+  { how: "invert", label: "invert", hint: "everything not currently selected", key: "⌘I" },
+  { how: "sameClass", label: "same class", hint: "everything of the selected object's class", key: "⌘⇧A" },
+  { how: "unreviewed", label: "unreviewed", hint: "still in review: the queue you are working" },
+  { how: "new", label: "new", hint: "drawn here and not yet saved" },
+  { how: "lowConf", label: "conf < 0.5", value: 0.5, hint: "the model was unsure about these" },
+  { how: "state", label: "rejected", value: "rejected", hint: "already rejected" },
+];
 
 // directed object-relationship kinds offered in the editor (rider_of is the India two-wheeler case)
 const RELATION_KINDS = ["rider_of", "towed_by", "part_of", "member_of", "occludes"];
@@ -828,6 +844,21 @@ export default function FrameEditor() {
 
   // ---- autosave: persist edits ~700ms after the last change settles (covers move/resize/relabel/
   // attribute/mask/delete). The debounce waits out an active drag, so we never save mid-gesture. ----
+  // Save-as: a named state on the server. Distinct from save, which writes the working copy back; this one
+  // is the thing you can return to after an hour of work went a different way.
+  const saveAs = useCallback(async () => {
+    const suggested = `working state ${new Date().toLocaleTimeString()}`;
+    const name = window.prompt("Name this save", suggested);
+    if (name === null) return;
+    try {
+      await save();
+      const c = await api.saveCheckpoint(id, name.trim() || suggested);
+      flash(`saved "${c.name}" with ${c.object_count} objects`);
+    } catch (e) {
+      flash("save as failed: " + humanizeError(e));
+    }
+  }, [id, save]);
+
   const saveRef = useRef(save);
   saveRef.current = save;
   const stRef = useRef(st);
@@ -892,7 +923,22 @@ export default function FrameEditor() {
       if (typing(e.target)) return;
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); dispatch(e.shiftKey ? { t: "redo" } : { t: "undo" }); return; }
-      if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); save(); return; }
+      if (mod && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        // Shift makes it save-as: a named, server-side state that survives a refresh, which the ordinary
+        // save does not create and undo cannot get back to.
+        if (e.shiftKey) void saveAs(); else save();
+        return;
+      }
+      // Selection, on the modifiers people already expect from every other editor.
+      if (mod && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        dispatch({ t: "selectBy", how: e.shiftKey ? "sameClass" : "all" });
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "i") {
+        e.preventDefault(); dispatch({ t: "selectBy", how: "invert" }); return;
+      }
       if (mod && e.key.toLowerCase() === "c" && st.selectedId) {
         const o = stRef.current.objects.find((x) => x.id === st.selectedId);
         if (o) { clipboardRef.current = o; flash("copied object"); }
@@ -945,7 +991,12 @@ export default function FrameEditor() {
         if (stRef.current.tool === "keypoint" && kpDraftRef.current?.length) finishKeypoints(kpDraftRef.current);
         else acceptCandidate();
       }
-      else if (e.key === "Escape") { dispatch({ t: "candidate", polys: null }); setKpDraft(null); }
+      else if (e.key === "Escape") {
+        // Escape clears in the order a person means it: the in-progress thing first, then the selection.
+        // Dropping both at once loses a selection somebody was still using.
+        if (st.candidate || kpDraft) { dispatch({ t: "candidate", polys: null }); setKpDraft(null); }
+        else if (st.selectedIds.length) dispatch({ t: "selectBy", how: "none" });
+      }
       else if ((e.key === "Delete" || e.key === "Backspace") && st.selectedId) dispatch({ t: "delete", id: st.selectedId });
       else if (e.key === "[") gotoFrame(meta?.prev_frame_id ?? null);
       else if (e.key === "]") gotoFrame(meta?.next_frame_id ?? null);
@@ -1748,6 +1799,18 @@ export default function FrameEditor() {
           {/* Tools tab: the AI/automation clusters, each collapsible, in their own tab so they never bury the
               object list. The AI panels are no longer nested inside road segmentation. */}
           {rightTab === "tools" && (<>
+          <PanelSection title="history and saves" defaultOpen
+            badge={`${st.past.length} step${st.past.length === 1 ? "" : "s"}`}>
+            <HistoryPanel
+              frameId={id}
+              past={st.past}
+              future={st.future}
+              onJump={(at) => dispatch({ t: "jump", at })}
+              onRestored={() => setReloadKey((k) => k + 1)}
+              flash={flash}
+            />
+          </PanelSection>
+
           <PanelSection title="agent · auto-label" defaultOpen>
             <AgentPanel frameId={id} selectedId={st.selectedId} onApplied={loadLayers} embedded />
           </PanelSection>
@@ -1831,6 +1894,30 @@ export default function FrameEditor() {
           </div>
           </>)}
 
+          {/* Ways to pick a set, sitting directly above the bulk actions they feed. A dense frame holds
+              forty vehicles and the useful selections are almost never contiguous, so a marquee alone leaves
+              "every autorickshaw" and "everything nobody has reviewed" as manual work. */}
+          {rightTab === "objects" && (
+            <div className="panel px-2 py-1.5">
+              <div className="flex flex-wrap gap-1">
+                {SELECTIONS.map((sel) => (
+                  <button
+                    key={sel.how + String(sel.value ?? "")}
+                    onClick={() => dispatch({ t: "selectBy", how: sel.how, value: sel.value })}
+                    title={sel.hint + (sel.key ? ` (${sel.key})` : "")}
+                    className="border border-line text-ink-3 px-1.5 py-0.5 hover:border-accent font-mono text-[10px]"
+                  >
+                    {sel.label}
+                  </button>
+                ))}
+              </div>
+              <p className="font-mono text-[10px] text-ink-3 mt-1">
+                Locked and hidden objects are never picked: a bulk action must not reach the thing somebody
+                locked to protect it.
+              </p>
+            </div>
+          )}
+
           {/* Bulk actions on a multi-selection. Before this, selection was a single id, so every batch
               operation had to go through the natural-language agent bar: there was no way to pick three
               boxes and delete or reclassify them directly. */}
@@ -1877,7 +1964,7 @@ export default function FrameEditor() {
           <button onClick={fit} title="fit to view" className="w-6 h-5 flex items-center justify-center rounded text-ink-2 hover:bg-line/50 ml-0.5"><Icon name="fit" size={14} /></button>
         </div>
         <div className="flex-1 px-3 overflow-hidden whitespace-nowrap text-ink-3/80">
-          <span className="text-ink-2">V</span> select &middot; <span className="text-ink-2">B</span> box &middot; <span className="text-ink-2">G</span> polygon &middot; <span className="text-ink-2">K</span> pose &middot; <span className="text-ink-2">R</span> measure &middot; <span className="text-ink-2">[ ]</span> frame &middot; <span className="text-ink-2">Cmd Z</span> undo &middot; <span className="text-ink-2">?</span> shortcuts
+          <span className="text-ink-2">V</span> select &middot; <span className="text-ink-2">B</span> box &middot; <span className="text-ink-2">G</span> polygon &middot; <span className="text-ink-2">K</span> pose &middot; <span className="text-ink-2">R</span> measure &middot; <span className="text-ink-2">[ ]</span> frame &middot; <span className="text-ink-2">Cmd Z</span> undo &middot; <span className="text-ink-2">Cmd A</span> select all &middot; <span className="text-ink-2">Cmd Shift S</span> save as &middot; <span className="text-ink-2">?</span> shortcuts
         </div>
         <div className="flex items-center gap-1.5 h-full border-l hairline px-3">
           <span className="text-ink-2">{st.objects.length} objects</span>

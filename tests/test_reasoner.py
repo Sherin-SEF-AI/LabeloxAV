@@ -911,3 +911,45 @@ async def test_a_check_is_graded_against_the_base_rate_not_against_a_coin_flip()
     assert good["lift_against"] > 1.0 and good["informative"] is True
     assert bad["lift_against"] < 1.0 and bad["informative"] is False, \
         "a rule that fires on the objects that were fine is not weak, it is harmful"
+
+
+@pytest.mark.db
+async def test_a_rerun_says_when_the_limit_cut_the_session_short():
+    """A partial pass that reads as a complete one is how a corpus ends up believing it has been reasoned
+    over when a fifth of it has not. That is exactly what happened: the largest session holds 60,232 objects
+    and a backfill capped at 20,000 left 40,232 unreasoned with nothing in the result to say so."""
+    from sqlalchemy import select
+
+    from db.models import Frame, Object, OntologyClass
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.autolabel.reasoner.rerun import rerun_session
+
+    async with get_sessionmaker()() as db:
+        cls_id = (await db.execute(
+            select(OntologyClass.id).where(OntologyClass.name == "sedan"))).scalar()
+        if cls_id is None:
+            pytest.skip("the ontology in this database has no sedan class")
+        s = DbSession(vehicle_id="veh-trunc", city="BLR", start_ts_ns=0, end_ts_ns=10**9,
+                      sensors={}, ontology_version="labelox-in-0.1.0")
+        db.add(s)
+        await db.flush()
+        f = Frame(session_id=s.session_id, ts_ns=0, cam_id="cam_f", img_uri="s3://x",
+                  width=1280, height=960, quality=0.9)
+        db.add(f)
+        await db.flush()
+        for _ in range(6):
+            db.add(Object(frame_id=f.frame_id, class_id=cls_id, bbox=[1.0, 2.0, 3.0, 4.0],
+                          conf=0.8, source="fused", attrs={}, state="review", provenance={}))
+        await db.commit()
+        sid = str(s.session_id)
+
+    async with get_sessionmaker()() as db:
+        short = await rerun_session(db, sid, limit=4, apply=False)
+        whole = await rerun_session(db, sid, limit=100, apply=False)
+
+    assert short["truncated"] is True
+    assert short["not_reasoned"] == 2
+    assert short["objects_in_session"] == 6
+    assert whole["truncated"] is False
+    assert whole["not_reasoned"] == 0
