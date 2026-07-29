@@ -29,6 +29,7 @@ from core.storage import get_object_store
 from services.autolabel.lane.linetype import MODEL_VERSION as LINETYPE_VERSION
 from services.autolabel.lane.linetype import classify_lane
 from services.autolabel.lane.marking import group_collinear
+from services.autolabel.lane.plausible import filter_proposals
 
 log = get_logger("perception_cloud")
 
@@ -120,7 +121,7 @@ async def ingest(result_path: Path) -> dict:
     from db.models import DrivableMask, Frame, Lane
     from db.session import get_sessionmaker
     store = get_object_store()
-    n_dr = n_lane = n_err = n_merged = 0
+    n_dr = n_lane = n_err = n_merged = n_off = 0
     rows = [json.loads(ln) for ln in result_path.read_text().splitlines() if ln.strip()]
     async with get_sessionmaker()() as db:
         for rec in rows:
@@ -154,6 +155,18 @@ async def ingest(result_path: Path) -> dict:
                 grouped = group_collinear(lanes, int(frame.width or 1280))
                 if len(grouped) != len(lanes):
                     n_merged += len(lanes) - len(grouped)
+
+                # A lane sits on the road, and the same sweep that produced these lanes produced the
+                # drivable mask for the same frame, so the check costs nothing extra. What it removes is
+                # the hoarding, the flyover girder and the kerb, which is what a lane detector finds when
+                # the road is cluttered.
+                surface = None
+                if dr and not rec.get("drivable_error"):
+                    surface = dr.get("classes")
+                kept, off = filter_proposals(grouped, surface, int(frame.width or 0))
+                if off:
+                    n_off += len(off)
+                grouped = [c for c, _ev in kept]
                 img = _frame_image(store, frame)
                 for pts in grouped:
                     # Typed from the paint, not defaulted. This was the last of the three write paths still
@@ -170,12 +183,15 @@ async def ingest(result_path: Path) -> dict:
                     n_lane += 1
         await db.commit()
     log.info("perception.ingested", drivable=n_dr, lanes=n_lane, errors=n_err,
-             merged_fragments=n_merged)
+             merged_fragments=n_merged, rejected_off_surface=n_off)
     return {"drivable": n_dr, "lanes": n_lane, "errors": n_err,
             # How many per-dash stubs were folded back into the lanes they belong to. A number worth seeing:
             # if it is large the segmenter is finding a lot of dashed road, which is the case the old path
             # could not represent at all.
-            "merged_fragments": n_merged}
+            "merged_fragments": n_merged,
+            # Proposals that were not on the road. Worth seeing: a large number here means the detector is
+            # finding structure rather than lanes, which is a fact about the scene, not a bug in the filter.
+            "rejected_off_surface": n_off}
 
 
 def _frame_image(store, frame):
