@@ -665,6 +665,12 @@ export const api = {
   // M2.2 drivable
   segmentDrivable: (frameId: string) => post<{ coverage: Record<string, number>; model: string }>(`/api/frames/${frameId}/drivable`, {}),
   getDrivable: (frameId: string) => get<{ found: boolean; classes?: Record<string, number[][]>; coverage?: Record<string, number>; source?: string; model_version?: string | null }>(`/api/frames/${frameId}/drivable`),
+  // The human correction. The endpoint has existed since M2.2 and nothing in the web app could reach it,
+  // so `source` was `proposed` on 2,478 of 2,479 masks: the dense surface layer was machine output a person
+  // could look at and not fix.
+  refineDrivable: (frameId: string, classes: Record<string, number[][]>, width: number, height: number) =>
+    put<{ frame_id: string; coverage: Record<string, number>; mask_uri: string }>(
+      `/api/frames/${frameId}/drivable`, { classes, width, height }),
   propagateObject: (object_id: string, frames = 12) =>
     post<{ created: number; track_id?: string; object_ids?: string[]; reason?: string }>(
       `/api/objects/${object_id}/propagate?frames=${frames}`, {}),

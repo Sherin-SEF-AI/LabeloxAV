@@ -118,6 +118,14 @@ const SELECTIONS: { how: SelectHow; label: string; value?: string | number; hint
   { how: "state", label: "rejected", value: "rejected", hint: "already rejected" },
 ];
 
+// The three surface classes the ternary drivable mask carries. Fallback is the unpaved shoulder India
+// actually drives on, which is why it is a first-class surface rather than a kind of non-drivable.
+const SURFACE_CLASSES = [
+  { key: "drivable", label: "drivable", tone: "border-pass text-pass" },
+  { key: "fallback", label: "fallback", tone: "border-warn text-warn" },
+  { key: "non_drivable", label: "non-drv", tone: "border-block text-block" },
+];
+
 // directed object-relationship kinds offered in the editor (rider_of is the India two-wheeler case)
 const RELATION_KINDS = ["rider_of", "towed_by", "part_of", "member_of", "occludes"];
 
@@ -187,6 +195,11 @@ export default function FrameEditor() {
   // Lanes-mode editing (canvas swap): selected lane, the in-progress add path, the raster image + fit scale
   const [laneSel, setLaneSel] = useState<string | null>(null);
   const [laneAdding, setLaneAdding] = useState<number[][] | null>(null);
+  // Drivable region editing. Separate buffers from the lane ones: a lane is an open polyline and a surface
+  // region is a closed area, and sharing a buffer would render one of them wrongly mid-draw.
+  const [areaAdding, setAreaAdding] = useState<number[][] | null>(null);
+  const [areaClass, setAreaClass] = useState<string>("drivable");
+  const [areaSel, setAreaSel] = useState<string | null>(null);
   const [laneImg, setLaneImg] = useState<HTMLImageElement | null>(null);
   const [laneScale, setLaneScale] = useState(1);
   // 3D and LiDAR mode (canvas swap): the cloud nearest this frame, its points, the 3D cuboids, edit state
@@ -523,7 +536,10 @@ export default function FrameEditor() {
     const r = canvasWrapRef.current!.getBoundingClientRect();
     return [(e.evt.clientX - r.left) / laneScale, (e.evt.clientY - r.top) / laneScale];
   };
-  const laneStageClick = (e: { evt: MouseEvent }) => { if (laneAdding) setLaneAdding([...laneAdding, laneToImg(e)]); };
+  const laneStageClick = (e: { evt: MouseEvent }) => {
+    if (laneAdding) { setLaneAdding([...laneAdding, laneToImg(e)]); return; }
+    if (areaAdding) setAreaAdding([...areaAdding, laneToImg(e)]);
+  };
   const laneDragPoint = (laneId: string, i: number, x: number, y: number) =>
     setLanes((ls) => ls.map((l) => l.lane_id === laneId
       ? { ...l, dirty: true, control_points: l.control_points.map((p, j) => (j === i ? [x, y] : p)) } : l));
@@ -546,6 +562,55 @@ export default function FrameEditor() {
     await api.deleteLane(laneSel); setLaneSel(null); await loadLayers(); flash("lane deleted");
   };
   const propagateLanes = async () => { const r = await api.propagateLanes(id, 8); flash(`propagated to ${r.created} lane-frames`); };
+
+  // ---- drivable surface editing --------------------------------------------------------------------
+  // The mask is stored as flat [x,y,x,y,...] rings per class, which is what the API takes and returns, so
+  // the editor speaks that shape rather than converting back and forth and risking a mismatch on save.
+  const saveDrivable = async (next: Record<string, number[][]>) => {
+    if (!meta) return;
+    try {
+      const r = await api.refineDrivable(id, next, meta.width, meta.height);
+      setDrivable(next);
+      setDrivableMeta({ source: "human", model: "human" });
+      const pct = Math.round((r.coverage.drivable ?? 0) * 100);
+      flash(`surface saved, ${pct}% drivable`);
+    } catch (e) { flash("surface save failed: " + humanizeError(e)); }
+  };
+
+  const finishArea = async () => {
+    // Three points is the minimum that encloses anything. Fewer is a stray click, and closing it would
+    // write a degenerate sliver into the coverage statistics.
+    if (!areaAdding || areaAdding.length < 3) { setAreaAdding(null); return; }
+    const flat = areaAdding.flat();
+    const next = { ...(drivable ?? {}) };
+    next[areaClass] = [...(next[areaClass] ?? []), flat];
+    setAreaAdding(null);
+    await saveDrivable(next);
+  };
+
+  const dragAreaPoint = (key: string, i: number, x: number, y: number) => {
+    const [cls, idx] = key.split(":");
+    setDrivable((d) => {
+      if (!d?.[cls]?.[Number(idx)]) return d;
+      const polys = d[cls].map((p2, j) => {
+        if (j !== Number(idx)) return p2;
+        const copy = [...p2];
+        copy[i * 2] = x; copy[i * 2 + 1] = y;
+        return copy;
+      });
+      return { ...d, [cls]: polys };
+    });
+  };
+
+  const deleteArea = async () => {
+    if (!areaSel || !drivable) return;
+    const [cls, idx] = areaSel.split(":");
+    if (!(await confirm({ title: `Delete this ${cls.replace("_", " ")} region?`, danger: true,
+                          confirmLabel: "Delete" }))) return;
+    const next = { ...drivable, [cls]: drivable[cls].filter((_p, j) => j !== Number(idx)) };
+    setAreaSel(null);
+    await saveDrivable(next);
+  };
 
   // Dense semantic editing. The raster had a `human` source it could never be set to, because there was no
   // write path: the layer was machine output a person could look at and not correct.
@@ -1241,7 +1306,11 @@ export default function FrameEditor() {
             laneImg && meta ? (
               <LaneCanvas img={laneImg} meta={{ width: meta.width, height: meta.height }} scale={laneScale}
                 lanes={lanes} sel={laneSel} drivable={layers.drivable ? drivable : null} adding={laneAdding}
-                onStageClick={laneStageClick} onSelect={setLaneSel} onDragPoint={laneDragPoint} />
+                addingArea={areaAdding} addingAreaClass={areaClass}
+                areaSel={areaSel} onSelectArea={(k) => { setAreaSel(k); setLaneSel(null); }}
+                onDragAreaPoint={dragAreaPoint}
+                onStageClick={laneStageClick} onSelect={(lid) => { setLaneSel(lid); setAreaSel(null); }}
+                onDragPoint={laneDragPoint} />
             ) : <div className="absolute inset-0 grid place-items-center font-mono text-[11px] text-ink-3">loading lanes...</div>
           ) : mode === "lidar3d" ? (
             pts3d ? (
@@ -1493,6 +1562,68 @@ export default function FrameEditor() {
                   </div>
                 );
               })()}
+
+              {/* Drivable surface. The PUT behind this has existed since M2.2 and nothing could reach it,
+                  so `source` was `proposed` on 2,478 of 2,479 masks: the layer was machine output a person
+                  could look at and not correct. */}
+              <div className="border-t hairline pt-2 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-ink-3 uppercase text-[10px]">drivable surface</span>
+                  <span className="text-ink-3">
+                    {drivable
+                      ? `${Object.values(drivable).reduce((n, ps) => n + ps.length, 0)} regions`
+                      : "none"}
+                  </span>
+                </div>
+
+                {areaAdding ? (
+                  <>
+                    <div className="text-ink-2">
+                      click to add points ({areaAdding.length}), then close the region
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      <button onClick={finishArea} disabled={areaAdding.length < 3}
+                        className="border border-pass text-pass px-2 py-1 disabled:opacity-40">close region</button>
+                      <button onClick={() => setAreaAdding(null)}
+                        className="border border-line text-ink-3 px-2 py-1 hover:border-block">cancel</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-3 gap-1">
+                      {SURFACE_CLASSES.map((c) => (
+                        <button key={c.key}
+                          onClick={() => { setAreaClass(c.key); setAreaAdding([]); setAreaSel(null); }}
+                          title={`draw a ${c.label} region`}
+                          className={`border px-1 py-1 text-[10px] ${c.tone}`}>
+                          + {c.label}
+                        </button>
+                      ))}
+                    </div>
+                    <button onClick={segRoad}
+                      className="w-full border border-line text-ink-3 px-2 py-1 hover:border-accent">
+                      re-run the model
+                    </button>
+                  </>
+                )}
+
+                {areaSel && (
+                  <div className="border-t hairline pt-2 space-y-1">
+                    <div className="text-ink-3 uppercase text-[10px]">
+                      selected {areaSel.split(":")[0].replace("_", " ")} region
+                    </div>
+                    <div className="text-ink-3 text-[10px]">
+                      drag a handle to pull the boundary onto the kerb, then save
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      <button onClick={() => drivable && void saveDrivable(drivable)}
+                        className="border border-pass text-pass px-2 py-1">save edits</button>
+                      <button onClick={deleteArea}
+                        className="border border-line text-ink-3 px-2 py-1 hover:border-block hover:text-block">delete</button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
           {/* 3D and LiDAR mode: the panel routes to the cuboid list plus selected-cuboid geometry */}
