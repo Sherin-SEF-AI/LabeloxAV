@@ -39,6 +39,10 @@ log = get_logger("reasoner_evidence")
 
 _PRIORS_PATH = Path(__file__).resolve().parents[3] / "configs" / "class_priors.yaml"
 
+# How far up a frame a road user can still legitimately appear. Measured, not assumed: see the note
+# in check_elevation for what the assumed value cost.
+ELEVATION_FRAC = 0.05
+
 
 @lru_cache(maxsize=1)
 def load_priors() -> dict:
@@ -126,44 +130,63 @@ def check_physics(ctx: EvidenceContext) -> list[Finding]:
 
 # ---------------------------------------------------------------- geometry
 
-def check_geometry(ctx: EvidenceContext) -> list[Finding]:
-    """Aspect ratio against the class prior, and the mask against the box.
+def check_aspect(ctx: EvidenceContext) -> list[Finding]:
+    """Box shape against the class's usual proportions.
 
-    Mask-versus-box disagreement was already computed at fusion and only ever used as a triage flag. It is
-    strong evidence: when SAM's segment covers a third of the detector's box, the two models are looking at
-    different things and at least one of them is wrong.
+    Its own collector rather than part of a general "geometry", because a collector is the unit an operator
+    can turn off and a finding is the unit the attribution grades, and those have to be the same thing or a
+    rule measured as harmful cannot actually be switched off. This one currently measures below the base
+    rate: an occluded or truncated vehicle has the wrong proportions and the right label, which is common
+    enough to swamp the cases where a bad shape means a bad class.
     """
-    out: list[Finding] = []
     priors = load_priors()
     bw = max(1.0, ctx.obj.bbox.x2 - ctx.obj.bbox.x1)
     bh = max(1.0, ctx.obj.bbox.y2 - ctx.obj.bbox.y1)
     ratio = bw / bh
 
     band = (priors.get("aspect_wh") or {}).get(ctx.obj.class_name)
-    if band:
-        lo, hi = float(band[0]), float(band[1])
-        if lo <= ratio <= hi:
-            out.append(Finding("geometry", 0.2,
-                               f"aspect {ratio:.2f} is typical for {ctx.obj.class_name}"))
-        else:
-            off = abs(1.0 - (ratio / lo if ratio < lo else ratio / hi))
-            out.append(Finding("geometry", -min(0.7, 0.2 + off * 0.4),
-                               f"aspect {ratio:.2f} is outside the {lo}-{hi} range for "
-                               f"{ctx.obj.class_name}"))
+    if not band:
+        return []
+    lo, hi = float(band[0]), float(band[1])
+    if lo <= ratio <= hi:
+        return [Finding("aspect", 0.2, f"aspect {ratio:.2f} is typical for {ctx.obj.class_name}")]
+    off = abs(1.0 - (ratio / lo if ratio < lo else ratio / hi))
+    return [Finding("aspect", -min(0.7, 0.2 + off * 0.4),
+                    f"aspect {ratio:.2f} is outside the {lo}-{hi} range for {ctx.obj.class_name}")]
 
-    if ctx.obj.provenance.mask_box_disagree:
-        out.append(Finding("geometry", -0.45,
-                           "the segment and the detector box cover different regions, so the two models "
-                           "are not looking at the same thing"))
 
-    overhead = set(priors.get("overhead_classes") or [])
-    if ctx.obj.class_name not in overhead and ctx.frame_h > 0:
-        # Entirely in the top third and not an overhead class: a road user cannot float there.
-        if ctx.obj.bbox.y2 < ctx.frame_h * 0.33:
-            out.append(Finding("geometry", -0.5,
-                               "the whole box sits in the upper third of the frame, where a road user "
-                               "cannot be"))
-    return out
+def check_mask_box(ctx: EvidenceContext) -> list[Finding]:
+    """Whether the segment and the detector box cover the same thing.
+
+    Computed at fusion and previously used only as a triage flag. When SAM's segment covers a third of the
+    detector's box the two models are looking at different things and at least one is wrong, which is a
+    strong argument in principle. Measured, it currently sits below the base rate, so it is doing less than
+    it looks like it should.
+    """
+    if not ctx.obj.provenance.mask_box_disagree:
+        return []
+    return [Finding("mask_box", -0.45,
+                    "the segment and the detector box cover different regions, so the two models are not "
+                    "looking at the same thing")]
+
+
+def check_elevation(ctx: EvidenceContext) -> list[Finding]:
+    """Whether the box sits higher up the frame than a road user can be.
+
+    The threshold is measured, not assumed, and the difference is the whole point of measuring. At a third
+    of frame height, which is where somebody guessed the horizon was, this objected to 490 reviewed objects
+    and was right 43% of the time against a base rate of 63%: it fired more often on the objects that were
+    fine than on the ones that were wrong, so having it was worse than not. Distant vehicles and
+    high-mounted cameras put perfectly good road users well above a third. At a twentieth the same rule is
+    right 99% of the time.
+    """
+    priors = load_priors()
+    if ctx.obj.class_name in set(priors.get("overhead_classes") or []) or ctx.frame_h <= 0:
+        return []
+    if ctx.obj.bbox.y2 >= ctx.frame_h * ELEVATION_FRAC:
+        return []
+    return [Finding("elevation", -0.5,
+                    "the whole box sits at the very top of the frame, where a road user cannot be")]
 
 
 # ---------------------------------------------------------------- temporal
@@ -252,9 +275,11 @@ def check_scene(ctx: EvidenceContext) -> list[Finding]:
         if ctx.obj.class_name in set(table.get(road_type) or []):
             out.append(Finding("scene", -0.3,
                                f"{ctx.obj.class_name} is unusual on a {road_type}, though not impossible"))
-        else:
-            out.append(Finding("scene", 0.1,
-                               f"{ctx.obj.class_name} is ordinary on a {road_type}"))
+        # No finding when the class is merely not implausible here. That used to emit a small positive
+        # weight, and measuring it showed why that was wrong: it fired for 1,350 of the reviewed objects and
+        # was right 25% of the time, which is the base rate. It was not evidence, it was a constant added to
+        # almost everything, and a constant that lifts every score lifts the wrong ones too. Saying a class
+        # is not out of place here says nothing about whether this particular box is that class.
     return out
 
 
@@ -351,7 +376,12 @@ def check_corpus_memory(ctx: EvidenceContext) -> list[Finding]:
 
 CHECKS = {
     "physics": check_physics,
-    "geometry": check_geometry,
+    # One collector per rule. A collector is what an operator can disable and a finding name is what the
+    # attribution grades; when those differ, a rule measured as harmful cannot be switched off, which is
+    # what "geometry" was: three unrelated rules of very different strength under one switch.
+    "aspect": check_aspect,
+    "mask_box": check_mask_box,
+    "elevation": check_elevation,
     "temporal": check_temporal,
     "scene": check_scene,
     "cross_model": check_cross_model,

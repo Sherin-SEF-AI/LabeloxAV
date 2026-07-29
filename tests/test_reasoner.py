@@ -558,6 +558,9 @@ async def test_attribution_counts_only_reviewed_objects():
              "findings": [{"check": "physics", "weight": -0.7, "detail": "impossible"}]}
 
     async with get_sessionmaker()() as db:
+        baseline = await measure_checks(db)
+        before_against = (baseline.get("checks", {}).get("physics") or {}).get("fired_against", 0)
+
         s = DbSession(vehicle_id="veh-reason", city="BLR", start_ts_ns=0, end_ts_ns=10**9,
                       sensors={}, ontology_version="labelox-in-0.1.0")
         db.add(s)
@@ -577,13 +580,13 @@ async def test_attribution_counts_only_reviewed_objects():
                       before={}, after={}, ts_ns=0))
         await db.commit()
 
-        out = await measure_checks(db)
+        after = await measure_checks(db)
 
-    physics = out["checks"]["physics"]
-    # The reviewed one counted; the unreviewed one did not.
-    assert physics["fired_against"] >= 1
-    assert physics["correct_against"] >= 1
-    assert out["reviewed"] < out["reasoned"]
+    # Measured as a delta, because the test database accumulates objects from every other test in the run
+    # and an absolute count would be asserting about their leftovers rather than about these two rows.
+    added = after["checks"]["physics"]["fired_against"] - before_against
+    assert added == 1, "the reviewed object counted once and the unreviewed one not at all"
+    assert after["reviewed"] == after["reasoned"], "only reviewed objects are fetched at all"
 
 
 @pytest.mark.db
@@ -592,11 +595,17 @@ async def test_suggested_weights_are_reported_never_applied():
     notices until a class collapses."""
     from db.session import get_sessionmaker
     from services.autolabel.reasoner.attribution import suggest_weights
+    from services.autolabel.reasoner.evidence import CHECKS
 
     async with get_sessionmaker()() as db:
         out = await suggest_weights(db)
     assert "not applied" in out["note"]
-    assert set(out["suggestions"]) >= {"physics", "geometry", "temporal", "scene"}
+    # Every registered collector gets a suggestion, whether or not it has fired. "geometry" is gone: it was
+    # three unrelated rules under one switch, and it is now aspect, mask_box and elevation, each of which
+    # can be graded and turned off on its own.
+    assert set(out["suggestions"]) >= {"physics", "aspect", "mask_box", "elevation",
+                                       "temporal", "scene"}
+    assert "geometry" not in CHECKS
 
 
 # ---------------------------------------------------------------- the live runner seam
@@ -680,3 +689,225 @@ async def test_the_escalation_budget_cannot_exceed_the_vlm_allowance():
 
     # And an exhausted budget yields no calls rather than a negative one.
     assert max(0, min(0, per_frame_cap, reasoner_cap - already)) == 0
+
+
+@pytest.mark.db
+async def test_a_settled_object_keeps_its_label_but_still_records_what_the_reasoner_thought():
+    """The bug that made the whole layer ungradable. Attribution measures the reasoner against what humans
+    decided, and the rerun refused to write a trace on any object a human had decided, so the two halves
+    excluded each other and no amount of backfilling could produce a measurement.
+
+    Writing a trace is an observation. Changing a label is a decision. Only the second is a person's."""
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from db.models import Frame, Object, OntologyClass
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.autolabel.reasoner.rerun import rerun_session
+
+    async with get_sessionmaker()() as db:
+        s = DbSession(vehicle_id="veh-trace", city="BLR", start_ts_ns=0, end_ts_ns=10**9,
+                      sensors={}, ontology_version="labelox-in-0.1.0")
+        db.add(s)
+        await db.flush()
+        f = Frame(session_id=s.session_id, ts_ns=0, cam_id="cam_f", img_uri="s3://x",
+                  width=1280, height=960, quality=0.9)
+        db.add(f)
+        await db.flush()
+        cls_id = (await db.execute(
+            select(OntologyClass.id).where(OntologyClass.name == "sedan"))).scalar()
+        if cls_id is None:
+            pytest.skip("the ontology in this database has no sedan class")
+        for state in ("accepted", "rejected", "review"):
+            db.add(Object(frame_id=f.frame_id, class_id=cls_id,
+                          bbox=[100.0, 500.0, 260.0, 600.0], conf=0.9, source="fused",
+                          attrs={}, state=state, provenance={}))
+        await db.commit()
+        sid = str(s.session_id)
+
+    async with get_sessionmaker()() as db:
+        out = await rerun_session(db, sid, limit=100, apply=True)
+
+    async with get_sessionmaker()() as db:
+        rows = (await db.execute(
+            select(Object).join(Frame, Object.frame_id == Frame.frame_id)
+            .where(Frame.session_id == _uuid.UUID(sid)))).scalars().all()
+
+    by_state = {r.state: r for r in rows}
+    assert out["skipped_human_decisions"] == 2, "two objects were settled by a person"
+    # Every one carries a trace, settled or not: that is what makes the layer measurable.
+    assert all((r.provenance or {}).get("reasoning") for r in rows), \
+        "a settled object is the answer key, and withholding its trace is what left attribution empty"
+    # And the settled ones kept their labels.
+    assert by_state["accepted"].state == "accepted"
+    assert by_state["rejected"].state == "rejected"
+
+
+@pytest.mark.db
+async def test_attribution_reads_every_reviewed_object_not_an_arbitrary_page():
+    """The measurement is only over reviewed objects, so fetching an arbitrary page of the whole table and
+    filtering afterwards puts the answer at the mercy of which rows the page happened to contain. On the real
+    corpus that was 20,000 rows drawn from 583,525 to find 2,007 reviewed ones."""
+
+    from sqlalchemy import select
+
+    from db.models import Frame, Object, OntologyClass, Review
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.autolabel.reasoner.attribution import measure_checks
+
+    trace = {"decision": "review", "score": -0.4, "conflict": 0.0, "detector_conf": 0.7,
+             "findings": [{"check": "physics", "weight": -0.7, "detail": "impossible"}]}
+
+    async with get_sessionmaker()() as db:
+        cls_id = (await db.execute(
+            select(OntologyClass.id).where(OntologyClass.name == "sedan"))).scalar()
+        if cls_id is None:
+            pytest.skip("the ontology in this database has no sedan class")
+        s = DbSession(vehicle_id="veh-attr-page", city="BLR", start_ts_ns=0, end_ts_ns=10**9,
+                      sensors={}, ontology_version="labelox-in-0.1.0")
+        db.add(s)
+        await db.flush()
+        f = Frame(session_id=s.session_id, ts_ns=0, cam_id="cam_f", img_uri="s3://x",
+                  width=1280, height=960, quality=0.9)
+        db.add(f)
+        await db.flush()
+
+        # One reviewed object carrying a trace, among a crowd of unreviewed ones that also carry traces.
+        # A page-then-filter implementation can miss the only row that counts.
+        reviewed = Object(frame_id=f.frame_id, class_id=cls_id, bbox=[1.0, 2.0, 3.0, 4.0],
+                          conf=0.8, source="fused", attrs={}, state="rejected",
+                          provenance={"reasoning": trace})
+        db.add(reviewed)
+        await db.flush()
+        db.add(Review(object_id=reviewed.object_id, action="reject", reviewer="tester",
+                      before={}, after={}, ts_ns=0))
+        for _ in range(30):
+            db.add(Object(frame_id=f.frame_id, class_id=cls_id, bbox=[1.0, 2.0, 3.0, 4.0],
+                          conf=0.8, source="fused", attrs={}, state="review",
+                          provenance={"reasoning": trace}))
+        await db.commit()
+        target = reviewed.object_id
+
+    async with get_sessionmaker()() as db:
+        out = await measure_checks(db)
+
+    # The invariant the fix encodes: no unreviewed row enters the computation at all, so the page can never
+    # be crowded out by them however many there are. Under a fetch-then-filter implementation the thirty
+    # unreviewed objects above would be pulled in and counted among the reasoned, leaving fewer reviewed
+    # than reasoned, and on a table of 583,525 rows they would have displaced the reviewed ones entirely.
+    assert out["reasoned"] == out["reviewed"], \
+        "an object nobody looked at must not even be fetched, let alone grade a check"
+    assert out["reviewed"] >= 1
+    assert (out["checks"].get("physics") or {}).get("fired_against", 0) >= 1
+
+    async with get_sessionmaker()() as db:
+        still = await db.get(Object, target)
+    assert still.state == "rejected"
+
+
+@pytest.mark.db
+async def test_a_correction_means_opposite_things_for_accept_and_for_reject():
+    """Reported under one name it inverted three decisions out of five: `reject` read as 94% wrong on the
+    real corpus when it was 94% vindicated. A human correcting an object the reasoner let through is the
+    reasoner having been wrong; correcting one it escalated is the escalation having been warranted."""
+    from sqlalchemy import select
+
+    from db.models import Frame, Object, OntologyClass, Review
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.autolabel.reasoner.attribution import decision_outcomes
+
+    def trace(decision):
+        return {"decision": decision, "score": 0.0, "conflict": 0.0, "detector_conf": 0.7,
+                "findings": []}
+
+    async with get_sessionmaker()() as db:
+        cls_id = (await db.execute(
+            select(OntologyClass.id).where(OntologyClass.name == "sedan"))).scalar()
+        if cls_id is None:
+            pytest.skip("the ontology in this database has no sedan class")
+        s = DbSession(vehicle_id="veh-polarity", city="BLR", start_ts_ns=0, end_ts_ns=10**9,
+                      sensors={}, ontology_version="labelox-in-0.1.0")
+        db.add(s)
+        await db.flush()
+        f = Frame(session_id=s.session_id, ts_ns=0, cam_id="cam_f", img_uri="s3://x",
+                  width=1280, height=960, quality=0.9)
+        db.add(f)
+        await db.flush()
+        for decision in ("accept", "reject"):
+            o = Object(frame_id=f.frame_id, class_id=cls_id, bbox=[1.0, 2.0, 3.0, 4.0], conf=0.8,
+                       source="fused", attrs={}, state="rejected",
+                       provenance={"reasoning": trace(decision)})
+            db.add(o)
+            await db.flush()
+            db.add(Review(object_id=o.object_id, reviewer="tester", action="reject",
+                          before={}, after={}, ts_ns=0))
+        await db.commit()
+
+    async with get_sessionmaker()() as db:
+        out = await decision_outcomes(db)
+
+    accept, reject = out["by_decision"]["accept"], out["by_decision"]["reject"]
+    assert "error_rate" in accept and "justified_rate" not in accept
+    assert "justified_rate" in reject and "error_rate" not in reject
+    assert accept["meaning"] == "let through without review"
+    assert reject["meaning"] == "escalated to a human"
+    # And the headline names the one number the layer is accountable to.
+    assert out["auto_accept_error_rate"] == accept["error_rate"]
+
+
+@pytest.mark.db
+async def test_a_check_is_graded_against_the_base_rate_not_against_a_coin_flip():
+    """Precision alone is uninterpretable. On the real corpus 63% of reviewed objects were corrected anyway,
+    so a rule firing at random scores 0.63 and looks respectable, and one scoring 0.53 looks like a coin flip
+    when it is in fact anti-correlated: firing more often on the objects that were fine. Two rules were being
+    read that way, and one of them was making the score actively worse."""
+    from sqlalchemy import select
+
+    from db.models import Frame, Object, OntologyClass, Review
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.autolabel.reasoner.attribution import measure_checks
+
+    def trace(check):
+        return {"decision": "review", "score": -0.4, "conflict": 0.0, "detector_conf": 0.7,
+                "findings": [{"check": check, "weight": -0.5, "detail": "objection"}]}
+
+    async with get_sessionmaker()() as db:
+        cls_id = (await db.execute(
+            select(OntologyClass.id).where(OntologyClass.name == "sedan"))).scalar()
+        if cls_id is None:
+            pytest.skip("the ontology in this database has no sedan class")
+        s = DbSession(vehicle_id="veh-lift", city="BLR", start_ts_ns=0, end_ts_ns=10**9,
+                      sensors={}, ontology_version="labelox-in-0.1.0")
+        db.add(s)
+        await db.flush()
+        f = Frame(session_id=s.session_id, ts_ns=0, cam_id="cam_f", img_uri="s3://x",
+                  width=1280, height=960, quality=0.9)
+        db.add(f)
+        await db.flush()
+        # A rule that objects only to objects humans then corrected, and one that objects only to objects
+        # humans accepted. The first carries information; the second is worse than silence.
+        for check, action, state in (("lift_good", "reject", "rejected"),
+                                     ("lift_bad", "confirm", "accepted")):
+            for _ in range(30):
+                o = Object(frame_id=f.frame_id, class_id=cls_id, bbox=[1.0, 2.0, 3.0, 4.0],
+                           conf=0.8, source="fused", attrs={}, state=state,
+                           provenance={"reasoning": trace(check)})
+                db.add(o)
+                await db.flush()
+                db.add(Review(object_id=o.object_id, reviewer="tester", action=action,
+                              before={}, after={}, ts_ns=0))
+        await db.commit()
+
+    async with get_sessionmaker()() as db:
+        out = await measure_checks(db)
+
+    assert out["base_rate_wrong"] is not None, "the bar every check clears has to be reported"
+    good, bad = out["checks"]["lift_good"], out["checks"]["lift_bad"]
+    assert good["lift_against"] > 1.0 and good["informative"] is True
+    assert bad["lift_against"] < 1.0 and bad["informative"] is False, \
+        "a rule that fires on the objects that were fine is not weak, it is harmful"

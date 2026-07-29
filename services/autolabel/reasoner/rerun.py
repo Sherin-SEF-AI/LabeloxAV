@@ -68,6 +68,11 @@ async def rerun_session(db: AsyncSession, session_id: str, *, limit: int = 500,
 
     Human decisions are never overwritten, whatever `apply` says. An object a person accepted or rejected
     is settled, and a machine revisiting it would undo exactly the work the loop exists to collect.
+
+    The reasoning trace is a separate matter and is recorded on settled objects too. It says what the
+    reasoner thought, not what the label is, and those objects are the only ones against which the reasoner
+    can be graded: a human ruling is the answer key. Withholding the trace there is what kept the attribution
+    measurement empty no matter how much of the corpus was reasoned over.
     """
     from db.models import Frame, Object
     from services.autolabel.ontology import get_ontology
@@ -129,14 +134,22 @@ async def rerun_session(db: AsyncSession, session_id: str, *, limit: int = 500,
 
             if not apply:
                 continue
-            if row.source == "human" or row.state in ("accepted", "rejected"):
-                # Settled by a person. Revisiting it would undo the work the loop exists to collect.
-                skipped_human += 1
-                continue
+
+            # The trace is written on every object, including the ones a person has settled. Recording what
+            # the reasoner thought is an observation; changing the label is a decision, and only the second
+            # is a person's to make. Conflating them was a real bug: attribution grades the reasoner against
+            # what humans decided, so refusing to record its reasoning on exactly the objects a human ruled
+            # on meant the measurement could never have anything to read. The two halves excluded each other
+            # and the layer stayed ungradable.
             row.provenance = {**(row.provenance or {}), **{
                 "reasoning": u.provenance.reasoning,
                 "quality_flags": u.provenance.quality_flags,
                 "notes": u.provenance.notes}}
+
+            if row.source == "human" or row.state in ("accepted", "rejected"):
+                # Settled by a person. Revisiting the label would undo the work the loop exists to collect.
+                skipped_human += 1
+                continue
             if would_demote:
                 row.state = "review"
                 applied += 1
