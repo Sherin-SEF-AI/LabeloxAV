@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { getUser } from "@/lib/user";
+import { useCurrentUser } from "@/lib/user";
 import type { AssignmentRow, MergeRequestRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
+import LoadState from "@/components/shell/LoadState";
 import { StateBadge } from "@/components/StateBadge";
 
 // M4.3 collaboration console: lakeFS branches, annotator assignments, and merge requests. Annotators work
@@ -16,14 +17,24 @@ export default function CollaboratePage() {
   const [asgs, setAsgs] = useState<AssignmentRow[]>([]);
   const [mrs, setMrs] = useState<MergeRequestRow[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
-  const me = getUser();
+  const [loadErr, setLoadErr] = useState<unknown>(null);
+  // Read in an effect, not in the body: getUser() touches localStorage and rendering it directly made
+  // the server say one thing and the client another, which React resolves by discarding the server HTML.
+  const me = useCurrentUser();
   const canReview = me?.role === "reviewer" || me?.role === "admin";
 
   const load = useCallback(async () => {
-    const [b, a, m] = await Promise.all([api.collabBranches(), api.collabAssignments(), api.collabMRs()]);
-    setBranches(b.branches);
-    setAsgs(a);
-    setMrs(m);
+    setLoadErr(null);
+    try {
+        const [b, a, m] = await Promise.all([api.collabBranches(), api.collabAssignments(), api.collabMRs()]);
+        setBranches(b.branches);
+        setAsgs(a);
+        setMrs(m);
+    } catch (e) {
+      // Without this the page kept rendering an empty shell after a
+      // failed request, which is indistinguishable from having no data.
+      setLoadErr(e);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -42,6 +53,7 @@ export default function CollaboratePage() {
       right={msg ? <span className="font-mono text-[11px] text-warn">{msg}</span> : undefined}
     >
       <div className="p-4 space-y-4 font-mono text-[11px]">
+      {loadErr != null && <LoadState error={loadErr} onRetry={() => void load()} />}
         <div className="flex items-center gap-2 text-ink-3">
           <span>actor: <span className="text-ink-2">{me ? `${me.name} (${me.role})` : "none"}</span></span>
           {!canReview && <span className="text-warn">reviewer or admin role needed to approve/merge</span>}

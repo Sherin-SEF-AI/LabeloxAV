@@ -36,6 +36,24 @@ export type Viewport = { scale: number; ox: number; oy: number };
 
 type Snapshot = { objects: EdObject[]; deleted: string[] };
 
+// A history entry is a snapshot plus what the edit was and a stable identity to jump to. Kept apart from
+// Snapshot so EditorState, which spreads Snapshot, does not sprout a label of its own.
+export type HistoryEntry = Snapshot & { label: string; at: number };
+
+// Ways to pick a set of objects that are not "drag a box round them". A dense frame holds forty vehicles
+// and the useful selections are almost never contiguous: every autorickshaw, everything the model was
+// unsure about, everything nobody has looked at yet.
+export type SelectHow =
+  | "all"          // every visible, unlocked object
+  | "none"
+  | "invert"
+  | "class"        // by class name
+  | "sameClass"    // the same class as the primary selection
+  | "state"        // review / accepted / rejected
+  | "lowConf"      // conf below a threshold
+  | "unreviewed"   // still in review, which is the queue an annotator is working
+  | "new";         // drawn in this session and not yet saved
+
 export type EditorState = Snapshot & {
   selectedId: string | null;
   // Additional ids selected alongside selectedId. Kept separate from selectedId rather than replacing it so
@@ -46,8 +64,8 @@ export type EditorState = Snapshot & {
   viewport: Viewport;
   candidate: number[][] | null; // SAM candidate polygons (image coords)
   touched: string[]; // ids the annotator actually selected/edited; "confirm frame" accepts only these
-  past: Snapshot[];
-  future: Snapshot[];
+  past: HistoryEntry[];
+  future: HistoryEntry[];
 };
 
 export type Action =
@@ -57,6 +75,7 @@ export type Action =
   | { t: "select"; id: string | null }
   | { t: "selectMany"; ids: string[]; additive?: boolean }
   | { t: "toggleSelect"; id: string }
+  | { t: "selectBy"; how: SelectHow; value?: string | number }
   | { t: "setVisible"; ids: string[]; visible: boolean }
   | { t: "setLocked"; ids: string[]; locked: boolean }
   | { t: "candidate"; polys: number[][] | null }
@@ -67,6 +86,7 @@ export type Action =
   | { t: "delete"; id: string }
   | { t: "undo" }
   | { t: "redo" }
+  | { t: "jump"; at: number }
   | { t: "saved"; remap: Record<string, string>; versions?: Record<string, number> };
 
 let _tmp = 0;
@@ -74,7 +94,13 @@ export function tmpId(): string {
   return `tmp-${++_tmp}`;
 }
 
-const snap = (s: EditorState): Snapshot => ({ objects: s.objects, deleted: s.deleted });
+const snap = (s: EditorState, label = "edit"): HistoryEntry =>
+  ({ objects: s.objects, deleted: s.deleted, label, at: ++_seq });
+
+// A monotonic counter rather than a clock: history entries need a stable identity to be jumped to and
+// rendered as a list, and Date.now() collides when two edits land in the same millisecond, which dragging
+// a box does constantly.
+let _seq = 0;
 
 // An object id is unique by construction, so editor state must never hold two objects with the same
 // id. A collision can arise when an idempotent server create returns an id already in the list (a temp
@@ -86,11 +112,30 @@ function uniqById(objs: EdObject[]): EdObject[] {
   return Array.from(byId.values());
 }
 
+// What an update actually changed, in the words a person would use. A history that says "edit" fourteen
+// times is a list nobody can navigate, which is the same as not having one.
+function describeUpdate(s: EditorState, id: string, patch: Partial<EdObject>): string {
+  const o = s.objects.find((x) => x.id === id);
+  const name = o?.class_name ?? "object";
+  if (patch.class_name && patch.class_name !== o?.class_name) {
+    return `relabelled ${name} to ${patch.class_name}`;
+  }
+  if (patch.mask) return `edited ${name} mask`;
+  if (patch.keypoints) return `posed ${name}`;
+  if (patch.polyline) return `edited ${name} line`;
+  if (patch.attrs) return `set ${name} attributes`;
+  if (patch.state) return `marked ${name} ${patch.state}`;
+  if (patch.bbox || patch.rot !== undefined) return `moved ${name}`;
+  return `edited ${name}`;
+}
+
 const HISTORY_CAP = 100;
 
-// wrap a mutating result: push current snapshot to history (capped), clear redo
-function mutate(s: EditorState, next: Snapshot): EditorState {
-  return { ...s, ...next, past: [...s.past, snap(s)].slice(-HISTORY_CAP), future: [] };
+// wrap a mutating result: push current snapshot to history (capped), clear redo.
+// The label describes the edit that is about to happen, not the state being stored, because that is what a
+// person reading the list is looking for: "deleted 3 objects", not "12 objects".
+function mutate(s: EditorState, next: Snapshot, label = "edit"): EditorState {
+  return { ...s, ...next, past: [...s.past, snap(s, label)].slice(-HISTORY_CAP), future: [] };
 }
 
 // two objects differ if any human-syncable field changed (geometry / class / mask / attrs / state / rot)
@@ -159,6 +204,36 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
       return { ...s, selectedIds: ids, selectedId: ids[ids.length - 1] ?? null,
                touched: s.touched.includes(a.id) ? s.touched : [...s.touched, a.id] };
     }
+    case "selectBy": {
+      // Locked objects are never selected. The lock exists so a bulk action cannot reach them, and a
+      // select-all that ignored it would hand every bulk action the thing the lock was protecting.
+      const pool = s.objects.filter((o) => !o.locked && o.visible !== false);
+      const primary = s.objects.find((o) => o.id === s.selectedId);
+      let ids: string[];
+      switch (a.how) {
+        case "all": ids = pool.map((o) => o.id); break;
+        case "none": return { ...s, selectedIds: [], selectedId: null };
+        case "invert": ids = pool.filter((o) => !s.selectedIds.includes(o.id)).map((o) => o.id); break;
+        case "class": ids = pool.filter((o) => o.class_name === a.value).map((o) => o.id); break;
+        case "sameClass":
+          if (!primary) return s;
+          ids = pool.filter((o) => o.class_name === primary.class_name).map((o) => o.id);
+          break;
+        case "state": ids = pool.filter((o) => o.state === a.value).map((o) => o.id); break;
+        case "lowConf": {
+          const t = typeof a.value === "number" ? a.value : 0.5;
+          ids = pool.filter((o) => (o.conf ?? 1) < t).map((o) => o.id);
+          break;
+        }
+        case "unreviewed": ids = pool.filter((o) => o.state === "review").map((o) => o.id); break;
+        case "new": ids = pool.filter((o) => o.isNew).map((o) => o.id); break;
+        default: return s;
+      }
+      // The primary selection stays whatever it was if it survived the filter, so the properties panel does
+      // not jump to a different object underneath the annotator's hands.
+      const keepPrimary = s.selectedId && ids.includes(s.selectedId) ? s.selectedId : (ids[0] ?? null);
+      return { ...s, selectedIds: ids, selectedId: keepPrimary };
+    }
     case "setVisible":
       // Visibility is a view concern, not an edit: it must not mark the object dirty or enter undo history,
       // or hiding a box to see behind it would queue a pointless save and consume an undo step.
@@ -172,13 +247,14 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
     case "candidate":
       return { ...s, candidate: a.polys };
     case "add":
-      return { ...mutate(s, { objects: uniqById([...s.objects, a.obj]), deleted: s.deleted }), selectedId: a.obj.id };
+      return { ...mutate(s, { objects: uniqById([...s.objects, a.obj]), deleted: s.deleted },
+                         `added ${a.obj.class_name}`), selectedId: a.obj.id };
     case "update":
       return {
         ...mutate(s, {
           objects: s.objects.map((o) => (o.id === a.id ? { ...o, ...a.patch, dirty: !o.isNew } : o)),
           deleted: s.deleted,
-        }),
+        }, describeUpdate(s, a.id, a.patch)),
         touched: s.touched.includes(a.id) ? s.touched : [...s.touched, a.id],
       };
     case "acceptAll":
@@ -188,7 +264,7 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
         objects: s.objects.map((o) =>
           o.isNew || !s.touched.includes(o.id) ? o : { ...o, state: "accepted", dirty: true }),
         deleted: s.deleted,
-      });
+      }, `confirmed ${s.touched.length} reviewed`);
     case "reviewed":
       // A review (accept/reject) already persisted to the server via api.review with an explicit state, so
       // set the object's state and new version WITHOUT marking it dirty (dirty would make autosave re-write
@@ -201,7 +277,8 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
       const obj = s.objects.find((o) => o.id === a.id);
       const deleted = obj && !obj.isNew ? [...s.deleted, a.id] : s.deleted;
       return {
-        ...mutate(s, { objects: s.objects.filter((o) => o.id !== a.id), deleted }),
+        ...mutate(s, { objects: s.objects.filter((o) => o.id !== a.id), deleted },
+                  `deleted ${obj?.class_name ?? "object"}`),
         selectedId: s.selectedId === a.id ? null : s.selectedId,
       };
     }
@@ -211,7 +288,7 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
       const r = restore(s, prev);
       return { ...s, objects: r.objects, deleted: r.deleted,
         selectedId: r.objects.some((o) => o.id === s.selectedId) ? s.selectedId : null,
-        past: s.past.slice(0, -1), future: [snap(s), ...s.future] };
+        past: s.past.slice(0, -1), future: [snap(s, prev.label), ...s.future] };
     }
     case "redo": {
       if (!s.future.length) return s;
@@ -219,7 +296,31 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
       const r = restore(s, nxt);
       return { ...s, objects: r.objects, deleted: r.deleted,
         selectedId: r.objects.some((o) => o.id === s.selectedId) ? s.selectedId : null,
-        past: [...s.past, snap(s)], future: s.future.slice(1) };
+        past: [...s.past, snap(s, nxt.label)], future: s.future.slice(1) };
+    }
+    case "jump": {
+      // Move straight to a point in the history rather than stepping. Undo is fine for the last thing you
+      // did and useless for "put it back to how it was before I started this junction", which is the case
+      // a visible history exists to serve.
+      const iPast = s.past.findIndex((h) => h.at === a.at);
+      if (iPast >= 0) {
+        const target = s.past[iPast];
+        const r = restore(s, target);
+        // Everything after the target moves to the redo stack, newest last, so stepping forward again
+        // replays the same edits in the order they happened.
+        const undone = [...s.past.slice(iPast + 1), snap(s, target.label)].reverse();
+        return { ...s, objects: r.objects, deleted: r.deleted,
+          selectedId: r.objects.some((o) => o.id === s.selectedId) ? s.selectedId : null,
+          past: s.past.slice(0, iPast), future: [...undone, ...s.future] };
+      }
+      const iFut = s.future.findIndex((h) => h.at === a.at);
+      if (iFut < 0) return s;
+      const target = s.future[iFut];
+      const r = restore(s, target);
+      const redone = [snap(s, target.label), ...s.future.slice(0, iFut).reverse()];
+      return { ...s, objects: r.objects, deleted: r.deleted,
+        selectedId: r.objects.some((o) => o.id === s.selectedId) ? s.selectedId : null,
+        past: [...s.past, ...redone], future: s.future.slice(iFut + 1) };
     }
     case "saved": {
       const remap = (o: EdObject): EdObject => ({ ...o, id: a.remap[o.id] ?? o.id, isNew: false });
@@ -232,8 +333,11 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
         }))),
         // Keep the undo history across autosaves: remap temp ids, mark snapshot objects saved, and drop
         // pending deletes (restore() recomputes them). Without this, autosave wipes undo/redo entirely.
-        past: s.past.map((sn) => ({ objects: sn.objects.map(remap), deleted: [] })),
-        future: s.future.map((sn) => ({ objects: sn.objects.map(remap), deleted: [] })),
+        // The label and the entry's identity carry through the remap. They describe the edit, which the
+        // save did not change, and losing them would leave a history panel full of unnamed steps after the
+        // first autosave.
+        past: s.past.map((sn) => ({ ...sn, objects: sn.objects.map(remap), deleted: [] })),
+        future: s.future.map((sn) => ({ ...sn, objects: sn.objects.map(remap), deleted: [] })),
       };
     }
     default:

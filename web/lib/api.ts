@@ -23,6 +23,10 @@ import type {
   LaneLinkResult,
   LaneTypeResult,
   LaneTypeCoverage,
+  Checkpoint,
+  CheckpointList,
+  RestoreResult,
+  ObjectHistory,
   SegmentEditResult,
   InertialEvents,
   Confusions,
@@ -1231,6 +1235,23 @@ export const api = {
   ) => post<DrivingEvent>(`/api/sessions/${sessionId}/driving-events`, body),
   trackDrivingEvents: (trackId: string) =>
     get<DrivingEventList>(`/api/tracks/${trackId}/driving-events`),
+
+  // ---- Named saves of a frame's annotations ----------------------------------------------------------
+  saveCheckpoint: (frameId: string, name: string, note?: string) =>
+    post<Checkpoint>(`/api/frames/${frameId}/checkpoints`, { name, note: note || null }),
+  listCheckpoints: (frameId: string, includeAuto = true) =>
+    get<CheckpointList>(`/api/frames/${frameId}/checkpoints?include_auto=${includeAuto}`),
+  restoreCheckpoint: (checkpointId: string) =>
+    post<RestoreResult>(`/api/checkpoints/${checkpointId}/restore`, {}),
+  deleteCheckpoint: async (checkpointId: string) => {
+    await refreshTokenIfNeeded();
+    const r = await fetch(`/api/checkpoints/${checkpointId}`, {
+      method: "DELETE", headers: { ...userHeaders() },
+    });
+    if (!r.ok) throw new Error(`DELETE checkpoint -> ${r.status}`);
+    return r.json();
+  },
+  objectHistory: (objectId: string) => get<ObjectHistory>(`/api/objects/${objectId}/history`),
 
   // ---- Dense semantic raster: the human correction path ----------------------------------------------
   editFrameSegmentation: (

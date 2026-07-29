@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
+import LoadState from "@/components/shell/LoadState";
 import LineChart from "@/components/charts/LineChart";
 import { apiGet } from "@/lib/api";
 
@@ -15,10 +16,18 @@ const SEV: Record<string, string> = { ok: "text-pass", drift_detected: "text-war
 export default function CalyxTimeline() {
   const [vehicle, setVehicle] = useState("TIGOR-07");
   const [timeline, setTimeline] = useState<Point[]>([]);
+  const [loadErr, setLoadErr] = useState<unknown>(null);
 
   const load = useCallback(async () => {
-    const r = await apiGet<{ timeline?: Point[] }>(`/api/calyx/rig/${encodeURIComponent(vehicle)}/history`);
-    setTimeline(r.timeline ?? []);
+    setLoadErr(null);
+    try {
+        const r = await apiGet<{ timeline?: Point[] }>(`/api/calyx/rig/${encodeURIComponent(vehicle)}/history`);
+        setTimeline(r.timeline ?? []);
+    } catch (e) {
+      // Without this the page kept rendering an empty shell after a
+      // failed request, which is indistinguishable from having no data.
+      setLoadErr(e);
+    }
   }, [vehicle]);
   useEffect(() => { load(); }, [load]);
 
@@ -29,6 +38,7 @@ export default function CalyxTimeline() {
     <PageShell active="CALYX" title="CALYX rig calibration"
       right={<span className="font-mono text-[11px] text-ink-3">{timeline.length} sessions · {flagged.length} flagged</span>}>
       <div className="p-4 max-w-4xl space-y-4 font-mono text-[11px]">
+      {loadErr != null && <LoadState error={loadErr} onRetry={() => void load()} />}
         <div className="flex items-end gap-2">
           <label className="flex flex-col gap-1"><span className="text-ink-3 text-[10px] uppercase">vehicle</span>
             <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} className="bg-panel border border-line px-2 py-1 text-ink w-48" /></label>

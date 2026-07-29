@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { Scenario } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
+import LoadState from "@/components/shell/LoadState";
 import ScoreBar from "@/components/shell/ScoreBar";
 
 // Scenario mining surface (the second moat): NL search over behaviourally-defined scenarios,
@@ -25,9 +26,11 @@ export default function ScenariosPage() {
   const [semantic, setSemantic] = useState(false);
   const [rows, setRows] = useState<Scenario[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadErr, setLoadErr] = useState<unknown>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadErr(null);
     try {
       if (q.trim()) {
         const res = await api.scenarioSearch(q.trim(), semantic);
@@ -35,6 +38,9 @@ export default function ScenariosPage() {
       } else {
         setRows(await api.scenarios({ limit: "200" }));
       }
+    } catch (e) {
+      // A search that fails must not look like a search that found nothing.
+      setLoadErr(e);
     } finally {
       setLoading(false);
     }
@@ -47,6 +53,7 @@ export default function ScenariosPage() {
   return (
     <PageShell
       active="SCENARIOS"
+      title="Scenarios"
       right={
         <>
           <span className="border border-line px-2 py-0.5">{rows.length} found</span>
@@ -84,6 +91,9 @@ export default function ScenariosPage() {
         </div>
       }
     >
+      {loadErr != null && (
+        <div className="p-3"><LoadState error={loadErr} onRetry={() => void load()} /></div>
+      )}
       <table className="w-full text-sm">
           <thead className="text-ink-3 font-mono text-[11px] uppercase border-b hairline sticky top-0 bg-bg">
             <tr>

@@ -708,6 +708,21 @@ class LabeloxClient:
         return self._call("POST", f"/api/campaigns/{campaign_id}/tick",
                           params={"dry_run": dry_run}, json_body=None)
 
+    def delete_checkpoints_by_checkpoint_id(self, checkpoint_id: str) -> Any:
+        """Remove"""
+        return self._call("DELETE", f"/api/checkpoints/{checkpoint_id}",
+                          params=None, json_body=None)
+
+    def get_checkpoints_by_checkpoint_id(self, checkpoint_id: str) -> Any:
+        """Get One"""
+        return self._call("GET", f"/api/checkpoints/{checkpoint_id}",
+                          params=None, json_body=None)
+
+    def post_checkpoints_by_checkpoint_id_restore(self, checkpoint_id: str) -> Any:
+        """Restore"""
+        return self._call("POST", f"/api/checkpoints/{checkpoint_id}/restore",
+                          params=None, json_body=None)
+
     def post_cloud_connect(self, body: Any = None) -> Any:
         """Cloud Connect"""
         return self._call("POST", f"/api/cloud/connect",
@@ -1236,6 +1251,16 @@ class LabeloxClient:
     def post_frames_by_frame_id_adverse(self, frame_id: str, body: Any = None) -> Any:
         """Create Adverse"""
         return self._call("POST", f"/api/frames/{frame_id}/adverse",
+                          params=None, json_body=body)
+
+    def get_frames_by_frame_id_checkpoints(self, frame_id: str, include_auto: bool | None = True, limit: int | None = 50) -> Any:
+        """List For Frame"""
+        return self._call("GET", f"/api/frames/{frame_id}/checkpoints",
+                          params={"include_auto": include_auto, "limit": limit}, json_body=None)
+
+    def post_frames_by_frame_id_checkpoints(self, frame_id: str, body: Any = None) -> Any:
+        """Save As"""
+        return self._call("POST", f"/api/frames/{frame_id}/checkpoints",
                           params=None, json_body=body)
 
     def get_frames_by_frame_id_cuboids(self, frame_id: str) -> Any:
@@ -2188,6 +2213,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/objects/{object_id}/explain",
                           params=None, json_body=None)
 
+    def get_objects_by_object_id_history(self, object_id: str) -> Any:
+        """Object History"""
+        return self._call("GET", f"/api/objects/{object_id}/history",
+                          params=None, json_body=None)
+
     def post_objects_by_object_id_keyframe(self, object_id: str, value: bool | None = True) -> Any:
         """Set Keyframe"""
         return self._call("POST", f"/api/objects/{object_id}/keyframe",
@@ -3056,4 +3086,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 594 routes generated from the server schema.
+# 600 routes generated from the server schema.

@@ -323,7 +323,9 @@ export default function HomePage() {
           <div className="shrink-0">
             <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Jump to a workflow</h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
-              <ActionCard primary icon="review" title="Review" desc="Work through model proposals ranked by what matters." onClick={() => document.getElementById("queue")?.scrollIntoView({ behavior: "smooth" })} delay={0} />
+              {/* Navigates, like every sibling. It used to scroll to the queue section further down this page,
+                  which is the same affordance doing a different thing depending on which card you pressed. */}
+              <ActionCard primary icon="review" title="Review" desc="Work through model proposals ranked by what matters." onClick={() => router.push("/review/queue")} delay={0} />
               <ActionCard icon="plus" title="Import" desc="Bring in dashcam video or sensor logs to annotate." onClick={() => router.push("/import")} delay={50} />
               <ActionCard icon="activity" title="Analytics" desc="Labeling progress, agreement, and coverage." onClick={() => router.push("/analytics")} delay={100} />
               <ActionCard icon="layers" title="Datasets" desc="Seal and export a versioned dataset (COCO, YOLO)." onClick={() => router.push("/datasets")} delay={150} />

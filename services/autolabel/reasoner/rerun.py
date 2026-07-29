@@ -94,6 +94,17 @@ async def rerun_session(db: AsyncSession, session_id: str, *, limit: int = 500,
         return {"session_id": session_id, "objects": 0,
                 "detail": "the session has no objects to reason about"}
 
+    # Whether the limit cut the session short. Without this a caller cannot tell a fully reasoned session
+    # from a partly reasoned one: both come back reporting however many objects were looked at, and a large
+    # session silently comes back 40,000 objects short of done. Counted rather than inferred, because
+    # "len(rows) == limit" is also what an exactly-limit-sized session looks like.
+    from sqlalchemy import func
+
+    total = (await db.execute(
+        select(func.count(Object.object_id))
+        .join(Frame, Object.frame_id == Frame.frame_id)
+        .where(Frame.session_id == uuid.UUID(session_id)))).scalar() or 0
+
     # Grouped by frame, because half the checks are about an object's neighbours and its scene, and an
     # object reasoned about alone loses exactly the context that makes the layer worth having.
     by_frame: dict = {}
@@ -168,6 +179,11 @@ async def rerun_session(db: AsyncSession, session_id: str, *, limit: int = 500,
              would_demote=len(changes), applied=applied, dry_run=not apply)
     return {
         "session_id": session_id, "objects": len(rows), "frames": len(by_frame),
+        "objects_in_session": int(total),
+        # Loud rather than silent. A partial pass that reads as a complete one is how a corpus ends up
+        # believing it has been reasoned over when a fifth of it has not.
+        "truncated": int(total) > len(rows),
+        "not_reasoned": max(0, int(total) - len(rows)),
         "decisions": counts,
         "would_demote": len(changes),
         "auto_accepted": auto_accepted,

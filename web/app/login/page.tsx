@@ -40,6 +40,7 @@ function Field({ label, ...rest }: { label: string } & React.InputHTMLAttributes
 function Divider({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 font-mono text-[10px] text-ink-4">
+      <h1 className="sr-only">Sign in to LabeloxAV</h1>
       <div className="h-px bg-line flex-1" />{children}<div className="h-px bg-line flex-1" />
     </div>
   );

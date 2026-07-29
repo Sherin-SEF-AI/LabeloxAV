@@ -37,9 +37,19 @@ export default function PlatformSwitcher() {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 mt-1 z-50 bg-panel border border-line rounded shadow-2xl grid grid-cols-[200px_1fr] w-[46rem] max-w-[92vw] overflow-hidden">
+          {/* Anchored to the button's right edge, not its left. This button lives near the right of the
+              header, so a left-anchored panel 46rem wide started there and ran off the screen: at 1700px it
+              ended at 2078, and everything past the fold was simply unreachable. Growing leftward from the
+              button keeps it on screen at any width the header itself fits in.
+
+              One column until there is room for two, for the same reason. The rail was a hard 200px, so on
+              a narrow window it took most of the width and left the descriptions a strip too thin to read,
+              and a nav that explains itself does not if the explanations are clipped. */}
+          <div className="absolute right-0 mt-1 z-50 bg-panel border border-line rounded shadow-2xl
+            grid grid-cols-1 sm:grid-cols-[180px_1fr] w-[46rem] max-w-[calc(100vw-1.5rem)]
+            max-h-[80vh] overflow-y-auto overflow-x-hidden">
             {/* left: the platforms */}
-            <div className="border-r border-line bg-bg/40 py-1">
+            <div className="sm:border-r border-b sm:border-b-0 border-line bg-bg/40 py-1">
               <div className="px-3 py-1.5 text-[9px] uppercase tracking-wide text-ink-3">Platforms</div>
               {PLATFORMS_ORDERED.map((p) => {
                 const active = p.id === current.id;
@@ -69,7 +79,7 @@ export default function PlatformSwitcher() {
               </div>
               <div className="text-[11px] text-ink-3 leading-snug mt-1">{preview.role}</div>
 
-              <div className="mt-3 grid grid-cols-2 gap-1.5">
+              <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-1.5">
                 {preview.nav.map((n) => (
                   <button
                     key={n.href}
@@ -78,7 +88,9 @@ export default function PlatformSwitcher() {
                       ${pathname === n.href ? "bg-accent/15 border-accent/40" : ""}`}
                   >
                     <div className={`text-[12px] ${pathname === n.href ? "text-accent-2" : "text-ink"}`}>{n.label}</div>
-                    {n.hint && <div className="text-[10px] text-ink-3 leading-tight mt-0.5 truncate">{n.hint}</div>}
+                    {/* Wraps rather than truncates. The hint is the whole reason this menu is two panes
+                        instead of a list of names, and half a sentence explains nothing. */}
+                    {n.hint && <div className="text-[10px] text-ink-3 leading-tight mt-0.5">{n.hint}</div>}
                   </button>
                 ))}
               </div>

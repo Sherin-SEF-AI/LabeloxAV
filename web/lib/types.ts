@@ -997,3 +997,53 @@ export type SegmentEditResult = {
   replaced: boolean;
   unknown_classes: string[];
 };
+
+
+// ---- Named saves of a frame's annotations -----------------------------------------------------------
+
+export type Checkpoint = {
+  checkpoint_id: string;
+  frame_id: string;
+  session_id: string | null;
+  name: string;
+  note: string | null;
+  object_count: number;
+  created_by: string | null;
+  // True on the checkpoint a restore took of what it replaced, so a restore is itself undoable.
+  auto: boolean;
+  created_at: string | null;
+};
+
+export type CheckpointList = { frame_id: string; count: number; checkpoints: Checkpoint[] };
+
+export type RestoreResult = {
+  restored: Checkpoint;
+  updated: number;
+  created: number;
+  deleted: number;
+  dropped_stale_tracks: number;
+  // The checkpoint taken of the state this restore replaced. One call from undoing it.
+  undo_with: string;
+};
+
+export type ObjectHistoryEvent = {
+  review_id: string;
+  action: string;
+  reviewer: string | null;
+  ts_ns: number;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  time_spent_ms: number | null;
+};
+
+export type ObjectHistory = {
+  object_id: string;
+  current: { class_id: number; state: string; version: number; source: string; conf: number };
+  count: number;
+  events: ObjectHistoryEvent[];
+  reasoning: Record<string, unknown> | null;
+};
+
+// Re-exported from the editor reducer so panels can type against it without importing the reducer, which
+// would drag the whole editor state machine into any component that only wants to draw a list.
+export type { HistoryEntry } from "@/components/editor/useEditor";

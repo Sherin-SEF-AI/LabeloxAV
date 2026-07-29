@@ -1973,6 +1973,31 @@ class ScenarioCluster(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AnnotationCheckpoint(Base):
+    # A named save of a frame's annotations. Undo is capped, tab-local and dies with a refresh; this is the
+    # state a person can always get back to. Stored as a full snapshot rather than a diff, because a diff
+    # chain is only as good as its weakest link and this table exists precisely to not be that.
+    __tablename__ = "annotation_checkpoint"
+
+    checkpoint_id: Mapped[uuid.UUID] = _uuid_pk()
+    frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    objects: Mapped[list] = mapped_column(JSONB, nullable=False)
+    object_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_by: Mapped[str | None] = mapped_column(String(64))
+    # True on the checkpoint a restore takes of what it is about to replace, so undoing a restore is itself
+    # a restore rather than a hope.
+    auto: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                       server_default=sql_text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_checkpoint_frame_created", "frame_id", "created_at"),
+                      Index("ix_checkpoint_session", "session_id"))
+
+
 class AnnotationQuality(Base):
     """LabeloxAV label quality layer (M13): per-annotation quality score, inter-annotator agreement, and gold
     audit verdict, in a side table so the hot object row is untouched. Surfaced in the workspace so a reviewer

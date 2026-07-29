@@ -1,3 +1,7 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
 // Current-user credential: a signed Bearer token (issued by the API when the user is created) lives in
 // localStorage and rides on every request as the Authorization header. Role drives the QA workflow
 // (annotator submits for QA, reviewer/admin approves). The token is unforgeable, so identity can no longer
@@ -162,4 +166,16 @@ export async function ensureMediaCookie(): Promise<void> {
     }
   })();
   return _minting;
+}
+
+// Read the current user without breaking hydration.
+//
+// getUser() reads localStorage, which does not exist on the server, so calling it in a component body makes
+// the server render one thing and the client another. React responds by throwing away the server HTML for
+// that subtree, which on /collaborate showed up as a page error and a flash of the wrong identity. Reading
+// it in an effect means the first paint matches the server and the real value arrives a tick later.
+export function useCurrentUser(): CurrentUser | null {
+  const [u, setU] = useState<CurrentUser | null>(null);
+  useEffect(() => { setU(getUser()); }, []);
+  return u;
 }
