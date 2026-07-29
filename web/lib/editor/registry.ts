@@ -61,6 +61,7 @@ export const APP_GROUPS: NavGroup[] = [
       { href: "/lidar", label: "LiDAR", hint: "point cloud explorer" },
       { href: "/map", label: "HD map", hint: "fused map and provenance" },
       { href: "/inertial", label: "Inertial", hint: "ego-state timeline, events, maneuvers" },
+      { href: "/events", label: "Driving events", hint: "lane changes, signal phases, violations" },
       { href: "/inspect", label: "Inspector", hint: "Foxglove-class MCAP session inspection" },
     ],
   },
@@ -112,7 +113,55 @@ export const MODES: EditorMode[] = [
     key: "lanes", label: "Lanes and drivable", rail: "LANE", hotkey: "2", canvas: "konva",
     groups: [
       { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
-      { key: "lane", label: "Lane", tools: [{ key: "lane-add", label: "add lane", hotkey: "B" }] },
+      // Lane type is a tool rather than a property set after the fact, because it decides whether a crossing
+      // of this boundary is a manoeuvre or an offence, and picking it while drawing is when the annotator
+      // is actually looking at the line.
+      { key: "lane", label: "Lane", tools: [
+        { key: "lane-solid", label: "solid", hotkey: "B" },
+        { key: "lane-dashed", label: "dashed", hotkey: "N" },
+        { key: "lane-double", label: "double", hotkey: "J" },
+        { key: "lane-edge", label: "road edge", hotkey: "H" },
+        { key: "lane-implicit", label: "implicit", hotkey: "Y" },
+      ] },
+      { key: "freespace", label: "Free space", tools: [
+        { key: "drivable", label: "drivable", hotkey: "F" },
+        { key: "non-drivable", label: "non drivable", hotkey: "X" },
+        { key: "fallback", label: "fallback", hotkey: "Z" },
+      ] },
+      { key: "laneops", label: "Lane ops", tools: [
+        { key: "lane-propose", label: "propose", hotkey: "O" },
+        { key: "lane-propagate", label: "propagate", hotkey: "P" },
+      ] },
+    ],
+  },
+  {
+    key: "semantic", label: "Semantic", rail: "SEM", hotkey: "6", canvas: "konva",
+    groups: [
+      { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
+      { key: "paint", label: "Paint", tools: [
+        { key: "sem-polygon", label: "region", hotkey: "G" },
+        { key: "sem-brush", label: "brush", hotkey: "P" },
+        { key: "sem-eraser", label: "eraser", hotkey: "E" },
+        { key: "sem-fill", label: "fill", hotkey: "F" },
+      ] },
+      { key: "assist", label: "Assist", tools: [
+        { key: "sem-superpixel", label: "cells", hotkey: "U" },
+        { key: "sem-auto", label: "auto segment", hotkey: "A" },
+      ] },
+    ],
+  },
+  {
+    key: "events", label: "Events", rail: "EVT", hotkey: "7", canvas: "table",
+    groups: [
+      { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
+      { key: "mark", label: "Mark", tools: [
+        { key: "event-point", label: "instant", hotkey: "I" },
+        { key: "event-interval", label: "interval", hotkey: "T" },
+      ] },
+      { key: "derive", label: "Derive", tools: [
+        { key: "event-derive", label: "derive", hotkey: "D" },
+        { key: "event-link-lanes", label: "link lanes", hotkey: "K" },
+      ] },
     ],
   },
   {

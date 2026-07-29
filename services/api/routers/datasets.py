@@ -83,13 +83,29 @@ async def dataset_lineage(commit_id: str):
 
 
 @router.get("/datasets/{a_id}/diff/{b_id}")
-async def dataset_diff(a_id: str, b_id: str):
-    """Milestone I: what changed between two snapshots (count deltas, ontology change, slice-spec changes)."""
+async def dataset_diff(a_id: str, b_id: str, deep: bool = True, sample: int = 20,
+                       db: AsyncSession = Depends(db_session)):
+    """What changed between two snapshots.
+
+    The headline comparison (counts, ontology, slice spec) answers "is it bigger". `deep` also resolves
+    which objects entered and left and how the class distribution moved, which is what somebody deciding
+    whether to take a new version actually needs. It costs a query over both object sets, so it can be
+    turned off for a cheap check.
+    """
     from services.export.snapshots import compare_commits
-    res = await compare_commits(a_id, b_id)
-    if res.get("error"):
-        raise HTTPException(404, res["error"])
-    return res
+
+    if not deep:
+        res = await compare_commits(a_id, b_id)
+        if res.get("error"):
+            raise HTTPException(404, res["error"])
+        return res
+
+    from services.export.diff import deep_diff_commits
+
+    try:
+        return await deep_diff_commits(db, a_id, b_id, sample=sample)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @router.get("/datasets/{commit_id}")
@@ -115,3 +131,45 @@ async def dataset_detail(commit_id: str, db: AsyncSession = Depends(db_session))
         "ontology_version": d.ontology_version, "created_at": _iso(d.created_at),
         "slice_spec": d.slice_spec, "files": sorted(files, key=lambda f: f["path"]),
     }
+
+
+@router.get("/datasets/{commit_id}/download")
+async def download_dataset(commit_id: str):
+    """Stream the whole sealed dataset as a ZIP.
+
+    Taking delivery previously meant fetching every file through its own presigned URL, which for a dataset
+    of forty thousand frames is forty thousand round trips. Building the archive in the API process instead
+    would hold the entire dataset in memory; this streams it a file at a time, so peak memory is one file
+    however large the dataset is.
+
+    No Content-Length: the compressed size is not known until the last entry is written, and guessing one
+    would truncate the download at whatever was guessed.
+    """
+    from starlette.responses import StreamingResponse
+
+    from services.export.streaming import stream_commit, suggested_filename
+
+    async with get_sessionmaker()() as db:
+        commit = await db.get(DatasetCommit, commit_id)
+    if commit is None:
+        raise HTTPException(404, "dataset not found")
+    name = (commit.slice_spec or {}).get("name")
+
+    return StreamingResponse(
+        stream_commit(commit_id), media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{suggested_filename(commit_id, name)}"',
+            "X-Accel-Buffering": "no",
+        })
+
+
+@router.get("/datasets/versions/{name}")
+async def dataset_versions(name: str, limit: int = 20, db: AsyncSession = Depends(db_session)):
+    """A dataset's versions by name, in order, each with the delta from the one before it.
+
+    Distinct from /datasets/{commit_id}/lineage, which walks one commit's parent chain. This is the list a
+    release manager reads: not "where did this commit come from" but "how has this dataset moved".
+    """
+    from services.export.diff import lineage_chain
+
+    return await lineage_chain(db, name, limit=limit)

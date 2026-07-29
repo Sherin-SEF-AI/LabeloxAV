@@ -14,6 +14,7 @@ from starlette.responses import JSONResponse
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
 from services.api.deps import role_rank
+from services.api.media import MEDIA_COOKIE, is_media_read
 from services.api.routers import (
     activelearn,
     adverse,
@@ -22,6 +23,7 @@ from services.api.routers import (
     assets,
     autolabel,
     calibration,
+    campaigns,
     cloud,
     collaborate,
     corrections,
@@ -29,14 +31,19 @@ from services.api.routers import (
     datasets,
     discovery,
     drivable,
+    driving_events,
     dynamics,
+    edge,
     errordetect,
     events,
+    experiments,
     explore,
     export,
     govern,
     hdmap,
+    identity_routes,
     imports,
+    inbox,
     inertial,
     inspector,
     integrations,
@@ -55,10 +62,13 @@ from services.api.routers import (
     ocr,
     predictions,
     quality,
+    reasoner,
     recall,
     relabel,
     review,
     search,
+    security,
+    secv2,
     segment_assist,
     segmentation,
     signs,
@@ -137,6 +147,12 @@ def _assert_auth_floors(app: FastAPI) -> int:
         if ("GET" in methods or "HEAD" in methods) and _is_public_read(path) \
                 and not path.startswith(_APPROVED_PUBLIC_READ_PREFIXES):
             leaked.append(path)
+    # Every unauthenticated credential route must be one that actually exists, or the allowlist is drifting
+    # away from the route table and naming something that no longer means anything.
+    mounted = {getattr(r, "path", "") for r in app.routes}
+    missing = sorted(p for p in _CREDENTIAL_PATHS if p not in mounted)
+    if missing:
+        raise RuntimeError(f"credential allowlist names routes that are not mounted: {missing}")
     if leaked:
         raise RuntimeError(f"public read routes without an approved floor: {sorted(leaked)}")
     return checked
@@ -196,9 +212,38 @@ _APPROVED_PUBLIC_READ_PREFIXES = ("/api/health", "/api/readyz")
 _SELF_PATHS = ("/api/users/me",)
 
 
+# The credential routes: how somebody who holds no token obtains one. A sign-in route behind the token gate
+# is a deadlock, so these are reachable unauthenticated by necessity rather than by preference.
+#
+# Listed exactly, never by prefix. "/api/auth" as a prefix would silently expose every future route added
+# under it, including the ones that change a password or disable a second factor. Each entry below carries
+# its own protection: login and reset answer identically for a real and an absent account, signup refuses
+# unless the operator enabled it or the deployment has no users at all, and the OIDC pair are worthless
+# without the provider's signature.
+_CREDENTIAL_PATHS = frozenset({
+    "/api/auth/methods",              # which methods exist; configuration, never account existence
+    "/api/auth/login",
+    "/api/auth/login/mfa",            # finishing a sign-in that login itself began
+    "/api/auth/mfa/setup-pending",    # enrolment forced at the door, before any token exists
+    "/api/auth/mfa/confirm",
+    "/api/auth/signup",
+    "/api/auth/password/reset-request",
+    "/api/auth/password/reset",
+    "/api/auth/oidc/start",
+    "/api/auth/oidc/callback",
+    "/api/auth/logout",               # clearing cookies must work even with a lapsed token
+})
+
+
 def _is_public_read(path: str) -> bool:
     """A read that is reachable without a token. Kept tiny and explicit so the fail-closed default holds."""
     return path.startswith(_PUBLIC_READ_PREFIXES)
+
+
+def _is_credential_path(path: str) -> bool:
+    """A route somebody with no token must reach in order to get one."""
+    return path in _CREDENTIAL_PATHS
+
 
 
 def _required_role(path: str) -> str:
@@ -228,6 +273,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if method in ("GET", "HEAD") and _is_public_read(path):
             return await call_next(request)
+        # The credential routes. Reaching a sign-in page requires no token by definition; each of these is
+        # individually listed and individually defended, rather than a prefix that would swallow whatever
+        # gets added under /api/auth next.
+        if _is_credential_path(path):
+            return await call_next(request)
 
         from sqlalchemy import func, select
 
@@ -248,6 +298,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if qs_token:
                 authz = f"Bearer {qs_token}"
         uid = bearer_uid(authz, settings.auth.signing_key)
+
+        # Image subresources: an <img> cannot set a header, so accept the media cookie for those paths and
+        # only those. bearer_uid above has already refused a media token presented as a Bearer, so this is
+        # the single place the restricted credential is honoured, and it can buy nothing but an image.
+        if uid is None and method in ("GET", "HEAD") and is_media_read(path):
+            from services.api.auth_token import MEDIA_SCOPE, verify_token
+
+            cookie = request.cookies.get(MEDIA_COOKIE)
+            payload = verify_token(cookie, settings.auth.signing_key) if cookie else None
+            if payload is not None and payload.scope == MEDIA_SCOPE:
+                uid = payload.uid
+
         role = None
         if uid:
             try:
@@ -449,6 +511,7 @@ app.include_router(objects3d.router, prefix="/api", tags=["lidar"])
 app.include_router(lidar_scene.router, prefix="/api", tags=["lidar"])
 app.include_router(drivable.router, prefix="/api", tags=["drivable"])
 app.include_router(inertial.router, prefix="/api", tags=["inertial"])
+app.include_router(driving_events.router, prefix="/api", tags=["driving-events"])
 app.include_router(inspector.router, prefix="/api", tags=["inspector"])
 app.include_router(sanyx_router.router, prefix="/api", tags=["sanyx"])
 app.include_router(calyx_router.router, prefix="/api", tags=["calyx"])
@@ -461,5 +524,13 @@ app.include_router(forgyx_router.router, prefix="/api", tags=["forgyx"])
 app.include_router(auth_router.router, prefix="/api", tags=["auth"])
 app.include_router(flywheel_router.router, prefix="/api", tags=["flywheel"])
 app.include_router(hardening_router.router, prefix="/api", tags=["hardening"])
+app.include_router(campaigns.router, prefix="/api", tags=["campaigns"])
+app.include_router(reasoner.router, prefix="/api", tags=["reasoner"])
+app.include_router(edge.router, prefix="/api", tags=["edge"])
+app.include_router(experiments.router, prefix="/api", tags=["experiments"])
+app.include_router(secv2.router, prefix="/api", tags=["security"])
+app.include_router(identity_routes.router, prefix="/api", tags=["identity"])
+app.include_router(inbox.router, prefix="/api", tags=["inbox"])
+app.include_router(security.router, prefix="/api", tags=["security"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])

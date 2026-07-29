@@ -1,0 +1,181 @@
+# The vocabulary of things that happen on a road, as opposed to things that are in a frame.
+#
+# Object labels answer "what is here". They cannot answer "what happened", and most of what a planner needs
+# to be trained and evaluated on is the second question: a car changed lane into the ego gap, a signal went
+# red while the ego was in the box, a rider crossed a solid line. Those are spans of time about an actor, not
+# boxes on a frame, and they are what this file names.
+#
+# Every kind declares its shape so the derivers, the API and the editor agree without any of them hardcoding
+# a list. Fields:
+#   modality  which timeline the event lives on (driving here; imu/audio/scene/geo already exist)
+#   shape     interval (has a duration) or point (an instant)
+#   anchor    track (about one actor), frame (about one image), or session (about the drive)
+#   severity  info | notable | violation. violation means a traffic rule was broken, which is a different
+#             claim from "this is interesting" and is what the mining and safety-case surfaces filter on.
+#   derived   whether a deriver can propose this, or it is human-only. A human-only kind is deliberate: no
+#             geometry we have can see intent, so near-miss intent stays a human judgement.
+#   family    what physical occurrence this kind describes. Two kinds in one family are two readings of the
+#             same event, not two events: a crossing is a crossing whether or not the line turned out to be
+#             one it was legal to cross. Re-deriving keys on the family, so a reclassification updates the
+#             record in place instead of filing a second one beside it.
+#   payload   fields the deriver writes and the editor shows. Documented here so a consumer never has to
+#             read the deriver to find out what it can rely on.
+
+version: v1
+
+kinds:
+
+  # ---- Lane behaviour. Derived from Lane control points and tracked ground contact points ---------------
+
+  lane_change:
+    modality: driving
+    family: lane_crossing
+    shape: interval
+    anchor: track
+    severity: notable
+    derived: true
+    description: An actor's ground contact point crossed a lane boundary and stayed across it.
+    payload: [direction, lane_type, lane_id, from_side, to_side, frames]
+
+  lane_change_illegal:
+    modality: driving
+    family: lane_crossing
+    shape: interval
+    anchor: track
+    severity: violation
+    derived: true
+    description: A lane change across a solid or double line, which is not permitted.
+    payload: [direction, lane_type, lane_id, from_side, to_side, frames]
+
+  lane_weave:
+    modality: driving
+    family: lane_weave
+    shape: interval
+    anchor: track
+    severity: violation
+    derived: true
+    # Two crossings of the same boundary inside a short window. Distinct from a lane change because the
+    # actor ended where it started, which is the signature of weaving through traffic rather than moving over.
+    description: Repeated crossings of the same lane boundary within a short window.
+    payload: [crossings, lane_id, lane_type, window_ns]
+
+  lane_straddle:
+    modality: driving
+    family: lane_straddle
+    shape: interval
+    anchor: track
+    severity: notable
+    derived: true
+    description: An actor sat on a lane boundary without committing to either side.
+    payload: [lane_id, lane_type, frames, mean_abs_offset_px]
+
+  # ---- Signals. Derived from the signal_state attribute over a traffic_signal track --------------------
+
+  signal_phase:
+    modality: driving
+    family: signal_phase
+    shape: interval
+    anchor: track
+    severity: info
+    derived: true
+    description: One contiguous state of one traffic signal.
+    payload: [state, duration_ns, frames]
+
+  signal_transition_invalid:
+    modality: driving
+    family: signal_transition
+    shape: point
+    anchor: track
+    severity: notable
+    derived: true
+    # Almost always a labelling error rather than a broken signal, which is why this is a quality signal and
+    # not a violation. Red straight to green with no amber is the common one.
+    description: A signal transition that the phase graph does not permit, usually a mislabelled frame.
+    payload: [from_state, to_state, legal_next]
+
+  signal_flicker:
+    modality: driving
+    family: signal_flicker
+    shape: interval
+    anchor: track
+    severity: notable
+    derived: true
+    description: A signal state that changed and changed back within a span too short to be real.
+    payload: [state, reverted_to, duration_ns]
+
+  # ---- Human-only. No geometry we have can see intent, so these are never proposed ---------------------
+
+  near_miss:
+    modality: driving
+    family: near_miss
+    shape: interval
+    anchor: track
+    severity: notable
+    derived: false
+    description: A collision was avoided only by one party reacting.
+    payload: [with_track_id, note]
+
+  ego_hard_brake:
+    modality: driving
+    family: ego_hard_brake
+    shape: interval
+    anchor: session
+    severity: notable
+    derived: false
+    description: The ego braked hard enough to be a reaction to something.
+    payload: [peak_decel_mps2, note]
+
+  right_of_way_violation:
+    modality: driving
+    family: right_of_way_violation
+    shape: interval
+    anchor: track
+    severity: violation
+    derived: false
+    description: An actor took right of way it did not have.
+    payload: [note]
+
+  wrong_way:
+    modality: driving
+    family: wrong_way
+    shape: interval
+    anchor: track
+    severity: violation
+    derived: false
+    description: An actor travelled against the direction of traffic.
+    payload: [note]
+
+# The phase graph a signal is expected to follow. Read by the signal deriver to decide whether a transition
+# is possible; a transition that is not listed produces signal_transition_invalid. Ontology values are the
+# single letters R, Y, G plus "off", which is what ontology/labelox_in_v0.yaml declares.
+signal_phase_graph:
+  R: [Y, G, "off"]      # red to green direct is normal in India; red-amber together is not used
+  Y: [R, "off"]
+  G: [Y, R, "off"]      # green straight to red happens on cheap fixed-time controllers
+  "off": [R, Y, G]
+
+# A phase shorter than this is not a signal changing, it is a frame or two mislabelled. 400ms is well under
+# the shortest real amber and well over a single frame at any capture rate the fleet runs.
+signal_min_phase_ns: 400000000
+
+lane:
+  # A crossing has to persist to count. One frame on the far side of a line is jitter in the box or the lane
+  # fit, not a lane change, and treating it as one would bury the real changes in noise.
+  min_frames_after_cross: 3
+  # How far from the boundary the contact point must get before the crossing is committed, as a fraction of
+  # the frame width. Scale-free so it holds across capture resolutions.
+  commit_offset_frac: 0.012
+  # Within this window, a second crossing of the same boundary is weaving rather than a second lane change.
+  weave_window_ns: 4000000000
+  # Sitting inside this band of the boundary for straddle_min_frames is straddling.
+  straddle_band_frac: 0.008
+  straddle_min_frames: 6
+  # Lane types a crossing of which is a violation rather than a manoeuvre. `unknown` is deliberately absent:
+  # a line whose paint could not be read is not evidence of an offence, and the safe direction when the
+  # evidence is a smear of grey pixels is the lesser claim.
+  illegal_to_cross: [solid, double]
+  # How sure the line-type classifier has to be before a crossing is called an offence. Below this the
+  # crossing is still reported, as an ordinary lane change: the manoeuvre happened either way, and only the
+  # accusation depends on knowing what was crossed. A lane typed before this field existed has no measured
+  # confidence at all, and those are treated as unmeasured rather than as confident.
+  min_type_conf_for_violation: 0.5

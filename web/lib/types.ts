@@ -326,6 +326,31 @@ export type LaneRow = {
   is_ego: boolean;
   source: string;
   model_version: string | null;
+  // How strongly the paint supported the type. Null means nobody measured it, which is not the same as
+  // measured and uncertain: every lane written before the classifier existed carries a hardcoded default.
+  marking_conf?: number | null;
+  measured?: boolean;
+};
+
+export type LaneTypeResult = {
+  session_id: string;
+  lanes: number;
+  measured?: number;
+  changed_type?: number;
+  unreadable_frames_lanes?: number;
+  frames_decoded?: number;
+  by_type?: Record<string, number>;
+  mean_confidence?: number | null;
+  distinct_types?: number;
+  dry_run?: boolean;
+  detail?: string;
+};
+
+export type LaneTypeCoverage = {
+  total: number;
+  measured: number;
+  unmeasured: number;
+  by_type: Record<string, { count: number; mean_confidence: number | null }>;
 };
 
 export type DiscoveryCandidate = {
@@ -469,3 +494,506 @@ export type CloudStatus = {
   configured: boolean;      // is RUNPOD_API_KEY set on the backend
 };
 export type CloudOrphan = { pod_id: string; gpu_type: string | null; uptime_s: number; est_cost: number };
+
+// LabeloxSec: the security domain. These mirror services/api/routers/security.py, which is capability-gated
+// rather than role-gated alone: reading a registration mark is lawful for an authorised security deployment
+// and is exactly what the AV pack must never do, because under DPDPA a plate is personal data the privacy
+// plane blurs.
+export type SecPack = {
+  pack_id: string;
+  name: string;
+  capabilities: string[];
+  anpr_authorised: boolean;
+  static_camera: boolean;
+  safety_classes: string[];
+  available_packs: string[];
+};
+
+export type SecSession = {
+  session_id: string;
+  camera_id: string | null;
+  city: string | null;
+  start_ts_ns: number | null;
+  pack_id: string | null;
+  plate_reads: number;
+};
+
+export type WatchlistEntry = {
+  entry_id: string;
+  plate: string;            // the normalised mark, which is what matching runs on
+  plate_raw: string;
+  reason: string | null;
+  severity: string;         // info | warn | critical
+  active: boolean;
+  added_by: string | null;
+  created_at: string | null;
+};
+
+export type PlateReadRow = {
+  read_id: string;
+  session_id: string | null;
+  frame_id: string | null;
+  camera_id: string | null;
+  plate: string;
+  plate_raw: string;
+  plate_type: string;
+  state_code: string | null;
+  rto_district: string | null;
+  valid: boolean;
+  det_conf: number;
+  // null when the reader exposes no calibrated score. The console says so rather than showing a number that
+  // would make a confidence filter look meaningful when it is not.
+  ocr_conf: number | null;
+  format_confidence: number;
+  bbox: number[] | null;
+  watchlist_hit: boolean;
+  watchlist_severity: string | null;
+  created_at: string | null;
+};
+
+export type SecStats = {
+  reads: number;
+  watchlist_hits: number;
+  valid_format: number;
+  watchlist_size: number;
+  unscored_reads: number;
+  top_states: Record<string, number>;
+};
+
+
+// The inbox: what happened, who did what, and who looked at personal data. Mirrors services/notify.py,
+// services/activity.py, and services/govern/pii_access.py.
+export type NotificationRow = {
+  notification_id: string;
+  kind: string;
+  severity: string;              // info | warn | critical
+  title: string;
+  body: string | null;
+  href: string | null;
+  subject_type: string | null;
+  subject_id: string | null;
+  role: string | null;
+  user_id: string | null;
+  meta: Record<string, unknown>;
+  created_at: string | null;
+  read: boolean;
+};
+
+export type ActivityEvent = {
+  event_id: string;
+  user_id: string | null;
+  user_name: string | null;
+  verb: string;
+  label: string;                 // the human phrasing, so the feed is not raw identifiers
+  subject_type: string | null;
+  subject_id: string | null;
+  summary: string | null;
+  href: string | null;
+  meta: Record<string, unknown>;
+  created_at: string | null;
+};
+
+export type ActivitySummary = {
+  hours: number;
+  total: number;
+  by_verb: Record<string, number>;
+  labels: Record<string, string>;
+  active_people: number;
+};
+
+export type PiiAccessRow = {
+  access_id: string;
+  user_id: string | null;
+  user_name: string | null;
+  subject_type: string;
+  subject_id: string;
+  session_id: string | null;
+  action: string;
+  pii_kinds: string[];
+  // The number a policy is actually written about: viewing a blurred frame is ordinary work, viewing the
+  // original is the thing being governed.
+  redacted: boolean;
+  route: string | null;
+  pack_id: string | null;
+  created_at: string | null;
+};
+
+export type Profile = {
+  user_id: string;
+  name: string;
+  role: string;
+  email: string | null;
+  has_password: boolean;
+  mfa_enabled: boolean;
+  sso: boolean;
+  sso_issuer: string | null;
+  recovery_codes_left: number;
+  created_at: string | null;
+};
+
+// Campaigns: the improvement loop run by the system. Mirrors services/flywheel/campaign.py.
+export type Campaign = {
+  campaign_id: string;
+  name: string;
+  class_name: string;
+  task_type: string;
+  target_metric: string;
+  target_value: number;
+  label_budget: number;
+  labels_spent: number;
+  max_iterations: number;
+  patience: number;
+  status: string;              // pending | running | blocked | succeeded | exhausted | stopped
+  iteration: number;
+  stalled_iterations: number;
+  best_value: number | null;
+  // True by default. A loop that can promote with no person in it is a different product with a
+  // different risk profile, so autopilot is opted into one stage at a time.
+  require_approval: boolean;
+  autopilot_stages: string[];
+  created_by: string | null;
+  notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type CampaignStep = {
+  step_id: string;
+  iteration: number;
+  stage: string;               // mine | judge | label | train | evaluate | promote
+  status: string;
+  detail: Record<string, unknown>;
+  metrics: Record<string, number>;
+  awaiting: string | null;
+  job_id: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type CampaignDetail = Campaign & {
+  steps: CampaignStep[];
+  next_stage: string;
+  halt_reason: string | null;
+};
+
+export type CampaignTick = {
+  campaign: Campaign;
+  action: string;              // ran | waiting | awaiting_approval | halted | failed | none
+  stage?: string;
+  awaiting?: string;
+  detail?: string;
+  step?: CampaignStep;
+};
+
+// The lineage DAG. `rank` is the column a renderer puts a node in, computed server side so the layout is
+// the same in every client rather than reinvented per view.
+export type LineageNode = {
+  id: string;
+  kind: string;                // session | dataset | gold | training_job | model | promotion | deployment
+  label: string;
+  meta: Record<string, unknown>;
+  // A node an edge points at that is no longer there. Rendered as a break, because a missing gold set is
+  // a fact about the lineage rather than an absence to smooth over.
+  incomplete: boolean;
+  rank: number;
+};
+
+export type LineageGraph = {
+  nodes: LineageNode[];
+  edges: { source: string; target: string; kind: string }[];
+  kinds: string[];
+  root: string;
+  sessions_shown?: number;
+  sessions_truncated?: boolean;
+  detail?: string;
+};
+
+// Tracklets: a track as a timeline with its keyframes marked.
+export type TrackletSample = {
+  frame_id: string;
+  object_id: string;
+  ts_ns: number;
+  bbox: number[];
+  is_keyframe: boolean;
+  source: string;
+  state: string;
+};
+
+export type Tracklet = {
+  track_id: string;
+  class_id: number;
+  class_name: string;
+  first_ts_ns: number;
+  last_ts_ns: number;
+  length: number;
+  keyframes: number;
+  // The number an annotator is optimising: how many frames one correction covers.
+  frames_per_keyframe: number | null;
+  samples: TrackletSample[];
+  intents: unknown[];
+};
+
+// LabeloxSec v2.
+export type CameraZone = {
+  zone_id: string;
+  camera_id: string;
+  session_id: string | null;
+  name: string;
+  kind: string;                // area | line
+  points: number[][];
+  rule: string;                // enter | exit | dwell | cross
+  dwell_seconds: number | null;
+  classes: string[];
+  severity: string;
+  active: boolean;
+  created_by: string | null;
+  created_at: string | null;
+};
+
+export type SecurityIncident = {
+  incident_id: string;
+  camera_id: string | null;
+  session_id: string | null;
+  zone_id: string | null;
+  kind: string;
+  severity: string;
+  title: string;
+  summary: string | null;
+  start_ts_ns: number;
+  end_ts_ns: number;
+  duration_s: number;
+  evidence: Record<string, unknown>;
+  plate: string | null;
+  person_identity: string | null;
+  status: string;              // open | ack | closed
+  acknowledged_by: string | null;
+  created_at: string | null;
+};
+
+export type PersonIdentityRow = {
+  identity_id: string;
+  n_tracks: number;
+  cameras: string[];
+  first_ts_ns: number | null;
+  last_ts_ns: number | null;
+  // The signature itself is never returned: it is the only thing that could be matched against another
+  // system's database, and exporting it would defeat the boundary re-identification is built around.
+  signature_dim: number;
+};
+
+// Edge feedback: what the field says about what the bench passed.
+export type EdgeDeviceRow = {
+  device_id: string;
+  name: string | null;
+  hardware: string | null;
+  runtime: string | null;
+  artifact_id: string | null;
+  model_version: string | null;
+  fleet: string | null;
+  last_seen_at: string | null;
+  live: boolean;
+  meta: Record<string, unknown>;
+};
+
+export type EdgeFieldReport = {
+  artifact_id: string;
+  hours: number;
+  devices: number;
+  live_devices: number;
+  windows: number;
+  inferences: number;
+  dropped_frames: number;
+  field: {
+    latency_p50_ms: number | null;
+    latency_p95_ms: number | null;
+    worst_throttled_fraction: number;
+    temp_c_max: number | null;
+  };
+  bench: Record<string, unknown>;
+  // The product: either number alone is uninteresting, the gap between them is the finding.
+  latency_ratio: number | null;
+  confidence_drift: number | null;
+  findings: { kind: string; severity: string; detail: string }[];
+  fleet_significant: boolean;
+  min_devices: number;
+};
+
+export type EdgeFleet = {
+  hours: number;
+  artifacts: {
+    artifact_id: string;
+    windows: number;
+    devices: number;
+    latency_p95_ms: number | null;
+    latency_ratio: number | null;
+    findings: number;
+    fleet_significant: boolean;
+  }[];
+  devices: number;
+  // A fleet whose devices have gone quiet looks identical to a healthy one in every average computed
+  // over the devices still talking.
+  silent_devices: number;
+};
+
+
+// The reasoning layer. Mirrors services/autolabel/reasoner/.
+//
+// A finding carries its own sentence as well as its weight, because every one of these ends up in front
+// of a reviewer or an auditor, and a number nobody can read is a number nobody can trust.
+export type ReasoningFinding = {
+  check: string;               // physics | geometry | temporal | scene | cross_model | corpus_memory
+  weight: number;              // positive supports the label, negative argues against it
+  detail: string;
+  suggests: string | null;
+};
+
+export type ReasoningTrace = {
+  // accept | review | adjudicate | reject | abstain. Abstain means nothing could be assessed, which is
+  // deliberately distinct from having assessed it and found nothing wanting.
+  decision: string;
+  score: number;
+  conflict: number;
+  detector_conf: number;
+  suggested_class: string | null;
+  question: string | null;
+  findings: ReasoningFinding[];
+};
+
+export type ReasonerAttribution = {
+  objects: number;
+  reasoned: number;
+  reviewed: number;
+  decisions: Record<string, number>;
+  checks: Record<string, {
+    fired_against: number;
+    fired_for: number;
+    precision_against: number | null;
+    precision_for: number | null;
+    measured: boolean;
+    correct_against: number;
+    correct_for: number;
+  }>;
+  min_samples: number;
+  caveat: string;
+};
+
+export type ReasonerRerun = {
+  session_id: string;
+  objects: number;
+  frames: number;
+  decisions: Record<string, number>;
+  would_demote: number;
+  auto_accepted: number;
+  // The number that matters: dividing by every object understates the intervention by an order of
+  // magnitude, because most objects were never auto-accepted in the first place.
+  demote_rate_of_auto_accepted: number | null;
+  demote_rate_of_all: number;
+  applied: number;
+  skipped_human_decisions: number;
+  dry_run: boolean;
+  examples: {
+    object_id: string; frame_id: string; class_name: string; state: string;
+    decision: string; suggested_class: string | null; reasons: string[];
+  }[];
+  truncated_examples: number;
+};
+
+// ---- Driving events ----------------------------------------------------------------------------------
+
+export type EventKindSpec = {
+  kind: string;
+  modality: string;
+  shape: "interval" | "point";
+  anchor: "track" | "frame" | "session";
+  severity: "info" | "notable" | "violation";
+  derived: boolean;
+  description: string;
+  payload: string[];
+};
+
+export type EventTaxonomy = {
+  version: string;
+  kinds: EventKindSpec[];
+  severities: string[];
+  signal_phase_graph: Record<string, string[]>;
+};
+
+export type DrivingEvent = {
+  event_id: string;
+  session_id: string;
+  kind: string;
+  modality: string;
+  t_start_ns: number;
+  t_end_ns: number | null;
+  track_id: string | null;
+  frame_id: string | null;
+  conf: number | null;
+  severity: string;
+  // Set when a person ruled on this and the evidence underneath has since changed. Their verdict stands;
+  // this says the premise moved, so somebody can go and look.
+  evidence_changed?: { was: string; would_now_be: string } | null;
+  payload: Record<string, unknown>;
+  source: string;
+  state: string;
+  version: number;
+};
+
+export type DrivingEventList = {
+  session_id?: string;
+  track_id?: string;
+  count: number;
+  // The session origin, so an absolute capture timestamp can be shown as an offset into the drive.
+  session_start_ns?: number | null;
+  events: DrivingEvent[];
+};
+
+export type DrivingEventSummary = {
+  session_id: string;
+  total: number;
+  by_kind: Record<string, number>;
+  by_state: Record<string, number>;
+  by_severity: Record<string, number>;
+  violations: number;
+};
+
+export type DeriveResult = {
+  session_id: string;
+  derived: number;
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  pruned_stale: number;
+  skipped_reviewed: number;
+  rejected_by_taxonomy: number;
+  by_kind: Record<string, number>;
+};
+
+export type DerivePreview = {
+  session_id: string;
+  derived: number;
+  by_kind: Record<string, number>;
+  events: Record<string, unknown>[];
+  truncated: number;
+};
+
+export type LaneLinkResult = {
+  session_id: string;
+  lanes: number;
+  already_linked?: number;
+  linked: number;
+  identities: number;
+  multi_frame_identities: number;
+  frame_width?: number;
+  dry_run: boolean;
+  detail?: string;
+};
+
+export type SegmentEditResult = {
+  frame_id: string;
+  kind: string;
+  source: string;
+  coverage: Record<string, number>;
+  labelled_fraction: number;
+  replaced: boolean;
+  unknown_classes: string[];
+};

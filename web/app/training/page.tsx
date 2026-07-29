@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useJobStream } from "@/lib/useEventStream";
 import { api, type ModelLine, type TrainingJob , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
@@ -51,12 +52,15 @@ export default function TrainingPage() {
     }
   }
 
+  // Pushed, not polled. This page used to re-fetch the whole job list every two seconds whether or not
+  // anything had changed, with no pause when the tab was hidden. The stream sends only on change, and the
+  // one-shot refresh below covers the first paint and any deployment where the stream cannot connect.
+  const jobStream = useJobStream();
   useEffect(() => {
     api.trainingTasks().then(setTasks).catch(() => {});
     refresh();
-    const t = setInterval(refresh, 2000);
-    return () => clearInterval(t);
   }, []);
+  useEffect(() => { if (jobStream.data) refresh(); }, [jobStream.data]);
 
   function listFrom(s: string): string[] {
     return s.split(",").map((x) => x.trim()).filter(Boolean);

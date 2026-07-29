@@ -5,8 +5,9 @@ pack (it goes through packs.registry, the sanctioned bridge). Governance, curati
 instead of the `{"vru","animal"}` literals and hardcoded strata the audit found copy-pasted across the tree.
 
 Every helper takes an optional pack_id and defaults to the configured active pack ('av'), so the legacy paths
-resolve to the AV pack and stay byte-identical. Per-session pack routing (Session.pack_id) plugs in here later
-by passing the session's pack_id.
+resolve to the AV pack and stay byte-identical. Per-session routing is `pack_for_session`: a session records
+the pack it was captured under (Session.pack_id), and passing that id here is what makes the second domain
+behave differently at runtime rather than only existing in the registry.
 """
 
 from __future__ import annotations
@@ -17,6 +18,29 @@ from packs.registry import default_pack_id, get_pack
 
 def active_pack(pack_id: str | None = None) -> DomainPack:
     return get_pack(pack_id or default_pack_id())
+
+
+async def pack_id_for_session(db, session_id) -> str:
+    """The pack a session belongs to, from Session.pack_id.
+
+    Falls back to the configured default rather than raising: a session captured before the column existed
+    has no pack recorded, and it is an AV session by history. Returning the default keeps every legacy path
+    resolving exactly as it did.
+    """
+    from uuid import UUID
+
+    from db.models import Session as DbSession
+
+    try:
+        row = await db.get(DbSession, session_id if isinstance(session_id, UUID) else UUID(str(session_id)))
+    except Exception:  # noqa: BLE001 - a malformed id is not a reason to fail closed into the wrong pack
+        return default_pack_id()
+    return (row.pack_id if row is not None and row.pack_id else default_pack_id())
+
+
+async def pack_for_session(db, session_id) -> DomainPack:
+    """The DomainPack a session belongs to. The routing seam every per-session capability check goes through."""
+    return get_pack(await pack_id_for_session(db, session_id))
 
 
 def has_capability(name: str, pack_id: str | None = None) -> bool:

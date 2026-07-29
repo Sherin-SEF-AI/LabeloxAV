@@ -76,11 +76,26 @@ export type JobStreamRow = {
   metrics?: Record<string, number> | null;
 };
 
+export type IngestProgress = {
+  source: string;                 // import_job | batch_log | none
+  active: boolean;
+  finished: boolean;
+  done: number;
+  total: number;
+  current: string | null;
+  frames: number;
+  progress: number;
+  note?: string;
+};
+
 export type JobStream = {
   training: JobStreamRow[];
   import: JobStreamRow[];
   export: JobStreamRow[];
   autolabel: JobStreamRow[];
+  // Ingest rides the same stream rather than getting one of its own: one connection serves every page
+  // that watches work happen, instead of each opening its own.
+  ingest: IngestProgress[];
 };
 
 export function useJobStream(): StreamState<JobStream> {
@@ -89,4 +104,79 @@ export function useJobStream(): StreamState<JobStream> {
 
 export function useTrainingStream(jobId: string | null): StreamState<JobStreamRow> {
   return useEventStream<JobStreamRow>(jobId ? `/api/events/training/${jobId}` : null, "training");
+}
+
+// Follow one job to completion over the shared stream, for a foreground wait like the import wizard.
+//
+// Imperative rather than a hook because the caller is inside an async workflow, not a render: the wizard
+// awaits this between "upload" and "open the session". The stream carries status and progress; the
+// terminal record is fetched once at the end, because the session id the caller needs is not on the wire
+// and putting a full job record in every frame would be wasteful for a value read once.
+//
+// A poll fallback is kept and deliberately slow. If the stream cannot connect (an old proxy that buffers
+// event streams, for instance) the wizard must still finish rather than hanging on a progress bar forever.
+export function watchImportJob(
+  jobId: string,
+  onProgress: (job: { status: string; progress?: number | null; counts?: Record<string, number> }) => void,
+  opts: { fallbackMs?: number; timeoutMs?: number } = {},
+): Promise<string> {
+  const fallbackMs = opts.fallbackMs ?? 8000;
+  const timeoutMs = opts.timeoutMs ?? 30 * 60 * 1000;
+
+  return new Promise<string>((resolve, reject) => {
+    const token = getUser()?.token;
+    let done = false;
+    let es: EventSource | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
+    let deadline: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      done = true;
+      es?.close();
+      if (poll) clearInterval(poll);
+      if (deadline) clearTimeout(deadline);
+    };
+
+    const settle = async (status: string, error?: string | null) => {
+      if (done) return;
+      if (status === "error") { cleanup(); reject(new Error(error || "import failed")); return; }
+      if (status !== "done") return;
+      cleanup();
+      try {
+        const { apiGet } = await import("./api");
+        const job = await apiGet<{ session_id?: string | null }>(`/api/imports/${jobId}`);
+        if (!job.session_id) { reject(new Error("import done but no session was created")); return; }
+        resolve(job.session_id);
+      } catch (e) { reject(e); }
+    };
+
+    if (token) {
+      es = new EventSource(`/api/events/jobs?token=${encodeURIComponent(token)}`);
+      es.addEventListener("jobs", (ev) => {
+        try {
+          const snap = JSON.parse((ev as MessageEvent).data) as JobStream;
+          const row = (snap.import ?? []).find((r) => r.job_id === jobId);
+          if (!row) return;
+          onProgress(row);
+          void settle(row.status, (row as { error?: string }).error);
+        } catch { /* a malformed frame must not fail the import the user is watching */ }
+      });
+    }
+
+    // Slow safety net, not the primary path: it only matters when the stream never arrives.
+    poll = setInterval(async () => {
+      try {
+        const { apiGet } = await import("./api");
+        const job = await apiGet<{ status: string; progress?: number; counts?: Record<string, number>;
+                                   error?: string | null }>(`/api/imports/${jobId}`);
+        onProgress(job);
+        void settle(job.status, job.error);
+      } catch (e) { cleanup(); reject(e); }
+    }, fallbackMs);
+
+    deadline = setTimeout(() => {
+      cleanup();
+      reject(new Error("the import did not finish in time; check the jobs page for its state"));
+    }, timeoutMs);
+  });
 }

@@ -83,7 +83,9 @@ export default function AssetEditor() {
       case "text":
         return <TextSpanEditor text={asset.text ?? ""} annotations={anns} config={config}
           activeLabel={label} selectedId={selectedId} onSelect={setSelectedId}
-          onCreate={(start, end) => add("span", { start, end })} />;
+          onCreate={(start, end) => add("span", { start, end })}
+          onCreateRelation={(from_annotation_id, to_annotation_id) =>
+            add("relation", { from_annotation_id, to_annotation_id })} />;
       case "audio":
         return asset.uri
           ? <AudioRegionEditor uri={asset.uri} annotations={anns} config={config} activeLabel={label}
@@ -100,7 +102,19 @@ export default function AssetEditor() {
         return asset.uri
           ? <DocumentEditor uri={asset.uri} annotations={anns} config={config} activeLabel={label}
               selectedId={selectedId} onSelect={setSelectedId}
-              onCreate={(bbox) => add("bbox", { bbox })} />
+              onCreate={(bbox) => add("bbox", { bbox })}
+              onTranscribe={async (annotationId, bbox) => {
+                try {
+                  const r = await api.ocrRegion(asset.uri!, bbox);
+                  if (!r.text.trim()) { flash("the reader found no text in that region"); return; }
+                  await api.updateAnnotation(annotationId, { fields: { text: r.text } });
+                  await load();
+                  // The unmeasured case is said out loud. The local reader returns no calibrated score, and
+                  // a transcription that looks verified when nobody verified it is the failure the OCR
+                  // path was already fixed once for.
+                  flash(r.measured ? `read: ${r.text}` : `read (unscored): ${r.text}`);
+                } catch (e) { flash(humanizeError(e)); }
+              }} />
           : <div className="p-4 font-mono text-[11px] text-ink-3">asset has no uri</div>;
       case "dialogue":
         return <PreferenceEditor candidates={candidates} prompt={asset.text ?? ""} annotations={anns}

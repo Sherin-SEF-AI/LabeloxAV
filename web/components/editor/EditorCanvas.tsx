@@ -35,6 +35,11 @@ type Props = {
   layers?: LayerFlags;
   onViewport: (v: Viewport) => void;
   onSelect: (id: string | null) => void;
+  // Marquee: drag a rubber band on empty canvas to select everything it encloses. Multi-select existed
+  // only from the object list, which means picking six of forty vehicles was six trips to a side panel
+  // while the objects themselves were on screen the whole time.
+  onSelectMany?: (ids: string[], additive: boolean) => void;
+  selectedIds?: string[];
   onUpdateBbox: (id: string, bbox: number[], rot?: number) => void;
   onDrawBox: (bbox: number[]) => void;
   onDrawPolygon: (points: number[]) => void;   // manual polygon: flattened [x,y,...], no GPU/SAM needed
@@ -72,6 +77,8 @@ export default function EditorCanvas(p: Props) {
   // container is actually measured, so the frame fits to the true canvas.
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [img, setImg] = useState<HTMLImageElement | null>(null);
+  const [marquee, setMarquee] = useState<
+    { x0: number; y0: number; x1: number; y1: number; additive: boolean } | null>(null);
   const [draw, setDraw] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [poly, setPoly] = useState<number[]>([]); // in-progress manual polygon, flattened [x,y,...]
   const [stroke, setStroke] = useState<number[][] | null>(null); // active brush/eraser stroke stamp centres
@@ -154,6 +161,12 @@ export default function EditorCanvas(p: Props) {
   function onDown(e: Konva.KonvaEventObject<MouseEvent>) {
     if (p.panning) return; // space-pan handled by Stage drag
     const [x, y] = toImg();
+    if (p.tool === "select" && p.onSelectMany && e.target === e.target.getStage()) {
+      // Begin a marquee. Started only on empty canvas, so dragging an object still moves it: the same
+      // gesture cannot mean both without one of them becoming unreachable.
+      setMarquee({ x0: x, y0: y, x1: x, y1: y, additive: e.evt.shiftKey || e.evt.metaKey });
+      return;
+    }
     if (p.tool === "box" || p.tool === "sam-box") {
       setDraw({ x0: x, y0: y, x1: x, y1: y });
     } else if (p.tool === "measure") {
@@ -195,17 +208,40 @@ export default function EditorCanvas(p: Props) {
     if (p.tool !== "polygon" && p.tool !== "polyline" && p.tool !== "adverse") setPoly([]);
   }, [p.tool]);
   useEffect(() => { if (p.tool !== "measure") setMeasure(null); }, [p.tool]);
+  useEffect(() => { if (p.tool !== "select") setMarquee(null); }, [p.tool]);
   useEffect(() => { if (p.tool !== "brush" && p.tool !== "eraser") setStroke(null); }, [p.tool]);
 
   function onMove() {
     const [x, y] = toImg();
     p.onCursor([x, y]);
+    if (marquee) setMarquee((m) => (m ? { ...m, x1: x, y1: y } : m));
     if (draw) setDraw((d) => (d ? { ...d, x1: x, y1: y } : d));
     if (measure) setMeasure((m) => (m ? { ...m, x1: x, y1: y } : m));
     if (stroke && (p.tool === "brush" || p.tool === "eraser")) setStroke((s) => (s ? [...s, [x, y]] : s));
   }
 
   function onUp() {
+    if (marquee) {
+      const box = [Math.min(marquee.x0, marquee.x1), Math.min(marquee.y0, marquee.y1),
+                   Math.max(marquee.x0, marquee.x1), Math.max(marquee.y0, marquee.y1)];
+      const additive = marquee.additive;
+      setMarquee(null);
+      // A drag under a few pixels is a click, not a marquee. Without this every click on empty canvas
+      // would clear the selection twice and the deselect below would never be reached.
+      if (box[2] - box[0] < 3 && box[3] - box[1] < 3) {
+        p.onSelect(null);
+      } else {
+        // Enclosed, not merely touched. Intersection selection makes a sweep across a crowded frame grab
+        // everything it brushed past, which is nearly always more than was meant.
+        const hit = p.objects
+          .filter((o) => o.visible !== false && !o.locked
+                         && o.bbox[0] >= box[0] && o.bbox[1] >= box[1]
+                         && o.bbox[2] <= box[2] && o.bbox[3] <= box[3])
+          .map((o) => o.id);
+        p.onSelectMany?.(hit, additive);
+      }
+      return;
+    }
     if (stroke) {
       const r = p.brushRadius ?? 12;
       const op = p.tool === "eraser" ? "erase" : "add";
@@ -512,6 +548,31 @@ export default function EditorCanvas(p: Props) {
                 <Circle x={measure.x1} y={measure.y1} radius={2.5 / s} fill="#58A6FF" />
                 <KText x={(measure.x0 + measure.x1) / 2 + 6 / s} y={(measure.y0 + measure.y1) / 2 - 8 / s}
                   text={label} fontSize={13 / s} fill="#58A6FF" />
+              </Group>
+            );
+          })()}
+
+          {/* the marquee itself: enclosed objects light up live, so what will be selected is visible
+              before the mouse is released rather than discovered after */}
+          {marquee && (() => {
+            const bx = [Math.min(marquee.x0, marquee.x1), Math.min(marquee.y0, marquee.y1),
+                        Math.max(marquee.x0, marquee.x1), Math.max(marquee.y0, marquee.y1)];
+            const inside = p.objects.filter(
+              (o) => o.visible !== false && !o.locked
+                     && o.bbox[0] >= bx[0] && o.bbox[1] >= bx[1]
+                     && o.bbox[2] <= bx[2] && o.bbox[3] <= bx[3]);
+            return (
+              <Group listening={false}>
+                <Rect x={bx[0]} y={bx[1]} width={bx[2] - bx[0]} height={bx[3] - bx[1]}
+                  stroke="#58A6FF" strokeWidth={1 / s} dash={[4 / s, 3 / s]}
+                  fill="rgba(88,166,255,0.08)" />
+                {inside.map((o) => (
+                  <Rect key={`mq${o.id}`} x={o.bbox[0]} y={o.bbox[1]}
+                    width={o.bbox[2] - o.bbox[0]} height={o.bbox[3] - o.bbox[1]}
+                    stroke="#58A6FF" strokeWidth={2 / s} />
+                ))}
+                <KText x={bx[0]} y={bx[1] - 14 / s} text={`${inside.length} enclosed`}
+                  fontSize={12 / s} fill="#58A6FF" />
               </Group>
             );
           })()}

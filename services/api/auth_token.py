@@ -41,6 +41,9 @@ class TokenPayload:
     token_version: int | None      # None for a legacy token, which cannot be revoked
     exp: int | None
     legacy: bool = False
+    # None for an ordinary session token. "media" marks the restricted credential the browser sends
+    # automatically as a cookie so an <img> can authenticate; see mint_media_token.
+    scope: str | None = None
 
 
 def _b64(b: bytes) -> str:
@@ -62,6 +65,27 @@ def mint_token(user_id: str | UUID, signing_key: str, *, token_version: int = 1,
     now = int(now if now is not None else time.time())
     payload = json.dumps({"uid": str(user_id), "iat": now, "exp": now + int(ttl_seconds),
                           "tv": int(token_version)}, separators=(",", ":"), sort_keys=True).encode()
+    return f"{_PREFIX}.{_b64(payload)}.{_b64(_sig(payload, signing_key))}"
+
+
+MEDIA_SCOPE = "media"
+
+
+def mint_media_token(user_id: str | UUID, signing_key: str, *, token_version: int = 1,
+                     ttl_seconds: int = 900, now: int | None = None) -> str:
+    """Issue a short-lived, media-only token.
+
+    An <img> tag cannot set an Authorization header, so the only credential a browser can present for an
+    image subresource is a cookie or a query parameter. Both are sent or logged far more freely than a
+    header, so what is presented that way must be worth as little as possible: this token authorises GET on
+    the image routes alone (see _is_media_read), expires in minutes rather than hours, and is refused
+    everywhere a session token is accepted. Handing out the session token for the same job would put a
+    full-privilege, twelve-hour credential into access logs and Referer headers.
+    """
+    now = int(now if now is not None else time.time())
+    payload = json.dumps({"uid": str(user_id), "iat": now, "exp": now + int(ttl_seconds),
+                          "tv": int(token_version), "scp": MEDIA_SCOPE},
+                         separators=(",", ":"), sort_keys=True).encode()
     return f"{_PREFIX}.{_b64(payload)}.{_b64(_sig(payload, signing_key))}"
 
 
@@ -112,22 +136,33 @@ def verify_token(token: str | None, signing_key: str, *, accept_legacy: bool = F
         UUID(uid)
         exp = int(data["exp"])
         tv = int(data["tv"])
+        # Absent on every token minted before media tokens existed, which is exactly what an unscoped
+        # session token should look like. A missing claim must never read as a broader scope.
+        scope = data.get("scp")
+        scope = str(scope) if scope is not None else None
     except Exception:  # noqa: BLE001 - a malformed but correctly-signed payload is still rejected
         return None
     if exp < int(now if now is not None else time.time()):
         return None
-    return TokenPayload(uid=uid, token_version=tv, exp=exp, legacy=False)
+    return TokenPayload(uid=uid, token_version=tv, exp=exp, legacy=False, scope=scope)
 
 
 def bearer_payload(authorization: str | None, signing_key: str, *, accept_legacy: bool = False,
                    now: int | None = None) -> TokenPayload | None:
-    """Extract and verify the payload from an 'Authorization: Bearer <token>' header value."""
+    """Extract and verify the payload from an 'Authorization: Bearer <token>' header value.
+
+    A scoped token is refused here rather than in each caller. A media token is a restricted credential the
+    browser sends automatically and that therefore reaches logs and proxies; if presenting it as a Bearer
+    also worked, the restriction would buy nothing, because anything that could read the cookie could act as
+    the user in full.
+    """
     if not authorization:
         return None
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer":
         return None
-    return verify_token(token.strip(), signing_key, accept_legacy=accept_legacy, now=now)
+    payload = verify_token(token.strip(), signing_key, accept_legacy=accept_legacy, now=now)
+    return None if (payload and payload.scope is not None) else payload
 
 
 def bearer_uid(authorization: str | None, signing_key: str, *, accept_legacy: bool = False) -> str | None:

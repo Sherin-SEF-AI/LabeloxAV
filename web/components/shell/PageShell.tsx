@@ -24,7 +24,9 @@ export default function PageShell({ active, title, subtitle, right, primaryActio
 }) {
   const showBar = Boolean(title || primaryAction || meta || subtitle);
   return (
-    <div className="h-screen flex flex-col">
+    // min-h-0 on the column and overflow on the bands: without it a narrow viewport clips the filter row
+    // and the content beneath it rather than letting either scroll.
+    <div className="h-[100dvh] flex flex-col min-h-0">
       {/* The header crumb only appears when the page has no title bar of its own, so the location is never
           spelled out twice in two different styles directly above itself. */}
       <TopNav active={active} right={right} showCrumb={!showBar} />

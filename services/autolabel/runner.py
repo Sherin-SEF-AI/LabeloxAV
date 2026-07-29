@@ -329,6 +329,11 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
         if champion_weights:
             log.info("autolabel.champion_serving", weights=champion_weights)
 
+        # Per-track observations from the frames just seen, for the reasoner's temporal check. Held here
+        # rather than queried per object: the check needs the immediate neighbours, and a database round
+        # trip per detection would cost more than the whole reasoning pass.
+        track_history: dict[str, list] = {}
+
         async def on_frame(fd: FrameDetections) -> None:
             fused = engine.fuse_frame(fd.frame.frame_id, fd.dets_a, fd.dets_b)
             # Thing/stuff (panoptic): drop stuff detections (sky, road, vegetation, barriers, walls) before
@@ -360,12 +365,47 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
                 quality_ok[id(fo.obj)] = qv.ok
                 if not qv.ok:
                     totals["quality_demoted"] = totals.get("quality_demoted", 0) + 1
+
+            # The reasoning pass. The quality reviewer above answers "is this box nonsense"; this answers
+            # "is this the right class, and does anything the frame knows contradict it". It runs before
+            # the gate because the gate's only other input is the detector's own confidence, which is the
+            # model grading its own homework and cannot catch a confident wrong label.
+            reasoner_ok: dict[int, bool] = {}
+            if settings.reasoner.enabled:
+                from services.autolabel.reasoner.pass_ import (
+                    FrameContext, apply_to_objects, escalate, reason_frame, summarise,
+                )
+
+                fctx = FrameContext(width=fd.frame.width, height=fd.frame.height,
+                                    scene=getattr(fd.frame, "scene", None) or {},
+                                    track_history=track_history)
+                verdicts = reason_frame(objs, onto, fctx,
+                                        checks=settings.reasoner.checks or None)
+                if settings.reasoner.adjudicate and verifier:
+                    # Tier 2 draws on the same VLM budget as the old verification pass, and is capped
+                    # separately: a bad prior that suddenly conflicts everywhere must not be able to
+                    # consume the whole GPU allowance on its own.
+                    room = min(budget - totals["vlm_calls"], per_frame_cap,
+                               settings.reasoner.max_adjudications_per_session
+                               - totals.get("adjudications", 0))
+                    used = escalate(objs, verdicts, onto, fd.image_bgr, verifier, budget=max(0, room))
+                    totals["adjudications"] = totals.get("adjudications", 0) + used
+                    totals["vlm_calls"] += used
+                reasoner_ok = apply_to_objects(objs, verdicts,
+                                               record_trace=settings.reasoner.record_trace)
+                for decision, n in summarise(verdicts).items():
+                    key = f"reasoner_{decision}"
+                    totals[key] = totals.get(key, 0) + n
+
             # Spend the per-frame VLM budget on the most uncertain objects first (lowest conf).
             order = sorted(range(len(fused)), key=lambda i: fused[i].obj.conf)
             frame_vlm = 0
             for i in order:
                 fo = fused[i]
-                qok = quality_ok[id(fo.obj)]
+                # Both signals gate auto-accept, and either one can withhold it. The reasoner never
+                # promotes: a verdict of accept only permits the gate to do what its own calibrated
+                # thresholds already allow, so a 0.3 detection cannot be talked into being a label.
+                qok = quality_ok[id(fo.obj)] and reasoner_ok.get(id(fo.obj), True)
                 fo.obj.state = gate_object(fo.obj, onto, settings.gate,
                                            auto_accept_enabled=auto_accept_enabled, quality_ok=qok)
                 if verifier and needs_vlm(fo.obj, onto, settings.gate, quality_ok=qok):
@@ -377,6 +417,17 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
                                                    auto_accept_enabled=auto_accept_enabled, quality_ok=qok)  # re-gate
                         totals["vlm_calls"] += 1
                         frame_vlm += 1
+
+            # Carry this frame's observations forward so the next frame's temporal check has something to
+            # compare against. Bounded to a short window: a track's agreement with itself is a local
+            # property, and holding a whole session would grow without limit for no extra signal.
+            for fo in fused:
+                if fo.obj.track_id:
+                    tid = str(fo.obj.track_id)
+                    hist = track_history.setdefault(tid, [])
+                    hist.append((fd.frame.ts_ns, fo.obj.bbox, fo.obj.class_id))
+                    if len(hist) > 6:
+                        del hist[:-6]
             by_state = await persist_frame_objects(db, store, bus, fd.frame, fused)
             totals["objects"] += len(fused)
             for k, v in by_state.items():

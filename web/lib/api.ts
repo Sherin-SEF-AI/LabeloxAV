@@ -14,6 +14,16 @@ import type {
   CalibResolved,
   CalibSession,
   EgoState,
+  EventTaxonomy,
+  DrivingEvent,
+  DrivingEventList,
+  DrivingEventSummary,
+  DeriveResult,
+  DerivePreview,
+  LaneLinkResult,
+  LaneTypeResult,
+  LaneTypeCoverage,
+  SegmentEditResult,
   InertialEvents,
   Confusions,
   CorrectionCoverage,
@@ -74,6 +84,30 @@ import type {
   EvalPatchRow,
   CloudStatus,
   CloudOrphan,
+  NotificationRow,
+  ReasoningTrace,
+  ReasonerAttribution,
+  ReasonerRerun,
+  Campaign,
+  CampaignDetail,
+  CampaignTick,
+  LineageGraph,
+  Tracklet,
+  CameraZone,
+  SecurityIncident,
+  PersonIdentityRow,
+  EdgeFleet,
+  EdgeDeviceRow,
+  EdgeFieldReport,
+  ActivityEvent,
+  ActivitySummary,
+  PiiAccessRow,
+  Profile,
+  SecPack,
+  SecSession,
+  SecStats,
+  WatchlistEntry,
+  PlateReadRow,
 } from "./types";
 
 // Same-origin: next.config rewrites /api/* to the FastAPI backend. Every request carries the current
@@ -661,6 +695,190 @@ export const api = {
       `/api/integrations/sources/${id}/preview`),
   deleteSource: (id: string) => del<{ deleted: boolean }>(`/api/integrations/sources/${id}`),
 
+  // Read one region of a document page. Separate from ocrRun, which walks a session's sign objects: a
+  // document page is an Asset with hand-drawn regions, so there is nothing for the session path to iterate.
+  ocrRegion: (uri: string, bbox: number[]) =>
+    post<{ text: string; lang: string; conf: number | null; measured: boolean }>(
+      "/api/ocr/region", { uri, bbox }),
+
+  // ---- The reasoning layer: what it decided, why, and whether it is any good ----
+  reasonerTrace: (objectId: string) =>
+    get<{ found: boolean; reasoning: ReasoningTrace | null; state?: string; detail?: string }>(
+      `/api/reasoner/trace/${objectId}`),
+  reasonerAttribution: (sinceHours?: number) =>
+    get<ReasonerAttribution>(
+      `/api/reasoner/attribution${sinceHours ? `?since_hours=${sinceHours}` : ""}`),
+  reasonerOutcomes: (sinceHours?: number) =>
+    get<{ reasoned: number; by_decision: Record<string, { total: number; reviewed: number;
+          corrected: number; error_rate: number | null }>; headline?: string }>(
+      `/api/reasoner/outcomes${sinceHours ? `?since_hours=${sinceHours}` : ""}`),
+  reasonerWeights: () =>
+    get<{ suggestions: Record<string, Record<string, unknown>>; based_on: number; note: string }>(
+      "/api/reasoner/weights"),
+  reasonerCoverage: () =>
+    get<{ objects: number; sampled: number; reasoned_in_sample: number; fraction: number }>(
+      "/api/reasoner/coverage"),
+  reasonerPriors: () =>
+    get<{ classes_with_height: string[]; classes_with_aspect: string[]; never_on_road: string[];
+          confusable_pairs: string[][]; overhead_classes: string[]; loaded: boolean; detail: string }>(
+      "/api/reasoner/priors"),
+  reasonerExplain: (body: Record<string, unknown>) =>
+    post<ReasoningTrace & { class_name: string; reasons: string[] }>("/api/reasoner/explain", body),
+  reasonerRerun: (sessionId: string, apply = false, limit = 1500) =>
+    post<ReasonerRerun>(
+      `/api/reasoner/rerun/${sessionId}?apply=${apply}&limit=${limit}`, {}),
+
+  // ---- Campaigns: the improvement loop, run by the system ----
+  campaigns: (status?: string) =>
+    get<{ campaigns: Campaign[] }>(`/api/campaigns${status ? `?status=${status}` : ""}`),
+  createCampaign: (body: Record<string, unknown>) => post<Campaign>("/api/campaigns", body),
+  campaign: (id: string) => get<CampaignDetail>(`/api/campaigns/${id}`),
+  tickCampaign: (id: string, dryRun = false) =>
+    post<CampaignTick>(`/api/campaigns/${id}/tick?dry_run=${dryRun}`, {}),
+  approveCampaignStage: (id: string, stage: string) =>
+    post<CampaignTick>(`/api/campaigns/${id}/approve?stage=${stage}`, {}),
+  stopCampaign: (id: string) => post<Campaign>(`/api/campaigns/${id}/stop`, {}),
+
+  // ---- Lineage: the DAG behind a model, a session, or a dataset ----
+  modelLineage: (modelVersion: string) =>
+    get<LineageGraph>(`/api/lineage/model/${encodeURIComponent(modelVersion)}`),
+  sessionLineage: (sessionId: string) => get<LineageGraph>(`/api/lineage/session/${sessionId}`),
+  datasetLineage: (commitId: string) => get<LineageGraph>(`/api/lineage/dataset/${commitId}`),
+
+  // ---- Tracklets: draw once, correct where it drifts ----
+  tracklet: (trackId: string) => get<Tracklet>(`/api/tracklets/${trackId}`),
+  // Distinct from setKeyframe above, which only flips the flag on the M2.5 path. This one also carries a
+  // corrected box, and correcting necessarily makes the frame a keyframe.
+  setTrackletKeyframe: (objectId: string, bbox: number[] | null, isKeyframe = true) =>
+    post<{ object_id: string; is_keyframe: boolean }>(
+      `/api/tracklets/objects/${objectId}/keyframe`, { bbox, is_keyframe: isKeyframe }),
+  deriveTracklet: (trackId: string, method = "linear") =>
+    post<{ updated: number; keyframes: number; method: string }>(
+      `/api/tracklets/${trackId}/derive?method=${method}`, {}),
+  propagateTracklet: (objectId: string, direction = "both", frames = 12) =>
+    post<{ created: number }>(
+      `/api/tracklets/objects/${objectId}/propagate?direction=${direction}&frames=${frames}`, {}),
+  setTrackAttributes: (trackId: string, attrs: Record<string, unknown>) =>
+    post<{ objects: number }>(`/api/tracklets/${trackId}/attributes`, { attrs }),
+  suggestKeyframes: (trackId: string, budget = 8) =>
+    get<{ suggestions: { object_id: string; frame_id: string; curvature: number }[] }>(
+      `/api/tracklets/${trackId}/suggest-keyframes?budget=${budget}`),
+  trackletStats: (sessionId?: string) =>
+    get<{ tracked_objects: number; keyframes: number; tracks: number;
+          frames_per_keyframe: number | null }>(
+      `/api/tracklets/stats/summary${sessionId ? `?session_id=${sessionId}` : ""}`),
+
+  // ---- LabeloxSec v2: zones, incidents, identities, live ingest ----
+  secZones: (cameraId?: string) =>
+    get<{ zones: CameraZone[] }>(`/api/sec/zones${cameraId ? `?camera_id=${cameraId}` : ""}`),
+  createSecZone: (body: Record<string, unknown>) => post<CameraZone>("/api/sec/zones", body),
+  deleteSecZone: (id: string) => del<{ removed: boolean }>(`/api/sec/zones/${id}`),
+  evaluateSecSession: (sessionId: string) =>
+    post<{ zones: number; incidents: number; tracks: number }>(
+      `/api/sec/sessions/${sessionId}/evaluate`, {}),
+  secIncidents: (q: { camera_id?: string; kind?: string; status?: string; severity?: string;
+                      since_hours?: number; limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v != null && v !== "") p.set(k, String(v)); });
+    return get<{ total: number; incidents: SecurityIncident[] }>(`/api/sec/incidents?${p}`);
+  },
+  acknowledgeIncident: (id: string, close = false) =>
+    post<SecurityIncident>(`/api/sec/incidents/${id}/acknowledge?close=${close}`, {}),
+  stitchPlates: (sessionId: string) =>
+    post<{ attached: number; reads: number }>(`/api/sec/sessions/${sessionId}/stitch-plates`, {}),
+  secIdentities: (minCameras = 1) =>
+    get<{ identities: PersonIdentityRow[]; total: number }>(
+      `/api/sec/identities?min_cameras=${minCameras}`),
+  forgetIdentity: (id: string) => del<{ forgotten: boolean }>(`/api/sec/identities/${id}`),
+  linkIdentities: (sessionId: string) =>
+    post<{ tracks: number; matched: number; cross_camera: number }>(
+      `/api/sec/sessions/${sessionId}/link-identities`, {}),
+  rtspIngest: (body: Record<string, unknown>) =>
+    post<{ session_id: string; frames: number }>("/api/sec/rtsp/ingest", body),
+
+  // ---- Edge: what the field says about what the bench passed ----
+  edgeFleet: (hours = 24) => get<EdgeFleet>(`/api/edge/fleet?hours=${hours}`),
+  edgeDevices: (fleet?: string) =>
+    get<{ devices: EdgeDeviceRow[] }>(`/api/edge/devices${fleet ? `?fleet=${fleet}` : ""}`),
+  edgeFieldReport: (artifactId: string, hours = 168) =>
+    get<EdgeFieldReport>(`/api/edge/artifacts/${artifactId}/field?hours=${hours}`),
+  edgeFieldGate: (artifactId: string, hours = 168) =>
+    get<EdgeFieldReport & { verdict: string; detail: string }>(
+      `/api/edge/artifacts/${artifactId}/gate?hours=${hours}`),
+
+  // ---- Resumable exports ----
+  exportProgress: (jobId: string) =>
+    get<{ status: string; progress: number; records_written: number; total_records: number;
+          chunks_done: number; resumable: boolean }>(`/api/exports/${jobId}/progress`),
+  resumableExports: () =>
+    get<{ resumable: { job_id: string; name: string; progress: number }[] }>("/api/exports/resumable"),
+  resumeExport: (jobId: string) => post<{ status: string }>(`/api/exports/${jobId}/resume`, {}),
+  championSweep: (sessionId?: string, topK = 100) =>
+    post<{ considered: number; with_near_misses: number;
+           candidates: { frame_id: string; score: number; proposals: unknown[] }[] }>(
+      `/api/activelearn/champion-sweep?top_k=${topK}${sessionId ? `&session_id=${sessionId}` : ""}`, {}),
+
+  // ---- Inbox: notifications, activity, and the access log ----
+  notifications: (limit = 50, unreadOnly = false) =>
+    get<{ total: number; notifications: NotificationRow[] }>(
+      `/api/notifications?limit=${limit}&unread_only=${unreadOnly}`),
+  notificationCount: () => get<{ unread: number }>("/api/notifications/count"),
+  markNotificationRead: (id: string) =>
+    post<{ marked: boolean }>(`/api/notifications/${id}/read`, {}),
+  markAllNotificationsRead: () => post<{ marked: number }>("/api/notifications/read-all", {}),
+
+  activity: (q: { mine?: boolean; user_id?: string; verb?: string; since_hours?: number;
+                  limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v != null && v !== "") p.set(k, String(v)); });
+    return get<{ total: number; events: ActivityEvent[] }>(`/api/activity?${p.toString()}`);
+  },
+  activitySummary: (hours = 24, mine = true) =>
+    get<ActivitySummary>(`/api/activity/summary?hours=${hours}&mine=${mine}`),
+
+  piiAccess: (q: { user_id?: string; subject_id?: string; action?: string; since_hours?: number;
+                   limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v != null && v !== "") p.set(k, String(v)); });
+    return get<{ total: number; accesses: PiiAccessRow[] }>(`/api/govern/pii-access?${p.toString()}`);
+  },
+  piiAccessSummary: (hours = 168) =>
+    get<{ hours: number; accesses: number; unredacted: number;
+          by_action: Record<string, number>; by_user: Record<string, number> }>(
+      `/api/govern/pii-access/summary?hours=${hours}`),
+
+  // ---- Identity self-service ----
+  profile: () => get<Profile>("/api/auth/profile"),
+  changePassword: (current_password: string | null, new_password: string) =>
+    post<{ token: string }>("/api/auth/password/change", { current_password, new_password }),
+  mfaSetup: () => post<{ secret: string; otpauth_uri: string }>("/api/auth/mfa/setup", {}),
+  mfaConfirm: (code: string) =>
+    post<{ token: string; recovery_codes: string[] }>("/api/auth/mfa/confirm", { code }),
+  mfaDisable: (password: string) => post<{ mfa_enabled: boolean }>("/api/auth/mfa/disable", { password }),
+  revokeSessions: () => post<{ token: string }>("/api/auth/sessions/revoke", {}),
+
+  // ---- LabeloxSec: the security domain (ANPR, watchlist, static-camera sessions) ----
+  // Every call here is capability-gated server side, so a deployment on the AV pack gets a 403 rather than a
+  // plate console that appears to work. secPack() is what the page reads first to decide what to render.
+  secPack: (packId = "sec") => get<SecPack>(`/api/security/pack?pack_id=${packId}`),
+  secSessions: (limit = 100, offset = 0) =>
+    get<{ total: number; offset: number; limit: number; sessions: SecSession[] }>(
+      `/api/security/sessions?limit=${limit}&offset=${offset}`),
+  secWatchlist: (activeOnly = true) =>
+    get<{ entries: WatchlistEntry[] }>(`/api/security/watchlist?active_only=${activeOnly}`),
+  secAddWatch: (plate: string, reason: string | null, severity: string) =>
+    post<WatchlistEntry>("/api/security/watchlist", { plate, reason, severity }),
+  secRemoveWatch: (entryId: string) =>
+    del<{ removed: boolean; plate?: string }>(`/api/security/watchlist/${entryId}`),
+  secReads: (q: { session_id?: string; camera_id?: string; plate?: string; state_code?: string;
+                  hits_only?: boolean; limit?: number; offset?: number } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v != null && v !== "") p.set(k, String(v)); });
+    return get<{ total: number; offset: number; limit: number; reads: PlateReadRow[] }>(
+      `/api/security/reads?${p.toString()}`);
+  },
+  secStats: () => get<SecStats>("/api/security/stats"),
+
   // ---- Multi-modal assets and annotations ----
   assetKinds: () => get<{ kinds: { kind: string; description: string }[] }>("/api/assets/kinds"),
   setLabelConfig: (projectId: string, config: LabelConfig) =>
@@ -969,6 +1187,57 @@ export const api = {
   cloudDisconnect: (pause = false) => post<CloudStatus>("/api/cloud/disconnect", { pause }),
   cloudOrphans: () => get<{ orphans: CloudOrphan[] }>("/api/cloud/orphans"),
   cloudTerminateOrphan: (podId: string) => post<{ terminated: string }>("/api/cloud/orphans/terminate", { pod_id: podId }),
+
+  // ---- Driving events: lane behaviour, signal phases, and the rulings on them ------------------------
+  eventTaxonomy: () => get<EventTaxonomy>(`/api/events/taxonomy`),
+  drivingEvents: (
+    sessionId: string,
+    opts?: { kind?: string; state?: string; severity?: string; trackId?: string; limit?: number },
+  ) => {
+    const q = new URLSearchParams();
+    if (opts?.kind) q.set("kind", opts.kind);
+    if (opts?.state) q.set("state", opts.state);
+    if (opts?.severity) q.set("severity", opts.severity);
+    if (opts?.trackId) q.set("track_id", opts.trackId);
+    if (opts?.limit) q.set("limit", String(opts.limit));
+    return get<DrivingEventList>(`/api/sessions/${sessionId}/driving-events?${q.toString()}`);
+  },
+  drivingEventSummary: (sessionId: string) =>
+    get<DrivingEventSummary>(`/api/sessions/${sessionId}/driving-events/summary`),
+  deriveDrivingEvents: (sessionId: string, pruneStale = true) =>
+    post<DeriveResult>(
+      `/api/sessions/${sessionId}/driving-events/derive?prune_stale=${pruneStale}`, {}),
+  previewDrivingEvents: (sessionId: string) =>
+    post<DerivePreview>(`/api/sessions/${sessionId}/driving-events/preview`, {}),
+  linkSessionLanes: (sessionId: string, apply = true) =>
+    post<LaneLinkResult>(`/api/sessions/${sessionId}/lanes/link?apply=${apply}`, {}),
+  classifySessionLanes: (sessionId: string, opts?: { apply?: boolean; reclassify?: boolean }) =>
+    post<LaneTypeResult>(
+      `/api/sessions/${sessionId}/lanes/classify?apply=${opts?.apply ?? true}` +
+      `&reclassify=${opts?.reclassify ?? false}`, {}),
+  laneTypeCoverage: () => get<LaneTypeCoverage>(`/api/lanes/type-coverage`),
+  ruleOnDrivingEvent: (eventId: string, verdict: "confirm" | "reject", note?: string) =>
+    post<DrivingEvent>(`/api/driving-events/${eventId}/${verdict}`, { note: note || null }),
+  createDrivingEvent: (
+    sessionId: string,
+    body: {
+      kind: string;
+      t_start_ns: number;
+      t_end_ns?: number | null;
+      track_id?: string | null;
+      frame_id?: string | null;
+      payload?: Record<string, unknown>;
+    },
+  ) => post<DrivingEvent>(`/api/sessions/${sessionId}/driving-events`, body),
+  trackDrivingEvents: (trackId: string) =>
+    get<DrivingEventList>(`/api/tracks/${trackId}/driving-events`),
+
+  // ---- Dense semantic raster: the human correction path ----------------------------------------------
+  editFrameSegmentation: (
+    frameId: string,
+    body: { kind?: string; classes: { class_name: string; polygons: number[][] }[]; replace?: boolean },
+  ) => put<SegmentEditResult>(`/api/frames/${frameId}/segment`, body),
+
 };
 
 export type TrainingJob = {

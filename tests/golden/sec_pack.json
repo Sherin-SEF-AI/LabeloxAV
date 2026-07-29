@@ -149,7 +149,10 @@
       "anpr",
       "background_prior",
       "privacy_redaction",
-      "static_camera"
+      "reid",
+      "rtsp",
+      "static_camera",
+      "zones"
     ],
     "default_scene_model": "static_camera",
     "display_name": "Security / CCTV (India)",

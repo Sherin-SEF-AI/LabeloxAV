@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useJobStream } from "@/lib/useEventStream";
 import { api, type ImportJob , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
@@ -74,11 +75,11 @@ function ImportBody() {
   }
   const HEALTH_COLOR: Record<string, string> = { pass: "text-pass border-pass", warn: "text-warn border-warn", fail: "text-block border-block" };
 
-  useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 2000);
-    return () => clearInterval(t);
-  }, []);
+  // The import job list arrives on the shared stream; refreshing on each push replaces the two-second
+  // poll that ran on every open tab regardless of whether anything was importing.
+  const jobStream = useJobStream();
+  useEffect(() => { refresh(); }, []);
+  useEffect(() => { if (jobStream.data) refresh(); }, [jobStream.data]);
 
   async function onGo() {
     if (!files.length) return;

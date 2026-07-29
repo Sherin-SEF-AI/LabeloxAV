@@ -146,9 +146,20 @@ async def gate_directed_materialize(run_id: str, payload: GateBatchIn,
     endpoint exists to route around.
     """
     from services.flywheel.gate_directed import materialize_gate_batch
+    from services.notify import notify
 
     try:
-        return await materialize_gate_batch(db, run_id, payload.project_id,
-                                            budget=payload.budget, jobs_of=payload.jobs_of)
+        result = await materialize_gate_batch(db, run_id, payload.project_id,
+                                              budget=payload.budget, jobs_of=payload.jobs_of)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+    # The loop just produced work for humans. Announcing it is what closes the last manual seam: without
+    # this, a batch built automatically still waits for somebody to think to look for it.
+    n = int(result.get("frames") or result.get("n_frames") or 0)
+    await notify(db, kind="gate_batch_ready", severity="info",
+                 title=f"a gate-directed review batch is ready ({n} frames)",
+                 body="built from the per-class recall deficit that blocked the last promotion",
+                 href="/projects", subject_type="gate_batch", subject_id=run_id,
+                 meta={"run_id": run_id, "classes": result.get("classes") or []})
+    return result

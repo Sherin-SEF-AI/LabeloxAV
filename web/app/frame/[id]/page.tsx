@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { api, lidarCloudPoints, type Cuboid3D, type LidarCloud, type LidarPoints , humanizeError } from "@/lib/api";
 import type { ColorBy } from "@/components/lidar/PointCloudViewer";
-import type { AdverseRegion, AlItem, ErrorCandidateRow, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, ProjectedCuboid, Relationship } from "@/lib/types";
+import type { AdverseRegion, AlItem, DrivingEvent, ErrorCandidateRow, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, ProjectedCuboid, Relationship } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
@@ -76,6 +76,13 @@ const G = {
   region: { key: "region", label: "Region", tools: [{ key: "adverse", label: "adverse", hotkey: "D" }] },
   cuboid: { key: "cuboid", label: "3D box", tools: [{ key: "cuboid", label: "cuboid", hotkey: "C" }] },
   measure: { key: "measure", label: "Measure", tools: [{ key: "measure", label: "measure", hotkey: "R" }] },
+  // Semantic paints a dense class raster rather than creating objects. It reuses the polygon and brush the
+  // object canvas already has, because a region drawn for a class and a region drawn for an instance are
+  // the same gesture and teaching the annotator two of them would be gratuitous.
+  semantic: { key: "semantic", label: "Semantic", tools: [
+    { key: "sem-region", label: "region", hotkey: "G" },
+    { key: "sem-erase", label: "erase", hotkey: "E" },
+  ] },
 } satisfies Record<string, ToolGroup>;
 
 // Per-mode tool strips. The mode rail picks one; the strip renders only that mode's groups.
@@ -88,6 +95,8 @@ const MODE_GROUPS: Record<string, ToolGroup[]> = {
   pose: [G.select, G.pose, G.measure],
   lidar3d: [G.select],
   lanes: [G.select],
+  semantic: [G.select, G.semantic],
+  events: [G.select],
   review: [G.select],
 };
 const MODE_TOOLS: Record<string, string[]> = Object.fromEntries(
@@ -214,6 +223,8 @@ export default function FrameEditor() {
     if (!tools.includes(stRef.current.tool)) dispatch({ t: "tool", tool: (tools[0] ?? "select") as Tool });
   };
   const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true });
+  // Driving events on this frame's session (lane changes, signal phases), shown in the events mode.
+  const [frameEvents, setFrameEvents] = useState<DrivingEvent[]>([]);
 
   const flash = (m: string) => {
     setNotice(m);
@@ -519,6 +530,31 @@ export default function FrameEditor() {
     await api.deleteLane(laneSel); setLaneSel(null); await loadLayers(); flash("lane deleted");
   };
   const propagateLanes = async () => { const r = await api.propagateLanes(id, 8); flash(`propagated to ${r.created} lane-frames`); };
+
+  // Dense semantic editing. The raster had a `human` source it could never be set to, because there was no
+  // write path: the layer was machine output a person could look at and not correct.
+  const paintSemantic = async (pts: number[]) => {
+    if (!currentClass) { flash("pick a class first"); return; }
+    try {
+      const r = await api.editFrameSegmentation(id, {
+        kind: "semantic",
+        classes: [{ class_name: currentClass.name, polygons: [pts] }],
+      });
+      if (r.unknown_classes.length) flash(`ontology does not know ${r.unknown_classes.join(", ")}`);
+      else flash(`painted ${currentClass.name}, ${(r.labelled_fraction * 100).toFixed(1)}% of the frame labelled`);
+      await loadLayers();
+    } catch (e) { flash("semantic paint failed: " + humanizeError(e)); }
+  };
+
+  // Driving events for this frame's session, so behaviour is reviewable next to the frame that shows it.
+  const loadFrameEvents = async () => {
+    if (!meta) return;
+    try {
+      const r = await api.drivingEvents(meta.session_id, { limit: 200 });
+      setFrameEvents(r.events);
+      if (!r.events.length) flash("no driving events yet, derive them from the events page");
+    } catch (e) { flash("events load failed: " + humanizeError(e)); }
+  };
 
   // 3D mode: load the session cloud nearest this frame's timestamp, then its points and 3D cuboids.
   useEffect(() => {
@@ -876,7 +912,11 @@ export default function FrameEditor() {
       }
       if (mod) return;
       // Shift+1..5 switches mode (plain 1..9 stays the quick-relabel shortcut)
-      if (e.shiftKey && /^Digit[1-5]$/.test(e.code)) { e.preventDefault(); switchMode(MODES[Number(e.code.slice(5)) - 1].key); return; }
+      if (e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
+        const target = MODES[Number(e.code.slice(5)) - 1];
+        if (target) { e.preventDefault(); switchMode(target.key); }
+        return;
+      }
       const k = e.key.toLowerCase();
       // Review mode rebinds a/x to accept/reject the selected object (and advance the queue).
       if (mode === "review") {
@@ -951,10 +991,23 @@ export default function FrameEditor() {
       lanes={lanes} drivable={drivable} layers={layers}
       onViewport={(viewport) => dispatch({ t: "viewport", viewport })}
       onSelect={doSelect}
+      selectedIds={st.selectedIds}
+      // Marquee selection. The reducer already excluded locked objects and the canvas already knew how to
+      // draw a rubber band; what was missing was the gesture on empty canvas that connects the two, so
+      // picking six of forty vehicles meant six trips to the object list while they were all on screen.
+      onSelectMany={(ids, additive) => dispatch({ t: "selectMany", ids, additive })}
       relationships={relationships}
       onUpdateBbox={(oid, bbox, rot) => dispatch({ t: "update", id: oid, patch: rot !== undefined ? { bbox, rot } : { bbox } })}
       onDrawBox={(bbox) => { if (currentClass) { const nid = tmpId(); dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox, mask: [], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } }); autoClassify(nid, bbox); } }}
-      onDrawPolygon={(pts) => { if (currentClass) { const nid = tmpId(); const bb = bboxOfPolys([pts]); dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox: bb, mask: [pts], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } }); autoClassify(nid, bb); } }}
+      onDrawPolygon={(pts) => {
+        if (!currentClass) return;
+        // In semantic mode the same gesture means a class region rather than an instance. Routed here rather
+        // than through a second canvas because the drawing is identical and only the destination differs.
+        if (mode === "semantic") { void paintSemantic(pts); return; }
+        const nid = tmpId(); const bb = bboxOfPolys([pts]);
+        dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox: bb, mask: [pts], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
+        autoClassify(nid, bb);
+      }}
       onDrawPolyline={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [], polyline: Array.from({ length: pts.length / 2 }, (_, i) => [pts[2 * i], pts[2 * i + 1]]), attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
       adverse={adverse}
       onDrawAdverse={async (pts) => { try { await api.createAdverse(id, { geometry: pts, condition: adverseCond }); setAdverse(await api.listAdverse(id).catch(() => [])); flash(`tagged ${adverseCond}`); } catch (e) { flash("region failed: " + humanizeError(e)); } }}
@@ -979,9 +1032,13 @@ export default function FrameEditor() {
   );
 
   return (
-    <div className="h-screen flex flex-col">
+    // min-w-0 and overflow-hidden on the root: a flex column otherwise adopts the widest child's intrinsic
+    // width, so the unwrappable top bar widened the entire page and the body scrolled sideways instead of
+    // the bar scrolling inside itself. On a tablet that pushed the canvas off screen entirely.
+    <div className="h-[100dvh] flex flex-col min-w-0 overflow-hidden">
       {/* TOP BAR: identity, frame context, global actions, confirm (the design's 46px top bar) */}
-      <header className="flex items-center gap-3 px-3 h-[46px] border-b hairline shrink-0">
+      <header className="flex items-center gap-3 px-3 h-[46px] border-b hairline shrink-0
+                         min-w-0 overflow-x-auto no-scrollbar">
         <BackButton />
         <button onClick={() => router.push("/")} className="flex items-baseline gap-px" title="home (triage)">
           <span className="font-display font-bold text-[15px] tracking-tight text-ink">Labelox</span>
@@ -1081,7 +1138,46 @@ export default function FrameEditor() {
             } />
           </div>
         <div ref={canvasWrapRef} className="flex-1 min-w-0 relative">
-          {mode === "lanes" ? (
+          {mode === "events" ? (
+            // Opaque: this panel replaces the image rather than floating over it, and inheriting the
+            // transparent canvas let what is behind print through the controls.
+            <div className="absolute inset-0 overflow-auto bg-bg p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <button onClick={() => void loadFrameEvents()}
+                  className="border border-line text-ink-2 px-2 py-1 font-mono text-[11px] hover:border-accent">
+                  load session events
+                </button>
+                <button onClick={() => router.push("/events")}
+                  className="border border-line text-ink-3 px-2 py-1 font-mono text-[11px] hover:border-accent">
+                  derive and review &rarr;
+                </button>
+                <span className="font-mono text-[10px] text-ink-3">{frameEvents.length} events</span>
+              </div>
+              <p className="font-mono text-[10px] text-ink-3 max-w-[70ch]">
+                Behaviour, not boxes: what an actor did over time. A lane change is a track crossing a lane
+                boundary and staying across it; a signal phase is one contiguous state of one light. Every
+                one is a candidate until somebody rules on it.
+              </p>
+              {frameEvents.length > 0 && (
+                <table className="w-full font-mono text-[11px]">
+                  <thead className="text-ink-3 text-left">
+                    <tr><th className="py-1">kind</th><th>severity</th><th>start</th><th>conf</th><th>state</th></tr>
+                  </thead>
+                  <tbody>
+                    {frameEvents.map((ev) => (
+                      <tr key={ev.event_id} className="border-t border-line">
+                        <td className="py-1">{ev.kind}</td>
+                        <td className={ev.severity === "violation" ? "text-block" : ev.severity === "notable" ? "text-warn" : "text-ink-3"}>{ev.severity}</td>
+                        <td className="tabular-nums">{(ev.t_start_ns / 1e9).toFixed(2)}s</td>
+                        <td className="tabular-nums">{ev.conf == null ? "-" : ev.conf.toFixed(2)}</td>
+                        <td className={ev.state === "confirmed" ? "text-pass" : ev.state === "review" ? "text-warn" : "text-ink-3"}>{ev.state}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ) : mode === "lanes" ? (
             laneImg && meta ? (
               <LaneCanvas img={laneImg} meta={{ width: meta.width, height: meta.height }} scale={laneScale}
                 lanes={lanes} sel={laneSel} drivable={layers.drivable ? drivable : null} adding={laneAdding}
@@ -1211,8 +1307,10 @@ export default function FrameEditor() {
           {notice && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 font-mono text-[11px] text-warn">{notice}</div>
           )}
-          {/* HUD: frame time and camera, a quiet overlay top-left (the design's HUD) */}
-          {meta && (
+          {/* HUD: frame time and camera, a quiet overlay top-left (the design's HUD). Suppressed in events
+              mode, where the canvas is a table rather than an image: a frame timestamp and a cursor position
+              describe something that is not on screen, and the overlay printed through the controls. */}
+          {meta && mode !== "events" && (
             <div className="absolute top-3 left-3 z-10 flex flex-col gap-1 pointer-events-none">
               <span className="font-mono text-[11px] text-ink-2 bg-bg/60 px-1.5 py-0.5 rounded w-fit">{new Date(Number(meta.ts_ns) / 1e6).toISOString().replace("T", " ").replace("Z", "")}</span>
               <span className="font-mono text-[11px] text-ink-3 bg-bg/60 px-1.5 py-0.5 rounded w-fit">cam {meta.cam_id}{meta.is_lidar ? " · lidar" : ""}{cursor ? `  ·  ${Math.round(cursor[0])}, ${Math.round(cursor[1])}` : ""}</span>
@@ -1294,7 +1392,12 @@ export default function FrameEditor() {
             <span className="mt-2 [writing-mode:vertical-rl] font-display text-[10px] uppercase tracking-wider text-ink-3">Properties</span>
           </div>
         ) : (
-        <aside className="w-[340px] shrink-0 border-l hairline flex flex-col min-h-0">
+          // Fixed width on a desktop, an overlay on anything narrower. At 340px fixed, a 768px tablet is
+          // left with 428px of canvas, which is not an annotation surface; the collapse toggle above
+          // already exists, so below the breakpoint the panel floats over the canvas instead of eating it.
+          <aside className="w-[340px] shrink-0 border-l hairline flex flex-col min-h-0
+                          max-lg:absolute max-lg:right-0 max-lg:top-0 max-lg:bottom-0 max-lg:z-30
+                          max-lg:bg-panel max-lg:shadow-xl">
           <div className="h-[38px] shrink-0 flex items-center gap-2 px-3 border-b hairline">
             <span className="font-display font-semibold text-[12.5px] text-ink">
               {selected ? selected.class_name : mode === "review" ? "Review" : mode === "lanes" ? "Lanes" : mode === "lidar3d" ? "Cuboids" : "Properties"}
@@ -1765,7 +1868,8 @@ export default function FrameEditor() {
       </div>
 
       {/* BOTTOM BAR: zoom, shortcut hints, counts, save status (the design's 28px bottom bar) */}
-      <footer className="h-7 shrink-0 flex items-center border-t hairline font-mono text-[10.5px] text-ink-3">
+      <footer className="h-7 shrink-0 flex items-center border-t hairline font-mono text-[10.5px] text-ink-3
+                         min-w-0 overflow-x-auto no-scrollbar">
         <div className="flex items-center h-full border-r hairline px-1">
           <button onClick={() => zoomBy(1 / 1.2)} title="zoom out" className="w-6 h-5 flex items-center justify-center rounded text-ink-2 hover:bg-line/50"><Icon name="zoomOut" size={14} /></button>
           <span className="min-w-[38px] text-center text-ink-2">{Math.round(st.viewport.scale * 100) || 0}%</span>

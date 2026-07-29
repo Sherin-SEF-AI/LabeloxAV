@@ -114,6 +114,8 @@ export const MENUS: Menu[] = [
         hint: "what is assigned to you" },
       { key: "review", label: "Review queue", icon: "review", href: "/review/queue",
         separatorBefore: true, hint: "active learning and error candidates" },
+      { key: "rapid", label: "Rapid review", icon: "check", href: "/review/rapid",
+        hint: "one crop, one keystroke" },
       { key: "annotations", label: "Annotations", icon: "list", href: "/annotations",
         hint: "browse and resume" },
       { key: "agent", label: "Agent console", icon: "activity", href: "/agent",
@@ -130,12 +132,20 @@ export const MENUS: Menu[] = [
     items: [
       { key: "quality", label: "Quality sheet", icon: "check", href: "/quality",
         hint: "gold set and gate metrics" },
+      { key: "reasoner", label: "Reasoning layer", icon: "target", href: "/reasoner",
+        hint: "what ran before each label, and whether it was right" },
       { key: "calibration", label: "Calibration", icon: "ruler", href: "/calibration",
         hint: "camera validation" },
       { key: "training", label: "Training", icon: "activity", href: "/training",
         separatorBefore: true, hint: "training jobs and model registry" },
       { key: "govern", label: "Govern", icon: "flag", href: "/govern",
         hint: "loop control, champion gate, kill switch" },
+      { key: "campaigns", label: "Campaigns", icon: "target", href: "/campaigns",
+        hint: "the improvement loop, run by the system" },
+      { key: "lineage", label: "Lineage", icon: "route", href: "/lineage",
+        hint: "what a model is made of, and what a session ended up in" },
+      { key: "field", label: "Field performance", icon: "activity", href: "/forgyx/field",
+        hint: "what deployed devices report against the bench" },
       { key: "collaborate", label: "Collaborate", icon: "link", href: "/collaborate",
         hint: "branches and merge requests" },
     ],
@@ -154,6 +164,39 @@ export const MENUS: Menu[] = [
       { key: "map", label: "HD map", icon: "route", href: "/map", hint: "fused map and provenance" },
       { key: "inertial", label: "Inertial", icon: "activity", href: "/inertial",
         hint: "ego state, events, maneuvers" },
+    ],
+  },
+  {
+    // The second domain. LabeloxSec is a pack, not a platform: it changes what the same spine is authorised to
+    // do rather than adding another stage to the loop, which is why it lives in its own menu instead of the
+    // platform switcher.
+    key: "security",
+    label: "Security",
+    items: [
+      { key: "labeloxsec", label: "LabeloxSec console", icon: "flag", href: "/labeloxsec",
+        hint: "plate reads, watchlist, static-camera sessions" },
+      { key: "sec-hits", label: "Watchlist hits", icon: "activity", href: "/labeloxsec?hits=1",
+        hint: "reads that matched a watched mark" },
+      { key: "sec-incidents", label: "Incidents", icon: "flag", href: "/labeloxsec/incidents",
+        hint: "zones, crossings, and cross-camera sightings" },
+    ],
+  },
+  {
+    // The account and its trail. These were unreachable because they did not exist: the only credential was
+    // an admin-minted token, so there was nothing to manage and nowhere to see what you had done.
+    key: "account",
+    label: "Account",
+    items: [
+      { key: "profile", label: "Your account", icon: "user", href: "/profile",
+        hint: "password, two-factor, sessions" },
+      { key: "activity", label: "Activity", icon: "activity", href: "/activity",
+        hint: "what you and the team have done" },
+      { key: "pii-access", label: "PII access log", icon: "shield", href: "/govern/pii-access",
+        hint: "who viewed personal data (admin)", separatorBefore: true },
+      { key: "language", label: "Language", icon: "info", event: "lbx:language",
+        hint: "English, हिन्दी, ಕನ್ನಡ, தமிழ்", separatorBefore: true },
+      { key: "tour", label: "Show the tour again", icon: "info", event: "lbx:tour",
+        hint: "the four things worth knowing on day one" },
     ],
   },
   {

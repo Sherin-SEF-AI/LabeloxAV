@@ -212,6 +212,30 @@ class CalibrateSettings(BaseModel):
                                      # method=isotonic so a calibrated 0.95 means ~95% precision (M9)
 
 
+class ReasonerSettings(BaseModel):
+    """The reasoning layer between detection and label.
+
+    On by default. The Tier 1 checks are deterministic and cost microseconds, and the failure they catch
+    (a confident wrong label auto-accepted into the training set) is the one that has actually hurt this
+    corpus. Turning it off is for measuring what it is worth, not for running without it.
+    """
+
+    enabled: bool = True
+    # Which collectors to run. Empty means all of them; naming a subset is how a check under suspicion is
+    # isolated without editing code.
+    checks: list[str] = []
+    # Whether a conflicted detection may escalate to the VLM. Separate from the VLM's own enable flag,
+    # because a deployment may want the free Tier 1 checks and not the GPU cost of Tier 2.
+    adjudicate: bool = True
+    # Ceiling on Tier 2 calls per session, on top of the VLM budget. The reasoner escalates only conflicted
+    # objects, which should be a small fraction; a ceiling here means a bad prior that suddenly conflicts
+    # everywhere cannot silently consume the whole GPU budget.
+    max_adjudications_per_session: int = 200
+    # Write the full trace onto provenance. Off would make the layer unauditable and unmeasurable, so it
+    # exists only for a deployment with a hard storage constraint.
+    record_trace: bool = True
+
+
 class GateSettings(BaseModel):
     auto_accept: float = 0.95          # benign default; calibrated, so this is a precision floor
     safety_auto_accept: float = 0.99   # M-Q.4: safety-critical classes (VRU, animal) must be near-certain
@@ -367,6 +391,12 @@ class TrainingSettings(BaseModel):
     # scratch, which needs far more data than a corpus of human-corrected labels typically holds.
     segmentation_weights: str = "yolo11n-seg.pt"
     pose_weights: str = "yolo11n-pose.pt"
+    # A crop classifier starts from a classification checkpoint: the head shape has to match the task, and
+    # starting a classifier from a detection checkpoint discards the pretrained head entirely.
+    classification_weights: str = "yolo11n-cls.pt"
+    # Named so the 3D task can report what it would load, and refuse by name rather than by silence. There
+    # is no 3D detector in this environment; see services/training/tasks/detect3d.py.
+    detect3d_weights: str = "openpcdet-pointpillars.pth"
     # A crashed run resumes from its last checkpoint instead of restarting at epoch 0. The worker resets an
     # orphaned job to pending; without this that discarded every epoch already paid for.
     resume_orphaned_runs: bool = True
@@ -588,6 +618,39 @@ class AuthSettings(BaseModel):
     # Accept the legacy lbx1 tokens (no expiry, no revocation) during a migration window. Off by default and
     # refused on any non-local deployment by _require_prod_secrets: a legacy token cannot be expired or revoked.
     accept_legacy_tokens: bool = False
+
+    # ---- how a person actually signs in ----
+    # Local passwords. On by default: without them the only credential is an admin-minted token, which is
+    # what made this undeployable. A directory-only deployment turns this off so no local password exists
+    # to be phished or reused.
+    password_login: bool = True
+    # Whether an unauthenticated visitor may create their own account. Off by default: on a corpus holding
+    # personal data, open registration is a decision an operator makes deliberately, not a default they
+    # discover. When on, the account is created at self_signup_role and an admin promotes from there.
+    self_signup: bool = False
+    self_signup_role: str = "annotator"
+    # Restrict self-signup to a set of email domains, e.g. ["example.com"]. Empty means no restriction,
+    # which is only sensible on a closed network.
+    self_signup_domains: list[str] = []
+    # Require a second factor for these roles once they have enrolled one. Reviewers and admins can approve
+    # labels and promote models, so their accounts are worth more than an annotator's.
+    mfa_required_roles: list[str] = ["admin"]
+
+    # ---- OIDC / SSO ----
+    # Set issuer and client_id to enable. The client secret is optional because a public client with PKCE
+    # is a valid and increasingly common configuration.
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
+    oidc_scopes: str = "openid email profile"
+    # Where the provider sends the browser back. Must match the registration at the provider exactly.
+    oidc_redirect_uri: str = "http://localhost:3000/api/auth/oidc/callback"
+    # Role given to an account created on its first federated sign-in.
+    oidc_default_role: str = "annotator"
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return bool(self.oidc_issuer and self.oidc_client_id)
 
 
 class IntegrationsSettings(BaseModel):
@@ -812,6 +875,7 @@ class Settings(BaseSettings):
     fusion: FusionSettings = FusionSettings()
     calibrate: CalibrateSettings = CalibrateSettings()
     gate: GateSettings = GateSettings()
+    reasoner: ReasonerSettings = ReasonerSettings()
     quality: QualitySettings = QualitySettings()
     intelligence: IntelligenceSettings = IntelligenceSettings()
     intel: IntelSettings = IntelSettings()  # Data Intelligence Layer (Phase 1)

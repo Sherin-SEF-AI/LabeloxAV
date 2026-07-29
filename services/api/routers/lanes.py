@@ -17,6 +17,8 @@ from db.models import Frame, Lane
 from services.api.deps import db_session
 from services.autolabel.lane.curves import fit_control_points, mark_ego, propagate_control_points
 from services.autolabel.lane.detect import model_tag, propose_lanes
+from services.autolabel.lane.linetype import MODEL_VERSION as LINETYPE_VERSION
+from services.autolabel.lane.linetype import classify_lane
 
 router = APIRouter()
 
@@ -35,6 +37,10 @@ def _row(lane: Lane) -> dict:
     return {"lane_id": str(lane.lane_id), "frame_id": str(lane.frame_id),
             "track_ref": str(lane.track_ref) if lane.track_ref else None,
             "control_points": lane.control_points, "lane_type": lane.lane_type,
+            "marking_conf": lane.marking_conf,
+            # Null confidence means the type was never measured, which is a different claim from a type
+            # measured and found uncertain, and consumers that gate on solid need to tell them apart.
+            "measured": lane.marking_conf is not None,
             "is_ego": lane.is_ego, "source": lane.source, "model_version": lane.model_version}
 
 
@@ -57,8 +63,13 @@ async def propose(frame_id: UUID, db: AsyncSession = Depends(db_session)):
     ego = mark_ego(cps, frame.width, frame.height)
     created = []
     for i, cp in enumerate(cps):
+        # Typed from the paint on the way in. This used to be the literal "solid" for every lane the system
+        # had ever proposed, which is what left 4,548 of 4,558 lanes claiming a type nobody measured.
+        lane_type, conf, evidence = classify_lane(img, cp, frame_width=frame.width)
         lane = Lane(frame_id=frame.frame_id, session_id=frame.session_id, control_points=cp,
-                    lane_type="solid", is_ego=(i == ego), source="proposed", model_version=model_tag())
+                    lane_type=lane_type, is_ego=(i == ego), source="proposed",
+                    marking_conf=conf, provenance={"linetype": evidence.as_dict()},
+                    model_version=f"{model_tag()}+{LINETYPE_VERSION}")
         db.add(lane)
         created.append(lane)
     await db.flush()
@@ -129,8 +140,15 @@ async def propagate(frame_id: UUID, frames: int = 8, db: AsyncSession = Depends(
             if ncp is None:
                 continue
             lt, ego, ref = meta[lid]
+            # Typed against the frame it landed on, not the one it came from: a line that is solid where it
+            # was drawn may be dashed two seconds later, and inheriting the keyframe's type propagates a
+            # claim about paint nobody looked at.
+            ptype, pconf, pev = classify_lane(nimg, ncp, frame_width=nf.width)
             db.add(Lane(frame_id=nf.frame_id, session_id=frame.session_id, control_points=ncp,
-                        lane_type=lt, is_ego=ego, source="propagated", track_ref=ref, model_version="optical-flow"))
+                        lane_type=(ptype if pconf > 0 else lt), is_ego=ego, source="propagated",
+                        track_ref=ref, marking_conf=pconf,
+                        provenance={"linetype": pev.as_dict(), "inherited_type": lt},
+                        model_version=f"optical-flow+{LINETYPE_VERSION}"))
             cur[lid] = ncp
             created += 1
         prev_gray = cur_gray

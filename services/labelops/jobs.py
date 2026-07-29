@@ -151,6 +151,16 @@ async def assign_job(db: AsyncSession, job_id: str, assignee_id: str | None,
     from services.integrations.webhooks import emit
 
     await emit("job.assigned", {"job_id": job_id, "assignee_id": assignee_id})
+
+    # Addressed to the person, not the role: this one has an owner, and telling everyone would be noise for
+    # everyone except them.
+    if assignee_id:
+        from services.notify import notify
+
+        await notify(db, kind="job_assigned", user_id=assignee_id,
+                     title=f"a labeling job was assigned to you ({job.stage})",
+                     body=f"{len(job.frame_ids or [])} frames to label",
+                     href="/projects", subject_type="label_job", subject_id=job_id)
     return _job_dict(job)
 
 

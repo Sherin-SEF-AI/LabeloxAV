@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useJobStream } from "@/lib/useEventStream";
 import { api , humanizeError } from "@/lib/api";
 import type { CurationSummary } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
@@ -42,11 +43,11 @@ export default function CurationPage() {
     }
   }
 
-  useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 3000);
-    return () => clearInterval(t);
-  }, []);
+  // The curation summary changes when embedding or autolabel work lands, both of which are on the shared
+  // job stream, so this follows the stream instead of running its own three-second timer.
+  const jobStream = useJobStream();
+  useEffect(() => { refresh(); }, []);
+  useEffect(() => { if (jobStream.data) refresh(); }, [jobStream.data]);
 
   async function embed() {
     setBusy(true);

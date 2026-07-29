@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,7 +26,24 @@ async def db_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+def _media_cookie_payload(request: Request, settings):
+    """The media-cookie payload, but only on an image subresource and only if the token is media-scoped.
+
+    Deliberately narrow. The cookie is attached by the browser to every /api request it makes, so honouring
+    it anywhere else would turn an automatically-sent credential into a general-purpose one.
+    """
+    from services.api.auth_token import MEDIA_SCOPE, verify_token
+    from services.api.media import MEDIA_COOKIE, is_media_read
+
+    if request.method not in ("GET", "HEAD") or not is_media_read(request.url.path):
+        return None
+    cookie = request.cookies.get(MEDIA_COOKIE)
+    payload = verify_token(cookie, settings.auth.signing_key) if cookie else None
+    return payload if (payload is not None and payload.scope == MEDIA_SCOPE) else None
+
+
 async def current_user(
+    request: Request,
     authorization: str | None = Header(default=None),
     x_lbx_user_id: str | None = Header(default=None),
     db: AsyncSession = Depends(db_session),
@@ -40,6 +57,11 @@ async def current_user(
     settings = get_settings()
     payload = bearer_payload(authorization, settings.auth.signing_key,
                              accept_legacy=settings.auth.accept_legacy_tokens)
+    if payload is None:
+        # The media cookie, honoured only for an image subresource. Some of those routes sit under a router
+        # with its own role floor, so resolving identity here as well is what keeps the cookie working on
+        # them; without it the middleware would admit the request and the dependency would still refuse it.
+        payload = _media_cookie_payload(request, settings)
     if payload is not None:
         uid = payload.uid
     elif not settings.auth.enabled and x_lbx_user_id:

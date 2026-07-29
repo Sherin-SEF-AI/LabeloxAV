@@ -26,6 +26,9 @@ from uuid import UUID
 
 from core.logging import get_logger
 from core.storage import get_object_store
+from services.autolabel.lane.linetype import MODEL_VERSION as LINETYPE_VERSION
+from services.autolabel.lane.linetype import classify_lane
+from services.autolabel.lane.marking import group_collinear
 
 log = get_logger("perception_cloud")
 
@@ -117,7 +120,7 @@ async def ingest(result_path: Path) -> dict:
     from db.models import DrivableMask, Frame, Lane
     from db.session import get_sessionmaker
     store = get_object_store()
-    n_dr = n_lane = n_err = 0
+    n_dr = n_lane = n_err = n_merged = 0
     rows = [json.loads(ln) for ln in result_path.read_text().splitlines() if ln.strip()]
     async with get_sessionmaker()() as db:
         for rec in rows:
@@ -143,13 +146,51 @@ async def ingest(result_path: Path) -> dict:
             lanes = rec.get("lanes") or []
             if lanes:
                 await db.execute(delete(Lane).where(Lane.frame_id == fid, Lane.source == "proposed"))
-                for i, pts in enumerate(lanes):
+                # The pod returns connected components, and a dashed lane is one component per dash. Left
+                # alone that stores a single lane as several short stubs, each of which is entirely paint and
+                # therefore reads as a confident solid line, which is a line crossing is an offence on.
+                # Fragmenting a dashed lane manufactures violations, so the dashes are put back together
+                # before anything is written.
+                grouped = group_collinear(lanes, int(frame.width or 1280))
+                if len(grouped) != len(lanes):
+                    n_merged += len(lanes) - len(grouped)
+                img = _frame_image(store, frame)
+                for pts in grouped:
+                    # Typed from the paint, not defaulted. This was the last of the three write paths still
+                    # hardcoding "solid", which is what left the corpus claiming 4,548 solid lines.
+                    lane_type, conf, evidence = ("unknown", None, None)
+                    if img is not None:
+                        lane_type, conf, ev = classify_lane(img, pts, frame_width=frame.width)
+                        evidence = ev.as_dict()
                     db.add(Lane(frame_id=fid, session_id=frame.session_id, control_points=pts,
-                           lane_type="solid", is_ego=False, source="proposed", model_version="mapillary-marking:pod"))
+                           lane_type=lane_type, is_ego=False, source="proposed",
+                           marking_conf=conf,
+                           provenance={"linetype": evidence} if evidence else {},
+                           model_version=f"mapillary-marking:pod+{LINETYPE_VERSION}"))
                     n_lane += 1
         await db.commit()
-    log.info("perception.ingested", drivable=n_dr, lanes=n_lane, errors=n_err)
-    return {"drivable": n_dr, "lanes": n_lane, "errors": n_err}
+    log.info("perception.ingested", drivable=n_dr, lanes=n_lane, errors=n_err,
+             merged_fragments=n_merged)
+    return {"drivable": n_dr, "lanes": n_lane, "errors": n_err,
+            # How many per-dash stubs were folded back into the lanes they belong to. A number worth seeing:
+            # if it is large the segmenter is finding a lot of dashed road, which is the case the old path
+            # could not represent at all.
+            "merged_fragments": n_merged}
+
+
+def _frame_image(store, frame):
+    """The frame's image, or None if it cannot be read.
+
+    Typing a lane needs the picture. A frame whose image has gone is not a reason to fail the ingest or to
+    guess a type: the lane lands unmeasured, and the classify pass picks it up later.
+    """
+    from services.recall.backends import load_image_bgr
+
+    try:
+        return load_image_bgr(store, frame.img_uri)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("perception.frame_image_unreadable", frame=str(frame.frame_id), error=str(exc))
+        return None
 
 
 def _run_sweep_on_pod(root: Path, work: Path, lanes: bool) -> None:

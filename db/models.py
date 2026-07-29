@@ -268,13 +268,21 @@ class Lane(Base):
     session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
     track_ref: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # same lane across frames
     control_points: Mapped[list] = mapped_column(JSONB, nullable=False)  # [[x,y],...] control points
-    lane_type: Mapped[str] = mapped_column(String(16), nullable=False)   # solid|dashed|double|road_edge|implicit|fallback
+    # unknown is a real value and the honest one: the type was measured and the paint did not say. It is not
+    # in illegal_to_cross, so a crossing of an unmeasurable line derives as a manoeuvre rather than an
+    # offence, which is the safe direction when the evidence is a smear of grey pixels.
+    lane_type: Mapped[str] = mapped_column(String(16), nullable=False)   # solid|dashed|double|road_edge|implicit|fallback|unknown
     is_ego: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="proposed")  # proposed|human|propagated
     model_version: Mapped[str | None] = mapped_column(String(64))
+    # How strongly the paint supported the type. Null means nobody measured it, which is different from
+    # measured-and-uncertain and has to stay distinguishable.
+    marking_conf: Mapped[float | None] = mapped_column(Float)
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=sql_text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_lane_frame", "frame_id"), Index("ix_lane_track_ref", "track_ref"))
+    __table_args__ = (Index("ix_lane_frame", "frame_id"), Index("ix_lane_track_ref", "track_ref"),
+                      Index("ix_lane_session_conf", "session_id", "marking_conf"))
 
 
 class DrivableMask(Base):
@@ -510,10 +518,15 @@ class Prediction(Base):
     mask_uri: Mapped[str | None] = mapped_column(Text)
     mask_encoding: Mapped[str | None] = mapped_column(String(16))
     cuboid_3d: Mapped[dict | None] = mapped_column(JSONB)
+    # The identity a tracker assigned, when the run was a tracker rather than a per-frame detector. Null for
+    # a detection run, and that nullness is what tells the tracking evaluator there is nothing to associate,
+    # rather than it scoring a detector as a tracker with an identity switch on every frame.
+    track_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         Index("ix_prediction_run", "run_id"),
+        Index("ix_prediction_track", "run_id", "track_id"),
         Index("ix_prediction_frame", "frame_id"),
         Index("ix_prediction_run_frame", "run_id", "frame_id"),
     )
@@ -855,6 +868,11 @@ class GoldSet(Base):
     n_frames: Mapped[int] = mapped_column(Integer, default=0)
     ontology_version: Mapped[str] = mapped_column(String(64), nullable=False)
     metrics: Mapped[dict] = mapped_column(JSONB, default=dict)  # eval cached at seal time (optional)
+    # Sealed track ids, present only when the set was sealed with track continuity guaranteed. A tracking
+    # metric scored against a set without this is scored against association labels that may not exist, so
+    # the evaluator refuses rather than reporting a number built on absent ground truth.
+    track_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    tracks_sealed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     data_yaml_uri: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -913,6 +931,10 @@ class ExportJob(Base):
     commit_id: Mapped[str | None] = mapped_column(String(128))  # set on completion
     object_count: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text)
+    # What has already been written and verified. An export was all or nothing, so a failure at ninety
+    # percent restarted from zero, which on a large corpus means hours of repeated work.
+    checkpoint: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    resumed_from: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -1027,9 +1049,17 @@ class TimelineEvent(Base):
     event_id: Mapped[uuid.UUID] = _uuid_pk()
     session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("session.session_id", ondelete="CASCADE"))
     kind: Mapped[str] = mapped_column(String(40), nullable=False)
-    modality: Mapped[str] = mapped_column(String(16), nullable=False)        # imu|audio|scene|geo|crossmodal
+    modality: Mapped[str] = mapped_column(String(16), nullable=False)  # imu|audio|scene|geo|crossmodal|driving
     t_start_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
     t_end_ns: Mapped[int | None] = mapped_column(BigInteger)                 # null = a point event
+    # What the event is about. Nullable because an inertial spike or an audio region is genuinely about the
+    # session alone; SET NULL rather than CASCADE because a confirmed event is a finding about the drive and
+    # should outlive the track that suggested it.
+    track_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("track.track_id", ondelete="SET NULL"))
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("frame.frame_id", ondelete="SET NULL"))
+    conf: Mapped[float | None] = mapped_column(Float)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="human")  # human|auto|correlated
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="review")  # review|confirmed|rejected
@@ -1037,7 +1067,9 @@ class TimelineEvent(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_timeline_event_session_t", "session_id", "t_start_ns"),)
+    __table_args__ = (Index("ix_timeline_event_session_t", "session_id", "t_start_ns"),
+                      Index("ix_timeline_event_track", "track_id"),
+                      Index("ix_timeline_event_session_kind", "session_id", "kind"))
 
 
 class SpeechSegment(Base):
@@ -2027,3 +2059,548 @@ class FlywheelCycle(Base):
     collection_tasks: Mapped[list] = mapped_column(JSONB, default=list)  # [{cell, priority, target_count, reason}]
     rationale: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PlateWatchlist(Base):
+    """A registration mark a security deployment is watching for (LabeloxSec).
+
+    Deployment state, not reference data: a stolen-vehicle list or an access allow-list belongs to the site,
+    not to the product. Stored on the normalised form because that is the only thing matching can be done on
+    reliably ("KA 01 AB 1234", "ka-01-ab-1234" and "KA01AB1234" are one mark), with the raw text kept so an
+    operator sees what they typed.
+    """
+
+    __tablename__ = "plate_watchlist"
+
+    entry_id: Mapped[uuid.UUID] = _uuid_pk()
+    plate_normalized: Mapped[str] = mapped_column(String(16), nullable=False, unique=True, index=True)
+    plate_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    # info: log it. warn: surface it. critical: page someone. The severity travels with the hit so a
+    # downstream consumer does not have to re-derive urgency from the reason text.
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, default="warn")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    added_by: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PlateRead(Base):
+    """One plate read by the ANPR path (LabeloxSec).
+
+    This is personal data. It exists only under a pack that declares the `anpr` capability; the AV pack does
+    the opposite and blurs plates without ever reading them, and the capability gate refuses ANPR there. The
+    session FK cascades so an erasure request removes these with the rest of the session's data rather than
+    leaving plate text behind, which would defeat the erasure.
+
+    ocr_conf is nullable on purpose: a generative-VLM reader exposes no calibrated score, and a fabricated
+    number would make a confidence filter look meaningful when it is not.
+    """
+
+    __tablename__ = "plate_read"
+
+    read_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"), index=True)
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("frame.frame_id", ondelete="CASCADE"), index=True)
+    camera_id: Mapped[str | None] = mapped_column(String(64), index=True)
+
+    plate_normalized: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    plate_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    plate_type: Mapped[str] = mapped_column(String(16), nullable=False)   # standard|bh_series|diplomatic|invalid
+    state_code: Mapped[str | None] = mapped_column(String(4))
+    rto_district: Mapped[str | None] = mapped_column(String(8))
+    valid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    det_conf: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    ocr_conf: Mapped[float | None] = mapped_column(Float)                # None = unmeasured, never faked
+    format_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    bbox: Mapped[list[float] | None] = mapped_column(ARRAY(Float))
+
+    watchlist_hit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    watchlist_severity: Mapped[str | None] = mapped_column(String(16))
+    pack_id: Mapped[str] = mapped_column(String(32), nullable=False, default="sec")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Identity, notification, and access-record tables.
+#
+# Until now the only credential was an admin-minted token: there was no way for a person to obtain access
+# themselves, no second factor, and no route to a corporate directory. That is the single largest blocker to
+# a real deployment, and it is why these tables exist.
+# ---------------------------------------------------------------------------------------------------
+
+
+class UserCredential(Base):
+    """A password and its second factor, kept off the User row.
+
+    Separate from `app_user` on purpose. The user row is read on every authenticated request to resolve a
+    role, and a hash that expensive to compare has no business travelling with it. Keeping the secret in its
+    own table also means a query that lists users cannot accidentally select it.
+    """
+
+    __tablename__ = "user_credential"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="CASCADE"), primary_key=True)
+    # scrypt, with its parameters and salt encoded in the string, so a future cost increase can be rolled
+    # per user rather than forcing a global reset.
+    password_hash: Mapped[str | None] = mapped_column(Text)
+    password_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Failed-attempt throttling lives here rather than in a cache: a lockout that a process restart clears
+    # is not a lockout.
+    failed_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # TOTP. The secret is only usable once confirmed: a half-enrolled factor that already blocked sign-in
+    # would lock a user out of their own account with an authenticator they never finished setting up.
+    totp_secret: Mapped[str | None] = mapped_column(Text)
+    totp_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Single-use recovery codes, stored hashed for the same reason the password is.
+    recovery_hashes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # The last TOTP step accepted, so a code cannot be replayed inside its own validity window.
+    last_totp_step: Mapped[int | None] = mapped_column(BigInteger)
+
+    # Federated identity. Set when the account signs in through OIDC; a matching issuer+subject is the
+    # authority, never the email, which a directory can reassign to a different person.
+    oidc_issuer: Mapped[str | None] = mapped_column(Text)
+    oidc_subject: Mapped[str | None] = mapped_column(Text)
+    email: Mapped[str | None] = mapped_column(String(320))
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_user_credential_oidc", "oidc_issuer", "oidc_subject", unique=True),
+        Index("ix_user_credential_email", "email"),
+    )
+
+
+class PasswordReset(Base):
+    """A single-use, expiring reset token.
+
+    Stored as a hash, so a database read cannot be turned into an account takeover, and consumed on use so a
+    token recovered from a mailbox later is inert.
+    """
+
+    __tablename__ = "password_reset"
+
+    reset_id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Notification(Base):
+    """One thing that happened which somebody needs to know about.
+
+    Issue comments, job completions, gate blocks, drift breaches, and SLO alarms were all silent: the system
+    knew, and no one was told unless they happened to be looking at the right page. A notification is
+    addressed to a user, or to a role when the audience is "whoever is on duty".
+    """
+
+    __tablename__ = "notification"
+
+    notification_id: Mapped[uuid.UUID] = _uuid_pk()
+    # Exactly one of these is set. A user-addressed notification is personal; a role-addressed one is a duty
+    # queue, and is marked read per user in `notification_read` rather than on the row itself.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="CASCADE"), index=True)
+    role: Mapped[str | None] = mapped_column(String(16), index=True)
+
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, default="info")  # info|warn|critical
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    # Where clicking it goes. A notification you cannot act on is just noise.
+    href: Mapped[str | None] = mapped_column(Text)
+    # What it is about, so a second event on the same subject can supersede rather than pile up.
+    subject_type: Mapped[str | None] = mapped_column(String(32))
+    subject_id: Mapped[str | None] = mapped_column(String(64))
+    meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 server_default=func.now(), index=True)
+
+    __table_args__ = (
+        Index("ix_notification_user_unread", "user_id", "read_at"),
+        Index("ix_notification_subject", "subject_type", "subject_id"),
+    )
+
+
+class NotificationRead(Base):
+    """Per-user read state for a role-addressed notification, which has no single owner to mark."""
+
+    __tablename__ = "notification_read"
+
+    notification_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("notification.notification_id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="CASCADE"), primary_key=True)
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PiiAccessLog(Base):
+    """Who looked at personal data, and at what.
+
+    `PiiAudit` records what the redactor found. This records what a human saw. A DPDPA or GDPR enquiry asks
+    both, and the second question had no answer: an unredacted frame could be fetched by any authenticated
+    reviewer and nothing recorded that it happened.
+    """
+
+    __tablename__ = "pii_access_log"
+
+    access_id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="SET NULL"), index=True)
+    user_name: Mapped[str | None] = mapped_column(String(64))
+    # Kept even when the subject row is deleted, because the fact of access outlives the data accessed and
+    # is exactly what an erasure enquiry needs to see.
+    subject_type: Mapped[str] = mapped_column(String(32), nullable=False)   # frame|plate_read|speech|export
+    subject_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("session.session_id", ondelete="SET NULL"), index=True)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)         # view|download|export|read_plate
+    pii_kinds: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # ["face","plate","speech"]
+    redacted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    route: Mapped[str | None] = mapped_column(Text)
+    pack_id: Mapped[str | None] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 server_default=func.now(), index=True)
+
+    __table_args__ = (Index("ix_pii_access_user_time", "user_id", "created_at"),)
+
+
+class ActivityEvent(Base):
+    """What a person did, in order, so they can answer "what did I do today" without reading five tables.
+
+    Reviews, objects, jobs, and exports each already record their own history, but none of them is a
+    timeline: there was no way to see a shift's work as one sequence, and no way for a lead to see a team's.
+    """
+
+    __tablename__ = "activity_event"
+
+    event_id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="CASCADE"), index=True)
+    user_name: Mapped[str | None] = mapped_column(String(64))
+    verb: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    subject_type: Mapped[str | None] = mapped_column(String(32))
+    subject_id: Mapped[str | None] = mapped_column(String(64))
+    summary: Mapped[str | None] = mapped_column(Text)
+    href: Mapped[str | None] = mapped_column(Text)
+    meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 server_default=func.now(), index=True)
+
+    __table_args__ = (Index("ix_activity_user_time", "user_id", "created_at"),)
+
+
+class Experiment(Base):
+    """A named line of training work, and the runs under it.
+
+    The per-job metric curve already answered "how did this run go". It could not answer "is this family of
+    runs getting better", which is the question a person actually asks between iterations, because nothing
+    tied runs together: comparing two meant reading two job rows and remembering which hyperparameters went
+    with which. An external tracker (wandb, mlflow) is the usual answer and would put the loop's own history
+    outside the loop, where the gate cannot read it.
+    """
+
+    __tablename__ = "experiment"
+
+    experiment_id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    task_type: Mapped[str] = mapped_column(String(32), nullable=False, default="detection")
+    description: Mapped[str | None] = mapped_column(Text)
+    # What is being varied and what is held fixed, so a comparison between two runs is interpretable rather
+    # than a diff of every hyperparameter at once.
+    hypothesis: Mapped[str | None] = mapped_column(Text)
+    tags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    created_by: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ExperimentRun(Base):
+    """One training job's place in an experiment, with the numbers that make it comparable.
+
+    Denormalised from `training_job` on purpose. A job row is mutable operational state (status, progress,
+    the live metric), and an experiment record is a fixed claim about a finished run: what it scored, on
+    which gold set, against which baseline. Reading the comparison off mutable rows would let a later job
+    edit-in-place change what an earlier comparison said.
+    """
+
+    __tablename__ = "experiment_run"
+
+    run_id: Mapped[uuid.UUID] = _uuid_pk()
+    experiment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("experiment.experiment_id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("training_job.job_id", ondelete="SET NULL"), index=True)
+    label: Mapped[str | None] = mapped_column(String(128))
+    hparams: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    dataset_spec: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    metrics: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # The whole curve, not just the endpoint, so a run that peaked and then overfit is distinguishable from
+    # one that never learned.
+    curve: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    gold_id: Mapped[str | None] = mapped_column(String(128))
+    baseline_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    notes: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_experiment_run_exp_started", "experiment_id", "started_at"),)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Campaigns, security scene analytics, and edge telemetry.
+# ---------------------------------------------------------------------------------------------------
+
+
+class Campaign(Base):
+    """A standing intent to improve one class, and the autonomous loop that pursues it.
+
+    Every piece of the improvement loop already existed and every transition between them was a person
+    remembering to do it: read the gate's per-class deficit, build a review batch, run the VLM judge over
+    it, launch a retrain, attempt promotion, read the result, decide whether to go again. That is the work
+    the flywheel was built to remove and it stayed manual, so a class stalled whenever nobody was watching.
+
+    A campaign is the missing orchestration. It holds the target, the budget, and where it has got to; it
+    stops on its own terms rather than running forever, because an autonomous loop with no stopping
+    condition is a way to spend a GPU budget on a class that is not improving.
+    """
+
+    __tablename__ = "campaign"
+
+    campaign_id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    class_name: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    task_type: Mapped[str] = mapped_column(String(32), nullable=False, default="detection")
+
+    # What "done" means. A campaign that cannot succeed also cannot stop, so a target is required.
+    target_metric: Mapped[str] = mapped_column(String(32), nullable=False, default="recall")
+    target_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.6)
+    # Labels this campaign may spend, total. The single hardest limit: the review batches it builds are
+    # human time, and an autonomous loop must not be able to commission unbounded amounts of it.
+    label_budget: Mapped[int] = mapped_column(Integer, nullable=False, default=2000)
+    labels_spent: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    max_iterations: Mapped[int] = mapped_column(Integer, nullable=False, default=6)
+    # Consecutive iterations without improvement before giving up. Two, not one: a single flat iteration is
+    # noise, and stopping on it would abandon a class that was about to move.
+    patience: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+
+    # pending | running | blocked | succeeded | exhausted | stopped
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", index=True)
+    iteration: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    stalled_iterations: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    best_value: Mapped[float | None] = mapped_column(Float)
+    # Whether a person must approve each gate crossing. On by default: a loop that can promote a model with
+    # no human in it is a different product with a different risk profile.
+    require_approval: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    autopilot_stages: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+    created_by: Mapped[str | None] = mapped_column(String(64))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CampaignStep(Base):
+    """One stage of one iteration, with what it produced.
+
+    Recorded per step rather than summarised on the campaign, because the interesting question when a
+    campaign stalls is which stage stopped paying: a campaign whose batches keep coming back all-correct
+    has a mining problem, and one whose retrains never gate has a data problem, and the two look identical
+    from the campaign row alone.
+    """
+
+    __tablename__ = "campaign_step"
+
+    step_id: Mapped[uuid.UUID] = _uuid_pk()
+    campaign_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("campaign.campaign_id", ondelete="CASCADE"), index=True)
+    iteration: Mapped[int] = mapped_column(Integer, nullable=False)
+    # mine | judge | label | train | evaluate | promote
+    stage: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    detail: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    metrics: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # What this step needs a person to do, when it needs one.
+    awaiting: Mapped[str | None] = mapped_column(String(64))
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_campaign_step_campaign_iter", "campaign_id", "iteration"),)
+
+
+class CameraZone(Base):
+    """A named region of a fixed camera's view, and what crossing it means.
+
+    A static camera's whole value is that its frame does not move, which makes a polygon drawn on it a
+    permanent statement about the world: this rectangle is the loading bay, this line is the gate. The Sec
+    pack had the static-camera scene model and no way to say either, so every detection was a detection
+    somewhere in the picture and no rule could be written about place.
+    """
+
+    __tablename__ = "camera_zone"
+
+    zone_id: Mapped[uuid.UUID] = _uuid_pk()
+    camera_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="area")   # area | line
+    # Image-pixel geometry: a closed polygon for an area, two points for a line.
+    points: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # What entering, dwelling in, or crossing it should raise.
+    rule: Mapped[str] = mapped_column(String(24), nullable=False, default="enter")  # enter|exit|dwell|cross
+    dwell_seconds: Mapped[float | None] = mapped_column(Float)
+    # Which classes the rule applies to. Empty means every class, which is almost never what is wanted and
+    # is therefore not the default anyone gets by accident: the UI requires a choice.
+    classes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, default="warn")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    pack_id: Mapped[str] = mapped_column(String(32), nullable=False, default="sec")
+    created_by: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SecurityIncident(Base):
+    """One thing that happened, stitched from everything that evidenced it.
+
+    A plate read, a zone crossing and a person track were three unrelated rows about the same van arriving
+    at the same gate at the same moment, and an operator had to assemble the event in their head from three
+    screens. An incident is that assembly, made once and kept.
+    """
+
+    __tablename__ = "security_incident"
+
+    incident_id: Mapped[uuid.UUID] = _uuid_pk()
+    camera_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"), index=True)
+    zone_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("camera_zone.zone_id", ondelete="SET NULL"))
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, default="warn")
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text)
+    # The window it spans, so two events a second apart are one incident rather than two.
+    start_ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    end_ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Everything that evidenced it: plate read ids, object ids, track ids, frame ids.
+    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    plate: Mapped[str | None] = mapped_column(String(16), index=True)
+    person_identity: Mapped[str | None] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")  # open|ack|closed
+    acknowledged_by: Mapped[str | None] = mapped_column(String(64))
+    pack_id: Mapped[str] = mapped_column(String(32), nullable=False, default="sec")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 server_default=func.now(), index=True)
+
+    __table_args__ = (Index("ix_incident_camera_time", "camera_id", "start_ts_ns"),)
+
+
+class PersonIdentity(Base):
+    """A person seen by more than one camera, as an appearance signature rather than a name.
+
+    Deliberately not an identity in the ordinary sense. There is no name, no reference photograph and no
+    enrolment: a signature is derived from tracks already recorded and links them to each other, so the
+    system can say "the same person appeared at both gates" and can never say who they are. That boundary
+    is the difference between re-identification for an authorised security deployment and building a face
+    database, and it is enforced by there being nowhere to put a name.
+    """
+
+    __tablename__ = "person_identity"
+
+    identity_id: Mapped[uuid.UUID] = _uuid_pk()
+    signature: Mapped[list[float] | None] = mapped_column(ARRAY(Float))
+    n_tracks: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    cameras: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    first_ts_ns: Mapped[int | None] = mapped_column(BigInteger)
+    last_ts_ns: Mapped[int | None] = mapped_column(BigInteger)
+    pack_id: Mapped[str] = mapped_column(String(32), nullable=False, default="sec")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PersonSighting(Base):
+    """One track attributed to one signature, with how confident the match was."""
+
+    __tablename__ = "person_sighting"
+
+    sighting_id: Mapped[uuid.UUID] = _uuid_pk()
+    identity_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("person_identity.identity_id", ondelete="CASCADE"), index=True)
+    track_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"))
+    camera_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    similarity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EdgeDevice(Base):
+    """A device running a deployed artifact, and what it reports back.
+
+    FORGYX gates on numbers measured on a bench. A bench does not thermally throttle after twenty minutes
+    in a parked vehicle, does not share its GPU with a video encoder, and does not see the input
+    distribution the field sees. So the gate has been passing artifacts on figures that are true in a room
+    nobody deploys in.
+    """
+
+    __tablename__ = "edge_device"
+
+    device_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str | None] = mapped_column(String(128))
+    hardware: Mapped[str | None] = mapped_column(String(64))        # jetson_orin_nx | rpi5 | hailo8 | ...
+    runtime: Mapped[str | None] = mapped_column(String(32))         # tensorrt | onnxruntime | litert
+    artifact_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    model_version: Mapped[str | None] = mapped_column(String(64), index=True)
+    fleet: Mapped[str | None] = mapped_column(String(64), index=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EdgeTelemetry(Base):
+    """One reporting window from one device.
+
+    A window rather than a sample: a device that posted every inference would spend its uplink on telemetry,
+    and the numbers that matter (p50, p95, the thermal ceiling reached) are properties of a window anyway.
+    """
+
+    __tablename__ = "edge_telemetry"
+
+    telemetry_id: Mapped[uuid.UUID] = _uuid_pk()
+    device_id: Mapped[str] = mapped_column(
+        ForeignKey("edge_device.device_id", ondelete="CASCADE"), index=True)
+    artifact_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    model_version: Mapped[str | None] = mapped_column(String(64))
+    window_start_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    window_end_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    n_inferences: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    latency_p50_ms: Mapped[float | None] = mapped_column(Float)
+    latency_p95_ms: Mapped[float | None] = mapped_column(Float)
+    latency_max_ms: Mapped[float | None] = mapped_column(Float)
+    fps: Mapped[float | None] = mapped_column(Float)
+    temp_c_max: Mapped[float | None] = mapped_column(Float)
+    throttled_fraction: Mapped[float | None] = mapped_column(Float)
+    power_w_mean: Mapped[float | None] = mapped_column(Float)
+    # Score distribution as a histogram, which is how field accuracy drift is detectable without labels:
+    # the field has no ground truth, and a confidence distribution that has moved is the signal available.
+    conf_histogram: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    detections_per_frame: Mapped[float | None] = mapped_column(Float)
+    dropped_frames: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 server_default=func.now(), index=True)
+
+    __table_args__ = (Index("ix_edge_telemetry_artifact_time", "artifact_id", "created_at"),)
