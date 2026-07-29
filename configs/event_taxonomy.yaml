@@ -93,6 +93,21 @@ kinds:
     description: A signal transition that the phase graph does not permit, usually a mislabelled frame.
     payload: [from_state, to_state, legal_next]
 
+  signal_approach_on_red:
+    modality: driving
+    family: signal_approach
+    shape: interval
+    anchor: track
+    severity: notable
+    derived: true
+    # Approach, not entry, and the name says so. Ego speed exists on 2% of frames and on none of the
+    # sessions carrying signal phases, so a red-light-running detector would return nothing forever. What
+    # the corpus does support is the signal growing and drifting down the frame while showing red or amber,
+    # which says the gap was closing. Calling that "ran a red light" would be a claim the evidence cannot
+    # carry, and severity is notable rather than violation for the same reason.
+    description: The ego kept closing on a signal that was showing red or amber.
+    payload: [signal_state, growth_ratio, rise_frac, frames, claim]
+
   signal_flicker:
     modality: driving
     family: signal_flicker

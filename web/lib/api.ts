@@ -18,6 +18,8 @@ import type {
   DrivingEvent,
   DrivingEventList,
   DrivingEventSummary,
+  EventSearchResult,
+  EventCorpusSummary,
   DeriveResult,
   DerivePreview,
   LaneLinkResult,
@@ -1239,6 +1241,27 @@ export const api = {
       payload?: Record<string, unknown>;
     },
   ) => post<DrivingEvent>(`/api/sessions/${sessionId}/driving-events`, body),
+  // Behaviour across the whole corpus. Every other event route is session-scoped, which cannot answer
+  // "every illegal lane change while a signal was red" because that is a question about the fleet.
+  searchEvents: (q: {
+    kind?: string; severity?: string; state?: string; city?: string;
+    minConf?: number; withKind?: string; withState?: string; withinMs?: number;
+    limit?: number; offset?: number;
+  }) => {
+    const p = new URLSearchParams();
+    if (q.kind) p.set("kind", q.kind);
+    if (q.severity) p.set("severity", q.severity);
+    if (q.state) p.set("state", q.state);
+    if (q.city) p.set("city", q.city);
+    if (q.minConf != null) p.set("min_conf", String(q.minConf));
+    if (q.withKind) p.set("with_kind", q.withKind);
+    if (q.withState) p.set("with_state", q.withState);
+    if (q.withinMs) p.set("within_ms", String(q.withinMs));
+    p.set("limit", String(q.limit ?? 200));
+    p.set("offset", String(q.offset ?? 0));
+    return get<EventSearchResult>(`/api/events/search?${p.toString()}`);
+  },
+  eventCorpusSummary: () => get<EventCorpusSummary>(`/api/events/corpus-summary`),
   trackDrivingEvents: (trackId: string) =>
     get<DrivingEventList>(`/api/tracks/${trackId}/driving-events`),
 
