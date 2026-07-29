@@ -48,7 +48,9 @@ const STATE_COLOR: Record<string, string> = {
 export function StateBadge({ state }: { state: string }) {
   const cls = STATE_COLOR[state] ?? "text-ink-2 border-line";
   return (
-    <span className={`font-mono text-[11px] uppercase tracking-wide border px-1.5 py-0.5 ${cls}`}>
+    // Never wraps. "queued-cloud" broke onto two lines in the jobs and training tables and pushed those
+    // rows taller than their neighbours, which reads as a layout fault rather than a long word.
+    <span className={`inline-block whitespace-nowrap font-mono text-[11px] uppercase tracking-wide border px-1.5 py-0.5 ${cls}`}>
       {state}
     </span>
   );

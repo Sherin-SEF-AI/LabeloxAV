@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import type { AlItem, ErrorCandidateRow } from "@/lib/types";
 import dynamic from "next/dynamic";
 import PageShell from "@/components/shell/PageShell";
+import LoadState from "@/components/shell/LoadState";
 import ScoreBar from "@/components/shell/ScoreBar";
 import { ConfBar } from "@/components/StateBadge";
 
@@ -22,15 +23,22 @@ export default function ReviewQueuePage() {
   const [errs, setErrs] = useState<ErrorCandidateRow[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [whyOpen, setWhyOpen] = useState<string | null>(null);  // M-F.0 expanded rationale row
+  const [err, setErr] = useState<unknown>(null);
   const [sortQ, setSortQ] = useState(false);  // M-F.1 sort the value queue by lowest label quality first
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setErr(null);
     try {
       const [al, ec] = await Promise.all([api.alScore(undefined, 60), api.errorCandidates("pending", 80)]);
       setItems(al.items);
       setErrs(ec);
+    } catch (e) {
+      // There was a finally and no catch, so a failed fetch left the table empty and silent. An empty
+      // review queue is a meaningful state here (the shift is done) and must not be what a dropped request
+      // looks like.
+      setErr(e);
     } finally {
       setLoading(false);
     }
@@ -53,17 +61,19 @@ export default function ReviewQueuePage() {
         </>
       }>
       <div className="p-4 space-y-3 font-mono text-[11px]">
+        {/* A failure says so and offers a retry, instead of an empty table that reads as a finished shift. */}
+        {err != null && <LoadState error={err} onRetry={() => void load()} />}
 
         {tab === "value" ? (
           <table className="w-full">
-            <thead><tr className="text-ink-3 text-left border-b hairline"><th className="px-2 py-1">class</th><th>conf</th>
+            <thead><tr className="text-ink-3 text-left border-b hairline"><th className="px-2 py-1 w-14"></th><th>class</th><th>conf</th>
               <th><button onClick={() => setSortQ((s) => !s)} title="sort by lowest label quality first"
                 className={sortQ ? "text-accent" : "hover:text-ink"}>quality{sortQ ? " ↓" : ""}</button></th>
               <th>value</th><th>uncertain</th><th>diverse</th><th>rare</th><th>err</th><th></th></tr></thead>
             <tbody>
               {loading && items.length === 0 && Array.from({ length: 10 }).map((_, r) => (
                 <tr key={`sk${r}`} className="border-b hairline">
-                  {Array.from({ length: 8 }).map((__, c) => (
+                  {Array.from({ length: 9 }).map((__, c) => (
                     <td key={c} className="px-2 py-1.5"><span className="block h-3 skeleton" style={{ width: c === 0 ? "80%" : "60%", animationDelay: `${(r * 8 + c) * 40}ms` }} /></td>
                   ))}
                 </tr>
@@ -71,16 +81,25 @@ export default function ReviewQueuePage() {
               {(sortQ ? [...items].sort((a, b) => (a.quality_score ?? 1) - (b.quality_score ?? 1)) : items).map((it) => (
                 <Fragment key={it.object_id}>
                   <tr className="border-b hairline hover:bg-line">
+                    {/* The crop, because this is visual triage. Without it the queue asks a reviewer to rank
+                        boxes they cannot see, and every judgement costs a round trip into the editor. The
+                        endpoint has existed all along; only the img tag was missing. Lazy so a 200-row queue
+                        does not fire 200 requests before the first screenful is readable. */}
+                    <td className="px-2 py-1">
+                      <img src={`/api/objects/${it.object_id}/crop`} alt="" loading="lazy"
+                        className="w-12 h-12 object-cover rounded bg-bg-2 border border-line"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
+                    </td>
                     <td className="px-2 py-1 text-ink-2">{it.class_name}</td>
                     <td><ConfBar conf={it.conf} /></td>
                     <td>{it.quality_score != null
                       ? <span className={it.quality_score >= 0.4 ? "text-pass" : it.quality_score >= 0.25 ? "text-warn" : "text-block"}>{it.quality_score.toFixed(2)}</span>
                       : <span className="text-ink-3">-</span>}</td>
                     <td className="text-accent">{it.value.toFixed(3)}</td>
-                    <td><ScoreBar value={it.scores.uncertainty} showValue={false} /></td>
-                    <td><ScoreBar value={it.scores.diversity} showValue={false} /></td>
-                    <td><ScoreBar value={it.scores.rarity} showValue={false} /></td>
-                    <td><ScoreBar value={it.scores.error_prone} showValue={false} tone="warn" /></td>
+                    <td><ScoreBar value={it.scores.uncertainty} /></td>
+                    <td><ScoreBar value={it.scores.diversity} /></td>
+                    <td><ScoreBar value={it.scores.rarity} /></td>
+                    <td><ScoreBar value={it.scores.error_prone} tone="warn" /></td>
                     <td className="text-right pr-2 space-x-2 whitespace-nowrap">
                       <button onClick={() => setWhyOpen((w) => (w === it.object_id ? null : it.object_id))}
                         className={whyOpen === it.object_id ? "text-accent" : "text-ink-3 hover:text-ink"}>why</button>
@@ -88,7 +107,7 @@ export default function ReviewQueuePage() {
                     </td>
                   </tr>
                   {whyOpen === it.object_id && (
-                    <tr className="border-b hairline"><td colSpan={9} className="px-3 py-2 bg-bg-2">
+                    <tr className="border-b hairline"><td colSpan={10} className="px-3 py-2 bg-bg-2">
                       <ExplainPanel objectId={it.object_id} />
                     </td></tr>
                   )}

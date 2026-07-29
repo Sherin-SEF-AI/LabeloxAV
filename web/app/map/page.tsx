@@ -6,6 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { api } from "@/lib/api";
 import type { MapCommitRow, MapProvenance } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
+import LoadState from "@/components/shell/LoadState";
 import Inspector from "@/components/shell/Inspector";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 
@@ -24,9 +25,14 @@ export default function MapPage() {
   const [commits, setCommits] = useState<MapCommitRow[]>([]);
   const [sel, setSel] = useState<string>("");
   const [prov, setProv] = useState<MapProvenance | null>(null);
+  const [loadErr, setLoadErr] = useState<unknown>(null);
 
   useEffect(() => {
-    api.hdmapCommits().then((c) => { setCommits(c); if (c[0]) setSel(c[0].commit_id); });
+    // A bare .then() left a rejection unhandled and the map permanently empty, which reads as a corpus
+    // with no map rather than a request that failed.
+    api.hdmapCommits()
+      .then((c) => { setCommits(c); if (c[0]) setSel(c[0].commit_id); })
+      .catch(setLoadErr);
   }, []);
 
   useEffect(() => {
@@ -70,7 +76,7 @@ export default function MapPage() {
   const commit = commits.find((c) => c.commit_id === sel);
 
   return (
-    <PageShell active="HD MAP" filters={(
+    <PageShell active="HD MAP" title="HD map" filters={(
       <>
         <span className="text-ink-3">commit</span>
         <select value={sel} onChange={(e) => setSel(e.target.value)} className="bg-bg border border-line px-2 py-1 text-ink">
@@ -89,6 +95,7 @@ export default function MapPage() {
         <div ref={wrap} className="flex-1" />
         <Inspector title="element provenance" side="right">
           <div className="p-3 font-mono text-[11px]">
+            {loadErr != null && <LoadState error={loadErr} onRetry={() => window.location.reload()} />}
             {prov?.found ? (
               <div className="space-y-1.5">
                 <div className="text-ink-2">{prov.kind} <span className="text-ink-3">{prov.element_id?.slice(0, 8)}</span></div>

@@ -167,7 +167,7 @@ export default function CuboidAnnotatePage() {
   };
 
   return (
-    <PageShell active="CUBOID ANNOTATE" right="AI lift 2D to 3D">
+    <PageShell active="CUBOID ANNOTATE" title="Cuboid annotation" right="AI lift 2D to 3D">
       <div className="flex h-full bg-[#0a0e14] text-neutral-200">
         <Inspector title="Cuboid annotation" side="left" width="w-80">
           <div className="flex flex-col gap-3 p-4">

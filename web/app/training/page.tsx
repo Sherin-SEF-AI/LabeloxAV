@@ -92,13 +92,8 @@ export default function TrainingPage() {
     <PageShell
       active="TRAINING"
       title="Training"
-      right={<span className="text-ink-3">worker required: <span className="text-ink-2">make train-worker</span></span>}
-      primaryAction={
-        <button onClick={onSubmit}
-          className="font-mono text-xs border border-line px-3 py-1 hover:border-accent">
-          queue training job
-        </button>
-      }
+      right={<span className="text-ink-3">worker: <span className="text-ink-2">make train-worker</span></span>}
+
     >
       <div className="p-4 space-y-4 max-w-5xl w-full mx-auto">
         <Section title="new training job">
@@ -168,8 +163,10 @@ export default function TrainingPage() {
                 const live = (j.metrics?.live as { map50?: number } | undefined) ?? undefined;
                 const ep = j.counts?.epoch ?? 0;
                 const tot = j.counts?.total_epochs ?? 0;
+                const failed = j.status === "error" || j.status === "failed";
                 return (
-                  <div key={j.job_id} className="flex items-center gap-2 font-mono text-[11px]">
+                  <div key={j.job_id} className="font-mono text-[11px] py-1">
+                  <div className="flex items-center gap-2">
                     <span className="w-28 truncate text-ink-2" title={j.purpose}>{j.purpose}</span>
                     <span className={`w-12 ${j.compute_target === "cloud" ? "text-info" : "text-ink-3"}`}>
                       {j.compute_target}
@@ -186,6 +183,18 @@ export default function TrainingPage() {
                       <button onClick={() => api.cancelTraining(j.job_id).then(refresh)}
                         className="border border-line px-1.5 hover:border-block">cancel</button>
                     )}
+                  </div>
+                  {/* Why it failed, on the row. The API has returned this field all along and the row never
+                      drew it, so a failed run and a stalled one looked identical: a badge saying ERROR, a
+                      stage, and an empty bar. */}
+                  {failed && j.error && (
+                    <div className="text-block leading-tight mt-0.5 pl-[7.5rem]">{j.error}</div>
+                  )}
+                  {failed && !j.error && (
+                    <div className="text-ink-3 leading-tight mt-0.5 pl-[7.5rem]">
+                      failed without recording a reason, which is itself worth reporting
+                    </div>
+                  )}
                   </div>
                 );
               })}

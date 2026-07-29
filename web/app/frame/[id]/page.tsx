@@ -616,7 +616,13 @@ export default function FrameEditor() {
       setCub3d((cs) => [...cs, created]); setCubSel(created.object_3d_id);
     } catch (e) { setLidarMsg("add failed: " + humanizeError(e)); }
   };
-  const delCub = async (cid: string) => { try { await api.lidarDeleteCuboid(cid); setCub3d((cs) => cs.filter((c) => c.object_3d_id !== cid)); setCubSel(null); } catch (e) { setLidarMsg("delete failed: " + humanizeError(e)); } };
+  const delCub = async (cid: string) => {
+    // A 3D cuboid is not covered by the frame's checkpoints, which snapshot 2D objects, so this deletion is
+    // genuinely irreversible and asks first.
+    if (!(await confirm({ title: "Delete this 3D box?", danger: true, confirmLabel: "Delete" }))) return;
+    try { await api.lidarDeleteCuboid(cid); setCub3d((cs) => cs.filter((c) => c.object_3d_id !== cid)); setCubSel(null); }
+    catch (e) { setLidarMsg("delete failed: " + humanizeError(e)); }
+  };
   const aiLift3d = async () => {
     if (!cloud3d) return;
     setLidarMsg("lifting 2D objects to 3D...");
@@ -1087,6 +1093,9 @@ export default function FrameEditor() {
     // width, so the unwrappable top bar widened the entire page and the body scrolled sideways instead of
     // the bar scrolling inside itself. On a tablet that pushed the canvas off screen entirely.
     <div className="h-[100dvh] flex flex-col min-w-0 overflow-hidden">
+      {/* The editor has no room to print a page title, but the page still needs a name in an outline view
+          or a screen reader, where "untitled document" is the alternative. */}
+      <h1 className="sr-only">Frame editor</h1>
       {/* TOP BAR: identity, frame context, global actions, confirm (the design's 46px top bar) */}
       <header className="flex items-center gap-3 px-3 h-[46px] border-b hairline shrink-0
                          min-w-0 overflow-x-auto no-scrollbar">

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { AuditRow, GovState, RegistryRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
+import LoadState from "@/components/shell/LoadState";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 
 // M4.4 governance console: champion status, control-sample precision, drift, the audit log, and the kill
@@ -16,10 +17,18 @@ export default function GovernPage() {
   const [prec, setPrec] = useState<{ reviewed: number; incorrect: number; precision: number | null } | null>(null);
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<unknown>(null);
 
   const load = useCallback(async () => {
-    const [s, r, p, a] = await Promise.all([api.governState(), api.governRegistry(), api.governPrecision(), api.governAudit()]);
-    setState(s); setRegistry(r); setPrec(p); setAudit(a);
+    setErr(null);
+    try {
+      const [s, r, p, a] = await Promise.all([api.governState(), api.governRegistry(), api.governPrecision(), api.governAudit()]);
+      setState(s); setRegistry(r); setPrec(p); setAudit(a);
+    } catch (e) {
+      // This page holds the kill switch and the promotion gate. A silent failure here shows stale or absent
+      // state for controls somebody is about to act on, which is the worst place in the app to be quiet.
+      setErr(e);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -46,6 +55,7 @@ export default function GovernPage() {
   return (
     <PageShell active="GOVERN" title="GOVERN" primaryAction={primaryAction}>
       <div className="p-4 space-y-4 font-mono text-[11px]">
+        {err != null && <LoadState error={err} onRetry={() => void load()} />}
         {/* state banner */}
         <div className={`panel p-3 flex items-center gap-3 ${paused ? "border-warn" : ""}`}>
           <span className={`w-2.5 h-2.5 rounded-full ${state?.loop_enabled ? "bg-pass" : "bg-block"}`} />

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSmartBack } from "@/lib/nav";
+import { useConfirm } from "@/components/ConfirmProvider";
 import { api , humanizeError } from "@/lib/api";
 import type { IntentVocab, Ontology, Track } from "@/lib/types";
 import { classColor } from "@/lib/colors";
@@ -14,6 +15,7 @@ import PageHeaderBar from "@/components/shell/PageHeaderBar";
 // frame. Click a crop to jump into that frame in the editor.
 
 export default function TrackEditor() {
+  const confirm = useConfirm();
   const router = useRouter();
   const goBack = useSmartBack();
   const { id } = useParams<{ id: string }>();
@@ -78,7 +80,12 @@ export default function TrackEditor() {
   );
 
   const onDelete = useCallback(async () => {
-    if (!confirm("Delete this entire track (all its objects)?")) return;
+    // The app's dialog, not the browser's. A native confirm is styled differently from every other
+    // destructive prompt here and a browser is free to suppress it, which would delete a whole track on a
+    // single click with no prompt at all.
+    if (!(await confirm({ title: "Delete this entire track?",
+                          body: "Every object on it goes too, and this cannot be undone.",
+                          danger: true, confirmLabel: "Delete track" }))) return;
     setBusy(true);
     try {
       await api.deleteTrack(id);

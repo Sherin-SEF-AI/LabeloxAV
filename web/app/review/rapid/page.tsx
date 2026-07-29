@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import PageShell from "@/components/shell/PageShell";
 import { api, humanizeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
-import { acceptState, getUser } from "@/lib/user";
+import { acceptState, useCurrentUser } from "@/lib/user";
 import type { TriageRow } from "@/lib/types";
 
 // Rapid review: one crop, one keystroke.
@@ -36,7 +36,7 @@ const PREFETCH = 4;
 function RapidBody() {
   const params = useSearchParams();
   const router = useRouter();
-  const me = getUser();
+  const me = useCurrentUser();
 
   const [queue, setQueue] = useState<TriageRow[]>([]);
   const [index, setIndex] = useState(0);

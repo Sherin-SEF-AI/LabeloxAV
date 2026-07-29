@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
+import { useConfirm } from "@/components/ConfirmProvider";
 import { api } from "@/lib/api";
 import type { FrameMeta, LaneRow } from "@/lib/types";
 import BackButton from "@/components/BackButton";
@@ -20,6 +21,7 @@ const COLOR: Record<string, string> = { proposed: "#58A6FF", human: "#FF7A2F", p
 type Lane = LaneRow & { dirty?: boolean };
 
 export default function LaneEditor() {
+  const confirm = useConfirm();
   const router = useRouter();
   const frameId = String(useParams().frameId);
   const [meta, setMeta] = useState<FrameMeta | null>(null);
@@ -89,12 +91,22 @@ export default function LaneEditor() {
   };
   const setType = (t: string) => { if (sel) setLanes((ls) => ls.map((l) => l.lane_id === sel ? { ...l, lane_type: t, dirty: true } : l)); };
   const toggleEgo = () => { if (sel) setLanes((ls) => ls.map((l) => ({ ...l, is_ego: l.lane_id === sel ? !l.is_ego : l.is_ego, dirty: l.lane_id === sel ? true : l.dirty }))); };
-  const del = async () => { if (sel) { await api.deleteLane(sel); setSel(null); await load(); } };
+  const del = async () => {
+    if (!sel) return;
+    // A lane is a hand-drawn spline that took real work and there is no undo on this surface, so the
+    // deletion asks first. It used to go straight through on a single click.
+    const lane = lanes.find((l) => l.lane_id === sel);
+    if (!(await confirm({ title: "Delete this lane?",
+                          body: lane ? `${lane.lane_type}${lane.is_ego ? ", ego lane" : ""}` : undefined,
+                          danger: true, confirmLabel: "Delete" }))) return;
+    await api.deleteLane(sel); setSel(null); await load();
+  };
 
   const selLane = lanes.find((l) => l.lane_id === sel);
 
   return (
     <div className="min-h-screen flex flex-col">
+      <h1 className="sr-only">Lane and drivable annotation</h1>
       <header className="flex items-center gap-3 px-3 h-11 border-b hairline shrink-0 font-mono text-[11px]">
         <BackButton />
         <span className="text-ink-3">/ LANES <span className="text-ink-2">{frameId.slice(0, 8)}</span></span>

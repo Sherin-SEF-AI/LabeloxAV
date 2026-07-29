@@ -49,7 +49,7 @@ body {
   /* Primary action: Blender blue gradient. */
   .btn-primary {
     color: #ffffff;
-    background: linear-gradient(#5183c7, #4772b3);
+    background: linear-gradient(#6f97d4, #5b86c7);
     border-color: #2f5588;
   }
   .btn-primary:hover:not(:disabled) { background: linear-gradient(#5f92d6, #5080c4); border-color: #365f97; }
@@ -58,7 +58,7 @@ body {
   /* An engaged toggle reads as the blue selection state. */
   .btn-on {
     color: #ffffff;
-    background: linear-gradient(#5183c7, #4772b3);
+    background: linear-gradient(#6f97d4, #5b86c7);
     border-color: #2f5588;
   }
 
@@ -72,7 +72,7 @@ body {
     font-size: 12px;
     outline: none;
   }
-  .field:focus { border-color: #4772b3; box-shadow: inset 0 0 0 1px rgba(71, 114, 179, 0.7); }
+  .field:focus { border-color: #5b86c7; box-shadow: inset 0 0 0 1px rgba(91, 134, 199, 0.7); }
   .field::placeholder { color: #6a6a6a; }
 
   /* Panel header strip: a raised bar that names a panel, like Blender's collapsible region headers. */
@@ -92,7 +92,7 @@ body {
 
 /* Blender selection blue. */
 ::selection {
-  background: rgba(71, 114, 179, 0.4);
+  background: rgba(91, 134, 199, 0.4);
 }
 
 /* Global control rounding: buttons, inputs, selects round like Blender by default. */
@@ -102,9 +102,22 @@ button, input, select, textarea {
 
 /* Keyboard focus: the Blender blue ring. */
 :focus-visible {
-  outline: 1px solid rgba(91, 135, 201, 0.8);
+  /* 2px and opaque. A 1px ring at 80% opacity against #1d1d1d is legible on a large monitor and easy to
+     lose on a laptop in daylight, which matters most for the keyboard-driven review loop where the ring is
+     the only thing telling you where you are. */
+  outline: 2px solid #7ea9e0;
   outline-offset: 1px;
 }
+/* Row actions get a reachable target without the type getting bigger.
+   Scoped to table cells on purpose: that is where the audit found sub-20px buttons doing real work (the
+   review queue's "why" and "label", the jobs table's "open"), and it is the one place a full shift is spent
+   clicking. The editor's tool strip is deliberately left dense, the way Blender and Nuke leave theirs. */
+td button, td a, th button {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+}
+
 button:not(:disabled) {
   cursor: pointer;
 }
@@ -126,7 +139,7 @@ button:not(:disabled) {
   line-height: 1.3;
   color: #e6e6e6;
   background: #101010;
-  border: 1px solid #4772b3;
+  border: 1px solid #5b86c7;
   border-radius: 4px;
   white-space: nowrap;
   pointer-events: none;
@@ -244,7 +257,7 @@ button:not(:disabled) {
 .lift:hover {
   transform: translateY(-2px);
   border-color: rgba(91, 135, 201, 0.55);
-  box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(71, 114, 179, 0.12);
+  box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(91, 134, 199, 0.12);
 }
 
 /* Sheen: a one-pass light sweep across the primary call to action on hover. */
@@ -263,7 +276,7 @@ button:not(:disabled) {
 .rail::before {
   content: "";
   position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
-  background: var(--accent, #4772b3);
+  background: var(--accent, #5b86c7);
   transform: scaleY(0);
   transform-origin: center;
   transition: transform 160ms ease;

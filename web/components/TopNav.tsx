@@ -63,9 +63,14 @@ export default function TopNav({ active, right, showCrumb = true }: {
 
       {showCrumb && <Crumb active={active} />}
 
-      {/* right side: page actions, then session controls */}
-      <div className="flex items-center gap-2 text-xs shrink-0 ml-auto">
-        {right}
+      {/* right side: page actions, then session controls.
+          The whole cluster used to be shrink-0 with {right} injected raw, so a page passing a long status
+          pushed the session controls past the viewport instead of the status giving way: /training's
+          "worker required: make train-worker" put the page at 1323px inside a 1280px window and the user
+          chip off the edge. The page's own node is now the only part allowed to shrink, and it truncates. */}
+      <div className="flex items-center gap-2 text-xs ml-auto min-w-0">
+        {right && <div className="min-w-0 truncate hidden lg:block">{right}</div>}
+        <div className="flex items-center gap-2 shrink-0">
         <button onClick={() => window.dispatchEvent(new Event("lbx:palette"))}
           data-tip="Command palette: jump to any page"
           className="btn text-[11px] gap-1.5 h-7">
@@ -76,6 +81,7 @@ export default function TopNav({ active, right, showCrumb = true }: {
         <CloudControl />
         <NotificationBell />
         <UserPicker />
+        </div>
       </div>
 
       <CommandPalette />

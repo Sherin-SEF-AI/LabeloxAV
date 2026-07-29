@@ -65,6 +65,7 @@ export default function JobsPage() {
   return (
     <PageShell
       active="JOBS"
+      title="Jobs"
       right={loading ? <Spinner label="loading jobs" /> : (
         <span className="flex items-center gap-2 text-ink-3">
           {/* Say whether the page is live. A silently dead stream looks identical to an idle system, so a
@@ -78,19 +79,25 @@ export default function JobsPage() {
     >
       <div className="p-4">
         <div className="panel">
-          <div className="grid grid-cols-[80px_1fr_90px_1fr_140px_70px] gap-2 px-3 py-2 border-b hairline font-mono text-[10px] uppercase text-ink-3">
+          {/* Detail carries the fraction, progress does not. It used to be the other way round: a
+              fixed-width bar held a full 1fr while the only explanation of a failure was squeezed into
+              140px and truncated, so the one column that matters when something breaks was the one you
+              could not read. */}
+          <div className="grid grid-cols-[80px_minmax(0,14rem)_100px_120px_minmax(0,1fr)_70px] gap-2 px-3 py-2 border-b hairline font-mono text-[10px] uppercase text-ink-3">
             <span>kind</span><span>label</span><span>status</span><span>progress</span><span>detail</span><span></span>
           </div>
           {shown.map((j) => (
-            <div key={j.job_id} className="grid grid-cols-[80px_1fr_90px_1fr_140px_70px] gap-2 px-3 py-1.5 border-b hairline items-center font-mono text-[11px]">
+            <div key={j.job_id} className="grid grid-cols-[80px_minmax(0,14rem)_100px_120px_minmax(0,1fr)_70px] gap-2 px-3 py-2 border-b hairline items-center font-mono text-[11px]">
               <span><StateBadge state={j.kind} /></span>
               <span className="text-ink-2 truncate" title={j.label}>{j.label}</span>
               <span><StateBadge state={j.status} /></span>
               <div className="flex items-center gap-2">
                 <ConfBar conf={j.progress || 0} />
               </div>
-              <span className="text-ink-3 truncate" title={j.error || j.detail}>
-                {j.error ? <span className="text-block">{j.error.slice(0, 40)}</span> : j.detail}
+              {/* Wraps to two lines rather than truncating. An error sliced to 40 characters names the
+                  exception and never the cause, which is the half a reader does not need. */}
+              <span className="text-ink-3 leading-tight min-w-0" title={j.error || j.detail}>
+                {j.error ? <span className="text-block line-clamp-2">{j.error}</span> : j.detail}
               </span>
               <button onClick={() => router.push(j.link)} className="border border-line px-1.5 py-0.5 text-ink-3 hover:border-accent">open</button>
             </div>
