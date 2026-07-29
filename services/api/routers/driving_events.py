@@ -118,6 +118,43 @@ async def lane_type_coverage(db: AsyncSession = Depends(db_session)):
     return await corpus_type_summary(db)
 
 
+@router.get("/events/search")
+async def search(kind: str | None = None, severity: str | None = None, state: str | None = None,
+                 city: str | None = None, session_id: UUID | None = None,
+                 min_conf: float | None = None,
+                 with_kind: str | None = None, with_state: str | None = None,
+                 within_ms: int = 0,
+                 limit: int = Query(200, ge=1, le=1000), offset: int = Query(0, ge=0),
+                 db: AsyncSession = Depends(db_session)):
+    """Behaviour across the whole corpus, not one session.
+
+    Every other event route is session-scoped, which is right for reviewing a drive and wrong for the
+    question the events exist to answer. `with_kind` and `with_state` are the conjunction: "every illegal
+    lane change while a signal was showing red" is a temporal join within a session, and it is the query
+    that makes this layer worth having rather than merely correct.
+
+    Comma-separated values are accepted on kind, severity and state so a filter chip can send several.
+    """
+    from services.intelligence.event_search import search_events
+
+    def many(v):
+        return [x.strip() for x in v.split(",") if x.strip()] if v else None
+
+    return await search_events(
+        db, kinds=many(kind), severities=many(severity), states=many(state), city=city,
+        session_id=session_id, min_conf=min_conf, with_kind=with_kind,
+        with_payload_state=many(with_state), within_ns=int(within_ms) * 1_000_000,
+        limit=limit, offset=offset)
+
+
+@router.get("/events/corpus-summary")
+async def corpus_summary_ep(db: AsyncSession = Depends(db_session)):
+    """What the corpus holds, so a question can be aimed rather than guessed at."""
+    from services.intelligence.event_search import corpus_summary
+
+    return await corpus_summary(db)
+
+
 class RulingIn(BaseModel):
     """A human decision on a candidate. note is free text kept on the event for the next reader."""
 

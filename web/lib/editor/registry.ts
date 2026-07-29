@@ -62,6 +62,7 @@ export const APP_GROUPS: NavGroup[] = [
       { href: "/map", label: "HD map", hint: "fused map and provenance" },
       { href: "/inertial", label: "Inertial", hint: "ego-state timeline, events, maneuvers" },
       { href: "/events", label: "Driving events", hint: "lane changes, signal phases, violations" },
+      { href: "/events/search", label: "Behaviour search", hint: "query the corpus: a crossing while a signal was red" },
       { href: "/inspect", label: "Inspector", hint: "Foxglove-class MCAP session inspection" },
     ],
   },

@@ -3,6 +3,7 @@ delete human lanes, and propagate a frame's lanes forward by optical flow (sourc
 
 from __future__ import annotations
 
+import json
 from uuid import UUID
 
 import cv2
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.logging import get_logger
 from core.storage import get_object_store
 from db.models import Frame, Lane
 from services.api.deps import db_session
@@ -19,7 +21,9 @@ from services.autolabel.lane.curves import fit_control_points, mark_ego, propaga
 from services.autolabel.lane.detect import model_tag, propose_lanes
 from services.autolabel.lane.linetype import MODEL_VERSION as LINETYPE_VERSION
 from services.autolabel.lane.linetype import classify_lane
+from services.autolabel.lane.plausible import filter_proposals
 
+log = get_logger("lanes")
 router = APIRouter()
 
 
@@ -31,6 +35,24 @@ class LaneIn(BaseModel):
 
 def _decode(store, uri):
     return cv2.imdecode(np.frombuffer(store.get_bytes(uri), np.uint8), cv2.IMREAD_COLOR)
+
+
+async def _drivable_classes(db, frame_id) -> dict | None:
+    """The frame's drivable polygons, or None if nobody has segmented it.
+
+    None and an empty mask are different and the plausibility test treats them differently: no mask is
+    missing evidence, not evidence that the road is missing.
+    """
+    from db.models import DrivableMask
+
+    dm = await db.get(DrivableMask, frame_id)
+    if dm is None or not dm.mask_uri:
+        return None
+    try:
+        return json.loads(get_object_store().get_bytes(dm.mask_uri)).get("classes") or None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("lanes.drivable_unreadable", frame=str(frame_id), error=str(exc))
+        return None
 
 
 def _row(lane: Lane) -> dict:
@@ -60,6 +82,18 @@ async def propose(frame_id: UUID, db: AsyncSession = Depends(db_session)):
         raise HTTPException(500, "could not decode frame image")
     await db.execute(delete(Lane).where(Lane.frame_id == frame.frame_id, Lane.source == "proposed"))
     cps = [fit_control_points(p) for p in propose_lanes(img)]
+
+    # A lane sits on the road. The detector finds bright linear structure, and a dashcam frame is full of
+    # bright linear structure that is not a lane: a striped hoarding, a flyover girder, a kerb, an awning.
+    # On one real frame that produced six "lanes", every one an edge of a striped wall, drawn as diagonals
+    # across the sky. The drivable mask already knows where the road is, so it is asked.
+    surface = await _drivable_classes(db, frame.frame_id)
+    kept, rejected = filter_proposals(cps, surface, frame.width or 0)
+    if rejected:
+        log.info("lanes.rejected_off_surface", frame=str(frame.frame_id), n=len(rejected),
+                 kept=len(kept))
+    cps = [c for c, _ev in kept]
+
     ego = mark_ego(cps, frame.width, frame.height)
     created = []
     for i, cp in enumerate(cps):
@@ -75,7 +109,11 @@ async def propose(frame_id: UUID, db: AsyncSession = Depends(db_session)):
     await db.flush()
     out = [_row(lane) for lane in created]
     await db.commit()
-    return {"proposed": len(out), "lanes": out, "model": model_tag()}
+    return {"proposed": len(out), "lanes": out, "model": model_tag(),
+            # Reported rather than dropped quietly. A proposer that silently halves its own output is one
+            # nobody can debug, and if this rejects everything the drivable mask is the thing to look at.
+            "rejected_off_surface": len(rejected),
+            "rejected_detail": [ev for _c, ev in rejected][:5]}
 
 
 @router.post("/frames/{frame_id}/lanes")

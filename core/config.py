@@ -516,6 +516,11 @@ class ActiveLearnSettings(BaseModel):
     w_flicker: float = 0.15              # temporal box jitter: a high-flicker high-confidence track is a
                                          # classic auto-label failure the scalar confidence misses, so it earns
                                          # review priority (core.accel.uncertainty.flicker_scores)
+    # The reasoning layer's own conflict: evidence that disagrees with itself, which is where a human adds
+    # the most and where no other term here can see. Weighted alongside uncertainty rather than below it,
+    # because the checks behind it carry measured lift over the review base rate while error_prone currently
+    # fires on 40% of the corpus at a near-constant score.
+    w_reasoner_conflict: float = 0.35
     w_fn: float = 0.6                    # recall-recovery (false-negative) value, so a recovered miss ranks
     uncertainty_lo: float = 0.55         # below this is hopeless, above uncertainty_hi is easy
     uncertainty_hi: float = 0.92

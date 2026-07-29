@@ -58,10 +58,14 @@ def _identity(kind: str, track_id, t_start_ns: int) -> tuple:
 async def derive_events(db, session_id) -> list[dict]:
     """Every derived candidate for a session, from every deriver, un-persisted."""
     from services.intelligence.lane_events import detect_lane_events
+    from services.intelligence.signal_approach import detect_signal_approaches
     from services.intelligence.signal_events import detect_signal_events
 
+    # Approach runs after the phases, and reads them: it asks what the ego was doing during the reds the
+    # phase deriver already found, so it cannot run first.
     out: list[dict] = []
-    for name, fn in (("lane", detect_lane_events), ("signal", detect_signal_events)):
+    for name, fn in (("lane", detect_lane_events), ("signal", detect_signal_events),
+                     ("signal_approach", detect_signal_approaches)):
         try:
             out.extend(await fn(db, session_id))
         except Exception as exc:  # noqa: BLE001

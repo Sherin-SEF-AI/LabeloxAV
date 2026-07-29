@@ -953,3 +953,96 @@ async def test_a_rerun_says_when_the_limit_cut_the_session_short():
     assert short["objects_in_session"] == 6
     assert whole["truncated"] is False
     assert whole["not_reasoned"] == 0
+
+
+@pytest.mark.db
+async def test_the_review_queue_can_see_the_reasoners_conflict():
+    """The queue ranked on uncertainty, diversity, rarity and an error term firing on 40% of the corpus at a
+    near-constant score, while the one signal that says the machine genuinely cannot settle an object was
+    computed, stored, and invisible to it.
+
+    Conflict rather than score: a low score means the evidence agrees the label is wrong and the gate already
+    routes those. Conflict means the evidence disagrees with itself, which is where a human adds the most."""
+    from sqlalchemy import select
+
+    from db.models import Frame, Object, OntologyClass
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.activelearn.selector import score_candidates
+
+    def trace(conflict, decision="review"):
+        return {"decision": decision, "score": -0.2, "conflict": conflict, "detector_conf": 0.7,
+                "findings": []}
+
+    async with get_sessionmaker()() as db:
+        cls_id = (await db.execute(
+            select(OntologyClass.id).where(OntologyClass.name == "sedan"))).scalar()
+        if cls_id is None:
+            pytest.skip("the ontology in this database has no sedan class")
+        s = DbSession(vehicle_id="veh-alconf", city="BLR", start_ts_ns=0, end_ts_ns=10**9,
+                      sensors={}, ontology_version="labelox-in-0.1.0")
+        db.add(s)
+        await db.flush()
+        f = Frame(session_id=s.session_id, ts_ns=0, cam_id="cam_f", img_uri="s3://x",
+                  width=1280, height=960, quality=0.9)
+        db.add(f)
+        await db.flush()
+        # Two objects identical in every term the queue could already see. Only the reasoner separates them.
+        for conflict in (0.0, 0.9):
+            db.add(Object(frame_id=f.frame_id, class_id=cls_id, bbox=[10.0, 10.0, 60.0, 90.0],
+                          conf=0.8, source="fused", attrs={}, state="review",
+                          provenance={"reasoning": trace(conflict)}))
+        await db.commit()
+        sid = str(s.session_id)
+
+    async with get_sessionmaker()() as db:
+        items = await score_candidates(db, session_id=sid, pool_limit=50)
+
+    assert len(items) == 2
+    assert all("reasoner_conflict" in i["scores"] for i in items), \
+        "the term has to be reported, not just folded into the total"
+    top, bottom = items[0], items[1]
+    assert top["scores"]["reasoner_conflict"] > bottom["scores"]["reasoner_conflict"]
+    assert top["value"] > bottom["value"], \
+        "an object the reasoner could not settle must outrank one it could"
+
+
+@pytest.mark.db
+async def test_an_adjudicate_verdict_counts_as_conflict_even_when_the_number_is_modest():
+    """The layer saying out loud that it could not decide is the same information as a high conflict score,
+    and reading only the number would miss it."""
+    from sqlalchemy import select
+
+    from db.models import Frame, Object, OntologyClass
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.activelearn.selector import score_candidates
+
+    async with get_sessionmaker()() as db:
+        cls_id = (await db.execute(
+            select(OntologyClass.id).where(OntologyClass.name == "sedan"))).scalar()
+        if cls_id is None:
+            pytest.skip("the ontology in this database has no sedan class")
+        s = DbSession(vehicle_id="veh-adj", city="BLR", start_ts_ns=0, end_ts_ns=10**9,
+                      sensors={}, ontology_version="labelox-in-0.1.0")
+        db.add(s)
+        await db.flush()
+        f = Frame(session_id=s.session_id, ts_ns=0, cam_id="cam_f", img_uri="s3://x",
+                  width=1280, height=960, quality=0.9)
+        db.add(f)
+        await db.flush()
+        db.add(Object(frame_id=f.frame_id, class_id=cls_id, bbox=[10.0, 10.0, 60.0, 90.0],
+                      conf=0.8, source="fused", attrs={}, state="review",
+                      provenance={"reasoning": {"decision": "adjudicate", "conflict": 0.05,
+                                                "score": 0.0, "findings": []}}))
+        db.add(Object(frame_id=f.frame_id, class_id=cls_id, bbox=[10.0, 10.0, 60.0, 90.0],
+                      conf=0.8, source="fused", attrs={}, state="review",
+                      provenance={"reasoning": {"decision": "accept", "conflict": 0.05,
+                                                "score": 0.6, "findings": []}}))
+        await db.commit()
+        sid = str(s.session_id)
+
+    async with get_sessionmaker()() as db:
+        items = await score_candidates(db, session_id=sid, pool_limit=50)
+    top = max(items, key=lambda i: i["scores"]["reasoner_conflict"])
+    assert top["scores"]["reasoner_conflict"] > 0, "an adjudication is conflict whatever the number says"

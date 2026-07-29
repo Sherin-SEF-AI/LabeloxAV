@@ -1047,3 +1047,44 @@ export type ObjectHistory = {
 // Re-exported from the editor reducer so panels can type against it without importing the reducer, which
 // would drag the whole editor state machine into any component that only wants to draw a list.
 export type { HistoryEntry } from "@/components/editor/useEditor";
+
+
+// ---- Cross-corpus behaviour search --------------------------------------------------------------------
+
+export type EventHit = {
+  event_id: string;
+  kind: string;
+  severity: string;
+  session_id: string;
+  city: string | null;
+  vehicle_id: string | null;
+  frame_id: string | null;
+  track_id: string | null;
+  actor_class: string | null;
+  t_start_ns: number;
+  t_end_ns: number | null;
+  // Offset into the drive. The absolute capture time is what the pipeline needs and what no reviewer can read.
+  at_s: number | null;
+  duration_s: number;
+  conf: number | null;
+  state: string;
+  payload: Record<string, unknown>;
+};
+
+export type EventSearchResult = {
+  total: number;
+  returned: number;
+  offset: number;
+  limit: number;
+  results: EventHit[];
+  detail?: string;
+};
+
+export type EventCorpusSummary = {
+  total: number;
+  by_kind: Record<string, number>;
+  by_state: Record<string, number>;
+  by_severity: Record<string, number>;
+  cities: Record<string, number>;
+  sessions_with_events: number;
+};
