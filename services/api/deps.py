@@ -107,6 +107,18 @@ class OntologyClassOut(BaseModel):
     india: bool
 
 
+class TriageFlag(BaseModel):
+    """One reason an object is in the queue, with how loudly it should read.
+
+    Structured rather than folded into the prose on `why`, so severity is decided where the evidence is and
+    a client renders it instead of recovering it with regexes over a joined string.
+    """
+
+    code: str                                   # mask_box | class_conflict | rare_class | low_conf | review_band
+    label: str                                  # what the reader is asked to check, in words
+    severity: str                               # high | medium | low
+
+
 class TriageRow(BaseModel):
     object_id: str
     frame_id: str
@@ -115,7 +127,8 @@ class TriageRow(BaseModel):
     class_name: str
     conf: float
     state: str
-    why: str
+    why: str                                    # the same reasons as prose, kept for existing readers
+    flags: list[TriageFlag] = []                # worst first, so ordering does not need re-deriving
     priority: float
     source: str = "human"                       # imported | fused | human | auto_accept | interpolated
     import_format: str | None = None            # mapillary | idd | bdd | ... when source == imported

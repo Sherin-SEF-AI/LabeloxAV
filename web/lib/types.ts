@@ -1,3 +1,13 @@
+// How loudly a queue reason reads. Decided server-side alongside the evidence, so the client renders the
+// ordering rather than recovering it by pattern-matching prose.
+export type TriageSeverity = "high" | "medium" | "low";
+
+export type TriageFlag = {
+  code: string;
+  label: string;
+  severity: TriageSeverity;
+};
+
 export type TriageRow = {
   object_id: string;
   frame_id: string;
@@ -7,6 +17,7 @@ export type TriageRow = {
   conf: number;
   state: string;
   why: string;
+  flags?: TriageFlag[];   // worst first; absent on rows from an older API
   priority: number;
   source?: string;
   import_format?: string | null;
