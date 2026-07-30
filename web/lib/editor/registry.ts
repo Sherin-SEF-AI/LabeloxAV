@@ -136,7 +136,7 @@ export const MODES: EditorMode[] = [
     ],
   },
   {
-    key: "semantic", label: "Semantic", rail: "SEM", hotkey: "6", canvas: "konva",
+    key: "semantic", label: "Semantic", rail: "SEM", hotkey: "3", canvas: "konva",
     groups: [
       { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
       { key: "paint", label: "Paint", tools: [
@@ -152,7 +152,7 @@ export const MODES: EditorMode[] = [
     ],
   },
   {
-    key: "events", label: "Events", rail: "EVT", hotkey: "7", canvas: "table",
+    key: "events", label: "Events", rail: "EVT", hotkey: "4", canvas: "table",
     groups: [
       { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
       { key: "mark", label: "Mark", tools: [
@@ -166,14 +166,14 @@ export const MODES: EditorMode[] = [
     ],
   },
   {
-    key: "pose", label: "Pose and behavior", rail: "POSE", hotkey: "3", canvas: "konva",
+    key: "pose", label: "Pose and behavior", rail: "POSE", hotkey: "5", canvas: "konva",
     groups: [
       { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
       { key: "pose", label: "Pose", tools: [{ key: "keypoint", label: "keypoint", hotkey: "K" }] },
     ],
   },
   {
-    key: "lidar3d", label: "3D and LiDAR", rail: "3D", hotkey: "4", canvas: "three",
+    key: "lidar3d", label: "3D and LiDAR", rail: "3D", hotkey: "6", canvas: "three",
     groups: [
       { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
       { key: "cuboid", label: "Cuboid", tools: [
@@ -184,7 +184,7 @@ export const MODES: EditorMode[] = [
     ],
   },
   {
-    key: "review", label: "Review", rail: "QA", hotkey: "5", canvas: "konva",
+    key: "review", label: "Review", rail: "QA", hotkey: "7", canvas: "konva",
     groups: [
       { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
     ],

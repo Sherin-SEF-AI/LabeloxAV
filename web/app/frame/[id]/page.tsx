@@ -32,6 +32,10 @@ import { MODES, type ToolGroup } from "@/lib/editor/registry";
 import type { SelectHow } from "@/components/editor/useEditor";
 import Filmstrip from "@/components/editor/Filmstrip";
 import HistoryPanel from "@/components/editor/HistoryPanel";
+import CursorReadout from "@/components/editor/CursorReadout";
+import { camLabel } from "@/lib/editor/camLabel";
+import { IS_DEMO_BUILD } from "@/lib/demoFlag";
+import { setCursor as publishCursor } from "@/lib/editor/cursorStore";
 
 // Frame-centric professional annotation editor. Pan/zoom canvas, draw + edit boxes, SAM-assisted masks,
 // layers panel, class palette, attributes, keyboard-driven, batched save. Operational Materialism tokens.
@@ -177,7 +181,6 @@ export default function FrameEditor() {
   const [reloadKey, setReloadKey] = useState(0);
   const [currentClass, setCurrentClass] = useState<OntologyClass | null>(null);
   const [panning, setPanning] = useState(false);
-  const [cursor, setCursor] = useState<number[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [autosave, setAutosave] = useState(true);
@@ -1149,7 +1152,7 @@ export default function FrameEditor() {
       onUpdateMask={(oid, polys) =>
         // Keep the bbox in sync with the edited mask so geometry and segmentation never diverge.
         dispatch({ t: "update", id: oid, patch: polys.length ? { mask: polys, bbox: bboxOfPolys(polys) } : { mask: polys } })}
-      onCursor={setCursor}
+      onCursor={publishCursor}
     />
   );
 
@@ -1208,8 +1211,10 @@ export default function FrameEditor() {
           <span className="w-px h-5 bg-line mx-0.5" />
           <CloudControl />
           <span className="w-px h-5 bg-line mx-0.5" />
-          <button onClick={() => setScaleNoteOpen(true)} title="how this layout scales"
-            className="flex items-center gap-1.5 h-[30px] px-2.5 rounded-md border border-line text-ink-2 hover:bg-line/50 hover:text-ink text-[11.5px]"><Icon name="info" size={15} /><span>How it scales</span></button>
+          {IS_DEMO_BUILD && (
+            <button onClick={() => setScaleNoteOpen(true)} title="how this layout scales"
+              className="flex items-center gap-1.5 h-[30px] px-2.5 rounded-md border border-line text-ink-2 hover:bg-line/50 hover:text-ink text-[11.5px]"><Icon name="info" size={15} /><span>How it scales</span></button>
+          )}
           <button onClick={() => window.dispatchEvent(new Event("lbx:shortcuts"))} title="keyboard shortcuts ( ? )"
             className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink"><Icon name="keyboard" size={17} /></button>
           <button onClick={() => dispatch({ t: "acceptAll" })} disabled={!st.objects.length} title="confirm every object as human-verified gold (A)"
@@ -1442,7 +1447,7 @@ export default function FrameEditor() {
           {meta && mode !== "events" && (
             <div className="absolute top-3 left-3 z-10 flex flex-col gap-1 pointer-events-none">
               <span className="font-mono text-[11px] text-ink-2 bg-bg/60 px-1.5 py-0.5 rounded w-fit">{new Date(Number(meta.ts_ns) / 1e6).toISOString().replace("T", " ").replace("Z", "")}</span>
-              <span className="font-mono text-[11px] text-ink-3 bg-bg/60 px-1.5 py-0.5 rounded w-fit">cam {meta.cam_id}{meta.is_lidar ? " · lidar" : ""}{cursor ? `  ·  ${Math.round(cursor[0])}, ${Math.round(cursor[1])}` : ""}</span>
+              <span className="font-mono text-[11px] text-ink-3 bg-bg/60 px-1.5 py-0.5 rounded w-fit">{camLabel(meta.cam_id)}{meta.is_lidar ? " · lidar" : ""}<CursorReadout /></span>
             </div>
           )}
 

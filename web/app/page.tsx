@@ -441,7 +441,7 @@ export default function HomePage() {
                         <WhyChips row={r} />
                       </td>
                       <td className="px-3 py-2 align-top"><ConfBar conf={r.conf} /></td>
-                      <td className="px-3 py-2 align-top"><StateBadge state={r.state} /></td>
+                      <td className="px-3 py-2 align-top"><StateBadge state={r.state} source={r.source} conf={r.conf} /></td>
                     </tr>
                   ))}
                   {!shownRows.length ? (
