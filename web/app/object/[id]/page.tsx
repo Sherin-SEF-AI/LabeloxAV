@@ -177,6 +177,57 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
             </div>
           </section>
 
+          {/* Sign typing, shown only where it applies. These columns have existed since migration 0016 and
+              nothing served them, so a wrong sign_type was invisible to the only person who could catch it.
+              A sign the classifier examined and declined to type reads as declined, not as blank, because
+              "no type" and "not looked at" are different facts. */}
+          {(obj.sign_type || obj.ocr_text || obj.class_name === "traffic_sign") && (
+            <section>
+              <div className="font-mono text-[11px] text-ink-3 uppercase mb-2">sign</div>
+              <div className="font-mono text-[11px] space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-ink-2">type</span>
+                  {obj.sign_type
+                    ? <span className="text-ink">{obj.sign_type}</span>
+                    : <span className="text-ink-3">
+                        {(obj.provenance?.sign as { rejected?: boolean } | undefined)?.rejected
+                          ? "declined" : "not typed"}
+                      </span>}
+                </div>
+                {obj.sign_category && (
+                  <div className="flex justify-between">
+                    <span className="text-ink-2">category</span><span className="text-ink">{obj.sign_category}</span>
+                  </div>
+                )}
+                {(obj.provenance?.sign as { margin?: number } | undefined)?.margin != null && (
+                  <div className="flex justify-between">
+                    <span className="text-ink-2">margin over &quot;not a sign&quot;</span>
+                    <span className="text-ink tabular-nums">
+                      {((obj.provenance!.sign as { margin: number }).margin).toFixed(3)}
+                    </span>
+                  </div>
+                )}
+                {(obj.provenance?.sign as { reason?: string } | undefined)?.reason && (
+                  <div className="text-ink-3 pt-1">
+                    {(obj.provenance!.sign as { reason: string }).reason}
+                  </div>
+                )}
+                {obj.ocr_text && (
+                  <div className="pt-1 border-t hairline mt-1">
+                    <div className="text-ink-2">text read {obj.ocr_lang ? `(${obj.ocr_lang})` : ""}</div>
+                    <div className="text-ink">{obj.ocr_text}</div>
+                    {/* Null conf is unmeasured, not zero. The local VLM returns no calibrated score, and
+                        showing 0.00 would read as a bad result rather than an absent one. */}
+                    <div className="text-ink-3">
+                      {obj.ocr_conf == null ? "confidence unmeasured, needs verification"
+                        : `confidence ${obj.ocr_conf.toFixed(2)}`}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
           <section>
             <div className="font-mono text-[11px] text-ink-3 uppercase mb-2">provenance</div>
             <div className="font-mono text-[11px] space-y-1">

@@ -158,6 +158,13 @@ class ObjectDetail(BaseModel):
     keypoints: dict | None = None
     polyline: list[list[float]] | None = None
     cuboid_3d: dict | None = None
+    # Sign typing and road text, read-only. Served so a reviewer can see what the classifier decided; a
+    # wrong type is corrected by re-running recognition, not by editing the field.
+    sign_type: str | None = None
+    sign_category: str | None = None
+    ocr_text: str | None = None
+    ocr_lang: str | None = None
+    ocr_conf: float | None = None
 
 
 class ReviewIn(BaseModel):

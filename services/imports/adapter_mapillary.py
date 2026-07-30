@@ -43,9 +43,13 @@ MAPILLARY_TO_ONTOLOGY = {
     "object--animal--ground-animal": "cattle",
     "object--traffic-light": "traffic_signal",
     "object--traffic-sign--front": "traffic_sign",
-    "object--traffic-sign--back": "traffic_sign",
     "object--traffic-sign--direction-front": "traffic_sign",
-    "object--traffic-sign--direction-back": "traffic_sign",
+    # The rear of a sign is a blank grey rectangle with no sign face on it. Vistas distinguishes it and this
+    # map used to throw that away, which taught the detector that a plain panel is a road sign and handed the
+    # type classifier crops with nothing to read. There is no ontology class for the back of a sign, so it
+    # goes to the catch-all rather than being asserted as something it is not.
+    "object--traffic-sign--back": "object_fallback",
+    "object--traffic-sign--direction-back": "object_fallback",
     "object--street-light": "street_light",
     "object--banner": "hoarding",
     "object--billboard": "hoarding",

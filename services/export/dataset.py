@@ -132,6 +132,11 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
                 keypoints=obj.keypoints,
                 polyline=obj.polyline,
                 relationships=rel_map.get(str(obj.object_id), []),
+                sign_type=obj.sign_type,
+                sign_category=obj.sign_category,
+                ocr_text=obj.ocr_text,
+                ocr_lang=obj.ocr_lang,
+                ocr_conf=obj.ocr_conf,
             )
         )
     return records

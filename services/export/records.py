@@ -36,3 +36,8 @@ class ExportRecord:
     keypoints: dict | None = None  # COCO-style {"skeleton","points":[[x,y,v],...]} pose, when present
     polyline: list | None = None   # open linear feature [[x,y],...] (curb/road_edge/barrier), when present
     relationships: list = field(default_factory=list)  # outgoing [{"to_object_id","kind"},...] groupings
+    sign_type: str | None = None       # Indian RTO taxonomy type, when a sign was typed and not rejected
+    sign_category: str | None = None   # mandatory | cautionary | informatory
+    ocr_text: str | None = None        # road text read off a sign or board; never a license plate
+    ocr_lang: str | None = None
+    ocr_conf: float | None = None      # None means unmeasured, never assume a number

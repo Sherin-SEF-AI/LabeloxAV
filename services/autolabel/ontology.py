@@ -35,10 +35,14 @@ STUFF_NAMES = frozenset({
     # barriers / fences / walls / railings
     "barrier", "crash_barrier", "median_barrier", "guardrail", "fence", "road_side_grill",
     "side_wall", "construction_barrier", "barricade_line", "temp_barricade", "sandbag",
-    # buildings and large fixed structures
+    # buildings and large fixed structures.
+    # `hoarding` is deliberately NOT here. A billboard has definite edges and is countable, which is the test
+    # for a thing, and while it sat in this set `persist.py` discarded every one the autolabeller proposed.
+    # Advertising then had nowhere to go and its contents were labelled `traffic_sign`, which is a large part
+    # of why that class holds 48,322 objects against 518 hoardings and recalls at 0.163.
     "buildings", "shops", "foot_overbridge", "flyover_pillar", "fly_over", "bus_shelter",
     "bmtc_bus_shelter", "metro_bus_stop", "school_bus_stop", "temp_bus_stop", "toll_booth",
-    "telephone_booth", "overhead_water_tank", "shrine", "hoarding", "metro_pillar",
+    "telephone_booth", "overhead_water_tank", "shrine", "metro_pillar",
     "festival_pandal", "roadside_shop",
     # amorphous ground clutter and lines
     "electric_line", "debris", "garbage_pile", "waterlogging", "excavation_pit",

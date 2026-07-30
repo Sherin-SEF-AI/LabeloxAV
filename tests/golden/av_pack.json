@@ -52,6 +52,27 @@
         "buffalo",
         "bull",
         "ox"
+      ],
+      "hoarding": [
+        "advertising hoarding",
+        "billboard",
+        "a large commercial advertisement board",
+        "a shop name board",
+        "a fuel station price display"
+      ],
+      "traffic_sign": [
+        "traffic sign",
+        "road sign",
+        "a red and white triangular warning sign",
+        "a circular speed limit sign",
+        "a red octagonal stop sign",
+        "a blue circular mandatory direction sign",
+        "a green destination board with place names"
+      ],
+      "traffic_signal": [
+        "traffic signal",
+        "traffic light",
+        "a signal head with red amber green lamps"
       ]
     },
     "vlm_prompt_template": "You are labeling an object cropped from an Indian road scene for an autonomous-driving dataset. Identify the object and read its attributes."
@@ -167,7 +188,6 @@
       "foot_overbridge",
       "garbage_pile",
       "guardrail",
-      "hoarding",
       "median_barrier",
       "metro_bus_stop",
       "metro_pillar",
@@ -201,6 +221,7 @@
       "e_rickshaw",
       "goat",
       "hatchback",
+      "hoarding",
       "lcv",
       "mini_bus",
       "minivan",

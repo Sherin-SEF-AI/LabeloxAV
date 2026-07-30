@@ -166,7 +166,12 @@ class DrivableSettings(BaseModel):
 
 class SignSettings(BaseModel):
     taxonomy_path: str = "ontology/signs_in_v0.yaml"
-    siglip_scale: float = 100.0    # softmax temperature on the zero-shot logits
+    # How far the best sign type must beat the best "not a sign" prompt before the type is written. Cosine
+    # similarities from SigLIP 2 are already L2-normalised, so this is in similarity units, not probability.
+    # Set from the corpus: real sign crops clear the negatives comfortably, while vehicles and blank patches,
+    # which the previous version typed confidently, do not. Raising it types fewer signs and gets fewer
+    # wrong; a sign left untyped costs a lookup, a sign typed wrongly is exported and believed.
+    min_margin: float = 0.02
     vlm_for_unusual: bool = True   # read unusual / text-bearing signs with Qwen-VL (duty-cycled)
 
 
@@ -443,6 +448,9 @@ class OntologySettings(BaseModel):
         "cattle", "dog", "buffalo", "goat",
         # the real, common road infrastructure (IDD has sign/light; pole and barrier are everywhere)
         "traffic_sign", "traffic_signal", "pole", "barrier", "road_divider", "speed_bump",
+        # Advertising is grounded alongside signs rather than left out. Without a class of its own to land
+        # in, every hoarding the detector saw was proposed as a traffic_sign.
+        "hoarding",
     ])
     promotion_min_instances: int = 50  # verified (gate-accepted) instances a class must earn to re-enter
 

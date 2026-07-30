@@ -17,7 +17,7 @@ from uuid import UUID
 
 import cv2
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from core.config import get_settings
 from core.logging import get_logger
@@ -26,6 +26,7 @@ from db.models import Frame, Object, PiiAudit
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
 from services.autolabel.paths.path_c_qwen3vl import crop_object
+from services.autolabel.signs.taxonomy import text_bearing_types
 
 log = get_logger("ocr")
 
@@ -111,6 +112,12 @@ async def ocr_session(session_id: UUID, limit: int | None = None) -> dict:
     async with maker() as db:
         stmt = (select(Object, Frame.img_uri, Frame.frame_id).join(Frame, Frame.frame_id == Object.frame_id)
                 .where(Frame.session_id == session_id, Object.class_id.in_(text_classes), Object.state != "rejected"))
+        # Skip the sign types the taxonomy says carry no text. The recogniser has always computed this flag
+        # and nothing has ever read it, so every no-horn and give-way roundel in the session went through a
+        # VLM call to be told it has no text. Signs that have not been typed yet are still read, because an
+        # untyped sign is unknown rather than known to be blank.
+        stmt = stmt.where(or_(Object.sign_type.is_(None),
+                              Object.sign_type.in_(sorted(text_bearing_types()))))
         if limit:
             stmt = stmt.limit(limit)
         rows = (await db.execute(stmt)).all()

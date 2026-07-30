@@ -162,6 +162,14 @@ def _detail(obj: Object, frame: Frame, onto) -> ObjectDetail:
         keypoints=obj.keypoints,
         polyline=obj.polyline,
         cuboid_3d=obj.cuboid_3d,
+        # Sign typing and road text have lived on the object since 0016 and were served by nothing, so a
+        # wrong sign_type was invisible to the one person able to correct it. Read-only here; correcting it
+        # is a review action, not a field edit.
+        sign_type=obj.sign_type,
+        sign_category=obj.sign_category,
+        ocr_text=obj.ocr_text,
+        ocr_lang=obj.ocr_lang,
+        ocr_conf=obj.ocr_conf,
     )
 
 
