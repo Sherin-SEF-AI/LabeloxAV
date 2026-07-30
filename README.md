@@ -269,6 +269,36 @@ Detectors live in a versioned registry, trained on the India Driving Dataset and
 
 The IDD model reaches 0.44 mAP@50, up from an earlier 0.39 baseline, while the tiny YOLO11n trades accuracy for speed so it can run on the vehicle. These are modest numbers on a hard dataset: the models do reasonably on common road agents and poorly on the rare India specific long tail, which is the gap the active learning loop exists to close. Every model is promoted only through the champion and challenger gate above.
 
+### Trained on our own reviewed corpus
+
+The models above are trained on public data. These are the first trained on labels produced by this engine, on the operational Bangalore dashcam fleet. The weights ship in [`models/`](models/) via git-lfs, with full provenance in [`models/README.md`](models/README.md):
+
+| Model | Backbone | Train | Val | Recall @0.25 | Recall @0.05 |
+| --- | --- | --- | --- | --- | --- |
+| real-v1-nano | YOLO11n | 7,306 frames / 10,053 objects | 1,831 frames / 2,087 objects | **0.411** | 0.591 |
+| real-v1-small | YOLO11s | same | same | 0.386 | - |
+
+**Recall, not mAP, and the distinction is the point.** The corpus is 2.9% reviewed, so a correct detection of an object nobody has labelled yet is scored as a false positive. Precision and AP inherit that error and are not measurable here. Recall does not: every box in the key is a thing a human confirmed is there, and the only question asked is whether the model found it. That holds however incomplete the key is.
+
+The larger backbone is not better (0.386 against 0.411), so capacity is not what is limiting this. Recall tracks the number of training instances almost monotonically:
+
+| Class | Train instances | Recall @0.25 |
+| --- | --- | --- |
+| truck | 2,679 | 0.743 |
+| bus | 2,089 | 0.684 |
+| motorcycle | 2,752 | 0.343 |
+| pedestrian | 752 | 0.216 |
+| cattle | 91 | 0.209 |
+| sedan | 193 | 0.181 |
+| traffic_sign | 1,201 | 0.163 |
+| traffic_signal | 158 | 0.000 |
+| rider | 134 | 0.000 |
+| autorickshaw | 4 | not measurable |
+
+Above roughly two thousand instances the model works; below two hundred it does not fire at all. That ranking is a labelling priority list derived from evidence rather than intuition, and it is what the active learning loop should be aimed at next. Autorickshaw is the sharpest case: the most India specific class in the ontology has four real training instances.
+
+Dropping the confidence threshold from 0.25 to 0.05 moves recall from 0.411 to 0.591, a 44% relative jump, with motorcycle going 0.343 to 0.714. The model is finding these objects and scoring them under threshold. That is the signature of training on a partially annotated set, where unlabelled positives are taught as background and suppress confidence on real ones. It is fixed with more labels or with a loss that ignores unlabelled regions, not with a bigger model.
+
 ## Honest status
 
 This is a from scratch build of the full pipeline, backed by an automated test suite. What follows separates what has been exercised on real data from what has only been written and type checked, because those are not the same claim.
@@ -296,7 +326,11 @@ Re-run on that same 400-object gold slice with the champion (`mr-idd-yolo11l`), 
 
 None of these changed a headline result, because the headline result was already reported unflatteringly. They changed whether the numbers underneath it can be trusted, which is the part that matters.
 
-The test suite once wrote to the same database as production and left synthetic frames behind. That is fixed at the source with an isolated test database, CI, and an ingest gate that rejects corrupt frames, and the residue was quarantined.
+**Correction (the test residue was larger than this file claimed).** This section previously said the test suite had once written to the production database and that "the residue was quarantined". The leak is genuinely fixed at the source, with an isolated test database, CI, and an ingest gate that rejects corrupt frames. The residue was not quarantined. Auditing the corpus before the first training run on our own labels found that **1,730 of 2,071 sessions (72%) are test fixtures**: frames of flat colour fill and uniform random static, under six vehicle ids, 5,245 frames and 13,172 objects, all dated to before the isolation fix.
+
+The failure that matters is not the leak but what it did to a measurement. Fixtures are written `accepted` or `auto_accept` by construction, while real frames average 2.9% reviewed and only 40 in the whole corpus are fully reviewed. Completeness and realism are therefore anti-correlated, so a validation set filtered on "every object on this frame has been ruled on", which is the obviously correct filter, selects *for* the pollution. One built that way came out 93% synthetic and produced a confident mAP@50 of 0.274 that was a fact about test fixtures. Two follow-up experiments, one on training length and one on backbone size, both returned null because both were graded against it.
+
+What caught it was not a metric. It was looking at the training crops: 47 of 48 sampled autorickshaw labels were flat colour rectangles. Screening is now by pixels rather than by name, because a photograph is locally smooth, a flat fill has almost no distinct colours, and uniform static has the same difference between neighbouring pixels as between distant ones. Name based screening would have been wrong in both directions: `TIGOR-DEMO`, `test-blurabbit`, `TIGOR-01` and `E2E-01` all read as fixtures and are real footage. The clean dataset rebuilt this way is what the `real-v1` models above are trained on, and the fixture sessions are excluded from it by both filters independently.
 
 ---
 

@@ -10,6 +10,9 @@ __pycache__/
 web/node_modules/
 web/.next/
 *.pt
+# Released checkpoints are the exception, tracked through git-lfs so the repo stays small. Everything else
+# under *.pt is a local training artifact and stays out.
+!models/*.pt
 *.onnx
 *.engine
 .cloud.env
