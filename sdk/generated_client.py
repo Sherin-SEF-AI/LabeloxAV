@@ -1008,6 +1008,16 @@ class LabeloxClient:
         return self._call("GET", f"/api/errordetect/summary",
                           params=None, json_body=None)
 
+    def get_eval_operations(self) -> Any:
+        """Operations"""
+        return self._call("GET", f"/api/eval/operations",
+                          params=None, json_body=None)
+
+    def get_eval_operations_by_op_type_latest(self, op_type: str) -> Any:
+        """Operation Latest"""
+        return self._call("GET", f"/api/eval/operations/{op_type}/latest",
+                          params=None, json_body=None)
+
     def post_eval_tracking(self, gold_id: str, run_id: str, iou_thr: float | None = 0.5) -> Any:
         """Score Tracking"""
         return self._call("POST", f"/api/eval/tracking",
@@ -3086,4 +3096,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 600 routes generated from the server schema.
+# 602 routes generated from the server schema.
