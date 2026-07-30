@@ -78,6 +78,7 @@ from services.api.routers import (
     triage,
     upload,
     users,
+    op_eval,
 )
 from services.api.routers import (
     auth as auth_router,
@@ -530,6 +531,7 @@ app.include_router(campaigns.router, prefix="/api", tags=["campaigns"])
 app.include_router(reasoner.router, prefix="/api", tags=["reasoner"])
 app.include_router(edge.router, prefix="/api", tags=["edge"])
 app.include_router(experiments.router, prefix="/api", tags=["experiments"])
+app.include_router(op_eval.router, prefix="/api", tags=["eval"])
 app.include_router(secv2.router, prefix="/api", tags=["security"])
 app.include_router(identity_routes.router, prefix="/api", tags=["identity"])
 app.include_router(inbox.router, prefix="/api", tags=["inbox"])
