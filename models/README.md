@@ -32,8 +32,14 @@ in the root README for why that screening exists and what it was hiding.
 
 The corpus is 2.9% reviewed. A correct detection of an object nobody has labelled yet is scored as a false
 positive, so precision and average precision inherit that error and are not measurable on this data. Recall
-does not inherit it: every box in the key is a thing a human confirmed is there, and the only question asked
-is whether the model found it, which holds however incomplete the key is.
+does not inherit it: the only question asked is whether the model found a box that is in the key, which
+holds however incomplete the key is.
+
+Read "reviewed" carefully, though. Of the 12,256 objects in that pool, 11,673 are `auto_accept`, meaning the
+previous autolabeler's own output gated by confidence rather than anything a person looked at. The corpus
+holds **126 human reviewed objects** out of 570,378, which is 0.02%. So these checkpoints are largely
+distilling the earlier autolabeler, and their ceiling is its accuracy. That is the most likely reason
+neither a longer schedule nor a larger backbone moved the numbers, and it will not be fixed by training.
 
 Any mAP figure quoted for these checkpoints, including the one the training job records, is measured against
 that same incomplete key and should not be relied on.
