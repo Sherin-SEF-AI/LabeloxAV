@@ -128,6 +128,22 @@ class Frame(Base):
 
     # Free-form curation tags (explorer). Distinct from `scene`, which is model-derived: these are human or
     # bulk-applied marks ("needs_relabel", "golden", "night_rain") used to slice and act on the corpus.
+    # How far along the machine-to-human path this label has travelled.
+    #
+    #   machine_proposed  a model put it here and nobody has looked
+    #   machine_accepted  the gate accepted it on confidence, still unseen by a person
+    #   human_edited      a person changed its class or geometry
+    #   human_confirmed   a person looked and said it is right
+    #   track_confirmed   confirmed by spot-checking the track it belongs to
+    #
+    # Separate from `state`, which is the queue, and from `source`, which is who last wrote the row and
+    # collapses to "human" on any touch. None of the three is derivable from the others: an object can be
+    # state=accepted, source=human and still never have been confirmed by the person who nudged its box.
+    lifecycle: Mapped[str | None] = mapped_column(String(24))
+    # Append-only [(state, actor, at)], so a badge that looks wrong can be traced to the write behind it.
+    lifecycle_history: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]")
+
     tags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
 
     session: Mapped[Session] = relationship(back_populates="frames")

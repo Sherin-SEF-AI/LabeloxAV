@@ -394,6 +394,13 @@ export async function lidarCloudPoints(
 }
 
 export const api = {
+  // Measured precision for one batch operation. Throws on 404, which is the unmeasured state and is a real
+  // answer rather than an error to swallow silently.
+  opPrecisionLatest: (opType: string) =>
+    get<{ precision: number; recall: number | null; n: number; dataset_slice: string; caveat: string }>(
+      `/eval/operations/${encodeURIComponent(opType)}/latest`),
+  opPrecisionAll: () => get<{ operations: Record<string, unknown>; kinds: string[] }>("/eval/operations"),
+
   lidarClouds: (sessionId: string) =>
     get<{ session_id: string; clouds: LidarCloud[] }>(`/api/lidar/sessions/${sessionId}/clouds`),
   lidarCloudMeta: (cloudId: string) => get<LidarCloud & { calibration_version: string | null }>(`/api/lidar/clouds/${cloudId}`),
