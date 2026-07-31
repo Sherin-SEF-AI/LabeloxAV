@@ -69,6 +69,32 @@ def ipm_max_range_m(fy: float, camera_height_m: float) -> float:
     return IPM_ERROR_BUDGET * fy * camera_height_m / BOX_BOTTOM_JITTER_PX
 
 
+# The range that supports a *trajectory* is much shorter than the one that supports a distance, and the
+# difference is not a matter of taste.
+#
+# A single reading at 150 m with 25% error is a usable rough statement: that bus is far away. Differencing
+# two such readings to get a heading is not, because the differencing keeps the error and throws away the
+# signal. Measured on this corpus the consequence was stark: 79.6% of all tracks classified as U-turns,
+# because objects at 60 to 200 m jumped 114 m forward and 159 m back between consecutive frames at 3fps, and
+# a heading fitted to that swings through a full circle.
+#
+# So the bound for trajectory work comes from a different requirement: the position error per frame must be
+# small compared with how far the object actually moves per frame. From df = f^2 * dv / (fy * h),
+#
+#     f_traj = sqrt(STEP_M * MOTION_FRACTION * fy * h / dv)
+#
+# where STEP_M is the inter-frame relative motion a city scene actually produces and MOTION_FRACTION is how
+# much of it the error may consume before a heading stops meaning anything.
+TRAJECTORY_STEP_M = 4.0        # relative motion between frames at 3fps in city traffic
+TRAJECTORY_ERROR_FRACTION = 0.15   # error may eat at most this much of that step
+
+
+def ipm_max_trajectory_range_m(fy: float, camera_height_m: float) -> float:
+    """Farthest distance at which a *sequence* of lifts supports a heading. See the derivation above."""
+    return math.sqrt(TRAJECTORY_STEP_M * TRAJECTORY_ERROR_FRACTION
+                     * fy * camera_height_m / BOX_BOTTOM_JITTER_PX)
+
+
 def _risk(ttc: float | None, distance: float | None, is_vru: bool, closing_mps: float | None) -> str:
     if ttc is not None and ttc < TTC_HIGH_S:
         return "high"

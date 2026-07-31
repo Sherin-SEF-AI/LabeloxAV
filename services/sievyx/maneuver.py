@@ -8,7 +8,13 @@ Pure over a trajectory (a list of timestamped positions), so it is testable with
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
+
+# Below this a step is a difference of two noisy positions and nothing else, so the heading it implies is
+# noise. The old floor was 1e-6 metres, which admitted a 14 cm step reading +90 degrees.
+MIN_SEGMENT_M = 0.25
 
 MANEUVERS = ["cut_in", "unprotected_turn", "u_turn", "lane_change", "jaywalk", "straight"]
 
@@ -24,11 +30,22 @@ def trajectory_features(traj: list[dict]) -> dict:
     seg = np.linalg.norm(d, axis=1)
     path_len = float(seg.sum())
     net = p[-1] - p[0]
-    # heading at start vs end (over the moving segments)
-    moving = seg > 1e-6
+    # Turn accumulated along the path, from segments long enough to have a direction.
+    #
+    # Two things were wrong before. Every segment counted however short, so a 14 cm step between two noisy
+    # positions contributed a heading of +90 degrees; and the turn was read as the unwrapped difference
+    # between the first and last heading, which lets that noise drift without bound. A track that merely
+    # approached the camera accumulated 438 degrees, and four fifths of the corpus classified as U-turns.
+    #
+    # Summing per-step turns, each wrapped to the shorter way round, is the honest measure: it is the total
+    # curvature for a real turn, and for a jittering track the steps are small and signed and largely cancel
+    # rather than accumulating. The length floor does the rest, since it is the short steps that carry no
+    # direction at all.
+    moving = seg > MIN_SEGMENT_M
     if moving.sum() >= 2:
-        head = np.arctan2(d[moving][:, 0], d[moving][:, 1])   # heading relative to forward axis
-        net_turn = float(np.degrees(np.unwrap(head)[-1] - np.unwrap(head)[0]))
+        head = np.arctan2(d[moving][:, 0], d[moving][:, 1])   # heading relative to the forward axis
+        steps = (np.diff(head) + math.pi) % (2 * math.pi) - math.pi
+        net_turn = float(np.degrees(steps.sum()))
     else:
         net_turn = 0.0
     lateral = float(net[0])
