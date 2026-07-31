@@ -227,6 +227,15 @@ class BulkReviewIn(BaseModel):
     attrs: dict | None = None          # set_attrs: merged into each object's attrs
     state: str | None = None
     reviewer: str = "anon"
+    # Total time the reviewer spent on this batch, divided across its members. Bulk review hardcoded zero,
+    # which is fine when it is an occasional sweep over a filter and wrong once a keyboard grid routes most
+    # of the corpus's review through it: every throughput and cost-per-label number is built on this column,
+    # and a constant zero silently reports that the work was free.
+    time_spent_ms: int = 0
+    # Versions the client believed it was acting on, keyed by object id. Any object that has changed since
+    # is skipped and named in the response rather than clobbered, which is the same protection single review
+    # has had all along.
+    expected_versions: dict[str, int] | None = None
 
 
 class AutolabelStartIn(BaseModel):
