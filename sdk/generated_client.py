@@ -1578,6 +1578,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/imports/{job_id}",
                           params=None, json_body=None)
 
+    def post_inference_runs(self, body: Any = None) -> Any:
+        """Ingest Run"""
+        return self._call("POST", f"/api/inference-runs",
+                          params=None, json_body=body)
+
     def get_ingest_progress(self) -> Any:
         """Ingest Progress"""
         return self._call("GET", f"/api/ingest/progress",
@@ -2087,6 +2092,11 @@ class LabeloxClient:
         """List Models"""
         return self._call("GET", f"/api/models",
                           params={"limit": limit}, json_body=None)
+
+    def post_models_external(self, body: Any = None) -> Any:
+        """Register External"""
+        return self._call("POST", f"/api/models/external",
+                          params=None, json_body=body)
 
     def post_multicam_associate(self, session_id: str) -> Any:
         """Associate"""
@@ -3101,4 +3111,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 603 routes generated from the server schema.
+# 605 routes generated from the server schema.
