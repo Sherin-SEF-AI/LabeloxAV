@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import PageShell from "@/components/shell/PageShell";
 import { api, humanizeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
+import { describeScope, triageQuery } from "@/lib/triageScope";
 import { acceptState, useCurrentUser } from "@/lib/user";
 import type { TriageRow } from "@/lib/types";
 
@@ -48,19 +49,20 @@ function RapidBody() {
   const shownAt = useRef<number>(Date.now());
   const inFlight = useRef(0);
 
-  const sessionId = params.get("session") || undefined;
+  // Every scope the triage API accepts, not just the session. A batch mined for one class had no URL that
+  // would open it while this page forwarded one parameter out of five.
+  const scope = params.toString();
+  const scopeLabel = describeScope(params);
   const current = queue[index] ?? null;
 
   useEffect(() => {
     (async () => {
       try {
-        const q: Record<string, string> = { limit: "200" };
-        if (sessionId) q.session_id = sessionId;
-        setQueue(await api.triage(q));
+        setQueue(await api.triage(triageQuery(new URLSearchParams(scope))));
       } catch (e) { toast(humanizeError(e), "error"); } finally { setLoading(false); }
     })();
     api.ontology().then((o) => setClasses(o.classes.map((c) => c.name))).catch(() => {});
-  }, [sessionId]);
+  }, [scope]);
 
   useEffect(() => { shownAt.current = Date.now(); }, [index]);
 
@@ -155,7 +157,9 @@ function RapidBody() {
     <PageShell
       active="RAPID REVIEW"
       title="Rapid review"
-      subtitle="one crop, one keystroke"
+      // A scoped queue ends early by design. Saying what it was scoped to is the difference between "the
+      // batch is finished" and "the corpus looks empty and something is broken".
+      subtitle={scopeLabel ? `${scopeLabel} · one crop, one keystroke` : "one crop, one keystroke"}
       right={
         <span className="font-mono text-[11px] text-ink-3">
           {index}/{queue.length} · <span className="text-pass">{counts.accept}a</span>

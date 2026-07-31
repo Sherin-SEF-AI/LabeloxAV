@@ -27,6 +27,16 @@ log = get_logger("al_selector")
 # objects worth a human: still provisional (not human-verified), where a label adds signal
 _CANDIDATE_STATES = ("review", "annotate", "auto_accept")
 
+# Smallest object a person can actually rule on from a crop, measured on the shorter side in pixels.
+#
+# The value ranking scores what the model is unsure about, and a distant object is exactly that: small, low
+# confidence, high uncertainty. So it sorts to the top of every pool while being the one object a reviewer
+# cannot judge. A batch mined without this floor came back at 12 to 40 pixels, which is a queue of coin
+# flips: the reviewer guesses, and the guess enters the corpus indistinguishable from a considered verdict.
+#
+# Zero disables the floor, for callers that are ranking rather than dispatching work.
+MIN_REVIEWABLE_SIDE_PX = 0.0
+
 
 def _norm(x: np.ndarray) -> np.ndarray:
     x = np.asarray(x, dtype=float)
@@ -43,13 +53,20 @@ def _uncertainty(conf: float, agreement: bool, mask_box_disagree: bool, lo: floa
 
 
 async def score_candidates(db: AsyncSession, session_id: str | None = None, pool_limit: int = 2000,
-                           class_ids: list[int] | None = None) -> list[dict]:
+                           class_ids: list[int] | None = None,
+                           min_side_px: float = MIN_REVIEWABLE_SIDE_PX) -> list[dict]:
     cfg = get_settings().phase4.activelearn
     onto = get_ontology()
 
     q = (select(Object.object_id, Object.frame_id, Object.class_id, Object.conf, Object.provenance,
                 Object.quality_score, Object.track_id)
          .where(Object.state.in_(_CANDIDATE_STATES), Object.source != "human"))
+    if min_side_px > 0:
+        # Applied in the pool query rather than after ranking, because the pool is itself truncated by
+        # pool_limit. Filtering afterwards would let unreviewable objects consume the pool and leave the
+        # ranking to choose from whatever few judgeable ones happened to survive.
+        q = q.where(func.least(Object.bbox[3] - Object.bbox[1],
+                               Object.bbox[4] - Object.bbox[2]) >= min_side_px)
     if session_id:
         from db.models import Frame
         q = q.join(Frame, Frame.frame_id == Object.frame_id).where(Frame.session_id == session_id)
