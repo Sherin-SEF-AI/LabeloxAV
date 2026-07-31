@@ -35,6 +35,11 @@ class SimilarIn(BaseModel):
     exclude_track: bool = True    # object search only: drop other crops of the very object you started from
     city: str | None = None       # restrict to one city
     session_id: str | None = None  # restrict to one session
+    # Which plane an uploaded crop searches. `object_id` has always searched objects and `frame_id` frames,
+    # because the query itself said which; an uploaded image says nothing, so it silently meant frames.
+    # "here is a picture of the thing, find me more of it" is the exemplar query people actually want, and
+    # it was unreachable. Defaults to frame so existing callers are unchanged.
+    target: str = "frame"         # frame | object
 
 
 def _decorate_frames(nbrs) -> list[dict]:
@@ -102,6 +107,18 @@ async def search_similar(body: SimilarIn, db: AsyncSession = Depends(db_session)
         img = cv2.imdecode(np.frombuffer(base64.b64decode(body.image_b64), np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             raise HTTPException(400, "could not decode image")
+        if body.target == "object":
+            # An uploaded crop against the object plane: the exemplar query. DINOv3 only, because that is
+            # the space object crops are indexed in and the one that answers "more things that look like
+            # this"; SigLIP2 on a crop would compare a picture against a text-aligned space for no gain.
+            # Letterboxed the same way the indexed crops were, so the query sits in the same distribution
+            # rather than a stretched version of it.
+            from services.intelligence.embed.prep import square_letterbox
+
+            qv = dinov3.encode_image(square_letterbox(img)).tolist()
+            nbrs = await find_similar_objects(db, qv, **common)
+            return {"kind": "object", "mode": "visual",
+                    "results": _decorate_objects(get_ontology(), nbrs)}
         if fused:
             nbrs = await fused_frame_neighbors(db, dinov3.encode_image(img).tolist(),
                                                siglip2.encode_image(img).tolist(), k=body.k)
