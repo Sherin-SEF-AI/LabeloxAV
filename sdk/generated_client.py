@@ -2198,6 +2198,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/objects/classify",
                           params=None, json_body=body)
 
+    def post_objects_crops(self, body: Any = None) -> Any:
+        """Object Crop Sheet"""
+        return self._call("POST", f"/api/objects/crops",
+                          params=None, json_body=body)
+
     def post_objects_quality_backfill(self, session_id: Any | None = None) -> Any:
         """Quality Backfill Ep"""
         return self._call("POST", f"/api/objects/quality/backfill",
@@ -3096,4 +3101,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 602 routes generated from the server schema.
+# 603 routes generated from the server schema.
