@@ -97,5 +97,9 @@ def test_pending_counts_is_cheap_and_returns_ints():
             return await daemon.pending_counts(db)
 
     p = run_async(_go())
-    assert set(p) == {"frames", "objects"}
-    assert isinstance(p["frames"], int) and isinstance(p["objects"], int)
+    # The half-embedded counts are reported beside the backlog, not folded into it. They exist because a
+    # crop with a DINOv3 vector and a NULL SigLIP2 one was counted as complete by every earlier version of
+    # this function, which is how the whole corpus became unreachable by text search without any counter
+    # noticing. A non-zero value here beside a zero backlog is that defect returning.
+    assert set(p) == {"frames", "objects", "frames_missing_siglip", "objects_missing_siglip"}
+    assert all(isinstance(v, int) for v in p.values())

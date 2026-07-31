@@ -16,12 +16,18 @@ maybe_embed_pending is the scheduler hook; pending_counts is the cheap check it 
 
 from __future__ import annotations
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
 from core.logging import get_logger
-from db.models import Frame, FrameEmbedding, Object, ObjectEmbedding
+from db.models import Frame, Object
+from services.intelligence.embed.pending import (
+    frame_missing_siglip,
+    frame_needs_embedding,
+    object_missing_siglip,
+    object_needs_embedding,
+)
 
 log = get_logger("embed.daemon")
 
@@ -33,15 +39,23 @@ async def pending_counts(db: AsyncSession) -> dict:
     id set and does a row-by-row membership test that takes minutes over 220K rows (and mis-handles a NULL in
     the subquery). NOT EXISTS is a hash anti-join on the embedding table's primary key, sub-second at the same
     scale.
+
+    Both vectors are required, not just a row. See services/intelligence/embed/pending.py: a crop with a
+    DINOv3 vector and a NULL SigLIP2 one is unreachable by text search, and the row-existence test that used
+    to live here counted the entire corpus as complete while object text search returned nothing.
     """
     frames = (await db.execute(
-        select(func.count()).select_from(Frame).where(
-            ~exists().where(FrameEmbedding.frame_id == Frame.frame_id,
-                            FrameEmbedding.dino_vec.isnot(None))))).scalar_one()
+        select(func.count()).select_from(Frame).where(frame_needs_embedding()))).scalar_one()
     objects = (await db.execute(
-        select(func.count()).select_from(Object).where(
-            ~exists().where(ObjectEmbedding.object_id == Object.object_id)))).scalar_one()
-    return {"frames": int(frames), "objects": int(objects)}
+        select(func.count()).select_from(Object).where(object_needs_embedding()))).scalar_one()
+    # Reported separately because it is the population every previous counter called done. A non-zero value
+    # here beside a zero backlog is the signature of that defect returning.
+    half_frames = (await db.execute(
+        select(func.count()).select_from(Frame).where(frame_missing_siglip()))).scalar_one()
+    half_objects = (await db.execute(
+        select(func.count()).select_from(Object).where(object_missing_siglip()))).scalar_one()
+    return {"frames": int(frames), "objects": int(objects),
+            "frames_missing_siglip": int(half_frames), "objects_missing_siglip": int(half_objects)}
 
 
 def _free_vram_mb() -> float | None:
