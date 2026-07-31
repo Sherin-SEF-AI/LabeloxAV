@@ -29,6 +29,7 @@ from services.api.routers import (
     collaborate,
     corrections,
     curation,
+    dataset_query,
     datasets,
     discovery,
     drivable,
@@ -61,6 +62,7 @@ from services.api.routers import (
     objects,
     objects3d,
     ocr,
+    op_eval,
     predictions,
     quality,
     reasoner,
@@ -78,7 +80,6 @@ from services.api.routers import (
     triage,
     upload,
     users,
-    op_eval,
 )
 from services.api.routers import (
     auth as auth_router,
@@ -469,6 +470,7 @@ app.include_router(meta.router, prefix="/api", tags=["meta"])
 app.include_router(triage.router, prefix="/api", tags=["triage"])
 app.include_router(objects.router, prefix="/api", tags=["objects"])
 app.include_router(predictions.router, prefix="/api", tags=["predictions"])
+app.include_router(dataset_query.router, prefix="/api", tags=["datasets"])
 app.include_router(review.router, prefix="/api", tags=["review"])
 app.include_router(intelligence.router, prefix="/api", tags=["intelligence"])
 app.include_router(search.router, prefix="/api", tags=["search"])

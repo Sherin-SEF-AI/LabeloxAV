@@ -878,15 +878,40 @@ class LabeloxClient:
         return self._call("GET", f"/api/datasets",
                           params={"limit": limit}, json_body=None)
 
+    def get_datasets_blob(self, uri: str) -> Any:
+        """Dataset Blob"""
+        return self._call("GET", f"/api/datasets/blob",
+                          params={"uri": uri}, json_body=None)
+
+    def get_datasets_compile(self, q: str) -> Any:
+        """Compile Only"""
+        return self._call("GET", f"/api/datasets/compile",
+                          params={"q": q}, json_body=None)
+
     def post_datasets_export(self, body: Any = None) -> Any:
         """Start Export"""
         return self._call("POST", f"/api/datasets/export",
+                          params=None, json_body=body)
+
+    def get_datasets_preview(self, q: str, version: Any | None = None, limit: int | None = 200000) -> Any:
+        """Preview"""
+        return self._call("GET", f"/api/datasets/preview",
+                          params={"q": q, "version": version, "limit": limit}, json_body=None)
+
+    def post_datasets_shards(self, body: Any = None) -> Any:
+        """Build"""
+        return self._call("POST", f"/api/datasets/shards",
                           params=None, json_body=body)
 
     def get_datasets_versions_by_name(self, name: str, limit: int | None = 20) -> Any:
         """Dataset Versions"""
         return self._call("GET", f"/api/datasets/versions/{name}",
                           params={"limit": limit}, json_body=None)
+
+    def get_datasets_vocabulary(self) -> Any:
+        """Vocabulary"""
+        return self._call("GET", f"/api/datasets/vocabulary",
+                          params=None, json_body=None)
 
     def get_datasets_by_a_id_diff_by_b_id(self, a_id: str, b_id: str, deep: bool | None = True, sample: int | None = 20) -> Any:
         """Dataset Diff"""
@@ -3111,4 +3136,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 605 routes generated from the server schema.
+# 610 routes generated from the server schema.
