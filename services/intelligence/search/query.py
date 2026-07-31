@@ -38,6 +38,20 @@ def parse_query(q: str) -> tuple[dict, list[str]]:
     return scene, classes
 
 
+def should_filter(candidate_count: int, k: int, *, narrowed: bool) -> bool:
+    """Whether a parsed term is strong enough to filter on, rather than only to rank by.
+
+    A word can be an ontology class and an ordinary English word at once. "a cow on the road" parses `road`,
+    a surface class annotated as an object on 1 of 34,977 frames in the live corpus, so a hard filter
+    collapsed the search to that frame while the actual subject was ignored (a cow is filed as `cattle`).
+
+    The rule is the caller's own request: a filter leaving fewer frames than the number of results asked for
+    is removing more than it selects. Below that, the parsed terms are already inside the text being
+    embedded, so they still steer the ranking and nothing is lost by not also filtering on them.
+    """
+    return narrowed and candidate_count >= k
+
+
 async def semantic_search(db: AsyncSession, q: str, k: int = 24) -> dict:
     from services.intelligence.embed import siglip2
 
@@ -72,9 +86,17 @@ async def semantic_search(db: AsyncSession, q: str, k: int = 24) -> dict:
     qvec = siglip2.encode_text(q).tolist()
     dist = FrameEmbedding.siglip_vec.cosine_distance(qvec).label("d")
     rerank = select(FrameEmbedding.frame_id, dist).where(FrameEmbedding.siglip_vec.isnot(None))
-    if scene or classes or ocr_hit:  # only constrain when the parse or OCR matched something
-        if not candidate_ids:
-            return {"query": q, "filters": scene, "classes": classes, "count": 0, "results": []}
+    # Constrain only when the parse matched something AND the constraint leaves enough frames to rank.
+    #
+    # A word can be an ontology class and an ordinary English word at once, and then a hard filter destroys
+    # the query. "a cow on the road" parses `road`, which is a surface class annotated as an object on 1 of
+    # 34,977 frames, so the search collapsed to that single frame while the actual subject was ignored
+    # (the ontology calls a cow `cattle`). The parse was not wrong; treating every match as a hard filter
+    # was. Below the number of results the caller asked for, the filter is removing more than it selects, so
+    # the parsed terms stay in the embedded text as a soft signal and the rerank runs over the corpus.
+    narrowed = bool(scene or classes or ocr_hit)
+    applied = should_filter(len(candidate_ids), k, narrowed=narrowed)
+    if applied:
         rerank = rerank.where(FrameEmbedding.frame_id.in_(candidate_ids))
     rows = (await db.execute(rerank.order_by(dist).limit(k))).all()
 
@@ -84,4 +106,16 @@ async def semantic_search(db: AsyncSession, q: str, k: int = 24) -> dict:
         if fr is not None:
             results.append({"frame_id": str(fid), "image_url": f"/api/frames/{fid}/image",
                             "scene": fr.scene, "score": round(1.0 - float(d), 4)})
-    return {"query": q, "filters": scene, "classes": classes, "count": len(results), "results": results}
+    log.info("semantic_search", q=q, classes=classes, scene=scene,
+             candidates=len(candidate_ids), filtered=applied, returned=len(results))
+    return {"query": q, "filters": scene, "classes": classes,
+            # What was actually done, not only what was understood. A caller shown `classes: ["road"]`
+            # beside results has no way to tell whether those results were filtered by it or merely ranked
+            # near it, and the two mean very different things about the answer.
+            "filtered": applied,
+            "candidates": len(candidate_ids) if narrowed else None,
+            "detail": (None if not narrowed or applied else
+                       f"the terms {classes or list(scene.values())} matched only "
+                       f"{len(candidate_ids)} frames, fewer than the {k} asked for, so they were used to "
+                       f"rank rather than to filter"),
+            "count": len(results), "results": results}
