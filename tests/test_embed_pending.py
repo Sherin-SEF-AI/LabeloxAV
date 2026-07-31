@@ -122,6 +122,32 @@ async def test_the_old_predicate_called_it_complete():
 
 
 @pytest.mark.asyncio
+async def test_coverage_separates_what_find_similar_reaches_from_what_text_reaches():
+    """One number cannot answer both questions, and reporting one as both is how this stayed hidden.
+
+    The endpoint counted the legacy `Embedding` table, which nothing has written since the move to pgvector,
+    so it reported near zero against a corpus that is fully embedded visually. Corrected, it reports the two
+    separately, which is the only way a corpus that is 100% reachable by find-similar and 0% reachable by
+    text can describe itself.
+    """
+    from db.session import get_sessionmaker
+    from services.api.routers.corrections import coverage
+    from services.autolabel.ontology import get_ontology
+
+    async with get_sessionmaker()() as db:
+        before = await coverage(db)
+        await _object_with_embedding(db, get_ontology(), dino=True, siglip=False)
+        after = await coverage(db)
+
+        assert after["visual_embedded"] == before["visual_embedded"] + 1
+        assert after["text_embedded"] == before["text_embedded"], \
+            "a crop with no SigLIP2 vector adds nothing to what text search can reach"
+        # The legacy alias keeps meaning what it always meant to existing callers.
+        assert after["embedded"] == after["visual_embedded"]
+        await db.rollback()
+
+
+@pytest.mark.asyncio
 async def test_the_half_embedded_population_is_countable_on_its_own():
     """A number that used to read zero needs its own counter, or the fix is unverifiable."""
     from sqlalchemy import func, select

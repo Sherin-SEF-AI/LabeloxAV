@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
-from db.models import Embedding, Frame, Object, Review
+from db.models import Frame, Object, ObjectEmbedding, Review
 from db.models import Session as DbSession
 from services.api.deps import db_session
 from services.autolabel.ontology import get_ontology
@@ -101,9 +101,30 @@ async def confusions(by: str = "class", limit: int = 30, db: AsyncSession = Depe
 
 @router.get("/corrections/coverage")
 async def coverage(db: AsyncSession = Depends(db_session)):
+    """How much of the corpus similar-search can actually reach.
+
+    This counted the legacy `Embedding` table, which nothing has written since the move to pgvector, so it
+    reported near zero against a corpus that is in fact fully embedded. The live tables are
+    `object_embedding` and `frame_embedding`.
+
+    Reported by vector rather than by row, because a row is not a vector: `siglip_vec` arrived later as a
+    nullable column, and a crop holding a DINOv3 vector and a NULL SigLIP2 one is reachable by
+    find-similar and unreachable by text. One number cannot say both, so it does not try.
+    """
     total = (await db.execute(select(func.count()).select_from(Object).where(Object.state != "rejected"))).scalar_one()
-    emb = (await db.execute(select(func.count()).select_from(Embedding))).scalar_one()
-    return {"embedded": int(emb), "total": int(total), "pct": round(100 * emb / total, 1) if total else 0.0}
+    dino = (await db.execute(select(func.count()).select_from(ObjectEmbedding)
+                             .where(ObjectEmbedding.dino_vec.isnot(None)))).scalar_one()
+    siglip = (await db.execute(select(func.count()).select_from(ObjectEmbedding)
+                               .where(ObjectEmbedding.siglip_vec.isnot(None)))).scalar_one()
+
+    def pct(n: int) -> float:
+        return round(100 * n / total, 1) if total else 0.0
+
+    return {"total": int(total),
+            # `embedded` and `pct` keep their meaning for existing callers: what find-similar can reach.
+            "embedded": int(dino), "pct": pct(dino),
+            "visual_embedded": int(dino), "visual_pct": pct(dino),
+            "text_embedded": int(siglip), "text_pct": pct(siglip)}
 
 
 @router.post("/corrections/embed")
