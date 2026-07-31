@@ -14,13 +14,14 @@ from sqlalchemy import distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
-from db.models import AgentRun, Frame, Object, TrainingJob
+from db.models import AgentRun, Frame, Object
+from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("agent.error_daemon")
 
 
 async def _training_running(db: AsyncSession) -> bool:
-    return (await db.execute(select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1))).first() is not None
+    return await training_holds_gpu(db)
 
 
 async def _sessions_with_machine_objects(db: AsyncSession, limit: int) -> list[uuid.UUID]:

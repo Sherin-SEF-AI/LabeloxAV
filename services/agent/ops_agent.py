@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from db.models import AgentRun
+from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("agent.ops_agent")
 
@@ -58,10 +59,10 @@ async def _t_materialize(db: AsyncSession, args: dict) -> dict:
 async def _t_autolabel(db: AsyncSession, args: dict) -> dict:
     import asyncio
 
-    from db.models import AutolabelJob, TrainingJob
+    from db.models import AutolabelJob
     from db.session import get_sessionmaker
 
-    if (await db.execute(select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1))).first():
+    if await training_holds_gpu(db):
         return {"error": "GPU reserved for a training job; autolabel paused"}
     if (await db.execute(select(AutolabelJob.job_id).where(AutolabelJob.status == "running").limit(1))).first():
         return {"error": "an autolabel job is already running"}

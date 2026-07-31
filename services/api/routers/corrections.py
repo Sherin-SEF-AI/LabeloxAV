@@ -12,11 +12,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
-from db.models import Embedding, Frame, Object, Review, TrainingJob
+from db.models import Embedding, Frame, Object, Review
 from db.models import Session as DbSession
 from services.api.deps import db_session
 from services.autolabel.ontology import get_ontology
 from services.intelligence.corrections import correction_candidates
+from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("api_corrections")
 router = APIRouter()
@@ -109,7 +110,7 @@ async def coverage(db: AsyncSession = Depends(db_session)):
 async def embed(session_id: str | None = None, db: AsyncSession = Depends(db_session)):
     """Compute CLIP object embeddings (a session, or the whole corpus) in the background so the
     similar-search has coverage. GPU work; yields to a running training job."""
-    if (await db.execute(select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1))).first():
+    if await training_holds_gpu(db):
         raise HTTPException(503, "GPU reserved for a training job; embedding is paused until it finishes")
 
     async def _run() -> None:

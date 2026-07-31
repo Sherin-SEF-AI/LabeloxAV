@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.logging import get_logger
 from core.storage import get_object_store
 from db.models import AgentRun, Frame, Object
+from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("agent.relabel")
 
@@ -112,12 +113,11 @@ async def run_relabel_all(run_id: uuid.UUID, *, max_frames: int = 200, created_b
                           session_id: str | None = None, min_conf: float = 0.45, margin: float = 0.15) -> None:
     """Background: relabel every machine-labelled frame (bounded), one reversible child run per frame, the
     parent run aggregating counts. Yields to a running training job (GPU discipline)."""
-    from db.models import TrainingJob
     from db.session import get_sessionmaker
 
     maker = get_sessionmaker()
     async with maker() as db:
-        if (await db.execute(select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1))).first():
+        if await training_holds_gpu(db):
             run = await db.get(AgentRun, run_id)
             if run:
                 run.status, run.counts = "committed", {"skipped": "training job holds the GPU"}

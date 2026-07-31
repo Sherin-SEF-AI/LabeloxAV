@@ -562,20 +562,19 @@ async def object_crop(object_id: str, pad: float = 0.15, db: AsyncSession = Depe
 
 @router.post("/segment")
 async def segment(payload: SegmentIn, db: AsyncSession = Depends(db_session)):
-    from sqlalchemy import select
-
-    from db.models import TrainingJob
     from services.api.sam_service import segment as run_segment
+    from services.training.gpu_lease import gpu_busy_detail
 
     # Single-GPU discipline: interactive segmentation yields to an active training job. Loading SAM
     # on top of a running train would OOM and KILL the multi-hour job, so refuse cleanly (no GPU touch).
     # Box-level review (accept/reject/reclassify) needs no GPU and still works.
-    running = (await db.execute(
-        select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1)
-    )).first()
-    if running is not None:
-        raise HTTPException(503, "GPU reserved for an active training job. Interactive segmentation is "
-                                 "paused until it finishes; box review (accept/reject/reclassify) still works.")
+    #
+    # Liveness comes from the job's heartbeat rather than its status column, because a run killed by a crash
+    # or a stopped container leaves the column at "running" and would otherwise refuse every request from
+    # then on, promising a GPU that is already free.
+    busy = await gpu_busy_detail(db)
+    if busy:
+        raise HTTPException(503, busy)
 
     frame = await db.get(Frame, UUID(payload.frame_id))
     if frame is None:

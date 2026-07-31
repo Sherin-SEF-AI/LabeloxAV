@@ -11,10 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.logging import get_logger
 from core.storage import get_object_store
 from core.timebase import now_ns
-from db.models import Frame, Object, Review, TrainingJob
+from db.models import Frame, Object, Review
 from services.api.deps import BulkReviewIn, ReviewIn, current_user, db_session
 from services.api.routers.objects import _write_mask
 from services.autolabel.ontology import get_ontology
+from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("api_review")
 router = APIRouter()
@@ -28,9 +29,8 @@ async def qa_vlm(session_id: str, limit: int = 40, db: AsyncSession = Depends(db
     import asyncio
     from uuid import UUID as _UUID
 
-    from sqlalchemy import select
 
-    if (await db.execute(select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1))).first():
+    if await training_holds_gpu(db):
         raise HTTPException(503, "GPU reserved for a training job; VLM auto-QA is paused until it finishes")
 
     async def _run() -> None:
