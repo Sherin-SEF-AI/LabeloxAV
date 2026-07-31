@@ -50,6 +50,21 @@ async def record_evaluation(db: AsyncSession, model_version: str, aggregate: dic
                      challenger_of=champ_version, failure_clusters={})
     db.add(row)
     await db.commit()
+
+    # Group the misses now that the eval has an id, so failure-driven mining has an input. This was written
+    # `{}` unconditionally, which left services/sievyx/failure_mining.py without a caller or a source.
+    # Clustering is best-effort: a model whose failures cannot be grouped is still a model that evaluated,
+    # and the verdict above must not depend on it.
+    try:
+        from services.verdyx.failure_clusters import build_failure_clusters, resolve_patch_eval_id
+
+        # Resolved by (gold_id, model_version), not by eval id: EvalPatch.eval_id is minted by the analytics
+        # evaluator and shares no id space with this table.
+        patch_eval = await resolve_patch_eval_id(db, gold_id=gold_id, model_version=model_version)
+        row.failure_clusters = await build_failure_clusters(db, patch_eval)
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("verdyx.failure_clusters_failed", eval_id=str(row.eval_id), error=str(exc))
     log.info("verdyx.eval", model=model_version, verdict=verdict["verdict"],
              regressed=[r["slice"] for r in verdict.get("regressed_slices", [])])
     return {"eval_id": str(row.eval_id), "model_version": model_version, "verdict": verdict,
