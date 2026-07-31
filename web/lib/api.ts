@@ -1004,8 +1004,24 @@ export const api = {
     post<{ job_id: string; status: string }>("/api/datasets/export", body),
   jobs: () => get<JobRow[]>("/api/jobs"),
   ingestProgress: () => get<{ active: boolean; finished: boolean; done: number; total: number; current: string | null; frames: number }>("/api/ingest/progress"),
-  bulkReview: (object_ids: string[], action: string, class_name?: string, state?: string, attrs?: Record<string, unknown>) =>
-    post<{ updated: number }>("/api/objects/bulk-review", { object_ids, action, class_name, state, attrs }),
+  bulkReview: (object_ids: string[], action: string, class_name?: string, state?: string,
+               attrs?: Record<string, unknown>,
+               extra?: { time_spent_ms?: number; expected_versions?: Record<string, number> }) =>
+    post<{
+      updated: number; action: string;
+      skipped_missing: string[];
+      skipped_stale: { object_id: string; expected: number; current: number }[];
+    }>("/api/objects/bulk-review",
+       { object_ids, action, class_name, state, attrs, ...(extra ?? {}) }),
+  // One sprite sheet for many crops. A grid asking for its tiles one at a time is N whole-frame decodes and
+  // N requests; this is one of each per frame. `placements` gives the cell each object landed in.
+  cropSheet: (object_ids: string[], cell = 128, cols?: number) =>
+    post<{
+      cell: number; cols: number; rows: number; count: number;
+      frames_decoded: number; crops: number;
+      placements: { object_id: string; row: number; col: number; ok: boolean; w?: number; h?: number }[];
+      sheet: string | null;
+    }>("/api/objects/crops", { object_ids, cell, cols: cols ?? 0 }),
   // Interactive AI correction: correct one -> find similar -> bulk apply
   correctionSuggest: (body: {
     object_id: string;

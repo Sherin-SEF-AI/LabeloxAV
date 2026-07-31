@@ -116,6 +116,8 @@ export const MENUS: Menu[] = [
         separatorBefore: true, hint: "active learning and error candidates" },
       { key: "rapid", label: "Rapid review", icon: "check", href: "/review/rapid",
         hint: "one crop, one keystroke" },
+      { key: "grid", label: "Crop grid", icon: "layers", href: "/review/grid",
+        hint: "many crops, one keystroke each" },
       { key: "annotations", label: "Annotations", icon: "list", href: "/annotations",
         hint: "browse and resume" },
       { key: "agent", label: "Agent console", icon: "activity", href: "/agent",
