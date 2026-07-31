@@ -21,6 +21,7 @@ from core.logging import get_logger
 from db.models import Frame, Object, ObjectDynamics
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
+from services.calibration.resolve import resolve_calibration
 from services.domain import safety_l1
 from services.hdmap.georef import ipm_pixel_to_vehicle
 
@@ -84,7 +85,6 @@ async def compute_session_dynamics(session_id: UUID) -> dict:
     cfg = get_settings()
     onto = get_ontology()
     rig, sp = cfg.rig, cfg.spatial
-    pitch = math.radians(sp.camera_pitch_deg)
     maker = get_sessionmaker()
 
     async with maker() as db:
@@ -97,18 +97,29 @@ async def compute_session_dynamics(session_id: UUID) -> dict:
             return {"objects": 0, "reason": "no objects in this session"}
 
         # 1. lift every object's ground-contact point to a metric (forward, lateral) position
+        #
+        # Calibration is resolved per camera rather than read from the rig config, because the config
+        # assumes a pitch of exactly zero on every drive and pitch is what sets the horizon row the lift
+        # measures distance against. `resolve_calibration` returns the stored per-session estimate when
+        # there is one and the nominal rig default otherwise, so an uncalibrated session behaves exactly as
+        # it did before. Resolved once per camera, not per object: there are half a million objects.
+        cams_seen = {(r[6], r[7] or rig.ref_width, r[8] or 1080) for r in rows}
+        calib = {}
+        for cam, cw, ch in cams_seen:
+            calib[cam] = await resolve_calibration(session_id, cam, cw, ch)
+
         recs: dict = {}
-        for oid, tid, cid, bbox, fid, ts, cam, w, h, ego in rows:
-            lens = rig.camera_lens.get(cam, "narrow")
-            K = rig.lenses[lens]
-            scale = (w or rig.ref_width) / rig.ref_width
-            fx, fy, cx, cy = K.fx * scale, K.fy * scale, (w or rig.ref_width) / 2.0, (h or 1080) / 2.0
+        for oid, tid, cid, bbox, fid, ts, cam, _w, _h, ego in rows:
+            cal = calib[cam]
+            fx, fy, cx, cy = cal.fx, cal.fy, cal.cx, cal.cy
+            cam_pitch = math.radians(float(cal.rpy_deg[1]))
+            cam_height = float(cal.xyz_m[2]) or sp.camera_height_m
             u, v = (bbox[0] + bbox[2]) / 2.0, bbox[3]   # bottom-centre = where the object meets the road
-            fl = ipm_pixel_to_vehicle(u, v, fx, fy, cx, cy, sp.camera_height_m, pitch,
-                                      dist=K.dist, fisheye=K.model == "fisheye")
+            fl = ipm_pixel_to_vehicle(u, v, fx, fy, cx, cy, cam_height, cam_pitch,
+                                      dist=cal.dist, fisheye=cal.model == "fisheye")
             forward, lateral, dist = (None, None, None)
             if fl is not None:
-                f_max = ipm_max_range_m(fy, sp.camera_height_m)
+                f_max = ipm_max_range_m(fy, cam_height)
                 cand_fwd, cand_lat = fl
                 # Behind the camera is not a distance, and beyond the usable range the lift is arithmetic
                 # rather than measurement. Both are dropped to None so a consumer sees missing evidence

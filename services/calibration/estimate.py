@@ -19,6 +19,13 @@ from core.logging import get_logger
 log = get_logger("calibration_estimate")
 
 
+# How far from level a windscreen-mounted camera can plausibly sit. Beyond this the vanishing point was
+# fitted to something that is not the road, and pitch is what the flat-road lift measures distance against,
+# so a wrong estimate is worse than the nominal zero it replaces. Chosen against the real distribution: 79%
+# of 125 estimated sessions fall inside it and the rejected tail reaches 8.5 degrees.
+MAX_PLAUSIBLE_PITCH_DEG = 3.0
+
+
 def focal_from_exif(exif: dict | None, img_w: int) -> float | None:
     """fx from a 35mm-equivalent focal length (the field that survives most transcodes), or None."""
     f35 = (exif or {}).get("FocalLengthIn35mmFilm") or (exif or {}).get("focal_35mm")
@@ -129,6 +136,21 @@ async def estimate_session_calibration(session_id, max_frames: int = 12) -> dict
                 out[cam_id] = {"stored": False, "reason": "no usable road lines"}
                 continue
             pitch_deg = float(np.median(pitches))
+            # A vanishing point fitted to road lines can be dragged a long way by a kerb, a shadow edge or a
+            # row of parked cars, which is the same failure the lane proposer had with hoardings. Measured
+            # across 125 real sessions the estimates cluster near level, 62% within one degree, with a tail
+            # reaching 8.5 degrees. A windscreen mount does not sit at 8.5 degrees: at this focal length that
+            # is 429 pixels of horizon shift on a 1080-high frame, and pitch is exactly what the flat-road
+            # lift measures distance against. An implausible estimate is therefore worse than the nominal
+            # zero it would replace, so it is refused rather than stored, and the camera stays on nominal.
+            if abs(pitch_deg) > MAX_PLAUSIBLE_PITCH_DEG:
+                out[cam_id] = {"stored": False, "reason": f"estimated pitch {pitch_deg:.2f} deg is beyond "
+                                                          f"+/-{MAX_PLAUSIBLE_PITCH_DEG} deg, which a "
+                                                          "windscreen mount does not reach; the vanishing "
+                                                          "point was probably fitted to something that is "
+                                                          "not the road",
+                               "rejected_pitch_deg": round(pitch_deg, 3), "frames_used": len(pitches)}
+                continue
             fields = {
                 "model": nom.model, "fx": nom.fx, "fy": nom.fy, "cx": nom.cx, "cy": nom.cy,
                 "dist": list(nom.dist), "ref_width": w,
