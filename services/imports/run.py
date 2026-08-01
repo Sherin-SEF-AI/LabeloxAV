@@ -34,6 +34,7 @@ from services.imports import (
     adapter_bdd,
     adapter_coco,
     adapter_cvat,
+    adapter_encord,
     adapter_kitti,
     adapter_labelstudio,
     adapter_mapillary,
@@ -41,6 +42,8 @@ from services.imports import (
     adapter_openlabel,
     adapter_parquet,
     adapter_pascalvoc,
+    adapter_scale,
+    adapter_superannotate,
     adapter_yolo,
 )
 from services.imports._util import resolve_image
@@ -61,6 +64,11 @@ ADAPTERS = {
     "bdd": adapter_bdd.parse,
     "cvat": adapter_cvat.parse,
     "labelstudio": adapter_labelstudio.parse,
+    # Migration formats: a competitor's export is the cheapest path in for a team that already
+    # has years of labels somewhere else.
+    "scale": adapter_scale.parse,
+    "superannotate": adapter_superannotate.parse,
+    "encord": adapter_encord.parse,
 }
 RAW_FORMATS = {"video", "mcap", "images"}
 ALL_FORMATS = sorted(set(ADAPTERS) | RAW_FORMATS)
