@@ -122,3 +122,28 @@ async def build(payload: BuildIn, db: AsyncSession = Depends(db_session)):
                                   samples_per_shard=payload.samples_per_shard, limit=payload.limit)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/datasets/lake/publish", dependencies=[Depends(require_role("admin"))])
+async def publish_lake(db: AsyncSession = Depends(db_session)):
+    """Publish the annotation plane to Iceberg for the customer's own query engine.
+
+    Admin, not reviewer: this writes the whole label corpus to a location outside the API's access control,
+    which is a data-egress decision rather than a reporting one.
+    """
+    from services.datasets.lake import publish
+
+    return await publish(db)
+
+
+@router.get("/datasets/lake/{table}")
+async def read_lake(table: str, limit: int = 100):
+    """A sample of a published table, so the lake is checkable without a query engine to hand."""
+    from services.datasets.lake import scan
+
+    try:
+        return {"table": table, "rows": scan(table, limit=min(limit, 1000))}
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(409, f"table not published yet: {exc}") from exc

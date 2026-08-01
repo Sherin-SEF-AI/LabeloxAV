@@ -29,6 +29,12 @@ dependencies = [
     "opencv-python-headless==4.10.0.84",
     "supervision==0.25.1",
     "pyarrow==18.1.0",
+    # The annotation lake. A SQL catalog on the Postgres already running and data files in the object store
+    # already running, so publishing labels as Iceberg needs no catalog service of its own.
+    "pyiceberg[s3fs,sql-postgres]==0.11.1",
+    # Not a runtime dependency of the API: it is what verifies the published lake is readable by an ordinary
+    # query engine, which is the whole claim the lake makes.
+    "duckdb==1.5.5",
     "mcap==1.2.1",
     "mcap-protobuf-support==0.5.2",
     "mcap-ros2-support==0.5.7",

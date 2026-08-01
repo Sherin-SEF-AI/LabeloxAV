@@ -893,6 +893,16 @@ class LabeloxClient:
         return self._call("POST", f"/api/datasets/export",
                           params=None, json_body=body)
 
+    def post_datasets_lake_publish(self) -> Any:
+        """Publish Lake"""
+        return self._call("POST", f"/api/datasets/lake/publish",
+                          params=None, json_body=None)
+
+    def get_datasets_lake_by_table(self, table: str, limit: int | None = 100) -> Any:
+        """Read Lake"""
+        return self._call("GET", f"/api/datasets/lake/{table}",
+                          params={"limit": limit}, json_body=None)
+
     def get_datasets_preview(self, q: str, version: Any | None = None, limit: int | None = 200000) -> Any:
         """Preview"""
         return self._call("GET", f"/api/datasets/preview",
@@ -3136,4 +3146,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 610 routes generated from the server schema.
+# 612 routes generated from the server schema.
