@@ -35,9 +35,21 @@ class BuildSpec:
     max_per_class: int = 400        # balanced sampling cap (counters bus_shelter-style over-firing)
     val_frac: float = 0.2
     agreement_only: bool = False    # True = only cross-path-agreement objects (cleanest pseudo-labels)
-    # Restrict the trainset to specific object states. Empty = the old behaviour (everything not rejected).
-    # Passing the reviewed states (accepted/auto_accept/human/vlm_review) is what keeps the raw, unreviewed
-    # `review` labels out of training, which is exactly the pollution that collapsed loop-op-v5.
+    # Restrict the trainset to specific object states. Empty, the default, means everything not rejected.
+    #
+    # Passing the reviewed states (accepted/auto_accept/human/vlm_review) keeps raw `review` labels out of
+    # training, which was recorded here as the pollution that collapsed loop-op-v5.
+    #
+    # There is now measured evidence pointing the other way, and both belong here because they disagree.
+    # A controlled comparison on the operational corpus, same frames and session split and validation key
+    # and backbone and schedule with only the label states changed, took micro recall from 0.411 to 0.770
+    # and rider from 0.000 to 0.468. The reason is that gate-approved objects are 7.6% of what the detector
+    # found on those frames, so restricting to them teaches the model that the other 92.4% of the traffic is
+    # background: 14,819 riders labelled background against 134 labelled rider.
+    #
+    # loop-op-v5 could not be re-examined; its job rows are gone. So this is not a claim that the older note
+    # was wrong, only that restricting states is not the safe default it reads as, and that anyone reaching
+    # for it should measure recall against a fixed key rather than assume cleaner labels are better ones.
     states: list[str] = field(default_factory=list)
     seed: int = 7
     route_prefix: str | None = None  # scope to a capture batch, e.g. "202606"

@@ -124,7 +124,8 @@ async def run_loop(
 @click.option("--data-yaml", default=None, help="train directly on this YOLO data.yaml, skip corpus build")
 @click.option("--drop", "drop_classes", multiple=True, help="ontology class to exclude (repeatable)")
 @click.option("--include", "include_classes", multiple=True, help="restrict the trainset to these ontology classes (repeatable); keeps the taxonomy aligned with the base model for a fair baseline eval")
-@click.option("--states", "states", default=None, help="comma-separated object states to train on, e.g. accepted,auto_accept,human,vlm_review; keeps raw unreviewed 'review' labels out (the loop-op-v5 pollution)")
+@click.option("--states", "states", default=None,
+              help="comma-separated object states to train on. Leaving this unset trains on everything not rejected, which is the default for a reason: restricting to reviewed states on a partially-reviewed corpus teaches most of the traffic as background and cost 0.359 of micro recall in a controlled comparison. See services/training/dataset_builder.py:states.")
 @click.option("--promote/--no-promote", default=False)
 def main(name, base_weights, epochs, imgsz, batch, route_prefix, agreement_only, max_per_class, conf_floor, idd_dir, data_yaml, drop_classes, include_classes, states, promote) -> None:
     settings = get_settings()
