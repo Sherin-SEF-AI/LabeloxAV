@@ -1603,6 +1603,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/imports",
                           params={"limit": limit}, json_body=None)
 
+    def post_imports_dry_run(self, body: Any = None) -> Any:
+        """Dry Run"""
+        return self._call("POST", f"/api/imports/dry-run",
+                          params=None, json_body=body)
+
     def post_imports_start(self, body: Any = None) -> Any:
         """Start"""
         return self._call("POST", f"/api/imports/start",
@@ -3146,4 +3151,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 612 routes generated from the server schema.
+# 613 routes generated from the server schema.

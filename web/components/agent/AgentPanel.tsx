@@ -16,6 +16,8 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
   const [runId, setRunId] = useState<string | null>(null);
   const [previewed, setPreviewed] = useState<Set<string>>(new Set());
   const [msg, setMsg] = useState<string | null>(null);
+  const [intent, setIntent] = useState<{ action: string; classes: string[] | string;
+                                         conf_min: number | null } | null>(null);
   const [cmd, setCmd] = useState("");
   const [suggestions, setSuggestions] = useState<{ action: string; label: string }[]>([]);
   const [copilot, setCopilot] = useState<{ pattern: { from_name: string; to_name: string; to_class: number; count: number } | null; candidates: string[] } | null>(null);
@@ -113,8 +115,15 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
     try {
       const r = await api.agentCommand(frameId, text);
       setMsg(r.summary);
+      // The resolved intent, shown rather than discarded. services/agent/nl.py returns it precisely so a
+      // person sees what the agent understood before and after it acts, and this panel was reading it only
+      // to decide whether to refresh. An agent whose interpretation is invisible is one you have to trust
+      // instead of check.
+      setIntent(r.intent);
       if (["accept", "revert"].includes(r.intent.action) && !r.blocked) onApplied?.();
-    } catch (e) { setMsg("command failed: " + humanizeError(e)); }
+    // Clear the intent on failure: a stale "understood as accept" beside an error reads as though
+    // the agent acted, which is the opposite of what happened.
+    } catch (e) { setIntent(null); setMsg("command failed: " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -288,6 +297,21 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
         </div>
       )}
       {msg && <div className="px-1 pt-1 font-mono text-[9.5px] text-ink-3">{msg}</div>}
+      {intent && (
+        <div className="px-1 pt-0.5 font-mono text-[9.5px] text-ink-3">
+          understood as{" "}
+          <span className="text-accent">{intent.action}</span>
+          {Array.isArray(intent.classes) && intent.classes.length > 0 && (
+            <> on <span className="text-ink">{intent.classes.join(", ")}</span></>
+          )}
+          {!Array.isArray(intent.classes) && intent.classes && (
+            <> on <span className="text-ink">{String(intent.classes)}</span></>
+          )}
+          {intent.conf_min != null && <> above <span className="text-ink">{intent.conf_min}</span></>}
+          {(!intent.classes || (Array.isArray(intent.classes) && !intent.classes.length)) &&
+            intent.conf_min == null && <span className="text-warn"> nothing in particular</span>}
+        </div>
+      )}
     </div>
   );
 }

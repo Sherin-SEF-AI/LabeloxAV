@@ -58,13 +58,23 @@ class QueryError(ValueError):
 
 
 def vocabulary() -> dict:
-    """Every term that resolves, so a caller can be told what it could have written."""
+    """Every term that resolves, so a caller can be told what it could have written.
+
+    Groups are deduplicated to one term per underlying l1. `four-wheeler` and `four_wheeler` both parse,
+    because people type both, but showing them as two chips implies they select different things.
+    """
     from services.autolabel.ontology import get_ontology
+
+    canonical: dict[str, str] = {}
+    for term, l1 in _L1_GROUPS.items():
+        # The canonical form is the one matching the ontology's own l1 spelling; the rest are input aliases.
+        if l1 not in canonical or term == l1:
+            canonical[l1] = term
 
     return {
         "scene": sorted(_SCENE_TERMS),
         "state": sorted(_STATE_TERMS),
-        "group": sorted(_L1_GROUPS),
+        "group": sorted(canonical.values()),
         "class": sorted(c.name for c in get_ontology().classes),
     }
 

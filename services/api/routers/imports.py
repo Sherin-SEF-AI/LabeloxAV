@@ -48,6 +48,37 @@ def _job_dict(j: ImportJob) -> dict:
     }
 
 
+@router.post("/imports/dry-run")
+async def dry_run(payload: ImportStartIn):
+    """Parse a source and report what importing it would cost, without writing anything.
+
+    A migration is the moment a customer finds out what their taxonomy survives. Telling them afterwards
+    that two of their classes became one of ours invites them to discover the loss a month later; telling
+    them here makes it a decision they get to make. Read-only by construction: it parses and remaps in
+    memory and touches no table.
+    """
+    from services.imports.conflicts import taxonomy_report
+    from services.imports.run import ADAPTERS, _acquire_source
+
+    if payload.format not in ADAPTERS:
+        raise HTTPException(status_code=400,
+                            detail=f"'{payload.format}' has no annotation adapter to dry-run; "
+                                   f"choose one of {sorted(ADAPTERS)}")
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            root = _acquire_source(payload.source_uri, Path(tmp))
+            frames = ADAPTERS[payload.format](root)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(400, f"could not read that source: {exc}") from exc
+
+    return {"format": payload.format, "source_uri": payload.source_uri,
+            "frames": len(frames),
+            "report": taxonomy_report(frames)}
+
+
 @router.post("/imports/start")
 async def start(payload: ImportStartIn):
     if payload.format not in ALL_FORMATS:

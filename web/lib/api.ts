@@ -1015,6 +1015,33 @@ export const api = {
        { object_ids, action, class_name, state, attrs, ...(extra ?? {}) }),
   // One sprite sheet for many crops. A grid asking for its tiles one at a time is N whole-frame decodes and
   // N requests; this is one of each per frame. `placements` gives the cell each object landed in.
+  // Dataset-as-query. The compiler refuses unknown terms rather than ignoring them, so the vocabulary is
+  // part of the surface and not just documentation.
+  // Migration dry run: what the taxonomy costs, before anything is written.
+  importDryRun: (format: string, source_uri: string) =>
+    post<{
+      format: string; frames: number;
+      report: {
+        source_classes: number; objects: number; mapped_cleanly: number; into_fallback: number;
+        fallback_fraction: number;
+        unmapped: { source_class: string; objects: number; falls_back_to: string }[];
+        merges: { ontology_class: string; source_classes: string[]; objects: number }[];
+        mapping: { source_class: string; ontology_class: string; objects: number; clean: boolean }[];
+      };
+    }>("/api/imports/dry-run", { format, source_uri }),
+
+  datasetVocabulary: () =>
+    get<{ scene: string[]; state: string[]; group: string[]; class: string[] }>("/api/datasets/vocabulary"),
+  datasetPreview: (q: string, version?: string) =>
+    get<{
+      query: string; predicate: Record<string, unknown>;
+      terms: { term: string; kind: string; expands_to?: string[] }[];
+      frames: number; objects: number; classes: Record<string, number>; sealed: boolean;
+    }>("/api/datasets/preview?" + new URLSearchParams(version ? { q, version } : { q }).toString()),
+  datasetBuildShards: (query: string, version?: string, samples_per_shard = 256) =>
+    post<{ name: string; shards: string[]; index_uri: string | null; samples: number; shard_count: number }>(
+      "/api/datasets/shards", { query, version, samples_per_shard }),
+
   cropSheet: (object_ids: string[], cell = 128, cols?: number) =>
     post<{
       cell: number; cols: number; rows: number; count: number;

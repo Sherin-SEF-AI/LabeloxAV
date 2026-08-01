@@ -33,6 +33,9 @@ const IMPORT_FORMATS: [string, string][] = [
   ["openlabel", "OpenLABEL"], ["nuscenes", "nuScenes"], ["kitti", "KITTI"],
   ["bdd", "BDD100K"], ["mapillary", "Mapillary"], ["parquet", "Parquet (lossless)"],
   ["images", "Images folder"], ["video", "Video"], ["mcap", "MCAP"],
+  // Competitor exports. Listed with the rest because from a user's point of view they are just formats;
+  // what differs is that a migration wants the dry run first, which /import/migrate provides.
+  ["scale", "Scale AI"], ["superannotate", "SuperAnnotate"], ["encord", "Encord"],
 ];
 
 // Export targets wired in services/export/dataset.py.
@@ -56,12 +59,16 @@ export const MENUS: Menu[] = [
         items: IMPORT_FORMATS.map(([f, label]) => ({
           key: `import-${f}`, label, href: `/import?format=${f}`,
         })) },
+      { key: "migrate", label: "Migrate from another tool", icon: "clipboard", href: "/import/migrate",
+        hint: "see what the taxonomy costs before importing" },
       { key: "export", label: "Export", icon: "save",
         items: EXPORT_FORMATS.map(([f, label]) => ({
           key: `export-${f}`, label, href: `/datasets?format=${f}`,
         })) },
       { key: "datasets", label: "Datasets", icon: "layers", href: "/datasets",
         hint: "sealed dataset delivery", separatorBefore: true },
+      { key: "dataset-query", label: "Dataset query", icon: "search", href: "/datasets/query",
+        hint: "describe the data, stream it as shards" },
       { key: "sources", label: "Storage sources", icon: "link", href: "/integrations",
         hint: "registered S3, GCS and Azure buckets" },
       { key: "webhooks", label: "Webhooks", icon: "activity", href: "/integrations?tab=webhooks",

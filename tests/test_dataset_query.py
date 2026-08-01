@@ -79,6 +79,16 @@ def test_the_vocabulary_lists_what_would_have_worked():
     assert "cattle" in v["class"]
 
 
+def test_the_group_vocabulary_shows_one_term_per_thing_it_selects():
+    """`four-wheeler` and `four_wheeler` both parse, because people type both. Listing them as two chips
+    implies they select different things, which is a UI that lies about the vocabulary."""
+    v = vocabulary()
+    assert "four_wheeler" in v["group"]
+    assert "four-wheeler" not in v["group"], "the hyphen form is an input alias, not a second group"
+    # Both still resolve, which is the point of keeping the alias at all.
+    assert compile_query("four-wheeler")["predicate"] == compile_query("four_wheeler")["predicate"]
+
+
 def test_the_predicate_is_the_vocabulary_the_rest_of_the_system_already_evaluates():
     """One predicate shape, three ways in: this compiler, the SQL evaluator, and the pure matcher.
 
