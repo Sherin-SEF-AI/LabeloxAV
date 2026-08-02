@@ -178,6 +178,12 @@ async def prereview_batch(db: AsyncSession, batch_id: str, *, limit: int | None 
     judged = skipped = unreadable = 0
     margin = settings.models.vlm.crop_margin
 
+    # Committed in chunks rather than once at the end. A 300-crop batch against a local model is tens of
+    # minutes and against a metered API is real money, and a single commit at the end means no progress is
+    # visible while it runs and every verdict is lost if it dies partway. Chunked, a re-run skips what
+    # already landed, so an interrupted job resumes instead of restarting.
+    commit_every = 10
+
     for obj in objects:
         if obj.object_id in already:
             skipped += 1
@@ -207,6 +213,11 @@ async def prereview_batch(db: AsyncSession, batch_id: str, *, limit: int | None 
                   "confidence": parsed["confidence"], "provider": provider,
                   "detail": {"given_class": given, "reason": parsed["reason"], "alternatives": alts},
                   "batch_id": batch_id, "ts_ns": now_ns()}))
+
+        if judged % commit_every == 0:
+            await db.commit()
+            log.info("vlm_review.progress", batch_id=batch_id, judged=judged,
+                     of=len(objects) - len(already), by_verdict=counts)
 
     await db.commit()
     out = {"batch_id": batch_id, "objects": len(objects), "judged": judged, "skipped": skipped,
