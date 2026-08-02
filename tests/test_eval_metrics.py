@@ -213,3 +213,52 @@ def test_sampling_returns_nan_outside_a_lanes_own_extent():
 
 def test_lane_f1_is_unmeasured_without_ground_truth():
     assert lane_f1([_line(50)], [], width=200, height=100)["measured"] is False
+
+
+def test_a_verdict_says_what_it_did_not_check():
+    """promote=true beside Safe-mIoU 0.0 reads as approval in spite of the safety score.
+
+    It is not. The floor is off by default, deliberately, because gating on a noisy first gold set would
+    block legitimate promotions. So safety was never evaluated, and a verdict that lists only what passed
+    invites exactly that misreading. Observed on a real run.
+    """
+    from services.training.eval import regression_gate
+
+    base = {"map50": 0.20, "per_class": {"rider": 0.40}}
+    cand = {"map50": 0.29, "per_class": {"rider": 0.45}, "safe_miou": 0.0}
+
+    r = regression_gate(cand, base)
+    assert r["promote"] is True, "mAP improved and nothing regressed, so this does pass what it checked"
+    assert r["safe_miou"] == 0.0, "the measured value must be on the verdict, not only in the metrics blob"
+    assert any("safe_miou" in u for u in r["unchecked"]), "the omission has to be stated"
+    assert any("no floor set" in u for u in r["unchecked"])
+
+
+def test_setting_the_floor_moves_safe_miou_from_unchecked_to_decisive():
+    from services.training.eval import regression_gate
+
+    base = {"map50": 0.20, "per_class": {}}
+    cand = {"map50": 0.29, "per_class": {}, "safe_miou": 0.0}
+
+    r = regression_gate(cand, base, min_safe_miou=0.5)
+    assert r["promote"] is False
+    assert any("safe_miou 0.0 < required 0.5" in x for x in r["reasons"])
+    assert r["unchecked"] == [], "nothing is unchecked once the floor is applied"
+
+
+def test_an_unmeasured_safe_miou_is_reported_as_unmeasured():
+    """Distinct from measured-and-low: one is missing evidence, the other is bad evidence."""
+    from services.training.eval import regression_gate
+
+    r = regression_gate({"map50": 0.3, "per_class": {}}, {"map50": 0.2, "per_class": {}})
+    assert r["safe_miou"] is None
+    assert any("not measured" in u for u in r["unchecked"])
+
+
+def test_unchecked_is_always_present_so_absence_is_not_ambiguous():
+    """A caller must not have to distinguish "no key" from "nothing was skipped"."""
+    from services.training.eval import regression_gate
+
+    r = regression_gate({"map50": 0.3, "per_class": {}, "safe_miou": 0.9},
+                        {"map50": 0.2, "per_class": {}}, min_safe_miou=0.5)
+    assert "unchecked" in r and r["unchecked"] == []
