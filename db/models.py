@@ -1282,9 +1282,16 @@ class ErrorCandidate(Base):
     proposed_label: Mapped[dict | None] = mapped_column(JSONB)         # {class_id, class_name} if a fix is suggested
     detail: Mapped[dict] = mapped_column(JSONB, default=dict)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|confirmed_error|dismissed
+    # Who ruled and when. Dismissals used to leave no trace at all, which made them useless as calibration:
+    # confirmed over confirmed-plus-dismissed is the detector's precision, and an untimestamped verdict
+    # cannot be attributed to a detector version or a period.
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_error_candidate_status", "status"), Index("ix_error_candidate_object", "object_id"))
+    __table_args__ = (Index("ix_error_candidate_status", "status"), Index("ix_error_candidate_object", "object_id"),
+                      Index("ix_error_candidate_kind_status", "kind", "status"))
 
 
 class RelabelRun(Base):

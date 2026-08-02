@@ -467,7 +467,23 @@ export const api = {
   firstFrame: (id: string) => get<{ frame_id: string }>(`/api/sessions/${id}/first-frame`),
   // M4.0/M4.1 review queue
   alScore: (sessionId?: string, limit = 50) => get<{ pool: number; items: AlItem[] }>(`/api/activelearn/score?limit=${limit}${sessionId ? `&session_id=${sessionId}` : ""}`),
-  errorCandidates: (status = "pending", limit = 100) => get<ErrorCandidateRow[]>(`/api/errordetect/candidates?status=${status}&limit=${limit}`),
+  errorCandidates: (status = "pending", limit = 100, kind?: string) =>
+    get<ErrorCandidateRow[]>(
+      `/api/errordetect/candidates?` +
+      new URLSearchParams(kind ? { status, limit: String(limit), kind } : { status, limit: String(limit) }).toString()),
+  // Bulk, because 298,529 candidates ruled on one at a time is not a queue anybody finishes. `note` records
+  // the judgement, which for a bulk dismissal is about the detector rather than about the objects.
+  errorBulk: (candidate_ids: string[], verdict: "confirmed_error" | "dismissed", note?: string) =>
+    post<{ verdict: string; requested: number; applied: number; missing: number; already_decided: number }>(
+      "/api/errordetect/candidates/bulk", { candidate_ids, verdict, note }),
+  errorPrecision: () =>
+    get<{
+      per_kind: Record<string, {
+        pending: number; confirmed_error: number; dismissed: number; decided: number;
+        precision: { p: number | null; lo: number; hi: number; n: number }; usable: boolean; note: string | null;
+      }>;
+      total_candidates: number; total_decided: number; caveat: string | null;
+    }>("/api/errordetect/precision"),
   errorRun: (kinds?: string[]) => post<{ persisted: number; by_kind: Record<string, number> }>("/api/errordetect/run", kinds ? { kinds } : {}),
   errorConfirm: (id: string) => post(`/api/errordetect/candidates/${id}/confirm`, {}),
   errorDismiss: (id: string) => post(`/api/errordetect/candidates/${id}/dismiss`, {}),

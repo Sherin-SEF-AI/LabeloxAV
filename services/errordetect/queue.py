@@ -22,6 +22,11 @@ from services.errordetect.policy import detect_policy_violations
 
 log = get_logger("ed_queue")
 
+# Below this many verdicts a detector's precision interval spans most of [0, 1], which is not a measurement.
+# Reported as unmeasured rather than shown beside detectors that have been properly judged, so a detector
+# with three verdicts cannot be quietly ranked against one with three hundred.
+MIN_VERDICTS_FOR_PRECISION = 20
+
 
 async def run_detection(db: AsyncSession, session_id: str | None = None, kinds: list[str] | None = None) -> dict:
     """Run the requested detectors and persist ranked error candidates. Idempotent: clears prior pending
@@ -61,10 +66,18 @@ async def run_detection(db: AsyncSession, session_id: str | None = None, kinds: 
     return {"persisted": len(best), "by_kind": by_kind, "scope": session_id or "corpus"}
 
 
-async def list_candidates(db: AsyncSession, status: str = "pending", limit: int = 100) -> list[dict]:
-    rows = (await db.execute(
-        select(ErrorCandidate).where(ErrorCandidate.status == status)
-        .order_by(ErrorCandidate.score.desc()).limit(limit))).scalars().all()
+async def list_candidates(db: AsyncSession, status: str = "pending", limit: int = 100,
+                          kind: str | None = None) -> list[dict]:
+    """The ranked queue, optionally restricted to one detector.
+
+    The restriction is not a convenience filter. Ranking is across detectors by score, and the detectors do
+    not emit commensurable scores, so a mixed page is largely whichever detector produces the biggest
+    numbers. It is also the only way to judge a single detector, which is what the verdicts exist for.
+    """
+    q = select(ErrorCandidate).where(ErrorCandidate.status == status)
+    if kind:
+        q = q.where(ErrorCandidate.kind == kind)
+    rows = (await db.execute(q.order_by(ErrorCandidate.score.desc()).limit(limit))).scalars().all()
     return [{"candidate_id": str(c.candidate_id), "object_id": str(c.object_id), "kind": c.kind,
              "score": c.score, "proposed_label": c.proposed_label, "detail": c.detail, "status": c.status}
             for c in rows]
@@ -99,13 +112,136 @@ async def confirm_error(db: AsyncSession, candidate_id: str, apply_proposed: boo
     return {"candidate_id": candidate_id, "status": "confirmed_error", "action": action, "before": before, "after": after}
 
 
-async def dismiss_error(db: AsyncSession, candidate_id: str) -> dict:
+async def dismiss_error(db: AsyncSession, candidate_id: str, *, user_id: str | None = None,
+                        note: str | None = None) -> dict:
+    """Dismiss a candidate: the detector was wrong about this object.
+
+    Records who and when, which it did not before. A dismissal is not merely the absence of a confirmation;
+    it is the negative half of the detector's precision, and an unattributed one cannot be tied to a
+    detector version or a period, so the precision it feeds would be untraceable the moment anything moved.
+    """
+    from datetime import UTC, datetime
+
     c = await db.get(ErrorCandidate, UUID(candidate_id))
     if c is None:
         return {"error": "candidate not found"}
     c.status = "dismissed"
+    c.decided_by = UUID(user_id) if user_id else None
+    c.decided_at = datetime.now(UTC)
+    c.decision_note = note
     await db.commit()
+    log.info("ed.dismissed", candidate_id=candidate_id, kind=c.kind)
     return {"candidate_id": candidate_id, "status": "dismissed"}
+
+
+async def bulk_verdict(db: AsyncSession, candidate_ids: list[str], verdict: str, *,
+                       user_id: str | None = None, reviewer: str = "error-detect",
+                       note: str | None = None, apply_proposed: bool = True) -> dict:
+    """Rule on many candidates at once.
+
+    298,529 candidates and one verdict, with confirm and dismiss both taking a single id. At one call per
+    candidate the queue is not reviewable in principle, let alone in practice, and the detectors stay
+    uncalibrated forever because calibration needs verdicts in volume.
+
+    Bulk dismissal is the common case and the reason this exists: dismissing 400 near-duplicate candidates
+    is one judgement about a detector, not 400 judgements about objects. `note` records that judgement,
+    which is the most useful thing in the row afterwards.
+
+    Confirmation still goes through confirm_error per candidate rather than being reimplemented as a bulk
+    UPDATE. Confirming mutates the object, writes a Review row and applies a class fix, and a second
+    implementation of that would drift from the first; a wrong bulk confirm is also far more expensive than
+    a wrong bulk dismiss, since it rewrites labels.
+    """
+    from datetime import UTC, datetime
+
+    if verdict not in ("confirmed_error", "dismissed"):
+        raise ValueError(f"unknown verdict '{verdict}'; expected confirmed_error or dismissed")
+    if not candidate_ids:
+        return {"verdict": verdict, "requested": 0, "applied": 0, "missing": 0, "already_decided": 0}
+
+    ids = [UUID(c) for c in candidate_ids]
+    rows = list((await db.execute(
+        select(ErrorCandidate).where(ErrorCandidate.candidate_id.in_(ids)))).scalars().all())
+    found = {r.candidate_id for r in rows}
+
+    # A candidate somebody already ruled on is left alone rather than overwritten. Two reviewers working
+    # the same queue is the normal case, and silently replacing the first verdict would corrupt the
+    # calibration data with no trace of the disagreement.
+    pending = [r for r in rows if r.status == "pending"]
+    already = len(rows) - len(pending)
+
+    applied = 0
+    if verdict == "dismissed":
+        stamp = datetime.now(UTC)
+        for r in pending:
+            r.status = "dismissed"
+            r.decided_by = UUID(user_id) if user_id else None
+            r.decided_at = stamp
+            r.decision_note = note
+            applied += 1
+        await db.commit()
+    else:
+        for r in pending:
+            res = await confirm_error(db, str(r.candidate_id), apply_proposed=apply_proposed,
+                                      reviewer=reviewer, user_id=user_id)
+            if "error" not in res:
+                applied += 1
+                r.decided_by = UUID(user_id) if user_id else None
+                r.decided_at = datetime.now(UTC)
+                r.decision_note = note
+        await db.commit()
+
+    out = {"verdict": verdict, "requested": len(candidate_ids), "applied": applied,
+           "missing": len(ids) - len(found), "already_decided": already}
+    log.info("ed.bulk_verdict", **out)
+    return out
+
+
+async def detector_precision(db: AsyncSession, *, confidence: float = 0.95) -> dict:
+    """Per-detector precision, from the verdicts humans have actually given.
+
+    The calibration the queue has never had. Each detector emits a score, and until now nothing said whether
+    a high score meant anything: 298,529 candidates carried one verdict between them. Confirmed over
+    confirmed-plus-dismissed is the detector's precision, and it is the number that decides whether a
+    detector earns a place in the queue at all.
+
+    Every rate carries a Wilson interval and a count, because with verdicts this scarce most detectors will
+    report an interval spanning almost the whole range, and that is the honest answer rather than a
+    discouraging one. `usable` marks the ones with enough verdicts to act on, so a detector with three
+    verdicts cannot be quietly compared against one with three hundred.
+    """
+    from services.labelops.sampling import wilson_interval
+
+    rows = (await db.execute(
+        select(ErrorCandidate.kind, ErrorCandidate.status, func.count(ErrorCandidate.candidate_id))
+        .group_by(ErrorCandidate.kind, ErrorCandidate.status))).all()
+
+    per_kind: dict[str, dict] = {}
+    for kind, status, n in rows:
+        d = per_kind.setdefault(kind, {"pending": 0, "confirmed_error": 0, "dismissed": 0})
+        d[status] = d.get(status, 0) + int(n)
+
+    out = {}
+    for kind, d in sorted(per_kind.items()):
+        decided = d["confirmed_error"] + d["dismissed"]
+        ci = wilson_interval(d["confirmed_error"], decided, confidence)
+        out[kind] = {
+            **d, "decided": decided, "precision": ci,
+            "usable": decided >= MIN_VERDICTS_FOR_PRECISION,
+            "note": None if decided >= MIN_VERDICTS_FOR_PRECISION else (
+                f"only {decided} verdicts: this detector's precision is unmeasured, not low"),
+        }
+    total_decided = sum(v["decided"] for v in out.values())
+    return {
+        "per_kind": out,
+        "total_candidates": sum(sum(d.values()) for d in per_kind.values()),
+        "total_decided": total_decided,
+        # Said plainly, because a page full of intervals from zero to one invites the reading that the
+        # detectors are bad when the truth is that nobody has looked at them.
+        "caveat": None if total_decided else (
+            "no candidate has been ruled on, so no detector has a measurable precision. The scores rank; "
+            "they do not predict."),
+    }
 
 
 async def summary(db: AsyncSession) -> dict:
