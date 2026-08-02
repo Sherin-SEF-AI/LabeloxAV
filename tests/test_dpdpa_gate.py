@@ -36,19 +36,36 @@ def test_all_three_conditions_block_as_one_gate():
 
 
 async def test_export_gate_on_real_data():
+    """The gate against database rows rather than in-memory arguments, so the queries are exercised too.
+
+    This used to take the first PiiAudit row it found in the corpus and skip when there was none. Once the
+    suite stopped inheriting residue from previous runs there never was one, so a compliance gate that
+    refuses exports went from covered to silently skipped. It seeds its own session, frame and audit now,
+    which also makes the passing case deterministic: it no longer depends on whichever session happened to
+    be first, or on that session having no unredacted speech attached by some other test.
+    """
     import uuid
 
-    import pytest
-    from sqlalchemy import delete, select
+    from sqlalchemy import delete
 
-    from db.models import PiiAudit, SpeechSegment
+    from core.timebase import now_ns, seconds_to_ns
+    from db.models import Frame, PiiAudit, SpeechSegment
+    from db.models import Session as DbSession
     from db.session import get_sessionmaker
     from services.anonymize.compliance import dpdpa_export_gate
+    from services.autolabel.ontology import get_ontology
+
+    sid, fid, ts = uuid.uuid4(), uuid.uuid4(), now_ns()
     async with get_sessionmaker()() as db:
-        row = (await db.execute(select(PiiAudit.session_id, PiiAudit.frame_id).limit(1))).first()
-    if row is None:
-        pytest.skip("no PiiAudit data in the corpus")
-    sid, fid = row
+        db.add(DbSession(session_id=sid, vehicle_id="CP-01", start_ts_ns=ts, end_ts_ns=ts + seconds_to_ns(1),
+                         city="BLR", sensors={}, ontology_version=get_ontology().version))
+        db.add(Frame(frame_id=fid, session_id=sid, ts_ns=ts, cam_id="cam_f", img_uri="s3://x/f.jpg",
+                     width=320, height=240, quality=0.9, scene={}))
+        await db.flush()
+        db.add(PiiAudit(frame_id=fid, session_id=sid, n_faces=1, n_plates=0,
+                        regions=[{"type": "face", "bbox": [1.0, 1.0, 10.0, 10.0], "score": 0.9}],
+                        method_version="test", ts_ns=ts))
+        await db.commit()
     assert (await dpdpa_export_gate(sid, [fid]))["pass"]                       # an audited frame passes
     refuse = await dpdpa_export_gate(sid, [fid, uuid.uuid4()])                 # an un-audited frame refuses
     assert not refuse["pass"] and any(b["kind"] == "unredacted_visual_pii" for b in refuse["blockers"])

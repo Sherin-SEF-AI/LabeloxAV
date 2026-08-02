@@ -61,7 +61,75 @@ def _provision_test_db(request):
             cur.execute(f'CREATE DATABASE "{pg.db}"')
     admin.close()
     subprocess.run([".venv/bin/alembic", "upgrade", "head"], check=True, cwd=REPO_ROOT, env={**os.environ})
+    _reset_corpus(pg)
     yield
+
+
+# Tables whose contents are not test residue, so emptying them would break the schema rather than clean it.
+# Determined by migrating an empty database and listing what is non-empty: PostGIS reference data, the
+# alembic revision, and the governance singleton. Everything outside this set is either seeded by tests or
+# re-seeded below.
+#
+# app_user is migration-seeded but deliberately absent: the suite creates users constantly and they were
+# accumulating into the thousands, which is the same rot this reset exists to stop. Its one bootstrap row is
+# re-inserted instead.
+_MIGRATION_SEEDED = frozenset({"alembic_version", "spatial_ref_sys", "governance_state"})
+
+
+def _reset_corpus(pg) -> None:
+    """Empty the corpus tables so a run starts from the schema's own reference data and nothing else.
+
+    The suite seeds sessions, frames and objects and commits them, and nothing ever cleaned up, so this
+    database had accumulated 6,865 sessions and 12,262 frames across runs. Tests that assert on a
+    corpus-wide figure (an availability count, a search hit, the largest cluster) were therefore written
+    against whatever had piled up that month and expired quietly later. That is the recorded
+    order-dependent failure category and the cause of the intermittent ones that replaced it, and it got
+    worse with every run.
+
+    Once per session rather than once per test, for two reasons. Per-test isolation through a rolled back
+    transaction is the textbook fix and is not available here: these tests call asyncio.run more than once
+    (seed, then exercise), and an asyncpg connection cannot outlive the loop that opened it, so no
+    transaction can span a test. And a per-test truncate would force every test to re-seed the 182 ontology
+    rows it currently guards on, for no benefit, because within one run each affected test seeds once. What
+    actually broke these tests was accumulation across runs.
+    """
+    import psycopg
+
+    conn = psycopg.connect(host=pg.host, port=pg.port, user=pg.user, password=pg.password,
+                           dbname=pg.db, autocommit=True)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+            targets = sorted(t for (t,) in cur.fetchall() if t not in _MIGRATION_SEEDED)
+            if targets:
+                cur.execute("TRUNCATE TABLE {} RESTART IDENTITY CASCADE".format(
+                    ", ".join(f'"{t}"' for t in targets)))
+            # The bootstrap admin, exactly as db/migrations/versions/0011_users.py creates it. Re-inserted
+            # rather than preserved so per-run test users do not pile up behind it.
+            cur.execute("INSERT INTO app_user (user_id, name, role) "
+                        "VALUES (gen_random_uuid(), 'admin', 'admin')")
+            # CASCADE reaches any table holding a foreign key into one being truncated, which would silently
+            # take the preserved rows with it. Checked rather than assumed, because an empty
+            # governance_state would surface far from here as unrelated governance failures.
+            for t in ("governance_state", "alembic_version"):
+                cur.execute(f'SELECT count(*) FROM "{t}"')  # noqa: S608
+                if cur.fetchone()[0] == 0:
+                    raise RuntimeError(
+                        f"resetting the test corpus emptied '{t}', which a migration seeds. A foreign key "
+                        f"into a truncated table pulled it in through CASCADE; either add the referencing "
+                        f"table to _MIGRATION_SEEDED or re-seed '{t}' here.")
+    finally:
+        conn.close()
+
+    # The ontology is reference data the application seeds (scripts/seed_ontology.py), not something tests
+    # own, and roughly half of them assume it is present rather than seeding it themselves. It survived
+    # before only because it was residue nobody had cleared, which is precisely the dependency worth making
+    # explicit: the suite needs a seeded ontology, so seed one.
+    import asyncio
+
+    from scripts.seed_ontology import seed
+
+    asyncio.run(seed())
 
 
 @pytest.fixture(autouse=True)
