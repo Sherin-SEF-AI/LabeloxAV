@@ -1,6 +1,10 @@
-# LabeloxAV
+<p align="center">
+  <img src="docs/logo.png" alt="LabeloxAV" width="420">
+</p>
 
-**A data engine for autonomous driving, built for Indian roads.**
+<p align="center"><b>A data engine for autonomous driving, built for Indian roads.</b></p>
+
+---
 
 It takes raw fleet footage, auto labels it with a calibrated confidence gate, mines the rare and risky moments, builds HD map layers, and then improves its own models in a closed loop. The human stops being a labeler and becomes a governor.
 
