@@ -98,6 +98,62 @@ def test_near_dup_flags_extra_object():
         ids = {c["object_id"] for c in found}
         assert extra_oid in ids     # the object absent from the near-identical twin is flagged
         cand = next(c for c in found if c["object_id"] == extra_oid)
-        assert cand["kind"] == "near_dup_inconsistent" and cand["score"] >= 0.9
+        assert cand["kind"] == "near_dup_inconsistent"
+        # This used to assert score >= 0.9, which was asserting the defect: the score was the frame
+        # similarity, and a candidate cannot exist below the similarity gate, so the assertion held for
+        # every possible candidate and could never have failed. The score is now how suspect the object is.
+        assert 0.0 <= cand["score"] <= 1.0
+        assert cand["detail"]["similarity"] >= 0.9      # the similarity is still reported, as evidence
 
     run_async(_flow())
+
+
+def test_the_score_ranks_by_suspicion_not_by_how_alike_the_frames_are():
+    """The defect that let 45,313 near-duplicate candidates monopolise the review queue.
+
+    Scoring a candidate with the frame similarity produced a number bounded below by the gate: across the
+    corpus the tenth percentile was 0.986 and the mean 0.992, so every candidate looked equally urgent and
+    the queue was effectively ordered by which frames happened to look alike. Because the queue ranks across
+    detectors, that put them above `confident_learning`, the one detector emitting a real probability.
+    """
+    from services.errordetect.near_dup import _suspicion
+
+    # Same pair of frames, so the old score would be identical for both of these.
+    weak, strong = _suspicion(conf=0.30, dup_margin=0.5), _suspicion(conf=0.95, dup_margin=0.5)
+    assert weak > strong, ("a detection its near-identical twin does not corroborate is more suspect when "
+                           "the detector was unsure of it")
+
+    # And the score has to leave room to rank, which the similarity never did.
+    spread = [_suspicion(conf=c, dup_margin=0.5) for c in (0.1, 0.3, 0.5, 0.7, 0.9)]
+    assert max(spread) - min(spread) > 0.3, f"scores this flat cannot order a queue: {spread}"
+    assert spread == sorted(spread, reverse=True)
+
+
+def test_the_score_stays_on_the_same_scale_as_the_other_detectors():
+    """It is ranked against confident_learning, which reports a probability, so it has to be in [0, 1]."""
+    from services.errordetect.near_dup import _suspicion
+
+    for conf in (-0.5, 0.0, 0.5, 1.0, 1.5):
+        for margin in (-1.0, 0.0, 0.5, 1.0, 2.0):
+            s = _suspicion(conf=conf, dup_margin=margin)
+            assert 0.0 <= s <= 1.0, (conf, margin, s)
+
+
+def test_a_near_identical_pair_is_more_damning_than_one_barely_past_the_gate():
+    from services.errordetect.near_dup import _suspicion
+
+    assert _suspicion(conf=0.4, dup_margin=1.0) > _suspicion(conf=0.4, dup_margin=0.0)
+
+
+def test_an_outlier_score_cannot_exceed_a_certainty():
+    """Cosine distance runs to 2.0 and was emitted raw, so an outlier could outrank a detector that was sure.
+
+    Observed live: an embedding_outlier candidate at 1.065, ranked above every confident_learning candidate
+    on a queue that sorts by score across detectors.
+    """
+    import inspect
+
+    from services.errordetect import embedding_outlier
+
+    src = inspect.getsource(embedding_outlier.detect_embedding_outliers)
+    assert 'min(1.0, float(d))' in src, "the distance must be bounded before it becomes a score"

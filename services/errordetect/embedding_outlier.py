@@ -44,7 +44,12 @@ async def detect_embedding_outliers(db: AsyncSession, session_id: str | None = N
         thresh = float(np.percentile(dist, pct))
         for (oid, _), d in zip(members, dist, strict=False):
             if d > thresh and d > 0.35:  # also an absolute floor so tight clusters do not over-flag
-                out.append({"object_id": oid, "kind": "embedding_outlier", "score": round(float(d), 4),
+                # Cosine distance runs to 2.0, so emitting it raw put candidates above 1.0 (the corpus held
+                # one at 1.065) on a queue ranked against detectors whose scores are probabilities. Clamped
+                # at 1.0, which is orthogonality: a crop pointing away from its own class centroid is
+                # already as wrong as this detector can say, and ordering past that point is noise.
+                out.append({"object_id": oid, "kind": "embedding_outlier",
+                            "score": round(min(1.0, float(d)), 4),
                             "proposed_label": None,
                             "detail": {"class_name": onto.by_id(cid).name, "centroid_distance": round(float(d), 4),
                                        "class_threshold": round(thresh, 4)}})
