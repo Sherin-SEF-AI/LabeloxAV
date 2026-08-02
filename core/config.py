@@ -169,6 +169,18 @@ class AnthropicSettings(BaseModel):
     timeout_s: float = 60.0
 
 
+class BillingSettings(BaseModel):
+    """Prices for metered deliveries, in INR per unit.
+
+    Zero by default, and deliberately so: a system that starts charging because somebody deployed a new
+    version is worse than one that meters quantity and leaves the rate to be set explicitly. A price of
+    zero still records the delivery, the quantity and the certification status, which is the part that
+    cannot be reconstructed after the fact.
+    """
+    unit_price_inr: dict[str, float] = {"export": 0.0, "inference": 0.0, "judge": 0.0}
+    default_account: str = "default"
+
+
 class ClipSettings(BaseModel):
     model: str = "ViT-B/32"   # CLIP/SigLIP backbone for embeddings (frame/crop + text)
     crop_margin: float = 0.1
@@ -936,6 +948,7 @@ class Settings(BaseSettings):
     anpr: AnprSettings = AnprSettings()        # ANPR-India (security domain; pack-gated on 'anpr')
     groq: GroqSettings = GroqSettings()        # optional Groq cloud inference (text + vision), ollama fallback
     anthropic: AnthropicSettings = AnthropicSettings()  # optional frontier judge (text + vision), same fallback
+    billing: BillingSettings = BillingSettings()  # metered delivery pricing (0 by default; metering still records)
 
     @model_validator(mode="after")
     def _groq_key_from_env(self):

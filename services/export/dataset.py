@@ -325,6 +325,22 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
         "formats": spec.formats,
         "dataset_prefix": store.uri(prefix),
     }
+
+    # Meter the delivery. Here rather than in the API router because every path that produces a dataset
+    # ships one: the buyer agent, the ops agent, the resumable exporter and the CLI all call this function,
+    # and metering at the router would have missed four of the five. Idempotent on the commit id, so a
+    # re-export of the same content is recorded once and charged once.
+    #
+    # Marked uncertified: a certificate needs a sealed gold set and a scored evaluation run, and an export
+    # is usually shipped before it has been evaluated. certify_delivery attaches one later. Metering it as
+    # measured because a certificate might arrive would be the dishonest default.
+    async with maker() as db:
+        from services.billing.meter import record_delivery
+
+        await record_delivery(db, kind="export", subject_id=commit_id, quantity=float(len(records)),
+                              detail={"slice": spec.name, "formats": delivered,
+                                      "ontology_version": onto.version})
+
     log.info("export.done", **result)
     from services.integrations.webhooks import emit
 

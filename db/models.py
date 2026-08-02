@@ -385,6 +385,42 @@ class MachineVerdict(Base):
     )
 
 
+class UsageRecord(Base):
+    """One metered, billable delivery.
+
+    Unique on (kind, subject_id) because a commit id is content-addressed: exporting the same slice twice
+    returns the same commit, and metering per call would bill twice for one artifact.
+
+    Prices are stamped here at write time rather than joined from config at read time, so recomputing an old
+    invoice cannot silently rewrite what a customer was quoted.
+    """
+
+    __tablename__ = "usage_record"
+
+    record_id: Mapped[uuid.UUID] = _uuid_pk()
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)      # export | inference | judge
+    account: Mapped[str] = mapped_column(String(128), nullable=False, default="default")
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    subject_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    unit: Mapped[str] = mapped_column(String(32), nullable=False)
+    unit_price_inr: Mapped[float | None] = mapped_column(Float)
+    amount_inr: Mapped[float | None] = mapped_column(Float)
+    # Whether this delivery carried a measured quality claim. On the row rather than looked up later, so an
+    # invoice can show which lines were sold uncertified instead of hiding them.
+    certified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    certificate_signature: Mapped[str | None] = mapped_column(String(128))
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+    ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("kind", "subject_id", name="uq_usage_record_kind_subject"),
+        Index("ix_usage_record_account", "account"),
+        Index("ix_usage_record_kind", "kind"),
+    )
+
+
 class Scenario(Base):
     __tablename__ = "scenario"
 
