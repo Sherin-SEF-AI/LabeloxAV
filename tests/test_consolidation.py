@@ -18,7 +18,6 @@ from core.clustering import (
     normed,
 )
 
-
 # --- clustering: shared mechanism, distinct linkage ----------------------------------------------
 
 

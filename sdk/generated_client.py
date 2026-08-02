@@ -603,6 +603,21 @@ class LabeloxClient:
         return self._call("GET", f"/api/autolabel/{job_id}",
                           params=None, json_body=None)
 
+    def post_billing_certify_by_commit_id(self, commit_id: str, eval_id: str, gold_id: str, model_version: str) -> Any:
+        """Certify"""
+        return self._call("POST", f"/api/billing/certify/{commit_id}",
+                          params={"eval_id": eval_id, "gold_id": gold_id, "model_version": model_version}, json_body=None)
+
+    def get_billing_invoice(self, account: str | None = 'default', since_ns: Any | None = None, until_ns: Any | None = None) -> Any:
+        """Invoice"""
+        return self._call("GET", f"/api/billing/invoice",
+                          params={"account": account, "since_ns": since_ns, "until_ns": until_ns}, json_body=None)
+
+    def get_billing_usage(self, account: Any | None = None, since_ns: Any | None = None, until_ns: Any | None = None) -> Any:
+        """Usage"""
+        return self._call("GET", f"/api/billing/usage",
+                          params={"account": account, "since_ns": since_ns, "until_ns": until_ns}, json_body=None)
+
     def get_calibration_sessions(self) -> Any:
         """List Sessions"""
         return self._call("GET", f"/api/calibration/sessions",
@@ -1018,19 +1033,29 @@ class LabeloxClient:
         return self._call("POST", f"/api/embeddings/compute",
                           params=None, json_body=body)
 
-    def get_errordetect_candidates(self, status: str | None = 'pending', limit: int | None = 100) -> Any:
+    def get_errordetect_candidates(self, status: str | None = 'pending', limit: int | None = 100, kind: Any | None = None) -> Any:
         """Candidates"""
         return self._call("GET", f"/api/errordetect/candidates",
-                          params={"status": status, "limit": limit}, json_body=None)
+                          params={"status": status, "limit": limit, "kind": kind}, json_body=None)
+
+    def post_errordetect_candidates_bulk(self, body: Any = None) -> Any:
+        """Bulk"""
+        return self._call("POST", f"/api/errordetect/candidates/bulk",
+                          params=None, json_body=body)
 
     def post_errordetect_candidates_by_candidate_id_confirm(self, candidate_id: str, body: Any = None) -> Any:
         """Confirm"""
         return self._call("POST", f"/api/errordetect/candidates/{candidate_id}/confirm",
                           params=None, json_body=body)
 
-    def post_errordetect_candidates_by_candidate_id_dismiss(self, candidate_id: str) -> Any:
+    def post_errordetect_candidates_by_candidate_id_dismiss(self, candidate_id: str, note: Any | None = None) -> Any:
         """Dismiss"""
         return self._call("POST", f"/api/errordetect/candidates/{candidate_id}/dismiss",
+                          params={"note": note}, json_body=None)
+
+    def get_errordetect_precision(self) -> Any:
+        """Precision"""
+        return self._call("GET", f"/api/errordetect/precision",
                           params=None, json_body=None)
 
     def post_errordetect_run(self, body: Any = None) -> Any:
@@ -1172,6 +1197,21 @@ class LabeloxClient:
         """Export"""
         return self._call("POST", f"/api/export",
                           params=None, json_body=body)
+
+    def get_export_scenario_event_by_event_id(self, event_id: str, near_m: float | None = 60.0, pad_s: float | None = 4.0, road_network_file: str | None = 'map.xodr', fmt: str | None = 'xml') -> Any:
+        """Scenario From Event"""
+        return self._call("GET", f"/api/export/scenario/event/{event_id}",
+                          params={"near_m": near_m, "pad_s": pad_s, "road_network_file": road_network_file, "fmt": fmt}, json_body=None)
+
+    def get_export_scenario_session_by_session_id(self, session_id: str, t_start_ns: int, t_end_ns: int, near_m: float | None = 60.0, road_network_file: str | None = 'map.xodr', fmt: str | None = 'xml', name: str | None = 'scenario') -> Any:
+        """Scenario From Window"""
+        return self._call("GET", f"/api/export/scenario/session/{session_id}",
+                          params={"t_start_ns": t_start_ns, "t_end_ns": t_end_ns, "near_m": near_m, "road_network_file": road_network_file, "fmt": fmt, "name": name}, json_body=None)
+
+    def get_export_by_commit_id_certificate(self, commit_id: str, eval_id: str, gold_id: str, model_version: str, fmt: str | None = 'json') -> Any:
+        """Certificate"""
+        return self._call("GET", f"/api/export/{commit_id}/certificate",
+                          params={"eval_id": eval_id, "gold_id": gold_id, "model_version": model_version, "fmt": fmt}, json_body=None)
 
     def get_exports_resumable(self, limit: int | None = 50) -> Any:
         """List Resumable"""
@@ -1803,6 +1843,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/labelops/jobs/{job_id}/submit",
                           params=None, json_body=body)
 
+    def get_labelops_judge_agreement(self, model_version: Any | None = None, batch_id: Any | None = None) -> Any:
+        """Read Judge Agreement"""
+        return self._call("GET", f"/api/labelops/judge-agreement",
+                          params={"model_version": model_version, "batch_id": batch_id}, json_body=None)
+
     def get_labelops_my_jobs(self) -> Any:
         """My Jobs"""
         return self._call("GET", f"/api/labelops/my-jobs",
@@ -1817,6 +1862,16 @@ class LabeloxClient:
         """Read Precision"""
         return self._call("GET", f"/api/labelops/precision/{batch_id}",
                           params=None, json_body=None)
+
+    def get_labelops_prereview_by_batch_id(self, batch_id: str, model_version: Any | None = None, agreement_batch_id: Any | None = None) -> Any:
+        """Read Prereview"""
+        return self._call("GET", f"/api/labelops/prereview/{batch_id}",
+                          params={"model_version": model_version, "agreement_batch_id": agreement_batch_id}, json_body=None)
+
+    def post_labelops_prereview_by_batch_id(self, batch_id: str, limit: Any | None = None) -> Any:
+        """Run Prereview"""
+        return self._call("POST", f"/api/labelops/prereview/{batch_id}",
+                          params={"limit": limit}, json_body=None)
 
     def get_labelops_projects(self, limit: int | None = 100) -> Any:
         """List Projects"""
@@ -3143,6 +3198,31 @@ class LabeloxClient:
         return self._call("POST", f"/api/vlm-targets/{target_id}/status",
                           params={"status": status}, json_body=None)
 
+    def post_workforce(self, body: Any = None) -> Any:
+        """Register"""
+        return self._call("POST", f"/api/workforce",
+                          params=None, json_body=body)
+
+    def post_workforce_dispatch(self, body: Any = None) -> Any:
+        """Dispatch"""
+        return self._call("POST", f"/api/workforce/dispatch",
+                          params=None, json_body=body)
+
+    def get_workforce_rating(self) -> Any:
+        """Rating"""
+        return self._call("GET", f"/api/workforce/rating",
+                          params=None, json_body=None)
+
+    def get_workforce_by_workforce_id_pending(self, workforce_id: str, limit: int | None = 50) -> Any:
+        """Pending"""
+        return self._call("GET", f"/api/workforce/{workforce_id}/pending",
+                          params={"limit": limit}, json_body=None)
+
+    def post_workforce_by_workforce_id_return(self, workforce_id: str) -> Any:
+        """Submit Return"""
+        return self._call("POST", f"/api/workforce/{workforce_id}/return",
+                          params=None, json_body=None)
+
     def get_metrics_2(self) -> Any:
         """Metrics Endpoint"""
         return self._call("GET", f"/metrics",
@@ -3161,4 +3241,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 615 routes generated from the server schema.
+# 631 routes generated from the server schema.
