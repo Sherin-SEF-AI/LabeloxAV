@@ -126,10 +126,10 @@ class VlmSettings(BaseModel):
     # cloud path. Text (nl/intent) and vision (Path C) are chosen independently so text can go cloud while
     # vision stays local. A missing GROQ_API_KEY, a cloud failure, or an open circuit all fall back to ollama,
     # so the cloud is never a hard dependency.
-    text_provider: str = "ollama"      # ollama | groq  (nl.py / intent, text-only, no media leaves the box)
-    vision_provider: str = "ollama"    # ollama | groq  (Path C VLM verifier)
+    text_provider: str = "ollama"      # ollama | groq | anthropic  (nl.py / intent, text-only, no media leaves the box)
+    vision_provider: str = "ollama"    # ollama | groq | anthropic  (Path C VLM verifier)
     escalate_provider: str | None = None  # optional stronger provider re-asked only on a not-confident verdict
-    allow_cloud_media: bool = True     # False keeps image crops local even when vision_provider=groq (data residency)
+    allow_cloud_media: bool = True     # False keeps crops local even when the provider is a cloud one (data residency)
     breaker_threshold: int = 3         # consecutive cloud failures before the circuit opens
     breaker_cooldown_s: float = 60.0   # how long the circuit stays open before a half-open retry
 
@@ -144,6 +144,29 @@ class GroqSettings(BaseModel):
     text_model: str = "llama-3.3-70b-versatile"
     vision_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     timeout_s: float = 30.0
+
+
+class AnthropicSettings(BaseModel):
+    """Anthropic cloud inference (Messages API). Optional in exactly the way Groq is: an empty api_key means
+    "not configured" and the router falls back to the local provider, so nothing here is a hard dependency.
+
+    Present alongside Groq rather than instead of it because they answer different questions. Groq is the
+    fast cloud path for the autolabel stream; this is the judge, re-read on a crop the corpus could not
+    otherwise get a verdict on, where being right matters more than being quick.
+
+    The key comes from the environment (LBX_ANTHROPIC__API_KEY or ANTHROPIC_API_KEY) and is an outbound
+    credential rather than a secret protecting LabeloxAV, so it stays out of _require_prod_secrets.
+    """
+    api_key: str = ""
+    base_url: str = "https://api.anthropic.com/v1"
+    api_version: str = "2023-06-01"
+    text_model: str = "claude-sonnet-5"
+    vision_model: str = "claude-sonnet-5"
+    # The judge re-reads one crop and answers with a short JSON object, so the ceiling only has to cover a
+    # verdict plus a one-line reason. Kept tight because a runaway generation on a 300-crop batch is a real
+    # cost, not a theoretical one.
+    max_tokens: int = 1024
+    timeout_s: float = 60.0
 
 
 class ClipSettings(BaseModel):
@@ -912,6 +935,7 @@ class Settings(BaseSettings):
     forgyx: ForgyxSettings = ForgyxSettings()  # FORGYX edge-deployment signing (data engine plane)
     anpr: AnprSettings = AnprSettings()        # ANPR-India (security domain; pack-gated on 'anpr')
     groq: GroqSettings = GroqSettings()        # optional Groq cloud inference (text + vision), ollama fallback
+    anthropic: AnthropicSettings = AnthropicSettings()  # optional frontier judge (text + vision), same fallback
 
     @model_validator(mode="after")
     def _groq_key_from_env(self):
@@ -919,6 +943,14 @@ class Settings(BaseSettings):
         environment variable just works. The explicit LBX form still wins if both are set."""
         if not self.groq.api_key:
             self.groq.api_key = os.environ.get("GROQ_API_KEY", "")
+        return self
+
+    @model_validator(mode="after")
+    def _anthropic_key_from_env(self):
+        """Same courtesy for ANTHROPIC_API_KEY. Separate validator rather than folded into the Groq one so
+        that adding a third provider does not mean editing a function named after the first."""
+        if not self.anthropic.api_key:
+            self.anthropic.api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         return self
 
     @classmethod

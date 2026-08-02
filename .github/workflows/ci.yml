@@ -46,7 +46,7 @@ jobs:
         # it is the framework idiom, not a bug.
         run: >
           .venv/bin/ruff check
-          core/accel core/version.py services/verdyx
+          core/accel core/version.py services/verdyx services/llm
           services/api/main.py services/api/deps.py services/api/auth_token.py
           services/api/routers/predictions.py services/analytics/evaluation.py
 
