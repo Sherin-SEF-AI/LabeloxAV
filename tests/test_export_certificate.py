@@ -242,3 +242,41 @@ def test_the_certificate_leads_with_what_it_did_not_measure():
             await db.commit()
 
     run_async(_flow())
+
+
+@requires_infra
+def test_an_evaluation_that_scored_nothing_cannot_be_certified():
+    """Found by issuing a certificate against the live corpus with a made-up eval_id.
+
+    It succeeded: zero classes, an overall precision of "not measured", and a valid signature over the whole
+    thing. That artifact is worse than no certificate, because at a glance it is indistinguishable from one
+    attesting a clean release, and it verifies.
+    """
+    import uuid as _uuid
+
+    from db.models import GoldSet
+    from db.session import get_sessionmaker
+    from services.autolabel.ontology import get_ontology
+
+    gold_id = f"gold-empty-{_uuid.uuid4().hex[:8]}"
+
+    async def _flow():
+        from sqlalchemy import delete
+
+        async with get_sessionmaker()() as db:
+            db.add(GoldSet(gold_id=gold_id, name="empty eval test", spec={},
+                           object_ids=[str(_uuid.uuid4()) for _ in range(20)], n_objects=20, n_frames=2,
+                           ontology_version=get_ontology().version, metrics={}, track_ids=[],
+                           tracks_sealed=False))
+            await db.commit()
+        async with get_sessionmaker()() as db:
+            cert = await build_certificate(db, commit_id="c1", eval_id=str(_uuid.uuid4()),
+                                           gold_id=gold_id, model_version="m1", key="k")
+        assert "error" in cert and "no scored patches" in cert["error"]
+        assert "signature" not in cert, "a refusal must not carry a signature"
+
+        async with get_sessionmaker()() as db:
+            await db.execute(delete(GoldSet).where(GoldSet.gold_id == gold_id))
+            await db.commit()
+
+    run_async(_flow())

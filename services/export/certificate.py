@@ -150,6 +150,14 @@ async def build_certificate(db: AsyncSession, *, commit_id: str, eval_id: str, g
         return {"error": "gold set is empty, so nothing was measured", "gold_id": gold_id}
 
     per_class = await per_class_precision_recall(db, eval_id, confidence=confidence)
+    if not per_class:
+        # An eval_id with no patches is a typo, a deleted run, or an evaluation that never scored anything.
+        # Without this the certificate issues anyway: zero classes, an overall precision of "not measured",
+        # and a valid signature over the whole thing. That artifact is worse than no certificate, because it
+        # is indistinguishable at a glance from one attesting a clean release and it verifies.
+        return {"error": f"evaluation '{eval_id}' has no scored patches, so nothing was measured",
+                "eval_id": str(eval_id), "gold_id": gold_id}
+
     measured = {k: v for k, v in per_class.items() if v["measured"]}
     unmeasured = sorted(k for k, v in per_class.items() if not v["measured"])
 
