@@ -81,6 +81,31 @@ class OllamaVlmClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.cfg = self.settings.models.vlm
+        # Named to match the cloud clients so callers that need to ask their own question can duck-type on
+        # it. Without this the local path could only ever be asked verify()'s question, which is
+        # "what is this?"; the judge needs to ask "the label says X, is that right?" and those are
+        # different questions with different failure modes.
+        self.model = self.cfg.ollama_tag
+
+    def chat_json(self, prompt: str, *, model: str | None = None, image_jpeg: bytes | None = None,
+                  temperature: float = 0.0) -> dict:
+        """One chat turn returning a JSON object, same contract as GroqClient/AnthropicClient.
+
+        Raises on failure rather than returning {}, because an empty object reads downstream as a real but
+        empty answer, and for a judge that means "found nothing wrong".
+        """
+        payload: dict = {
+            "model": model or self.cfg.ollama_tag,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "format": "json",
+            "options": {"num_ctx": self.cfg.max_context, "temperature": temperature},
+        }
+        if image_jpeg is not None:
+            payload["messages"][0]["images"] = [base64.b64encode(image_jpeg).decode()]
+        resp = httpx.post(f"{self.cfg.ollama_url}/api/chat", json=payload, timeout=self.cfg.timeout_s)
+        resp.raise_for_status()
+        return json.loads(resp.json()["message"]["content"])
 
     def verify(
         self, crop_bgr: np.ndarray, shortlist: list[str], attr_schema: dict, temperature: float = 0.0

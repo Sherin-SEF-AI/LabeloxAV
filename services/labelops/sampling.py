@@ -62,6 +62,33 @@ def sample_size_for(half_width: float, *, expected_p: float = 0.5, confidence: f
     return int(math.ceil(n))
 
 
+def rogan_gladen(observed_p: float, *, sensitivity: float, specificity: float) -> float | None:
+    """Correct a rate measured by an imperfect judge for that judge's own error.
+
+    The reason this is needed rather than optional. A VLM can judge 570,379 labels; a person cannot. But the
+    judge is wrong sometimes, and quoting its raw agreement rate as precision embeds its error in every
+    number downstream, in an unknown direction. If the judge is 90% sensitive and calls 85% of labels
+    correct, the true rate is not 85%.
+
+    Measure the judge against a human-adjudicated subsample to get its sensitivity (it says correct when the
+    label is correct) and specificity (it says incorrect when the label is wrong), then invert:
+
+        p_true = (p_observed + specificity - 1) / (sensitivity + specificity - 1)
+
+    the standard Rogan-Gladen prevalence estimator. Returns None when sensitivity + specificity <= 1, which
+    means the judge carries no information (at exactly 1 it is a coin, below it is anti-correlated) and no
+    correction can recover a rate from it. That is a real state and worth refusing to answer for, since the
+    formula happily returns a confident-looking number either side of the singularity.
+
+    Clamped to [0, 1]: sampling noise in a small subsample can push the estimate outside the range it is
+    estimating, and a precision of 1.04 is less useful than a precision of 1.0 with a wide interval.
+    """
+    denom = sensitivity + specificity - 1.0
+    if denom <= 1e-9:
+        return None
+    return max(0.0, min(1.0, (observed_p + specificity - 1.0) / denom))
+
+
 def acceptance_decision(defects: int, n: int, *, max_defect_rate: float,
                         confidence: float = 0.95) -> dict:
     """Accept a batch, reject it, or say the sample is too small to tell.

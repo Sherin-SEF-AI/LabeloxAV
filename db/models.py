@@ -13,6 +13,7 @@ from sqlalchemy import (
     ARRAY,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -20,6 +21,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 # Aliased: Asset defines a column literally named `text`, which would shadow the bare sqlalchemy.text
@@ -344,6 +346,43 @@ class Review(Base):
     ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     __table_args__ = (Index("ix_review_object", "object_id"),)
+
+
+class MachineVerdict(Base):
+    """A machine's judgement on an existing label. Deliberately not a Review.
+
+    `review` means a person ruled on this object, and three things depend on that meaning: precision
+    sampling excludes reviewed objects, corpus precision reads the states a human moved, and annotator
+    scorecards count rows there. A VLM opinion written into that table would corrupt all three invisibly,
+    because the rows would look identical.
+
+    Keeping the planes separate is also what makes the method work. A judge has its own error rate, and the
+    only way to measure it is to have humans rule on a subsample and compare. There is nothing to compare
+    against once the two are mixed.
+    """
+
+    __tablename__ = "machine_verdict"
+
+    verdict_id: Mapped[uuid.UUID] = _uuid_pk()
+    object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
+    judge: Mapped[str] = mapped_column(String(32), nullable=False)          # kind of judge, e.g. "vlm"
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)       # anthropic | groq | ollama
+    model_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)        # correct | incorrect | unsure
+    proposed_class_id: Mapped[int | None] = mapped_column(Integer)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    agreement: Mapped[float | None] = mapped_column(Float)                  # multi-vote agreement fraction
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+    batch_id: Mapped[str | None] = mapped_column(String(64))
+    ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("verdict in ('correct','incorrect','unsure')", name="ck_machine_verdict_verdict"),
+        UniqueConstraint("object_id", "judge", "model_version", name="uq_machine_verdict_object_judge"),
+        Index("ix_machine_verdict_batch", "batch_id"),
+        Index("ix_machine_verdict_object", "object_id"),
+    )
 
 
 class Scenario(Base):
