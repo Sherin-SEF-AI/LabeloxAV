@@ -89,10 +89,18 @@ def test_analyze_spec_reports_availability_and_shortfall():
     async def _flow():
         async with get_sessionmaker()() as db:
             fit = await analyze_spec(db, "3 frames with a pedestrian")
-            short = await analyze_spec(db, "1000 frames with a pedestrian")
+            # Ask for more than the corpus holds, measured rather than guessed. Asking for a flat 1000 and
+            # expecting a shortfall near 900 was an assumption about corpus size, not a property of the
+            # agent: the suite seeds pedestrian frames into a shared database and never cleans up, so the
+            # corpus crossed 1000 and the over-ask silently became an under-ask that the corpus could fill.
+            # The real claim is that the gap is reported exactly, which holds at any corpus size.
+            available = fit["fulfillment"]["available"]
+            gap = 500
+            short = await analyze_spec(db, f"{available + gap} frames with a pedestrian")
         assert "pedestrian" in fit["understood"]
         assert fit["fulfillment"]["available"] >= 5
         assert fit["fulfillment"]["fulfillable"] == 3 and fit["fulfillment"]["shortfall"] == 0
-        assert short["fulfillment"]["shortfall"] >= 900 and short["guidance"]
+        assert short["fulfillment"]["shortfall"] == gap and short["guidance"]
+        assert short["fulfillment"]["fulfillable"] == available
 
     run_async(_flow())

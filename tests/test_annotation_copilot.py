@@ -113,17 +113,22 @@ def test_pattern_similar_batch_revert():
         cands = sug["candidates"]
         assert set(cands) & set(similar)          # found the still-mislabeled look-alikes
         assert not (set(cands) & set(corrected))  # excluded the already-corrected examples
+        # Track an object this run seeded, whose prior state is therefore known to be auto_accept.
+        # suggest_for_reviewer searches the whole corpus and the suite shares one database, so cands[0] is
+        # often a look-alike from an earlier run sitting in some other state. Revert restored that state
+        # faithfully and the assertion below called it a failure, blaming the revert for the seeding.
+        mine = next(c for c in cands if c in set(similar))
         async with get_sessionmaker()() as db:
             r = await apply_batch(db, cands, auto)
         assert r["relabeled"] >= 1
         async with get_sessionmaker()() as db:
-            obj = await db.get(Object, uuid.UUID(cands[0]))
+            obj = await db.get(Object, uuid.UUID(mine))
             assert obj.class_id == auto and obj.state == "review"
         async with get_sessionmaker()() as db:
             rev = await revert_run(db, uuid.UUID(r["run_id"]))
         assert rev["reverted"] >= 1
         async with get_sessionmaker()() as db:
-            obj2 = await db.get(Object, uuid.UUID(cands[0]))
+            obj2 = await db.get(Object, uuid.UUID(mine))
             assert obj2.class_id == e_auto and obj2.state == "auto_accept"
 
     run_async(_flow())
