@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.api.deps import current_user, db_session, require_role
+from services.api.deps import db_session, require_role
 from services.labelops import issues as issue_svc
 from services.labelops import jobs as job_svc
 from services.labelops import quality as quality_svc
@@ -195,3 +195,30 @@ async def resolve_issue(issue_id: str, reopen: bool = False, user=Depends(requir
 async def scorecards(project_id: str | None = None, db: AsyncSession = Depends(db_session)):
     """Per-annotator throughput and honeypot quality."""
     return {"scorecards": await quality_svc.annotator_scorecards(db, project_id=project_id)}
+
+
+@router.post("/labelops/precision-batch", dependencies=[Depends(require_role("reviewer"))])
+async def make_precision_batch(target: int = 300, db: AsyncSession = Depends(db_session)):
+    """Stamp a random sample of machine labels for review, to measure how many of them are correct.
+
+    Distinct from the active-learning queue on purpose. That queue surfaces the hardest objects, which is
+    right for improving a model and wrong for measuring one: judging it reports the accuracy of the worst
+    objects in the corpus rather than of the corpus. This samples randomly within class instead.
+    """
+    from services.labelops.precision_batch import build_precision_batch
+
+    return await build_precision_batch(db, target=target)
+
+
+@router.get("/labelops/precision/{batch_id}")
+async def read_precision(batch_id: str, db: AsyncSession = Depends(db_session)):
+    """Precision per class and for the corpus, from whatever of the batch has been judged so far.
+
+    Reports both the sample figure and a corpus figure re-weighted by how common each class actually is,
+    because the batch over-samples rare classes deliberately and quoting the first as the second is the
+    mistake this exists to prevent. Every rate carries a Wilson interval, so a number from 12 objects cannot
+    be mistaken for one from 12,000.
+    """
+    from services.labelops.precision_batch import corpus_precision
+
+    return await corpus_precision(db, batch_id)

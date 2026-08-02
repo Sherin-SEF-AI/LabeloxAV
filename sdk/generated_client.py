@@ -1808,6 +1808,16 @@ class LabeloxClient:
         return self._call("GET", f"/api/labelops/my-jobs",
                           params=None, json_body=None)
 
+    def post_labelops_precision_batch(self, target: int | None = 300) -> Any:
+        """Make Precision Batch"""
+        return self._call("POST", f"/api/labelops/precision-batch",
+                          params={"target": target}, json_body=None)
+
+    def get_labelops_precision_by_batch_id(self, batch_id: str) -> Any:
+        """Read Precision"""
+        return self._call("GET", f"/api/labelops/precision/{batch_id}",
+                          params=None, json_body=None)
+
     def get_labelops_projects(self, limit: int | None = 100) -> Any:
         """List Projects"""
         return self._call("GET", f"/api/labelops/projects",
@@ -3151,4 +3161,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 613 routes generated from the server schema.
+# 615 routes generated from the server schema.
