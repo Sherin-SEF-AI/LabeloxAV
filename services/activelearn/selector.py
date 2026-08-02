@@ -55,6 +55,33 @@ MIN_REVIEWABLE_SIDE_PX = 0.0
 # taken.
 FLICKER_WINDOW = 64
 
+# What a detector's score is worth before anybody has judged that detector.
+#
+# Not 1.0, which is the old behaviour and treats an unevaluated detector as reliable. Not 0.0 either, which
+# would be defensible in principle ("no evidence it predicts") and useless in practice, because it would
+# silence every detector in this corpus at once: 298,529 candidates carry one verdict between them. Half
+# says the honest thing, that an unjudged detector is a coin until somebody rules on its candidates, and
+# leaves it able to contribute without outranking a detector that has earned its weight.
+UNMEASURED_DETECTOR_WEIGHT = 0.5
+
+
+async def _detector_weights(db) -> dict[str, float]:
+    """Per-detector ranking weight: the Wilson lower bound of its measured precision.
+
+    The lower bound rather than the point estimate, because the point estimate rewards small samples: nine
+    confirmations out of ten reads as 0.9 and would outrank nine hundred out of a thousand at 0.9, when the
+    second is the one that has actually been demonstrated. The lower bound puts them at roughly 0.60 and
+    0.88, which is the order a reviewer would want.
+    """
+    from services.errordetect.queue import MIN_VERDICTS_FOR_PRECISION, detector_precision
+
+    report = await detector_precision(db)
+    out: dict[str, float] = {}
+    for kind, d in report["per_kind"].items():
+        if d["decided"] >= MIN_VERDICTS_FOR_PRECISION:
+            out[kind] = float(d["precision"]["lo"])
+    return out
+
 
 def _norm(x: np.ndarray) -> np.ndarray:
     x = np.asarray(x, dtype=float)
@@ -117,11 +144,25 @@ async def score_candidates(db: AsyncSession, session_id: str | None = None, pool
     # rare-scenario frames (Phase 1 discovery), and error candidates (M4.1)
     rare_frames = set((await db.execute(
         select(ScenarioCandidate.frame_id).where(ScenarioCandidate.kind.in_(("rare_class", "embedding_outlier"))))).scalars())
+    # Error-candidate signal, weighted by how much each detector has earned.
+    #
+    # This used to be a bare max() over the raw scores, which assumes the detectors emit commensurable
+    # numbers. They do not. `confident_learning` reports an actual probability; `policy_violation` and
+    # `critic_flag` use hand-assigned constants; `near_dup_inconsistent` was reporting frame similarity,
+    # which could not fall below its own 0.96 gate and so beat everything else on every object it touched.
+    # A max over that is a max over which detector is loudest.
+    #
+    # Weighting by measured precision fixes the comparison and closes the loop at the same time: judging a
+    # detector in the error queue now changes how the selector ranks. The weight is the Wilson lower bound
+    # rather than the point estimate, so nine confirmations out of ten does not outrank nine hundred out of
+    # a thousand on the strength of a small sample.
+    weights = await _detector_weights(db)
     err_scores: dict[str, float] = {}
-    for oid, sc in (await db.execute(
-            select(ErrorCandidate.object_id, ErrorCandidate.score).where(
+    for oid, kind, sc in (await db.execute(
+            select(ErrorCandidate.object_id, ErrorCandidate.kind, ErrorCandidate.score).where(
                 ErrorCandidate.object_id.in_(oids), ErrorCandidate.status == "pending"))).all():
-        err_scores[str(oid)] = max(err_scores.get(str(oid), 0.0), float(sc))
+        weighted = float(sc) * weights.get(kind, UNMEASURED_DETECTOR_WEIGHT)
+        err_scores[str(oid)] = max(err_scores.get(str(oid), 0.0), weighted)
 
     # novelty: mean cosine distance to the k nearest neighbours in the pool (isolated = novel)
     novelty = _pool_novelty([emb.get(oid) for oid in oids], cfg.diversity_knn)
