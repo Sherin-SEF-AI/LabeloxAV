@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 from sqlalchemy import delete, select
@@ -35,24 +35,16 @@ def _normed(vec) -> np.ndarray:
 
 
 def _cluster(rows: list[tuple[str, object]], sim_thresh: float) -> list[dict]:
-    """Greedy online cosine clustering: assign each fallback crop to the nearest centroid above the
-    threshold, else open a new cluster. O(n*k), fine for a bounded sample."""
-    clusters: list[dict] = []
-    for oid, vec in rows:
-        v = _normed(vec)
-        best_s, best_i = sim_thresh, -1
-        for i, c in enumerate(clusters):
-            s = float(c["vec"] @ v)
-            if s > best_s:
-                best_s, best_i = s, i
-        if best_i >= 0:
-            c = clusters[best_i]
-            n = len(c["members"])
-            c["vec"] = _normed(c["vec"] * n + v)
-            c["members"].append(str(oid))
-        else:
-            clusters.append({"vec": v, "members": [str(oid)]})
-    return clusters
+    """Greedy centroid clustering, from core.clustering.
+
+    Greedy rather than connected components on purpose, and the distinction is load-bearing here: this
+    decides whether a bag of crops is one thing worth minting a class for. Connected components would chain
+    A to B to C where A and C are nothing alike, and the proposal would be for a class that does not exist.
+    Every member of a greedy cluster stays within the threshold of its centroid.
+    """
+    from core.clustering import greedy_cosine
+
+    return greedy_cosine(rows, sim_thresh)
 
 
 async def _confusion_and_hint(db: AsyncSession, centroid: np.ndarray, onto) -> tuple[list[dict], str | None]:
@@ -189,7 +181,7 @@ async def approve(db: AsyncSession, proposal_id: uuid.UUID, name: str, *, l0: st
     prop.status = "approved"
     prop.approved_class = new_id
     prop.run_id = run_id
-    prop.decided_at = datetime.now(timezone.utc)
+    prop.decided_at = datetime.now(UTC)
     await db.commit()
     log.info("steward.approve", proposal_id=str(proposal_id), new_class=new_id, relabeled=len(changes))
     return {"proposal_id": str(proposal_id), "class_id": new_id, "name": cls["name"], "relabeled": len(changes),
@@ -201,7 +193,7 @@ async def reject(db: AsyncSession, proposal_id: uuid.UUID) -> dict:
     if prop is None:
         raise ValueError("proposal not found")
     prop.status = "rejected"
-    prop.decided_at = datetime.now(timezone.utc)
+    prop.decided_at = datetime.now(UTC)
     await db.commit()
     return {"proposal_id": str(proposal_id), "status": "rejected"}
 
