@@ -421,6 +421,59 @@ class UsageRecord(Base):
     )
 
 
+class Workforce(Base):
+    """A team that labels for a living: an outside vendor, or an internal team routed the same way.
+
+    Internal teams go through the same machinery on purpose. Exempting "our people" from measurement is how
+    a quality bar quietly becomes a quality bar for suppliers only.
+    """
+
+    __tablename__ = "workforce"
+
+    workforce_id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="vendor")  # vendor | internal
+    endpoint: Mapped[str | None] = mapped_column(Text)      # where a dispatch is POSTed; null means pull-only
+    secret: Mapped[str] = mapped_column(String(128), nullable=False)   # HMAC key for this workforce's callbacks
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    capabilities: Mapped[dict] = mapped_column(JSONB, default=dict)    # {"classes": [...], "modalities": [...]}
+    capacity_jobs_per_day: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # The acceptance bar is a commercial term negotiated per vendor, not a global constant.
+    min_honeypot_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.9)
+    contact: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WorkforceAssignment(Base):
+    """One dispatch of one job to one workforce, with its whole life.
+
+    Separate from label_job.assignee_id because a dispatch can be sent, returned, rejected on quality and
+    sent again, possibly elsewhere. A column on the job would keep only the last of those and lose exactly
+    the history that says which workforce is worth using.
+    """
+
+    __tablename__ = "workforce_assignment"
+
+    assignment_id: Mapped[uuid.UUID] = _uuid_pk()
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("label_job.job_id", ondelete="CASCADE"))
+    workforce_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workforce.workforce_id", ondelete="CASCADE"))
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="dispatched")
+    external_ref: Mapped[str | None] = mapped_column(String(128))
+    dispatched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    returned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    honeypot_accuracy: Mapped[float | None] = mapped_column(Float)
+    objects_returned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reason: Mapped[str | None] = mapped_column(Text)
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    __table_args__ = (
+        CheckConstraint("state in ('dispatched','returned','accepted','rejected','expired')",
+                        name="ck_workforce_assignment_state"),
+        Index("ix_workforce_assignment_workforce", "workforce_id", "state"),
+    )
+
+
 class Scenario(Base):
     __tablename__ = "scenario"
 

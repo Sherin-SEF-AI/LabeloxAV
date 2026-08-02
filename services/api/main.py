@@ -81,6 +81,7 @@ from services.api.routers import (
     triage,
     upload,
     users,
+    workforce,
 )
 from services.api.routers import (
     auth as auth_router,
@@ -480,6 +481,7 @@ app.include_router(cloud.router, prefix="/api", tags=["cloud"])
 app.include_router(models.router, prefix="/api", tags=["models"])
 app.include_router(export.router, prefix="/api", tags=["export"])
 app.include_router(billing.router, prefix="/api", tags=["billing"])
+app.include_router(workforce.router, prefix="/api", tags=["workforce"])
 app.include_router(explore.router, prefix="/api", tags=["explore"])
 app.include_router(quality.router, prefix="/api", tags=["quality"])
 app.include_router(recall.router, prefix="/api", tags=["recall"])
