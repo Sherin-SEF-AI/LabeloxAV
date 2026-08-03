@@ -41,10 +41,15 @@ const IMPORT_FORMATS: [string, string][] = [
 
 // Export targets wired in services/export/dataset.py.
 const EXPORT_FORMATS: [string, string][] = [
-  ["coco", "COCO"], ["yolo", "YOLO"], ["cvat", "CVAT XML"],
+  ["coco", "COCO"], ["yolo", "YOLO"], ["pascalvoc", "Pascal VOC"], ["cvat", "CVAT XML"],
   ["labelstudio", "Label Studio JSON"], ["openlabel", "OpenLABEL"],
   ["nuscenes", "nuScenes (3D)"], ["kitti", "KITTI"], ["bdd", "BDD100K"],
+  ["mapillary", "Mapillary"], ["masks", "Instance masks"],
   ["parquet", "Parquet (lossless)"],
+  // Scene-level targets: not derived from an Object, which is why none of them could leave the system
+  // until adapter_scene existed.
+  ["panoptic", "COCO panoptic"], ["lanes", "Lanes (CULane+)"],
+  ["drivable", "Drivable (BDD)"], ["hdmap", "HD map (GeoJSON)"],
 ];
 
 export const MENUS: Menu[] = [
