@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from db.models import Frame, Object
+from services.errordetect.score import as_suspicion
 
 log = get_logger("ed.critic")
 
@@ -50,7 +51,7 @@ async def detect_critic(db: AsyncSession, session_id: str | None = None, *, limi
             if not flags:
                 continue
             score = max(_SEVERITY[c] for c in flags)
-            out.append({"object_id": str(o.object_id), "kind": "critic_flag", "score": round(score, 4),
+            out.append({"object_id": str(o.object_id), "kind": "critic_flag", "score": as_suspicion(score),
                         "proposed_label": None, "detail": {"checks": flags, "reasons": v.reasons}})
     log.info("ed.critic.done", frames=len(frame_ids), flagged=len(out), scope=session_id or "corpus")
     return out

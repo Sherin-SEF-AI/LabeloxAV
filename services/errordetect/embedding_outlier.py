@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.logging import get_logger
 from db.models import Frame, Object, ObjectEmbedding
 from services.autolabel.ontology import get_ontology
+from services.errordetect.score import as_suspicion
 
 log = get_logger("ed_outlier")
 _ACCEPTED = ("accepted", "auto_accept")
@@ -49,7 +50,7 @@ async def detect_embedding_outliers(db: AsyncSession, session_id: str | None = N
                 # at 1.0, which is orthogonality: a crop pointing away from its own class centroid is
                 # already as wrong as this detector can say, and ordering past that point is noise.
                 out.append({"object_id": oid, "kind": "embedding_outlier",
-                            "score": round(min(1.0, float(d)), 4),
+                            "score": as_suspicion(d),
                             "proposed_label": None,
                             "detail": {"class_name": onto.by_id(cid).name, "centroid_distance": round(float(d), 4),
                                        "class_threshold": round(thresh, 4)}})

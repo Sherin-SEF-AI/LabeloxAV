@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.logging import get_logger
 from db.models import Frame, Object, ObjectEmbedding
 from services.autolabel.ontology import get_ontology
+from services.errordetect.score import as_suspicion
 
 log = get_logger("ed_confident")
 _ACCEPTED = ("accepted", "auto_accept")
@@ -65,7 +66,7 @@ async def detect_confident_learning(db: AsyncSession, session_id: str | None = N
             continue
         prop_cid = classes[proposed]
         out.append({"object_id": str(oids[i]), "kind": "confident_learning",
-                    "score": round(float(1.0 - pred[i][given]), 4),
+                    "score": as_suspicion(1.0 - pred[i][given]),
                     "proposed_label": {"class_id": prop_cid, "class_name": onto.by_id(prop_cid).name},
                     "detail": {"given_class": onto.by_id(classes[given]).name,
                                "given_prob": round(float(pred[i][given]), 4),

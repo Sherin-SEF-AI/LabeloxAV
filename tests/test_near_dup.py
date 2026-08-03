@@ -156,4 +156,7 @@ def test_an_outlier_score_cannot_exceed_a_certainty():
     from services.errordetect import embedding_outlier
 
     src = inspect.getsource(embedding_outlier.detect_embedding_outliers)
-    assert 'min(1.0, float(d))' in src, "the distance must be bounded before it becomes a score"
+    # The clamp moved into services/errordetect/score.py once the same mistake turned up in four places:
+    # a convention every detector has to remember is not a contract, and two detectors were in range only
+    # by luck.
+    assert 'as_suspicion(d)' in src, "the distance must be bounded before it becomes a score"

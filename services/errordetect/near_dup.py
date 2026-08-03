@@ -46,7 +46,9 @@ def _suspicion(conf: float, dup_margin: float) -> float:
     This ranks, it does not calibrate. No score here can claim to be P(error) until confirmed and dismissed
     verdicts exist to fit against, and across 298,529 candidates there is currently one.
     """
-    return round(max(0.0, min(1.0, 1.0 - conf)) * (0.5 + 0.5 * max(0.0, min(1.0, dup_margin))), 4)
+    from services.errordetect.score import as_suspicion
+
+    return as_suspicion(max(0.0, min(1.0, 1.0 - conf)) * (0.5 + 0.5 * max(0.0, min(1.0, dup_margin))))
 
 
 async def detect_near_dup_inconsistent(db: AsyncSession, session_id: str | None = None, *,
