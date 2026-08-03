@@ -18,6 +18,9 @@ import { toast } from "@/lib/toast";
 // Then importing is a decision rather than a surprise.
 
 const FORMATS = [
+  // Labelbox first because it is the most common thing to be migrating off, and the one this page could
+  // not answer for until now.
+  ["labelbox", "Labelbox"],
   ["scale", "Scale AI"], ["superannotate", "SuperAnnotate"], ["encord", "Encord"],
   ["cvat", "CVAT"], ["labelstudio", "Label Studio"], ["coco", "COCO"],
 ] as const;
@@ -35,7 +38,7 @@ type Report = {
 
 export default function MigratePage() {
   const router = useRouter();
-  const [format, setFormat] = useState<string>("scale");
+  const [format, setFormat] = useState<string>("labelbox");
   const [source, setSource] = useState("");
   const [vehicle, setVehicle] = useState("IMPORT-01");
   const [city, setCity] = useState("");
@@ -88,7 +91,7 @@ export default function MigratePage() {
             </Field>
             <Field label="source (s3:// uri, zip or directory)">
               <input value={source} onChange={(e) => setSource(e.target.value)} spellCheck={false}
-                placeholder="s3://uploads/scale-export.zip"
+                placeholder="s3://uploads/labelbox-export.ndjson"
                 className="input font-mono text-[11px] w-[26rem]" />
             </Field>
             <Field label="vehicle">

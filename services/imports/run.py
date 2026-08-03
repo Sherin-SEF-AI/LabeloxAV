@@ -36,6 +36,7 @@ from services.imports import (
     adapter_cvat,
     adapter_encord,
     adapter_kitti,
+    adapter_labelbox,
     adapter_labelstudio,
     adapter_mapillary,
     adapter_nuscenes,
@@ -66,6 +67,7 @@ ADAPTERS = {
     "labelstudio": adapter_labelstudio.parse,
     # Migration formats: a competitor's export is the cheapest path in for a team that already
     # has years of labels somewhere else.
+    "labelbox": adapter_labelbox.parse,
     "scale": adapter_scale.parse,
     "superannotate": adapter_superannotate.parse,
     "encord": adapter_encord.parse,

@@ -35,7 +35,8 @@ const IMPORT_FORMATS: [string, string][] = [
   ["images", "Images folder"], ["video", "Video"], ["mcap", "MCAP"],
   // Competitor exports. Listed with the rest because from a user's point of view they are just formats;
   // what differs is that a migration wants the dry run first, which /import/migrate provides.
-  ["scale", "Scale AI"], ["superannotate", "SuperAnnotate"], ["encord", "Encord"],
+  ["labelbox", "Labelbox"], ["scale", "Scale AI"], ["superannotate", "SuperAnnotate"],
+  ["encord", "Encord"],
 ];
 
 // Export targets wired in services/export/dataset.py.
