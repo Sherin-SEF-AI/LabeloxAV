@@ -89,6 +89,53 @@ def rogan_gladen(observed_p: float, *, sensitivity: float, specificity: float) -
     return max(0.0, min(1.0, (observed_p + specificity - 1.0) / denom))
 
 
+def rogan_gladen_interval(observed_p: float, *, sens_ci: dict, spec_ci: dict) -> dict:
+    """Correct a rate for an imperfect judge, carrying the judge's own uncertainty through.
+
+    The point version collapses three uncertain quantities into one confident-looking number, and on real
+    data that is worse than useless. Measured on this corpus the judge came out at sensitivity 0.76
+    (0.65 to 0.84) and specificity 0.80 (0.65 to 0.90), which puts the estimator's denominator anywhere
+    between 0.30 and 0.74. A denominator uncertain by a factor of two makes the corrected rate uncertain by
+    a factor of two, and quoting its midpoint would hide exactly that.
+
+    So the correction is evaluated at both ends of the judge's intervals. Note this is the range implied by
+    the judge's uncertainty alone; the sampling error in `observed_p` is reported separately by the caller
+    and the two are not combined, because combining them would imply a joint interval nobody computed.
+
+    `clamped` is the important flag. Rogan-Gladen is unbounded, so a judge whose measured error cannot
+    explain the observed rate produces an estimate above 1.0 or below 0.0, which then gets clipped into
+    range and reads as a confident 1.0. That is a signal that the model does not fit, not an answer, and it
+    has to be visible.
+    """
+    lo_est = rogan_gladen(observed_p, sensitivity=sens_ci["lo"], specificity=spec_ci["lo"])
+    hi_est = rogan_gladen(observed_p, sensitivity=sens_ci["hi"], specificity=spec_ci["hi"])
+    mid = rogan_gladen(observed_p, sensitivity=sens_ci["p"], specificity=spec_ci["p"])
+
+    ends = [v for v in (lo_est, hi_est, mid) if v is not None]
+    if not ends:
+        return {"p": None, "lo": None, "hi": None, "clamped": False,
+                "note": "the judge carries no information (sensitivity + specificity <= 1), so no "
+                        "correction is possible at any point in its interval"}
+
+    def _raw(sens: float, spec: float) -> float | None:
+        d = sens + spec - 1.0
+        return None if d <= 1e-9 else (observed_p + spec - 1.0) / d
+
+    raws = [r for r in (_raw(sens_ci["lo"], spec_ci["lo"]), _raw(sens_ci["hi"], spec_ci["hi"]),
+                        _raw(sens_ci["p"], spec_ci["p"])) if r is not None]
+    clamped = any(r > 1.0 or r < 0.0 for r in raws)
+
+    note = None
+    if clamped:
+        note = ("the corrected estimate falls outside [0, 1] before clamping, which means the observed rate "
+                "is more extreme than this judge's measured error can explain. Treat it as a bound, not a "
+                "point estimate: either the judge is better than its calibration suggests, or the "
+                "calibration set is not representative of the batch being corrected")
+    return {"p": round(mid, 4) if mid is not None else None,
+            "lo": round(min(ends), 4), "hi": round(max(ends), 4),
+            "clamped": clamped, "note": note}
+
+
 def acceptance_decision(defects: int, n: int, *, max_defect_rate: float,
                         confidence: float = 0.95) -> dict:
     """Accept a batch, reject it, or say the sample is too small to tell.

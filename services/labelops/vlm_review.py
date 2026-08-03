@@ -381,7 +381,7 @@ async def judged_precision(db: AsyncSession, batch_id: str, *, confidence: float
     population when that assumption is the one you actually want, for instance a dedicated adjudication set
     covering a wider slice than the batch under test.
     """
-    from services.labelops.sampling import rogan_gladen, wilson_interval
+    from services.labelops.sampling import rogan_gladen_interval, wilson_interval
 
     q = (select(OntologyClass.name, MachineVerdict.verdict, func.count(MachineVerdict.verdict_id))
          .join(Object, Object.object_id == MachineVerdict.object_id)
@@ -400,27 +400,47 @@ async def judged_precision(db: AsyncSession, batch_id: str, *, confidence: float
     total_decided = sum(d["correct"] + d["incorrect"] for d in per_class.values())
     total_unsure = sum(d["unsure"] for d in per_class.values())
 
-    agreement = await judge_agreement(db, model_version=model_version,
-                                      batch_id=agreement_batch_id or batch_id)
     raw = wilson_interval(total_correct, total_decided, confidence)
 
+    # Prefer the retrospective calibration, which measures the judge against human rulings that already
+    # existed and therefore covers both directions. judge_agreement is the fallback and is weaker here for a
+    # structural reason: it reads human ground truth off the object's current state, and this corpus has 240
+    # accepted objects against essentially no rejected ones, so it can measure sensitivity and has almost no
+    # negatives to measure specificity with. Rogan-Gladen needs both.
+    from services.labelops.judge_calibration import stored_calibration
+
+    calibration = await stored_calibration(db, model_version=model_version)
+    agreement = await judge_agreement(db, model_version=model_version,
+                                      batch_id=agreement_batch_id or batch_id)
+
     corrected = caveat = None
-    if agreement["usable"]:
-        corrected = rogan_gladen(raw["p"] or 0.0, sensitivity=agreement["sensitivity"],
-                                 specificity=agreement["specificity"])
-        if corrected is None:
-            caveat = ("the judge's sensitivity and specificity sum to 1, meaning its verdicts carry no "
-                      "information, so no correction is possible")
+    if calibration:
+        corrected = rogan_gladen_interval(raw["p"] or 0.0,
+                                          sens_ci=calibration["sensitivity_interval"],
+                                          spec_ci=calibration["specificity_interval"])
+        if corrected.get("clamped"):
+            caveat = corrected["note"]
+    elif agreement["usable"]:
+        corrected = rogan_gladen_interval(
+            raw["p"] or 0.0,
+            sens_ci={"p": agreement["sensitivity"], "lo": agreement["sensitivity"],
+                     "hi": agreement["sensitivity"]},
+            spec_ci={"p": agreement["specificity"], "lo": agreement["specificity"],
+                     "hi": agreement["specificity"]})
+        caveat = ("corrected against judge agreement on reviewed objects rather than a calibration set, so "
+                  "the judge's own uncertainty is not carried through")
     else:
         caveat = (f"no correction applied: only {agreement['decided']} objects have both a machine verdict "
-                  f"and a human ruling, so the judge's own error rate is unmeasured. The raw figure is the "
-                  f"judge's agreement rate, not the label precision.")
+                  f"and a human ruling, and no retrospective calibration exists, so the judge's own error "
+                  f"rate is unmeasured. The raw figure is the judge's agreement rate, not the label "
+                  f"precision.")
 
     return {
         "batch_id": batch_id,
         "judged": total_decided, "unsure": total_unsure,
         "raw": raw,
-        "corrected": round(corrected, 4) if corrected is not None else None,
+        "corrected": corrected,
+        "judge_calibration": calibration,
         "judge_agreement": agreement,
         "caveat": caveat,
         "per_class": {k: {**v, "raw": wilson_interval(v["correct"], v["correct"] + v["incorrect"], confidence)}

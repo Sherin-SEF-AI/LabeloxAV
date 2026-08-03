@@ -341,8 +341,13 @@ def test_precision_is_corrected_once_the_judge_has_been_measured():
         assert r["raw"]["p"] == 0.6
         # Corrected through the judge's own measured error (sensitivity 0.9, specificity 0.7), the labels
         # are actually 50% correct. Quoting 0.6 would have overstated quality by ten points.
-        assert r["corrected"] == pytest.approx(0.5, abs=1e-3), r["corrected"]
-        assert r["caveat"] is None
+        #
+        # A dict rather than a float: the correction now carries the judge's own uncertainty through, because
+        # a point estimate built from three uncertain quantities reads as more settled than it is. On the
+        # real corpus that mattered, where a measured sensitivity of 0.76 and specificity of 0.80 put the
+        # estimator's denominator anywhere between 0.30 and 0.74.
+        assert r["corrected"]["p"] == pytest.approx(0.5, abs=1e-3), r["corrected"]
+        assert r["corrected"]["clamped"] is False
 
     run_async(_flow())
 
