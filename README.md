@@ -330,12 +330,20 @@ The genuinely order-dependent ones had a shared cause: the suite seeds and commi
 
 | | Built | Actually used |
 | --- | --- | --- |
-| Precision batch | 300 crops machine-judged | **0 human adjudications**, so precision is still unmeasured |
+| Precision batch | 300 crops machine-judged, judge calibrated | **measured**: label precision at least 0.94 (see below) |
 | Error detectors | bulk verdicts, per-detector precision | **298,528 pending, 1 decided** |
 | Workforce | dispatch, callback, rating | **0 registered** |
 | Metered delivery | usage records, invoices | **0 records**; no export has run since |
 
-Every one of those waits on a person or an operational trigger rather than on more code. The machine judge did run: 300 of 300 crops, 240 called correct and 60 incorrect, a raw agreement rate of 0.80 (0.751 to 0.841). The system refuses to call that precision, and it is right to: with no human adjudications the judge's own error rate is unmeasured, so the figure is the judge's agreement rate and nothing more. Roughly fifty adjudications would convert it into a corpus precision with an interval.
+Every one of those waits on a person or an operational trigger rather than on more code.
+
+**Except the first, which turned out not to.** The machine judge ran on all 300 crops: 240 called correct, 60 incorrect, a raw agreement rate of 0.80 (0.751 to 0.841). Converting that into a label precision needs the judge's own error rate, which looked like it needed somebody to adjudicate a fresh sample, which is why it had not happened.
+
+The corpus already held the answer. Hundreds of human rulings sit in `review`, recorded for other purposes and never read as ground truth: **a review that changed an object's class is a person saying the machine was wrong**, and one that accepted it without changing the class is a person saying it was right. That is a labelled evaluation set for the judge, already paid for. Measured against it, the judge scores **sensitivity 0.76** (0.65 to 0.84) and **specificity 0.80** (0.65 to 0.90), across 118 independent human decisions, at no new cost.
+
+Corrected through that, the 0.80 becomes a **lower bound of 0.94 on label precision for a random sample of the corpus**, which is the first such number this system has ever had. It is reported as a bound rather than a point because the estimate hits the top of the range: Rogan-Gladen is unbounded, and a judge whose measured error cannot explain the observed rate produces something above 1.0 that clips into range and reads as a confident 1.0. That is a signal the model does not fit, not an answer, so the correction carries the judge's uncertainty through and flags `clamped` instead of hiding it. It fired on the first real use.
+
+Three things decide whether any of that means anything, and each would have produced a confident, silently false number. The judge must be asked about the class **the machine asserted**, not the one the object carries now, since every negative's current class is the human's correction. One track-level reclassify is **one** human decision, not one per object: this corpus has 164 negative objects behind 44 decisions, and counting objects would shrink the interval by 2.3x. And the calibration cannot infer ground truth from object state, because a reclassified object ends up `accepted` and every negative would count as a positive.
 
 One caveat on the judge itself. The local model never once returned `unsure` across 300 crops, despite abstention being a first-class verdict, and some of its rejections carry reasons like *"too small and blurred to identify with certainty"*, which is an abstention wearing the wrong label. Its 0.80 is therefore probably pessimistic. A frontier judge is wired behind the same provider interface and unconfigured here.
 
