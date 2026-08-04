@@ -113,6 +113,18 @@ class VlmSettings(BaseModel):
     model: str = "Qwen/Qwen2-VL-2B-Instruct"  # transformers backend; target: Qwen3-VL-4B
     ollama_url: str = "http://localhost:11434"
     ollama_tag: str = "qwen2.5vl:7b"  # locally available; target: qwen3-vl:4b
+    # The model that judges existing labels, when it should differ from the one that proposes them.
+    #
+    # Separate because the two jobs are different and were measured separately. `ollama_tag` is read by
+    # eight call sites: the Path C verifier, road-text and ANPR OCR, captioning, VLM QA and the ops agent.
+    # The judge was measured against 118 human decisions and qwen3-vl:8b-instruct-q8_0 won on the axes that
+    # matter (specificity 0.89 against 0.80, equal superclass sensitivity, and it actually abstains where
+    # qwen2.5vl:7b returned `unsure` zero times in 547 crops). None of that says anything about naming an
+    # object, which is what the other seven callers ask for, so changing one tag for all of them would be
+    # generalising a measurement past what it covers.
+    #
+    # Empty means "use ollama_tag", so this costs nothing until somebody sets it.
+    judge_tag: str = ""
     quant: str = "nf4"
     max_context: int = 8192
     crop_margin: float = 0.15

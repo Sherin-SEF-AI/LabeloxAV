@@ -218,7 +218,7 @@ async def calibrate_judge(db: AsyncSession, *, limit: int | None = None, client=
             asked_id = onto.by_name(item.asked_class).id
         except Exception:  # noqa: BLE001
             continue
-        reply = _ask(client, crop, item.asked_class, _alternatives(onto, asked_id))
+        reply = _ask(client, crop, item.asked_class, _alternatives(onto, asked_id), model=model_version)
         parsed = parse_judge_reply(reply, onto)
         judged += 1
 

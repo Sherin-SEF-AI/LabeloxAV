@@ -195,7 +195,7 @@ async def prereview_batch(db: AsyncSession, batch_id: str, *, limit: int | None 
 
         given = onto.by_id(int(obj.class_id)).name
         alts = _alternatives(onto, int(obj.class_id))
-        reply = _ask(client, crop, given, alts)
+        reply = _ask(client, crop, given, alts, model=model_version)
         parsed = parse_judge_reply(reply, onto)
         counts[parsed["verdict"]] += 1
         judged += 1
@@ -237,7 +237,7 @@ def _model_version_for(settings, provider: str) -> str:
         return settings.anthropic.vision_model
     if provider == "groq":
         return settings.groq.vision_model
-    return settings.models.vlm.ollama_tag
+    return settings.models.vlm.judge_tag or settings.models.vlm.ollama_tag
 
 
 def _chat_capable(client):
@@ -263,7 +263,7 @@ def _chat_capable(client):
     return None
 
 
-def _ask(client, crop, given_class: str, alternatives: list[str]) -> dict:
+def _ask(client, crop, given_class: str, alternatives: list[str], model: str | None = None) -> dict:
     """One judging call.
 
     A judging prompt is not what VlmClient.verify was built for: verify() takes a shortlist and an attribute
@@ -284,7 +284,9 @@ def _ask(client, crop, given_class: str, alternatives: list[str]) -> dict:
         if ok:
             chat = target if hasattr(target, "chat_json") else target.client
             try:
-                return chat.chat_json(prompt, model=getattr(target, "model", None),
+                # `model` overrides the client's default so the judge can run a different model from the
+                # one Path C proposes with, which is the point of models.vlm.judge_tag.
+                return chat.chat_json(prompt, model=model or getattr(target, "model", None),
                                       image_jpeg=buf.tobytes(), temperature=0.0)
             except Exception as exc:  # noqa: BLE001
                 log.info("vlm_review.judge_call_failed", error=str(exc)[:160])
