@@ -372,3 +372,43 @@ def test_precision_corrects_with_the_judge_that_judged_the_batch():
     assert "judge_model" in src
     assert "MachineVerdict.batch_id == batch_id" in src, (
         "the judge has to be read off the batch, not defaulted to None")
+
+
+def test_a_refinement_inside_a_superclass_is_not_a_cross_superclass_error():
+    """The distinction that decided a model comparison, and nearly decided it wrongly.
+
+    On the strict reading qwen3-vl:8b scored sensitivity 0.50 against qwen2.5vl:7b's 0.76, which reads as a
+    much worse judge. It is not: 31 of its 34 rejections of human-accepted labels proposed another
+    four-wheeler, saying "this is an SUV, not a sedan". At superclass level the two are 0.956 and 0.943.
+
+    The gap is in the ground truth, not the judge: a reviewer clicking accept on `sedan` for a car is
+    answering a coarser question than "is this precisely a sedan", so a stronger model looks worse by
+    disagreeing more usefully.
+    """
+    from services.autolabel.ontology import get_ontology
+    from services.labelops.judge_calibration import _is_refinement
+
+    onto = get_ontology()
+    suv = next(c.id for c in onto.classes if c.name == "suv")
+    pole = next(c.id for c in onto.classes if c.name == "pole")
+
+    assert _is_refinement(onto, "sedan", suv) is True, "sedan to SUV is a refinement"
+    assert _is_refinement(onto, "rider", pole) is False, "rider to pole is a real error"
+    # and a rejection with no proposal cannot be called a refinement
+    assert _is_refinement(onto, "sedan", None) is False
+    assert _is_refinement(onto, None, suv) is False
+
+
+@requires_infra
+def test_both_sensitivities_are_reported_rather_than_one_chosen():
+    """Collapsing to either number hides the thing that matters. The strict figure alone makes a better
+    judge look worse; the superclass figure alone hides that it disagrees on fine class at all."""
+    import inspect
+
+    from services.labelops import judge_calibration
+
+    for fn in (judge_calibration.calibrate_judge, judge_calibration.stored_calibration):
+        src = inspect.getsource(fn)
+        assert '"sensitivity"' in src and '"sensitivity_superclass"' in src, (
+            f"{fn.__name__} must report both readings")
+        assert '"refinements_within_superclass"' in src, "and the count behind the difference"

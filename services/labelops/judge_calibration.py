@@ -33,6 +33,19 @@ on and the cost is real.
 **A judge that abstains is not scored as correct.** `unsure` is counted separately in both directions.
 Folding abstentions into the wrong side would let a judge that declines every hard crop report excellent
 sensitivity on the easy ones.
+
+**A refinement inside a superclass is not the same disagreement as a cross-superclass error, and conflating
+them measures the calibration set rather than the judge.** This was found by comparing two models. On the
+strict reading qwen3-vl:8b scored sensitivity 0.50 against qwen2.5vl:7b's 0.76, which reads as a much worse
+judge. It is not: 31 of its 34 rejections of human-accepted labels proposed another four-wheeler, saying
+"this is an SUV, not a sedan", with reasons like higher ground clearance and roof rails. At superclass level
+the two score 0.956 and 0.943.
+
+The gap is real and it is in the ground truth. A reviewer clicking accept on `sedan` for a car is answering
+a coarser question than "is this precisely a sedan", so a stronger model looks worse by disagreeing more
+usefully. Both numbers are therefore reported: `sensitivity` stays strict, and `sensitivity_superclass`
+counts a within-L1 refinement as agreement. The same L1 comparison `apply_vlm` already uses to decide
+whether a VLM override is cheap or a big claim.
 """
 
 from __future__ import annotations
@@ -51,6 +64,20 @@ log = get_logger("labelops.judge_calibration")
 
 # States a human moved an object to that mean "the label was right".
 ACCEPTED_STATES = ("accepted", "submitted")
+
+
+def _is_refinement(onto, asked_class: str | None, proposed_class_id: int | None) -> bool:
+    """Whether a rejection swapped one class for a sibling under the same L1.
+
+    sedan to SUV is a refinement; rider to pole is an error. The same comparison `apply_vlm` uses to decide
+    whether a VLM override is cheap or a big claim, so the two cannot drift apart.
+    """
+    if not asked_class or proposed_class_id is None:
+        return False
+    try:
+        return onto.by_name(asked_class).l1 == onto.by_id(int(proposed_class_id)).l1
+    except Exception:  # noqa: BLE001
+        return False
 
 
 @dataclass
@@ -197,9 +224,12 @@ async def calibrate_judge(db: AsyncSession, *, limit: int | None = None, client=
 
         d = per_decision.setdefault(item.decision_key, {
             "human_says_correct": item.human_says_correct,
-            "correct": 0, "incorrect": 0, "unsure": 0, "objects": 0})
+            "correct": 0, "incorrect": 0, "unsure": 0, "objects": 0, "refinement": False})
         d[parsed["verdict"]] += 1
         d["objects"] += 1
+        if parsed["verdict"] == "incorrect" and _is_refinement(onto, item.asked_class,
+                                                              parsed["proposed_class_id"]):
+            d["refinement"] = True
 
         if persist:
             await db.execute(pg_insert(MachineVerdict).values(
@@ -221,6 +251,7 @@ async def calibrate_judge(db: AsyncSession, *, limit: int | None = None, client=
         await db.commit()
 
     tp = fp = tn = fn = abstain_pos = abstain_neg = 0
+    refinements = 0
     for d in per_decision.values():
         # Majority of the objects under one human decision. A tie, or all abstentions, counts as an
         # abstention rather than being broken arbitrarily toward agreement.
@@ -241,6 +272,8 @@ async def calibrate_judge(db: AsyncSession, *, limit: int | None = None, client=
                 tp += 1
             else:
                 fn += 1
+                if d.get("refinement"):
+                    refinements += 1
         else:
             if verdict == "incorrect":
                 tn += 1
@@ -262,6 +295,11 @@ async def calibrate_judge(db: AsyncSession, *, limit: int | None = None, client=
         "specificity": round(spec, 4) if spec is not None else None,
         "sensitivity_interval": sens_ci,
         "specificity_interval": spec_ci,
+        # Counting a within-superclass refinement as agreement. Reported beside the strict figure rather
+        # than instead of it: the gap between the two is a property of the calibration set, not of the
+        # judge, and collapsing to either number alone hides that.
+        "sensitivity_superclass": (round((tp + refinements) / (tp + fn), 4) if (tp + fn) else None),
+        "refinements_within_superclass": refinements,
         "confusion": {"tp": tp, "fp": fp, "tn": tn, "fn": fn,
                       "abstained_on_correct": abstain_pos, "abstained_on_wrong": abstain_neg},
         "usable": sens is not None and spec is not None and (sens + spec) > 1.0,
@@ -302,7 +340,8 @@ async def stored_calibration(db: AsyncSession, *, model_version: str | None = No
             return None
 
     rows = (await db.execute(
-        select(MachineVerdict.verdict, MachineVerdict.detail, MachineVerdict.object_id)
+        select(MachineVerdict.verdict, MachineVerdict.detail, MachineVerdict.object_id,
+               MachineVerdict.proposed_class_id)
         .where(MachineVerdict.batch_id == "judge-calibration",
                MachineVerdict.model_version == model_version))).all()
     if not rows:
@@ -313,16 +352,21 @@ async def stored_calibration(db: AsyncSession, *, model_version: str | None = No
     cal = await build_calibration_set(db)
     key_by_object = {i.object_id: i.decision_key for i in cal["positives"] + cal["negatives"]}
 
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
     per_decision: dict[str, dict] = {}
-    for verdict, detail, oid in rows:
+    for verdict, detail, oid, proposed in rows:
         key = key_by_object.get(str(oid))
         if key is None:
             continue
         d = per_decision.setdefault(key, {"human_says_correct": bool((detail or {}).get("human_says_correct")),
-                                          "correct": 0, "incorrect": 0, "unsure": 0})
+                                          "correct": 0, "incorrect": 0, "unsure": 0, "refinement": False})
         d[verdict] = d.get(verdict, 0) + 1
+        if verdict == "incorrect" and _is_refinement(onto, (detail or {}).get("asked_class"), proposed):
+            d["refinement"] = True
 
-    tp = fp = tn = fn = 0
+    tp = fp = tn = fn = refinements = 0
     for d in per_decision.values():
         if d["correct"] > d["incorrect"]:
             v = "correct"
@@ -333,6 +377,8 @@ async def stored_calibration(db: AsyncSession, *, model_version: str | None = No
         if d["human_says_correct"]:
             tp += v == "correct"
             fn += v == "incorrect"
+            if v == "incorrect" and d.get("refinement"):
+                refinements += 1
         else:
             tn += v == "incorrect"
             fp += v == "correct"
@@ -344,6 +390,8 @@ async def stored_calibration(db: AsyncSession, *, model_version: str | None = No
         "specificity": round(tn / (tn + fp), 4),
         "sensitivity_interval": wilson_interval(tp, tp + fn),
         "specificity_interval": wilson_interval(tn, tn + fp),
+        "sensitivity_superclass": round((tp + refinements) / (tp + fn), 4) if (tp + fn) else None,
+        "refinements_within_superclass": refinements,
         "confusion": {"tp": tp, "fp": fp, "tn": tn, "fn": fn},
         "independent_decisions": len(per_decision),
         "model_version": model_version,
