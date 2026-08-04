@@ -398,3 +398,94 @@ def test_the_judge_is_measured_on_the_population_it_is_being_applied_to():
             "or the scoping parameter is doing nothing")
 
     run_async(_flow())
+
+
+@requires_infra
+def test_precision_reports_superclass_agreement_beside_the_strict_rate():
+    """Without this the headline number is the most misleading one the system can produce.
+
+    Re-judging the 300-crop batch with a stronger model took the strict agreement rate from 0.80 to 0.51,
+    which reads as "half the corpus is mislabelled". Of the 140 rejections behind that, 128 proposed another
+    four-wheeler (sedan to SUV) and 2 said the label named the wrong kind of thing entirely. Superclass
+    agreement is 0.958.
+
+    Both are true and they answer different questions, so both are returned: the strict rate is what a
+    fine-grained consumer gets, and the superclass rate is what a safety gate cares about.
+    """
+    import uuid as _uuid
+
+    from db.models import MachineVerdict
+    from db.session import get_sessionmaker
+    from services.autolabel.ontology import get_ontology
+    from services.labelops.vlm_review import judged_precision
+
+    onto = get_ontology()
+    sedan = next(c for c in onto.classes if c.name == "sedan")
+    suv = next(c for c in onto.classes if c.name == "suv")
+    pole = next(c for c in onto.classes if c.name == "pole")
+    batch = f"superclass-{_uuid.uuid4().hex[:8]}"
+    model = f"judge-{_uuid.uuid4().hex[:6]}"
+
+    async def _flow():
+        oids = await _seed_batch_objects(batch, sedan.id, 4)
+        async with get_sessionmaker()() as db:
+            ts = 1
+            # one confirmed, two refinements (sedan -> suv), one real error (sedan -> pole)
+            for oid, verdict, proposed in (
+                (oids[0], "correct", None),
+                (oids[1], "incorrect", suv.id),
+                (oids[2], "incorrect", suv.id),
+                (oids[3], "incorrect", pole.id),
+            ):
+                db.add(MachineVerdict(object_id=_uuid.UUID(oid), judge="vlm", provider="ollama",
+                                      model_version=model, verdict=verdict, proposed_class_id=proposed,
+                                      confidence=0.9, detail={"given_class": "sedan"},
+                                      batch_id=batch, ts_ns=ts))
+            await db.commit()
+
+        async with get_sessionmaker()() as db:
+            r = await judged_precision(db, batch, model_version=model)
+
+        assert r["judged"] == 4
+        assert r["raw"]["p"] == 0.25, "strict: only one exact-class agreement"
+        assert r["raw_superclass"]["p"] == 0.75, "superclass: the two SUV calls are the right kind of thing"
+        assert r["rejections"]["refinement_within_superclass"] == 2
+        assert r["rejections"]["cross_superclass"] == 1
+        assert "safety gate cares about" in r["rejections"]["note"]
+
+    run_async(_flow())
+
+
+async def _seed_batch_objects(batch_id: str, class_id: int, n: int) -> list[str]:
+    """n objects stamped into a flywheel batch, so judged_precision can find them."""
+    from core.timebase import now_ns, seconds_to_ns
+    from db.models import Frame, Object, OntologyClass, OntologyVersion
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
+    sid, fid, ts = uuid.uuid4(), uuid.uuid4(), now_ns()
+    out = []
+    async with get_sessionmaker()() as db:
+        if await db.get(OntologyVersion, onto.version) is None:
+            db.add(OntologyVersion(version=onto.version, hierarchy_levels=3, attributes={}))
+            await db.flush()
+            for c in onto.classes:
+                db.add(OntologyClass(id=c.id, version=onto.version, name=c.name, l0=c.l0, l1=c.l1,
+                                     india=c.india, map_to={}))
+            await db.flush()
+        db.add(DbSession(session_id=sid, vehicle_id="CP-01", start_ts_ns=ts,
+                         end_ts_ns=ts + seconds_to_ns(1), city="BLR", sensors={},
+                         ontology_version=onto.version))
+        db.add(Frame(frame_id=fid, session_id=sid, ts_ns=ts, cam_id="cam_f", img_uri="s3://x/f.jpg",
+                     width=320, height=240, quality=0.9, scene={}))
+        await db.flush()
+        for _ in range(n):
+            oid = uuid.uuid4()
+            db.add(Object(object_id=oid, frame_id=fid, class_id=class_id, bbox=[1.0, 1.0, 30.0, 30.0],
+                          conf=0.6, source="fused", state="auto_accept", attrs={}, version=1,
+                          provenance={"flywheel": {"cycle_id": batch_id}}))
+            out.append(str(oid))
+        await db.commit()
+    return out

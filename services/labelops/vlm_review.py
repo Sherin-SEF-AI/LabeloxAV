@@ -385,18 +385,29 @@ async def judged_precision(db: AsyncSession, batch_id: str, *, confidence: float
     """
     from services.labelops.sampling import rogan_gladen_interval, wilson_interval
 
-    q = (select(OntologyClass.name, MachineVerdict.verdict, func.count(MachineVerdict.verdict_id))
+    q = (select(OntologyClass.name, MachineVerdict.verdict, MachineVerdict.proposed_class_id,
+                MachineVerdict.detail)
          .join(Object, Object.object_id == MachineVerdict.object_id)
          .join(OntologyClass, OntologyClass.id == Object.class_id)
-         .where(MachineVerdict.batch_id == batch_id, MachineVerdict.judge == JUDGE)
-         .group_by(OntologyClass.name, MachineVerdict.verdict))
+         .where(MachineVerdict.batch_id == batch_id, MachineVerdict.judge == JUDGE))
     if model_version:
         q = q.where(MachineVerdict.model_version == model_version)
 
+    from services.autolabel.ontology import get_ontology
+    from services.labelops.judge_calibration import _is_refinement
+
+    onto = get_ontology()
     per_class: dict[str, dict] = {}
-    for name, verdict, n in (await db.execute(q)).all():
+    refinements = cross_superclass = 0
+    for name, verdict, proposed, detail in (await db.execute(q)).all():
         d = per_class.setdefault(name, dict.fromkeys(VERDICTS, 0))
-        d[verdict] += int(n)
+        d[verdict] += 1
+        if verdict == "incorrect":
+            asked = (detail or {}).get("given_class") or name
+            if _is_refinement(onto, asked, proposed):
+                refinements += 1
+            elif proposed is not None:
+                cross_superclass += 1
 
     total_correct = sum(d["correct"] for d in per_class.values())
     total_decided = sum(d["correct"] + d["incorrect"] for d in per_class.values())
@@ -448,10 +459,22 @@ async def judged_precision(db: AsyncSession, batch_id: str, *, confidence: float
                   f"rate is unmeasured. The raw figure is the judge's agreement rate, not the label "
                   f"precision.")
 
+    # The same strict-versus-superclass split the calibration reports, one layer out, and for the same
+    # reason. On this corpus the strict rate is 0.509 and reads as "half the labels are wrong"; of the 140
+    # rejections behind it, 128 propose another four-wheeler and 2 are genuinely a different kind of thing.
+    # Quoting the strict figure alone as corpus precision would be the most misleading number this system
+    # could produce.
+    superclass_correct = total_correct + refinements
     return {
         "batch_id": batch_id,
         "judged": total_decided, "unsure": total_unsure,
         "raw": raw,
+        "raw_superclass": wilson_interval(superclass_correct, total_decided, confidence),
+        "rejections": {"refinement_within_superclass": refinements,
+                       "cross_superclass": cross_superclass,
+                       "note": ("a refinement swapped a class for a sibling under the same L1 (sedan to "
+                                "SUV); a cross-superclass rejection says the label named the wrong kind of "
+                                "thing entirely, which is the error a safety gate cares about")},
         "corrected": corrected,
         "judge_calibration": calibration,
         "judge_agreement": agreement,
