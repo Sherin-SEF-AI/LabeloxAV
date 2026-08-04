@@ -286,11 +286,25 @@ async def stored_calibration(db: AsyncSession, *, model_version: str | None = No
     positive and report a specificity of zero for a judge behaving perfectly. The ground truth for this set
     lives in `detail.human_says_correct`, recorded when the item was assembled.
     """
-    q = (select(MachineVerdict.verdict, MachineVerdict.detail, MachineVerdict.object_id)
-         .where(MachineVerdict.batch_id == "judge-calibration"))
-    if model_version:
-        q = q.where(MachineVerdict.model_version == model_version)
-    rows = (await db.execute(q)).all()
+    # Refuse to blend judges. Once a second model has been calibrated, an unscoped read averages two
+    # different judges into a sensitivity that belongs to neither, and the result looks exactly like a
+    # measurement. The caller has to say which judge, and judged_precision derives it from the batch.
+    if not model_version:
+        judges = [r[0] for r in (await db.execute(
+            select(MachineVerdict.model_version)
+            .where(MachineVerdict.batch_id == "judge-calibration")
+            .distinct())).all()]
+        if len(judges) > 1:
+            log.warning("judge_calibration.ambiguous", judges=sorted(judges))
+            return None
+        model_version = judges[0] if judges else None
+        if model_version is None:
+            return None
+
+    rows = (await db.execute(
+        select(MachineVerdict.verdict, MachineVerdict.detail, MachineVerdict.object_id)
+        .where(MachineVerdict.batch_id == "judge-calibration",
+               MachineVerdict.model_version == model_version))).all()
     if not rows:
         return None
 
@@ -332,5 +346,6 @@ async def stored_calibration(db: AsyncSession, *, model_version: str | None = No
         "specificity_interval": wilson_interval(tn, tn + fp),
         "confusion": {"tp": tp, "fp": fp, "tn": tn, "fn": fn},
         "independent_decisions": len(per_decision),
+        "model_version": model_version,
         "source": "retrospective calibration against existing human rulings",
     }

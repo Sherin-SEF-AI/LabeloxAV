@@ -183,17 +183,70 @@ def test_one_track_level_correction_counts_as_one_human_decision():
 
 @requires_infra
 def test_the_set_has_both_classes_which_is_what_makes_it_usable():
-    """Sensitivity needs positives and specificity needs negatives. The corpus has 240 accepted objects and
-    essentially no rejected ones, so reading only object state gives one class and no correction is
-    possible. The reclassifications are the negatives."""
+    """Sensitivity needs positives and specificity needs negatives.
+
+    The corpus has 240 accepted objects and essentially no rejected ones, so reading only object state gives
+    one class and Rogan-Gladen cannot be applied at all. The reclassifications are what supply the other
+    side, and this checks that both reach the set.
+
+    Seeded rather than asserted against whatever the corpus holds. The first version asked the live set for
+    at least one of each, which passes or fails depending on what else ran first: it is a claim about the
+    data where it needs to be a claim about the assembly.
+    """
+    from core.timebase import now_ns, seconds_to_ns
+    from db.models import Frame, Object, OntologyClass, OntologyVersion, Review
+    from db.models import Session as DbSession
     from db.session import get_sessionmaker
+    from services.autolabel.ontology import get_ontology
     from services.labelops.judge_calibration import build_calibration_set
 
     async def _flow():
+        onto = get_ontology()
+        wrong = next(c.id for c in onto.classes if c.name == "e_auto")
+        right = next(c.id for c in onto.classes if c.name == "motorcycle")
+        sid, fid, ts = uuid.uuid4(), uuid.uuid4(), now_ns()
+
         async with get_sessionmaker()() as db:
-            cal = await build_calibration_set(db)
-        assert cal["n_positive_decisions"] > 0
-        assert cal["n_negative_decisions"] > 0
+            before = await build_calibration_set(db)
+
+            if await db.get(OntologyVersion, onto.version) is None:
+                db.add(OntologyVersion(version=onto.version, hierarchy_levels=3, attributes={}))
+                await db.flush()
+                for c in onto.classes:
+                    db.add(OntologyClass(id=c.id, version=onto.version, name=c.name, l0=c.l0, l1=c.l1,
+                                         india=c.india, map_to={}))
+                await db.flush()
+            db.add(DbSession(session_id=sid, vehicle_id="CP-01", start_ts_ns=ts,
+                             end_ts_ns=ts + seconds_to_ns(1), city="BLR", sensors={},
+                             ontology_version=onto.version))
+            db.add(Frame(frame_id=fid, session_id=sid, ts_ns=ts, cam_id="cam_f",
+                         img_uri="s3://x/f.jpg", width=320, height=240, quality=0.9, scene={}))
+            await db.flush()
+
+            # One accepted without a class change: a person saying the label was right.
+            pos = uuid.uuid4()
+            db.add(Object(object_id=pos, frame_id=fid, class_id=right, bbox=[1.0, 1.0, 30.0, 30.0],
+                          conf=0.6, source="fused", state="accepted", attrs={}, provenance={}, version=1))
+            await db.flush()
+            db.add(Review(object_id=pos, reviewer="rev", user_id=None, action="confirm",
+                          before={"class_id": right}, after={"class_id": right},
+                          time_spent_ms=0, ts_ns=ts))
+
+            # One reclassified: a person saying the machine was wrong.
+            neg = uuid.uuid4()
+            db.add(Object(object_id=neg, frame_id=fid, class_id=right, bbox=[2.0, 2.0, 31.0, 31.0],
+                          conf=0.6, source="fused", state="accepted", attrs={}, provenance={}, version=1))
+            await db.flush()
+            db.add(Review(object_id=neg, reviewer="rev", user_id=None, action="reclassify",
+                          before={"class_id": wrong}, after={"class_id": right},
+                          time_spent_ms=0, ts_ns=ts))
+            await db.commit()
+
+        async with get_sessionmaker()() as db:
+            after = await build_calibration_set(db)
+
+        assert after["n_positive_decisions"] - before["n_positive_decisions"] == 1
+        assert after["n_negative_decisions"] - before["n_negative_decisions"] == 1
 
     run_async(_flow())
 
@@ -226,3 +279,96 @@ def test_precision_prefers_the_retrospective_calibration_over_state_inference():
     idx_cal = src.index("if calibration:")
     idx_agree = src.index('elif agreement["usable"]')
     assert idx_cal < idx_agree, "calibration must be preferred, with agreement as the fallback"
+
+
+@requires_infra
+def test_two_calibrated_judges_are_never_averaged_into_one():
+    """The bug that became reachable the moment a second judge was calibrated.
+
+    stored_calibration read every row with batch_id='judge-calibration', so with two models present an
+    unscoped call blended their verdicts into a sensitivity belonging to neither, and the result looks
+    exactly like a measurement. Refusing is right: the caller has to say which judge, and judged_precision
+    derives it from the batch rather than passing None.
+    """
+    from core.timebase import now_ns, seconds_to_ns
+    from db.models import Frame, MachineVerdict, Object, OntologyClass, OntologyVersion, Review
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.autolabel.ontology import get_ontology
+    from services.labelops.judge_calibration import stored_calibration
+
+    async def _flow():
+        onto = get_ontology()
+        wrong = next(c.id for c in onto.classes if c.name == "e_auto")
+        right = next(c.id for c in onto.classes if c.name == "motorcycle")
+        sid, fid, ts = uuid.uuid4(), uuid.uuid4(), now_ns()
+        judge_a = f"judge-a-{uuid.uuid4().hex[:6]}"
+        judge_b = f"judge-b-{uuid.uuid4().hex[:6]}"
+
+        async with get_sessionmaker()() as db:
+            if await db.get(OntologyVersion, onto.version) is None:
+                db.add(OntologyVersion(version=onto.version, hierarchy_levels=3, attributes={}))
+                await db.flush()
+                for c in onto.classes:
+                    db.add(OntologyClass(id=c.id, version=onto.version, name=c.name, l0=c.l0, l1=c.l1,
+                                         india=c.india, map_to={}))
+                await db.flush()
+            db.add(DbSession(session_id=sid, vehicle_id="CP-01", start_ts_ns=ts,
+                             end_ts_ns=ts + seconds_to_ns(1), city="BLR", sensors={},
+                             ontology_version=onto.version))
+            db.add(Frame(frame_id=fid, session_id=sid, ts_ns=ts, cam_id="cam_f",
+                         img_uri="s3://x/f.jpg", width=320, height=240, quality=0.9, scene={}))
+            await db.flush()
+
+            # One known positive and one known negative, both judged by both models. judge_a gets both
+            # right, judge_b gets both wrong. Averaging them reports 0.5 for two judges that scored 1.0
+            # and 0.0, which is the number belonging to neither.
+            for human_correct in (True, False):
+                oid = uuid.uuid4()
+                db.add(Object(object_id=oid, frame_id=fid, class_id=right,
+                              bbox=[1.0, 1.0, 30.0, 30.0], conf=0.6, source="fused", state="accepted",
+                              attrs={}, provenance={}, version=1))
+                await db.flush()
+                db.add(Review(
+                    object_id=oid, reviewer="rev", user_id=None,
+                    action="confirm" if human_correct else "reclassify",
+                    before={"class_id": right if human_correct else wrong},
+                    after={"class_id": right}, time_spent_ms=0, ts_ns=ts))
+                right_answer = "correct" if human_correct else "incorrect"
+                wrong_answer = "incorrect" if human_correct else "correct"
+                for mv, verdict in ((judge_a, right_answer), (judge_b, wrong_answer)):
+                    db.add(MachineVerdict(object_id=oid, judge="vlm", provider="ollama", model_version=mv,
+                                          verdict=verdict, confidence=0.9,
+                                          detail={"human_says_correct": human_correct},
+                                          batch_id="judge-calibration", ts_ns=ts))
+            await db.commit()
+
+        async with get_sessionmaker()() as db:
+            unscoped = await stored_calibration(db)
+        assert unscoped is None, (
+            "with several judges calibrated, an unscoped read must refuse rather than average them")
+
+        async with get_sessionmaker()() as db:
+            a = await stored_calibration(db, model_version=judge_a)
+            b = await stored_calibration(db, model_version=judge_b)
+        assert a is not None and a["model_version"] == judge_a
+        assert b is not None and b["model_version"] == judge_b
+        # The two judges are opposites. An average would be 0.5/0.5, which describes neither of them.
+        assert (a["sensitivity"], a["specificity"]) == (1.0, 1.0)
+        assert (b["sensitivity"], b["specificity"]) == (0.0, 0.0)
+
+    run_async(_flow())
+
+
+@requires_infra
+def test_precision_corrects_with_the_judge_that_judged_the_batch():
+    """Deriving the judge from the batch is what makes the default safe. Passing None through would let a
+    batch judged by one model be corrected by another model's error rates."""
+    import inspect
+
+    from services.labelops import vlm_review
+
+    src = inspect.getsource(vlm_review.judged_precision)
+    assert "judge_model" in src
+    assert "MachineVerdict.batch_id == batch_id" in src, (
+        "the judge has to be read off the batch, not defaulted to None")

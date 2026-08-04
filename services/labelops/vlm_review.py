@@ -409,7 +409,18 @@ async def judged_precision(db: AsyncSession, batch_id: str, *, confidence: float
     # negatives to measure specificity with. Rogan-Gladen needs both.
     from services.labelops.judge_calibration import stored_calibration
 
-    calibration = await stored_calibration(db, model_version=model_version)
+    # Which judge produced this batch's verdicts. Derived rather than left None, because a correction has
+    # to use the calibration of the judge that actually did the judging: with two judges calibrated, an
+    # unscoped lookup would average them into a rate belonging to neither.
+    judge_model = model_version
+    if judge_model is None:
+        judges = [r[0] for r in (await db.execute(
+            select(MachineVerdict.model_version)
+            .where(MachineVerdict.batch_id == batch_id, MachineVerdict.judge == JUDGE)
+            .distinct())).all()]
+        judge_model = judges[0] if len(judges) == 1 else None
+
+    calibration = await stored_calibration(db, model_version=judge_model)
     agreement = await judge_agreement(db, model_version=model_version,
                                       batch_id=agreement_batch_id or batch_id)
 
