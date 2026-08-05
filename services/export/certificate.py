@@ -132,6 +132,33 @@ async def per_class_precision_recall(db: AsyncSession, eval_id: str, *,
     return dict(sorted(out.items()))
 
 
+async def _resolvable_gold(db: AsyncSession, object_ids: list) -> int:
+    """How many sealed gold objects still exist.
+
+    A gold set stores ids in JSONB, so a delete elsewhere in the corpus removes the object and leaves the
+    membership list pointing at nothing. Sealing protects the list from being edited; it does not protect
+    the rows it names.
+    """
+    import uuid as _uuid
+
+    from db.models import Object
+
+    ids = []
+    for o in object_ids:
+        try:
+            ids.append(_uuid.UUID(str(o)))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    if not ids:
+        return 0
+    total = 0
+    # Chunked: a large gold set in one IN clause can pass Postgres's parameter limit.
+    for i in range(0, len(ids), 10000):
+        total += int((await db.execute(
+            select(func.count(Object.object_id)).where(Object.object_id.in_(ids[i:i + 10000])))).scalar() or 0)
+    return total
+
+
 async def build_certificate(db: AsyncSession, *, commit_id: str, eval_id: str, gold_id: str,
                             model_version: str, key: str, confidence: float = 0.95,
                             overall: dict | None = None) -> dict:
@@ -145,9 +172,22 @@ async def build_certificate(db: AsyncSession, *, commit_id: str, eval_id: str, g
     gold = await db.get(GoldSet, gold_id)
     if gold is None:
         return {"error": "gold set not found", "gold_id": gold_id}
-    gold_size = len(gold.object_ids or [])
-    if not gold_size:
+    declared = list(gold.object_ids or [])
+    if not declared:
         return {"error": "gold set is empty, so nothing was measured", "gold_id": gold_id}
+
+    # How many of the sealed objects still exist. Not the same number as how many were sealed, and this
+    # corpus is the reason it is checked: the fixture purge deleted 13,172 objects, `gold_set.object_ids`
+    # is a JSONB list rather than a foreign key, so nothing cascaded and nothing warned. Four of five gold
+    # sets are now entirely dangling and the largest holds 47 of its 400.
+    #
+    # Reporting the declared count would put "measured against 400 gold objects" on a signed certificate
+    # backed by 47, which is exactly the kind of number this artifact exists to stop.
+    resolvable = await _resolvable_gold(db, declared)
+    if not resolvable:
+        return {"error": ("every object in this gold set has been deleted, so there is nothing left to "
+                          "measure against"),
+                "gold_id": gold_id, "gold_declared": len(declared), "gold_resolvable": 0}
 
     per_class = await per_class_precision_recall(db, eval_id, confidence=confidence)
     if not per_class:
@@ -175,8 +215,17 @@ async def build_certificate(db: AsyncSession, *, commit_id: str, eval_id: str, g
         # gold set is ever resealed with different contents under the same id, a certificate issued before
         # and one issued after will disagree here and the discrepancy is discoverable. Without it, the only
         # evidence would be the id, which is exactly the thing that failed to change.
-        "gold_fingerprint": gold_membership_fingerprint(gold.object_ids or []),
-        "gold_objects": gold_size,
+        "gold_fingerprint": gold_membership_fingerprint(declared),
+        # The number that can actually be scored against, which is the one a reader means by "gold size".
+        "gold_objects": resolvable,
+        "gold_declared": len(declared),
+        # Named when they differ, because a shrunken gold set weakens every interval on the certificate and
+        # a reader comparing two certificates needs to see that the ground truth moved under them.
+        "gold_missing": len(declared) - resolvable,
+        "gold_note": (None if resolvable == len(declared) else
+                      f"{len(declared) - resolvable} of {len(declared)} sealed gold objects no longer "
+                      f"exist in the corpus; every figure below is measured against the {resolvable} that "
+                      f"remain"),
         "eval_id": str(eval_id),
         "confidence": confidence,
         "overall": {
