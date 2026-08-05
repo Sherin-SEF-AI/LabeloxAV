@@ -241,9 +241,15 @@ async def calibrate_judge(db: AsyncSession, *, limit: int | None = None, client=
                         **item.detail},
                 batch_id="judge-calibration", ts_ns=now_ns(),
             ).on_conflict_do_update(
-                constraint="uq_machine_verdict_object_judge",
+                constraint="uq_machine_verdict_object_judge_batch",
                 set_={"verdict": parsed["verdict"], "confidence": parsed["confidence"],
-                      "batch_id": "judge-calibration", "ts_ns": now_ns()}))
+                      "proposed_class_id": parsed["proposed_class_id"],
+                      # detail too: leaving it stale is how a row ends up with one batch's id and another
+                      # batch's contents, which is what made the theft invisible.
+                      "detail": {"asked_class": item.asked_class, "reason": parsed["reason"],
+                                 "calibration": True,
+                                 "human_says_correct": item.human_says_correct, **item.detail},
+                      "ts_ns": now_ns()}))
             if judged % 10 == 0:
                 await db.commit()
 

@@ -144,11 +144,11 @@ async def prereview_batch(db: AsyncSession, batch_id: str, *, limit: int | None 
                           skip_judged: bool = True) -> dict:
     """Judge every object in a flywheel batch and record what the judge said.
 
-    Idempotent by construction: the verdict table is unique on (object, judge, model_version), so re-running
-    the same judge updates in place rather than double-counting, and a different model version writes its own
-    row so two judges stay comparable on the same crops. `skip_judged` additionally avoids paying for calls
-    that would only overwrite an identical verdict, which matters when the batch is 300 crops and the judge
-    is a metered API.
+    Idempotent by construction: the verdict table is unique on (object, judge, model_version, batch_id), so
+    re-running the same judge updates in place rather than double-counting, a different model version writes
+    its own row so two judges stay comparable on the same crops, and an object appearing in two batches
+    keeps a verdict in each. `skip_judged` additionally avoids paying for calls that would only overwrite an
+    identical verdict, which matters when the batch is 300 crops and the judge is a metered API.
     """
     from services.autolabel.ontology import get_ontology
     from services.llm.router import make_vlm_client
@@ -168,10 +168,14 @@ async def prereview_batch(db: AsyncSession, batch_id: str, *, limit: int | None 
 
     already: set[_uuid.UUID] = set()
     if skip_judged and objects:
+        # Scoped to this batch, matching the uniqueness key. Without the batch filter an object judged in
+        # some other batch by the same model reads as already done, and this batch quietly ends up with a
+        # hole in it that nothing reports.
         already = set((await db.execute(
             select(MachineVerdict.object_id).where(
                 MachineVerdict.judge == JUDGE,
                 MachineVerdict.model_version == model_version,
+                MachineVerdict.batch_id == batch_id,
                 MachineVerdict.object_id.in_([o.object_id for o in objects])))).scalars().all())
 
     counts = dict.fromkeys(VERDICTS, 0)
@@ -208,7 +212,7 @@ async def prereview_batch(db: AsyncSession, batch_id: str, *, limit: int | None 
             detail={"given_class": given, "reason": parsed["reason"], "alternatives": alts},
             batch_id=batch_id, ts_ns=now_ns(),
         ).on_conflict_do_update(
-            constraint="uq_machine_verdict_object_judge",
+            constraint="uq_machine_verdict_object_judge_batch",
             set_={"verdict": parsed["verdict"], "proposed_class_id": parsed["proposed_class_id"],
                   "confidence": parsed["confidence"], "provider": provider,
                   "detail": {"given_class": given, "reason": parsed["reason"], "alternatives": alts},

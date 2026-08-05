@@ -24,6 +24,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+
 # Aliased: Asset defines a column literally named `text`, which would shadow the bare sqlalchemy.text
 # helper inside that class body.
 from sqlalchemy import text as sql_text
@@ -373,13 +374,17 @@ class MachineVerdict(Base):
     confidence: Mapped[float | None] = mapped_column(Float)
     agreement: Mapped[float | None] = mapped_column(Float)                  # multi-vote agreement fraction
     detail: Mapped[dict] = mapped_column(JSONB, default=dict)
-    batch_id: Mapped[str | None] = mapped_column(String(64))
+    # In the uniqueness key: the same object can appear in two populations being measured for different
+    # reasons, and every reader here filters by batch. Without it, judging a detector sample stole nine
+    # verdicts out of the calibration set and nothing errored.
+    batch_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         CheckConstraint("verdict in ('correct','incorrect','unsure')", name="ck_machine_verdict_verdict"),
-        UniqueConstraint("object_id", "judge", "model_version", name="uq_machine_verdict_object_judge"),
+        UniqueConstraint("object_id", "judge", "model_version", "batch_id",
+                         name="uq_machine_verdict_object_judge_batch"),
         Index("ix_machine_verdict_batch", "batch_id"),
         Index("ix_machine_verdict_object", "object_id"),
     )

@@ -66,17 +66,33 @@ UNMEASURED_DETECTOR_WEIGHT = 0.5
 
 
 async def _detector_weights(db) -> dict[str, float]:
-    """Per-detector ranking weight: the Wilson lower bound of its measured precision.
+    """Per-detector ranking weight, from the strongest evidence available about that detector.
 
-    The lower bound rather than the point estimate, because the point estimate rewards small samples: nine
-    confirmations out of ten reads as 0.9 and would outrank nine hundred out of a thousand at 0.9, when the
-    second is the one that has actually been demonstrated. The lower bound puts them at roughly 0.60 and
-    0.88, which is the order a reviewer would want.
+    Three tiers, in this order, because they are not equally trustworthy and collapsing them would hide
+    which one a weight came from:
+
+      1. **Human verdicts.** Somebody looked and ruled. The best evidence there is.
+      2. **A judged sample.** A VLM grading the detector, which is weaker (it is a model assessing a model)
+         but exists at a scale humans do not reach: 298,528 candidates carry one human verdict between them,
+         so without this tier every detector sits on the unproven default forever and the ranking never
+         improves.
+      3. **The unproven default**, for a detector nothing has assessed.
+
+    The weight is a Wilson lower bound in both measured tiers, because the point estimate rewards small
+    samples: nine confirmations out of ten reads as 0.9 and would outrank nine hundred out of a thousand at
+    the same rate, when only the second has been demonstrated.
+
+    The machine tier counts cross-superclass confirmations rather than all of them. On this corpus a
+    detector's flags are overwhelmingly fine-class refinements, sedan against SUV, which are technically
+    correct and not the errors the queue exists to surface.
     """
+    from services.errordetect.judge_detectors import machine_detector_weights
     from services.errordetect.queue import MIN_VERDICTS_FOR_PRECISION, detector_precision
 
+    # Tier 2 first so tier 1 can overwrite it: a human ruling always beats a judged sample.
+    out: dict[str, float] = dict(await machine_detector_weights(db))
+
     report = await detector_precision(db)
-    out: dict[str, float] = {}
     for kind, d in report["per_kind"].items():
         if d["decided"] >= MIN_VERDICTS_FOR_PRECISION:
             out[kind] = float(d["precision"]["lo"])
