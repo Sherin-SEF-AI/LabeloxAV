@@ -88,7 +88,7 @@ export default function MapPage() {
             <span>calib {commit.calibration_version}</span>
           </span>
         )}
-        {!commits.length && <span className="text-warn">no map commits yet (run hdmap fuse on a georef'd session)</span>}
+        {!commits.length && <span className="text-warn">no map commits yet (run hdmap fuse on a georef&apos;d session)</span>}
       </>
     )}>
       <div className="flex h-full min-h-0">

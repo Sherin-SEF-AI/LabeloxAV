@@ -232,3 +232,7 @@ fmt: ## Format and lint
 .PHONY: lint-imports
 lint-imports: ## Enforce the engine-core-does-not-import-packs contract (.importlinter)
 	$(RUN) lint-imports
+
+.PHONY: lint-web
+lint-web: ## ESLint the frontend (blocking on errors; hook-dependency findings are warnings)
+	cd web && npx next lint

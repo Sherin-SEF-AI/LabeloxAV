@@ -7,7 +7,12 @@ call: a run that fails only tests listed here is at baseline, and anything else 
 Every entry states why it fails and what would fix it. An entry with no route to a fix does not belong here;
 it belongs in the code as an xfail or in the backlog as work.
 
-The suite currently has no failures outside the strict xfails below: 1476 pass, 2 skip, 4 xfail.
+The suite currently has no failures outside the strict xfails below: 1704 pass, 2 skip, 4 xfail, measured
+2026-08-06 against full infra (`make up`) on `labeloxav_test`, and repeated identically across runs.
+
+Run it with infra down and 206 of those tests skip rather than fail, because `_infra_up()` pings Redis. A run
+reporting "1495 passed, 215 skipped" is not a smaller green, it is most of the suite never executing, and the
+pass count is the only thing that distinguishes the two.
 
 Two categories were removed rather than fixed in place, because the diagnosis recorded here was wrong in a
 way worth keeping a note of. Both had been filed under a plausible cause that no amount of work on that
@@ -44,11 +49,16 @@ xfail is honest: the gate is doing its job and the test data is wrong.
 The three tests that were listed here as order-dependent now assert against rows they seeded themselves, so
 they no longer care what else is in the database. The condition that broke them has not gone away.
 
-The suite seeds sessions, frames and objects into one database and commits, and nothing truncates between
-tests or between runs. `labeloxav_test` holds 6,865 sessions, 12,262 frames and 17,269 objects, all of it
-accumulated residue. Any new assertion about a corpus-wide statistic, a count, an availability figure, a
-nearest neighbour, will be written against whatever the corpus happens to hold that day and will expire
-quietly some months later. That is how all three of the previous entries were written.
+The suite seeds sessions, frames and objects into one database and commits. A session-scoped autouse fixture
+(`_reset_corpus`) now truncates at the start of every run, so the cross-run accumulation described here is
+gone: a run no longer inherits the 6,865 sessions and 12,262 frames that had piled up.
+
+What remains is the within-run half. Nothing rolls back between individual tests, so a test still sees
+everything the tests before it committed. Any new assertion about a corpus-wide statistic, a count, an
+availability figure, a nearest neighbour, is written against whatever the earlier tests happened to leave and
+will expire quietly later. That is how all three of the previous entries were written. The order is
+deterministic (no `pytest-randomly`), so this shows up as a stable pass that silently stops meaning what it
+says, rather than as flake.
 
 Two habits avoid it, and both are cheaper than the isolation work:
 

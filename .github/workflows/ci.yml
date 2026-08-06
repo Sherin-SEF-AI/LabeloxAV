@@ -102,6 +102,12 @@ jobs:
       - name: Typecheck (tsc --noEmit, blocking)
         run: npx tsc --noEmit
 
+      - name: ESLint (blocking on errors)
+        # The repo carried a "lint" script with no linter installed to run it, so nothing on the frontend was
+        # ever checked beyond types. Errors block. The hook-dependency findings are warnings for now because
+        # each one needs reading rather than a bulk edit, and a gate that starts red is a gate nobody turns on.
+        run: npx next lint
+
       - name: Unit floor (vitest, blocking)
         # Pure-logic unit tests (token-expiry decoding, nav menu wiring). Fast, no DOM.
         run: npm test
