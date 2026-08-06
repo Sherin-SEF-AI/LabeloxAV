@@ -18,28 +18,18 @@ The geometry is deliberately plain, because the mistakes here are not in the alg
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from core.logging import get_logger
+from packs.base import Crossing
 
 log = get_logger("sec_zones")
 
 RULES = ("enter", "exit", "dwell", "cross")
 KINDS = ("area", "line")
 
-
-@dataclass(frozen=True)
-class Crossing:
-    """One rule firing, before it becomes an incident."""
-
-    zone_id: str
-    zone_name: str
-    rule: str
-    track_id: str | None
-    class_name: str
-    ts_ns: int
-    severity: str
-    detail: dict
+# Re-exported so this module stays the one place a reader looks for zone vocabulary, while the shape itself
+# lives in the contract because the engine reads every field of it.
+__all__ = ["Crossing", "KINDS", "RULES", "anchor_point", "evaluate_track", "point_in_polygon",
+           "segment_span", "side_of_line", "validate_zone"]
 
 
 def anchor_point(bbox: list[float]) -> tuple[float, float]:

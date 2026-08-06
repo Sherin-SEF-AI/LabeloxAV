@@ -170,6 +170,8 @@ def _build() -> Pack:
         legal_regime="DPDPA",
     )
 
+    from packs.sec.surfaces import SecStreamSource, SecZonePolicy
+
     return Pack(
         manifest=manifest,
         ontology=ontology,
@@ -184,6 +186,8 @@ def _build() -> Pack:
         privacy=privacy,
         scene_model=StaticCameraSceneModelFactory(),
         ingestion_adapters=(StaticCameraIngestionAdapter(),),
+        zone_policy=SecZonePolicy(),
+        stream_source=SecStreamSource(),
     )
 
 

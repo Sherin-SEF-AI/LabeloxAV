@@ -202,17 +202,22 @@ async def rtsp_ingest(payload: RtspIn, db: AsyncSession = Depends(db_session)): 
     Bounded by frames and by seconds, both. A live stream has no end, so a request without a limit is a
     request to run forever, and the caller almost never means that.
     """
-    from packs.sec.rtsp import RtspUnavailable, SamplingPolicy, ingest_stream
+    from services.domain import default_pack_id, get_pack
 
-    policy = SamplingPolicy(motion_threshold=payload.motion_threshold,
-                            heartbeat_seconds=payload.heartbeat_seconds)
+    pid = payload.pack_id or default_pack_id()
+    source = getattr(get_pack(pid), "stream_source", None)
+    if source is None:
+        raise HTTPException(400, f"pack {pid!r} has no live-stream source; it cannot sample an RTSP camera")
+
+    policy = source.sampling_policy(motion_threshold=payload.motion_threshold,
+                                    heartbeat_seconds=payload.heartbeat_seconds)
     try:
-        return await ingest_stream(payload.url, payload.camera_id, city=payload.city,
+        return await source.ingest(payload.url, payload.camera_id, city=payload.city,
                                    policy=policy, max_frames=payload.max_frames,
                                    max_seconds=payload.max_seconds, pack_id=payload.pack_id)
     except AnprNotAuthorised as exc:
         raise _refuse(exc) from exc
-    except RtspUnavailable as exc:
+    except source.unavailable_error as exc:
         # 502, not 500: the camera is an upstream this server could not reach, which is a different
         # problem from this server being broken.
         raise HTTPException(502, str(exc)) from exc

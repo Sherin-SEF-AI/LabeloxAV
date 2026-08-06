@@ -53,6 +53,24 @@ def _require_sec(pack_id: str | None) -> str:
     return pid
 
 
+def _zone_policy(pack_id: str):
+    """The pack's spatial rules, reached through the contract rather than imported.
+
+    Capability and surface are checked separately because they fail for different reasons: `_require_sec`
+    answers "is this deployment allowed to police places at all", which is a governance question, while a
+    missing `zone_policy` means a pack declared the capability and never supplied the geometry to back it.
+    Collapsing them would report a build mistake as a permission refusal.
+    """
+    from services.domain import get_pack
+
+    policy = getattr(get_pack(pack_id), "zone_policy", None)
+    if policy is None:
+        raise IncidentError(
+            f"pack {pack_id!r} declares 'static_camera' but supplies no zone_policy, so zone rules cannot "
+            "be evaluated")
+    return policy
+
+
 # ---------------------------------------------------------------- zones
 
 async def create_zone(db: AsyncSession, *, camera_id: str, name: str, points: list,
@@ -60,11 +78,9 @@ async def create_zone(db: AsyncSession, *, camera_id: str, name: str, points: li
                       dwell_seconds: float | None = None, severity: str = "warn",
                       session_id: str | None = None, created_by: str | None = None,
                       pack_id: str | None = None) -> dict:
-    from packs.sec.zones import validate_zone
-
     pid = _require_sec(pack_id)
     try:
-        validate_zone(kind, rule, points, dwell_seconds)
+        _zone_policy(pid).validate(kind, rule, points, dwell_seconds)
     except ValueError as exc:
         raise IncidentError(str(exc)) from exc
 
@@ -107,7 +123,6 @@ async def evaluate_session(db: AsyncSession, session_id: str, *,
     """Run every active zone for this session's camera over its tracks, and raise what fires."""
     from db.models import Frame, Object
     from db.models import Session as DbSession
-    from packs.sec.zones import evaluate_track
     from services.autolabel.ontology import get_ontology
 
     sess = await db.get(DbSession, uuid.UUID(session_id))
@@ -128,6 +143,7 @@ async def evaluate_session(db: AsyncSession, session_id: str, *,
         return {"session_id": session_id, "camera_id": cam, "zones": 0, "incidents": 0,
                 "detail": "no active zones on this camera"}
 
+    policy = _zone_policy(pid)
     onto = get_ontology()
     rows = (await db.execute(
         select(Object, Frame.ts_ns)
@@ -149,7 +165,7 @@ async def evaluate_session(db: AsyncSession, session_id: str, *,
     for zone in zones:
         zd = _zone_dict(zone)
         for samples in by_track.values():
-            for crossing in evaluate_track(zd, samples):
+            for crossing in policy.evaluate_track(zd, samples):
                 created = await raise_incident(
                     db, kind="dwell" if crossing.rule == "dwell" else "zone_crossing",
                     camera_id=cam, session_id=session_id, zone_id=str(zone.zone_id),

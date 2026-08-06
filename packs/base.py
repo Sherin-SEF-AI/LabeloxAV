@@ -253,6 +253,59 @@ class PrivacyPlane(Protocol):
     def export_gate(self, clip: object) -> object: ...
 
 
+@dataclass(frozen=True)
+class Crossing:
+    """One spatial rule firing, before the engine decides whether it becomes an incident.
+
+    The shape lives in the contract rather than in the pack because the engine reads every field of it to
+    build an incident. A pack decides *when* a rule fires; what a firing looks like is engine vocabulary.
+    """
+    zone_id: str
+    zone_name: str
+    rule: str
+    track_id: str | None
+    class_name: str
+    ts_ns: int
+    severity: str
+    detail: Mapping[str, object] = field(default_factory=dict)
+
+
+@runtime_checkable
+class ZonePolicy(Protocol):
+    """Spatial rules over a camera's field of view: what a zone may say, and when a track violates it.
+
+    Geometry is domain knowledge. Whether a loitering track in a doorway is an event at all has no meaning in
+    the AV pack and is the core of the security one, so the engine owns zone storage and incident raising
+    while the pack owns the predicate.
+    """
+    def validate(self, kind: str, rule: str, points: Sequence, dwell_seconds: float | None) -> None:
+        """Raise ValueError if a zone definition is not one this pack can evaluate."""
+        ...
+
+    def evaluate_track(self, zone: Mapping[str, object],
+                       samples: Sequence[Mapping[str, object]]) -> Sequence[Crossing]: ...
+
+
+@runtime_checkable
+class StreamSource(Protocol):
+    """Sampling a live camera into a session.
+
+    A live stream has no end, so every method here is bounded by construction. `unavailable_error` is part of
+    the surface because the engine has to distinguish an unreachable camera from its own failure, and it
+    cannot do that by catching a pack-private exception type.
+    """
+    unavailable_error: type[Exception]
+
+    def sampling_policy(self, **overrides: object) -> object:
+        """A pack-defined policy object, built from engine-supplied overrides. Opaque to the engine: it is
+        carried straight back into `ingest` and never inspected."""
+        ...
+
+    async def ingest(self, url: str, camera_id: str, *, city: str | None = None,
+                     policy: object | None = None, max_frames: int | None = None,
+                     max_seconds: float | None = None, pack_id: str | None = None) -> dict: ...
+
+
 # --------------------------------------------------------------------------------------------------------
 # The pack
 # --------------------------------------------------------------------------------------------------------
@@ -273,6 +326,11 @@ class DomainPack(Protocol):
     privacy: PrivacyPlaneSpec
     scene_model: SceneModelFactory | None
     ingestion_adapters: Sequence[IngestionAdapter]
+    # Optional because they are genuinely domain-specific rather than merely unfinished: an AV pack has no
+    # fixed zones to police and no camera to open. A pack that does not fill them is complete, and the engine
+    # refuses the corresponding route rather than pretending the capability exists.
+    zone_policy: ZonePolicy | None
+    stream_source: StreamSource | None
 
 
 @dataclass(frozen=True)
@@ -291,6 +349,8 @@ class Pack:
     privacy: PrivacyPlaneSpec
     scene_model: SceneModelFactory | None = None            # SEC-M2
     ingestion_adapters: tuple[IngestionAdapter, ...] = ()   # SEC-M2
+    zone_policy: ZonePolicy | None = None                   # static-camera domains only
+    stream_source: StreamSource | None = None               # static-camera domains only
 
 
 def superclass_affinity_cost(onto: Ontology, a_id: int, b_id: int, safety_l1: frozenset[str]) -> float:
