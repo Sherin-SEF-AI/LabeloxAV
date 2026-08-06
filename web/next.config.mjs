@@ -11,6 +11,18 @@ const nextConfig = {
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${API}/api/:path*` }];
   },
+  experimental: {
+    // The rewrite proxy defaults to a 30s ceiling, which is shorter than several endpoints legitimately
+    // take. A promotion runs a full evaluation of both the challenger and the reigning champion against
+    // gold, which on a cold cache is around 90s of GPU work; training, export and autolabel are the same
+    // shape. At the default the browser is handed a bare 500 while the backend runs happily to completion,
+    // so the gate would record a decision the operator was told had failed. That is the worst possible
+    // reading for a governance control: it invites a retry of a promotion that already happened.
+    //
+    // This raises the dev ceiling above the slowest of those paths. It does not make the endpoints fast,
+    // and a production ingress in front of the API needs its own matching timeout.
+    proxyTimeout: 5 * 60 * 1000,
+  },
   // konva's node build references the optional native 'canvas' package; the browser does not need
   // it. Alias it out so the bundle compiles (the canvas is client-only via dynamic ssr:false).
   webpack: (config) => {
