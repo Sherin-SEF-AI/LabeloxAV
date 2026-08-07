@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from uuid import UUID
 
@@ -87,12 +88,33 @@ def _gold_id(spec: GoldSpec, object_ids: list[str], ontology_version: str) -> st
     return f"gold-{h.hexdigest()[:16]}"
 
 
+def _reset_split(out: Path) -> None:
+    """Empty the val split before rebuilding it, because these directories are keyed on the gold set and not
+    on what is being materialised into them.
+
+    Both builders write one file per frame that has surviving, in-vocabulary objects, and skip the rest. They
+    used to only mkdir, so anything an earlier build left behind stayed and was scored as part of the next
+    one. That is silent and it moves numbers: the aligned split is rebuilt per model in the model's own class
+    order, so a leftover label file carries another model's class indices, and the val pass reads them as
+    this model's. Measured on the DashLab detector, the residue put mAP50 at 0.381 where a clean build gives
+    0.537, in the same call on the same gold set.
+
+    The sealed split has the same shape with a different trigger: its class indices are assigned from the
+    classes actually present, so losing or adding one object renumbers every label while stale files keep the
+    old numbering.
+    """
+    for sub in ("images/val", "labels/val"):
+        d = out / sub
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True, exist_ok=True)
+
+
 def _materialize(gold_id: str, objs: list[dict], onto) -> tuple[str, int]:
     """Write a frozen YOLO val split for the eval harness. Returns (data_yaml_path, n_frames)."""
     store = get_object_store()
     out = get_settings().scratch_path() / "gold" / gold_id
-    for sub in ("images/val", "labels/val"):
-        (out / sub).mkdir(parents=True, exist_ok=True)
+    _reset_split(out)
 
     present = sorted({o["class_id"] for o in objs})
     idx_of = {cid: i for i, cid in enumerate(present)}
@@ -134,8 +156,7 @@ def _materialize_aligned(gold_id: str, objs: list[dict], onto, names_list: list[
     are dropped (uncomparable). This is what makes the M9 numbers real rather than a vocab mismatch."""
     store = get_object_store()
     out = get_settings().scratch_path() / "gold" / gold_id / "aligned"
-    for sub in ("images/val", "labels/val"):
-        (out / sub).mkdir(parents=True, exist_ok=True)
+    _reset_split(out)
     name_to_idx = {n: i for i, n in enumerate(names_list)}
 
     by_frame: dict[str, list[dict]] = {}
