@@ -24,9 +24,26 @@ from db.session import get_sessionmaker
 from services.export.certificate import _resolvable_gold
 
 
-async def _run() -> int:
+async def _run(active_only: bool = False) -> int:
+    """Report every sealed set, or only the one evaluations actually run against.
+
+    `--active-only` exists so this can block a pipeline. Gating on the full history would start red and stay
+    red: five legacy sets in this corpus are already dangling and nothing can un-delete their objects, so a
+    blocking check over all of them is a check somebody turns off in a week. What must never happen is the
+    set `latest_gold_id` hands to the promotion gate degrading, and that is a condition a green gate can
+    actually defend.
+    """
     async with get_sessionmaker()() as db:
-        sets = list((await db.execute(select(GoldSet).order_by(GoldSet.gold_id))).scalars().all())
+        if active_only:
+            from services.govern.gold_eval import latest_gold_id
+
+            gid = await latest_gold_id(db)
+            if gid is None:
+                print("no sealed gold set exists, so nothing scores against one")
+                return 1
+            sets = [await db.get(GoldSet, gid)]
+        else:
+            sets = list((await db.execute(select(GoldSet).order_by(GoldSet.gold_id))).scalars().all())
         rows = []
         for g in sets:
             declared = list(g.object_ids or [])
@@ -52,8 +69,14 @@ async def _run() -> int:
 
 
 def main() -> None:
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--active-only", action="store_true",
+                    help="check only the set evaluations run against (the CI gate)")
+    args = ap.parse_args()
     setup_logging("INFO")
-    raise SystemExit(asyncio.run(_run()))
+    raise SystemExit(asyncio.run(_run(active_only=args.active_only)))
 
 
 if __name__ == "__main__":

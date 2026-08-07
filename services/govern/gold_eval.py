@@ -65,12 +65,44 @@ def _score_yaml(local_weights: str, data_yaml: str, gold_id: str, imgsz: int) ->
     return metrics
 
 
+# How much of a sealed set must still exist before a score against it means anything. Not 100%: a single
+# object removed by a legitimate correction should not halt the gate. Well above the 12% the largest set in
+# this corpus had degraded to while still reporting confident numbers.
+MIN_RESOLVABLE_FRACTION = 0.9
+
+
+async def _gold_population(db: AsyncSession, gold_id: str) -> tuple[int, int]:
+    """(declared, still resolvable) for a sealed set, using the same helper the export certificate counts
+    with, so the gate and the certificate can never disagree about how big a gold set is."""
+    from services.export.certificate import _resolvable_gold
+
+    g = await db.get(GoldSet, gold_id)
+    if g is None:
+        return (0, 0)
+    declared = list(g.object_ids or [])
+    return (len(declared), await _resolvable_gold(db, declared))
+
+
 async def evaluate_on_gold(db: AsyncSession, model_version: str, gold_id: str) -> dict | None:
     """Score one registered model on the sealed gold set, aligned to the model's class order. Returns metrics
     stamped with gold_id, or None when the model has no downloadable weights (nothing to score)."""
     reg = await db.get(ModelRegistry, model_version)
     if reg is None or not reg.weights_uri:
         return None
+
+    gold_declared, gold_resolvable = await _gold_population(db, gold_id)
+    if gold_declared and gold_resolvable / gold_declared < MIN_RESOLVABLE_FRACTION:
+        # Refuse before spending the GPU, and refuse rather than caveat. A gold set seals a membership list
+        # as JSONB, not as foreign keys, so the rows it names can be deleted out from under it with nothing
+        # cascading and nothing warning. This corpus scored a 400-object set that held 47 for months and
+        # every number it produced looked exactly like a number about 400 objects.
+        log.error("gold_eval.gold_degraded", model_version=model_version, gold_id=gold_id,
+                  declared=gold_declared, resolvable=gold_resolvable)
+        return {"error": "gold set is too degraded to score against", "gold_id": gold_id,
+                "model_version": model_version, "gold_declared": gold_declared,
+                "gold_resolvable": gold_resolvable,
+                "detail": f"{gold_resolvable} of {gold_declared} sealed objects still exist, below the "
+                          f"{MIN_RESOLVABLE_FRACTION:.0%} floor; re-seal a set before scoring"}
 
     settings = get_settings()
     imgsz = getattr(settings.training, "eval_imgsz", 960)
@@ -91,6 +123,8 @@ async def evaluate_on_gold(db: AsyncSession, model_version: str, gold_id: str) -
         #    the SAME gold set + model. Two harnesses that disagree beyond epsilon is a measurement fault, so
         #    flag the metrics divergent (the champion gate refuses to promote on that flag). Degrades silently
         #    when inference is unavailable (no GPU / weights), keeping the val-pass result.
+        metrics["gold_declared"] = gold_declared
+        metrics["gold_resolvable"] = gold_resolvable
         await _reconcile_with_prediction_plane(db, model_version, gold_id, metrics,
                                               vocabulary=frozenset(names_list))
         return metrics
