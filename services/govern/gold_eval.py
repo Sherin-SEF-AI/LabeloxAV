@@ -91,7 +91,8 @@ async def evaluate_on_gold(db: AsyncSession, model_version: str, gold_id: str) -
         #    the SAME gold set + model. Two harnesses that disagree beyond epsilon is a measurement fault, so
         #    flag the metrics divergent (the champion gate refuses to promote on that flag). Degrades silently
         #    when inference is unavailable (no GPU / weights), keeping the val-pass result.
-        await _reconcile_with_prediction_plane(db, model_version, gold_id, metrics)
+        await _reconcile_with_prediction_plane(db, model_version, gold_id, metrics,
+                                              vocabulary=frozenset(names_list))
         return metrics
     except Exception as exc:  # noqa: BLE001
         log.warning("gold_eval.failed", model_version=model_version, gold_id=gold_id, error=str(exc))
@@ -99,7 +100,8 @@ async def evaluate_on_gold(db: AsyncSession, model_version: str, gold_id: str) -
 
 
 async def _reconcile_with_prediction_plane(db: AsyncSession, model_version: str, gold_id: str,
-                                           metrics: dict) -> None:
+                                           metrics: dict,
+                                           vocabulary: frozenset[str] | None = None) -> None:
     from services.analytics.evaluation import evaluate_gold_patches
     from services.verdyx.inference_run import run_inference_on_gold
 
@@ -108,7 +110,12 @@ async def _reconcile_with_prediction_plane(db: AsyncSession, model_version: str,
         if run_id is None:
             metrics["reconcile"] = "prediction plane unavailable (weights/GPU); val-pass only"
             return
-        pp = await evaluate_gold_patches(db, gold_id, run_id=run_id)
+        # The model's own class list, the same one the val pass aligned the gold labels to. Passing it makes
+        # both harnesses score one population; without it they disagree by exactly the objects this model was
+        # never taught, which is a measurement fault reported as a model fault.
+        pp = await evaluate_gold_patches(db, gold_id, run_id=run_id, model_vocabulary=vocabulary)
+        metrics["prediction_plane_scored"] = pp.get("gold_scored")
+        metrics["prediction_plane_resolvable"] = pp.get("gold_resolvable")
         ap50 = pp.get("ap50")
         val_map50 = metrics.get("map50")
         if ap50 is None or val_map50 is None:
