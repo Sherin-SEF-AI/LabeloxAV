@@ -112,10 +112,10 @@ export default function InspectorWorkspace() {
     if (l) setPanels(l.panels.map((p) => ({ ...p, id: `p${++PANEL_SEQ}` })));
   };
 
-  const openLichtblick = async () => {
+  const openLichtblick = useCallback(async () => {
     try { const r = await api.inspectorLichtblick(sessionId); window.open(r.url, "_blank", "noopener"); }
     catch (e) { setErr("Open in Lichtblick failed: " + humanizeError(e)); }
-  };
+  }, [sessionId]);
 
   const vColor = verdict === "pass" ? "text-pass border-pass" : verdict === "warn" ? "text-warn border-warn" : verdict === "fail" ? "text-block border-block" : "text-ink-3 border-line";
 
@@ -126,9 +126,19 @@ export default function InspectorWorkspace() {
         <button onClick={() => router.push(`/frame/${curFrame.frameId}`)} title="open the frame at the current time in the annotation workspace"
           className="border border-accent/50 bg-accent/10 text-accent px-2 py-0.5 rounded hover:bg-accent/20">open frame in workspace</button>
       )}
-      <button onClick={openLichtblick} className="border border-line px-2 py-0.5 rounded hover:border-accent">open in lichtblick</button>
+      {/* Only 1 of 342 sessions in this corpus carries an MCAP, so offering this unconditionally meant the
+          button answered 409 for almost every session somebody opened. The precondition is knowable here:
+          the page already loaded the recording, or failed to. Say so on the control instead of on a toast
+          after the request. */}
+      <button onClick={openLichtblick} disabled={!mcap}
+        title={mcap ? "open this session's MCAP in Lichtblick"
+                    : "this session has no MCAP recording to inspect"}
+        className={`border px-2 py-0.5 rounded ${mcap ? "border-line hover:border-accent"
+                                                     : "border-line/40 text-ink-3 cursor-not-allowed"}`}>
+        open in lichtblick
+      </button>
     </div>
-  ), [verdict, curFrame, router]);
+  ), [verdict, curFrame, router, mcap, openLichtblick, vColor]);
 
   return (
     <PageShell active="INSPECT" subtitle="SESSION" right={right}>
