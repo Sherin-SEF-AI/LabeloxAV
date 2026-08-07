@@ -145,7 +145,10 @@ target-version = "py311"
 # would mean either hand-editing a file whose whole point is that it is regenerated, or teaching the
 # generator every style rule. Its correctness is checked by parsing it and by `--check` in CI, which is the
 # property that actually matters: that it matches the server.
-extend-exclude = ["sdk/generated_client.py"]
+# integrations/ holds git submodules: other repositories, vendored at a pinned commit. Linting them reports
+# 321 findings nobody here can act on, and `make fmt` runs `ruff check --fix` over the tree, which would
+# rewrite another project's source in place and leave its submodule permanently dirty.
+extend-exclude = ["sdk/generated_client.py", "integrations/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
