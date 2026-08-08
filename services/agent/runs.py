@@ -41,6 +41,14 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
     if run.status != "committed":
         raise ValueError(f"run is {run.status}, only a committed run can be reverted")
 
+    # A class merge moved objects wholesale, including human-labelled ones, so undoing it needs its own
+    # path: the generic restore below deliberately refuses to touch anything a person owns, which is right
+    # for an agent relabel and wrong for reversing an ontology decision.
+    if run.kind == "ontology_merge":
+        from services.agent.ontology_merge import revert_merge
+
+        return await revert_merge(db, run)
+
     # A cleanup sweep removed objects; reverting re-inserts them from the stored snapshots.
     if run.kind == "cleanup_sweep":
         from services.agent.cleanup_sweep import revert_cleanup
