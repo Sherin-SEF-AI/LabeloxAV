@@ -773,7 +773,7 @@ async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
 
 # Kinds with a relauncher that honours their cursor. A kind absent here can still be re-run from the start;
 # what it cannot do is continue, and the resume route refuses rather than pretending.
-_RESUMABLE_KINDS = frozenset({"error_sweep"})
+_RESUMABLE_KINDS = frozenset({"error_sweep", "relabel_all"})
 
 
 @router.get("/agent/runs/interrupted", dependencies=[Depends(require_role("annotator"))])
@@ -823,8 +823,14 @@ async def resume_run(run_id: str, db: AsyncSession = Depends(db_session)):
         raise HTTPException(409, claimed["error"])
 
     scope = claimed.get("scope") or {}
-    asyncio.create_task(run_error_sweep(
-        rid, max_sessions=int(scope.get("max_sessions") or 10), kinds=scope.get("kinds")))
+    if run.kind == "error_sweep":
+        asyncio.create_task(run_error_sweep(
+            rid, max_sessions=int(scope.get("max_sessions") or 10), kinds=scope.get("kinds")))
+    else:
+        from services.agent.relabel_agent import run_relabel_all
+
+        asyncio.create_task(run_relabel_all(
+            rid, max_frames=int(scope.get("max_frames") or 200), session_id=scope.get("session_id")))
     return {**claimed, "restarted": True}
 
 

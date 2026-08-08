@@ -1,4 +1,5 @@
 import type {
+  AgentRunRow,
   InterruptedRun,
   AlItem,
   AssignmentRow,
@@ -626,6 +627,9 @@ export const api = {
     post<{ run_id: string; relabeled: number; counts: { total: number; relabel_keep: number; relabel_review: number } }>(`/api/agent/frames/${frame_id}/relabel`, {}),
   agentRelabelAll: (opts: { max_frames?: number; session_id?: string } = {}) =>
     post<{ run_id: string; status: string }>(`/api/agent/relabel/all`, opts),
+  agentRuns: (limit = 20) => get<AgentRunRow[]>(`/api/agent/runs?limit=${limit}`),
+  agentRevertRun: (run_id: string) =>
+    post<{ run_id: string; reverted: number; skipped: number }>(`/api/agent/runs/${run_id}/revert`, {}),
   agentInterruptedRuns: () =>
     get<{ runs: InterruptedRun[] }>(`/api/agent/runs/interrupted`),
   agentResumeRun: (run_id: string) =>

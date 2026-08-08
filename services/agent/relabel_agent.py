@@ -114,6 +114,7 @@ async def run_relabel_all(run_id: uuid.UUID, *, max_frames: int = 200, created_b
     """Background: relabel every machine-labelled frame (bounded), one reversible child run per frame, the
     parent run aggregating counts. Yields to a running training job (GPU discipline)."""
     from db.session import get_sessionmaker
+    from services.agent.resume import beat, done_set
 
     maker = get_sessionmaker()
     async with maker() as db:
@@ -127,11 +128,22 @@ async def run_relabel_all(run_id: uuid.UUID, *, max_frames: int = 200, created_b
         if session_id:
             q = q.join(Frame, Frame.frame_id == Object.frame_id).where(Frame.session_id == uuid.UUID(session_id))
         frame_ids = list((await db.execute(q.limit(max_frames))).scalars().all())
+        # Resume support: the unit of work is one frame, so the cursor is the frames already relabelled.
+        # Re-running a frame would mint a second child run for it and double-count its totals, so skipping
+        # is about correctness of the numbers, not only about the wasted GPU time.
+        prior = await db.get(AgentRun, run_id)
+        done = done_set(dict(prior.progress or {})) if prior is not None else set()
+        totals = dict(prior.counts or {}) if prior is not None else {}
+        child_runs: list[str] = list((prior.changes or {}).get("child_runs") or []) if prior is not None else []
 
-    totals = {"frames": 0, "relabel_keep": 0, "relabel_review": 0}
-    child_runs: list[str] = []
+    for k in ("frames", "relabel_keep", "relabel_review"):
+        totals.setdefault(k, 0)
+    if done:
+        log.info("agent.relabel_all.resuming", run_id=str(run_id), already_done=len(done))
     try:
         for fid in frame_ids:
+            if str(fid) in done:
+                continue
             async with maker() as db:
                 res = await commit_relabel(db, fid, created_by=created_by or "relabel-all",
                                            min_conf=min_conf, margin=margin)
@@ -140,12 +152,17 @@ async def run_relabel_all(run_id: uuid.UUID, *, max_frames: int = 200, created_b
             totals["relabel_review"] += res["counts"].get("relabel_review", 0)
             if res["relabeled"]:
                 child_runs.append(res["run_id"])
+            done.add(str(fid))
             async with maker() as db:
                 run = await db.get(AgentRun, run_id)
                 if run:
-                    run.counts = dict(totals)
                     run.changes = {"child_runs": child_runs}
                     await db.commit()
+                # Cursor, counts and heartbeat in one write, after the child runs are recorded: a frame in
+                # the cursor whose child run was never saved would be skipped on resume and its relabels
+                # would then be unrevertable, because revert walks child_runs.
+                await beat(db, run_id, progress={"done": sorted(done), "total": len(frame_ids)},
+                           counts=dict(totals))
         async with maker() as db:
             run = await db.get(AgentRun, run_id)
             if run:

@@ -6,6 +6,7 @@ import { api, type AuditReport, type PromotionProposalRow } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import ActivityLog from "@/components/agent/ActivityLog";
 import InterruptedRuns from "@/components/agent/InterruptedRuns";
+import JobWatcher from "@/components/agent/JobWatcher";
 import { describeFailure } from "@/lib/actionError";
 import { type ActivityLog as Log, emptyLog, record } from "@/lib/activityLog";
 import { Spinner } from "@/components/Spinner";
@@ -543,6 +544,8 @@ export default function AgentConsole() {
           </div>
 
           <InterruptedRuns onResumed={load} />
+
+          <JobWatcher />
 
           <ActivityLog log={log} onClear={() => setLog((l) => ({ entries: [], seq: l.seq }))} />
 

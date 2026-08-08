@@ -1121,3 +1121,23 @@ export type InterruptedRun = {
   resumable: boolean;
   error: string | null;
 };
+
+// One unit of autonomous agent work. `fraction` comes from the job's own cursor and is null when the job
+// never recorded a total, which is a different statement from no progress.
+export type AgentRunRow = {
+  run_id: string;
+  kind: string;
+  status: string;
+  scope: Record<string, unknown>;
+  policy: Record<string, unknown>;
+  counts: Record<string, unknown>;
+  critic: Record<string, unknown>;
+  changed: number;
+  created_by: string | null;
+  created_at: string | null;
+  reverted_at: string | null;
+  progress: Record<string, unknown>;
+  heartbeat_at: string | null;
+  fraction: number | null;
+  error?: string | null;
+};
