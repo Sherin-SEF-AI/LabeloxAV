@@ -25,9 +25,36 @@ from services.training.gpu_lease import training_holds_gpu
 log = get_logger("agent.relabel")
 
 
-def _decide(crop_bgr, current_id: int, *, min_conf: float, margin: float, strong_conf: float, strong_margin: float):
-    """Return (suggested_id, suggested_name, top_conf, action) or None. action: relabel_keep | relabel_review."""
+# A crop this small carries too few pixels for a zero-shot classifier to say anything worth acting on, and
+# a distant object is exactly where its confidence is least earned.
+MIN_CROP_PX = 24
+
+# Crossing a superclass is a different claim from refining within one, and the corpus says so. A judge
+# calibrated against human review rulings put label precision at 0.958 by superclass with only 2 of 285
+# cross-superclass errors: the existing labels get the superclass right almost always, so a model proposing
+# to cross one is usually the thing that is wrong. Measured on 302 human-accepted objects, the old thresholds
+# would have changed 73 of them, 50 of those across a superclass, including motorcycle -> pedestrian at 0.744
+# and motorcycle -> street_vendor at 0.747, both auto-kept without review.
+CROSS_L1_CONF = 0.90
+CROSS_L1_MARGIN = 0.55
+
+
+def _decide(crop_bgr, current_id: int, *, min_conf: float, margin: float, strong_conf: float,
+            strong_margin: float, cross_l1_conf: float = CROSS_L1_CONF,
+            cross_l1_margin: float = CROSS_L1_MARGIN):
+    """Return (suggested_id, suggested_name, top_conf, action) or None. action: relabel_keep | relabel_review.
+
+    Two bars, not one. Within a superclass (`truck` to `tempo`, both heavy) the model is refining a
+    distinction the taxonomy makes and the ordinary thresholds apply. Across one (`motorcycle` to
+    `pedestrian`) it is contradicting the part of the label most likely to be right, so the bar is much
+    higher and the result always goes to a human rather than being kept.
+    """
     from services.autolabel.classify_crop import classify_crop
+    from services.autolabel.ontology import get_ontology
+
+    h, w = crop_bgr.shape[:2]
+    if h < MIN_CROP_PX or w < MIN_CROP_PX:
+        return None
 
     preds = classify_crop(crop_bgr, topk=20)
     if not preds:
@@ -40,11 +67,27 @@ def _decide(crop_bgr, current_id: int, *, min_conf: float, margin: float, strong
     # than improving it (a 'sedan' must not become 'vehicle_fallback'). Upgrading a fallback is fine.
     if str(top["class_name"]).endswith("_fallback"):
         return None
-    gap = float(top["conf"]) - cur_conf
-    if float(top["conf"]) < min_conf or gap < margin:
+
+    conf = float(top["conf"])
+    gap = conf - cur_conf
+
+    onto = get_ontology()
+    try:
+        same_l1 = onto.by_id(int(current_id)).l1 == onto.by_id(int(top["class_id"])).l1
+    except Exception:  # noqa: BLE001 - an unresolvable class is treated as the riskier case
+        same_l1 = False
+
+    if not same_l1:
+        if conf < cross_l1_conf or gap < cross_l1_margin:
+            return None
+        # Never auto-kept. A model that wants to move an object between superclasses may be right, and it is
+        # not right often enough to change the corpus without somebody looking.
+        return int(top["class_id"]), top["class_name"], round(conf, 3), "relabel_review"
+
+    if conf < min_conf or gap < margin:
         return None
-    action = "relabel_keep" if (float(top["conf"]) >= strong_conf and gap >= strong_margin) else "relabel_review"
-    return int(top["class_id"]), top["class_name"], round(float(top["conf"]), 3), action
+    action = "relabel_keep" if (conf >= strong_conf and gap >= strong_margin) else "relabel_review"
+    return int(top["class_id"]), top["class_name"], round(conf, 3), action
 
 
 async def plan_relabel(db: AsyncSession, frame_id: uuid.UUID, *, min_conf: float = 0.45, margin: float = 0.15,

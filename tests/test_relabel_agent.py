@@ -49,38 +49,62 @@ def run_async(coro):
 # --- the reasoning: margin over the independent model's distribution --------------------------------------
 
 def test_decide_relabels_only_on_clear_margin():
-    from services.agent import relabel_agent
+    """The margin rule, now expressed within a superclass.
 
-    crop = np.zeros((10, 10, 3), dtype=np.uint8)
+    This used to use a moped (two_wheeler) and an e_auto (three_wheeler) at 0.72, which the two-bar rule now
+    refuses: crossing a superclass needs 0.90 and a 0.55 gap, because measured against 302 human-verified
+    objects the single threshold changed 24.2% of them and 50 of those 73 crossed a superclass. The margin
+    behaviour this test is about is unchanged, so it is restated on a pair that stays inside one.
+    """
+    import services.autolabel.classify_crop as cc
+    from services.agent import relabel_agent
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
+    sedan = onto.by_name("sedan").id        # both four_wheeler
+    suv = onto.by_name("suv").id
+    # Large enough to clear MIN_CROP_PX: a crop smaller than that is declined whatever the model says.
+    crop = np.zeros((32, 32, 3), dtype=np.uint8)
 
     # Suggested class beats current by a clear margin and clears the floor -> a decisive relabel (keep).
-    relabel_agent.classify_crop = lambda c, topk=20: [  # type: ignore[attr-defined]
-        {"class_id": 7, "class_name": "autorickshaw", "conf": 0.72},
-        {"class_id": 3, "class_name": "car", "conf": 0.10},
+    cc.classify_crop = lambda c, topk=20: [
+        {"class_id": suv, "class_name": "suv", "conf": 0.72},
+        {"class_id": sedan, "class_name": "sedan", "conf": 0.10},
     ]
-    import services.autolabel.classify_crop as cc
-    cc.classify_crop = relabel_agent.classify_crop  # _decide imports from the module at call time
-
-    d = relabel_agent._decide(crop, current_id=3, min_conf=0.45, margin=0.15, strong_conf=0.60, strong_margin=0.30)
-    assert d is not None and d[0] == 7 and d[3] == "relabel_keep"
+    d = relabel_agent._decide(crop, current_id=sedan, min_conf=0.45, margin=0.15,
+                              strong_conf=0.60, strong_margin=0.30)
+    assert d is not None and d[0] == suv and d[3] == "relabel_keep"
 
     # Same top class but the current class is close behind -> margin not met -> leave it alone.
     cc.classify_crop = lambda c, topk=20: [
-        {"class_id": 7, "class_name": "autorickshaw", "conf": 0.52},
-        {"class_id": 3, "class_name": "car", "conf": 0.48},
+        {"class_id": suv, "class_name": "suv", "conf": 0.52},
+        {"class_id": sedan, "class_name": "sedan", "conf": 0.48},
     ]
-    assert relabel_agent._decide(crop, 3, min_conf=0.45, margin=0.15, strong_conf=0.60, strong_margin=0.30) is None
+    assert relabel_agent._decide(crop, sedan, min_conf=0.45, margin=0.15,
+                                 strong_conf=0.60, strong_margin=0.30) is None
+
+    # And the case that changed: the same clear margin across a superclass is no longer enough.
+    e_auto = onto.by_name("e_auto").id      # three_wheeler
+    moped = onto.by_name("moped").id        # two_wheeler
+    cc.classify_crop = lambda c, topk=20: [
+        {"class_id": e_auto, "class_name": "e_auto", "conf": 0.72},
+        {"class_id": moped, "class_name": "moped", "conf": 0.10},
+    ]
+    assert relabel_agent._decide(crop, moped, min_conf=0.45, margin=0.15,
+                                 strong_conf=0.60, strong_margin=0.30) is None
 
     # Model already agrees with the current label -> no proposal.
-    cc.classify_crop = lambda c, topk=20: [{"class_id": 3, "class_name": "car", "conf": 0.9}]
-    assert relabel_agent._decide(crop, 3, min_conf=0.45, margin=0.15, strong_conf=0.60, strong_margin=0.30) is None
+    cc.classify_crop = lambda c, topk=20: [{"class_id": sedan, "class_name": "sedan", "conf": 0.9}]
+    assert relabel_agent._decide(crop, sedan, min_conf=0.45, margin=0.15,
+                                 strong_conf=0.60, strong_margin=0.30) is None
 
     # Clears the margin but not the strong bar -> applied, but routed to review.
     cc.classify_crop = lambda c, topk=20: [
-        {"class_id": 7, "class_name": "autorickshaw", "conf": 0.50},
-        {"class_id": 3, "class_name": "car", "conf": 0.20},
+        {"class_id": suv, "class_name": "suv", "conf": 0.50},
+        {"class_id": sedan, "class_name": "sedan", "conf": 0.20},
     ]
-    d = relabel_agent._decide(crop, 3, min_conf=0.45, margin=0.15, strong_conf=0.60, strong_margin=0.30)
+    d = relabel_agent._decide(crop, sedan, min_conf=0.45, margin=0.15,
+                              strong_conf=0.60, strong_margin=0.30)
     assert d is not None and d[3] == "relabel_review"
 
 
@@ -169,10 +193,12 @@ def test_commit_and_revert_relabel():
     from services.agent.runs import revert_run
 
     fid, oid, car, auto = run_async(_seed_frame_with_car())
-    # Force the independent model to decisively call the car an autorickshaw.
+    # Force the independent model to decisively call the sedan an autorickshaw. That crosses a superclass
+    # (four_wheeler to three_wheeler), so it now needs to clear the higher bar, and it lands in review rather
+    # than being auto-kept. The commit-and-revert path this test is about is the same either way.
     cc.classify_crop = lambda c, topk=20: [
-        {"class_id": auto, "class_name": "autorickshaw", "conf": 0.8},
-        {"class_id": car, "class_name": "car", "conf": 0.05},
+        {"class_id": auto, "class_name": "autorickshaw", "conf": 0.97},
+        {"class_id": car, "class_name": "sedan", "conf": 0.02},
     ]
 
     async def _flow():
