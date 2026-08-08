@@ -363,9 +363,19 @@ class LabeloxClient:
         return self._call("GET", f"/api/agent/runs",
                           params={"limit": limit}, json_body=None)
 
+    def get_agent_runs_interrupted(self, limit: int | None = 50) -> Any:
+        """Interrupted Runs"""
+        return self._call("GET", f"/api/agent/runs/interrupted",
+                          params={"limit": limit}, json_body=None)
+
     def get_agent_runs_by_run_id(self, run_id: str) -> Any:
         """Run Detail"""
         return self._call("GET", f"/api/agent/runs/{run_id}",
+                          params=None, json_body=None)
+
+    def post_agent_runs_by_run_id_resume(self, run_id: str) -> Any:
+        """Resume Run"""
+        return self._call("POST", f"/api/agent/runs/{run_id}/resume",
                           params=None, json_body=None)
 
     def post_agent_runs_by_run_id_revert(self, run_id: str) -> Any:
@@ -3241,4 +3251,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 631 routes generated from the server schema.
+# 633 routes generated from the server schema.
