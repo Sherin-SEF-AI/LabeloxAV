@@ -7,12 +7,12 @@ documented cloud seam for horizontal scale and is intentionally not built here.
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
+from core.observability import spawn
 from db.models import ImportJob
 from db.session import get_sessionmaker
 from services.api.deps import ImportStartIn
@@ -90,7 +90,7 @@ async def start(payload: ImportStartIn):
         await db.commit()
     spec = ImportSpec(format=payload.format, source_uri=payload.source_uri,
                       target_vehicle=payload.target_vehicle, city=payload.city, options=payload.options)
-    asyncio.create_task(run_import_guarded(spec, job_id))
+    spawn(run_import_guarded(spec, job_id), name="run_import_guarded")
     return {"job_id": str(job_id), "status": "pending"}
 
 

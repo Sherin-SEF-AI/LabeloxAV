@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from core.config import get_settings
 from core.logging import get_logger
+from core.observability import spawn
 from core.storage import get_object_store
 from db.models import ModelRun, TrainingJob
 from db.session import get_sessionmaker
@@ -138,7 +139,7 @@ async def run_job(job_id) -> dict:
             if await _is_canceled(job_id):
                 cancel.set()
 
-    drain_task = asyncio.create_task(drain())
+    drain_task = spawn(drain(), name="drain")
     try:
         async with get_sessionmaker()() as db:
             job = await db.get(TrainingJob, uuid.UUID(str(job_id)))

@@ -373,7 +373,11 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
             reasoner_ok: dict[int, bool] = {}
             if settings.reasoner.enabled:
                 from services.autolabel.reasoner.pass_ import (
-                    FrameContext, apply_to_objects, escalate, reason_frame, summarise,
+                    FrameContext,
+                    apply_to_objects,
+                    escalate,
+                    reason_frame,
+                    summarise,
                 )
 
                 fctx = FrameContext(width=fd.frame.width, height=fd.frame.height,

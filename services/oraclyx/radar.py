@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import math
 
-from services.oraclyx.consensus import iou
-
 
 def _center(box: list[float]) -> tuple[float, float]:
     return (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0

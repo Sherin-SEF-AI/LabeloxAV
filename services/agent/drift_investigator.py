@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
-from datetime import timedelta
+from datetime import UTC, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
@@ -167,13 +167,13 @@ async def launch_investigation(db: AsyncSession, drift: dict, *, created_by: str
 async def maybe_investigate(db: AsyncSession, drift: dict) -> dict:
     """On-breach hook for the runtime scheduler: investigate a breach at most once per hour (avoid a new
     investigation every controller tick while the breach persists)."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from services.agent.runtime.report import ran_since
 
     if not drift.get("breached"):
         return {"ran": False, "reason": "no breach"}
-    if await ran_since(db, _KIND, datetime.now(timezone.utc) - timedelta(hours=1)):
+    if await ran_since(db, _KIND, datetime.now(UTC) - timedelta(hours=1)):
         return {"ran": False, "reason": "already investigated recently"}
     res = await launch_investigation(db, drift, created_by="scheduler")
     return {"ran": True, **res}

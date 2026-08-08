@@ -6,7 +6,7 @@ prior state/source from the recorded transition, but skips any object a human ha
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,7 +68,7 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
             child_reverted += r["reverted"]
             child_children += 1
         run.status = "reverted"
-        run.reverted_at = datetime.now(timezone.utc)
+        run.reverted_at = datetime.now(UTC)
         await db.commit()
         log.info("agent.run.revert_cascade", run_id=str(run_id), children=child_children, reverted=child_reverted)
         return {"run_id": str(run_id), "reverted": child_reverted, "skipped": 0, "children": child_children}
@@ -109,7 +109,7 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
         reverted += 1
 
     run.status = "reverted"
-    run.reverted_at = datetime.now(timezone.utc)
+    run.reverted_at = datetime.now(UTC)
     await db.commit()
     log.info("agent.run.revert", run_id=str(run_id), reverted=reverted, skipped=skipped)
     return {"run_id": str(run_id), "reverted": reverted, "skipped": skipped}

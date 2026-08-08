@@ -4,14 +4,13 @@ trigger embedding as a background task (GPU-light; yields to training)."""
 
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
+from core.observability import spawn
 from services.analytics.curation import curation_summary, diverse_sample
 from services.api.deps import db_session, require_role
 from services.training.gpu_lease import training_holds_gpu
@@ -100,5 +99,5 @@ async def _embed_guarded(session_id) -> None:
 async def embed(session_id: str | None = None, db: AsyncSession = Depends(db_session)):
     if await training_holds_gpu(db):
         raise HTTPException(503, "GPU reserved for a training job; embedding is paused until it finishes")
-    asyncio.create_task(_embed_guarded(session_id))
+    spawn(_embed_guarded(session_id), name="_embed_guarded")
     return {"started": True}

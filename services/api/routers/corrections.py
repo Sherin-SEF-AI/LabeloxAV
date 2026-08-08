@@ -3,7 +3,6 @@ confusion view (what the model gets wrong, from the Review audit trail), and emb
 
 from __future__ import annotations
 
-import asyncio
 from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
+from core.observability import spawn
 from db.models import Frame, Object, ObjectEmbedding, Review
 from db.models import Session as DbSession
 from services.api.deps import db_session
@@ -151,5 +151,5 @@ async def embed(session_id: str | None = None, db: AsyncSession = Depends(db_ses
         except Exception as exc:  # noqa: BLE001
             log.error("corrections.embed_failed", error=str(exc))
 
-    asyncio.create_task(_run())
+    spawn(_run(), name="_run")
     return {"started": True}

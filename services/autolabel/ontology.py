@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 import yaml
@@ -234,7 +234,7 @@ def get_ontology(pack_id: str = "av") -> Ontology:
     return _get_ontology_cached(pack_id or "av")
 
 
-@lru_cache(maxsize=None)
+@cache
 def _get_ontology_cached(pack_id: str) -> Ontology:
     if pack_id == "av":
         return load_ontology()  # byte-identical to the pre-pack behaviour: same YAML, same sidecar merge

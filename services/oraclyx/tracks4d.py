@@ -31,7 +31,7 @@ def stitch_track(observations: dict[int, list[float]], n_frames: int, max_heal_g
     boxes: dict[int, dict] = {i: {"frame": i, "bbox": list(observations[i]), "source": "observed"}
                               for i in anchors}
     healed = 0
-    for lo, hi in zip(anchors, anchors[1:]):
+    for lo, hi in zip(anchors, anchors[1:], strict=False):
         span = hi - lo
         if span <= 1 or span > max_heal_gap:
             continue

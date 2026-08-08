@@ -5,13 +5,13 @@ second tenant, so every fleet agent records its work the same way (one AgentRun 
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.observability import spawn
 from db.models import AgentRun
 from db.session import get_sessionmaker
 
@@ -23,7 +23,7 @@ async def launch(db: AsyncSession, kind: str, worker: Callable[[uuid.UUID], Awai
     db.add(AgentRun(run_id=run_id, kind=kind, scope={}, status="running", policy=policy or {}, counts={},
                     changes={}, critic={}, created_by=created_by))
     await db.commit()
-    asyncio.create_task(worker(run_id))
+    spawn(worker(run_id), name="worker")
     return {"run_id": str(run_id), "status": "running"}
 
 

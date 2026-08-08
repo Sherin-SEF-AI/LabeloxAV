@@ -11,7 +11,6 @@ writes rig_track_id across time. Here linking is per-instant (within one frame g
 
 from __future__ import annotations
 
-import uuid
 from collections import Counter, defaultdict
 from uuid import UUID
 

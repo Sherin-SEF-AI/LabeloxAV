@@ -8,7 +8,7 @@ model registry, and the drift + audit trail.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -85,7 +85,7 @@ async def generate_weekly_report(db: AsyncSession) -> dict:
     from services.agent.coverage import analyze_coverage
     from services.govern.control_sample import measured_precision
 
-    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    week_ago = datetime.now(UTC) - timedelta(days=7)
     prec = await measured_precision(db)
     drift = [{"metric": d.metric, "value": d.value, "breach": d.breach} for d in (await db.execute(
         select(DriftMetric).where(DriftMetric.created_at >= week_ago)

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
+from core.observability import spawn
 from core.storage import get_object_store
 from core.timebase import now_ns
 from db.models import Frame, Object, Review
@@ -26,7 +27,6 @@ async def qa_vlm(session_id: str, limit: int = 40, db: AsyncSession = Depends(db
     """Run a VLM auto-QA + auto-attributes pass on a session in the background: flags cross-superclass
     disagreements into the QA queue and pre-fills typed attributes. GPU-light (Ollama), yields to
     training. Flagged objects surface in triage's QA queue (state=submitted)."""
-    import asyncio
     from uuid import UUID as _UUID
 
 
@@ -41,7 +41,7 @@ async def qa_vlm(session_id: str, limit: int = 40, db: AsyncSession = Depends(db
         except Exception as exc:  # noqa: BLE001
             log.error("qa_vlm.failed", error=str(exc))
 
-    asyncio.create_task(_run())
+    spawn(_run(), name="_run")
     return {"started": True, "session_id": session_id, "limit": limit}
 
 _ACTION_STATE = {"confirm": "accepted", "accept": "accepted", "reject": "rejected"}

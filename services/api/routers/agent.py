@@ -5,13 +5,13 @@ recorded in one AgentRun; revert restores the exact prior state. Auto-accept is 
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.observability import spawn
 from db.models import AgentRun
 from services.agent.flywheel import run_flywheel
 from services.agent.frame_agent import commit_frame, plan_frame
@@ -231,7 +231,7 @@ async def error_sweep(body: ErrorSweepIn, db: AsyncSession = Depends(db_session)
                    created_by=str(user.user_id) if user else "daemon")
     db.add(run)
     await db.commit()
-    asyncio.create_task(run_error_sweep(run_id, max_sessions=max(1, body.max_sessions), kinds=body.kinds))
+    spawn(run_error_sweep(run_id, max_sessions=max(1, body.max_sessions), kinds=body.kinds), name="run_error_sweep")
     return {"run_id": str(run_id), "status": "running"}
 
 
@@ -384,11 +384,11 @@ async def flywheel(body: FlywheelIn, db: AsyncSession = Depends(db_session), use
     )
     db.add(run)
     await db.commit()
-    asyncio.create_task(run_flywheel(
+    spawn(run_flywheel(
         run_id, ticks=max(1, body.ticks), max_frames=max(1, body.max_frames),
         policy=_thresholds(body), session_id=body.session_id, dry_run=body.dry_run,
         created_by=str(user.user_id) if user else "flywheel",
-    ))
+    ), name="run_flywheel")
     return {"run_id": str(run_id), "status": "running", "dry_run": body.dry_run}
 
 
@@ -515,9 +515,9 @@ async def relabel_all(body: RelabelAllIn | None = None, db: AsyncSession = Depen
                    created_by=str(user.user_id) if user else "daemon")
     db.add(run)
     await db.commit()
-    asyncio.create_task(run_relabel_all(run_id, max_frames=max(1, body.max_frames),
+    spawn(run_relabel_all(run_id, max_frames=max(1, body.max_frames),
                                         session_id=body.session_id, min_conf=body.min_conf, margin=body.margin,
-                                        created_by=str(user.user_id) if user else None))
+                                        created_by=str(user.user_id) if user else None), name="run_relabel_all")
     return {"run_id": str(run_id), "status": "running"}
 
 
@@ -539,7 +539,7 @@ async def cleanup_sweep(body: CleanupIn | None = None, db: AsyncSession = Depend
     db.add(AgentRun(run_id=run_id, kind="cleanup_sweep", scope={}, status="running", policy=body.model_dump(),
                     counts={}, changes={}, critic={}, created_by=str(user.user_id) if user else "cleanup"))
     await db.commit()
-    asyncio.create_task(run_cleanup_sweep(run_id, do_pii=body.do_pii, pii_limit=body.pii_limit))
+    spawn(run_cleanup_sweep(run_id, do_pii=body.do_pii, pii_limit=body.pii_limit), name="run_cleanup_sweep")
     return {"run_id": str(run_id), "status": "running"}
 
 
@@ -824,13 +824,13 @@ async def resume_run(run_id: str, db: AsyncSession = Depends(db_session)):
 
     scope = claimed.get("scope") or {}
     if run.kind == "error_sweep":
-        asyncio.create_task(run_error_sweep(
-            rid, max_sessions=int(scope.get("max_sessions") or 10), kinds=scope.get("kinds")))
+        spawn(run_error_sweep(
+            rid, max_sessions=int(scope.get("max_sessions") or 10), kinds=scope.get("kinds")), name="run_error_sweep")
     else:
         from services.agent.relabel_agent import run_relabel_all
 
-        asyncio.create_task(run_relabel_all(
-            rid, max_frames=int(scope.get("max_frames") or 200), session_id=scope.get("session_id")))
+        spawn(run_relabel_all(
+            rid, max_frames=int(scope.get("max_frames") or 200), session_id=scope.get("session_id")), name="run_relabel_all")
     return {**claimed, "restarted": True}
 
 

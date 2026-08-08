@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
+from core.observability import spawn
 from db.models import Webhook
 from db.session import get_sessionmaker
 
@@ -278,7 +279,7 @@ async def emit(event: str, payload: dict, *, project_id: str | None = None) -> i
             continue
         if wh.project_id and project_id and str(wh.project_id) != str(project_id):
             continue
-        asyncio.create_task(_deliver_one(wh.webhook_id, wh.url, wh.secret, body))
+        spawn(_deliver_one(wh.webhook_id, wh.url, wh.secret, body), name="_deliver_one")
         n += 1
     if n:
         log.info("webhook.emitted", event_name=event, deliveries=n)

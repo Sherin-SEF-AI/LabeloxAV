@@ -110,8 +110,8 @@ async def suggest_for_frame(db: AsyncSession, frame_id) -> dict:
     import uuid as _uuid
 
     from services.agent.attribute_agent import plan_attributes
-    from services.agent.cuboid_agent import plan_cuboids
     from services.agent.critic import critique_frame
+    from services.agent.cuboid_agent import plan_cuboids
     from services.agent.frame_agent import _build_context, _load_objects
 
     fid = frame_id if isinstance(frame_id, _uuid.UUID) else _uuid.UUID(str(frame_id))

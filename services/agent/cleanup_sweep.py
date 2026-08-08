@@ -14,6 +14,7 @@ instead of the ~12-day GPU cost of a full re-detection.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC
 
 from sqlalchemy import distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -199,8 +200,8 @@ async def revert_cleanup(db: AsyncSession, run: AgentRun) -> dict:
         db.add(_restore(clean))
         restored += 1
     run.status = "reverted"
-    from datetime import datetime, timezone
-    run.reverted_at = datetime.now(timezone.utc)
+    from datetime import datetime
+    run.reverted_at = datetime.now(UTC)
     await db.commit()
     log.info("cleanup.revert", run_id=str(run.run_id), restored=restored)
     return {"run_id": str(run.run_id), "restored": restored}

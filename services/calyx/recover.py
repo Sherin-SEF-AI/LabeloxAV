@@ -12,7 +12,6 @@ from uuid import UUID
 
 import numpy as np
 
-from core.config import get_settings
 from core.geometry import se3_compose, se3_inverse, se3_magnitude
 from core.logging import get_logger
 from db.models import CalibrationOverride
