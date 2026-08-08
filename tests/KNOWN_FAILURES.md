@@ -44,6 +44,26 @@ These are `xfail(strict=True)` in the code, so they do not appear as failures. L
 **Fix:** give these fixtures real frames (a small committed sample) instead of `np.random`. Until then the
 xfail is honest: the gate is doing its job and the test data is wrong.
 
+## Environmental: two GPU tests fail under memory pressure, and pass in isolation
+
+| Test | |
+| --- | --- |
+| `test_m2_autolabel.py::test_stage1_runs_under_vram_ceiling` | loads YOLO11l and asserts a VRAM ceiling |
+| `test_m3_fusion.py::test_autolabel_pipeline_writes_gated_objects` | runs the same pipeline |
+
+Both pass alone and pass as a pair. They fail in a full run only when something else already holds most of
+the card. Measured on 2026-08-08: 12.3 GB of 16.3 GB was in use before the suite started, 5.2 GB by an Ollama
+model still resident and 7.1 GB by the long-lived API server, which runs Ultralytics val in-process for the
+promotion gate and does not release it between requests.
+
+So a full-suite result is only meaningful once the card is quiet. Before reading a failure here as a
+regression, check `nvidia-smi`, unload the Ollama model with a `keep_alive: 0` request, and restart the API.
+The same run is otherwise clean: 1746 passed, 2 skipped, 4 xfailed.
+
+**Fix:** the API server holding GPU memory across requests is the real defect. The promotion gate doing
+minutes of Ultralytics work inside an HTTP request is already recorded as wanting a job record it can poll;
+moving that work out of the API process would take this with it.
+
 ## Still true, and not a test failure: the shared test database is never cleaned
 
 The three tests that were listed here as order-dependent now assert against rows they seeded themselves, so
