@@ -55,6 +55,19 @@ async def current_user(
     from db.models import User
 
     settings = get_settings()
+
+    # A machine credential, checked before the token path because the two are told apart by their scheme and
+    # an API key would otherwise fail signature verification and read as anonymous. It resolves to a real
+    # User row, so every role floor, audit entry and created_by column downstream works unchanged and a
+    # machine's writes are attributed to the machine rather than to whoever generated its key.
+    if authorization and authorization.lower().startswith("bearer "):
+        from services.identity.service_accounts import split_key
+        from services.identity.service_accounts import verify as verify_key
+
+        raw = authorization.split(" ", 1)[1].strip()
+        if split_key(raw) is not None:
+            return await verify_key(db, raw)
+
     payload = bearer_payload(authorization, settings.auth.signing_key,
                              accept_legacy=settings.auth.accept_legacy_tokens)
     if payload is None:

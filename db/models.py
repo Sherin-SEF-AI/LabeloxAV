@@ -318,6 +318,43 @@ class DrivableMask(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ServiceAccount(Base):
+    """A machine credential: an API key bound to an app_user row.
+
+    Every auth path in this system was human, so an integration had to hold a person's password and act as
+    them. A service account is deliberately still a user, so role floors, audit trails and `created_by`
+    provenance keep working unchanged and a machine's actions are attributable the same way a person's are.
+
+    The key itself is never stored. What is stored is the sha256 of the secret half plus the public prefix,
+    which is what the lookup indexes on, so a leaked database yields no usable credential.
+
+    Revocation is a column rather than a token version, because a machine credential has to die the moment
+    somebody presses the button. A bearer token is checked against a version and is otherwise valid until it
+    expires, which is the wrong trade for something that lives in a CI config for a year.
+    """
+
+    __tablename__ = "service_account"
+
+    service_account_id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    # The identity it acts as. CASCADE: deleting the user removes the way to act as them.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="CASCADE"), nullable=False)
+    # Public half of the key, shown in the UI and used to find the row. Unique so a lookup is exact.
+    key_prefix: Mapped[str] = mapped_column(String(24), unique=True, nullable=False, index=True)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Reserved for narrowing a key below its user's role later; empty means the role alone governs.
+    scopes: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    description: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Throttled on write, so "is this key still in use?" is answerable without a write per request.
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class User(Base):
     # "user" is a reserved word in Postgres, so the table is app_user. Lightweight: no password (the
     # current user is chosen client-side); role gates the QA workflow (annotator submits, reviewer approves).

@@ -2798,6 +2798,26 @@ class LabeloxClient:
         return self._call("POST", f"/api/segment",
                           params=None, json_body=body)
 
+    def get_service_accounts(self, include_revoked: bool | None = False) -> Any:
+        """Index"""
+        return self._call("GET", f"/api/service-accounts",
+                          params={"include_revoked": include_revoked}, json_body=None)
+
+    def post_service_accounts(self, body: Any = None) -> Any:
+        """Create"""
+        return self._call("POST", f"/api/service-accounts",
+                          params=None, json_body=body)
+
+    def post_service_accounts_by_account_id_revoke(self, account_id: str) -> Any:
+        """Kill"""
+        return self._call("POST", f"/api/service-accounts/{account_id}/revoke",
+                          params=None, json_body=None)
+
+    def post_service_accounts_by_account_id_rotate(self, account_id: str) -> Any:
+        """New Key"""
+        return self._call("POST", f"/api/service-accounts/{account_id}/rotate",
+                          params=None, json_body=None)
+
     def get_sessions(self, limit: int | None = 200) -> Any:
         """Sessions"""
         return self._call("GET", f"/api/sessions",
@@ -3251,4 +3271,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 633 routes generated from the server schema.
+# 637 routes generated from the server schema.

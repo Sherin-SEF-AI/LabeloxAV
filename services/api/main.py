@@ -75,6 +75,7 @@ from services.api.routers import (
     secv2,
     segment_assist,
     segmentation,
+    service_accounts,
     signs,
     tracks,
     training,
@@ -200,7 +201,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="LabeloxAV", version="0.1.0", lifespan=lifespan)
 
 # Role floor by path prefix for mutating requests.
-_ADMIN_PREFIXES = ("/api/govern", "/api/users")
+_ADMIN_PREFIXES = ("/api/govern", "/api/users", "/api/service-accounts")
 _REVIEWER_PREFIXES = (
     "/api/review", "/api/export", "/api/datasets", "/api/relabel", "/api/imports", "/api/curation",
     "/api/corrections", "/api/collaborate", "/api/objects", "/api/tracks", "/api/lanes", "/api/errordetect",
@@ -336,6 +337,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     role = u.role if u else None
             except Exception:  # noqa: BLE001
                 role = None
+        elif authz:
+            # A machine credential. This gate resolves identity independently of the route dependency, so a
+            # credential the dependency understands and this does not is refused here and never reaches the
+            # route: service accounts authenticated perfectly in unit tests and answered 401 to every real
+            # request until this branch existed. Both paths call the same verifier so they cannot drift again.
+            from services.identity.service_accounts import split_key
+            from services.identity.service_accounts import verify as verify_key
+
+            raw = authz.split(" ", 1)[1].strip() if " " in authz else ""
+            if split_key(raw) is not None:
+                try:
+                    async with get_sessionmaker()() as db:
+                        u = await verify_key(db, raw)
+                        role = u.role if u else None
+                except Exception:  # noqa: BLE001
+                    role = None
 
         # Dev-login must be reachable without a token (it exists to hand out the first one); the route itself
         # is hard-gated to env == "local", so allowlisting it here does not open a hole on a real deployment.
@@ -521,6 +538,7 @@ app.include_router(errordetect.router, prefix="/api", tags=["errordetect"])
 app.include_router(relabel.router, prefix="/api", tags=["relabel"])
 app.include_router(collaborate.router, prefix="/api", tags=["collaborate"])
 app.include_router(govern.router, prefix="/api", tags=["govern"])
+app.include_router(service_accounts.router, prefix="/api", tags=["service-accounts"])
 app.include_router(multicam.router, prefix="/api", tags=["multicam"])
 app.include_router(mapassist.router, prefix="/api", tags=["mapassist"])
 app.include_router(hdmap.router, prefix="/api", tags=["hdmap"])
