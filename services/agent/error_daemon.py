@@ -32,8 +32,15 @@ async def _sessions_with_machine_objects(db: AsyncSession, limit: int) -> list[u
 
 
 async def run_error_sweep(run_id: uuid.UUID, *, max_sessions: int = 10, kinds: list[str] | None = None) -> None:
-    """Background: run every detector across up to max_sessions, updating the fix queue and the run."""
+    """Background: run every detector across up to max_sessions, updating the fix queue and the run.
+
+    Resumable. The unit of work is a whole session, so the cursor is the set of sessions already swept, and
+    a resumed run skips those instead of re-detecting them. That matters beyond the wasted GPU time: the
+    per-session totals are accumulated, and re-sweeping a session already counted would inflate `persisted`
+    into a number about how many times the job was interrupted.
+    """
     from db.session import get_sessionmaker
+    from services.agent.resume import beat, done_set
     from services.errordetect.queue import run_detection
 
     maker = get_sessionmaker()
@@ -46,21 +53,33 @@ async def run_error_sweep(run_id: uuid.UUID, *, max_sessions: int = 10, kinds: l
                 await db.commit()
             return
         sessions = await _sessions_with_machine_objects(db, max_sessions)
+        # Pick up an earlier attempt's cursor and totals. A fresh run has neither and starts from zero.
+        prior = await db.get(AgentRun, run_id)
+        done = done_set(dict(prior.progress or {})) if prior is not None else set()
+        totals: dict = dict(prior.counts or {}) if prior is not None else {}
 
-    totals: dict = {"sessions": 0, "persisted": 0, "by_kind": {}}
+    totals.setdefault("sessions", 0)
+    totals.setdefault("persisted", 0)
+    totals.setdefault("by_kind", {})
+    if done:
+        log.info("agent.error_sweep.resuming", run_id=str(run_id), already_done=len(done))
     try:
         for sid in sessions:
+            if str(sid) in done:
+                continue
             async with maker() as db:
                 res = await run_detection(db, str(sid), kinds)
             totals["sessions"] += 1
             totals["persisted"] += int(res.get("persisted", 0))
             for k, n in (res.get("by_kind") or {}).items():
                 totals["by_kind"][k] = totals["by_kind"].get(k, 0) + int(n)
+            done.add(str(sid))
+            # Cursor and totals move together in one commit. Recording progress separately would let a crash
+            # between the two land a session in the cursor whose counts were never saved, and a resume would
+            # then skip work it had not actually counted.
             async with maker() as db:
-                run = await db.get(AgentRun, run_id)
-                if run is not None:
-                    run.counts = dict(totals)
-                    await db.commit()
+                await beat(db, run_id, progress={"done": sorted(done), "total": len(sessions)},
+                           counts=dict(totals))
         async with maker() as db:
             run = await db.get(AgentRun, run_id)
             if run is not None:

@@ -1800,6 +1800,13 @@ class AgentRun(Base):
     changes: Mapped[dict] = mapped_column(JSONB, default=dict)     # {object_id: {from_state, to_state, from_source, to_source}}
     critic: Mapped[dict] = mapped_column(JSONB, default=dict)      # critic findings summary (by check, by object)
     error: Mapped[str | None] = mapped_column(Text)
+    # Written as the job progresses. A `running` row whose heartbeat has gone stale is a job whose process
+    # died, which is the only way to tell it from live work: the task lives in the API process and leaves no
+    # trace when that process goes away.
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The resume cursor, shaped by the job. Opaque on purpose: the only thing every job shares is needing to
+    # say how much is done, and a common shape would make each one lie about its unit of work.
+    progress: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     created_by: Mapped[str | None] = mapped_column(String(64))     # user id that launched it, or "flywheel"
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -168,6 +168,19 @@ async def lifespan(app: FastAPI):
     setup_logging(get_settings().log_level)
     checked = _assert_auth_floors(app)
     log.info("api.startup", api_routes_checked=checked)
+    # Background jobs run as tasks inside this process, so every one that was live when the previous process
+    # ended is now gone with no trace but a row still marked running. Startup is the one moment that is
+    # certain, so the sweep happens here rather than on a timer. It only touches rows whose heartbeat has
+    # already aged past the staleness window, so a job belonging to another live worker is never reaped.
+    # Best effort: an unreachable database must not stop the API from starting and reporting why.
+    try:
+        from db.session import get_sessionmaker
+        from services.agent.resume import reap_interrupted
+
+        async with get_sessionmaker()() as db:
+            await reap_interrupted(db)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("api.reap_interrupted_failed", error=str(exc))
     watchdog = asyncio.create_task(_cloud_watchdog())
     try:
         yield
