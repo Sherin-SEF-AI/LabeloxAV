@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import distinct, select
+from sqlalchemy import Text, distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from core.storage import get_object_store
-from db.models import AgentRun, Frame, Object
+from db.models import AgentRun, Frame, Object, OntologyClass
 from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("agent.relabel")
@@ -89,7 +89,29 @@ async def commit_relabel(db: AsyncSession, frame_id: uuid.UUID, *, created_by: s
     plan = await plan_relabel(db, frame_id, **kw)
     run_id = uuid.uuid4()
     changes: dict[str, dict] = {}
+
+    # The classifier scores every class the ontology object knows, and that object merges the governed YAML
+    # with the custom-class sidecar. A sidecar class that was never seeded into `ontology_class` is therefore
+    # proposable and unstorable at once, and writing it raises a foreign-key violation from inside a
+    # background task: the corpus-wide run died at frame 13 of 25 because one crop scored highest as
+    # `test_new_vehicle`, a leftover from a test.
+    #
+    # Skipping the proposal rather than letting it kill the run is the right trade. The frame is still read,
+    # the other objects on it are still corrected, and the drift is counted instead of being a traceback in a
+    # log nobody is reading.
+    proposed = {int(i["to_class"]) for i in plan["items"]}
+    storable: set[int] = set()
+    if proposed:
+        storable = set((await db.execute(
+            select(OntologyClass.id).where(OntologyClass.id.in_(proposed)))).scalars().all())
+    unstorable = proposed - storable
+    if unstorable:
+        log.warning("agent.relabel.unstorable_class", frame_id=str(frame_id), class_ids=sorted(unstorable))
+
     for item in plan["items"]:
+        if int(item["to_class"]) not in storable:
+            plan["counts"]["skipped_unknown_class"] = plan["counts"].get("skipped_unknown_class", 0) + 1
+            continue
         obj = await db.get(Object, uuid.UUID(item["object_id"]))
         if obj is None or obj.source == "human" or int(obj.class_id) == item["to_class"]:
             continue
@@ -124,10 +146,32 @@ async def run_relabel_all(run_id: uuid.UUID, *, max_frames: int = 200, created_b
                 run.status, run.counts = "committed", {"skipped": "training job holds the GPU"}
                 await db.commit()
             return
-        q = select(distinct(Object.frame_id)).where(Object.source != "human")
+        # Frames this job has never read before, oldest first.
+        #
+        # It used to be `distinct(frame_id) ... limit N` with no ordering and no exclusion, and Postgres
+        # returns the same rows for that query every time. 34,121 frames are eligible, so the default
+        # max_frames=200 covered 0.59% of them and covered the identical 0.59% on every run: pressing
+        # "relabel all frames" a hundred times re-read the same 200 frames and never reached the other
+        # 33,921. It looked like a job that found nothing rather than a job that could not see anything.
+        #
+        # A committed child run of kind `relabel` is the record that a frame was read, so excluding those
+        # makes successive runs walk forward through the corpus instead of standing still.
+        seen = (select(AgentRun.scope["frame_id"].astext)
+                .where(AgentRun.kind == "relabel", AgentRun.scope["frame_id"].astext.isnot(None)))
+        q = (select(distinct(Object.frame_id))
+             .where(Object.source != "human", Object.frame_id.cast(Text).notin_(seen)))
         if session_id:
             q = q.join(Frame, Frame.frame_id == Object.frame_id).where(Frame.session_id == uuid.UUID(session_id))
-        frame_ids = list((await db.execute(q.limit(max_frames))).scalars().all())
+        # Ordered so a run is reproducible and so an operator can tell two runs apart by what they covered.
+        frame_ids = list((await db.execute(q.order_by(Object.frame_id).limit(max_frames))).scalars().all())
+        if not frame_ids:
+            run = await db.get(AgentRun, run_id)
+            if run:
+                run.status = "committed"
+                run.counts = {"frames": 0, "detail": "every eligible frame has already been relabelled"}
+                await db.commit()
+            log.info("agent.relabel_all.nothing_left", run_id=str(run_id))
+            return
         # Resume support: the unit of work is one frame, so the cursor is the frames already relabelled.
         # Re-running a frame would mint a second child run for it and double-count its totals, so skipping
         # is about correctness of the numbers, not only about the wasted GPU time.
