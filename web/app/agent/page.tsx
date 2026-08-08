@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, type AuditReport, type PromotionProposalRow } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import ActivityLog from "@/components/agent/ActivityLog";
+import InterruptedRuns from "@/components/agent/InterruptedRuns";
 import { describeFailure } from "@/lib/actionError";
 import { type ActivityLog as Log, emptyLog, record } from "@/lib/activityLog";
 import { Spinner } from "@/components/Spinner";
@@ -540,6 +541,8 @@ export default function AgentConsole() {
               </div>
             ) : <div className="panel p-4 text-ink-3 text-sm">No promotion proposals. Scan the fallback clusters to find classes that have earned their way in.</div>}
           </div>
+
+          <InterruptedRuns onResumed={load} />
 
           <ActivityLog log={log} onClear={() => setLog((l) => ({ entries: [], seq: l.seq }))} />
 

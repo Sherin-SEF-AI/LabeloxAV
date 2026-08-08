@@ -1,4 +1,5 @@
 import type {
+  InterruptedRun,
   AlItem,
   AssignmentRow,
   AuditRow,
@@ -625,6 +626,11 @@ export const api = {
     post<{ run_id: string; relabeled: number; counts: { total: number; relabel_keep: number; relabel_review: number } }>(`/api/agent/frames/${frame_id}/relabel`, {}),
   agentRelabelAll: (opts: { max_frames?: number; session_id?: string } = {}) =>
     post<{ run_id: string; status: string }>(`/api/agent/relabel/all`, opts),
+  agentInterruptedRuns: () =>
+    get<{ runs: InterruptedRun[] }>(`/api/agent/runs/interrupted`),
+  agentResumeRun: (run_id: string) =>
+    post<{ run_id: string; kind: string; restarted: boolean; detail?: string }>(
+      `/api/agent/runs/${run_id}/resume`, {}),
   agentRunStatus: (run_id: string) =>
     get<{ run_id: string; kind: string; status: string; counts: Record<string, number>; changed: number }>(`/api/agent/runs/${run_id}`),
   // Overnight Auditor: run the nightly patrol, read the morning report

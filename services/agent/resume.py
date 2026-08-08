@@ -116,6 +116,9 @@ async def list_interrupted(db: AsyncSession, limit: int = 50) -> list[dict]:
     return [{
         "run_id": str(r.run_id), "kind": r.kind, "scope": dict(r.scope or {}),
         "progress": dict(r.progress or {}), "counts": dict(r.counts or {}),
+        # Fraction of the work its cursor says was finished, for a progress bar that reflects a measurement
+        # rather than an animation. None when the job never recorded a total.
+        "fraction": fraction_done(dict(r.progress or {})),
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "heartbeat_at": r.heartbeat_at.isoformat() if r.heartbeat_at else None,
         "resumable": bool(r.progress),
@@ -142,6 +145,18 @@ async def claim_for_resume(db: AsyncSession, run_id: uuid.UUID) -> dict | None:
     await db.commit()
     return {"run_id": str(run_id), "kind": run.kind, "scope": dict(run.scope or {}),
             "progress": dict(run.progress or {}), "counts": dict(run.counts or {}), "resumed": True}
+
+
+def fraction_done(progress: dict) -> float | None:
+    """How far a cursor says a run got, in [0, 1], or None when it cannot say.
+
+    None rather than 0.0 for an absent total: a bar sitting at zero claims no work was done, which is a
+    different statement from not knowing.
+    """
+    total = progress.get("total")
+    if not isinstance(total, int) or total <= 0:
+        return None
+    return round(min(1.0, len(done_set(progress)) / total), 4)
 
 
 def done_set(progress: dict, key: str = "done") -> set[str]:

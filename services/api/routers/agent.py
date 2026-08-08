@@ -771,6 +771,63 @@ async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
     return await list_runs(db, limit)
 
 
+# Kinds with a relauncher that honours their cursor. A kind absent here can still be re-run from the start;
+# what it cannot do is continue, and the resume route refuses rather than pretending.
+_RESUMABLE_KINDS = frozenset({"error_sweep"})
+
+
+@router.get("/agent/runs/interrupted", dependencies=[Depends(require_role("annotator"))])
+async def interrupted_runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
+    """Jobs whose process stopped before they finished, with the cursor each one left behind.
+
+    Declared above /agent/runs/{run_id} because FastAPI matches in order and "interrupted" would otherwise
+    be parsed as a run id and answer 422.
+    """
+    from services.agent.resume import list_interrupted
+
+    return {"runs": await list_interrupted(db, limit)}
+
+
+@router.post("/agent/runs/{run_id}/resume", dependencies=[Depends(require_role("reviewer"))])
+async def resume_run(run_id: str, db: AsyncSession = Depends(db_session)):
+    """Continue an interrupted job from its cursor.
+
+    Only the jobs that recorded one can actually skip finished work; the rest are honestly reported as not
+    resumable rather than being restarted under a name that implies they will not repeat themselves.
+    """
+    from services.agent.error_daemon import run_error_sweep
+    from services.agent.resume import claim_for_resume
+
+    try:
+        rid = uuid.UUID(run_id)
+    except ValueError as exc:
+        raise HTTPException(400, "invalid run id") from exc
+
+    run = await db.get(AgentRun, rid)
+    if run is None:
+        raise HTTPException(404, "run not found")
+
+    # Check the kind before claiming. Claiming first would flip the run to running and then, for a kind with
+    # no relauncher, leave it running with no process behind it: the exact stranded state this whole feature
+    # exists to remove, recreated by the button meant to clear it.
+    if run.kind not in _RESUMABLE_KINDS:
+        raise HTTPException(409, f"{run.kind} has no resume path yet, so it cannot be continued from its "
+                                 "cursor; its progress is preserved and it can be started again")
+
+    claimed = await claim_for_resume(db, rid)
+    if claimed is None:
+        raise HTTPException(404, "run not found")
+    if claimed.get("error"):
+        # 409, not 400: the request is well formed and the run is simply in a state that cannot be resumed,
+        # which is a fact about the world the caller should be told rather than a mistake they made.
+        raise HTTPException(409, claimed["error"])
+
+    scope = claimed.get("scope") or {}
+    asyncio.create_task(run_error_sweep(
+        rid, max_sessions=int(scope.get("max_sessions") or 10), kinds=scope.get("kinds")))
+    return {**claimed, "restarted": True}
+
+
 @router.get("/agent/runs/{run_id}", dependencies=[Depends(require_role("annotator"))])
 async def run_detail(run_id: str, db: AsyncSession = Depends(db_session)):
     r = await db.get(AgentRun, uuid.UUID(run_id))

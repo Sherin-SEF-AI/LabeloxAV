@@ -1106,3 +1106,18 @@ export type EventCorpusSummary = {
   cities: Record<string, number>;
   sessions_with_events: number;
 };
+
+// A job whose process stopped before it finished. `fraction` is derived from the job's own cursor and is
+// null when it never recorded a total, which is a different statement from zero progress.
+export type InterruptedRun = {
+  run_id: string;
+  kind: string;
+  scope: Record<string, unknown>;
+  progress: Record<string, unknown>;
+  counts: Record<string, unknown>;
+  fraction: number | null;
+  created_at: string | null;
+  heartbeat_at: string | null;
+  resumable: boolean;
+  error: string | null;
+};

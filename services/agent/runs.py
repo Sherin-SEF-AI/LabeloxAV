@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from db.models import AgentRun, Object
+from services.agent.resume import fraction_done
 
 log = get_logger("agent.runs")
 
@@ -24,6 +25,12 @@ def run_dict(run: AgentRun) -> dict:
         "changed": len(run.changes or {}), "created_by": run.created_by,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "reverted_at": run.reverted_at.isoformat() if run.reverted_at else None,
+        # The cursor and the last sign of life. Exposed so a caller can show real progress for a job that is
+        # still going, rather than an indeterminate bar that looks identical whether the job is working or
+        # has already died, which is how a run sat "running" for 863 hours without anyone noticing.
+        "progress": dict(run.progress or {}),
+        "heartbeat_at": run.heartbeat_at.isoformat() if run.heartbeat_at else None,
+        "fraction": fraction_done(dict(run.progress or {})),
     }
 
 
