@@ -3,11 +3,17 @@ independent model is confident the current one is wrong.
 
 The reasoning is a margin, not a coin flip. For each object it reads the whole SigLIP 2 class distribution
 over the crop, finds where the CURRENT class sits in it, and only proposes a relabel when a different class
-both clears an absolute-confidence floor AND beats the current class by a clear margin. A strong, decisive
-disagreement is applied and kept (the accuracy actually improves); a moderate one is applied but routed to
-review for a human to confirm; a weak one is left alone. Every change records the original class so the run
-reverts exactly. Runs on a single frame (from the editor) or across the whole corpus in the background
-('relabel all frames').
+both clears an absolute-confidence floor AND beats the current class by a clear margin. Every change records
+the original class so the run reverts exactly. Runs on a single frame (from the editor) or across the whole
+corpus in the background ('relabel all frames').
+
+**Everything routes to review by default.** This module used to keep a decisive disagreement without a human
+seeing it, on the reasoning that the accuracy improves. It does not. Measured against the 302 objects a
+person had verified in this corpus, all 10 changes it would have applied unreviewed overruled that person,
+including traffic_sign -> milestone at 0.985 and minivan -> mpv at 0.945. The confidence is a softmax over
+how well a crop matches each class *name*, so a high number says the name fits, not that the label is wrong,
+and it is highest exactly where two names are close. Auto-keep is therefore opt-in and off, and the agent is
+treated as what it measurably is: good at finding candidates, not at deciding them.
 """
 
 from __future__ import annotations
@@ -38,10 +44,15 @@ MIN_CROP_PX = 24
 CROSS_L1_CONF = 0.90
 CROSS_L1_MARGIN = 0.55
 
+# How many frames may fail back to back before a corpus run gives up. One unreadable frame is a data problem
+# and should be skipped; a run of them is the object store or the GPU being gone, and carrying on would mark
+# thousands of frames done having read none of them.
+MAX_CONSECUTIVE_FRAME_FAILURES = 20
+
 
 def _decide(crop_bgr, current_id: int, *, min_conf: float, margin: float, strong_conf: float,
             strong_margin: float, cross_l1_conf: float = CROSS_L1_CONF,
-            cross_l1_margin: float = CROSS_L1_MARGIN):
+            cross_l1_margin: float = CROSS_L1_MARGIN, auto_keep: bool = False):
     """Return (suggested_id, suggested_name, top_conf, action) or None. action: relabel_keep | relabel_review.
 
     Two bars, not one. Within a superclass (`truck` to `tempo`, both heavy) the model is refining a
@@ -86,13 +97,22 @@ def _decide(crop_bgr, current_id: int, *, min_conf: float, margin: float, strong
 
     if conf < min_conf or gap < margin:
         return None
-    action = "relabel_keep" if (conf >= strong_conf and gap >= strong_margin) else "relabel_review"
+    decisive = conf >= strong_conf and gap >= strong_margin
+    action = "relabel_keep" if (decisive and auto_keep) else "relabel_review"
     return int(top["class_id"]), top["class_name"], round(conf, 3), action
 
 
 async def plan_relabel(db: AsyncSession, frame_id: uuid.UUID, *, min_conf: float = 0.45, margin: float = 0.15,
-                       strong_conf: float = 0.60, strong_margin: float = 0.30) -> dict:
-    """Dry-run: which objects the reasoning layer would relabel, and how. No writes."""
+                       strong_conf: float = 0.60, strong_margin: float = 0.30,
+                       auto_keep: bool = False) -> dict:
+    """Dry-run: which objects the reasoning layer would relabel, and how. No writes.
+
+    `auto_keep` is off by default, so every proposal lands in review. Measured against the 302 objects a
+    human verified in this corpus, all 10 changes the agent would have applied without review overruled a
+    label a person had checked, among them traffic_sign -> milestone at 0.985 and minivan -> mpv at 0.945.
+    Confidence here reflects how well a crop matches a class *name*, not whether the label is wrong, so a
+    high number is not permission to skip the human. The caller can opt back in.
+    """
     from services.autolabel.ontology import get_ontology
     from services.recall.backends import load_image_bgr
 
@@ -113,7 +133,7 @@ async def plan_relabel(db: AsyncSession, frame_id: uuid.UUID, *, min_conf: float
         if x2 - x1 < 3 or y2 - y1 < 3:
             continue
         d = _decide(img[y1:y2, x1:x2], int(o.class_id), min_conf=min_conf, margin=margin,
-                    strong_conf=strong_conf, strong_margin=strong_margin)
+                    strong_conf=strong_conf, strong_margin=strong_margin, auto_keep=auto_keep)
         if d is None:
             continue
         sug_id, sug_name, conf, action = d
@@ -175,7 +195,8 @@ async def commit_relabel(db: AsyncSession, frame_id: uuid.UUID, *, created_by: s
 
 
 async def run_relabel_all(run_id: uuid.UUID, *, max_frames: int = 200, created_by: str | None = None,
-                          session_id: str | None = None, min_conf: float = 0.45, margin: float = 0.15) -> None:
+                          session_id: str | None = None, min_conf: float = 0.45, margin: float = 0.15,
+                          auto_keep: bool = False) -> None:
     """Background: relabel every machine-labelled frame (bounded), one reversible child run per frame, the
     parent run aggregating counts. Yields to a running training job (GPU discipline)."""
     from db.session import get_sessionmaker
@@ -228,12 +249,35 @@ async def run_relabel_all(run_id: uuid.UUID, *, max_frames: int = 200, created_b
     if done:
         log.info("agent.relabel_all.resuming", run_id=str(run_id), already_done=len(done))
     try:
+        consecutive_failures = 0
         for fid in frame_ids:
             if str(fid) in done:
                 continue
-            async with maker() as db:
-                res = await commit_relabel(db, fid, created_by=created_by or "relabel-all",
-                                           min_conf=min_conf, margin=margin)
+            try:
+                async with maker() as db:
+                    res = await commit_relabel(db, fid, created_by=created_by or "relabel-all",
+                                               min_conf=min_conf, margin=margin, auto_keep=auto_keep)
+            except Exception as exc:  # noqa: BLE001
+                # One frame must not end a corpus-wide job. A frame whose image is missing from the object
+                # store took out a whole 1,000-frame batch at frame 209, losing the rest of the work for a
+                # single unreadable row. It is marked done so a resume does not stop on it again.
+                consecutive_failures += 1
+                totals["skipped_error"] = totals.get("skipped_error", 0) + 1
+                done.add(str(fid))
+                log.warning("agent.relabel_all.frame_failed", run_id=str(run_id), frame_id=str(fid),
+                            error=str(exc)[:200])
+                if consecutive_failures >= MAX_CONSECUTIVE_FRAME_FAILURES:
+                    # Tolerating a bad frame is right; tolerating an outage is not. A run of failures means
+                    # the object store or the GPU has gone, and continuing would quietly mark thousands of
+                    # frames done having read none of them.
+                    raise RuntimeError(
+                        f"{consecutive_failures} frames in a row failed; stopping rather than marking the "
+                        f"rest done unread. Last error: {exc}") from exc
+                async with maker() as db:
+                    await beat(db, run_id, progress={"done": sorted(done), "total": len(frame_ids)},
+                               counts=dict(totals))
+                continue
+            consecutive_failures = 0
             totals["frames"] += 1
             totals["relabel_keep"] += res["counts"].get("relabel_keep", 0)
             totals["relabel_review"] += res["counts"].get("relabel_review", 0)

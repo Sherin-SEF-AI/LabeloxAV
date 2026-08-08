@@ -46,12 +46,15 @@ def _preds(monkeypatch, ranked: list[tuple[int, float]]):
 
 
 DEFAULTS = {"min_conf": 0.45, "margin": 0.15, "strong_conf": 0.60, "strong_margin": 0.30}
+# Auto-keep is opt-in and off by default, so the tests that are about the keep-versus-review split have to
+# ask for it. See test_nothing_is_auto_kept_by_default for why the default is what it is.
+KEEPING = {**DEFAULTS, "auto_keep": True}
 
 
 def test_a_confident_within_superclass_refinement_is_still_kept(monkeypatch):
     """The rule must not make the agent timid: sedan to suv is the distinction the taxonomy exists for."""
     _preds(monkeypatch, [(SUV, 0.80), (SEDAN, 0.10)])
-    out = _decide(CROP, SEDAN, **DEFAULTS)
+    out = _decide(CROP, SEDAN, **KEEPING)
     assert out is not None
     assert out[0] == SUV and out[3] == "relabel_keep"
 
@@ -112,5 +115,16 @@ def test_a_fallback_bucket_is_never_proposed(monkeypatch):
 ])
 def test_within_superclass_still_splits_keep_from_review(monkeypatch, conf, gap_from, expected):
     _preds(monkeypatch, [(SUV, conf), (SEDAN, gap_from)])
-    out = _decide(CROP, SEDAN, **DEFAULTS)
+    out = _decide(CROP, SEDAN, **KEEPING)
     assert out is not None and out[3] == expected
+
+
+def test_nothing_is_auto_kept_by_default(monkeypatch):
+    """The measurement that set the default. Against the 302 objects a person verified, all 10 changes this
+    would have applied unreviewed overruled that person, among them traffic_sign -> milestone at 0.985. The
+    confidence is a softmax over how well a crop matches a class name, so it is highest exactly where two
+    names are close, which is where the agent is least trustworthy."""
+    _preds(monkeypatch, [(SUV, 0.99), (SEDAN, 0.001)])
+    out = _decide(CROP, SEDAN, **DEFAULTS)
+    assert out is not None, "it should still propose the change"
+    assert out[3] == "relabel_review", "but a person decides it"

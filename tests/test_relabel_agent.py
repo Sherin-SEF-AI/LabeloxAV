@@ -72,8 +72,14 @@ def test_decide_relabels_only_on_clear_margin():
         {"class_id": sedan, "class_name": "sedan", "conf": 0.10},
     ]
     d = relabel_agent._decide(crop, current_id=sedan, min_conf=0.45, margin=0.15,
-                              strong_conf=0.60, strong_margin=0.30)
+                              strong_conf=0.60, strong_margin=0.30, auto_keep=True)
     assert d is not None and d[0] == suv and d[3] == "relabel_keep"
+
+    # The same call without opting in routes to review instead: auto-keep is off by default because every
+    # unreviewed change it made to a human-verified label was wrong.
+    d = relabel_agent._decide(crop, current_id=sedan, min_conf=0.45, margin=0.15,
+                              strong_conf=0.60, strong_margin=0.30)
+    assert d is not None and d[3] == "relabel_review"
 
     # Same top class but the current class is close behind -> margin not met -> leave it alone.
     cc.classify_crop = lambda c, topk=20: [
