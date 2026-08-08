@@ -2,8 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, type AuditReport, type PromotionProposalRow , humanizeError } from "@/lib/api";
+import { api, type AuditReport, type PromotionProposalRow } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
+import ActivityLog from "@/components/agent/ActivityLog";
+import { describeFailure } from "@/lib/actionError";
+import { type ActivityLog as Log, emptyLog, record } from "@/lib/activityLog";
 import { Spinner } from "@/components/Spinner";
 
 // The Agent Console: the corpus-level home for the autonomous agent. Self-healing QA (the error daemon
@@ -23,7 +26,21 @@ export default function AgentConsole() {
   const [queue, setQueue] = useState<Cand[]>([]);
   const [summary, setSummary] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  // The transcript replaces a single shared message string. `setMsg` is kept as the name every call site
+  // already uses and now appends an entry instead of overwriting one, so a background result landing minutes
+  // later sits beside the earlier ones rather than erasing them. Passing null clears nothing and records
+  // nothing, which is what the old `setMsg(null)` at the top of each handler meant.
+  const [log, setLog] = useState<Log>(emptyLog);
+  const setMsg = useCallback((m: string | null, status: "ok" | "failed" = "ok", hint?: string) => {
+    if (m === null) return;
+    setLog((l) => record(l, "", status, m, Date.now(), hint));
+  }, []);
+  // Report a failure from what the status actually says. Thirteen call sites here asserted "(needs reviewer
+  // role)" on every failure of an action, so a busy GPU (503) read as a permissions problem.
+  const failed = useCallback((action: string, e: unknown) => {
+    const f = describeFailure(action, e);
+    setLog((l) => record(l, action, "failed", f.message, Date.now(), f.hint));
+  }, []);
   const [loading, setLoading] = useState(true);
 
   const [audit, setAudit] = useState<{ status?: string; created_at?: string; report: AuditReport | null } | null>(null);
@@ -46,7 +63,7 @@ export default function AgentConsole() {
         if (n > 0) setTimeout(() => poll(n - 1), 5000);
       };
       void r; poll(60);
-    } catch (e) { setMsg("audit failed (needs reviewer role): " + humanizeError(e)); }
+    } catch (e) { failed("audit", e); }
     finally { setBusy(null); }
   };
 
@@ -54,11 +71,11 @@ export default function AgentConsole() {
     setBusy("sweep"); setMsg(null);
     try {
       const r = await api.agentErrorSweep(8);
-      setMsg("error sweep running in the background — the fix queue refreshes as sessions complete");
+      setMsg("error sweep running in the background: the fix queue refreshes as sessions complete");
       // poll a couple of times for results
       setTimeout(load, 6000); setTimeout(load, 15000);
       void r;
-    } catch (e) { setMsg("sweep failed (needs reviewer role): " + humanizeError(e)); }
+    } catch (e) { failed("sweep", e); }
     finally { setBusy(null); }
   };
 
@@ -68,7 +85,7 @@ export default function AgentConsole() {
     setBusy("relabel"); setMsg(null); setRelabel(null); setRelabelDone(false);
     try {
       const r = await api.agentRelabelAll({ max_frames: 300 });
-      setMsg("relabel running across the corpus — an independent model is re-reading every box");
+      setMsg("relabel running across the corpus: an independent model is re-reading every box");
       // poll progress until the background run reports committed
       const poll = async (n: number) => {
         try {
@@ -79,7 +96,7 @@ export default function AgentConsole() {
         if (n > 0) setTimeout(() => poll(n - 1), 4000);
       };
       poll(60);
-    } catch (e) { setMsg("relabel failed (needs reviewer role): " + humanizeError(e)); }
+    } catch (e) { failed("relabel", e); }
     finally { setBusy(null); }
   };
 
@@ -88,7 +105,7 @@ export default function AgentConsole() {
     try {
       const r = await api.estimateEgoMasks();
       setMsg(`ego-hood masks: ${r.with_hood}/${r.cameras} cameras have a detected hood${r.no_hood.length ? ` (no hood: ${r.no_hood.slice(0, 4).join(", ")})` : ""}`);
-    } catch (e) { setMsg("ego-mask estimation failed: " + humanizeError(e)); }
+    } catch (e) { failed("ego-mask estimation", e); }
     finally { setBusy(null); }
   };
   const backfillPii = async () => {
@@ -96,7 +113,7 @@ export default function AgentConsole() {
     try {
       await api.piiBackfill(2000);
       setMsg("PII backfill running in the background: blurring faces/plates on pre-gate frames, overwriting the stored image in place");
-    } catch (e) { setMsg("PII backfill failed (needs plate/face weights): " + humanizeError(e)); }
+    } catch (e) { failed("PII backfill", e); }
     finally { setBusy(null); }
   };
   const redetectAll = async () => {
@@ -104,7 +121,7 @@ export default function AgentConsole() {
     try {
       const r = await api.redetectAll(true);
       setMsg(`full re-detection started (run ${r.run_id.slice(0, 8)}): PII backfill, then re-run every session with thing/stuff + ego-hood + de-dup + oversize gates, one at a time on the GPU`);
-    } catch (e) { setMsg("re-detection failed (GPU may be reserved for training): " + humanizeError(e)); }
+    } catch (e) { failed("re-detection", e); }
     finally { setBusy(null); }
   };
 
@@ -115,7 +132,7 @@ export default function AgentConsole() {
       if (!p.counts.relabels) { setMsg(`no safe track-flip relabels (scanned ${p.counts.tracks} tracks, ${p.counts.flipped_tracks} flipped, ${p.counts.skipped_static ?? 0} corrupt)`); return; }
       const r = await api.agentTemporalRepair();
       setMsg(`temporal auto-repair: relabeled ${r.relabeled} outliers to their track majority (reversible, run ${r.run_id.slice(0, 8)})`);
-    } catch (e) { setMsg("repair failed (needs reviewer role): " + humanizeError(e)); }
+    } catch (e) { failed("repair", e); }
     finally { setBusy(null); }
   };
 
@@ -128,51 +145,51 @@ export default function AgentConsole() {
     const t = ask.trim(); if (!t) return;
     setBusy("ask"); setMsg(null);
     try { const r = await api.agentAsk(t); setAskResult({ understood: r.understood, count: r.count }); }
-    catch (e) { setMsg("query failed: " + humanizeError(e)); }
+    catch (e) { failed("query", e); }
     finally { setBusy(null); }
   };
   const doReport = async () => {
     setBusy("report"); setMsg(null);
     try { setReport(await api.agentReport()); }
-    catch (e) { setMsg("report failed: " + humanizeError(e)); }
+    catch (e) { failed("report", e); }
     finally { setBusy(null); }
   };
   const mine = async (what: "scenarios" | "disagreements") => {
     setBusy(what); setMsg(null);
     try {
-      if (what === "scenarios") { const r = await api.agentMineScenarios(); setMsg(`mined ${r.persisted} safety scenarios (${Object.entries(r.by_kind).map(([k, n]) => `${k}:${n}`).join(", ") || "none"}) — see Scenarios`); }
-      else { const r = await api.agentMineDisagreements(); setMsg(`mined ${r.persisted} model-disagreement frames${r.top[0] ? ` (top: ${r.top[0].tag})` : ""} — see Scenarios`); }
-    } catch (e) { setMsg("mine failed (needs reviewer role): " + humanizeError(e)); }
+      if (what === "scenarios") { const r = await api.agentMineScenarios(); setMsg(`mined ${r.persisted} safety scenarios (${Object.entries(r.by_kind).map(([k, n]) => `${k}:${n}`).join(", ") || "none"}) ,  see Scenarios`); }
+      else { const r = await api.agentMineDisagreements(); setMsg(`mined ${r.persisted} model-disagreement frames${r.top[0] ? ` (top: ${r.top[0].tag})` : ""} ,  see Scenarios`); }
+    } catch (e) { failed("mine", e); }
     finally { setBusy(null); }
   };
   const coverage = async () => {
     setBusy("coverage"); setMsg(null);
     try { const r = await api.agentCoverage(); setGaps(r.gaps); }
-    catch (e) { setMsg("coverage failed: " + humanizeError(e)); }
+    catch (e) { failed("coverage", e); }
     finally { setBusy(null); }
   };
 
   const cycle = async () => {
     setBusy("cycle"); setMsg(null);
     try { const r = await api.agentTrainingCycle(true); setMsg(`flywheel cycle (dry-run): would auto-accept ${r.tick.auto_accept}, review ${r.tick.review}, annotate ${r.tick.annotate} across ${r.tick.frames} top-value frames`); }
-    catch (e) { setMsg("cycle failed (needs reviewer role): " + humanizeError(e)); }
+    catch (e) { failed("cycle", e); }
     finally { setBusy(null); }
   };
   const drift = async () => {
     setBusy("drift"); setMsg(null);
     try {
       const r = await api.agentGoldDrift();
-      setMsg(r.status === "rolled_back" ? `GOLD DRIFT: champion regressed ${r.baseline_map}→${r.current_map} — rolled back + paused loop`
+      setMsg(r.status === "rolled_back" ? `GOLD DRIFT: champion regressed ${r.baseline_map}→${r.current_map}, rolled back + paused loop`
         : r.status === "healthy" ? `champion healthy on gold (${r.current_map} vs baseline ${r.baseline_map})`
-        : r.status === "cannot_evaluate" ? `champion ${r.champion} (baseline mAP ${r.baseline_map}) — gold set not materialized here`
+        : r.status === "cannot_evaluate" ? `champion ${r.champion} (baseline mAP ${r.baseline_map}), gold set not materialized here`
         : "no champion registered");
-    } catch (e) { setMsg("gold-drift check failed: " + humanizeError(e)); }
+    } catch (e) { failed("gold-drift check", e); }
     finally { setBusy(null); }
   };
 
   const act = async (c: Cand, kind: "confirm" | "dismiss") => {
     try { await (kind === "confirm" ? api.errorConfirm(c.candidate_id) : api.errorDismiss(c.candidate_id)); load(); }
-    catch (e) { setMsg(humanizeError(e)); }
+    catch (e) { failed(kind === "confirm" ? "confirm" : "dismiss", e); }
   };
 
   const [driftDiag, setDriftDiag] = useState<{ report: { hypothesis: string; proposed_action: { kind: string } } | null } | null>(null);
@@ -184,7 +201,7 @@ export default function AgentConsole() {
       if (!r.breached.length) { setMsg("no drift breach right now - governance is holding within tolerance"); return; }
       setMsg(`drift breach (${r.breached.join(", ")}) - investigating root cause in the background`);
       setTimeout(() => api.agentDriftLatest().then(setDriftDiag).catch(() => {}), 4000);
-    } catch (e) { setMsg("drift investigation failed (needs reviewer role): " + humanizeError(e)); }
+    } catch (e) { failed("drift investigation", e); }
     finally { setBusy(null); }
   };
 
@@ -194,7 +211,7 @@ export default function AgentConsole() {
     try {
       const r = kind === "datasheet" ? await api.agentDocDatasheet() : await api.agentDocWeekly();
       setDoc(r.markdown); setMsg(`${kind} drafted and stored (${r.uri.split("/").slice(-2).join("/")})`);
-    } catch (e) { setMsg("doc generation failed: " + humanizeError(e)); }
+    } catch (e) { failed("doc generation", e); }
     finally { setBusy(null); }
   };
 
@@ -205,7 +222,7 @@ export default function AgentConsole() {
   const scanOntology = async () => {
     setBusy("ontscan"); setMsg(null);
     try { const r = await api.agentOntologyScan(40); setMsg(`scanned ${r.scanned} fallbacks -> ${r.proposals} promotion proposals`); await loadProps(); }
-    catch (e) { setMsg("ontology scan failed (needs reviewer role): " + humanizeError(e)); }
+    catch (e) { failed("ontology scan", e); }
     finally { setBusy(null); }
   };
   const decide = async (id: string, action: "approve" | "reject") => {
@@ -217,7 +234,7 @@ export default function AgentConsole() {
         const r = await api.agentOntologyApprove(id, nm); setMsg(`minted ${r.name} (#${r.class_id}), relabeled ${r.relabeled} - reversible run ${r.run_id.slice(0, 8)}`);
       } else { await api.agentOntologyReject(id); setMsg("proposal rejected"); }
       await loadProps();
-    } catch (e) { setMsg("decision failed (needs reviewer role): " + humanizeError(e)); }
+    } catch (e) { failed("decision", e); }
     finally { setBusy(null); }
   };
 
@@ -227,13 +244,13 @@ export default function AgentConsole() {
   const planFleet = async () => {
     setBusy("fleet"); setMsg(null);
     try { const r = await api.agentFleetPlan(); setMsg(`fused ${r.gaps} gaps + ${r.vehicles} vehicles -> ${r.orders} collection orders`); await loadOrders(); }
-    catch (e) { setMsg("fleet plan failed (needs reviewer role): " + humanizeError(e)); }
+    catch (e) { failed("fleet plan", e); }
     finally { setBusy(null); }
   };
   const dispatchOrder = async (id: string) => {
     setBusy(id); setMsg(null);
     try { await api.agentFleetDispatch(id, "dispatched"); await loadOrders(); }
-    catch (e) { setMsg("dispatch failed (needs reviewer role): " + humanizeError(e)); }
+    catch (e) { failed("dispatch", e); }
     finally { setBusy(null); }
   };
 
@@ -243,7 +260,7 @@ export default function AgentConsole() {
     if (!buyer.trim()) return;
     setBusy("buyer"); setMsg(null);
     try { setBuyerRes(await api.agentBuyerSpec(buyer.trim(), confirm, confirm ? "buyer-" + Date.now() : undefined)); if (confirm) setMsg("slice composed, sealed export launched, datasheet drafted"); }
-    catch (e) { setMsg("buyer spec failed (needs reviewer role): " + humanizeError(e)); }
+    catch (e) { failed("buyer spec", e); }
     finally { setBusy(null); }
   };
 
@@ -253,7 +270,7 @@ export default function AgentConsole() {
     if (!ops.trim()) return;
     setBusy("ops"); setMsg(null);
     try { setOpsRes(await api.agentOpsAsk(ops.trim(), confirm)); }
-    catch (e) { setMsg("ops failed (needs reviewer role): " + humanizeError(e)); }
+    catch (e) { failed("ops", e); }
     finally { setBusy(null); }
   };
 
@@ -358,7 +375,7 @@ export default function AgentConsole() {
 
           {/* Data intelligence: the system finds what is worth labeling */}
           <div>
-            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Data intelligence — find what matters</h2>
+            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Data intelligence: find what matters</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="panel p-4">
                 <div className="text-ink font-medium text-sm">Safety scenarios</div>
@@ -367,7 +384,7 @@ export default function AgentConsole() {
               </div>
               <div className="panel p-4">
                 <div className="text-ink font-medium text-sm">Model disagreement</div>
-                <div className="text-ink-3 text-xs mt-1">Surface frames where the champion and challenger detectors voted different classes — the highest-value labels + a regression signal.</div>
+                <div className="text-ink-3 text-xs mt-1">Surface frames where the champion and challenger detectors voted different classes ,  the highest-value labels + a regression signal.</div>
                 <button onClick={() => mine("disagreements")} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "disagreements" ? "mining..." : "mine disagreements"}</button>
               </div>
               <div className="panel p-4">
@@ -428,7 +445,7 @@ export default function AgentConsole() {
           {/* Fleet Dispatch */}
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3">Fleet dispatch — collect what the corpus lacks</h2>
+              <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3">Fleet dispatch: collect what the corpus lacks</h2>
               <button onClick={planFleet} disabled={!!busy} className="ml-auto font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "fleet" ? "planning..." : "plan collection orders"}</button>
             </div>
             {orders.length ? (
@@ -446,7 +463,7 @@ export default function AgentConsole() {
 
           {/* Buyer Curation Agent */}
           <div>
-            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Buyer curation — spec to sealed dataset</h2>
+            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Buyer curation: spec to sealed dataset</h2>
             <div className="panel p-4">
               <div className="flex items-center gap-1.5">
                 <input value={buyer} onChange={(e) => setBuyer(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") askBuyer(false); }}
@@ -470,7 +487,7 @@ export default function AgentConsole() {
 
           {/* Operations Agent */}
           <div>
-            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Ask LabeloxAV — operate in sentences</h2>
+            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Ask LabeloxAV: operate in sentences</h2>
             <div className="panel p-4">
               <div className="flex items-center gap-1.5">
                 <input value={ops} onChange={(e) => setOps(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") askOps(false); }}
@@ -498,7 +515,7 @@ export default function AgentConsole() {
           {/* Ontology Steward */}
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3">Ontology Steward — grow the ontology</h2>
+              <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3">Ontology Steward: grow the ontology</h2>
               <button onClick={scanOntology} disabled={!!busy} className="ml-auto font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "ontscan" ? "scanning..." : "scan fallback clusters"}</button>
             </div>
             {props.length ? (
@@ -524,7 +541,7 @@ export default function AgentConsole() {
             ) : <div className="panel p-4 text-ink-3 text-sm">No promotion proposals. Scan the fallback clusters to find classes that have earned their way in.</div>}
           </div>
 
-          {msg ? <div className="font-mono text-[11px] text-warn">{msg}</div> : null}
+          <ActivityLog log={log} onClear={() => setLog((l) => ({ entries: [], seq: l.seq }))} />
 
           {/* Fix queue */}
           <div className="panel">
