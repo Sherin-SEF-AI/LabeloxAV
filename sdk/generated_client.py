@@ -1303,6 +1303,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/forgyx/benchmarks",
                           params={"model_version": model_version}, json_body=None)
 
+    def get_forgyx_benchmarks_audit(self) -> Any:
+        """Benchmarks Audit"""
+        return self._call("GET", f"/api/forgyx/benchmarks/audit",
+                          params=None, json_body=None)
+
     def get_forgyx_capabilities(self) -> Any:
         """Capabilities"""
         return self._call("GET", f"/api/forgyx/capabilities",
@@ -1317,6 +1322,11 @@ class LabeloxClient:
         """Deployments"""
         return self._call("GET", f"/api/forgyx/deployments",
                           params={"model_version": model_version}, json_body=None)
+
+    def post_forgyx_export_by_model_version(self, model_version: str, body: Any = None) -> Any:
+        """Export Model"""
+        return self._call("POST", f"/api/forgyx/export/{model_version}",
+                          params=None, json_body=body)
 
     def post_forgyx_gate(self, body: Any = None) -> Any:
         """Gate"""
@@ -3271,4 +3281,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 637 routes generated from the server schema.
+# 639 routes generated from the server schema.
