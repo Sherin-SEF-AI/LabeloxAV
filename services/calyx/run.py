@@ -11,10 +11,11 @@ from sqlalchemy import select
 
 from core.config import get_settings
 from core.logging import get_logger
-from db.models import CalibrationValidation
+from db.models import CalibrationOverride, CalibrationValidation
 from db.models import Session as DbSession
 from db.session import get_sessionmaker
 from services.calyx.drift import estimate_extrinsic_drift
+from services.calyx.rig_prior import build_rig_prior, deviations, prior_confidence
 
 log = get_logger("calyx.run")
 
@@ -63,3 +64,59 @@ async def rig_history(vehicle_id: str, limit: int = 200) -> dict:
             }
     timeline = sorted(by_session.values(), key=lambda x: x["created_at"] or "")
     return {"vehicle_id": vehicle_id, "n_sessions": len(timeline), "timeline": timeline}
+
+
+async def rig_prior_for_vehicle(db, vehicle_id: str, limit: int = 500) -> dict:
+    """The fleet calibration prior for one vehicle, and which of its sessions sit outside it.
+
+    Reads `camera_calibration`, which is where the estimates actually are. The consensus endpoint had been
+    reading `calibration_override` instead, a table holding zero rows on this deployment and on every
+    deployment that has never had a human correct a calibration by hand, so it answered "no calibrations" for
+    a vehicle with ninety-seven of them. Overrides still win where they exist, because a corrected extrinsic
+    is better evidence than the estimate it replaced; they are a patch on the base, not the base.
+    """
+    from db.models import CameraCalibration
+
+    rows = (await db.execute(
+        select(CameraCalibration, DbSession.vehicle_id)
+        .join(DbSession, CameraCalibration.session_id == DbSession.session_id)
+        .where(DbSession.vehicle_id == vehicle_id).limit(limit))).all()
+
+    overrides = {}
+    for o in (await db.execute(
+            select(CalibrationOverride)
+            .join(DbSession, CalibrationOverride.session_id == DbSession.session_id)
+            .where(DbSession.vehicle_id == vehicle_id).limit(limit))).scalars().all():
+        corrected = o.corrected or {}
+        if corrected.get("rpy_deg") and corrected.get("xyz_m"):
+            overrides[(str(o.session_id), o.cam_id)] = corrected
+
+    calibs = []
+    for cal, _veh in rows:
+        patch = overrides.get((str(cal.session_id), cal.cam_id))
+        calibs.append({
+            "session_id": str(cal.session_id), "cam_id": cal.cam_id,
+            "rpy_deg": (patch or {}).get("rpy_deg") or cal.rpy_deg,
+            "xyz_m": (patch or {}).get("xyz_m") or cal.xyz_m,
+            "confidence": float(cal.quality or 0.0),
+            "corrected": patch is not None,
+        })
+
+    prior = build_rig_prior(calibs)
+    outliers = []
+    for c in calibs:
+        d = deviations(c, prior)
+        if d["outlier"]:
+            outliers.append({"session_id": c["session_id"], "cam_id": c["cam_id"],
+                             "worst_sigmas": d["worst_sigmas"], "flagged_axes": d["flagged_axes"],
+                             "axes": {k: v for k, v in d["axes"].items() if v.get("outlier")}})
+    outliers.sort(key=lambda o: -o["worst_sigmas"])
+    return {
+        "vehicle_id": vehicle_id,
+        "n_calibrations": len(calibs),
+        "n_overrides": len(overrides),
+        "prior": prior,
+        "confidence": prior_confidence(prior),
+        "outliers": outliers,
+        "n_outliers": len(outliers),
+    }
