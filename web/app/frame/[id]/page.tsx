@@ -1226,7 +1226,9 @@ export default function FrameEditor() {
         <ModeRail mode={mode} onMode={switchMode} />
         {/* CENTER: tool strip row above the canvas */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          <div className="h-[50px] shrink-0 flex items-center gap-1.5 px-2.5 border-b hairline overflow-x-auto no-scrollbar">
+          {/* No overflow-x here: the strip collapses its own tail into an overflow flyout, and a scroll
+              container would hide the tail again with no affordance, which is the bug it just fixed. */}
+          <div className="h-[50px] shrink-0 flex items-center gap-1.5 px-2.5 border-b hairline overflow-hidden">
           <ToolStrip groups={MODE_GROUPS[mode] ?? MODE_GROUPS.objects} tool={st.tool}
             modeIcon={MODE_ICON[mode]} modeLabel={MODES.find((m) => m.key === mode)?.label}
             onSelect={(t) => dispatch({ t: "tool", tool: t as Tool })}

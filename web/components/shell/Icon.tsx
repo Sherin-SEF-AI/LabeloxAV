@@ -56,6 +56,10 @@ const ICONS: Record<string, Prim[]> = {
   zoomIn: [["circle", { cx: 11, cy: 11, r: 7.5 }], ["path", { d: "m21 21-4.3-4.3M11 8v6M8 11h6" }]],
   zoomOut: [["circle", { cx: 11, cy: 11, r: 7.5 }], ["path", { d: "m21 21-4.3-4.3M8 11h6" }]],
   dot: [["circle", { cx: 12, cy: 12, r: 3 }]],
+  // The tool strip's overflow affordance. A horizontal ellipsis rather than a chevron, because a chevron
+  // already means "alternates within this group" one level down and reusing it would conflate the two.
+  more: [["circle", { cx: 5, cy: 12, r: 1.6 }], ["circle", { cx: 12, cy: 12, r: 1.6 }],
+         ["circle", { cx: 19, cy: 12, r: 1.6 }]],
 };
 
 export type IconName = keyof typeof ICONS;
