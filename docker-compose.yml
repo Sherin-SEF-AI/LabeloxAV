@@ -152,6 +152,35 @@ services:
     restart: unless-stopped
     mem_limit: 512m
 
+  # Experiment tracking. Every model number this system produces lives only in Postgres today, so a
+  # promotion cannot be compared against last month's and an external model (DashLab) has no shared home for
+  # its metrics. Backed by the Postgres and MinIO already running rather than a third datastore: the point is
+  # somewhere to read the history from, not more infrastructure to keep alive.
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.19.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-labelox}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-labelox123}
+    # Its own database on the same server, so dropping it never touches the corpus.
+    command: >
+      bash -c "pip install --no-cache-dir psycopg2-binary boto3 >/dev/null &&
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri postgresql://${POSTGRES_USER:-labelox}:${POSTGRES_PASSWORD:-labelox}@postgres:5432/mlflow
+      --default-artifact-root s3://${MINIO_BUCKET:-labeloxav}/mlflow"
+    ports:
+      - "${MLFLOW_PORT:-5500}:5000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
 volumes:
   pgdata:
   miniodata:

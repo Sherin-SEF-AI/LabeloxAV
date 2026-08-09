@@ -127,6 +127,13 @@ async def evaluate_on_gold(db: AsyncSession, model_version: str, gold_id: str) -
         metrics["gold_resolvable"] = gold_resolvable
         await _reconcile_with_prediction_plane(db, model_version, gold_id, metrics,
                                               vocabulary=frozenset(names_list))
+        # Publish after reconciliation so the harness delta is part of what is recorded. Best effort by
+        # construction: an evaluation that ran and a tracking server that did not is a reporting failure, and
+        # letting it fail the evaluation would put a promotion decision at the mercy of a metrics service.
+        from services.integrations.mlflow_sink import log_evaluation
+
+        log_evaluation(model_version=model_version, gold_id=gold_id, metrics=metrics,
+                       tags={"source": "external" if str(reg.notes or "").startswith("external") else "labeloxav"})
         return metrics
     except Exception as exc:  # noqa: BLE001
         log.warning("gold_eval.failed", model_version=model_version, gold_id=gold_id, error=str(exc))

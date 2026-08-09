@@ -92,6 +92,8 @@ edge = [
 # job should not be one an environment can forget to install.
 observability = [
     "sentry-sdk[fastapi]>=2.19",
+    # Client only. The tracking server runs as a container against the Postgres and MinIO already here.
+    "mlflow-skinny>=2.19",
     "opentelemetry-sdk>=1.29",
     "opentelemetry-exporter-otlp-proto-http>=1.29",
     "opentelemetry-instrumentation-fastapi>=0.50b0",

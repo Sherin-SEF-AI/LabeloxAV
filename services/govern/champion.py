@@ -175,8 +175,22 @@ async def _evaluate_and_promote_locked(db, reg, challenger_version, task, cfg, o
 
         await emit("model.promoted", {"model_version": challenger_version, "task": task,
                                       "promoted_from": prev, "gate": gate})
+        _publish_gate(challenger_version, True, gate)
         return {"promoted": True, "champion": challenger_version, "promoted_from": prev, "gate": gate}
 
     await record(db, "champion", "reject", challenger_version, {"gate": gate})
     log.info("govern.reject", challenger=challenger_version, reasons=gate["reasons"])
+    _publish_gate(challenger_version, False, gate)
     return {"promoted": False, "gate": gate, "alert": "challenger rejected: " + "; ".join(gate["reasons"])}
+
+
+def _publish_gate(model_version: str, promoted: bool, gate: dict) -> None:
+    """Record the decision externally, refusals included.
+
+    The refusals are the more useful half of this history. Every model in this corpus was blocked for months,
+    first by a measurement fault and then on safety recall floors, and a record that kept only successful
+    promotions would show nothing at all for that entire period.
+    """
+    from services.integrations.mlflow_sink import log_promotion
+
+    log_promotion(model_version=model_version, promoted=promoted, gate=gate)
