@@ -24,7 +24,7 @@ from sqlalchemy import Text, distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
-from core.storage import get_object_store
+from core.storage import FETCHABLE_URI_SQL, get_object_store
 from db.models import AgentRun, Frame, Object, OntologyClass
 from services.training.gpu_lease import training_holds_gpu
 
@@ -222,10 +222,18 @@ async def run_relabel_all(run_id: uuid.UUID, *, max_frames: int = 200, created_b
         # makes successive runs walk forward through the corpus instead of standing still.
         seen = (select(AgentRun.scope["frame_id"].astext)
                 .where(AgentRun.kind == "relabel", AgentRun.scope["frame_id"].astext.isnot(None)))
+        #
+        # Frames whose img_uri names no object key are excluded here rather than failed later. Fifteen of
+        # them carry `s3://x.jpg`, which parses to a bucket and an empty key, and they are unfetchable
+        # permanently. Left in, they burn a slot in every batch and, worse, a run of them trips the
+        # consecutive-failure guard: the corpus pass stopped at batch 30 with 3,707 frames left, having
+        # decided from twenty dead fixtures in a row that something systemic was wrong.
         q = (select(distinct(Object.frame_id))
-             .where(Object.source != "human", Object.frame_id.cast(Text).notin_(seen)))
+             .join(Frame, Frame.frame_id == Object.frame_id)
+             .where(Object.source != "human", Object.frame_id.cast(Text).notin_(seen),
+                    Frame.img_uri.op("~")(FETCHABLE_URI_SQL)))
         if session_id:
-            q = q.join(Frame, Frame.frame_id == Object.frame_id).where(Frame.session_id == uuid.UUID(session_id))
+            q = q.where(Frame.session_id == uuid.UUID(session_id))
         # Ordered so a run is reproducible and so an operator can tell two runs apart by what they covered.
         frame_ids = list((await db.execute(q.order_by(Object.frame_id).limit(max_frames))).scalars().all())
         if not frame_ids:
