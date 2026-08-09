@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { LOCALES, getLocale, setLocale, t, type Locale } from "@/lib/i18n";
 import { getUser } from "@/lib/user";
+import { isPreAuthRoute, shouldOpenOnboarding } from "@/lib/onboardingGate";
 
 // The first five minutes.
 //
@@ -50,19 +51,20 @@ const STEPS: Step[] = [
 
 export default function Onboarding() {
   const router = useRouter();
+  const pathname = usePathname();
   const [step, setStep] = useState(0);
   const [open, setOpen] = useState(false);
   const [locale, setLocaleState] = useState<Locale>("en");
 
   useEffect(() => {
-    // Only for a signed-in user, and only once. Showing it on the login page would put a tour in front of
-    // somebody who cannot yet reach any of the things it points at.
+    // Only for a signed-in user, on a screen past sign-in, and only once. The user check alone was not
+    // enough: AuthBootstrap mints an admin token on mount in local dev, so by the time this ran there was
+    // always a user, and the tour opened over the login form and ate its clicks.
     if (typeof window === "undefined") return;
     setLocaleState(getLocale());
-    if (!getUser()) return;
-    if (localStorage.getItem(SEEN_KEY)) return;
+    if (!shouldOpenOnboarding(pathname, !!getUser(), !!localStorage.getItem(SEEN_KEY))) return;
     setOpen(true);
-  }, []);
+  }, [pathname]);
 
   const dismiss = () => {
     localStorage.setItem(SEEN_KEY, new Date().toISOString());
@@ -79,15 +81,15 @@ export default function Onboarding() {
   // The menu entries. Wired here rather than in the menu so a menu item is never a dead link: the handler
   // and the thing it opens live in the same file.
   useEffect(() => {
-    const reopen = () => { setStep(0); setOpen(true); };
-    const language = () => { setStep(0); setOpen(true); };
+    const reopen = () => { if (isPreAuthRoute(pathname)) return; setStep(0); setOpen(true); };
+    const language = () => { if (isPreAuthRoute(pathname)) return; setStep(0); setOpen(true); };
     window.addEventListener("lbx:tour", reopen);
     window.addEventListener("lbx:language", language);
     return () => {
       window.removeEventListener("lbx:tour", reopen);
       window.removeEventListener("lbx:language", language);
     };
-  }, []);
+  }, [pathname]);
 
   if (!open) return null;
   const s = STEPS[step];
