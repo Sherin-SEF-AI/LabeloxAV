@@ -95,17 +95,22 @@ class OllamaVlmClient:
         self.model = self.cfg.ollama_tag
 
     def chat_json(self, prompt: str, *, model: str | None = None, image_jpeg: bytes | None = None,
-                  temperature: float = 0.0) -> dict:
+                  temperature: float = 0.0, schema: dict | None = None) -> dict:
         """One chat turn returning a JSON object, same contract as GroqClient/AnthropicClient.
 
         Raises on failure rather than returning {}, because an empty object reads downstream as a real but
         empty answer, and for a judge that means "found nothing wrong".
+
+        `schema` constrains the reply the same way verify() constrains a class choice. A judge returning a
+        categorical verdict is the case that benefits most: the whole value of the answer is that it lands in
+        a known set, and an unparseable "probably not, though it could be" is worth nothing to a caller
+        counting agreements.
         """
         payload: dict = {
             "model": model or self.cfg.ollama_tag,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "format": "json",
+            "format": schema if schema else "json",
             "options": {"num_ctx": self.cfg.max_context, "temperature": temperature},
         }
         if image_jpeg is not None:
@@ -343,18 +348,20 @@ class LlamaServerVlmClient:
         ]}]
 
     def chat_json(self, prompt: str, *, model: str | None = None, image_jpeg: bytes | None = None,
-                  temperature: float = 0.0) -> dict:
+                  temperature: float = 0.0, schema: dict | None = None) -> dict:
         """One chat turn returning a JSON object, same contract as the other clients.
 
         Raises rather than returning {}, because an empty object reads downstream as a real but empty
         answer, and for a judge that means "found nothing wrong".
         """
         b64 = base64.b64encode(image_jpeg).decode() if image_jpeg is not None else None
+        rf = ({"type": "json_schema", "json_schema": {"name": "reply", "strict": True, "schema": schema}}
+              if schema else {"type": "json_object"})
         return self._post({
             "model": model or self.model,
             "messages": self._messages(prompt, b64),
             "temperature": temperature,
-            "response_format": {"type": "json_object"},
+            "response_format": rf,
         })
 
     def verify(self, crop_bgr: np.ndarray, shortlist: list[str], attr_schema: dict,
