@@ -9,6 +9,8 @@ without touching the rerank.
 
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +18,14 @@ from core.logging import get_logger
 from db.models import Frame, FrameEmbedding, Object
 from services.autolabel.ontology import get_ontology
 from services.intelligence.scene import SCENE_AXES
+from services.intelligence.search.rarity import (
+    DEFAULT_RARITY_WEIGHT,
+    MAX_POOL,
+    POOL_FACTOR,
+    class_frame_counts,
+    frame_rarity,
+)
+from services.intelligence.search.rarity import rerank as rerank_by_rarity
 
 log = get_logger("nl_search")
 
@@ -52,7 +62,8 @@ def should_filter(candidate_count: int, k: int, *, narrowed: bool) -> bool:
     return narrowed and candidate_count >= k
 
 
-async def semantic_search(db: AsyncSession, q: str, k: int = 24) -> dict:
+async def semantic_search(db: AsyncSession, q: str, k: int = 24,
+                          rarity_weight: float = DEFAULT_RARITY_WEIGHT) -> dict:
     from services.intelligence.embed import siglip2
 
     onto = get_ontology()
@@ -98,7 +109,10 @@ async def semantic_search(db: AsyncSession, q: str, k: int = 24) -> dict:
     applied = should_filter(len(candidate_ids), k, narrowed=narrowed)
     if applied:
         rerank = rerank.where(FrameEmbedding.frame_id.in_(candidate_ids))
-    rows = (await db.execute(rerank.order_by(dist).limit(k))).all()
+    # Pull a pool rather than exactly k, because rarity cannot promote a frame the vector search never
+    # returned. Ranking the top k alone would leave the weight with nothing to reorder.
+    pool = min(MAX_POOL, k * POOL_FACTOR) if rarity_weight > 0 else k
+    rows = (await db.execute(rerank.order_by(dist).limit(pool))).all()
 
     results = []
     for fid, d in rows:
@@ -106,8 +120,23 @@ async def semantic_search(db: AsyncSession, q: str, k: int = 24) -> dict:
         if fr is not None:
             results.append({"frame_id": str(fid), "image_url": f"/api/frames/{fid}/image",
                             "scene": fr.scene, "score": round(1.0 - float(d), 4)})
+
+    # Rarity blend. The corpus is 88% one class on 34,132 frames, so an ambiguous query returns a screenful
+    # of the commonest thing in it, and the frame worth labelling sits just below the cut.
+    rarity_by_frame: dict[str, float] = {}
+    if rarity_weight > 0 and results:
+        idf_map, _total = await class_frame_counts(db)
+        fids = [uuid.UUID(r["frame_id"]) for r in results]
+        by_frame: dict[str, set[int]] = {}
+        for fid, cid in (await db.execute(
+                select(Object.frame_id, Object.class_id).where(Object.frame_id.in_(fids)))).all():
+            if cid is not None:
+                by_frame.setdefault(str(fid), set()).add(int(cid))
+        rarity_by_frame = {f: frame_rarity(c, idf_map) for f, c in by_frame.items()}
+    results = rerank_by_rarity(results, rarity_by_frame, k, rarity_weight)
     log.info("semantic_search", q=q, classes=classes, scene=scene,
-             candidates=len(candidate_ids), filtered=applied, returned=len(results))
+             candidates=len(candidate_ids), filtered=applied, returned=len(results),
+             rarity_weight=rarity_weight)
     return {"query": q, "filters": scene, "classes": classes,
             # What was actually done, not only what was understood. A caller shown `classes: ["road"]`
             # beside results has no way to tell whether those results were filtered by it or merely ranked
@@ -118,4 +147,8 @@ async def semantic_search(db: AsyncSession, q: str, k: int = 24) -> dict:
                        f"the terms {classes or list(scene.values())} matched only "
                        f"{len(candidate_ids)} frames, fewer than the {k} asked for, so they were used to "
                        f"rank rather than to filter"),
+            # Stated for the same reason `filtered` is: a result order the caller cannot account for is one
+            # they cannot trust, and rarity reorders results without touching the query.
+            "rarity_weight": rarity_weight,
+            "rarity_applied": bool(rarity_weight > 0 and rarity_by_frame),
             "count": len(results), "results": results}

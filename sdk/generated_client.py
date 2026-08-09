@@ -2693,10 +2693,10 @@ class LabeloxClient:
         return self._call("GET", f"/api/search/objects",
                           params={"q": q, "session_id": session_id, "limit": limit}, json_body=None)
 
-    def get_search_semantic(self, q: str, k: int | None = 24) -> Any:
+    def get_search_semantic(self, q: str, k: int | None = 24, rarity_weight: Any | None = None) -> Any:
         """Search Semantic"""
         return self._call("GET", f"/api/search/semantic",
-                          params={"q": q, "k": k}, json_body=None)
+                          params={"q": q, "k": k, "rarity_weight": rarity_weight}, json_body=None)
 
     def post_search_similar(self, body: Any = None) -> Any:
         """Search Similar"""

@@ -166,11 +166,18 @@ async def objects_similar(object_id: str, db: AsyncSession = Depends(db_session)
 
 
 @router.get("/search/semantic")
-async def search_semantic(db: AsyncSession = Depends(db_session), q: str = Query(...), k: int = 24):
-    """Natural-language frame search: parse scene/class filters then SigLIP 2 pgvector rerank."""
-    from services.intelligence.search.query import semantic_search
+async def search_semantic(db: AsyncSession = Depends(db_session), q: str = Query(...), k: int = 24,
+                          rarity_weight: float | None = None):
+    """Natural-language frame search: parse scene/class filters, SigLIP 2 pgvector rerank, rarity blend.
 
-    return await semantic_search(db, q, k=k)
+    `rarity_weight` trades match against how much a frame would teach. The corpus is 88% one class across
+    34,132 frames, so a broad query returns a screenful of the commonest thing in it while the frame worth
+    labelling sits just under the cut. Set 0 for pure similarity; the response always reports which was used.
+    """
+    from services.intelligence.search.query import DEFAULT_RARITY_WEIGHT, semantic_search
+
+    w = DEFAULT_RARITY_WEIGHT if rarity_weight is None else rarity_weight
+    return await semantic_search(db, q, k=k, rarity_weight=w)
 
 
 @router.post("/scene/classify")
