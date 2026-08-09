@@ -152,10 +152,9 @@ async def test_a_device_with_nothing_to_upload_can_still_report(monkeypatch):
     """A board measuring hardware this system does not host has no artifact to offer, and saying so is
     honest. Refusing it would push real measurements out of the table to keep fabricated ones out."""
     import services.forgyx.export as ex
+    from db.models import ModelRegistry
     from db.session import get_sessionmaker
     from services.forgyx.run import record_benchmark
-
-    from db.models import ModelRegistry
 
     monkeypatch.setattr(ex, "get_object_store", lambda: _FakeStore(set()))
     mv = f"m-{uuid.uuid4().hex[:8]}"
