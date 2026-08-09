@@ -157,6 +157,11 @@ async def _reconcile_with_prediction_plane(db: AsyncSession, model_version: str,
         pp = await evaluate_gold_patches(db, gold_id, run_id=run_id, model_vocabulary=vocabulary)
         metrics["prediction_plane_scored"] = pp.get("gold_scored")
         metrics["prediction_plane_resolvable"] = pp.get("gold_resolvable")
+        # The prediction plane is where the counts with real denominators live, so it is the only side that
+        # can carry intervals. Threading them onto the metrics is what lets the gate say whether a mAP
+        # difference is supported by the sample rather than only that it exists.
+        if pp.get("intervals"):
+            metrics["intervals"] = pp["intervals"]
         ap50 = pp.get("ap50")
         val_map50 = metrics.get("map50")
         if ap50 is None or val_map50 is None:

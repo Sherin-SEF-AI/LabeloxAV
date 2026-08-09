@@ -221,6 +221,17 @@ async def evaluate_gold_patches(db: AsyncSession, gold_id: str, *, run_id: str,
 
     per_class_recall = {_name(c): round(matched_gt_50.get(c, 0) / n, 4) for c, n in gt_counts.items() if n}
 
+    # The same rates with the uncertainty they actually carry. A precision of 0.334 over nine matched objects
+    # and the same figure over nine thousand are indistinguishable as point estimates, and the promotion gate
+    # compares them as though they were the same claim. Per-class especially: the safety floors are applied
+    # per class, so a class with six gold instances can block or pass a model on almost no evidence.
+    from services.verdyx.intervals import annotate_per_class, from_counts
+
+    intervals = from_counts(tp=n_tp, fp=n_fp, fn=n_fn)
+    intervals["per_class_recall"] = annotate_per_class(
+        {_name(c): v for c, v in matched_gt_50.items()},
+        {_name(c): v for c, v in gt_counts.items()})
+
     result = {
         "eval_id": str(eval_id), "run_id": run_id, "gold_id": gold_id, "model_version": model_version,
         "score_thr": score_thr, "frames": len(by_frame_gt),
@@ -231,6 +242,9 @@ async def evaluate_gold_patches(db: AsyncSession, gold_id: str, *, run_id: str,
         "tp": n_tp, "fp": n_fp, "fn": n_fn,
         "precision": round(precision, 4), "recall": round(recall, 4),
         "per_class_recall": per_class_recall, "patches": len(patches),
+        # Every rate above, with its interval and its own denominator. Precision is over predictions and
+        # recall over ground truth, so a single n beside both would be wrong.
+        "intervals": intervals,
     }
     if reconstructed:
         # No raw confidence, so no PR curve and no AP. Return fixed-threshold precision/recall with a caveat so

@@ -62,6 +62,17 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
     map_c, map_ch = _map(challenger), _map(champion or {})
     beats_map = map_c >= map_ch + cfg.min_map_uplift
 
+    # Whether this much evidence can tell the two apart at all.
+    #
+    # The gate compares point estimates, and on this corpus's gold set a single object moves mAP by roughly
+    # ten points: it refused a challenger for "does not beat champion mAP (0.142 vs 0.169)" on nine matched
+    # objects. That refusal may be right, but nothing in it could distinguish a real regression from noise.
+    #
+    # This is advisory on purpose. It never promotes something the floors rejected; it says out loud when a
+    # comparison is being made on a sample too small to support it, so the answer to a blocked promotion can
+    # be "measure more" rather than "tune the model".
+    evidence = _evidence(challenger, champion)
+
     sm_c, sm_ch = challenger.get("safe_miou"), (champion or {}).get("safe_miou")
     # A missing challenger Safe-mIoU is a fail, not a silent pass: we cannot verify it did not regress
     # safety, so we refuse. With an incumbent baseline present, enforce the max-drop floor.
@@ -98,6 +109,8 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
     reasons: list[str] = []
     if not beats_map:
         reasons.append(f"does not beat champion mAP ({map_c:.3f} vs {map_ch:.3f})")
+        if evidence and not evidence["decisive"]:
+            reasons.append(f"and the sample cannot separate them: {evidence['detail']}")
     if not safe_ok:
         reasons.append("challenger lacks Safe-mIoU (fail-closed)" if sm_c is None
                        else f"Safe-mIoU regressed ({sm_c} vs {sm_ch})")
@@ -108,7 +121,7 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
         reasons.append("beats champion without any safety regression")
     return {"promote": promote, "beats_map": beats_map, "map_delta": round(map_c - map_ch, 4),
             "safe_ok": safe_ok, "safety_ok": safety_ok, "regressed_safety": regressed,
-            "recall_ok": recall_ok, "reasons": reasons}
+            "recall_ok": recall_ok, "reasons": reasons, "evidence": evidence}
 
 
 async def _common_gold_metrics(db, reg, champ, task):
@@ -194,3 +207,26 @@ def _publish_gate(model_version: str, promoted: bool, gate: dict) -> None:
     from services.integrations.mlflow_sink import log_promotion
 
     log_promotion(model_version=model_version, promoted=promoted, gate=gate)
+
+
+def _evidence(challenger: dict, champion: dict | None) -> dict | None:
+    """Whether the gold set is large enough for the mAP comparison to mean anything.
+
+    Uses recall as the stand-in, because it is the rate that carries a real denominator (gold instances) and
+    is already computed as an interval. mAP has no clean binomial n, so pretending to put a Wilson interval on
+    it would be worse than admitting the comparison is unquantified.
+    """
+    if not champion:
+        return None
+    from services.verdyx.intervals import compare, wilson
+
+    def _rate(m: dict):
+        iv = (m.get("intervals") or {}).get("recall")
+        if iv and iv.get("n"):
+            return wilson(round(iv["value"] * iv["n"]), int(iv["n"]))
+        return None
+
+    a, b = _rate(challenger), _rate(champion)
+    if a is None or b is None:
+        return None
+    return compare(a, b)
