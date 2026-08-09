@@ -1603,6 +1603,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/govern/state",
                           params=None, json_body=None)
 
+    def get_gpu_slot(self) -> Any:
+        """Gpu Slot Status"""
+        return self._call("GET", f"/api/gpu/slot",
+                          params=None, json_body=None)
+
     def post_hardening_efficiency(self, body: Any = None) -> Any:
         """Efficiency"""
         return self._call("POST", f"/api/hardening/efficiency",
@@ -3281,4 +3286,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 639 routes generated from the server schema.
+# 640 routes generated from the server schema.

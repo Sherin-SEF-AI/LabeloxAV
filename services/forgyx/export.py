@@ -190,7 +190,13 @@ async def export_and_benchmark(db, model_version: str, *, imgsz: int = 640, runs
     if not artifact_exists(uri):
         return {"ok": False, "reason": f"weights {uri} are not in object storage"}
 
-    with tempfile.TemporaryDirectory(prefix="forgyx-") as tmp:
+    # Export loads the weights and the benchmark runs inference, so both want the card. Short timeout
+    # rather than an unbounded wait: this is called from a request handler, and a caller who asked for an
+    # export deserves to be told the GPU is busy instead of watching a connection hang.
+    from core.gpu_slot import gpu_slot
+
+    async with gpu_slot(f"forgyx_export:{model_version}", timeout_s=300.0), \
+            tempfile.TemporaryDirectory(prefix="forgyx-") as tmp:
         local = Path(tmp) / "weights.pt"
         local.write_bytes(store.get_bytes(uri))
         art = export_to_onnx(local, tmp, imgsz=imgsz)

@@ -23,6 +23,7 @@ import uuid
 from sqlalchemy import Text, distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.gpu_slot import gpu_slot
 from core.logging import get_logger
 from core.storage import FETCHABLE_URI_SQL, get_object_store
 from db.models import AgentRun, Frame, Object, OntologyClass
@@ -258,66 +259,71 @@ async def run_relabel_all(run_id: uuid.UUID, *, max_frames: int = 200, created_b
         log.info("agent.relabel_all.resuming", run_id=str(run_id), already_done=len(done))
     try:
         consecutive_failures = 0
-        for fid in frame_ids:
-            if str(fid) in done:
-                continue
-            try:
-                async with maker() as db:
-                    res = await commit_relabel(db, fid, created_by=created_by or "relabel-all",
-                                               min_conf=min_conf, margin=margin, auto_keep=auto_keep)
-            except Exception as exc:  # noqa: BLE001
-                # One frame must not end a corpus-wide job. A frame whose image is missing from the object
-                # store took out a whole 1,000-frame batch at frame 209, losing the rest of the work for a
-                # single unreadable row. It is marked done so a resume does not stop on it again.
-                consecutive_failures += 1
-                totals["skipped_error"] = totals.get("skipped_error", 0) + 1
+        # One job on the card at a time. This loop is hours of batched inference, and a training job or an
+        # autolabel pass starting beside it does not fail cleanly: it runs the card out of memory part way
+        # through a batch, which arrives here as a failed frame and, twenty in a row, as a stopped corpus
+        # pass with nothing actually wrong with it. Waiting is right for a batch job; it has nowhere to be.
+        async with gpu_slot(f"relabel_all:{run_id}", timeout_s=None):
+            for fid in frame_ids:
+                if str(fid) in done:
+                    continue
+                try:
+                    async with maker() as db:
+                        res = await commit_relabel(db, fid, created_by=created_by or "relabel-all",
+                                                   min_conf=min_conf, margin=margin, auto_keep=auto_keep)
+                except Exception as exc:  # noqa: BLE001
+                    # One frame must not end a corpus-wide job. A frame whose image is missing from the object
+                    # store took out a whole 1,000-frame batch at frame 209, losing the rest of the work for a
+                    # single unreadable row. It is marked done so a resume does not stop on it again.
+                    consecutive_failures += 1
+                    totals["skipped_error"] = totals.get("skipped_error", 0) + 1
+                    done.add(str(fid))
+                    log.warning("agent.relabel_all.frame_failed", run_id=str(run_id), frame_id=str(fid),
+                                error=str(exc)[:200])
+                    # Marking it done in *this* run is not enough. The cross-run cursor is the set of committed
+                    # child `relabel` runs, and a frame that failed never gets one, so the next run selects it
+                    # again and fails on it again forever. Eleven frames whose images are absent from storage sat
+                    # at the head of the queue doing exactly that: successive batches read 0 frames and reported
+                    # success, and the corpus pass could never reach zero remaining.
+                    #
+                    # The child run says the frame was read and could not be used, which is true and is what the
+                    # cursor actually means. It carries the error so the skip is auditable rather than silent,
+                    # and a frame whose image comes back can be requeued by deleting these rows.
+                    async with maker() as db:
+                        db.add(AgentRun(run_id=uuid.uuid4(), kind="relabel",
+                                        scope={"frame_id": str(fid)}, status="skipped",
+                                        policy={"reason": "unreadable"}, counts={"skipped_error": 1},
+                                        changes={}, critic={"error": str(exc)[:400]},
+                                        created_by=created_by or "relabel-all"))
+                        await db.commit()
+                    if consecutive_failures >= MAX_CONSECUTIVE_FRAME_FAILURES:
+                        # Tolerating a bad frame is right; tolerating an outage is not. A run of failures means
+                        # the object store or the GPU has gone, and continuing would quietly mark thousands of
+                        # frames done having read none of them.
+                        raise RuntimeError(
+                            f"{consecutive_failures} frames in a row failed; stopping rather than marking the "
+                            f"rest done unread. Last error: {exc}") from exc
+                    async with maker() as db:
+                        await beat(db, run_id, progress={"done": sorted(done), "total": len(frame_ids)},
+                                   counts=dict(totals))
+                    continue
+                consecutive_failures = 0
+                totals["frames"] += 1
+                totals["relabel_keep"] += res["counts"].get("relabel_keep", 0)
+                totals["relabel_review"] += res["counts"].get("relabel_review", 0)
+                if res["relabeled"]:
+                    child_runs.append(res["run_id"])
                 done.add(str(fid))
-                log.warning("agent.relabel_all.frame_failed", run_id=str(run_id), frame_id=str(fid),
-                            error=str(exc)[:200])
-                # Marking it done in *this* run is not enough. The cross-run cursor is the set of committed
-                # child `relabel` runs, and a frame that failed never gets one, so the next run selects it
-                # again and fails on it again forever. Eleven frames whose images are absent from storage sat
-                # at the head of the queue doing exactly that: successive batches read 0 frames and reported
-                # success, and the corpus pass could never reach zero remaining.
-                #
-                # The child run says the frame was read and could not be used, which is true and is what the
-                # cursor actually means. It carries the error so the skip is auditable rather than silent,
-                # and a frame whose image comes back can be requeued by deleting these rows.
                 async with maker() as db:
-                    db.add(AgentRun(run_id=uuid.uuid4(), kind="relabel",
-                                    scope={"frame_id": str(fid)}, status="skipped",
-                                    policy={"reason": "unreadable"}, counts={"skipped_error": 1},
-                                    changes={}, critic={"error": str(exc)[:400]},
-                                    created_by=created_by or "relabel-all"))
-                    await db.commit()
-                if consecutive_failures >= MAX_CONSECUTIVE_FRAME_FAILURES:
-                    # Tolerating a bad frame is right; tolerating an outage is not. A run of failures means
-                    # the object store or the GPU has gone, and continuing would quietly mark thousands of
-                    # frames done having read none of them.
-                    raise RuntimeError(
-                        f"{consecutive_failures} frames in a row failed; stopping rather than marking the "
-                        f"rest done unread. Last error: {exc}") from exc
-                async with maker() as db:
+                    run = await db.get(AgentRun, run_id)
+                    if run:
+                        run.changes = {"child_runs": child_runs}
+                        await db.commit()
+                    # Cursor, counts and heartbeat in one write, after the child runs are recorded: a frame in
+                    # the cursor whose child run was never saved would be skipped on resume and its relabels
+                    # would then be unrevertable, because revert walks child_runs.
                     await beat(db, run_id, progress={"done": sorted(done), "total": len(frame_ids)},
                                counts=dict(totals))
-                continue
-            consecutive_failures = 0
-            totals["frames"] += 1
-            totals["relabel_keep"] += res["counts"].get("relabel_keep", 0)
-            totals["relabel_review"] += res["counts"].get("relabel_review", 0)
-            if res["relabeled"]:
-                child_runs.append(res["run_id"])
-            done.add(str(fid))
-            async with maker() as db:
-                run = await db.get(AgentRun, run_id)
-                if run:
-                    run.changes = {"child_runs": child_runs}
-                    await db.commit()
-                # Cursor, counts and heartbeat in one write, after the child runs are recorded: a frame in
-                # the cursor whose child run was never saved would be skipped on resume and its relabels
-                # would then be unrevertable, because revert walks child_runs.
-                await beat(db, run_id, progress={"done": sorted(done), "total": len(frame_ids)},
-                           counts=dict(totals))
         async with maker() as db:
             run = await db.get(AgentRun, run_id)
             if run:
