@@ -109,7 +109,13 @@ class VlmSettings(BaseModel):
     enabled: bool = True
     # ollama is the working default on this box (bitsandbytes 4-bit is unusable on Blackwell here,
     # and transformers 4.47 lacks Qwen3-VL). transformers backend kept for boxes where it works.
-    backend: str = "ollama"  # ollama | transformers | vllm
+    backend: str = "ollama"  # ollama | llamacpp | transformers | vllm
+    # llama-server (llama.cpp) as an alternative local backend. It takes a JSON schema in `response_format`
+    # and compiles it to GBNF itself, so the shortlist is enforced during sampling rather than requested in
+    # the prompt, and the prompt is then identical across objects and worth prefix-caching. Unset by
+    # default: this changes which process serves Path C, and that is a deployment decision, not a default.
+    llamacpp_url: str = "http://localhost:8080"
+    llamacpp_model: str = ""   # empty means whatever the server has loaded
     model: str = "Qwen/Qwen2-VL-2B-Instruct"  # transformers backend; target: Qwen3-VL-4B
     ollama_url: str = "http://localhost:11434"
     ollama_tag: str = "qwen2.5vl:7b"  # locally available; target: qwen3-vl:4b

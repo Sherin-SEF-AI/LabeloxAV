@@ -31,6 +31,7 @@ import numpy as np
 from core.config import Settings, get_settings
 from core.logging import get_logger
 from services.autolabel.paths.path_c_qwen3vl import (
+    LlamaServerVlmClient,
     OllamaVlmClient,
     VlmClient,
     VlmResult,
@@ -162,7 +163,7 @@ class RoutedVlmClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         cfg = self.settings.models.vlm
-        self.ollama = OllamaVlmClient(self.settings)
+        self.ollama = local_vlm_client(self.settings)
         self._breaker = CircuitBreaker(cfg.breaker_threshold, cfg.breaker_cooldown_s)
 
         # The cloud primary is used only when configured AND allowed to see media AND a key exists.
@@ -207,15 +208,29 @@ class RoutedVlmClient:
         return res
 
 
+def local_vlm_client(settings: Settings | None = None) -> VlmClient:
+    """The local floor: llama-server when `models.vlm.backend` says so, Ollama otherwise.
+
+    One line, because both clients enforce the verdict schema and both are duck-typed against the same
+    interface. Which local server runs Path C is a deployment decision (llama-server buys explicit prefix
+    cache control and a dependency-free binary), and it must not become a policy decision spread across the
+    router.
+    """
+    settings = settings or get_settings()
+    if settings.models.vlm.backend == "llamacpp":
+        return LlamaServerVlmClient(settings)
+    return OllamaVlmClient(settings)
+
+
 def make_vlm_client(settings: Settings | None = None) -> VlmClient:
-    """Return the vision client for the configured providers. When nothing points at the cloud, this is a
-    plain OllamaVlmClient (identical to before); otherwise the RoutedVlmClient wraps cloud + local."""
+    """Return the vision client for the configured providers. When nothing points at the cloud, this is the
+    local client alone (identical to before); otherwise the RoutedVlmClient wraps cloud + local."""
     settings = settings or get_settings()
     cfg = settings.models.vlm
     uses_cloud = cfg.vision_provider in _CLOUD_VLM or cfg.escalate_provider in _CLOUD_VLM
     if uses_cloud and cfg.allow_cloud_media:
         return RoutedVlmClient(settings)
-    return OllamaVlmClient(settings)
+    return local_vlm_client(settings)
 
 
 def route_text_json(prompt: str, *, temperature: float = 0.0, settings: Settings | None = None) -> dict | None:
