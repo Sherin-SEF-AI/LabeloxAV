@@ -12,6 +12,7 @@ import { SessionMcap } from "@/lib/inspector/mcap";
 import Timeline from "@/components/inspector/Timeline";
 import TopicBrowser from "@/components/inspector/TopicBrowser";
 import PanelHost from "@/components/inspector/PanelHost";
+import { cycleSpan, fromSaved, movePanel, panelStyle, rowsOf, setRows, toSaved } from "@/lib/inspector/layout";
 
 let PANEL_SEQ = 0;
 const mkPanel = (type: string, topic?: string): InspectorPanel => ({ id: `p${++PANEL_SEQ}`, type, topic });
@@ -54,6 +55,7 @@ export default function InspectorWorkspace() {
   const [verdict, setVerdict] = useState<string | null>(null);
   const [panels, setPanels] = useState<InspectorPanel[]>([]);
   const [noRecording, setNoRecording] = useState(false);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [layouts, setLayouts] = useState<{ layout_id: string; name: string; panels: InspectorPanel[]; is_default: boolean }[]>([]);
   const [saveName, setSaveName] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -84,7 +86,7 @@ export default function InspectorWorkspace() {
         setLayouts(lay.layouts);
         setEvents(ev.events || []);
         const def = lay.layouts.find((l) => l.is_default);
-        setPanels(def ? def.panels.map((p) => ({ ...p, id: `p${++PANEL_SEQ}` })) : defaultPanels(lay.config_default, idxTopics.length ? idxTopics : m.topics().map((t) => ({ name: t.topic, schema: t.schema, count: 0, rate: 0, first_ts: 0, last_ts: 0 }))));
+        setPanels(def ? fromSaved(def.panels, () => `p${++PANEL_SEQ}`) : defaultPanels(lay.config_default, idxTopics.length ? idxTopics : m.topics().map((t) => ({ name: t.topic, schema: t.schema, count: 0, rate: 0, first_ts: 0, last_ts: 0 }))));
       } catch (e) {
         // No recording is not the same as nothing to inspect. This deployment has one session with an MCAP
         // and 124 with point clouds, so refusing here made the 3D panel unreachable through the product's
@@ -135,14 +137,14 @@ export default function InspectorWorkspace() {
   const saveLayout = async () => {
     const name = saveName.trim() || "layout";
     try {
-      await api.inspectorSaveLayout(name, panels.map(({ type, topic, field }) => ({ id: "", type, topic, field })), true);
+      await api.inspectorSaveLayout(name, panels.map((p) => ({ id: "", ...toSaved(p) })), true);
       setLayouts((await api.inspectorLayouts()).layouts);
       setSaveName("");
     } catch (e) { setErr("save layout failed: " + humanizeError(e)); }
   };
   const loadLayout = (id: string) => {
     const l = layouts.find((x) => x.layout_id === id);
-    if (l) setPanels(l.panels.map((p) => ({ ...p, id: `p${++PANEL_SEQ}` })));
+    if (l) setPanels(fromSaved(l.panels, () => `p${++PANEL_SEQ}`));
   };
 
   const openLichtblick = useCallback(async () => {
@@ -228,9 +230,27 @@ export default function InspectorWorkspace() {
                   {panels.length === 0 ? (
                     <div className="h-full flex items-center justify-center font-mono text-xs text-ink-3">add a panel from the topic list</div>
                   ) : (
-                    <div className="grid grid-cols-2 gap-2 auto-rows-[minmax(200px,1fr)] h-full">
-                      {panels.map((p) => <PanelHost key={p.id} panel={p} onRemove={() => removePanel(p.id)}
-                        onFrame={(frameId, tsNs) => setCurFrame({ frameId, tsNs })} />)}
+                    <div className="grid grid-cols-2 gap-2 auto-rows-[minmax(200px,1fr)]">
+                      {panels.map((p, i) => (
+                        <div key={p.id} style={panelStyle(p)} className="min-h-0">
+                          <PanelHost
+                            panel={p}
+                            dragging={dragIdx === i}
+                            onRemove={() => removePanel(p.id)}
+                            onFrame={(frameId, tsNs) => setCurFrame({ frameId, tsNs })}
+                            onCycleSpan={() => setPanels((ps) => cycleSpan(ps, p.id))}
+                            onGrow={() => setPanels((ps) => setRows(ps, p.id, rowsOf(p) + 1))}
+                            onShrink={() => setPanels((ps) => setRows(ps, p.id, rowsOf(p) - 1))}
+                            onDragStart={() => setDragIdx(i)}
+                            // Without preventDefault the browser refuses the drop and the panel snaps back.
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={() => {
+                              setPanels((ps) => (dragIdx === null ? ps : movePanel(ps, dragIdx, i)));
+                              setDragIdx(null);
+                            }}
+                          />
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
