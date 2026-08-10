@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,6 +103,35 @@ async def annotations_at(session_id: str, ts_ns: int, db: AsyncSession = Depends
     from services.inspector.events import annotations_at as _ann
 
     return await _ann(db, _parse_sid(session_id), ts_ns)
+
+
+@router.get("/inspector/sessions/{session_id}/cloud", dependencies=[Depends(require_role("annotator"))])
+async def session_cloud(session_id: str, ts_ns: int, max_points: int = 200_000,
+                        db: AsyncSession = Depends(db_session)) -> Response:
+    """The point cloud nearest `ts_ns`, as interleaved float32 [x, y, z, intensity].
+
+    Binary rather than JSON: a 500,000-point cloud is about 6MB raw and several times that as text, and the
+    browser can map these bytes straight into a Float32Array with no parse step at all.
+
+    The counts and the time offset ride in headers so the panel can caption itself honestly: how many points
+    of how many it is drawing, and how far from the playhead the nearest cloud actually was.
+    """
+    from services.inspector.cloud import cloud_payload
+
+    out = await cloud_payload(db, _parse_sid(session_id), ts_ns, max_points=max_points)
+    if out is None:
+        raise HTTPException(404, "no point cloud for this session")
+    return Response(
+        content=out["bytes"], media_type="application/octet-stream",
+        headers={
+            "X-Cloud-Id": out["cloud_id"], "X-Cloud-Ts-Ns": out["ts_ns"],
+            "X-Cloud-Source": out["source"], "X-Cloud-Points": str(out["returned"]),
+            "X-Cloud-Total": str(out["total"]), "X-Cloud-Truncated": str(out["truncated"]).lower(),
+            "X-Cloud-Delta-Ms": str(out["delta_ms"]),
+            # Without this the browser cannot read any of the above from a fetch response.
+            "Access-Control-Expose-Headers": ("X-Cloud-Id, X-Cloud-Ts-Ns, X-Cloud-Source, X-Cloud-Points, "
+                                              "X-Cloud-Total, X-Cloud-Truncated, X-Cloud-Delta-Ms"),
+        })
 
 
 def _parse_sid(session_id: str) -> uuid.UUID:

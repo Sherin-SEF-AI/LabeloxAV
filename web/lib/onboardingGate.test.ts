@@ -36,6 +36,14 @@ describe("isPreAuthRoute", () => {
 });
 
 describe("shouldOpenOnboarding", () => {
+  it("stays shut while the route is still unknown", () => {
+    // A full-screen modal opened before we know where we are can land on the login page, which is the bug
+    // this file exists for. Not showing a tour costs a tour; showing it there costs the session.
+    expect(shouldOpenOnboarding(null, true, false)).toBe(false);
+    expect(shouldOpenOnboarding(undefined, true, false)).toBe(false);
+    expect(shouldOpenOnboarding("", true, false)).toBe(false);
+  });
+
   it("stays shut on the login page even when a token is already stored", () => {
     // The exact production of the bug: AuthBootstrap signed us in, so hasUser is true on /login.
     expect(shouldOpenOnboarding("/login", true, false)).toBe(false);

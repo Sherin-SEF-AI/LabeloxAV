@@ -22,6 +22,19 @@ export function isPreAuthRoute(pathname: string | null | undefined): boolean {
 }
 
 /**
+ * Whether we know enough about the current route to be sure a modal is safe to open.
+ *
+ * Separate from `isPreAuthRoute` because the two answers differ on an unknown pathname, and the difference
+ * matters. Chrome elsewhere treats an unknown route as an ordinary page, which is right for a nav highlight.
+ * For a full-screen modal it is not: the tour renders `fixed inset-0` and swallows every click underneath,
+ * so opening it while we cannot tell where we are risks covering the sign-in form again. Not showing a tour
+ * costs a tour. Showing it over the login page costs the session.
+ */
+export function routeIsKnown(pathname: string | null | undefined): boolean {
+  return typeof pathname === "string" && pathname.length > 0;
+}
+
+/**
  * Whether the first-run tour should open.
  *
  * `seen` is the persisted marker, `hasUser` the stored credential. The route check comes first because it is
@@ -29,6 +42,8 @@ export function isPreAuthRoute(pathname: string | null | undefined): boolean {
  */
 export function shouldOpenOnboarding(pathname: string | null | undefined,
                                      hasUser: boolean, seen: boolean): boolean {
+  // Fail closed: an unresolved pathname is not a licence to cover the screen.
+  if (!routeIsKnown(pathname)) return false;
   if (isPreAuthRoute(pathname)) return false;
   if (!hasUser) return false;
   return !seen;

@@ -199,6 +199,24 @@ async function get<T>(path: string): Promise<T> {
   }
 }
 
+/** A GET whose body is bytes, not JSON.
+ *
+ * The 3D panel fetches point clouds as interleaved float32: a 500,000-point cloud is about 6MB raw and
+ * several times that as text, so it never becomes JSON. It still has to come through here, because the read
+ * gate denies by default and a bare fetch sends no Authorization header. Returns the response so a caller
+ * can read the metadata headers alongside the buffer.
+ */
+export async function getBinary(path: string, init?: RequestInit): Promise<Response> {
+  begin();
+  try {
+    await refreshTokenIfNeeded();
+    return await fetch(path, { ...init, cache: "no-store",
+                               headers: { ...userHeaders(), ...(init?.headers ?? {}) } });
+  } finally {
+    end();
+  }
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   begin();
   try {

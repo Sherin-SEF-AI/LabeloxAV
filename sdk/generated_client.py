@@ -1728,6 +1728,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/inspector/sessions/{session_id}/annotations-at",
                           params={"ts_ns": ts_ns}, json_body=None)
 
+    def get_inspector_sessions_by_session_id_cloud(self, session_id: str, ts_ns: int, max_points: int | None = 200000) -> Any:
+        """Session Cloud"""
+        return self._call("GET", f"/api/inspector/sessions/{session_id}/cloud",
+                          params={"ts_ns": ts_ns, "max_points": max_points}, json_body=None)
+
     def get_inspector_sessions_by_session_id_events(self, session_id: str) -> Any:
         """Session Events"""
         return self._call("GET", f"/api/inspector/sessions/{session_id}/events",
@@ -3286,4 +3291,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 640 routes generated from the server schema.
+# 641 routes generated from the server schema.

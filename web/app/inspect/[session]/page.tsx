@@ -168,6 +168,15 @@ export default function InspectorWorkspace() {
                       </select>
                     )}
                   </div>
+                  {/* Panels that are not driven by an MCAP topic. The 3D view reads the point cloud store
+                      keyed on the clock, so there is no topic to pick it from and the topic browser cannot
+                      offer it. */}
+                  <div className="px-2 py-1.5 border-b hairline">
+                    <button onClick={() => addPanel("scene3d")}
+                      className="w-full font-mono text-[10px] border border-line rounded px-1.5 py-1 text-ink-2 hover:border-accent hover:text-ink">
+                      + 3D point cloud
+                    </button>
+                  </div>
                   <div className="flex-1 min-h-0">
                     <TopicBrowser topics={topics} onAdd={addPanel} />
                   </div>
