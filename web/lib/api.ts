@@ -1260,7 +1260,7 @@ export const api = {
     post<{ layout_id: string; name: string; is_default: boolean }>(`/api/inspector/layouts`, { name, panels, is_default }),
   inspectorDeleteLayout: (layout_id: string) => del<{ deleted: string }>(`/api/inspector/layouts/${layout_id}`),
   inspectorSessions: () =>
-    get<{ session_id: string; vehicle_id: string; city: string | null; start_ts_ns: number; end_ts_ns: number; verdict: string | null }[]>(`/api/inspector/sessions`),
+    get<{ session_id: string; vehicle_id: string; city: string | null; start_ts_ns: number; end_ts_ns: number; verdict: string | null; has_mcap: boolean; n_clouds: number }[]>(`/api/inspector/sessions`),
   inspectorEvents: (session_id: string) =>
     get<{ events: InspectorEvent[] }>(`/api/inspector/sessions/${session_id}/events`),
   inspectorFrameAt: (session_id: string, ts_ns: number) =>

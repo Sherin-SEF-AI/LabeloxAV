@@ -53,6 +53,7 @@ export default function InspectorWorkspace() {
   const [events, setEvents] = useState<InspectorEvent[]>([]);
   const [verdict, setVerdict] = useState<string | null>(null);
   const [panels, setPanels] = useState<InspectorPanel[]>([]);
+  const [noRecording, setNoRecording] = useState(false);
   const [layouts, setLayouts] = useState<{ layout_id: string; name: string; panels: InspectorPanel[]; is_default: boolean }[]>([]);
   const [saveName, setSaveName] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -85,10 +86,42 @@ export default function InspectorWorkspace() {
         const def = lay.layouts.find((l) => l.is_default);
         setPanels(def ? def.panels.map((p) => ({ ...p, id: `p${++PANEL_SEQ}` })) : defaultPanels(lay.config_default, idxTopics.length ? idxTopics : m.topics().map((t) => ({ name: t.topic, schema: t.schema, count: 0, rate: 0, first_ts: 0, last_ts: 0 }))));
       } catch (e) {
-        // a session ingested from images/video/imagery has no MCAP; say so plainly instead of a raw 409
-        if (live) setErr(/409/.test(humanizeError(e))
-          ? "This session has no MCAP recording to inspect. The Session Inspector applies to sessions ingested from an .mcap file."
-          : humanizeError(e));
+        // No recording is not the same as nothing to inspect. This deployment has one session with an MCAP
+        // and 124 with point clouds, so refusing here made the 3D panel unreachable through the product's
+        // own navigation. A session without a recording still has its own clock, its extracted frames and
+        // its geometry, all addressed by timestamp; what it lacks is topics, and the panels that need one
+        // say so themselves.
+        if (!live) return;
+        // No string sniffing on the error. The previous version tested it for "409" and the humanized
+        // message says "session has no MCAP" with no status in it, so the branch never fired. Ask the
+        // server what this session has instead: it is the only thing that actually knows, and the answer
+        // decides both whether to fall back and what to say when we cannot.
+        try {
+          const all = await api.inspectorSessions();
+          const me = all.find((x) => x.session_id === sessionId);
+          if (!me || !me.n_clouds) {
+            setErr(me
+              ? "This session has no MCAP recording and no point clouds, so there is nothing to inspect."
+              : humanizeError(e));
+            return;
+          }
+          setMcap(SessionMcap.empty());
+          setRange([BigInt(me.start_ts_ns), BigInt(me.end_ts_ns)]);
+          setTopics([]);
+          setNoRecording(true);
+          const [lay, ev] = await Promise.all([
+            api.inspectorLayouts().catch(() => ({ layouts: [], config_default: [] })),
+            api.inspectorEvents(sessionId).catch(() => ({ events: [] })),
+          ]);
+          if (!live) return;
+          setLayouts(lay.layouts);
+          setEvents(ev.events || []);
+          // Only the panels that read this session's own timeline. Restoring a saved layout full of topic
+          // panels here would open five that can never draw anything.
+          setPanels([mkPanel("scene3d"), mkPanel("image")]);
+        } catch (e2) {
+          if (live) setErr(humanizeError(e2));
+        }
       } finally {
         if (live) setLoading(false);
       }
@@ -178,7 +211,16 @@ export default function InspectorWorkspace() {
                     </button>
                   </div>
                   <div className="flex-1 min-h-0">
-                    <TopicBrowser topics={topics} onAdd={addPanel} />
+                    {noRecording ? (
+                      // Said plainly, because an empty topic list otherwise reads as a failed load rather
+                      // than as a session that was never recorded to an .mcap.
+                      <div className="p-2 font-mono text-[10px] text-ink-3 leading-relaxed">
+                        no .mcap recording for this session, so there are no topics to browse. The 3D and
+                        camera panels read this session&apos;s own timeline and work regardless.
+                      </div>
+                    ) : (
+                      <TopicBrowser topics={topics} onAdd={addPanel} />
+                    )}
                   </div>
                 </div>
                 {/* panel grid */}
