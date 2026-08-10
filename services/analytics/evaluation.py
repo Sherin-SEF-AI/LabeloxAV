@@ -71,7 +71,8 @@ def _greedy_match(pred_boxes: np.ndarray, pred_scores: np.ndarray,
 
 
 async def evaluate_gold_patches(db: AsyncSession, gold_id: str, *, run_id: str,
-                                iou_thr: float = 0.5, score_thr: float = 0.0) -> dict:
+                                iou_thr: float = 0.5, score_thr: float = 0.0,
+                                model_vocabulary: frozenset[str] | None = None) -> dict:
     """Score one inference run against a sealed gold set. Ground truth is the sealed GoldSet.object_ids;
     predictions are the immutable Prediction rows of `run_id` on those frames, and NOTHING from Object. The old
     harness drew predictions from live corpus rows, but human review mutates those rows in place (the confirmed
@@ -107,10 +108,34 @@ async def evaluate_gold_patches(db: AsyncSession, gold_id: str, *, run_id: str,
     gold_rows = (await db.execute(
         select(Object.object_id, Object.frame_id, Object.class_id, Object.bbox)
         .where(Object.object_id.in_(gold_ids)))).all()
+
+    # Score the same population the val pass scores, or the two harnesses are not measuring the same thing.
+    #
+    # `services/training/gold.py:_materialize_aligned` drops every gold object whose ontology class the model
+    # was never taught, which is right: you cannot hold a detector responsible for a class it has no output
+    # for. This harness scored the sealed set unfiltered, so those objects arrived here as false negatives
+    # that were absent over there. That is the whole of the `harness_divergent` flag, and it fires for every
+    # model because every model has some gap against a 192-class ontology. Measured on the DashLab detector:
+    # 10 objects on 5 frames aligned, 47 on 7 frames here, and the 37 extra were exactly its out-of-vocabulary
+    # classes (sedan, rider, pedestrian, cattle, traffic_sign, cycle), taking ap50 from 0.537 to 0.133.
+    #
+    # Filtering the gold side is enough to align both populations: `by_frame_gt` gates which frames'
+    # predictions are fetched at all, so a frame left with no in-vocabulary gold contributes no phantom false
+    # positives either.
+    n_declared = len(gold_rows)
+    if model_vocabulary is not None:
+        gold_rows = [r for r in gold_rows if onto.by_id(int(r[2])).name in model_vocabulary]
+
     by_frame_gt: dict[uuidlib.UUID, list] = {}
     for oid, fid, cid, bbox in gold_rows:
         by_frame_gt.setdefault(fid, []).append((oid, int(cid), list(bbox)))
     if not by_frame_gt:
+        if model_vocabulary is not None and n_declared:
+            # Refusing beats returning zeros: a model that shares no class with the gold set has not scored
+            # badly, it has not been measured, and a 0.0 here would read as the former.
+            return {"error": "no gold object is in this model's vocabulary, so it cannot be scored",
+                    "gold_id": gold_id, "run_id": run_id, "model_version": model_version,
+                    "gold_resolvable": n_declared, "gold_scored": 0}
         return {"error": "gold objects not found in the corpus", "gold_id": gold_id}
 
     pred_rows = (await db.execute(
@@ -196,12 +221,30 @@ async def evaluate_gold_patches(db: AsyncSession, gold_id: str, *, run_id: str,
 
     per_class_recall = {_name(c): round(matched_gt_50.get(c, 0) / n, 4) for c, n in gt_counts.items() if n}
 
+    # The same rates with the uncertainty they actually carry. A precision of 0.334 over nine matched objects
+    # and the same figure over nine thousand are indistinguishable as point estimates, and the promotion gate
+    # compares them as though they were the same claim. Per-class especially: the safety floors are applied
+    # per class, so a class with six gold instances can block or pass a model on almost no evidence.
+    from services.verdyx.intervals import annotate_per_class, from_counts
+
+    intervals = from_counts(tp=n_tp, fp=n_fp, fn=n_fn)
+    intervals["per_class_recall"] = annotate_per_class(
+        {_name(c): v for c, v in matched_gt_50.items()},
+        {_name(c): v for c, v in gt_counts.items()})
+
     result = {
         "eval_id": str(eval_id), "run_id": run_id, "gold_id": gold_id, "model_version": model_version,
         "score_thr": score_thr, "frames": len(by_frame_gt),
+        # What was actually scored, not what was sealed. A number over 10 of 400 objects and a number over
+        # 400 of 400 are both reported as "ap50" and only these fields tell them apart.
+        "gold_declared": len(gold_ids), "gold_resolvable": n_declared, "gold_scored": len(gold_rows),
+        "vocabulary_filtered": model_vocabulary is not None,
         "tp": n_tp, "fp": n_fp, "fn": n_fn,
         "precision": round(precision, 4), "recall": round(recall, 4),
         "per_class_recall": per_class_recall, "patches": len(patches),
+        # Every rate above, with its interval and its own denominator. Precision is over predictions and
+        # recall over ground truth, so a single n beside both would be wrong.
+        "intervals": intervals,
     }
     if reconstructed:
         # No raw confidence, so no PR curve and no AP. Return fixed-threshold precision/recall with a caveat so

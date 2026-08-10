@@ -17,18 +17,24 @@ export default function ImagePanel({ panel, onFrame }: { panel: InspectorPanel; 
   const { mcap, sessionId } = useMcap();
   const [src, setSrc] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  // Distinct from `note`, because "we have not looked yet" and "we looked and there is nothing" are
+  // different facts and only one of them is worth waiting for. Rendering the first message for both is the
+  // same defect the analytics page had: an unfinished request shown as a settled answer.
+  const [loaded, setLoaded] = useState(false);
   const [overlays, setOverlays] = useState(true);
   const [ann, setAnn] = useState<{ width: number; height: number; objects: Ann[] } | null>(null);
   const busy = useRef(false);
   const pending = useRef<bigint | null>(null);
 
   useEffect(() => {
-    if (!panel.topic) return;
     const run = async (ns: bigint) => {
       if (busy.current) { pending.current = ns; return; }
       busy.current = true;
       try {
-        const m = await mcap.latestAt(panel.topic!, ns, 3_000_000_000n);
+        // A session with no recording has no topic to read, and the panel used to return here and sit on
+        // "loading frame..." forever. The extracted-frame path needs only a session and a timestamp, which
+        // that session has, so it is the only path when there is no topic rather than the fallback.
+        const m = panel.topic ? await mcap.latestAt(panel.topic, ns, 3_000_000_000n) : null;
         const v = m?.value as { data?: string; format?: string } | null;
         if (v && typeof v.data === "string") {
           setSrc(`data:image/${v.format || "jpeg"};base64,${v.data}`);
@@ -37,7 +43,7 @@ export default function ImagePanel({ panel, onFrame }: { panel: InspectorPanel; 
           // fast path: the extracted frame nearest this ts_ns
           const f = await api.inspectorFrameAt(sessionId, Number(ns)).catch(() => null);
           if (f?.image_url) { setSrc(f.image_url); setNote(""); }
-          else { setNote("no frame at this time"); }
+          else { setSrc(null); setNote("no frame at this time"); }
         }
         // annotation overlay: the nearest extracted frame's boxes, synchronized to playback
         if (overlays) {
@@ -51,9 +57,13 @@ export default function ImagePanel({ panel, onFrame }: { panel: InspectorPanel; 
         setNote("image read error: " + humanizeError(e));
       } finally {
         busy.current = false;
+        setLoaded(true);
         if (pending.current !== null) { const n = pending.current; pending.current = null; run(n); }
       }
     };
+    // Once on mount as well as on every tick. Subscribing alone meant a panel added while playback was
+    // paused never read anything at all, because the clock had no reason to fire.
+    void run(clock.nowNs());
     return clock.subscribe(() => run(clock.nowNs()));
   }, [clock, mcap, panel.topic, sessionId, onFrame, overlays]);
 
@@ -65,7 +75,7 @@ export default function ImagePanel({ panel, onFrame }: { panel: InspectorPanel; 
         // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt="" className="max-h-full max-w-full object-contain" />
       ) : (
-        <div className="font-mono text-[10px] text-ink-3">{note || "loading frame..."}</div>
+        <div className="font-mono text-[10px] text-ink-3">{note || (loaded ? "no frame at this time" : "loading frame...")}</div>
       )}
       {overlays && ann && ann.objects.length > 0 && (
         <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${ann.width} ${ann.height}`} preserveAspectRatio="xMidYMid meet">

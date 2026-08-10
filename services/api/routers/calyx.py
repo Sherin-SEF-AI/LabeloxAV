@@ -12,12 +12,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import CalibrationOverride, CalibrationValidation
+from db.models import CalibrationValidation
 from db.models import Session as DbSession
 from services.api.deps import db_session
-from services.calyx.consensus import fuse_calibrations
 from services.calyx.recover import record_override
-from services.calyx.run import record_drift, rig_history
+from services.calyx.run import record_drift, rig_history, rig_prior_for_vehicle
 from services.calyx.targetless import calibrate_targetless
 
 router = APIRouter()
@@ -59,14 +58,17 @@ async def targetless(payload: TargetlessIn):
 
 @router.get("/calyx/rig/{vehicle_id}/consensus")
 async def rig_consensus(vehicle_id: str, db: AsyncSession = Depends(db_session)):
-    """Fuse the vehicle's per-session calibration overrides into a stronger rig prior."""
-    rows = (await db.execute(
-        select(CalibrationOverride)
-        .join(DbSession, CalibrationOverride.session_id == DbSession.session_id)
-        .where(DbSession.vehicle_id == vehicle_id).limit(500))).scalars().all()
-    calibs = [{"rpy_deg": (r.corrected or {}).get("rpy_deg"), "xyz_m": (r.corrected or {}).get("xyz_m"),
-               "confidence": r.confidence} for r in rows]
-    return {"vehicle_id": vehicle_id, "n_overrides": len(calibs), "prior": fuse_calibrations(calibs)}
+    """The vehicle's fleet calibration prior, per axis, and the sessions that sit outside it.
+
+    Reads `camera_calibration`. This endpoint used to read `calibration_override` alone, which holds no rows
+    until somebody corrects a calibration by hand, so it reported "no calibrations" for a vehicle with
+    ninety-seven of them. Overrides are applied on top of the estimates rather than instead of them.
+
+    The per-axis breakdown is the point. On this corpus only pitch varies; roll, yaw and all of xyz are the
+    same constant in every session, and a pooled spread over them reads as unanimous agreement when it is
+    really an absence of measurement.
+    """
+    return await rig_prior_for_vehicle(db, vehicle_id)
 
 
 class DriftIn(BaseModel):

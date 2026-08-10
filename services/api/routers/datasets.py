@@ -3,7 +3,6 @@ and hand back presigned download links. This is how labeled data leaves the engi
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
+from core.observability import spawn
 from core.storage import get_object_store
 from db.models import DatasetCommit, ExportJob
 from db.session import get_sessionmaker
@@ -56,7 +56,7 @@ async def start_export(payload: ExportIn, db: AsyncSession = Depends(db_session)
     job_id = uuid.uuid4()
     db.add(ExportJob(job_id=job_id, name=payload.name, spec=spec.model_dump(), status="pending"))
     await db.commit()
-    asyncio.create_task(_run_export(job_id, spec))
+    spawn(_run_export(job_id, spec), name="_run_export")
     return {"job_id": str(job_id), "status": "pending"}
 
 

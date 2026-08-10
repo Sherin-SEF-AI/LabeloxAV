@@ -1,16 +1,27 @@
 """Annotator-defined custom classes: add_custom_class normalizes the name, lands it in the custom id
 block marked rare (so the gate forces human review), makes it resolve through get_ontology everywhere, and
-is idempotent. The sidecar is restored in finally so the governed ontology is never left mutated."""
+is idempotent.
+
+This test writes to the real governed sidecar, `ontology/custom_classes.json`, because that is the file the
+production path writes and pointing it elsewhere would stop testing what ships. That makes the restore
+load-bearing: it runs against a tracked file in the working tree.
+
+The restore used to re-serialize the parsed list with a bare `json.dumps`, which preserved the content and
+destroyed the formatting, collapsing the file to a single line. Every full suite run therefore left the repo
+dirty with a 191-line diff that was pure whitespace, and the app's own writer uses `indent=2`, so the two
+fought each other. Keeping the original bytes and putting them back is the only thing that actually restores.
+"""
 
 from __future__ import annotations
-
-import json
 
 
 def test_add_custom_class_resolves_normalized_and_idempotent():
     from services.autolabel.ontology import _custom_path, add_custom_class, get_ontology
 
     name = "test_qx_idol_cart"
+    sidecar = _custom_path()
+    # Read before the first mutation, so a failure anywhere below still restores the file byte for byte.
+    original = sidecar.read_text() if sidecar.exists() else None
     try:
         c1 = add_custom_class("Test QX Idol Cart")
         assert c1["name"] == name and c1["existed"] is False
@@ -30,7 +41,8 @@ def test_add_custom_class_resolves_normalized_and_idempotent():
         with pytest.raises(ValueError):
             add_custom_class("!!!")
     finally:
-        p = _custom_path()
-        if p.exists():
-            p.write_text(json.dumps([c for c in json.loads(p.read_text()) if c["name"] != name]))
+        if original is None:
+            sidecar.unlink(missing_ok=True)
+        else:
+            sidecar.write_text(original)
         get_ontology.cache_clear()

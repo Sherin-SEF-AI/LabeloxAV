@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+
+import { type Placeholder, placeholder, statValue, titleCount } from "@/lib/emptyState";
 import { useRouter } from "next/navigation";
 import {
   analyticsApi,
@@ -25,6 +27,17 @@ import { apiGet } from "@/lib/api";
 // The sales sheet: corpus totals, class distribution and long-tail coverage, label-source mix
 // (auto-accepted vs human-touched), scenario coverage, and the review-agreement loop signal.
 // Color only encodes state; bars are plain divs (no chart library).
+
+// Draws whichever of the three states `placeholder` chose. A wait is dimmed and pulsing so it reads as
+// pending, an emptiness is stated plainly, and data draws nothing here at all.
+function Blank({ p }: { p: Placeholder }) {
+  if (!p) return null;
+  return (
+    <div className={`font-mono text-xs py-4 text-center ${p.kind === "loading" ? "text-ink-3/50 animate-pulse" : "text-ink-3"}`}>
+      {p.text}
+    </div>
+  );
+}
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -132,29 +145,27 @@ export default function AnalyticsPage() {
       <div className="p-4 space-y-4">
         {/* Top stat cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          <Stat label="frames" value={overview ? String(overview.frames) : "-"} />
-          <Stat label="objects" value={overview ? String(overview.objects) : "-"} />
-          <Stat label="tracks" value={overview ? String(overview.tracks) : "-"} />
-          <Stat label="scenarios" value={overview ? String(overview.scenarios) : "-"} />
+          <Stat label="frames" value={statValue(loading, overview?.frames)} />
+          <Stat label="objects" value={statValue(loading, overview?.objects)} />
+          <Stat label="tracks" value={statValue(loading, overview?.tracks)} />
+          <Stat label="scenarios" value={statValue(loading, overview?.scenarios)} />
           <Stat
             label="auto-accepted"
-            value={overview ? `${overview.auto_accepted_pct}%` : "-"}
+            value={statValue(loading, overview ? `${overview.auto_accepted_pct}%` : null)}
             sub={overview ? `${overview.human_touched_pct}% human-touched` : undefined}
           />
           <Stat
             label="long-tail coverage"
-            value={
-              overview
-                ? `${overview.long_tail.covered_classes}/${overview.long_tail.total_classes}`
-                : "-"
-            }
+            value={statValue(loading, overview
+              ? `${overview.long_tail.covered_classes}/${overview.long_tail.total_classes}`
+              : null)}
             sub={overview ? `${overview.long_tail.coverage_pct}% of ontology` : undefined}
           />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Class distribution */}
-          <Section title={`class distribution (${present.length} classes present)`}>
+          <Section title={`class distribution (${titleCount(loading, present.length, !!classes.length || !loading)} classes present)`}>
             <div className="space-y-1">
               {present.map((c) => (
                 <div key={c.class_id} className="flex items-center gap-2">
@@ -178,9 +189,7 @@ export default function AnalyticsPage() {
                   <div className="w-12 text-right font-mono text-[11px] text-ink-2">{c.count}</div>
                 </div>
               ))}
-              {!present.length && (
-                <div className="font-mono text-xs text-ink-3 py-4 text-center">no objects yet</div>
-              )}
+              <Blank p={placeholder(loading, present.length, "no objects yet")} />
             </div>
           </Section>
 
@@ -220,7 +229,7 @@ export default function AnalyticsPage() {
                 </div>
               </div>
             ) : (
-              <div className="font-mono text-xs text-ink-3 py-4 text-center">no objects yet</div>
+              <Blank p={placeholder(loading, mix?.total ?? 0, "no objects yet")} />
             )}
           </Section>
 
@@ -244,11 +253,7 @@ export default function AnalyticsPage() {
                   </div>
                 </div>
               ))}
-              {!scenarios.length && (
-                <div className="font-mono text-xs text-ink-3 py-4 text-center">
-                  no scenarios mined
-                </div>
-              )}
+              <Blank p={placeholder(loading, scenarios.length, "no scenarios mined")} />
             </div>
           </Section>
 
@@ -289,7 +294,7 @@ export default function AnalyticsPage() {
                 )}
               </div>
             ) : (
-              <div className="font-mono text-xs text-ink-3 py-4 text-center">no reviews yet</div>
+              <Blank p={placeholder(loading, agreement ? 1 : 0, "no reviews yet")} />
             )}
           </Section>
 

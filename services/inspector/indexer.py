@@ -57,7 +57,7 @@ def build_index_from_bytes(mcap_bytes: bytes, *, gap_min_factor: float) -> dict:
                          "first_ts": lo, "last_ts": hi}
         if rate > 0:
             thresh = gap_min_factor * (1e9 / rate)
-            wins = [[a, b] for a, b in zip(ts, ts[1:]) if (b - a) > thresh]
+            wins = [[a, b] for a, b in zip(ts, ts[1:], strict=False) if (b - a) > thresh]
             if wins:
                 gaps[topic] = wins
         all_lo = lo if all_lo is None else min(all_lo, lo)

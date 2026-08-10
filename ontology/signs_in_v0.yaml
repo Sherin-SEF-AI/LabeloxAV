@@ -29,3 +29,35 @@ types:
   - { name: petrol_pump, category: informatory, text_bearing: true, prompt: "a fuel petrol pump information sign" }
   - { name: bus_stop, category: informatory, text_bearing: false, prompt: "a bus stop information sign" }
   - { name: toll_ahead, category: informatory, text_bearing: true, prompt: "a toll plaza ahead information board" }
+
+# What a sign is not.
+#
+# A softmax over the types above cannot express "none of these": the probabilities sum to one, so whatever
+# arrives, something wins. Measured on real corpus crops, a photograph of a bus scored 0.817 as `bus_stop`
+# where actual signs averaged 0.759, because the phrase "a bus stop information sign" matches a bus. Same
+# failure for "a toll plaza ahead information board" against a truck, and "a pedestrian crossing warning
+# sign" against a pedestrian: the object noun dominates the phrase, so the model matched the thing the sign
+# depicts instead of the sign.
+#
+# These give it somewhere to say no. The decision is the margin between the best type and the best negative,
+# so a crop that looks more like a bus than like any sign is rejected rather than typed. Every entry here is
+# something that was actually seen carrying a traffic_sign label in this corpus, not a guess at what might
+# go wrong.
+negatives:
+  # The four the measurement caught directly.
+  - { name: neg_bus, prompt: "a photograph of a bus on a road" }
+  - { name: neg_truck, prompt: "a photograph of a truck or lorry on a road" }
+  - { name: neg_pedestrian, prompt: "a photograph of a person walking" }
+  - { name: neg_vehicle, prompt: "a photograph of a car or motorcycle" }
+  # Mapillary imports front and back of a sign to the same class, so the blank rear arrives as a sign.
+  - { name: neg_sign_back, prompt: "the blank grey back of a road sign, seen from behind" }
+  # Commercial signage, which this corpus carries a great deal of and which is not a traffic sign.
+  - { name: neg_hoarding, prompt: "a large advertising hoarding or billboard" }
+  - { name: neg_shop_board, prompt: "a shop front name board or business signage" }
+  - { name: neg_petrol_price, prompt: "a fuel station brand and price display board" }
+  # Structure without a sign face on it.
+  - { name: neg_pole, prompt: "a bare metal pole or post with nothing mounted on it" }
+  - { name: neg_road, prompt: "an empty road surface, tarmac, or kerb" }
+  - { name: neg_vegetation, prompt: "trees, foliage or vegetation beside a road" }
+  - { name: neg_building, prompt: "the wall or facade of a building" }
+  - { name: neg_sky, prompt: "plain sky, a blurred patch, or an out of focus background" }

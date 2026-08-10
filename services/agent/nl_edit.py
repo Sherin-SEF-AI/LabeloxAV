@@ -126,9 +126,8 @@ async def vlm_refine(matched: list[dict], phrase: str, max_objs: int = 40) -> li
     import numpy as np
 
     from core.storage import get_object_store
-    from services.autolabel.paths.path_c_qwen3vl import OllamaVlmClient, crop_object
-
     from db.session import get_sessionmaker
+    from services.autolabel.paths.path_c_qwen3vl import OllamaVlmClient, crop_object
 
     vlm = OllamaVlmClient()
     kept: list[str] = []

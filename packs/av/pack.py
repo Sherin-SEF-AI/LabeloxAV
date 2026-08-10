@@ -94,8 +94,27 @@ AV_COCO_TO_ONTOLOGY = {
 }
 
 # Open-vocab synonyms mapped back to one ontology class, so long-tail rural classes get proposed.
+#
+# A class with no entry here is prompted with its own name and the underscores swapped for spaces, which for
+# signs meant the single phrase "traffic sign" covering 21 distinct Indian designs, from a red octagon to a
+# green destination board. The phrases below name the designs the corpus actually contains.
+#
+# Signs and advertising are kept lexically apart on purpose. While `hoarding` was stuff the autolabeller
+# dropped it and its contents were labelled `traffic_sign`; now that it is a thing, the two classes would
+# compete for the same detections if their prompts both said "sign". So the sign phrases never say
+# "billboard" or "advertisement", and the advertising phrases never say "sign". Tests hold both directions.
 AV_OPENVOCAB_SYNONYMS = {
     "cattle": ("cattle", "cow", "buffalo", "bull", "ox"),
+    "traffic_sign": (
+        "traffic sign", "road sign", "a red and white triangular warning sign",
+        "a circular speed limit sign", "a red octagonal stop sign",
+        "a blue circular mandatory direction sign", "a green destination board with place names",
+    ),
+    "hoarding": (
+        "advertising hoarding", "billboard", "a large commercial advertisement board",
+        "a shop name board", "a fuel station price display",
+    ),
+    "traffic_signal": ("traffic signal", "traffic light", "a signal head with red amber green lamps"),
 }
 
 

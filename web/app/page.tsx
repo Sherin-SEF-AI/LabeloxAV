@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useJobStream } from "@/lib/useEventStream";
 import { api , humanizeError } from "@/lib/api";
-import type { DatasetRow, SessionRow, TriageRow } from "@/lib/types";
+import type { SessionRow, TriageFlag, TriageRow, TriageSeverity } from "@/lib/types";
 import { ConfBar, StateBadge } from "@/components/StateBadge";
 import PageShell from "@/components/shell/PageShell";
 import CorrectionModal from "@/components/CorrectionModal";
@@ -21,90 +21,47 @@ const BANDS = [
   { key: "submitted", label: "QA queue", hint: "submitted work awaiting approval" },
 ];
 
-// Count a number up to its target on mount, so a stat lands with a little motion instead of snapping into
-// place. Cheap: one rAF loop, eased, and it respects reduced-motion by jumping straight to the value.
-function useCountUp(target: number, ms = 900): number {
-  const [n, setN] = useState(0);
-  useEffect(() => {
-    if (typeof window === "undefined") { setN(target); return; }
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (reduce || target <= 0) { setN(target); return; }
-    let raf = 0; const t0 = performance.now();
-    const tick = (t: number) => {
-      const p = Math.min(1, (t - t0) / ms);
-      const eased = 1 - Math.pow(1 - p, 3);   // easeOutCubic
-      setN(Math.round(target * eased));
-      if (p < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [target, ms]);
-  return n;
+// A flag reads as loudly as it deserves. Three tiers rather than four equally weighted chips, because a
+// defect and a piece of context are not the same news, and a screen of identical chips cannot be sorted by
+// eye. High is something probably wrong, medium is worth a look, low is true but not a call to act.
+const SEVERITY_TONE: Record<TriageSeverity, string> = {
+  high: "text-block border-block/45 bg-block/10",
+  medium: "text-warn border-warn/40 bg-warn/10",
+  low: "text-ink-3 border-line",
+};
+
+// The colour of the row's left edge: the worst thing about it, readable before any word is. Drawn as a
+// border on the first cell rather than as its own narrow column, because a table distributes spare width
+// into a fixed-width column and turns a 3px rule into a slab.
+const SEVERITY_STRIPE: Record<TriageSeverity, string> = {
+  high: "border-l-block", medium: "border-l-warn", low: "border-l-line",
+};
+
+function worstSeverity(row: TriageRow): TriageSeverity {
+  const s = row.flags?.map((f) => f.severity) ?? [];
+  return s.includes("high") ? "high" : s.includes("medium") ? "medium" : "low";
 }
 
-// An overview stat: a labelled figure with an icon, counting up on load and lifting on hover. The accent
-// variant marks the one number that represents work waiting on you.
-function Stat({ label, value, sub, icon, loading, accent, delay = 0 }: {
-  label: string; value: number | string; sub?: string; icon: string; loading?: boolean; accent?: boolean; delay?: number;
-}) {
-  const numeric = typeof value === "number";
-  const counted = useCountUp(numeric ? (value as number) : 0);
-  const shown = loading ? null : numeric ? counted.toLocaleString() : value;
-  return (
-    <div style={{ "--d": `${delay}ms` } as React.CSSProperties}
-      className={`fade-up lift panel relative overflow-hidden px-4 py-3 ${accent ? "border-accent/40" : ""}`}>
-      {accent && <span className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-accent to-accent-2" aria-hidden />}
-      <div className="flex items-center justify-between">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-ink-3">{label}</span>
-        <span className={accent ? "text-accent" : "text-ink-3"}><Icon name={icon} size={14} /></span>
-      </div>
-      <div className={`font-display font-semibold text-3xl mt-1.5 tabular-nums leading-none ${accent ? "text-accent" : "text-ink"}`}>
-        {loading ? <span className="text-ink-3 animate-pulse">···</span> : shown}
-      </div>
-      {sub ? <div className="font-mono text-[11px] text-ink-3 mt-1">{sub}</div> : null}
-    </div>
-  );
+// Rows from an older API carry only the joined prose. Rendering them at low severity is honest: unknown is
+// not urgent, and inventing a tier from a regex here is the coupling this change removed.
+function flagsOf(row: TriageRow): TriageFlag[] {
+  if (row.flags?.length) return row.flags;
+  return (row.why || "")
+    .split(/,\s*/)
+    .filter(Boolean)
+    .map((label) => ({ code: label, label, severity: "low" as TriageSeverity }));
 }
 
-// A launcher tile into one of the platform's workflows: an icon in a tinted chip, a title and a one-line
-// description, that lifts and slides its arrow on hover. primary marks the recommended next step.
-function ActionCard({ title, desc, icon, onClick, primary, delay = 0 }: {
-  title: string; desc: string; icon: string; onClick: () => void; primary?: boolean; delay?: number;
-}) {
+function WhyChips({ row }: { row: TriageRow }) {
+  const flags = flagsOf(row);
+  if (!flags.length) return null;
   return (
-    <button onClick={onClick} title={desc}
-      style={{ "--d": `${delay}ms` } as React.CSSProperties}
-      className={`fade-up lift panel group flex items-start gap-3 px-3.5 py-3 text-left focus:outline-none focus:border-accent ${primary ? "border-accent/50" : ""}`}>
-      <span className={`grid place-items-center w-8 h-8 rounded shrink-0 transition-colors ${
-        primary ? "bg-accent/15 text-accent" : "bg-bg-2 text-ink-3 group-hover:text-accent group-hover:bg-accent/10"}`}>
-        <Icon name={icon} size={16} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="text-ink text-[13px] font-medium">{title}</span>
-          {primary && <span className="font-mono text-[9px] uppercase tracking-wide text-accent border border-accent/40 rounded px-1 leading-tight">next</span>}
+    <div className="flex flex-wrap gap-1 mt-1.5">
+      {flags.map((f, i) => (
+        <span key={`${f.code}-${i}`}
+          className={`text-[10px] leading-none px-1.5 py-1 rounded border ${SEVERITY_TONE[f.severity]}`}>
+          {f.label}
         </span>
-        <span className="block text-ink-3 text-[11px] leading-snug mt-0.5 line-clamp-2">{desc}</span>
-      </span>
-      <span className="text-ink-3 group-hover:text-accent transition-transform group-hover:translate-x-0.5 text-xs mt-0.5">&rarr;</span>
-    </button>
-  );
-}
-
-// The "why it needs you" reasons as scannable colored chips instead of one run-on line: conflicts read red,
-// low confidence amber, rare classes blue, mask/box disagreement accent.
-function WhyChips({ why }: { why: string }) {
-  if (!why) return null;
-  const tone = (t: string) =>
-    /conflict/.test(t) ? "text-block border-block/40"
-      : /low conf/.test(t) ? "text-warn border-warn/40"
-      : /rare/.test(t) ? "text-info border-info/40"
-      : /mask/.test(t) ? "text-accent border-accent/40"
-      : "text-ink-3 border-line";
-  return (
-    <div className="flex flex-wrap gap-1 mt-1">
-      {why.split(/,\s*/).filter(Boolean).map((t, i) => (
-        <span key={i} className={`font-mono text-[9.5px] leading-none px-1.5 py-0.5 rounded border ${tone(t)}`}>{t}</span>
       ))}
     </div>
   );
@@ -114,8 +71,6 @@ export default function HomePage() {
   const router = useRouter();
   const [rows, setRows] = useState<TriageRow[]>([]);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
-  const [sessionTotal, setSessionTotal] = useState(0);
-  const [datasets, setDatasets] = useState<DatasetRow[]>([]);
   const [session, setSession] = useState<string>("");
   const [states, setStates] = useState<string>("review,annotate");
   const [cursor, setCursor] = useState(0);
@@ -146,11 +101,8 @@ export default function HomePage() {
   }, [states, session]);
 
   useEffect(() => {
-    // The dropdown needs the session rows (capped), but the stat should show the true fleet size, so read
-    // the real total from the paginated endpoint rather than the length of a capped list.
+    // The dropdown needs the session rows; nothing on this page shows a fleet total any more.
     api.sessions().then(setSessions).catch(() => {});
-    api.sessionsPage({ limit: 1 }).then((p) => setSessionTotal(p.total)).catch(() => {});
-    api.datasets().then(setDatasets).catch(() => {});
     api.ontology().then((o) => setClasses(o.classes.map((c) => c.name))).catch(() => {});
     setRole(getUser()?.role);
   }, []);
@@ -234,13 +186,39 @@ export default function HomePage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Ignore keys aimed at a field. The handler is on window, so without this, typing a class name into
+      // the reclassify box moved the cursor on every "j" and submitted on Enter. Adding accept and reject
+      // to the same handler would have turned that from an annoyance into a wrong decision on real data.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
       if (e.key === "j") setCursor((c) => Math.min(c + 1, rows.length - 1));
       else if (e.key === "k") setCursor((c) => Math.max(c - 1, 0));
       else if (e.key === "Enter") open();
+      // Accept and reject act on the selection when there is one, otherwise on the row under the cursor,
+      // which is what makes the queue workable without the mouse.
+      else if (e.key === "a" || e.key === "r") {
+        const row = rows[cursor];
+        if (!sel.size && !row) return;
+        const targets = sel.size ? sel : new Set([row.object_id]);
+        e.preventDefault();
+        void (async () => {
+          try {
+            const res = await api.bulkReview([...targets], e.key === "a" ? "accept" : "reject",
+              undefined, e.key === "a" ? acceptState(role) : undefined);
+            setMsg(`${e.key === "a" ? "accepted" : "rejected"} ${res.updated}`);
+            setSel(new Set());
+            load();
+          } catch (err) {
+            setMsg(humanizeError(err));
+          }
+        })();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rows.length, open]);
+  }, [rows, cursor, sel, role, open, load]);
 
   const cities = useMemo(() => new Set(sessions.map((s) => s.city).filter(Boolean)).size, [sessions]);
   const activeBand = BANDS.find((b) => b.key === states);
@@ -290,60 +268,49 @@ export default function HomePage() {
             </div>
           ) : null}
 
-          {/* Welcome + the one action that matters: pick up where the queue left off */}
-          <div className="fade-up flex flex-wrap items-end justify-between gap-4 shrink-0">
-            <div>
-              <h1 className="font-display text-2xl text-ink font-semibold tracking-tight">
-                Welcome back{role ? <span className="text-accent">, {role}</span> : ""}
-              </h1>
-              <p className="text-ink-3 text-sm mt-1.5 max-w-xl">
-                Multimodal annotation for autonomous driving. Pick up your review queue, or jump into a workflow.
-              </p>
+          {/* One command row where four stacked blocks used to be.
+              What went, and why:
+                - the greeting, which said the same thing on every one of the day's forty visits;
+                - six workflow cards, each duplicating a menu entry one click away, for about 180px of the
+                  most valuable space on the screen;
+                - "your role", which is identity and already sits in the top right corner;
+                - "datasets", a lifetime total that cannot change during a shift.
+              A dashboard number has to change what you do next. These did not, and they were pushing the
+              queue, which is the entire point of this page, below the fold. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 shrink-0">
+            <h1 className="font-display text-lg text-ink font-semibold tracking-tight">
+              {activeBand?.label ?? "Review queue"}
+            </h1>
+            {/* Frames and drives rather than a session total: sessions count LiDAR-only records with no
+                frames in them, so one number would mean two different things. */}
+            <div className="font-mono text-[11px] text-ink-3 tabular-nums flex items-center gap-2">
+              <span>{loading ? "..." : rows.length.toLocaleString()} objects</span>
+              {ingest?.frames ? <><span className="text-line">/</span>
+                <span>{ingest.frames.toLocaleString()} frames</span></> : null}
+              {cities > 0 && <><span className="text-line">/</span><span>{cities} cit{cities === 1 ? "y" : "ies"}</span></>}
             </div>
-            <button
-              onClick={() => open(shownRows[0] ?? rows[0])}
-              disabled={!rows.length}
-              className="sheen lift flex items-center gap-2.5 bg-gradient-to-b from-accent-2 to-accent text-white font-medium text-sm px-5 py-2.5 rounded shadow-lg shadow-accent/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none shrink-0"
-            >
-              <Icon name="confirm" size={16} />
-              {rows.length ? "Continue reviewing" : "Queue is clear"}
-              {rows.length ? <span className="font-mono text-[11px] bg-white/20 rounded px-1.5 py-0.5 tabular-nums">{rows.length} queued</span> : null}
-            </button>
-          </div>
-
-          {/* At-a-glance stats: staggered entrance, count-up numbers, lift on hover */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
-            <Stat icon="review" label="In your queue" value={rows.length} sub={activeBand?.label.toLowerCase()} loading={loading} accent delay={0} />
-            <Stat icon="layers" label="Sessions" value={sessionTotal || sessions.length} sub={`${cities} cit${cities === 1 ? "y" : "ies"}`} loading={!sessions.length && loading} delay={60} />
-            <Stat icon="target" label="Datasets" value={datasets.length} sub={datasets.length ? "sealed exports" : "none yet"} delay={120} />
-            <Stat icon="activity" label="Your role" value={role ?? "annotator"} sub="what you can approve" delay={180} />
-          </div>
-
-          {/* Workflow launcher */}
-          <div className="shrink-0">
-            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Jump to a workflow</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
-              {/* Navigates, like every sibling. It used to scroll to the queue section further down this page,
-                  which is the same affordance doing a different thing depending on which card you pressed. */}
-              <ActionCard primary icon="review" title="Review" desc="Work through model proposals ranked by what matters." onClick={() => router.push("/review/queue")} delay={0} />
-              <ActionCard icon="plus" title="Import" desc="Bring in dashcam video or sensor logs to annotate." onClick={() => router.push("/import")} delay={50} />
-              <ActionCard icon="activity" title="Analytics" desc="Labeling progress, agreement, and coverage." onClick={() => router.push("/analytics")} delay={100} />
-              <ActionCard icon="layers" title="Datasets" desc="Seal and export a versioned dataset (COCO, YOLO)." onClick={() => router.push("/datasets")} delay={150} />
-              <ActionCard icon="route" title="Jobs" desc="Watch autolabel, training, and import jobs live." onClick={() => router.push("/jobs")} delay={200} />
-              <ActionCard icon="target" title="Curation" desc="Find the highest-value frames to label next." onClick={() => router.push("/curation")} delay={250} />
+            <div className="ml-auto flex items-center gap-2">
+              <button onClick={() => setShowActions((v) => !v)}
+                className="text-[12px] text-ink-2 border border-line rounded px-2.5 py-1.5 hover:bg-btn">
+                Session actions
+              </button>
+              <button
+                onClick={() => open(shownRows[0] ?? rows[0])}
+                disabled={!rows.length}
+                className="flex items-center gap-2 bg-accent hover:bg-accent-2 text-white font-medium text-[13px] px-4 py-1.5 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Icon name="confirm" size={14} />
+                {rows.length ? "Review next" : "Queue is clear"}
+              </button>
             </div>
           </div>
 
           {/* Review queue */}
           <div id="queue" className="fade-up panel flex-1 min-h-0 flex flex-col overflow-hidden" style={{ "--d": "300ms" } as React.CSSProperties}>
             <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b hairline">
-              <div>
-                <div className="text-ink font-medium flex items-center gap-2">
-                  <span className="text-accent"><Icon name="review" size={15} /></span>
-                  Your review queue
-                </div>
-                <div className="text-ink-3 text-xs mt-0.5">{activeBand?.hint} &middot; ranked by uncertainty and rarity</div>
-              </div>
+              {/* The title moved to the command row above. Repeating it here is the same duplication this
+                  change set out to remove, so what stays is only the band's own description. */}
+              <div className="text-ink-3 text-xs">{activeBand?.hint}</div>
               <div className="flex items-center gap-0.5 ml-auto font-mono text-[11px] bg-bg-2 rounded p-0.5">
                 {BANDS.map((b) => (
                   <button key={b.key} onClick={() => setStates(b.key)} title={b.hint}
@@ -426,13 +393,23 @@ export default function HomePage() {
             {/* Table (scrolls inside the panel so the page itself stays fit-to-screen) */}
             <div className="flex-1 min-h-0 overflow-auto">
             {loading && !rows.length ? (
-              <SkeletonRows rows={8} cols="grid-cols-[32px_40px_1fr_150px_110px]" />
+              <SkeletonRows rows={8} cols="grid-cols-[32px_76px_1fr_150px_110px]" />
             ) : rows.length ? (
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
+                {/* Explicit columns. Auto layout was resolving the header and the body to different widths
+                    once the thumbnail column arrived, leaving every heading sitting over the wrong column.
+                    Stating the widths once removes the inference entirely. */}
+                <colgroup>
+                  <col style={{ width: 44 }} />
+                  <col style={{ width: 84 }} />
+                  <col />
+                  <col style={{ width: 150 }} />
+                  <col style={{ width: 120 }} />
+                </colgroup>
                 <thead className="text-ink-3 font-mono text-[11px] uppercase border-b hairline sticky top-0 bg-panel z-10">
                   <tr>
                     <th className="px-3 py-2 w-8"><input type="checkbox" checked={allSelected} onChange={selectAll} /></th>
-                    <th className="text-left font-normal px-3 py-2 w-10">#</th>
+                    <th className="text-left font-normal px-2 py-2 w-[76px]">frame</th>
                     <th className="text-left font-normal px-3 py-2">object &middot; why it needs you</th>
                     <th className="text-left font-normal px-3 py-2 w-36">confidence</th>
                     <th className="text-left font-normal px-3 py-2 w-28">state</th>
@@ -442,20 +419,29 @@ export default function HomePage() {
                   {shownRows.map((r, i) => (
                     <tr key={r.object_id} onClick={() => { setCursor(i); open(r); }} onMouseEnter={() => setCursor(i)}
                       data-active={i === cursor}
-                      className={`rail border-b hairline cursor-pointer transition-colors ${sel.has(r.object_id) ? "bg-accent/5" : i === cursor ? "bg-bg-2" : "hover:bg-bg-2/60"}`}>
-                      <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}>
+                      className={`border-b hairline cursor-pointer transition-colors ${sel.has(r.object_id) ? "bg-accent/5" : i === cursor ? "bg-bg-2" : "hover:bg-bg-2/60"}`}>
+                      {/* The worst thing about this row, on its edge, readable before any word is. */}
+                      <td className={`px-3 py-2 align-top border-l-[3px] ${SEVERITY_STRIPE[worstSeverity(r)]}`}
+                        onClick={(e) => e.stopPropagation()}>
                         <input type="checkbox" checked={sel.has(r.object_id)} onChange={() => toggle(r.object_id)} />
                       </td>
-                      <td className="px-3 py-2 font-mono text-ink-3 align-top">{String(i + 1).padStart(2, "0")}</td>
+                      {/* A crop decides a good share of these without opening anything, and the endpoint
+                          behind it is already serving. Lazy so a 200-row queue does not fetch 200 images
+                          before the first one is on screen. */}
+                      <td className="px-2 py-2 align-top">
+                        <img src={`/api/objects/${r.object_id}/crop`} alt="" loading="lazy" decoding="async"
+                          className="w-[64px] h-[40px] object-cover rounded border border-line bg-bg-2"
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
+                      </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-ink">{r.class_name}</span>
                           <ObjectSourceBadge source={r.source} importFormat={r.import_format} />
                         </div>
-                        <WhyChips why={r.why} />
+                        <WhyChips row={r} />
                       </td>
                       <td className="px-3 py-2 align-top"><ConfBar conf={r.conf} /></td>
-                      <td className="px-3 py-2 align-top"><StateBadge state={r.state} /></td>
+                      <td className="px-3 py-2 align-top"><StateBadge state={r.state} source={r.source} conf={r.conf} /></td>
                     </tr>
                   ))}
                   {!shownRows.length ? (
@@ -483,6 +469,9 @@ export default function HomePage() {
             <div className="shrink-0 border-t hairline px-4 py-1.5 font-mono text-[10px] text-ink-3 flex items-center gap-3">
               <span><span className="text-ink-2">J / K</span> move</span>
               <span><span className="text-ink-2">Enter</span> open</span>
+              <span><span className="text-pass">A</span> accept</span>
+              <span><span className="text-block">R</span> reject</span>
+              {sel.size ? <span className="text-accent">{sel.size} selected</span> : null}
               <span className="ml-auto text-ink-3/70">ranked by uncertainty &times; rarity</span>
             </div>
           </div>

@@ -10,7 +10,7 @@ import pytest
 
 from core.config import get_settings
 from core.schemas import BBox, GateState, PathProposal, Provenance, UnifiedObject
-from services.autolabel.gate import gate_object, needs_vlm
+from services.autolabel.gate import class_auto_accept, gate_object, needs_vlm
 from services.autolabel.ontology import get_ontology
 from services.autolabel.paths.path_c_qwen3vl import VlmResult, VlmVerifier, apply_vlm
 
@@ -43,12 +43,29 @@ def _obj(class_id, class_name, conf, agreement, proposals=None) -> UnifiedObject
     )
 
 
+def _review_band_conf(class_id: int, onto, cfg) -> float:
+    """A confidence that genuinely sits in the review band for this class, read from the live gate config.
+
+    These tests used to hardcode 0.72, which stopped being a review-band confidence without anybody noticing.
+    Calibration moved the gate onto the honest isotonic scale (a14d22c: auto_accept 0.95 -> 0.45), so 0.72
+    became an auto-accept, and two tests whose whole subject is "the uncertain subset gets a VLM call" were
+    quietly asserting it about an object the gate was confident in. Deriving the value pins them to the
+    property they are named for instead of to one calibration epoch, so a future retune cannot silently
+    invert their meaning again.
+    """
+    hi = class_auto_accept(class_id, onto, cfg)
+    assert cfg.review_low < hi, (
+        f"the review band is empty for class {class_id}: review_low={cfg.review_low} >= auto_accept={hi}. "
+        "No confidence can be uncertain, so these tests would assert nothing.")
+    return (cfg.review_low + hi) / 2
+
+
 def test_duty_cycle_only_uncertain_objects():
     onto = get_ontology()
     cfg = get_settings().gate
 
     confident = _obj(11, "sedan", 0.97, True, [PathProposal(path="path_a_yolo26", verdict="agree", model_version="y")])
-    review_band = _obj(11, "sedan", 0.72, True)
+    review_band = _obj(11, "sedan", _review_band_conf(11, onto, cfg), True)
     rare = _obj(6, "autorickshaw", 0.98, True)
 
     assert needs_vlm(confident, onto, cfg) is False  # high-conf agreed common class: skip VLM
@@ -65,7 +82,7 @@ def test_vlm_runs_on_subset_and_populates_validated_attrs():
 
     objs = [
         _obj(11, "sedan", 0.97, True, [PathProposal(path="path_a_yolo26", verdict="agree", model_version="y")]),
-        _obj(11, "sedan", 0.72, True),     # review band -> VLM
+        _obj(11, "sedan", _review_band_conf(11, onto, cfg), True),  # review band -> VLM
         _obj(6, "autorickshaw", 0.98, True),  # rare -> VLM
     ]
     touched = 0

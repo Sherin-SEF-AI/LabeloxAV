@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 import PageShell from "@/components/shell/PageShell";
 import { api, humanizeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
+import { undoPayload, verdictPayload } from "@/lib/reviewVerdict";
+import { describeScope, triageQuery } from "@/lib/triageScope";
 import { acceptState, useCurrentUser } from "@/lib/user";
 import type { TriageRow } from "@/lib/types";
 
@@ -48,19 +50,20 @@ function RapidBody() {
   const shownAt = useRef<number>(Date.now());
   const inFlight = useRef(0);
 
-  const sessionId = params.get("session") || undefined;
+  // Every scope the triage API accepts, not just the session. A batch mined for one class had no URL that
+  // would open it while this page forwarded one parameter out of five.
+  const scope = params.toString();
+  const scopeLabel = describeScope(params);
   const current = queue[index] ?? null;
 
   useEffect(() => {
     (async () => {
       try {
-        const q: Record<string, string> = { limit: "200" };
-        if (sessionId) q.session_id = sessionId;
-        setQueue(await api.triage(q));
+        setQueue(await api.triage(triageQuery(new URLSearchParams(scope))));
       } catch (e) { toast(humanizeError(e), "error"); } finally { setLoading(false); }
     })();
     api.ontology().then((o) => setClasses(o.classes.map((c) => c.name))).catch(() => {});
-  }, [sessionId]);
+  }, [scope]);
 
   useEffect(() => { shownAt.current = Date.now(); }, [index]);
 
@@ -77,15 +80,12 @@ function RapidBody() {
     if (verdict === "skip") return;
     inFlight.current += 1;
     try {
-      await api.review(row.object_id, {
+      await api.review(row.object_id, verdictPayload(verdict, {
         reviewer: me?.name ?? "anon",
-        action: verdict === "accept" ? "confirm" : verdict === "reject" ? "reject" : "reclassify",
-        class_name: className,
-        state: verdict === "reject" ? "rejected" : acceptState(me?.role),
-        // Real elapsed time, so the productivity numbers this feeds are measurements rather than a
-        // constant. A hardcoded value here would quietly corrupt every throughput report downstream.
-        time_spent_ms: Math.max(0, Date.now() - shownAt.current),
-      });
+        acceptState: acceptState(me?.role),
+        className,
+        timeSpentMs: Date.now() - shownAt.current,
+      }));
     } catch (e) {
       toast(`${row.class_name}: ${humanizeError(e)}`, "error");
     } finally { inFlight.current -= 1; }
@@ -100,21 +100,24 @@ function RapidBody() {
   }, [queue, index, send]);
 
   const undo = useCallback(() => {
-    setDone((d) => {
-      if (!d.length) return d;
-      const last = d[d.length - 1];
-      setIndex((i) => Math.max(0, i - 1));
-      // The reversal is a real one: the object goes back to needing review on the server, not just in this
-      // tab. An undo that only moved the cursor would leave the mistake committed.
-      if (last.verdict !== "skip") {
-        void api.review(last.row.object_id, {
-          reviewer: me?.name ?? "anon", action: "confirm", state: "needs_review", time_spent_ms: 0,
-        }).catch((e) => toast(humanizeError(e), "error"));
-      }
-      toast(`undid ${last.verdict} on ${last.row.class_name}`, "success");
-      return d.slice(0, -1);
-    });
-  }, [me]);
+    // Read the stack rather than mutating inside a state updater. An updater must be pure, and this one
+    // fired the network call, so React re-invoking it (StrictMode does, in development) sent the reversal
+    // twice.
+    const last = done[done.length - 1];
+    if (!last) return;
+    setDone((d) => d.slice(0, -1));
+    setIndex((i) => Math.max(0, i - 1));
+    if (last.verdict === "skip") return;
+    // The reversal is a real one: the object goes back to needing review on the server, not just in this
+    // tab. An undo that only moved the cursor would leave the mistake committed.
+    //
+    // Success is claimed only once the server confirms it. This toast used to fire synchronously beside
+    // the request, so when every reversal was being rejected the annotator was still told it had worked.
+    void api.review(last.row.object_id, undoPayload(last.row, { reviewer: me?.name ?? "anon" }))
+      .then(() => toast(`undid ${last.verdict} on ${last.row.class_name}`, "success"))
+      .catch((e) => toast(`could not undo ${last.verdict} on ${last.row.class_name}: `
+                          + `${humanizeError(e)}. The verdict still stands.`, "error"));
+  }, [done, me]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -155,7 +158,9 @@ function RapidBody() {
     <PageShell
       active="RAPID REVIEW"
       title="Rapid review"
-      subtitle="one crop, one keystroke"
+      // A scoped queue ends early by design. Saying what it was scoped to is the difference between "the
+      // batch is finished" and "the corpus looks empty and something is broken".
+      subtitle={scopeLabel ? `${scopeLabel} · one crop, one keystroke` : "one crop, one keystroke"}
       right={
         <span className="font-mono text-[11px] text-ink-3">
           {index}/{queue.length} · <span className="text-pass">{counts.accept}a</span>

@@ -121,7 +121,8 @@ export async function refreshTokenIfNeeded(withinSeconds = 3600): Promise<void> 
 // requests, and Path=/api keeps it off page navigations entirely.
 
 const MEDIA_COOKIE = "lbx_media";
-let _mediaAt = 0;                 // epoch ms when the current cookie was minted
+let _mediaAt = 0;                 // epoch ms of the last successful mint
+let _mediaFailedAt = 0;           // epoch ms of the last failed mint, so failures are not retried per request
 let _mediaTtlMs = 900_000;        // replaced by whatever TTL the server actually issued
 let _minting: Promise<void> | null = null;
 
@@ -134,7 +135,29 @@ function setCookie(name: string, value: string, maxAgeSeconds: number): void {
 
 export function clearMediaCookie(): void {
   _mediaAt = 0;
+  _mediaFailedAt = 0;   // an explicit sign-in or sign-out should mint again at once, not serve a cooldown
   setCookie(MEDIA_COOKIE, "", 0);
+}
+
+/** How long to leave a failed mint alone before trying again. */
+export const MEDIA_RETRY_COOLDOWN_MS = 15_000;
+
+/**
+ * Whether to mint the media cookie now.
+ *
+ * The freshness check used to key only on the last success, and `refreshTokenIfNeeded` awaits this on every
+ * single API request. So while the backend was unreachable nothing was ever recorded, the guard never held,
+ * and every request fired an extra failed POST to /api/auth/media-token. That is why a three-minute API
+ * restart interleaved a media-token failure between every poll in the console.
+ *
+ * Pure and exported so the cooldown is testable without a document, a fetch or a clock.
+ */
+export function shouldMintMedia(now: number, lastOk: number, ttlMs: number, lastFail: number,
+                                cooldownMs: number = MEDIA_RETRY_COOLDOWN_MS): boolean {
+  // Re-mint at two thirds of life so an image request never races the expiry.
+  if (lastOk && now - lastOk < ttlMs * 0.66) return false;
+  if (lastFail && now - lastFail < cooldownMs) return false;
+  return true;
 }
 
 // Mint (or re-mint) the media cookie. Re-mints at two thirds of its life so an image request never races the
@@ -143,7 +166,7 @@ export function clearMediaCookie(): void {
 export async function ensureMediaCookie(): Promise<void> {
   const u = getUser();
   if (!u?.token || typeof document === "undefined") return;
-  if (_mediaAt && Date.now() - _mediaAt < _mediaTtlMs * 0.66) return;
+  if (!shouldMintMedia(Date.now(), _mediaAt, _mediaTtlMs, _mediaFailedAt)) return;
   if (_minting) return _minting;
   _minting = (async () => {
     try {
@@ -151,16 +174,20 @@ export async function ensureMediaCookie(): Promise<void> {
         method: "POST",
         headers: { Authorization: `Bearer ${u.token}` },
       });
-      if (r.ok) {
-        const body = await r.json();
-        if (body?.token) {
-          _mediaTtlMs = (Number(body.expires_in) || 900) * 1000;
-          setCookie(MEDIA_COOKIE, body.token, Number(body.expires_in) || 900);
-          _mediaAt = Date.now();
-        }
+      const body = r.ok ? await r.json() : null;
+      if (body?.token) {
+        _mediaTtlMs = (Number(body.expires_in) || 900) * 1000;
+        setCookie(MEDIA_COOKIE, body.token, Number(body.expires_in) || 900);
+        _mediaAt = Date.now();
+        _mediaFailedAt = 0;
+      } else {
+        // A non-ok response counts as a failure too, not just a thrown one: a 500 from an API that is up but
+        // unhealthy would otherwise be retried on every request exactly like an unreachable one.
+        _mediaFailedAt = Date.now();
       }
     } catch {
       // leave it absent; images will 401 visibly rather than the page failing to render
+      _mediaFailedAt = Date.now();
     } finally {
       _minting = null;
     }

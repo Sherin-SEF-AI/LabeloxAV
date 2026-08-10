@@ -27,28 +27,77 @@ _state: dict = {}
 
 
 def _prompt_vecs():
-    if "vecs" not in _state:
+    """Type and negative prompt vectors, embedded once.
+
+    Cached in a module global keyed on the taxonomy version, so editing the YAML in a long-running process
+    rebuilds the vectors instead of silently serving prompts that no longer exist on disk.
+    """
+    tax = get_sign_taxonomy()
+    if _state.get("version") != tax["version"]:
         from services.intelligence.embed import siglip2
 
-        tax = get_sign_taxonomy()
+        _state["version"] = tax["version"]
         _state["types"] = tax["types"]
+        _state["negatives"] = tax["negatives"]
         _state["vecs"] = siglip2.encode_texts([t["prompt"] for t in tax["types"]])
-    return _state["types"], _state["vecs"]
+        _state["neg_vecs"] = (siglip2.encode_texts([n["prompt"] for n in tax["negatives"]])
+                              if tax["negatives"] else None)
+    return _state["types"], _state["vecs"], _state["neg_vecs"]
+
+
+def _similarities(crop_bgr: np.ndarray):
+    """Cosine similarity of the crop against every type prompt and every negative prompt."""
+    from services.intelligence.embed import siglip2
+
+    types, tvecs, nvecs = _prompt_vecs()
+    fv = siglip2.encode_image(crop_bgr)
+    return types, tvecs @ fv, (nvecs @ fv if nvecs is not None else None)
+
+
+def sign_margin(crop_bgr: np.ndarray) -> float:
+    """How much more this crop looks like a sign than like the things that are not signs.
+
+    Positive means the best sign prompt beat every negative. This is the quantity the decision rests on, so
+    it is what gets reported rather than a softmax probability, which exists for any input at all and so
+    measures nothing.
+    """
+    _types, sims, nsims = _similarities(crop_bgr)
+    if nsims is None or not len(nsims):
+        return float(sims.max())
+    return float(sims.max() - nsims.max())
 
 
 def classify_sign(crop_bgr: np.ndarray) -> dict:
-    """Zero-shot sign type + category + text_bearing + confidence from a sign crop."""
-    from services.intelligence.embed import siglip2
+    """The sign's type, or an explicit refusal to type it.
 
-    types, tvecs = _prompt_vecs()
-    fv = siglip2.encode_image(crop_bgr)
-    logits = (tvecs @ fv) * get_settings().models.sign.siglip_scale
-    e = np.exp(logits - logits.max())
-    p = e / e.sum()
-    i = int(p.argmax())
+    Measured on real corpus crops, the previous version scored a photograph of a bus at 0.817 as `bus_stop`
+    where genuine signs averaged 0.759: the prompt "a bus stop information sign" matches a bus, because the
+    object noun carries the phrase. Softmaxing 21 sign prompts could not express "this is not a sign", so
+    every crop handed in came back confidently typed, including crops of vehicles, people and blank sky.
+
+    Now the best type competes against prompts for what a sign is not, and has to win by a margin. Below
+    that margin `sign_type` is None, which is a smaller claim and a true one.
+    """
+    cfg = get_settings().models.sign
+    types, sims, nsims = _similarities(crop_bgr)
+    i = int(sims.argmax())
     t = types[i]
-    return {"sign_type": t["name"], "sign_category": t["category"],
-            "text_bearing": bool(t.get("text_bearing", False)), "conf": round(float(p[i]), 3)}
+    best_neg = float(nsims.max()) if nsims is not None and len(nsims) else float("-inf")
+    margin = float(sims[i]) - best_neg if best_neg != float("-inf") else float(sims[i])
+
+    out = {"sign_type": t["name"], "sign_category": t["category"],
+           "text_bearing": bool(t.get("text_bearing", False)),
+           "margin": round(margin, 4), "top_similarity": round(float(sims[i]), 4),
+           "rejected": False, "reason": None}
+
+    if margin < cfg.min_margin:
+        # Named rather than left as a bare None, because "which negative won" is what tells a reviewer
+        # whether the detector boxed a hoarding, a vehicle, or the back of a sign.
+        worst = _state["negatives"][int(nsims.argmax())]["name"] if nsims is not None and len(nsims) else None
+        out.update(sign_type=None, sign_category=None, text_bearing=False, rejected=True,
+                   reason=f"looks more like {worst} than any sign type" if worst
+                          else "no sign type scored high enough to name")
+    return out
 
 
 def _decode(store, uri):
@@ -71,7 +120,7 @@ async def recognize_session(session_id: UUID, limit: int | None = None) -> dict:
             stmt = stmt.limit(limit)
         rows = (await db.execute(stmt)).all()
 
-    n, text_bearing = 0, 0
+    n, text_bearing, rejected = 0, 0, 0
     last_uri, last_img = None, None
     async with maker() as db:
         for obj, uri in rows:
@@ -81,15 +130,23 @@ async def recognize_session(session_id: UUID, limit: int | None = None) -> dict:
                 continue
             res = classify_sign(crop_object(last_img, tuple(obj.bbox), margin))
             o = await db.get(Object, obj.object_id)
+            # A rejection is written, not skipped. Clearing the columns is how a re-run corrects a type this
+            # object was given by the previous version, which typed everything it was handed.
             o.sign_type, o.sign_category = res["sign_type"], res["sign_category"]
             prov = dict(o.provenance or {})
-            prov["sign"] = {"model": "siglip2-zeroshot", "conf": res["conf"], "text_bearing": res["text_bearing"]}
+            prov["sign"] = {"model": "siglip2-zeroshot+negatives", "margin": res["margin"],
+                            "top_similarity": res["top_similarity"], "text_bearing": res["text_bearing"],
+                            "rejected": res["rejected"], "reason": res["reason"]}
             o.provenance = prov
-            n += 1
-            if res["text_bearing"]:
-                text_bearing += 1
+            if res["rejected"]:
+                rejected += 1
+            else:
+                n += 1
+                if res["text_bearing"]:
+                    text_bearing += 1
         await db.commit()
 
-    out = {"session_id": str(session_id), "recognized": n, "text_bearing": text_bearing, "model": "siglip2-zeroshot"}
+    out = {"session_id": str(session_id), "examined": len(rows), "recognized": n,
+           "rejected": rejected, "text_bearing": text_bearing, "model": "siglip2-zeroshot+negatives"}
     log.info("signs.done", **out)
     return out

@@ -91,8 +91,14 @@ async def _seed_auto_accept():
     return str(fid), str(oid), sedan
 
 
-def _stub_vlm(monkeyfree_to_class: str):
-    """Force the VLM verifier to confidently disagree, calling every sampled sedan a `to_class`."""
+def _stub_vlm(monkeypatch, monkeyfree_to_class: str):
+    """Force the VLM verifier to confidently disagree, calling every sampled sedan a `to_class`.
+
+    Through monkeypatch rather than by assigning to the modules directly. Plain assignment is never undone,
+    so `pc.VlmVerifier` and `pc.make_vlm_client` stayed replaced for the rest of the process and every later
+    test that touched the real ones silently got these stubs instead. That is invisible until some other
+    test asserts on the real class and fails for a reason that has nothing to do with it.
+    """
     import services.autolabel.grounding as grounding
     import services.autolabel.paths.path_c_qwen3vl as pc
 
@@ -106,20 +112,20 @@ def _stub_vlm(monkeyfree_to_class: str):
         def verify_object(self, img, bbox, class_id, votes=None):
             return pc.VlmResult(class_name=monkeyfree_to_class, confident=True, votes=1, agreement=1.0)
 
-    grounding.supported_concept_ids = _supported
-    pc.VlmVerifier = _FakeVerifier
-    pc.make_vlm_client = lambda settings=None: object()
+    monkeypatch.setattr(grounding, "supported_concept_ids", _supported)
+    monkeypatch.setattr(pc, "VlmVerifier", _FakeVerifier)
+    monkeypatch.setattr(pc, "make_vlm_client", lambda settings=None: object())
 
 
 @requires_infra
-def test_audit_queues_vlm_suspects_and_reports_reversibly():
+def test_audit_queues_vlm_suspects_and_reports_reversibly(monkeypatch):
     from db.models import AgentRun, Object
     from db.session import get_sessionmaker
     from services.agent.overnight_auditor import run_audit
     from services.agent.runs import revert_run
 
     fid, oid, sedan = run_async(_seed_auto_accept())
-    _stub_vlm("autorickshaw")
+    _stub_vlm(monkeypatch, "autorickshaw")
 
     async def _flow():
         run_id = uuid.uuid4()
@@ -149,7 +155,7 @@ def test_audit_queues_vlm_suspects_and_reports_reversibly():
 
 
 @requires_infra
-def test_maybe_run_nightly_is_once_per_day():
+def test_maybe_run_nightly_is_once_per_day(monkeypatch):
     from db.session import get_sessionmaker
     from services.agent.overnight_auditor import maybe_run_nightly
 
@@ -158,7 +164,7 @@ def test_maybe_run_nightly_is_once_per_day():
     from db.models import AgentRun
 
     run_async(_seed_auto_accept())
-    _stub_vlm("autorickshaw")
+    _stub_vlm(monkeypatch, "autorickshaw")
 
     async def _flow():
         async with get_sessionmaker()() as db:   # clean slate: no auditor run recorded for today yet

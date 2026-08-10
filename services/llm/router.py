@@ -1,11 +1,11 @@
-"""Provider routing: Groq as the fast cloud path, Ollama as the always-available local floor.
+"""Provider routing: cloud providers as the fast or strong path, Ollama as the always-available local floor.
 
-The whole point is that the two coexist safely. A router owns the policy so the providers stay dumb and the
+The whole point is that they coexist safely. A router owns the policy so the providers stay dumb and the
 call sites (Path C, nl.py) keep calling one interface:
 
-  - availability: no GROQ_API_KEY, or vision with allow_cloud_media off, means the cloud path is simply not
-    taken and ollama serves the call. Local dev works with zero Groq setup.
-  - failure fallback: any GroqError (network, 429 rate limit, bad reply) falls through to ollama for that call.
+  - availability: no API key, or vision with allow_cloud_media off, means the cloud path is simply not
+    taken and ollama serves the call. Local dev works with zero cloud setup.
+  - failure fallback: any cloud error (network, 429 rate limit, bad reply) falls through to ollama for that call.
   - circuit breaker: after N consecutive cloud failures the circuit opens and the cloud is skipped for a
     cooldown, so a Groq outage does not add a doomed round-trip to every single call; one half-open probe
     after the cooldown closes it again.
@@ -13,7 +13,12 @@ call sites (Path C, nl.py) keep calling one interface:
     extra cost is spent only on the genuinely hard crops.
 
 Every verdict records which provider produced it (VlmResult.provider), so a gate decision stays traceable and
-Groq-vs-Ollama quality can be compared on the gold set.
+providers can be compared against each other on the gold set.
+
+Two cloud providers are wired, and they are not interchangeable. Groq is the throughput path for the
+autolabel stream. Anthropic is the judge: slower and dearer per crop, used where being right matters more
+than being quick, which is the escalate slot and the bulk pre-review of a measurement batch. Adding a third
+means writing one client and one line in _CLOUD_VLM, not touching the policy.
 """
 
 from __future__ import annotations
@@ -26,14 +31,19 @@ import numpy as np
 from core.config import Settings, get_settings
 from core.logging import get_logger
 from services.autolabel.paths.path_c_qwen3vl import (
+    LlamaServerVlmClient,
     OllamaVlmClient,
     VlmClient,
     VlmResult,
     _build_prompt,
 )
+from services.llm.anthropic_client import AnthropicClient, AnthropicError
 from services.llm.groq_client import GroqClient, GroqError
 
 log = get_logger("llm.router")
+
+# Any provider error means "fall back", and the router deliberately does not care which cloud raised it.
+CloudError = (GroqError, AnthropicError)
 
 
 class CircuitBreaker:
@@ -96,6 +106,55 @@ class GroqVlmClient:
         )
 
 
+class AnthropicVlmClient:
+    """Vision verifier backed by Anthropic. Same VlmClient.verify shape as the others, so the router treats
+    it identically; it raises AnthropicError upward rather than falling back on its own."""
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.settings = settings or get_settings()
+        self.client = AnthropicClient(self.settings)
+        self.model = self.settings.anthropic.vision_model
+
+    def available(self) -> bool:
+        return self.client.available()
+
+    def verify(self, crop_bgr: np.ndarray, shortlist: list[str], attr_schema: dict,
+               temperature: float = 0.0) -> VlmResult:
+        ok, buf = cv2.imencode(".jpg", crop_bgr)
+        if not ok:
+            return VlmResult()
+        data = self.client.chat_json(_build_prompt(shortlist, attr_schema), model=self.model,
+                                     image_jpeg=buf.tobytes(), temperature=temperature)
+        return VlmResult(
+            class_name=data.get("class"),
+            attrs=data.get("attributes", {}) or {},
+            caption=data.get("caption", "") or "",
+            confident=bool(data.get("confident", False)),
+            raw=data, provider="anthropic",
+        )
+
+
+# The cloud vision providers, by the name used in models.vlm.vision_provider / escalate_provider. Ollama is
+# absent on purpose: it is the local floor, never a "cloud path" subject to the breaker or to allow_cloud_media.
+_CLOUD_VLM = {"groq": GroqVlmClient, "anthropic": AnthropicVlmClient}
+
+
+def _cloud_vlm(name: str | None, settings: Settings) -> GroqVlmClient | AnthropicVlmClient | None:
+    """The configured cloud vision client, or None when it is unnamed, unknown, or has no key.
+
+    Returning None for an unknown name rather than raising is deliberate: a typo in vision_provider degrades
+    to the local model instead of taking the pipeline down, and the log line below is how it gets noticed.
+    """
+    if not name or name == "ollama":
+        return None
+    cls = _CLOUD_VLM.get(name)
+    if cls is None:
+        log.warning("router.unknown_vision_provider", provider=name, known=sorted(_CLOUD_VLM))
+        return None
+    c = cls(settings)
+    return c if c.available() else None
+
+
 class RoutedVlmClient:
     """A VlmClient that tries the configured cloud provider, falls back to the local one, and optionally
     escalates a not-confident verdict to a stronger provider. Implements the same verify() so it drops in
@@ -104,39 +163,36 @@ class RoutedVlmClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         cfg = self.settings.models.vlm
-        self.ollama = OllamaVlmClient(self.settings)
+        self.ollama = local_vlm_client(self.settings)
         self._breaker = CircuitBreaker(cfg.breaker_threshold, cfg.breaker_cooldown_s)
 
         # The cloud primary is used only when configured AND allowed to see media AND a key exists.
-        self._groq: GroqVlmClient | None = None
-        if cfg.vision_provider == "groq" and cfg.allow_cloud_media:
-            g = GroqVlmClient(self.settings)
-            self._groq = g if g.available() else None
+        self._primary = _cloud_vlm(cfg.vision_provider, self.settings) if cfg.allow_cloud_media else None
 
-        # The escalate provider is currently groq (a stronger vision model can be pointed at groq.vision_model
-        # per deployment). Only wired when distinct from the primary and media egress is allowed.
-        self._escalate: GroqVlmClient | None = None
-        if cfg.escalate_provider == "groq" and cfg.allow_cloud_media:
-            e = GroqVlmClient(self.settings)
-            self._escalate = e if e.available() else None
+        # The escalate provider is re-asked only on a not-confident verdict, so pointing it at a stronger and
+        # dearer model than the primary is the intended configuration rather than a waste.
+        self._escalate = _cloud_vlm(cfg.escalate_provider, self.settings) if cfg.allow_cloud_media else None
 
-    def _try_groq(self, client: GroqVlmClient, *args, **kwargs) -> VlmResult | None:
+    def _try_cloud(self, client, *args, **kwargs) -> VlmResult | None:
+        """One cloud attempt under the breaker. Returns None on any provider failure, which is the router's
+        single signal to use the local floor instead."""
         if not self._breaker.allow():
             return None
         try:
             r = client.verify(*args, **kwargs)
             self._breaker.record_success()
             return r
-        except GroqError as exc:
+        except CloudError as exc:
             self._breaker.record_failure()
-            log.info("router.groq_fallback", error=str(exc), open=self._breaker.is_open)
+            log.info("router.cloud_fallback", error=str(exc), open=self._breaker.is_open,
+                     provider=type(client).__name__)
             return None
 
     def verify(self, crop_bgr: np.ndarray, shortlist: list[str], attr_schema: dict,
                temperature: float = 0.0) -> VlmResult:
         res: VlmResult | None = None
-        if self._groq is not None:
-            res = self._try_groq(self._groq, crop_bgr, shortlist, attr_schema, temperature)
+        if self._primary is not None:
+            res = self._try_cloud(self._primary, crop_bgr, shortlist, attr_schema, temperature)
         if res is None:
             res = self.ollama.verify(crop_bgr, shortlist, attr_schema, temperature)
             if not res.provider:
@@ -145,22 +201,36 @@ class RoutedVlmClient:
         # Escalate only a real-but-unsure verdict, so the extra cloud call is spent on the hard crops, not the
         # confident ones or the empty ones.
         if self._escalate is not None and res.class_name and not res.confident:
-            esc = self._try_groq(self._escalate, crop_bgr, shortlist, attr_schema, temperature)
+            esc = self._try_cloud(self._escalate, crop_bgr, shortlist, attr_schema, temperature)
             if esc is not None and esc.class_name:
-                esc.provider = "groq:escalate"
+                esc.provider = f"{esc.provider or 'cloud'}:escalate"
                 return esc
         return res
 
 
+def local_vlm_client(settings: Settings | None = None) -> VlmClient:
+    """The local floor: llama-server when `models.vlm.backend` says so, Ollama otherwise.
+
+    One line, because both clients enforce the verdict schema and both are duck-typed against the same
+    interface. Which local server runs Path C is a deployment decision (llama-server buys explicit prefix
+    cache control and a dependency-free binary), and it must not become a policy decision spread across the
+    router.
+    """
+    settings = settings or get_settings()
+    if settings.models.vlm.backend == "llamacpp":
+        return LlamaServerVlmClient(settings)
+    return OllamaVlmClient(settings)
+
+
 def make_vlm_client(settings: Settings | None = None) -> VlmClient:
-    """Return the vision client for the configured providers. When nothing points at the cloud, this is a
-    plain OllamaVlmClient (identical to before); otherwise the RoutedVlmClient wraps cloud + local."""
+    """Return the vision client for the configured providers. When nothing points at the cloud, this is the
+    local client alone (identical to before); otherwise the RoutedVlmClient wraps cloud + local."""
     settings = settings or get_settings()
     cfg = settings.models.vlm
-    uses_cloud = cfg.vision_provider == "groq" or cfg.escalate_provider == "groq"
+    uses_cloud = cfg.vision_provider in _CLOUD_VLM or cfg.escalate_provider in _CLOUD_VLM
     if uses_cloud and cfg.allow_cloud_media:
         return RoutedVlmClient(settings)
-    return OllamaVlmClient(settings)
+    return local_vlm_client(settings)
 
 
 def route_text_json(prompt: str, *, temperature: float = 0.0, settings: Settings | None = None) -> dict | None:
@@ -176,7 +246,14 @@ def route_text_json(prompt: str, *, temperature: float = 0.0, settings: Settings
             try:
                 return client.chat_json(prompt, model=settings.groq.text_model, temperature=temperature)
             except GroqError as exc:
-                log.info("router.text_groq_fallback", error=str(exc))
+                log.info("router.text_cloud_fallback", provider="groq", error=str(exc))
+    elif vcfg.text_provider == "anthropic":
+        aclient = AnthropicClient(settings)
+        if aclient.available():
+            try:
+                return aclient.chat_json(prompt, model=settings.anthropic.text_model, temperature=temperature)
+            except AnthropicError as exc:
+                log.info("router.text_cloud_fallback", provider="anthropic", error=str(exc))
 
     # Local fallback: the same Ollama text call nl.py used before (text-only, no images).
     import json

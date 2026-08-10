@@ -5,13 +5,13 @@ recorded in one AgentRun; revert restores the exact prior state. Auto-accept is 
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.observability import spawn
 from db.models import AgentRun
 from services.agent.flywheel import run_flywheel
 from services.agent.frame_agent import commit_frame, plan_frame
@@ -231,7 +231,7 @@ async def error_sweep(body: ErrorSweepIn, db: AsyncSession = Depends(db_session)
                    created_by=str(user.user_id) if user else "daemon")
     db.add(run)
     await db.commit()
-    asyncio.create_task(run_error_sweep(run_id, max_sessions=max(1, body.max_sessions), kinds=body.kinds))
+    spawn(run_error_sweep(run_id, max_sessions=max(1, body.max_sessions), kinds=body.kinds), name="run_error_sweep")
     return {"run_id": str(run_id), "status": "running"}
 
 
@@ -384,11 +384,11 @@ async def flywheel(body: FlywheelIn, db: AsyncSession = Depends(db_session), use
     )
     db.add(run)
     await db.commit()
-    asyncio.create_task(run_flywheel(
+    spawn(run_flywheel(
         run_id, ticks=max(1, body.ticks), max_frames=max(1, body.max_frames),
         policy=_thresholds(body), session_id=body.session_id, dry_run=body.dry_run,
         created_by=str(user.user_id) if user else "flywheel",
-    ))
+    ), name="run_flywheel")
     return {"run_id": str(run_id), "status": "running", "dry_run": body.dry_run}
 
 
@@ -515,9 +515,9 @@ async def relabel_all(body: RelabelAllIn | None = None, db: AsyncSession = Depen
                    created_by=str(user.user_id) if user else "daemon")
     db.add(run)
     await db.commit()
-    asyncio.create_task(run_relabel_all(run_id, max_frames=max(1, body.max_frames),
+    spawn(run_relabel_all(run_id, max_frames=max(1, body.max_frames),
                                         session_id=body.session_id, min_conf=body.min_conf, margin=body.margin,
-                                        created_by=str(user.user_id) if user else None))
+                                        created_by=str(user.user_id) if user else None), name="run_relabel_all")
     return {"run_id": str(run_id), "status": "running"}
 
 
@@ -539,7 +539,7 @@ async def cleanup_sweep(body: CleanupIn | None = None, db: AsyncSession = Depend
     db.add(AgentRun(run_id=run_id, kind="cleanup_sweep", scope={}, status="running", policy=body.model_dump(),
                     counts={}, changes={}, critic={}, created_by=str(user.user_id) if user else "cleanup"))
     await db.commit()
-    asyncio.create_task(run_cleanup_sweep(run_id, do_pii=body.do_pii, pii_limit=body.pii_limit))
+    spawn(run_cleanup_sweep(run_id, do_pii=body.do_pii, pii_limit=body.pii_limit), name="run_cleanup_sweep")
     return {"run_id": str(run_id), "status": "running"}
 
 
@@ -769,6 +769,69 @@ async def fleet_order_status(order_id: str, status: str, db: AsyncSession = Depe
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
 async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
     return await list_runs(db, limit)
+
+
+# Kinds with a relauncher that honours their cursor. A kind absent here can still be re-run from the start;
+# what it cannot do is continue, and the resume route refuses rather than pretending.
+_RESUMABLE_KINDS = frozenset({"error_sweep", "relabel_all"})
+
+
+@router.get("/agent/runs/interrupted", dependencies=[Depends(require_role("annotator"))])
+async def interrupted_runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
+    """Jobs whose process stopped before they finished, with the cursor each one left behind.
+
+    Declared above /agent/runs/{run_id} because FastAPI matches in order and "interrupted" would otherwise
+    be parsed as a run id and answer 422.
+    """
+    from services.agent.resume import list_interrupted
+
+    return {"runs": await list_interrupted(db, limit)}
+
+
+@router.post("/agent/runs/{run_id}/resume", dependencies=[Depends(require_role("reviewer"))])
+async def resume_run(run_id: str, db: AsyncSession = Depends(db_session)):
+    """Continue an interrupted job from its cursor.
+
+    Only the jobs that recorded one can actually skip finished work; the rest are honestly reported as not
+    resumable rather than being restarted under a name that implies they will not repeat themselves.
+    """
+    from services.agent.error_daemon import run_error_sweep
+    from services.agent.resume import claim_for_resume
+
+    try:
+        rid = uuid.UUID(run_id)
+    except ValueError as exc:
+        raise HTTPException(400, "invalid run id") from exc
+
+    run = await db.get(AgentRun, rid)
+    if run is None:
+        raise HTTPException(404, "run not found")
+
+    # Check the kind before claiming. Claiming first would flip the run to running and then, for a kind with
+    # no relauncher, leave it running with no process behind it: the exact stranded state this whole feature
+    # exists to remove, recreated by the button meant to clear it.
+    if run.kind not in _RESUMABLE_KINDS:
+        raise HTTPException(409, f"{run.kind} has no resume path yet, so it cannot be continued from its "
+                                 "cursor; its progress is preserved and it can be started again")
+
+    claimed = await claim_for_resume(db, rid)
+    if claimed is None:
+        raise HTTPException(404, "run not found")
+    if claimed.get("error"):
+        # 409, not 400: the request is well formed and the run is simply in a state that cannot be resumed,
+        # which is a fact about the world the caller should be told rather than a mistake they made.
+        raise HTTPException(409, claimed["error"])
+
+    scope = claimed.get("scope") or {}
+    if run.kind == "error_sweep":
+        spawn(run_error_sweep(
+            rid, max_sessions=int(scope.get("max_sessions") or 10), kinds=scope.get("kinds")), name="run_error_sweep")
+    else:
+        from services.agent.relabel_agent import run_relabel_all
+
+        spawn(run_relabel_all(
+            rid, max_frames=int(scope.get("max_frames") or 200), session_id=scope.get("session_id")), name="run_relabel_all")
+    return {**claimed, "restarted": True}
 
 
 @router.get("/agent/runs/{run_id}", dependencies=[Depends(require_role("annotator"))])

@@ -5,7 +5,7 @@
 // (move + resize via Transformer, drag mask vertices), draw box, SAM point, SAM box. All geometry is in
 // image pixels; the stage transform maps to screen. getRelativePointerPosition() returns image coords.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Circle, Group, Image as KImage, Layer, Line, Rect, Shape, Stage, Text as KText, Transformer } from "react-konva";
 import type Konva from "konva";
 import { classColor, classFill } from "@/lib/colors";
@@ -76,6 +76,32 @@ export default function EditorCanvas(p: Props) {
   // re-fit when the real container size arrived. Zero keeps the fit guard (size.w > 1) false until the
   // container is actually measured, so the frame fits to the true canvas.
   const [size, setSize] = useState({ w: 0, h: 0 });
+
+  // Paint order for boxes, computed when the objects or the selection change rather than on every render.
+  // Order matters for hit-testing: largest first so the smallest box sits on top and a click in a dense
+  // cluster selects the tightest object rather than the big one behind it. The selected box is forced to the
+  // very top so its transform handles are never occluded.
+  //
+  // This is the same comparator as before, moved off the render path. It used to run an O(n log n) sort on
+  // every render, and every pointer move was a render.
+  const boxOrder = useMemo(() => {
+    const area = (o: EdObject) => (o.bbox[2] - o.bbox[0]) * (o.bbox[3] - o.bbox[1]);
+    return p.objects
+      .filter((o) => o.visible && !(o.polyline && o.polyline.length >= 2))
+      .sort((a, b) => {
+        if (a.id === p.selectedId) return 1;
+        if (b.id === p.selectedId) return -1;
+        return area(b) - area(a);
+      });
+  }, [p.objects, p.selectedId]);
+
+  // Relationship endpoints were resolved with two linear scans per relationship, per render, so drawing R
+  // connectors over N objects cost O(R*N) every time the pointer moved.
+  const objectById = useMemo(() => {
+    const m = new Map<string, EdObject>();
+    for (const o of p.objects) m.set(o.id, o);
+    return m;
+  }, [p.objects]);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [marquee, setMarquee] = useState<
     { x0: number; y0: number; x1: number; y1: number; additive: boolean } | null>(null);
@@ -346,14 +372,7 @@ export default function EditorCanvas(p: Props) {
               Order matters for hit-testing: draw the largest boxes first so the smallest one sits on top,
               and a click inside a dense cluster selects the tightest object rather than the big one behind
               it. The selected box is forced to the very top so its transform handles are never occluded. */}
-          {L.boxes && [...p.objects.filter((o) => o.visible && !(o.polyline && o.polyline.length >= 2))]
-            .sort((a, b) => {
-              if (a.id === p.selectedId) return 1;
-              if (b.id === p.selectedId) return -1;
-              const area = (o: typeof a) => (o.bbox[2] - o.bbox[0]) * (o.bbox[3] - o.bbox[1]);
-              return area(b) - area(a);
-            })
-            .map((o) => {
+          {L.boxes && boxOrder.map((o: EdObject) => {
             const w = o.bbox[2] - o.bbox[0];
             const h = o.bbox[3] - o.bbox[1];
             const cx = o.bbox[0] + w / 2;
@@ -401,8 +420,8 @@ export default function EditorCanvas(p: Props) {
 
           {/* relationship connectors: a thin dashed line between the centres of two related objects */}
           {p.relationships?.map((r) => {
-            const a = p.objects.find((o) => o.id === r.from_object_id);
-            const b = p.objects.find((o) => o.id === r.to_object_id);
+            const a = objectById.get(r.from_object_id);
+            const b = objectById.get(r.to_object_id);
             if (!a || !b) return null;
             const ca = [(a.bbox[0] + a.bbox[2]) / 2, (a.bbox[1] + a.bbox[3]) / 2];
             const cb = [(b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2];

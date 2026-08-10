@@ -140,9 +140,35 @@ def regression_gate(
         reasons.append(f"{len(regressed)} classes regressed past {max_class_drop}")
 
     promote = len(reasons) == 0
+
+    # What this verdict did not look at.
+    #
+    # A gate that returns promote=true beside a Safe-mIoU of 0.0 reads as approval in spite of the safety
+    # score, when in fact safety was never evaluated: the floor is off by default for the documented reason
+    # above. That was observed on a real run and is a reasonable thing for a reader to misread, because the
+    # verdict says what passed and never says what was skipped.
+    #
+    # So the omission is reported rather than left silent. Not by forcing the floor on, which would defeat
+    # the deliberate default, but by naming the criterion that was not applied and surfacing the measured
+    # value beside it. A Safe-mIoU near zero means the candidate confuses vulnerable road users with
+    # everything else, and that is worth seeing whether or not somebody configured a threshold for it.
+    unchecked: list[str] = []
+    measured_sm = candidate.get("safe_miou")
+    if min_safe_miou is None:
+        if measured_sm is None:
+            unchecked.append("safe_miou: not measured and no floor set")
+        else:
+            unchecked.append(
+                f"safe_miou: measured {measured_sm} but no floor set, so it did not affect this verdict"
+                + (" (a value this low means the candidate confuses safety classes; set "
+                   "govern.min_safe_miou to gate on it)" if measured_sm < 0.5 else ""))
+
     return {
         "promote": promote,
         "map50_delta": delta,
         "regressed_classes": regressed,
         "reasons": reasons or ["passes: mAP improved, no class regressed past tolerance"],
+        # Always present, so a caller cannot mistake "nothing to report" for "everything was checked".
+        "unchecked": unchecked,
+        "safe_miou": measured_sm,
     }

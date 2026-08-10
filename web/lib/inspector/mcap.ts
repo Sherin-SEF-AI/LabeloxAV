@@ -62,6 +62,23 @@ export class SessionMcap {
     return new SessionMcap(reader);
   }
 
+  /** A reader over no recording, for a session that was never ingested from an .mcap.
+   *
+   * The corpus has one session with an MCAP and 124 with point clouds, so requiring a recording made the 3D
+   * panel almost unreachable. Those sessions still have a clock (their own ts bounds), extracted frames and
+   * clouds, all of which are addressed by timestamp and none of which come from a recording.
+   *
+   * An empty reader rather than a nullable context: every panel already calls topics(), timeRange() and
+   * collect() and already handles those being empty, because a real MCAP can lack any given topic. Making
+   * the context nullable would push a new null check into all seven of them to express the same thing.
+   */
+  static empty(): SessionMcap {
+    return new SessionMcap({
+      channelsById: new Map(), schemasById: new Map(), statistics: undefined,
+      readMessages: async function* () { /* nothing recorded */ },
+    } as unknown as McapIndexedReader);
+  }
+
   topics(): TopicInfo[] {
     const out: TopicInfo[] = [];
     for (const ch of this.reader.channelsById.values()) {

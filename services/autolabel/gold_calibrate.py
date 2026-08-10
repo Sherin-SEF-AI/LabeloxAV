@@ -16,7 +16,6 @@ folds), and it is only activated when the held-out reliability says it actually 
 from __future__ import annotations
 
 import json
-from uuid import UUID
 
 import numpy as np
 from sqlalchemy import select

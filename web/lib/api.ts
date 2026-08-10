@@ -1,4 +1,6 @@
 import type {
+  AgentRunRow,
+  InterruptedRun,
   AlItem,
   AssignmentRow,
   AuditRow,
@@ -192,6 +194,24 @@ async function get<T>(path: string): Promise<T> {
     const r = await fetch(path, { cache: "no-store", headers: { ...userHeaders() } });
     if (!r.ok) return fail(r, "GET", path);
     return r.json();
+  } finally {
+    end();
+  }
+}
+
+/** A GET whose body is bytes, not JSON.
+ *
+ * The 3D panel fetches point clouds as interleaved float32: a 500,000-point cloud is about 6MB raw and
+ * several times that as text, so it never becomes JSON. It still has to come through here, because the read
+ * gate denies by default and a bare fetch sends no Authorization header. Returns the response so a caller
+ * can read the metadata headers alongside the buffer.
+ */
+export async function getBinary(path: string, init?: RequestInit): Promise<Response> {
+  begin();
+  try {
+    await refreshTokenIfNeeded();
+    return await fetch(path, { ...init, cache: "no-store",
+                               headers: { ...userHeaders(), ...(init?.headers ?? {}) } });
   } finally {
     end();
   }
@@ -394,6 +414,13 @@ export async function lidarCloudPoints(
 }
 
 export const api = {
+  // Measured precision for one batch operation. Throws on 404, which is the unmeasured state and is a real
+  // answer rather than an error to swallow silently.
+  opPrecisionLatest: (opType: string) =>
+    get<{ precision: number; recall: number | null; n: number; dataset_slice: string; caveat: string }>(
+      `/eval/operations/${encodeURIComponent(opType)}/latest`),
+  opPrecisionAll: () => get<{ operations: Record<string, unknown>; kinds: string[] }>("/eval/operations"),
+
   lidarClouds: (sessionId: string) =>
     get<{ session_id: string; clouds: LidarCloud[] }>(`/api/lidar/sessions/${sessionId}/clouds`),
   lidarCloudMeta: (cloudId: string) => get<LidarCloud & { calibration_version: string | null }>(`/api/lidar/clouds/${cloudId}`),
@@ -460,7 +487,23 @@ export const api = {
   firstFrame: (id: string) => get<{ frame_id: string }>(`/api/sessions/${id}/first-frame`),
   // M4.0/M4.1 review queue
   alScore: (sessionId?: string, limit = 50) => get<{ pool: number; items: AlItem[] }>(`/api/activelearn/score?limit=${limit}${sessionId ? `&session_id=${sessionId}` : ""}`),
-  errorCandidates: (status = "pending", limit = 100) => get<ErrorCandidateRow[]>(`/api/errordetect/candidates?status=${status}&limit=${limit}`),
+  errorCandidates: (status = "pending", limit = 100, kind?: string) =>
+    get<ErrorCandidateRow[]>(
+      `/api/errordetect/candidates?` +
+      new URLSearchParams(kind ? { status, limit: String(limit), kind } : { status, limit: String(limit) }).toString()),
+  // Bulk, because 298,529 candidates ruled on one at a time is not a queue anybody finishes. `note` records
+  // the judgement, which for a bulk dismissal is about the detector rather than about the objects.
+  errorBulk: (candidate_ids: string[], verdict: "confirmed_error" | "dismissed", note?: string) =>
+    post<{ verdict: string; requested: number; applied: number; missing: number; already_decided: number }>(
+      "/api/errordetect/candidates/bulk", { candidate_ids, verdict, note }),
+  errorPrecision: () =>
+    get<{
+      per_kind: Record<string, {
+        pending: number; confirmed_error: number; dismissed: number; decided: number;
+        precision: { p: number | null; lo: number; hi: number; n: number }; usable: boolean; note: string | null;
+      }>;
+      total_candidates: number; total_decided: number; caveat: string | null;
+    }>("/api/errordetect/precision"),
   errorRun: (kinds?: string[]) => post<{ persisted: number; by_kind: Record<string, number> }>("/api/errordetect/run", kinds ? { kinds } : {}),
   errorConfirm: (id: string) => post(`/api/errordetect/candidates/${id}/confirm`, {}),
   errorDismiss: (id: string) => post(`/api/errordetect/candidates/${id}/dismiss`, {}),
@@ -602,6 +645,14 @@ export const api = {
     post<{ run_id: string; relabeled: number; counts: { total: number; relabel_keep: number; relabel_review: number } }>(`/api/agent/frames/${frame_id}/relabel`, {}),
   agentRelabelAll: (opts: { max_frames?: number; session_id?: string } = {}) =>
     post<{ run_id: string; status: string }>(`/api/agent/relabel/all`, opts),
+  agentRuns: (limit = 20) => get<AgentRunRow[]>(`/api/agent/runs?limit=${limit}`),
+  agentRevertRun: (run_id: string) =>
+    post<{ run_id: string; reverted: number; skipped: number }>(`/api/agent/runs/${run_id}/revert`, {}),
+  agentInterruptedRuns: () =>
+    get<{ runs: InterruptedRun[] }>(`/api/agent/runs/interrupted`),
+  agentResumeRun: (run_id: string) =>
+    post<{ run_id: string; kind: string; restarted: boolean; detail?: string }>(
+      `/api/agent/runs/${run_id}/resume`, {}),
   agentRunStatus: (run_id: string) =>
     get<{ run_id: string; kind: string; status: string; counts: Record<string, number>; changed: number }>(`/api/agent/runs/${run_id}`),
   // Overnight Auditor: run the nightly patrol, read the morning report
@@ -997,8 +1048,51 @@ export const api = {
     post<{ job_id: string; status: string }>("/api/datasets/export", body),
   jobs: () => get<JobRow[]>("/api/jobs"),
   ingestProgress: () => get<{ active: boolean; finished: boolean; done: number; total: number; current: string | null; frames: number }>("/api/ingest/progress"),
-  bulkReview: (object_ids: string[], action: string, class_name?: string, state?: string, attrs?: Record<string, unknown>) =>
-    post<{ updated: number }>("/api/objects/bulk-review", { object_ids, action, class_name, state, attrs }),
+  bulkReview: (object_ids: string[], action: string, class_name?: string, state?: string,
+               attrs?: Record<string, unknown>,
+               extra?: { time_spent_ms?: number; expected_versions?: Record<string, number> }) =>
+    post<{
+      updated: number; action: string;
+      skipped_missing: string[];
+      skipped_stale: { object_id: string; expected: number; current: number }[];
+    }>("/api/objects/bulk-review",
+       { object_ids, action, class_name, state, attrs, ...(extra ?? {}) }),
+  // One sprite sheet for many crops. A grid asking for its tiles one at a time is N whole-frame decodes and
+  // N requests; this is one of each per frame. `placements` gives the cell each object landed in.
+  // Dataset-as-query. The compiler refuses unknown terms rather than ignoring them, so the vocabulary is
+  // part of the surface and not just documentation.
+  // Migration dry run: what the taxonomy costs, before anything is written.
+  importDryRun: (format: string, source_uri: string) =>
+    post<{
+      format: string; frames: number;
+      report: {
+        source_classes: number; objects: number; mapped_cleanly: number; into_fallback: number;
+        fallback_fraction: number;
+        unmapped: { source_class: string; objects: number; falls_back_to: string }[];
+        merges: { ontology_class: string; source_classes: string[]; objects: number }[];
+        mapping: { source_class: string; ontology_class: string; objects: number; clean: boolean }[];
+      };
+    }>("/api/imports/dry-run", { format, source_uri }),
+
+  datasetVocabulary: () =>
+    get<{ scene: string[]; state: string[]; group: string[]; class: string[] }>("/api/datasets/vocabulary"),
+  datasetPreview: (q: string, version?: string) =>
+    get<{
+      query: string; predicate: Record<string, unknown>;
+      terms: { term: string; kind: string; expands_to?: string[] }[];
+      frames: number; objects: number; classes: Record<string, number>; sealed: boolean;
+    }>("/api/datasets/preview?" + new URLSearchParams(version ? { q, version } : { q }).toString()),
+  datasetBuildShards: (query: string, version?: string, samples_per_shard = 256) =>
+    post<{ name: string; shards: string[]; index_uri: string | null; samples: number; shard_count: number }>(
+      "/api/datasets/shards", { query, version, samples_per_shard }),
+
+  cropSheet: (object_ids: string[], cell = 128, cols?: number) =>
+    post<{
+      cell: number; cols: number; rows: number; count: number;
+      frames_decoded: number; crops: number;
+      placements: { object_id: string; row: number; col: number; ok: boolean; w?: number; h?: number }[];
+      sheet: string | null;
+    }>("/api/objects/crops", { object_ids, cell, cols: cols ?? 0 }),
   // Interactive AI correction: correct one -> find similar -> bulk apply
   correctionSuggest: (body: {
     object_id: string;
@@ -1166,7 +1260,7 @@ export const api = {
     post<{ layout_id: string; name: string; is_default: boolean }>(`/api/inspector/layouts`, { name, panels, is_default }),
   inspectorDeleteLayout: (layout_id: string) => del<{ deleted: string }>(`/api/inspector/layouts/${layout_id}`),
   inspectorSessions: () =>
-    get<{ session_id: string; vehicle_id: string; city: string | null; start_ts_ns: number; end_ts_ns: number; verdict: string | null }[]>(`/api/inspector/sessions`),
+    get<{ session_id: string; vehicle_id: string; city: string | null; start_ts_ns: number; end_ts_ns: number; verdict: string | null; has_mcap: boolean; n_clouds: number }[]>(`/api/inspector/sessions`),
   inspectorEvents: (session_id: string) =>
     get<{ events: InspectorEvent[] }>(`/api/inspector/sessions/${session_id}/events`),
   inspectorFrameAt: (session_id: string, ts_ns: number) =>

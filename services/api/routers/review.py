@@ -9,12 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
+from core.observability import spawn
 from core.storage import get_object_store
 from core.timebase import now_ns
-from db.models import Frame, Object, Review, TrainingJob
+from db.models import Frame, Object, Review
 from services.api.deps import BulkReviewIn, ReviewIn, current_user, db_session
 from services.api.routers.objects import _write_mask
 from services.autolabel.ontology import get_ontology
+from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("api_review")
 router = APIRouter()
@@ -25,12 +27,10 @@ async def qa_vlm(session_id: str, limit: int = 40, db: AsyncSession = Depends(db
     """Run a VLM auto-QA + auto-attributes pass on a session in the background: flags cross-superclass
     disagreements into the QA queue and pre-fills typed attributes. GPU-light (Ollama), yields to
     training. Flagged objects surface in triage's QA queue (state=submitted)."""
-    import asyncio
     from uuid import UUID as _UUID
 
-    from sqlalchemy import select
 
-    if (await db.execute(select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1))).first():
+    if await training_holds_gpu(db):
         raise HTTPException(503, "GPU reserved for a training job; VLM auto-QA is paused until it finishes")
 
     async def _run() -> None:
@@ -41,7 +41,7 @@ async def qa_vlm(session_id: str, limit: int = 40, db: AsyncSession = Depends(db
         except Exception as exc:  # noqa: BLE001
             log.error("qa_vlm.failed", error=str(exc))
 
-    asyncio.create_task(_run())
+    spawn(_run(), name="_run")
     return {"started": True, "session_id": session_id, "limit": limit}
 
 _ACTION_STATE = {"confirm": "accepted", "accept": "accepted", "reject": "rejected"}
@@ -66,11 +66,28 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
     reviewer, uid = _attrib(user, payload.reviewer)
 
     n = 0
+    missing: list[str] = []
+    stale: list[dict] = []
     from uuid import UUID as _UUID
 
-    for oid in payload.object_ids:
+    expected = payload.expected_versions or {}
+    # The batch's time is divided across its members rather than attributed to any one of them, so a grid
+    # that triages sixty crops in a minute reports sixty seconds of work and not sixty minutes or zero.
+    ids = payload.object_ids
+    per_item_ms = int(payload.time_spent_ms / len(ids)) if ids and payload.time_spent_ms > 0 else 0
+
+    for oid in ids:
         obj = await db.get(Object, _UUID(oid))
         if obj is None:
+            missing.append(oid)
+            continue
+        # Optimistic lock, per object. Single review has refused a stale write since it was written; bulk
+        # review did not, so a sweep silently overwrote whatever anybody else had done in the meantime. A
+        # stale member is skipped and named rather than failing the whole batch, because one contended
+        # object should not discard fifty-nine good verdicts.
+        want = expected.get(oid)
+        if want is not None and obj.version != want:
+            stale.append({"object_id": oid, "expected": want, "current": obj.version})
             continue
         before = {"class_id": obj.class_id, "bbox": list(obj.bbox), "attrs": dict(obj.attrs or {}), "state": obj.state,
                   "source": obj.source, "conf": obj.conf, "provenance": dict(obj.provenance or {})}
@@ -86,12 +103,36 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
         if new_state is not None:
             obj.state = new_state
         obj.source = "human"
+        # Advance the lock version, exactly as single review does. Without this a bulk edit was invisible to
+        # every other client's optimistic check, so an editor holding the object would overwrite it back.
+        obj.version = (obj.version or 1) + 1
         db.add(Review(object_id=obj.object_id, reviewer=reviewer, user_id=uid, action=payload.action,
                       before=before, after={"class_id": obj.class_id, "bbox": list(obj.bbox), "attrs": dict(obj.attrs or {}), "state": obj.state},
-                      time_spent_ms=0, ts_ns=now_ns()))
+                      time_spent_ms=per_item_ms, ts_ns=now_ns()))
         n += 1
     await db.commit()
-    return {"updated": n, "action": payload.action}
+
+    # One activity entry for the batch, not one per object: the feed is a human timeline and sixty identical
+    # rows is not a record of what somebody did, it is noise that buries everything either side of it.
+    if n:
+        from services.activity import record_activity
+
+        _verbs = {"confirm": "confirmed", "accept": "confirmed", "reject": "rejected",
+                  "reclassify": "reclassified"}
+        await record_activity(
+            db, user_id=uid, user_name=reviewer,
+            verb=_verbs.get(payload.action, "reviewed"),
+            subject_type="object", subject_id=str(ids[0]),
+            summary=(f"{payload.action} {n} objects"
+                     + (f" as {payload.class_name}" if payload.class_name else "")),
+            href=f"/review/grid?ids={n}",
+            meta={"action": payload.action, "count": n, "state": new_state,
+                  "skipped_stale": len(stale), "skipped_missing": len(missing)})
+
+    return {"updated": n, "action": payload.action,
+            # Named rather than silently dropped: a caller that asked for sixty and changed fifty-eight has
+            # to be able to find out which two, and why.
+            "skipped_missing": missing, "skipped_stale": stale}
 
 
 @router.post("/objects/{object_id}/review")

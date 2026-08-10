@@ -289,9 +289,13 @@ async def _stage_train(db: AsyncSession, c: Campaign, step: CampaignStep) -> dic
         return {"status": "waiting", "awaiting": "the retrain to finish",
                 "detail": {"job_id": str(step.job_id)}}
 
+    # By heartbeat, not by status column: a campaign that waits on a crashed job waits forever, and the
+    # step it is blocking never gets scheduled again.
+    from services.training.gpu_lease import training_holds_gpu
+
     running = (await db.execute(
         select(TrainingJob).where(TrainingJob.status == "running").limit(1))).scalars().first()
-    if running is not None:
+    if running is not None and await training_holds_gpu(db):
         # One GPU, held by a Postgres advisory lock. Queuing a second job would not make it run sooner.
         return {"status": "waiting", "awaiting": "the GPU, held by another training job",
                 "detail": {"blocked_by": str(running.job_id)}}

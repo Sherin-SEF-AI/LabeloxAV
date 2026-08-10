@@ -154,3 +154,74 @@ def test_dev_login_is_invisible_when_not_local(auth_on):
             assert c.post("/api/auth/dev-login").status_code == 404
         finally:
             s.auth.dev_login = prev_flag
+
+
+# --- machine credentials through the real middleware -------------------------------------------------------
+#
+# These exist because the unit tests for service accounts all passed while the feature was completely broken
+# over HTTP. `current_user` understood an API key; the auth middleware ran first, did its own bearer parse,
+# did not, and answered 401 to every request before the route was reached. A credential has two independent
+# gates in this app, and only a test that goes through both can show they agree.
+
+def _mint_key_coro(name: str, role: str):
+    from db.session import get_sessionmaker
+    from services.identity.service_accounts import mint
+
+    async def _go():
+        async with get_sessionmaker()() as db:
+            return await mint(db, name=name, role=role)
+    return _go()
+
+
+@requires_infra
+def test_a_service_account_key_authenticates_through_the_middleware(auth_on):
+    out = run_async(_mint_key_coro(f"t-{uuid.uuid4().hex[:8]}", "reviewer"))
+    h = {"Authorization": f"Bearer {out['api_key']}"}
+    with _client() as c:
+        assert c.get("/api/ontology", headers=h).status_code == 200
+
+
+@requires_infra
+def test_a_service_account_is_held_to_its_role(auth_on):
+    """The point of a machine identity: a key issued for one job cannot quietly do an admin one."""
+    out = run_async(_mint_key_coro(f"t-{uuid.uuid4().hex[:8]}", "annotator"))
+    h = {"Authorization": f"Bearer {out['api_key']}"}
+    with _client() as c:
+        assert c.get("/api/ontology", headers=h).status_code == 200
+        assert c.get("/api/service-accounts", headers=h).status_code == 403
+
+
+@requires_infra
+def test_revoking_a_key_stops_it_at_the_middleware(auth_on):
+    from db.session import get_sessionmaker
+    from services.identity.service_accounts import revoke
+
+    out = run_async(_mint_key_coro(f"t-{uuid.uuid4().hex[:8]}", "reviewer"))
+    h = {"Authorization": f"Bearer {out['api_key']}"}
+    with _client() as c:
+        assert c.get("/api/ontology", headers=h).status_code == 200
+
+        async def _kill():
+            async with get_sessionmaker()() as db:
+                await revoke(db, uuid.UUID(out["service_account_id"]))
+        run_async(_kill())
+
+        assert c.get("/api/ontology", headers=h).status_code == 401
+
+
+@requires_infra
+def test_a_forged_key_is_refused(auth_on):
+    """The prefix is public by design, so presenting a real one with any secret must fail."""
+    out = run_async(_mint_key_coro(f"t-{uuid.uuid4().hex[:8]}", "admin"))
+    forged = f"lbxk_{out['key_prefix']}_not-the-secret"
+    with _client() as c:
+        assert c.get("/api/ontology", headers={"Authorization": f"Bearer {forged}"}).status_code == 401
+
+
+@requires_infra
+def test_minting_a_key_needs_admin(auth_on):
+    _admin_id, rev_id, _ann_id = run_async(_seed_users_coro())
+    with _client() as c:
+        r = c.post("/api/service-accounts", json={"name": f"t-{uuid.uuid4().hex[:8]}"},
+                   headers=_bearer(rev_id))
+        assert r.status_code == 403

@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
-from db.models import Frame, TrainingJob
+from db.models import Frame
 from services.agent.frame_agent import commit_frame, plan_frame
 from services.agent.policy import PolicyThresholds
+from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("agent.fresh")
 
@@ -89,7 +89,7 @@ async def label_and_decide(db: AsyncSession, frame_id: uuid.UUID, *, commit: boo
                            policy: PolicyThresholds | None = None, created_by: str | None = None) -> dict:
     """One shot: fresh-detect the frame, then run the agent on the new objects. commit=False plans (writes
     the detected objects but takes no agent action); commit=True also applies the agent's decision."""
-    if (await db.execute(select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1))).first():
+    if await training_holds_gpu(db):
         raise RuntimeError("GPU reserved for a training job; fresh inference is paused")
     policy = policy or PolicyThresholds()
     label = await label_frame(db, frame_id)

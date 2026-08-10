@@ -17,8 +17,8 @@ from sqlalchemy import distinct, func, select
 from core.logging import get_logger
 from db.models import Frame
 from db.models import Session as DbSession
-from db.models import TrainingJob
 from db.session import get_sessionmaker
+from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("autolabel.redetect")
 
@@ -55,7 +55,7 @@ async def redetect_all_sessions(*, estimate_ego: bool = True, limit_per_session:
 
     maker = get_sessionmaker()
     async with maker() as db:
-        if (await db.execute(select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1))).first():
+        if await training_holds_gpu(db):
             return {"skipped": "training job holds the GPU"}
         session_ids = list((await db.execute(select(distinct(Frame.session_id)))).scalars().all())
 

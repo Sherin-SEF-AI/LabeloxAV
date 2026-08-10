@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.logging import get_logger
 from db.models import Frame, Object
 from services.autolabel.ontology import get_ontology
+from services.errordetect.score import as_suspicion
 
 log = get_logger("ed_consistency")
 
@@ -43,7 +44,7 @@ async def detect_consistency(db: AsyncSession, session_id: str | None = None) ->
         for oid, c in members:
             if c != maj:
                 out.append({"object_id": oid, "kind": "track_inconsistent",
-                            "score": round(n_maj / len(members), 4),
+                            "score": as_suspicion(n_maj / len(members)),
                             "proposed_label": {"class_id": maj, "class_name": onto.by_id(maj).name},
                             "detail": {"track_id": str(tid), "given_class": onto.by_id(c).name,
                                        "track_majority": onto.by_id(maj).name, "track_len": len(members)}})
@@ -62,7 +63,7 @@ async def detect_consistency(db: AsyncSession, session_id: str | None = None) ->
         for oid, c in members:
             if c != maj:
                 out.append({"object_id": oid, "kind": "cross_cam_inconsistent",
-                            "score": round(n_maj / len(members), 4),
+                            "score": as_suspicion(n_maj / len(members)),
                             "proposed_label": {"class_id": maj, "class_name": onto.by_id(maj).name},
                             "detail": {"rig_track_id": str(rid), "given_class": onto.by_id(c).name,
                                        "rig_majority": onto.by_id(maj).name, "n_views": len(members)}})

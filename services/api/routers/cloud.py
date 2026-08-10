@@ -50,6 +50,21 @@ async def cloud_status():
     return await get_manager().status()
 
 
+@router.get("/gpu/slot")
+async def gpu_slot_status():
+    """Whether the local GPU slot is held, so an operator can see why a job is waiting.
+
+    Advisory: the answer can be stale the instant it is returned, which is why nothing decides whether to
+    start work from it. Deciding is what acquiring the slot is for.
+    """
+    from core.gpu_slot import slot_is_free
+
+    free = await slot_is_free()
+    return {"free": free,
+            "detail": ("no job is holding the local GPU slot" if free else
+                       "a job holds the local GPU slot; other GPU work waits rather than sharing the card")}
+
+
 @router.get("/cloud/orphans")
 async def cloud_orphans():
     return {"orphans": await get_manager().find_orphans()}

@@ -55,6 +55,19 @@ async def current_user(
     from db.models import User
 
     settings = get_settings()
+
+    # A machine credential, checked before the token path because the two are told apart by their scheme and
+    # an API key would otherwise fail signature verification and read as anonymous. It resolves to a real
+    # User row, so every role floor, audit entry and created_by column downstream works unchanged and a
+    # machine's writes are attributed to the machine rather than to whoever generated its key.
+    if authorization and authorization.lower().startswith("bearer "):
+        from services.identity.service_accounts import split_key
+        from services.identity.service_accounts import verify as verify_key
+
+        raw = authorization.split(" ", 1)[1].strip()
+        if split_key(raw) is not None:
+            return await verify_key(db, raw)
+
     payload = bearer_payload(authorization, settings.auth.signing_key,
                              accept_legacy=settings.auth.accept_legacy_tokens)
     if payload is None:
@@ -107,6 +120,18 @@ class OntologyClassOut(BaseModel):
     india: bool
 
 
+class TriageFlag(BaseModel):
+    """One reason an object is in the queue, with how loudly it should read.
+
+    Structured rather than folded into the prose on `why`, so severity is decided where the evidence is and
+    a client renders it instead of recovering it with regexes over a joined string.
+    """
+
+    code: str                                   # mask_box | class_conflict | rare_class | low_conf | review_band
+    label: str                                  # what the reader is asked to check, in words
+    severity: str                               # high | medium | low
+
+
 class TriageRow(BaseModel):
     object_id: str
     frame_id: str
@@ -115,7 +140,8 @@ class TriageRow(BaseModel):
     class_name: str
     conf: float
     state: str
-    why: str
+    why: str                                    # the same reasons as prose, kept for existing readers
+    flags: list[TriageFlag] = []                # worst first, so ordering does not need re-deriving
     priority: float
     source: str = "human"                       # imported | fused | human | auto_accept | interpolated
     import_format: str | None = None            # mapillary | idd | bdd | ... when source == imported
@@ -145,6 +171,13 @@ class ObjectDetail(BaseModel):
     keypoints: dict | None = None
     polyline: list[list[float]] | None = None
     cuboid_3d: dict | None = None
+    # Sign typing and road text, read-only. Served so a reviewer can see what the classifier decided; a
+    # wrong type is corrected by re-running recognition, not by editing the field.
+    sign_type: str | None = None
+    sign_category: str | None = None
+    ocr_text: str | None = None
+    ocr_lang: str | None = None
+    ocr_conf: float | None = None
 
 
 class ReviewIn(BaseModel):
@@ -207,6 +240,15 @@ class BulkReviewIn(BaseModel):
     attrs: dict | None = None          # set_attrs: merged into each object's attrs
     state: str | None = None
     reviewer: str = "anon"
+    # Total time the reviewer spent on this batch, divided across its members. Bulk review hardcoded zero,
+    # which is fine when it is an occasional sweep over a filter and wrong once a keyboard grid routes most
+    # of the corpus's review through it: every throughput and cost-per-label number is built on this column,
+    # and a constant zero silently reports that the work was free.
+    time_spent_ms: int = 0
+    # Versions the client believed it was acting on, keyed by object id. Any object that has changed since
+    # is skipped and named in the response rather than clobbered, which is the same protection single review
+    # has had all along.
+    expected_versions: dict[str, int] | None = None
 
 
 class AutolabelStartIn(BaseModel):

@@ -8,16 +8,13 @@ import type { MapCommitRow, MapProvenance } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
 import Inspector from "@/components/shell/Inspector";
+import { OSM_STYLE } from "@/lib/basemap";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 
 // M3.3 HD map viewer: render a fused map_commit (lanes + signs) on a MapLibre basemap; click an element to
 // trace its provenance (source frames, calibration version, fusion run). OSM raster basemap, no token.
 
-const STYLE: maplibregl.StyleSpecification = {
-  version: 8,
-  sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "OSM" } },
-  layers: [{ id: "osm", type: "raster", source: "osm" }],
-};
+const STYLE = OSM_STYLE;
 
 export default function MapPage() {
   const wrap = useRef<HTMLDivElement>(null);
@@ -88,7 +85,7 @@ export default function MapPage() {
             <span>calib {commit.calibration_version}</span>
           </span>
         )}
-        {!commits.length && <span className="text-warn">no map commits yet (run hdmap fuse on a georef'd session)</span>}
+        {!commits.length && <span className="text-warn">no map commits yet (run hdmap fuse on a georef&apos;d session)</span>}
       </>
     )}>
       <div className="flex h-full min-h-0">

@@ -16,7 +16,7 @@ import uuid
 from collections import Counter, defaultdict
 from uuid import UUID
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 
 from core.logging import get_logger
 from db.models import ErrorCandidate, Frame, Object, RigObject

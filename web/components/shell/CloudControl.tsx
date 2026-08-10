@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api , humanizeError } from "@/lib/api";
 import type { CloudStatus, CloudOrphan } from "@/lib/types";
 import Icon from "@/components/shell/Icon";
+import { isLiveState, pollDelay } from "@/lib/pollDelay";
 
 // The cloud GPU control: a compact status pill (always showing state and, when connected, live uptime and
 // accruing cost) that opens a panel with connect/disconnect, the cost breakdown, and the idle / max-session
@@ -33,8 +34,12 @@ export default function CloudControl() {
   const [, setTick] = useState(0);
   const lastPoll = useRef<number>(0);
 
-  const pollOrphans = useCallback(async () => {
-    try { const r = await api.cloudOrphans(); setOrphans(r.orphans); } catch { /* ignore */ }
+  // Reports whether it reached the backend, so its loop can back off the way the status loop does. It used
+  // to swallow the failure and be driven by a fixed interval, which kept firing at an unreachable API: a
+  // three-minute restart produced 72 ECONNREFUSED errors in the console.
+  const pollOrphans = useCallback(async (): Promise<boolean> => {
+    try { const r = await api.cloudOrphans(); setOrphans(r.orphans); return true; }
+    catch { return false; }   // keep the last list; a blip must not blank the panel
   }, []);
   // A one-shot refresh after a connect/disconnect action, so the meter reflects the new state immediately
   // without waiting for the next adaptive tick.
@@ -48,27 +53,34 @@ export default function CloudControl() {
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
-    const LIVE = new Set(["connected", "running_job", "provisioning", "terminating", "pausing"]);
+    let orphanTimer: ReturnType<typeof setTimeout>;
     const loop = async () => {
       if (!alive) return;
-      let delay = 20000;
+      let ok = true;
+      let live = false;
       try {
         const s = await api.cloudStatus();
         if (!alive) return;
         setSt(s); lastPoll.current = Date.now();
-        delay = LIVE.has(s.state) ? 3000 : 20000;   // fast only while something is actually running
+        live = isLiveState(s.state);
       } catch {
-        delay = 30000;   // backend unreachable: keep the last value and back off
+        ok = false;   // backend unreachable: keep the last value and back off
       }
-      if (alive) timer = setTimeout(loop, delay);
+      if (alive) timer = setTimeout(loop, pollDelay({ ok, live }));
     };
-    loop(); pollOrphans();
+    // Its own loop rather than a shared one: orphans stay on the idle cadence even while a pod is live,
+    // because the meter is what needs a 3s refresh and this is a rate-limited third party behind it.
+    const orphanLoop = async () => {
+      if (!alive) return;
+      const ok = await pollOrphans();
+      if (alive) orphanTimer = setTimeout(orphanLoop, pollDelay({ ok }));
+    };
+    loop(); orphanLoop();
     // The last two timers in the app, and both are deliberate. Pod state lives in RunPod's API, not in this
     // database, so there is no row for the server to watch and push from: an SSE stream here would be the
     // same poll moved server-side, run once per connected client, against a rate-limited third party.
     // Adaptive instead, and it slows to 20s the moment nothing is running.
-    const b = setInterval(pollOrphans, 20000);
-    return () => { alive = false; clearTimeout(timer); clearInterval(b); };
+    return () => { alive = false; clearTimeout(timer); clearTimeout(orphanTimer); };
   }, [pollOrphans]);
   // A 1s tick that interpolates uptime and cost between polls so the meter never looks frozen. Local
   // arithmetic on values already held, not a network call: converting it to an event would mean asking the

@@ -6,7 +6,7 @@ FlywheelCycle table is the once-per-day marker, so a restart mid-window never do
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +20,7 @@ log = get_logger("flywheel.auto_schedule")
 
 
 async def _ran_corpus_cycle_today(db: AsyncSession) -> bool:
-    day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    day_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     n = (await db.execute(
         select(func.count()).select_from(FlywheelCycle)
         .where(FlywheelCycle.created_at >= day_start,

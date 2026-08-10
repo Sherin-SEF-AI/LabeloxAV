@@ -40,6 +40,7 @@ from services.export.adapter_scene import (
     write_hdmap,
     write_lanes,
     write_masks,
+    write_panoptic,
 )
 from services.export.adapter_yolo import write_yolo
 from services.export.records import ExportRecord
@@ -132,6 +133,11 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
                 keypoints=obj.keypoints,
                 polyline=obj.polyline,
                 relationships=rel_map.get(str(obj.object_id), []),
+                sign_type=obj.sign_type,
+                sign_category=obj.sign_category,
+                ocr_text=obj.ocr_text,
+                ocr_lang=obj.ocr_lang,
+                ocr_conf=obj.ocr_conf,
             )
         )
     return records
@@ -203,6 +209,7 @@ _SCENE_WRITERS = {
     "lanes": lambda fids, store, d, commit: write_lanes(fids, d / "lanes"),
     "drivable": lambda fids, store, d, commit: write_drivable(fids, store, d / "drivable"),
     "hdmap": lambda fids, store, d, commit: write_hdmap(d / "hdmap", commit),
+    "panoptic": lambda fids, store, d, commit: write_panoptic(fids, store, d / "panoptic"),
 }
 
 # Parquet is always written (lossless provenance) and so is accepted but never dispatched.
@@ -320,6 +327,22 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
         "formats": spec.formats,
         "dataset_prefix": store.uri(prefix),
     }
+
+    # Meter the delivery. Here rather than in the API router because every path that produces a dataset
+    # ships one: the buyer agent, the ops agent, the resumable exporter and the CLI all call this function,
+    # and metering at the router would have missed four of the five. Idempotent on the commit id, so a
+    # re-export of the same content is recorded once and charged once.
+    #
+    # Marked uncertified: a certificate needs a sealed gold set and a scored evaluation run, and an export
+    # is usually shipped before it has been evaluated. certify_delivery attaches one later. Metering it as
+    # measured because a certificate might arrive would be the dishonest default.
+    async with maker() as db:
+        from services.billing.meter import record_delivery
+
+        await record_delivery(db, kind="export", subject_id=commit_id, quantity=float(len(records)),
+                              detail={"slice": spec.name, "formats": delivered,
+                                      "ontology_version": onto.version})
+
     log.info("export.done", **result)
     from services.integrations.webhooks import emit
 

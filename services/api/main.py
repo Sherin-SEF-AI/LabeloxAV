@@ -13,6 +13,7 @@ from starlette.responses import JSONResponse
 
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
+from core.observability import spawn
 from services.api.deps import role_rank
 from services.api.media import MEDIA_COOKIE, is_media_read
 from services.api.routers import (
@@ -22,6 +23,7 @@ from services.api.routers import (
     analytics,
     assets,
     autolabel,
+    billing,
     calibration,
     campaigns,
     checkpoints,
@@ -29,6 +31,7 @@ from services.api.routers import (
     collaborate,
     corrections,
     curation,
+    dataset_query,
     datasets,
     discovery,
     drivable,
@@ -61,6 +64,7 @@ from services.api.routers import (
     objects,
     objects3d,
     ocr,
+    op_eval,
     predictions,
     quality,
     reasoner,
@@ -72,12 +76,14 @@ from services.api.routers import (
     secv2,
     segment_assist,
     segmentation,
+    service_accounts,
     signs,
     tracks,
     training,
     triage,
     upload,
     users,
+    workforce,
 )
 from services.api.routers import (
     auth as auth_router,
@@ -162,9 +168,27 @@ def _assert_auth_floors(app: FastAPI) -> int:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(get_settings().log_level)
+    # Inert without configuration: no SENTRY_DSN means Sentry is never initialised, no OTLP endpoint means no
+    # exporter. Turning telemetry on is then a deployment change rather than a code change.
+    from core.observability import init_observability
+
+    enabled = init_observability(app)
     checked = _assert_auth_floors(app)
-    log.info("api.startup", api_routes_checked=checked)
-    watchdog = asyncio.create_task(_cloud_watchdog())
+    log.info("api.startup", api_routes_checked=checked, **enabled)
+    # Background jobs run as tasks inside this process, so every one that was live when the previous process
+    # ended is now gone with no trace but a row still marked running. Startup is the one moment that is
+    # certain, so the sweep happens here rather than on a timer. It only touches rows whose heartbeat has
+    # already aged past the staleness window, so a job belonging to another live worker is never reaped.
+    # Best effort: an unreachable database must not stop the API from starting and reporting why.
+    try:
+        from db.session import get_sessionmaker
+        from services.agent.resume import reap_interrupted
+
+        async with get_sessionmaker()() as db:
+            await reap_interrupted(db)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("api.reap_interrupted_failed", error=str(exc))
+    watchdog = spawn(_cloud_watchdog(), name="_cloud_watchdog")
     try:
         yield
     finally:
@@ -183,7 +207,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="LabeloxAV", version="0.1.0", lifespan=lifespan)
 
 # Role floor by path prefix for mutating requests.
-_ADMIN_PREFIXES = ("/api/govern", "/api/users")
+_ADMIN_PREFIXES = ("/api/govern", "/api/users", "/api/service-accounts")
 _REVIEWER_PREFIXES = (
     "/api/review", "/api/export", "/api/datasets", "/api/relabel", "/api/imports", "/api/curation",
     "/api/corrections", "/api/collaborate", "/api/objects", "/api/tracks", "/api/lanes", "/api/errordetect",
@@ -319,6 +343,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     role = u.role if u else None
             except Exception:  # noqa: BLE001
                 role = None
+        elif authz:
+            # A machine credential. This gate resolves identity independently of the route dependency, so a
+            # credential the dependency understands and this does not is refused here and never reaches the
+            # route: service accounts authenticated perfectly in unit tests and answered 401 to every real
+            # request until this branch existed. Both paths call the same verifier so they cannot drift again.
+            from services.identity.service_accounts import split_key
+            from services.identity.service_accounts import verify as verify_key
+
+            raw = authz.split(" ", 1)[1].strip() if " " in authz else ""
+            if split_key(raw) is not None:
+                try:
+                    async with get_sessionmaker()() as db:
+                        u = await verify_key(db, raw)
+                        role = u.role if u else None
+                except Exception:  # noqa: BLE001
+                    role = None
 
         # Dev-login must be reachable without a token (it exists to hand out the first one); the route itself
         # is hard-gated to env == "local", so allowlisting it here does not open a hole on a real deployment.
@@ -468,6 +508,7 @@ app.include_router(meta.router, prefix="/api", tags=["meta"])
 app.include_router(triage.router, prefix="/api", tags=["triage"])
 app.include_router(objects.router, prefix="/api", tags=["objects"])
 app.include_router(predictions.router, prefix="/api", tags=["predictions"])
+app.include_router(dataset_query.router, prefix="/api", tags=["datasets"])
 app.include_router(review.router, prefix="/api", tags=["review"])
 app.include_router(intelligence.router, prefix="/api", tags=["intelligence"])
 app.include_router(search.router, prefix="/api", tags=["search"])
@@ -475,6 +516,8 @@ app.include_router(analytics.router, prefix="/api", tags=["analytics"])
 app.include_router(cloud.router, prefix="/api", tags=["cloud"])
 app.include_router(models.router, prefix="/api", tags=["models"])
 app.include_router(export.router, prefix="/api", tags=["export"])
+app.include_router(billing.router, prefix="/api", tags=["billing"])
+app.include_router(workforce.router, prefix="/api", tags=["workforce"])
 app.include_router(explore.router, prefix="/api", tags=["explore"])
 app.include_router(quality.router, prefix="/api", tags=["quality"])
 app.include_router(recall.router, prefix="/api", tags=["recall"])
@@ -501,6 +544,7 @@ app.include_router(errordetect.router, prefix="/api", tags=["errordetect"])
 app.include_router(relabel.router, prefix="/api", tags=["relabel"])
 app.include_router(collaborate.router, prefix="/api", tags=["collaborate"])
 app.include_router(govern.router, prefix="/api", tags=["govern"])
+app.include_router(service_accounts.router, prefix="/api", tags=["service-accounts"])
 app.include_router(multicam.router, prefix="/api", tags=["multicam"])
 app.include_router(mapassist.router, prefix="/api", tags=["mapassist"])
 app.include_router(hdmap.router, prefix="/api", tags=["hdmap"])
@@ -530,6 +574,7 @@ app.include_router(campaigns.router, prefix="/api", tags=["campaigns"])
 app.include_router(reasoner.router, prefix="/api", tags=["reasoner"])
 app.include_router(edge.router, prefix="/api", tags=["edge"])
 app.include_router(experiments.router, prefix="/api", tags=["experiments"])
+app.include_router(op_eval.router, prefix="/api", tags=["eval"])
 app.include_router(secv2.router, prefix="/api", tags=["security"])
 app.include_router(identity_routes.router, prefix="/api", tags=["identity"])
 app.include_router(inbox.router, prefix="/api", tags=["inbox"])

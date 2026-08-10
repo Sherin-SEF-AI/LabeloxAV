@@ -7,27 +7,47 @@ import ImagePanel from "@/components/inspector/ImagePanel";
 import MapPanel from "@/components/inspector/MapPanel";
 import CanPanel from "@/components/inspector/CanPanel";
 import AudioPanel from "@/components/inspector/AudioPanel";
+import Scene3DPanel from "@/components/inspector/Scene3DPanel";
 
 // Renders one panel by type inside a shared chrome. Every panel subscribes to the one clock and reads via
 // the shared MCAP reader. Adding a panel type is one case here plus its component.
 
 const TITLE: Record<string, string> = {
   image: "camera", imu_plot: "time-series", can_plot: "CAN signals", map: "GPS map",
-  raw: "raw message", can_table: "CAN table", audio: "audio",
+  raw: "raw message", can_table: "CAN table", audio: "audio", scene3d: "3D",
 };
 
-export default function PanelHost({ panel, onRemove, onFrame }: {
+export default function PanelHost({ panel, onRemove, onFrame, onCycleSpan, onGrow, onShrink,
+                                   onDragStart, onDragOver, onDrop, dragging }: {
   panel: InspectorPanel;
   onRemove: () => void;
   onFrame?: (frameId: string | null, tsNs: string) => void;
+  onCycleSpan?: () => void;
+  onGrow?: () => void;
+  onShrink?: () => void;
+  onDragStart?: () => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDrop?: () => void;
+  dragging?: boolean;
 }) {
   const title = `${TITLE[panel.type] ?? panel.type}${panel.topic ? " · " + panel.topic : ""}`;
-  const known = ["raw", "imu_plot", "can_plot", "image", "map", "can_table", "audio"];
+  const known = ["raw", "imu_plot", "can_plot", "image", "map", "can_table", "audio", "scene3d"];
   return (
-    <div className="flex flex-col h-full min-h-0 border hairline rounded bg-panel overflow-hidden">
-      <div className="flex items-center gap-2 px-2 py-1 border-b hairline">
+    <div
+      onDragOver={onDragOver}
+      onDrop={(e) => { e.preventDefault(); onDrop?.(); }}
+      className={`flex flex-col h-full min-h-0 border rounded bg-panel overflow-hidden ${dragging ? "border-accent opacity-60" : "hairline"}`}>
+      {/* The header is the drag handle, not the whole panel: a 3D view and a plot both want the pointer for
+          their own gestures, and making the body draggable would take orbit and zoom away from them. */}
+      <div draggable onDragStart={onDragStart}
+        className="flex items-center gap-2 px-2 py-1 border-b hairline cursor-grab active:cursor-grabbing">
         <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 truncate">{title}</span>
-        <button onClick={onRemove} className="ml-auto font-mono text-[10px] text-ink-3 hover:text-block px-1" title="remove panel">x</button>
+        <span className="ml-auto flex items-center gap-0.5">
+          <button onClick={onShrink} className="font-mono text-[10px] text-ink-3 hover:text-ink px-1" title="shorter">&minus;</button>
+          <button onClick={onGrow} className="font-mono text-[10px] text-ink-3 hover:text-ink px-1" title="taller">+</button>
+          <button onClick={onCycleSpan} className="font-mono text-[10px] text-ink-3 hover:text-ink px-1" title="toggle full width">&harr;</button>
+          <button onClick={onRemove} className="font-mono text-[10px] text-ink-3 hover:text-block px-1" title="remove panel">x</button>
+        </span>
       </div>
       <div className="flex-1 min-h-0">
         {panel.type === "raw" && panel.topic && <RawPanel topic={panel.topic} />}
@@ -36,6 +56,7 @@ export default function PanelHost({ panel, onRemove, onFrame }: {
         {panel.type === "map" && <MapPanel />}
         {panel.type === "can_table" && <CanPanel />}
         {panel.type === "audio" && panel.topic && <AudioPanel topic={panel.topic} />}
+        {panel.type === "scene3d" && <Scene3DPanel />}
         {!known.includes(panel.type) && <div className="p-3 font-mono text-[11px] text-ink-3">unknown panel type: {panel.type}</div>}
       </div>
     </div>

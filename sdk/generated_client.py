@@ -363,9 +363,19 @@ class LabeloxClient:
         return self._call("GET", f"/api/agent/runs",
                           params={"limit": limit}, json_body=None)
 
+    def get_agent_runs_interrupted(self, limit: int | None = 50) -> Any:
+        """Interrupted Runs"""
+        return self._call("GET", f"/api/agent/runs/interrupted",
+                          params={"limit": limit}, json_body=None)
+
     def get_agent_runs_by_run_id(self, run_id: str) -> Any:
         """Run Detail"""
         return self._call("GET", f"/api/agent/runs/{run_id}",
+                          params=None, json_body=None)
+
+    def post_agent_runs_by_run_id_resume(self, run_id: str) -> Any:
+        """Resume Run"""
+        return self._call("POST", f"/api/agent/runs/{run_id}/resume",
                           params=None, json_body=None)
 
     def post_agent_runs_by_run_id_revert(self, run_id: str) -> Any:
@@ -602,6 +612,21 @@ class LabeloxClient:
         """Status"""
         return self._call("GET", f"/api/autolabel/{job_id}",
                           params=None, json_body=None)
+
+    def post_billing_certify_by_commit_id(self, commit_id: str, eval_id: str, gold_id: str, model_version: str) -> Any:
+        """Certify"""
+        return self._call("POST", f"/api/billing/certify/{commit_id}",
+                          params={"eval_id": eval_id, "gold_id": gold_id, "model_version": model_version}, json_body=None)
+
+    def get_billing_invoice(self, account: str | None = 'default', since_ns: Any | None = None, until_ns: Any | None = None) -> Any:
+        """Invoice"""
+        return self._call("GET", f"/api/billing/invoice",
+                          params={"account": account, "since_ns": since_ns, "until_ns": until_ns}, json_body=None)
+
+    def get_billing_usage(self, account: Any | None = None, since_ns: Any | None = None, until_ns: Any | None = None) -> Any:
+        """Usage"""
+        return self._call("GET", f"/api/billing/usage",
+                          params={"account": account, "since_ns": since_ns, "until_ns": until_ns}, json_body=None)
 
     def get_calibration_sessions(self) -> Any:
         """List Sessions"""
@@ -878,15 +903,50 @@ class LabeloxClient:
         return self._call("GET", f"/api/datasets",
                           params={"limit": limit}, json_body=None)
 
+    def get_datasets_blob(self, uri: str) -> Any:
+        """Dataset Blob"""
+        return self._call("GET", f"/api/datasets/blob",
+                          params={"uri": uri}, json_body=None)
+
+    def get_datasets_compile(self, q: str) -> Any:
+        """Compile Only"""
+        return self._call("GET", f"/api/datasets/compile",
+                          params={"q": q}, json_body=None)
+
     def post_datasets_export(self, body: Any = None) -> Any:
         """Start Export"""
         return self._call("POST", f"/api/datasets/export",
+                          params=None, json_body=body)
+
+    def post_datasets_lake_publish(self) -> Any:
+        """Publish Lake"""
+        return self._call("POST", f"/api/datasets/lake/publish",
+                          params=None, json_body=None)
+
+    def get_datasets_lake_by_table(self, table: str, limit: int | None = 100) -> Any:
+        """Read Lake"""
+        return self._call("GET", f"/api/datasets/lake/{table}",
+                          params={"limit": limit}, json_body=None)
+
+    def get_datasets_preview(self, q: str, version: Any | None = None, limit: int | None = 200000) -> Any:
+        """Preview"""
+        return self._call("GET", f"/api/datasets/preview",
+                          params={"q": q, "version": version, "limit": limit}, json_body=None)
+
+    def post_datasets_shards(self, body: Any = None) -> Any:
+        """Build"""
+        return self._call("POST", f"/api/datasets/shards",
                           params=None, json_body=body)
 
     def get_datasets_versions_by_name(self, name: str, limit: int | None = 20) -> Any:
         """Dataset Versions"""
         return self._call("GET", f"/api/datasets/versions/{name}",
                           params={"limit": limit}, json_body=None)
+
+    def get_datasets_vocabulary(self) -> Any:
+        """Vocabulary"""
+        return self._call("GET", f"/api/datasets/vocabulary",
+                          params=None, json_body=None)
 
     def get_datasets_by_a_id_diff_by_b_id(self, a_id: str, b_id: str, deep: bool | None = True, sample: int | None = 20) -> Any:
         """Dataset Diff"""
@@ -983,19 +1043,29 @@ class LabeloxClient:
         return self._call("POST", f"/api/embeddings/compute",
                           params=None, json_body=body)
 
-    def get_errordetect_candidates(self, status: str | None = 'pending', limit: int | None = 100) -> Any:
+    def get_errordetect_candidates(self, status: str | None = 'pending', limit: int | None = 100, kind: Any | None = None) -> Any:
         """Candidates"""
         return self._call("GET", f"/api/errordetect/candidates",
-                          params={"status": status, "limit": limit}, json_body=None)
+                          params={"status": status, "limit": limit, "kind": kind}, json_body=None)
+
+    def post_errordetect_candidates_bulk(self, body: Any = None) -> Any:
+        """Bulk"""
+        return self._call("POST", f"/api/errordetect/candidates/bulk",
+                          params=None, json_body=body)
 
     def post_errordetect_candidates_by_candidate_id_confirm(self, candidate_id: str, body: Any = None) -> Any:
         """Confirm"""
         return self._call("POST", f"/api/errordetect/candidates/{candidate_id}/confirm",
                           params=None, json_body=body)
 
-    def post_errordetect_candidates_by_candidate_id_dismiss(self, candidate_id: str) -> Any:
+    def post_errordetect_candidates_by_candidate_id_dismiss(self, candidate_id: str, note: Any | None = None) -> Any:
         """Dismiss"""
         return self._call("POST", f"/api/errordetect/candidates/{candidate_id}/dismiss",
+                          params={"note": note}, json_body=None)
+
+    def get_errordetect_precision(self) -> Any:
+        """Precision"""
+        return self._call("GET", f"/api/errordetect/precision",
                           params=None, json_body=None)
 
     def post_errordetect_run(self, body: Any = None) -> Any:
@@ -1006,6 +1076,16 @@ class LabeloxClient:
     def get_errordetect_summary(self) -> Any:
         """Summary Ep"""
         return self._call("GET", f"/api/errordetect/summary",
+                          params=None, json_body=None)
+
+    def get_eval_operations(self) -> Any:
+        """Operations"""
+        return self._call("GET", f"/api/eval/operations",
+                          params=None, json_body=None)
+
+    def get_eval_operations_by_op_type_latest(self, op_type: str) -> Any:
+        """Operation Latest"""
+        return self._call("GET", f"/api/eval/operations/{op_type}/latest",
                           params=None, json_body=None)
 
     def post_eval_tracking(self, gold_id: str, run_id: str, iou_thr: float | None = 0.5) -> Any:
@@ -1128,6 +1208,21 @@ class LabeloxClient:
         return self._call("POST", f"/api/export",
                           params=None, json_body=body)
 
+    def get_export_scenario_event_by_event_id(self, event_id: str, near_m: float | None = 60.0, pad_s: float | None = 4.0, road_network_file: str | None = 'map.xodr', fmt: str | None = 'xml') -> Any:
+        """Scenario From Event"""
+        return self._call("GET", f"/api/export/scenario/event/{event_id}",
+                          params={"near_m": near_m, "pad_s": pad_s, "road_network_file": road_network_file, "fmt": fmt}, json_body=None)
+
+    def get_export_scenario_session_by_session_id(self, session_id: str, t_start_ns: int, t_end_ns: int, near_m: float | None = 60.0, road_network_file: str | None = 'map.xodr', fmt: str | None = 'xml', name: str | None = 'scenario') -> Any:
+        """Scenario From Window"""
+        return self._call("GET", f"/api/export/scenario/session/{session_id}",
+                          params={"t_start_ns": t_start_ns, "t_end_ns": t_end_ns, "near_m": near_m, "road_network_file": road_network_file, "fmt": fmt, "name": name}, json_body=None)
+
+    def get_export_by_commit_id_certificate(self, commit_id: str, eval_id: str, gold_id: str, model_version: str, fmt: str | None = 'json') -> Any:
+        """Certificate"""
+        return self._call("GET", f"/api/export/{commit_id}/certificate",
+                          params={"eval_id": eval_id, "gold_id": gold_id, "model_version": model_version, "fmt": fmt}, json_body=None)
+
     def get_exports_resumable(self, limit: int | None = 50) -> Any:
         """List Resumable"""
         return self._call("GET", f"/api/exports/resumable",
@@ -1208,6 +1303,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/forgyx/benchmarks",
                           params={"model_version": model_version}, json_body=None)
 
+    def get_forgyx_benchmarks_audit(self) -> Any:
+        """Benchmarks Audit"""
+        return self._call("GET", f"/api/forgyx/benchmarks/audit",
+                          params=None, json_body=None)
+
     def get_forgyx_capabilities(self) -> Any:
         """Capabilities"""
         return self._call("GET", f"/api/forgyx/capabilities",
@@ -1222,6 +1322,11 @@ class LabeloxClient:
         """Deployments"""
         return self._call("GET", f"/api/forgyx/deployments",
                           params={"model_version": model_version}, json_body=None)
+
+    def post_forgyx_export_by_model_version(self, model_version: str, body: Any = None) -> Any:
+        """Export Model"""
+        return self._call("POST", f"/api/forgyx/export/{model_version}",
+                          params=None, json_body=body)
 
     def post_forgyx_gate(self, body: Any = None) -> Any:
         """Gate"""
@@ -1498,6 +1603,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/govern/state",
                           params=None, json_body=None)
 
+    def get_gpu_slot(self) -> Any:
+        """Gpu Slot Status"""
+        return self._call("GET", f"/api/gpu/slot",
+                          params=None, json_body=None)
+
     def post_hardening_efficiency(self, body: Any = None) -> Any:
         """Efficiency"""
         return self._call("POST", f"/api/hardening/efficiency",
@@ -1558,6 +1668,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/imports",
                           params={"limit": limit}, json_body=None)
 
+    def post_imports_dry_run(self, body: Any = None) -> Any:
+        """Dry Run"""
+        return self._call("POST", f"/api/imports/dry-run",
+                          params=None, json_body=body)
+
     def post_imports_start(self, body: Any = None) -> Any:
         """Start"""
         return self._call("POST", f"/api/imports/start",
@@ -1567,6 +1682,11 @@ class LabeloxClient:
         """Status"""
         return self._call("GET", f"/api/imports/{job_id}",
                           params=None, json_body=None)
+
+    def post_inference_runs(self, body: Any = None) -> Any:
+        """Ingest Run"""
+        return self._call("POST", f"/api/inference-runs",
+                          params=None, json_body=body)
 
     def get_ingest_progress(self) -> Any:
         """Ingest Progress"""
@@ -1607,6 +1727,11 @@ class LabeloxClient:
         """Annotations At"""
         return self._call("GET", f"/api/inspector/sessions/{session_id}/annotations-at",
                           params={"ts_ns": ts_ns}, json_body=None)
+
+    def get_inspector_sessions_by_session_id_cloud(self, session_id: str, ts_ns: int, max_points: int | None = 200000) -> Any:
+        """Session Cloud"""
+        return self._call("GET", f"/api/inspector/sessions/{session_id}/cloud",
+                          params={"ts_ns": ts_ns, "max_points": max_points}, json_body=None)
 
     def get_inspector_sessions_by_session_id_events(self, session_id: str) -> Any:
         """Session Events"""
@@ -1748,10 +1873,35 @@ class LabeloxClient:
         return self._call("POST", f"/api/labelops/jobs/{job_id}/submit",
                           params=None, json_body=body)
 
+    def get_labelops_judge_agreement(self, model_version: Any | None = None, batch_id: Any | None = None) -> Any:
+        """Read Judge Agreement"""
+        return self._call("GET", f"/api/labelops/judge-agreement",
+                          params={"model_version": model_version, "batch_id": batch_id}, json_body=None)
+
     def get_labelops_my_jobs(self) -> Any:
         """My Jobs"""
         return self._call("GET", f"/api/labelops/my-jobs",
                           params=None, json_body=None)
+
+    def post_labelops_precision_batch(self, target: int | None = 300) -> Any:
+        """Make Precision Batch"""
+        return self._call("POST", f"/api/labelops/precision-batch",
+                          params={"target": target}, json_body=None)
+
+    def get_labelops_precision_by_batch_id(self, batch_id: str) -> Any:
+        """Read Precision"""
+        return self._call("GET", f"/api/labelops/precision/{batch_id}",
+                          params=None, json_body=None)
+
+    def get_labelops_prereview_by_batch_id(self, batch_id: str, model_version: Any | None = None, agreement_batch_id: Any | None = None) -> Any:
+        """Read Prereview"""
+        return self._call("GET", f"/api/labelops/prereview/{batch_id}",
+                          params={"model_version": model_version, "agreement_batch_id": agreement_batch_id}, json_body=None)
+
+    def post_labelops_prereview_by_batch_id(self, batch_id: str, limit: Any | None = None) -> Any:
+        """Run Prereview"""
+        return self._call("POST", f"/api/labelops/prereview/{batch_id}",
+                          params={"limit": limit}, json_body=None)
 
     def get_labelops_projects(self, limit: int | None = 100) -> Any:
         """List Projects"""
@@ -2078,6 +2228,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/models",
                           params={"limit": limit}, json_body=None)
 
+    def post_models_external(self, body: Any = None) -> Any:
+        """Register External"""
+        return self._call("POST", f"/api/models/external",
+                          params=None, json_body=body)
+
     def post_multicam_associate(self, session_id: str) -> Any:
         """Associate"""
         return self._call("POST", f"/api/multicam/associate",
@@ -2186,6 +2341,11 @@ class LabeloxClient:
     def post_objects_classify(self, body: Any = None) -> Any:
         """Classify Object"""
         return self._call("POST", f"/api/objects/classify",
+                          params=None, json_body=body)
+
+    def post_objects_crops(self, body: Any = None) -> Any:
+        """Object Crop Sheet"""
+        return self._call("POST", f"/api/objects/crops",
                           params=None, json_body=body)
 
     def post_objects_quality_backfill(self, session_id: Any | None = None) -> Any:
@@ -2543,10 +2703,10 @@ class LabeloxClient:
         return self._call("GET", f"/api/search/objects",
                           params={"q": q, "session_id": session_id, "limit": limit}, json_body=None)
 
-    def get_search_semantic(self, q: str, k: int | None = 24) -> Any:
+    def get_search_semantic(self, q: str, k: int | None = 24, rarity_weight: Any | None = None) -> Any:
         """Search Semantic"""
         return self._call("GET", f"/api/search/semantic",
-                          params={"q": q, "k": k}, json_body=None)
+                          params={"q": q, "k": k, "rarity_weight": rarity_weight}, json_body=None)
 
     def post_search_similar(self, body: Any = None) -> Any:
         """Search Similar"""
@@ -2657,6 +2817,26 @@ class LabeloxClient:
         """Segment"""
         return self._call("POST", f"/api/segment",
                           params=None, json_body=body)
+
+    def get_service_accounts(self, include_revoked: bool | None = False) -> Any:
+        """Index"""
+        return self._call("GET", f"/api/service-accounts",
+                          params={"include_revoked": include_revoked}, json_body=None)
+
+    def post_service_accounts(self, body: Any = None) -> Any:
+        """Create"""
+        return self._call("POST", f"/api/service-accounts",
+                          params=None, json_body=body)
+
+    def post_service_accounts_by_account_id_revoke(self, account_id: str) -> Any:
+        """Kill"""
+        return self._call("POST", f"/api/service-accounts/{account_id}/revoke",
+                          params=None, json_body=None)
+
+    def post_service_accounts_by_account_id_rotate(self, account_id: str) -> Any:
+        """New Key"""
+        return self._call("POST", f"/api/service-accounts/{account_id}/rotate",
+                          params=None, json_body=None)
 
     def get_sessions(self, limit: int | None = 200) -> Any:
         """Sessions"""
@@ -3068,6 +3248,31 @@ class LabeloxClient:
         return self._call("POST", f"/api/vlm-targets/{target_id}/status",
                           params={"status": status}, json_body=None)
 
+    def post_workforce(self, body: Any = None) -> Any:
+        """Register"""
+        return self._call("POST", f"/api/workforce",
+                          params=None, json_body=body)
+
+    def post_workforce_dispatch(self, body: Any = None) -> Any:
+        """Dispatch"""
+        return self._call("POST", f"/api/workforce/dispatch",
+                          params=None, json_body=body)
+
+    def get_workforce_rating(self) -> Any:
+        """Rating"""
+        return self._call("GET", f"/api/workforce/rating",
+                          params=None, json_body=None)
+
+    def get_workforce_by_workforce_id_pending(self, workforce_id: str, limit: int | None = 50) -> Any:
+        """Pending"""
+        return self._call("GET", f"/api/workforce/{workforce_id}/pending",
+                          params={"limit": limit}, json_body=None)
+
+    def post_workforce_by_workforce_id_return(self, workforce_id: str) -> Any:
+        """Submit Return"""
+        return self._call("POST", f"/api/workforce/{workforce_id}/return",
+                          params=None, json_body=None)
+
     def get_metrics_2(self) -> Any:
         """Metrics Endpoint"""
         return self._call("GET", f"/metrics",
@@ -3086,4 +3291,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 600 routes generated from the server schema.
+# 641 routes generated from the server schema.

@@ -21,6 +21,7 @@ from core.logging import get_logger
 from db.models import Frame, Object, ObjectDynamics
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
+from services.calibration.resolve import resolve_calibration
 from services.domain import safety_l1
 from services.hdmap.georef import ipm_pixel_to_vehicle
 
@@ -31,6 +32,67 @@ TTC_HIGH_S = 1.5      # below this is an imminent-collision risk
 TTC_MED_S = 4.0
 MAX_SPEED_KMH = 150.0  # physically-plausible ceiling; a larger delta is a tracking/IPM artifact, not a speed
 DT_MIN_S, DT_MAX_S = 0.05, 2.0  # usable frame gap for a finite difference
+
+# How far a flat-road IPM estimate can be believed, and why there has to be a limit at all.
+#
+# The ray through a pixel below the horizon meets the ground plane at exactly one point, so the lift always
+# returns an answer. Near the horizon that answer is worthless: the ray is nearly parallel to the road, and
+# the intersection races away. Run unbounded over the real corpus it produced distances with a 95th
+# percentile of 410 m and a maximum of 11,978 m, and lateral offsets spanning 5.5 km, on dashcam frames.
+#
+# The bound is derived rather than picked. For camera height h, an object at forward distance f sits at a
+# ray angle below the horizon of theta = atan(h/f), which for f >> h is about h/f. One pixel of vertical
+# error is d(theta) = 1/fy, so the relative distance error is
+#
+#     df/f = d(theta)/theta = f / (fy * h)
+#
+# and for an error budget tau over a box-bottom precision of dv pixels,
+#
+#     f_max = tau * fy * h / dv
+#
+# A detector's box bottom is not pixel-exact; it moves several pixels frame to frame on the same object,
+# which is what BOX_BOTTOM_JITTER_PX encodes. Beyond f_max the estimate is reported as unmeasured rather
+# than as a number, which is the same rule this codebase already applies to unmeasured confidence: absent
+# evidence must not arrive looking like evidence.
+IPM_ERROR_BUDGET = 0.25        # a box-bottom jitter may move the estimate by at most this fraction
+BOX_BOTTOM_JITTER_PX = 5.0     # observed frame-to-frame movement of a detector's box bottom
+
+# A time to collision is only meaningful while the gap is actually closing at a rate that means something.
+# The guard was closing_mps > 1e-3, one millimetre per second, which divided a large distance by nearly zero
+# and produced times to collision of up to 36 days. Below this the honest answer is that nothing is closing.
+MIN_CLOSING_MPS = 0.5          # about 1.8 km/h of range rate
+MAX_TTC_S = 60.0               # beyond a minute it is not a collision estimate, it is arithmetic
+
+
+def ipm_max_range_m(fy: float, camera_height_m: float) -> float:
+    """Farthest forward distance this camera's flat-road lift can support. See the derivation above."""
+    return IPM_ERROR_BUDGET * fy * camera_height_m / BOX_BOTTOM_JITTER_PX
+
+
+# The range that supports a *trajectory* is much shorter than the one that supports a distance, and the
+# difference is not a matter of taste.
+#
+# A single reading at 150 m with 25% error is a usable rough statement: that bus is far away. Differencing
+# two such readings to get a heading is not, because the differencing keeps the error and throws away the
+# signal. Measured on this corpus the consequence was stark: 79.6% of all tracks classified as U-turns,
+# because objects at 60 to 200 m jumped 114 m forward and 159 m back between consecutive frames at 3fps, and
+# a heading fitted to that swings through a full circle.
+#
+# So the bound for trajectory work comes from a different requirement: the position error per frame must be
+# small compared with how far the object actually moves per frame. From df = f^2 * dv / (fy * h),
+#
+#     f_traj = sqrt(STEP_M * MOTION_FRACTION * fy * h / dv)
+#
+# where STEP_M is the inter-frame relative motion a city scene actually produces and MOTION_FRACTION is how
+# much of it the error may consume before a heading stops meaning anything.
+TRAJECTORY_STEP_M = 4.0        # relative motion between frames at 3fps in city traffic
+TRAJECTORY_ERROR_FRACTION = 0.15   # error may eat at most this much of that step
+
+
+def ipm_max_trajectory_range_m(fy: float, camera_height_m: float) -> float:
+    """Farthest distance at which a *sequence* of lifts supports a heading. See the derivation above."""
+    return math.sqrt(TRAJECTORY_STEP_M * TRAJECTORY_ERROR_FRACTION
+                     * fy * camera_height_m / BOX_BOTTOM_JITTER_PX)
 
 
 def _risk(ttc: float | None, distance: float | None, is_vru: bool, closing_mps: float | None) -> str:
@@ -49,7 +111,6 @@ async def compute_session_dynamics(session_id: UUID) -> dict:
     cfg = get_settings()
     onto = get_ontology()
     rig, sp = cfg.rig, cfg.spatial
-    pitch = math.radians(sp.camera_pitch_deg)
     maker = get_sessionmaker()
 
     async with maker() as db:
@@ -62,19 +123,36 @@ async def compute_session_dynamics(session_id: UUID) -> dict:
             return {"objects": 0, "reason": "no objects in this session"}
 
         # 1. lift every object's ground-contact point to a metric (forward, lateral) position
+        #
+        # Calibration is resolved per camera rather than read from the rig config, because the config
+        # assumes a pitch of exactly zero on every drive and pitch is what sets the horizon row the lift
+        # measures distance against. `resolve_calibration` returns the stored per-session estimate when
+        # there is one and the nominal rig default otherwise, so an uncalibrated session behaves exactly as
+        # it did before. Resolved once per camera, not per object: there are half a million objects.
+        cams_seen = {(r[6], r[7] or rig.ref_width, r[8] or 1080) for r in rows}
+        calib = {}
+        for cam, cw, ch in cams_seen:
+            calib[cam] = await resolve_calibration(session_id, cam, cw, ch)
+
         recs: dict = {}
-        for oid, tid, cid, bbox, fid, ts, cam, w, h, ego in rows:
-            lens = rig.camera_lens.get(cam, "narrow")
-            K = rig.lenses[lens]
-            scale = (w or rig.ref_width) / rig.ref_width
-            fx, fy, cx, cy = K.fx * scale, K.fy * scale, (w or rig.ref_width) / 2.0, (h or 1080) / 2.0
+        for oid, tid, cid, bbox, fid, ts, cam, _w, _h, ego in rows:
+            cal = calib[cam]
+            fx, fy, cx, cy = cal.fx, cal.fy, cal.cx, cal.cy
+            cam_pitch = math.radians(float(cal.rpy_deg[1]))
+            cam_height = float(cal.xyz_m[2]) or sp.camera_height_m
             u, v = (bbox[0] + bbox[2]) / 2.0, bbox[3]   # bottom-centre = where the object meets the road
-            fl = ipm_pixel_to_vehicle(u, v, fx, fy, cx, cy, sp.camera_height_m, pitch,
-                                      dist=K.dist, fisheye=K.model == "fisheye")
+            fl = ipm_pixel_to_vehicle(u, v, fx, fy, cx, cy, cam_height, cam_pitch,
+                                      dist=cal.dist, fisheye=cal.model == "fisheye")
             forward, lateral, dist = (None, None, None)
             if fl is not None:
-                forward, lateral = fl
-                dist = math.hypot(forward, lateral)
+                f_max = ipm_max_range_m(fy, cam_height)
+                cand_fwd, cand_lat = fl
+                # Behind the camera is not a distance, and beyond the usable range the lift is arithmetic
+                # rather than measurement. Both are dropped to None so a consumer sees missing evidence
+                # instead of a confident number.
+                if cand_fwd > 0 and math.hypot(cand_fwd, cand_lat) <= f_max:
+                    forward, lateral = cand_fwd, cand_lat
+                    dist = math.hypot(forward, lateral)
             recs[oid] = {"oid": oid, "tid": tid, "cid": cid, "fid": fid, "ts": ts, "ego": float(ego or 0.0),
                          "forward": forward, "lateral": lateral, "dist": dist}
 
@@ -105,11 +183,22 @@ async def compute_session_dynamics(session_id: UUID) -> dict:
                             heading = math.degrees(math.atan2(lat_speed, fwd_speed))
                             closing_mps = -(r["dist"] - p["dist"]) / dt
                             closing = closing_mps * MPS_TO_KMH
-                            ttc = (r["dist"] / closing_mps) if closing_mps > 1e-3 else None
+                            if closing_mps >= MIN_CLOSING_MPS:
+                                cand_ttc = r["dist"] / closing_mps
+                                # A time to collision beyond the horizon is not a collision estimate. It is
+                                # a large distance divided by an almost-still gap, and reporting it invites
+                                # a downstream rule to treat it as a measurement of safety.
+                                ttc = cand_ttc if cand_ttc <= MAX_TTC_S else None
                 dyn[r["oid"]] = {"speed": speed, "heading": heading, "closing": closing, "ttc": ttc}
 
         # 3. write one row per object (distance always when liftable; speed/etc for tracked frames)
-        await db.execute(delete(ObjectDynamics).where(ObjectDynamics.object_id.in_(list(recs.keys()))))
+        #
+        # Deleted through a subquery on the session's frames rather than an IN list of every object id.
+        # asyncpg caps a statement at 32,767 parameters, so a dense session exceeded it and failed outright:
+        # one of 215 real sessions produced no dynamics at all for that reason. A subquery binds one
+        # parameter regardless of how many objects the session holds.
+        await db.execute(delete(ObjectDynamics).where(
+            ObjectDynamics.frame_id.in_(select(Frame.frame_id).where(Frame.session_id == session_id))))
         tracked = 0
         for oid, r in recs.items():
             d = dyn.get(oid, {})

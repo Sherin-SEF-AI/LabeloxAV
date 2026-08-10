@@ -12,10 +12,13 @@ import pytest
 from services.autolabel.ontology import get_ontology
 
 THINGS = ["sedan", "motorcycle", "autorickshaw", "bus", "pedestrian", "cattle", "pole", "electric_pole",
-          "traffic_sign", "traffic_signal", "street_light", "cone", "push_cart"]
+          "traffic_sign", "traffic_signal", "street_light", "cone", "push_cart",
+          # A billboard has definite edges and can be counted. It was stuff, which meant persist.py dropped
+          # every one the autolabeller proposed, leaving advertising to be labelled traffic_sign instead.
+          "hoarding"]
 STUFF = ["tree", "vegetation", "fallen_tree", "barrier", "crash_barrier", "median_barrier", "guardrail",
          "fence", "buildings", "side_wall", "road", "sidewalk", "median", "sky", "green_belt",
-         "lane_marking", "foot_overbridge", "fly_over", "hoarding"]
+         "lane_marking", "foot_overbridge", "fly_over"]
 
 
 @pytest.mark.parametrize("name", THINGS)

@@ -138,3 +138,107 @@ def test_text_route_uses_groq_then_falls_back_to_ollama(vlm_cfg, monkeypatch):
     import httpx
     monkeypatch.setattr(httpx, "post", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no ollama")))
     assert route_text_json("do a thing") is None
+
+
+# --- the frontier judge provider -------------------------------------------------------------
+#
+# Groq is the throughput path; Anthropic is wired for the job Groq is the wrong shape for, deciding whether
+# an existing label is right on a small crop. The router must treat it exactly as it treats Groq, or the
+# cloud stops being optional and a key outage becomes an outage.
+
+
+@pytest.fixture
+def anthropic_cfg():
+    v = get_settings().models.vlm
+    a = get_settings().anthropic
+    saved = (v.vision_provider, v.text_provider, v.escalate_provider, v.allow_cloud_media, a.api_key)
+    yield v, a
+    (v.vision_provider, v.text_provider, v.escalate_provider, v.allow_cloud_media, a.api_key) = saved
+
+
+def test_anthropic_success_is_used_and_tagged(anthropic_cfg, monkeypatch):
+    v, a = anthropic_cfg
+    v.vision_provider = "anthropic"; v.allow_cloud_media = True; a.api_key = "test-key"
+    client = make_vlm_client()
+    assert isinstance(client, RoutedVlmClient)
+
+    monkeypatch.setattr("services.llm.anthropic_client.AnthropicClient.chat_json",
+                        lambda self, *a_, **k: {"class": "autorickshaw", "confident": True,
+                                                "attributes": {}, "caption": "three-wheeler"})
+    monkeypatch.setattr("services.autolabel.paths.path_c_qwen3vl.OllamaVlmClient.verify",
+                        lambda self, *a_, **k: (_ for _ in ()).throw(AssertionError("ollama should not be called")))
+
+    r = client.verify(CROP, ["autorickshaw", "e_auto"], {})
+    assert r.class_name == "autorickshaw" and r.provider == "anthropic"
+
+
+def test_anthropic_failure_falls_back_to_ollama(anthropic_cfg, monkeypatch):
+    """The property that keeps the cloud optional. Without it, adding a provider adds an outage mode."""
+    from services.llm.anthropic_client import AnthropicError
+
+    v, a = anthropic_cfg
+    v.vision_provider = "anthropic"; v.allow_cloud_media = True; a.api_key = "test-key"
+    client = make_vlm_client()
+
+    monkeypatch.setattr("services.llm.anthropic_client.AnthropicClient.chat_json",
+                        lambda self, *a_, **k: (_ for _ in ()).throw(AnthropicError("anthropic http 429")))
+    monkeypatch.setattr("services.autolabel.paths.path_c_qwen3vl.OllamaVlmClient.verify",
+                        lambda self, *a_, **k: VlmResult(class_name="rider", confident=True, provider="ollama"))
+
+    r = client.verify(CROP, ["rider"], {})
+    assert r.class_name == "rider" and r.provider == "ollama"
+
+
+def test_no_key_means_the_provider_is_simply_not_configured(anthropic_cfg):
+    """Naming a provider without a key must not select it, or local dev breaks on someone else's config."""
+    v, a = anthropic_cfg
+    v.vision_provider = "anthropic"; v.escalate_provider = None; v.allow_cloud_media = True; a.api_key = ""
+    client = make_vlm_client()
+    # RoutedVlmClient is still returned (the provider is named), but it holds no cloud primary and so
+    # behaves as the local floor.
+    assert isinstance(client, RoutedVlmClient) and client._primary is None
+
+
+def test_an_unknown_provider_degrades_to_local_instead_of_crashing(anthropic_cfg):
+    """A typo in vision_provider should cost quality, not availability.
+
+    The previous router compared against the literal "groq", so an unrecognised name silently meant "no
+    cloud". Now that the name is a dictionary lookup, an unknown key has to be handled explicitly or it
+    raises inside the constructor and takes down every Path C call.
+    """
+    v, a = anthropic_cfg
+    v.vision_provider = "anthropik"; v.escalate_provider = None; v.allow_cloud_media = True; a.api_key = "k"
+    client = RoutedVlmClient()
+    assert client._primary is None
+
+
+def test_data_residency_still_wins_over_a_configured_frontier_provider(anthropic_cfg):
+    """allow_cloud_media=False is a DPDPA posture, not a preference: no crop leaves the box whatever the
+    provider says."""
+    from services.autolabel.paths.path_c_qwen3vl import OllamaVlmClient
+
+    v, a = anthropic_cfg
+    v.vision_provider = "anthropic"; v.escalate_provider = None; v.allow_cloud_media = False; a.api_key = "k"
+    assert isinstance(make_vlm_client(), OllamaVlmClient)
+
+
+def test_escalate_can_be_a_different_provider_than_the_primary(anthropic_cfg, monkeypatch):
+    """The configuration this generalisation exists for: fast provider in front, strong one on the hard crop."""
+    v, a = anthropic_cfg
+    g = get_settings().groq
+    saved_g = g.api_key
+    try:
+        v.vision_provider = "groq"; v.escalate_provider = "anthropic"
+        v.allow_cloud_media = True; a.api_key = "ak"; g.api_key = "gk"
+        client = RoutedVlmClient()
+
+        monkeypatch.setattr("services.llm.groq_client.GroqClient.chat_json",
+                            lambda self, *a_, **k: {"class": "e_auto", "confident": False, "attributes": {}})
+        monkeypatch.setattr("services.llm.anthropic_client.AnthropicClient.chat_json",
+                            lambda self, *a_, **k: {"class": "autorickshaw", "confident": True, "attributes": {}})
+
+        r = client.verify(CROP, ["autorickshaw", "e_auto"], {})
+        # the unsure groq verdict is escalated to anthropic, and the provider tag records both facts
+        assert r.class_name == "autorickshaw" and r.provider == "anthropic:escalate"
+    finally:
+        g.api_key = saved_g

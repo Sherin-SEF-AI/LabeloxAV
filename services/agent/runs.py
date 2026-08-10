@@ -6,13 +6,14 @@ prior state/source from the recorded transition, but skips any object a human ha
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from db.models import AgentRun, Object
+from services.agent.resume import fraction_done
 
 log = get_logger("agent.runs")
 
@@ -24,6 +25,12 @@ def run_dict(run: AgentRun) -> dict:
         "changed": len(run.changes or {}), "created_by": run.created_by,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "reverted_at": run.reverted_at.isoformat() if run.reverted_at else None,
+        # The cursor and the last sign of life. Exposed so a caller can show real progress for a job that is
+        # still going, rather than an indeterminate bar that looks identical whether the job is working or
+        # has already died, which is how a run sat "running" for 863 hours without anyone noticing.
+        "progress": dict(run.progress or {}),
+        "heartbeat_at": run.heartbeat_at.isoformat() if run.heartbeat_at else None,
+        "fraction": fraction_done(dict(run.progress or {})),
     }
 
 
@@ -33,6 +40,14 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
         raise ValueError("run not found")
     if run.status != "committed":
         raise ValueError(f"run is {run.status}, only a committed run can be reverted")
+
+    # A class merge moved objects wholesale, including human-labelled ones, so undoing it needs its own
+    # path: the generic restore below deliberately refuses to touch anything a person owns, which is right
+    # for an agent relabel and wrong for reversing an ontology decision.
+    if run.kind == "ontology_merge":
+        from services.agent.ontology_merge import revert_merge
+
+        return await revert_merge(db, run)
 
     # A cleanup sweep removed objects; reverting re-inserts them from the stored snapshots.
     if run.kind == "cleanup_sweep":
@@ -53,7 +68,7 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
             child_reverted += r["reverted"]
             child_children += 1
         run.status = "reverted"
-        run.reverted_at = datetime.now(timezone.utc)
+        run.reverted_at = datetime.now(UTC)
         await db.commit()
         log.info("agent.run.revert_cascade", run_id=str(run_id), children=child_children, reverted=child_reverted)
         return {"run_id": str(run_id), "reverted": child_reverted, "skipped": 0, "children": child_children}
@@ -94,7 +109,7 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
         reverted += 1
 
     run.status = "reverted"
-    run.reverted_at = datetime.now(timezone.utc)
+    run.reverted_at = datetime.now(UTC)
     await db.commit()
     log.info("agent.run.revert", run_id=str(run_id), reverted=reverted, skipped=skipped)
     return {"run_id": str(run_id), "reverted": reverted, "skipped": skipped}

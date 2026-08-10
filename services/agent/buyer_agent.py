@@ -16,6 +16,7 @@ from sqlalchemy import Integer, and_, distinct, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
+from core.observability import spawn
 from db.models import Frame, Object, ObjectDynamics
 
 log = get_logger("agent.buyer_agent")
@@ -107,7 +108,6 @@ async def analyze_spec(db: AsyncSession, text: str) -> dict:
 
 async def fulfill(db: AsyncSession, text: str, name: str, *, created_by: str | None = None) -> dict:
     """Compose the slice, launch the sealed export, and draft the datasheet."""
-    import asyncio
 
     from services.agent.doc_agent import generate_datasheet
     from services.curation.slices import create_slice
@@ -125,7 +125,7 @@ async def fulfill(db: AsyncSession, text: str, name: str, *, created_by: str | N
         except Exception as exc:  # noqa: BLE001
             log.error("buyer.export_failed", error=str(exc))
 
-    asyncio.create_task(_run())
+    spawn(_run(), name="_run")
     datasheet = await generate_datasheet(db, title=name)
     log.info("buyer.fulfill", name=name, slice_id=slice_row.get("slice_id"))
     return {"slice": slice_row, "export": "started (sealed commit)", "datasheet_uri": datasheet["uri"],

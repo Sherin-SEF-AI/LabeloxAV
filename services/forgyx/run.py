@@ -23,14 +23,51 @@ _FORMAT = {"agx_orin_trt": "tensorrt", "orin_nano_trt": "tensorrt", "sentrixai_l
 async def record_benchmark(db: AsyncSession, model_version: str, target: str, latency_ms: dict,
                            throughput_fps: float | None = None, power_w: float | None = None,
                            accuracy_ref: UUID | None = None, artifact_uri: str | None = None) -> dict:
-    """Persist a measured (model, target) benchmark. Devices POST their measured latency/power here."""
+    """Persist a measured (model, target) benchmark. Devices POST their measured latency/power here.
+
+    A named artifact must exist. The table's first three rows named `s3://labeloxav/models/demo/*.bin`, which
+    is not in object storage and never was, and the Pareto gate ranked them anyway. A benchmark whose
+    artifact nobody can fetch is not a weak measurement, it is one that cannot be checked, and it outranks
+    real ones because invented numbers are always flattering.
+
+    A benchmark with no artifact at all is still allowed: a device reporting what it measured on hardware
+    this system does not host is the normal case, and it is honest about having nothing to upload.
+    """
+    from services.forgyx.export import artifact_exists
+
+    if artifact_uri and not artifact_exists(artifact_uri):
+        return {"ok": False, "benchmark_id": None, "target": target,
+                "reason": f"artifact {artifact_uri} is not in object storage; refusing to record a "
+                          "benchmark that cannot be verified"}
     row = Benchmark(model_version=model_version, target=target, latency_ms=latency_ms,
                     throughput_fps=throughput_fps, power_w=power_w, accuracy_ref=accuracy_ref,
                     artifact_uri=artifact_uri)
     db.add(row)
     await db.commit()
     log.info("forgyx.benchmark", model=model_version, target=target, p95=latency_ms.get("p95"))
-    return {"benchmark_id": str(row.benchmark_id), "target": target, "latency_ms": latency_ms}
+    return {"ok": True, "benchmark_id": str(row.benchmark_id), "target": target, "latency_ms": latency_ms}
+
+
+async def audit_benchmarks(db: AsyncSession, limit: int = 1000) -> dict:
+    """Which recorded benchmarks name an artifact that is not there.
+
+    Written because three of them did, and nothing in the system would ever have said so. Reports rather
+    than deletes: a missing artifact can also mean a bucket was rotated under a real measurement, and this
+    cannot tell that apart from a fabrication. Naming them is what lets a human decide.
+    """
+    from services.forgyx.export import artifact_exists
+
+    rows = (await db.execute(select(Benchmark).limit(limit))).scalars().all()
+    unverifiable = []
+    for b in rows:
+        if b.artifact_uri and not artifact_exists(b.artifact_uri):
+            unverifiable.append({"benchmark_id": str(b.benchmark_id), "model_version": b.model_version,
+                                 "target": b.target, "artifact_uri": b.artifact_uri,
+                                 "latency_ms": b.latency_ms})
+    return {"n": len(rows), "n_unverifiable": len(unverifiable), "unverifiable": unverifiable,
+            "detail": (f"{len(unverifiable)} of {len(rows)} benchmarks name an artifact that is not in "
+                       "object storage" if unverifiable else
+                       f"all {len(rows)} benchmarks with an artifact resolve to real bytes")}
 
 
 async def record_deployment(db: AsyncSession, model_version: str, target: str, artifact_uri: str,

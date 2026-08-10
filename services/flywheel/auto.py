@@ -12,7 +12,46 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import FlywheelCycle, Object
 from services.flywheel.controller import adaptive_cycle
+from services.flywheel.gate_signals import demands_for_run, latest_blocked_run
 from services.flywheel.signals import class_starvation, corpus_totals, odd_gaps
+
+
+def _preferred_demands(gate_demands: list[dict], share_demands: list[dict]) -> list[dict]:
+    """Which labeling demands the budget follows when both signals have an opinion.
+
+    Recall wins when it has one. A class named by the gate is a class the gate is refusing to promote over,
+    which is a fact about what is blocking the system today; a class named by share is rare in the corpus,
+    which may or may not be why anything is stuck. Running both let the weaker signal draw budget away from
+    the stronger one, and the corpus has a documented case of exactly that: pedestrian at 514 instances read
+    as healthy by share while sitting at 0.02 recall and blocking every promotion.
+
+    Falls back rather than returning empty, because before any gate verdict exists (a new domain pack, a
+    fresh corpus) share is the only signal there is.
+
+    Gate demands are converted to the shape the rest of this cycle expects, which needs a class_id the gate
+    does not carry, and any class the ontology cannot resolve is dropped rather than guessed at: a demand
+    pointing at no class would silently draw budget and produce no work order.
+    """
+    if not gate_demands:
+        return share_demands
+
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
+    out = []
+    for d in gate_demands:
+        try:
+            cid = onto.by_name(d["class_name"]).id
+        except Exception:  # noqa: BLE001
+            continue
+        out.append({**d, "class_id": cid,
+                    # Everything reaching recall_demands is VRU or animal, so all of it is protected.
+                    "protected": True,
+                    # The allocator reads `delta` for the collection split; the recall deficit is the
+                    # equivalent quantity, and using it keeps an empty class routed to collection.
+                    "delta": -abs(d.get("deficit", 0.0)),
+                    "source": "gate_recall"})
+    return out or share_demands
 
 
 async def candidate_counts(db: AsyncSession, class_ids: list[int]) -> dict[int, int]:
@@ -50,6 +89,25 @@ async def run_auto_cycle(db: AsyncSession, total_label_budget: int = 2000, safet
     Returns the plan (allocation + collection tasks), the real signals that drove it, and a per-class work order
     of candidate objects to label, so the cycle is auditable end to end: a spend traces to the starved class or
     ODD gap that justified it, down to the object ids a reviewer would open."""
+    # Two signals can name a class as needing labels and they disagree, so the precedence is decided here
+    # rather than left to whichever ran.
+    #
+    # `class_starvation` measures a class's share of the labeled corpus. `recall_demands` reads the
+    # promotion gate's own per-class recall arithmetic. Across five operational retrain iterations pedestrian
+    # held 514 training instances, which share calls healthy, and sat at 0.02 recall, which is what actually
+    # blocked promotion. Share answers "is this class rare in the corpus"; recall answers "is this class the
+    # reason nothing can ship". When a blocked run exists the second question is the one worth spending a
+    # label budget on, and running both left them competing for the same budget with the weaker signal
+    # sometimes winning.
+    #
+    # Share is not deleted, because it is the only signal available before any gate verdict exists, which is
+    # the state of a new domain pack or a fresh corpus.
+    gate_demands: list[dict] = []
+    blocked_run = await latest_blocked_run(db)
+    if blocked_run:
+        gate = await demands_for_run(db, blocked_run)
+        gate_demands = gate.get("demands", [])
+
     starve = await class_starvation(db, min_share)
     gaps = await odd_gaps(db)
     totals = await corpus_totals(db)
@@ -57,7 +115,7 @@ async def run_auto_cycle(db: AsyncSession, total_label_budget: int = 2000, safet
     # Split the starved safety classes by whether labeling can still help: a class with candidates left goes to
     # the label budget; an empty class (no labelable instances) cannot be fixed by labeling, so it joins the
     # collection tasks alongside the ODD scene gaps. This is the honest routing the naive controller misses.
-    demands = starve["demands"]
+    demands = _preferred_demands(gate_demands, starve["demands"])
     cand_n = await candidate_counts(db, [d["class_id"] for d in demands])
     labelable = [d for d in demands if cand_n.get(d["class_id"], 0) > 0]
     empty = [d for d in demands if cand_n.get(d["class_id"], 0) == 0]

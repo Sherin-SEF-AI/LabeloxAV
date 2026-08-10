@@ -94,7 +94,12 @@ async def notify(db: AsyncSession, *, kind: str, title: str, body: str | None = 
         _publish(row)
         return str(row.notification_id)
     except Exception as exc:  # noqa: BLE001
-        log.warning("notify.failed", kind=kind, error=str(exc))
+        # Swallowed on purpose: a failed notification must not roll back the work it was announcing. Captured
+        # so the failure is not only a warning line that nobody reads, which is how a notification channel
+        # goes quietly dead.
+        from core.observability import capture
+
+        capture(exc, where="notify", kind=kind, subject_type=subject_type, subject_id=subject_id)
         try:
             await db.rollback()
         except Exception:  # noqa: BLE001

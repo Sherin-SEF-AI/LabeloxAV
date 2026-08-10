@@ -13,6 +13,7 @@ from sqlalchemy import (
     ARRAY,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -20,8 +21,10 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
+
 # Aliased: Asset defines a column literally named `text`, which would shadow the bare sqlalchemy.text
 # helper inside that class body.
 from sqlalchemy import text as sql_text
@@ -204,6 +207,22 @@ class Object(Base):
 
     # Free-form curation tags (explorer): human or bulk-applied marks used to slice and act on labels.
     # Distinct from `attrs`, which is the ontology-typed attribute schema for this class.
+    # How far along the machine-to-human path this label has travelled.
+    #
+    #   machine_proposed  a model put it here and nobody has looked
+    #   machine_accepted  the gate accepted it on confidence, still unseen by a person
+    #   human_edited      a person changed its class or geometry
+    #   human_confirmed   a person looked and said it is right
+    #   track_confirmed   confirmed by spot-checking the track it belongs to
+    #
+    # Separate from `state`, which is the queue, and from `source`, which is who last wrote the row and
+    # collapses to "human" on any touch. None of the three is derivable from the others: an object can be
+    # state=accepted, source=human and still never have been confirmed by the person who nudged its box.
+    lifecycle: Mapped[str | None] = mapped_column(String(24))
+    # Append-only [(state, actor, at)], so a badge that looks wrong can be traced to the write behind it.
+    lifecycle_history: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]")
+
     tags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
 
     frame: Mapped[Frame] = relationship(back_populates="objects")
@@ -299,6 +318,43 @@ class DrivableMask(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ServiceAccount(Base):
+    """A machine credential: an API key bound to an app_user row.
+
+    Every auth path in this system was human, so an integration had to hold a person's password and act as
+    them. A service account is deliberately still a user, so role floors, audit trails and `created_by`
+    provenance keep working unchanged and a machine's actions are attributable the same way a person's are.
+
+    The key itself is never stored. What is stored is the sha256 of the secret half plus the public prefix,
+    which is what the lookup indexes on, so a leaked database yields no usable credential.
+
+    Revocation is a column rather than a token version, because a machine credential has to die the moment
+    somebody presses the button. A bearer token is checked against a version and is otherwise valid until it
+    expires, which is the wrong trade for something that lives in a CI config for a year.
+    """
+
+    __tablename__ = "service_account"
+
+    service_account_id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    # The identity it acts as. CASCADE: deleting the user removes the way to act as them.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="CASCADE"), nullable=False)
+    # Public half of the key, shown in the UI and used to find the row. Unique so a lookup is exact.
+    key_prefix: Mapped[str] = mapped_column(String(24), unique=True, nullable=False, index=True)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Reserved for narrowing a key below its user's role later; empty means the role alone governs.
+    scopes: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    description: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Throttled on write, so "is this key still in use?" is answerable without a write per request.
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class User(Base):
     # "user" is a reserved word in Postgres, so the table is app_user. Lightweight: no password (the
     # current user is chosen client-side); role gates the QA workflow (annotator submits, reviewer approves).
@@ -328,6 +384,136 @@ class Review(Base):
     ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     __table_args__ = (Index("ix_review_object", "object_id"),)
+
+
+class MachineVerdict(Base):
+    """A machine's judgement on an existing label. Deliberately not a Review.
+
+    `review` means a person ruled on this object, and three things depend on that meaning: precision
+    sampling excludes reviewed objects, corpus precision reads the states a human moved, and annotator
+    scorecards count rows there. A VLM opinion written into that table would corrupt all three invisibly,
+    because the rows would look identical.
+
+    Keeping the planes separate is also what makes the method work. A judge has its own error rate, and the
+    only way to measure it is to have humans rule on a subsample and compare. There is nothing to compare
+    against once the two are mixed.
+    """
+
+    __tablename__ = "machine_verdict"
+
+    verdict_id: Mapped[uuid.UUID] = _uuid_pk()
+    object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
+    judge: Mapped[str] = mapped_column(String(32), nullable=False)          # kind of judge, e.g. "vlm"
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)       # anthropic | groq | ollama
+    model_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)        # correct | incorrect | unsure
+    proposed_class_id: Mapped[int | None] = mapped_column(Integer)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    agreement: Mapped[float | None] = mapped_column(Float)                  # multi-vote agreement fraction
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # In the uniqueness key: the same object can appear in two populations being measured for different
+    # reasons, and every reader here filters by batch. Without it, judging a detector sample stole nine
+    # verdicts out of the calibration set and nothing errored.
+    batch_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("verdict in ('correct','incorrect','unsure')", name="ck_machine_verdict_verdict"),
+        UniqueConstraint("object_id", "judge", "model_version", "batch_id",
+                         name="uq_machine_verdict_object_judge_batch"),
+        Index("ix_machine_verdict_batch", "batch_id"),
+        Index("ix_machine_verdict_object", "object_id"),
+    )
+
+
+class UsageRecord(Base):
+    """One metered, billable delivery.
+
+    Unique on (kind, subject_id) because a commit id is content-addressed: exporting the same slice twice
+    returns the same commit, and metering per call would bill twice for one artifact.
+
+    Prices are stamped here at write time rather than joined from config at read time, so recomputing an old
+    invoice cannot silently rewrite what a customer was quoted.
+    """
+
+    __tablename__ = "usage_record"
+
+    record_id: Mapped[uuid.UUID] = _uuid_pk()
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)      # export | inference | judge
+    account: Mapped[str] = mapped_column(String(128), nullable=False, default="default")
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    subject_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    unit: Mapped[str] = mapped_column(String(32), nullable=False)
+    unit_price_inr: Mapped[float | None] = mapped_column(Float)
+    amount_inr: Mapped[float | None] = mapped_column(Float)
+    # Whether this delivery carried a measured quality claim. On the row rather than looked up later, so an
+    # invoice can show which lines were sold uncertified instead of hiding them.
+    certified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    certificate_signature: Mapped[str | None] = mapped_column(String(128))
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+    ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("kind", "subject_id", name="uq_usage_record_kind_subject"),
+        Index("ix_usage_record_account", "account"),
+        Index("ix_usage_record_kind", "kind"),
+    )
+
+
+class Workforce(Base):
+    """A team that labels for a living: an outside vendor, or an internal team routed the same way.
+
+    Internal teams go through the same machinery on purpose. Exempting "our people" from measurement is how
+    a quality bar quietly becomes a quality bar for suppliers only.
+    """
+
+    __tablename__ = "workforce"
+
+    workforce_id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="vendor")  # vendor | internal
+    endpoint: Mapped[str | None] = mapped_column(Text)      # where a dispatch is POSTed; null means pull-only
+    secret: Mapped[str] = mapped_column(String(128), nullable=False)   # HMAC key for this workforce's callbacks
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    capabilities: Mapped[dict] = mapped_column(JSONB, default=dict)    # {"classes": [...], "modalities": [...]}
+    capacity_jobs_per_day: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # The acceptance bar is a commercial term negotiated per vendor, not a global constant.
+    min_honeypot_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.9)
+    contact: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WorkforceAssignment(Base):
+    """One dispatch of one job to one workforce, with its whole life.
+
+    Separate from label_job.assignee_id because a dispatch can be sent, returned, rejected on quality and
+    sent again, possibly elsewhere. A column on the job would keep only the last of those and lose exactly
+    the history that says which workforce is worth using.
+    """
+
+    __tablename__ = "workforce_assignment"
+
+    assignment_id: Mapped[uuid.UUID] = _uuid_pk()
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("label_job.job_id", ondelete="CASCADE"))
+    workforce_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workforce.workforce_id", ondelete="CASCADE"))
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="dispatched")
+    external_ref: Mapped[str | None] = mapped_column(String(128))
+    dispatched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    returned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    honeypot_accuracy: Mapped[float | None] = mapped_column(Float)
+    objects_returned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reason: Mapped[str | None] = mapped_column(Text)
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    __table_args__ = (
+        CheckConstraint("state in ('dispatched','returned','accepted','rejected','expired')",
+                        name="ck_workforce_assignment_state"),
+        Index("ix_workforce_assignment_workforce", "workforce_id", "state"),
+    )
 
 
 class Scenario(Base):
@@ -1191,9 +1377,16 @@ class ErrorCandidate(Base):
     proposed_label: Mapped[dict | None] = mapped_column(JSONB)         # {class_id, class_name} if a fix is suggested
     detail: Mapped[dict] = mapped_column(JSONB, default=dict)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|confirmed_error|dismissed
+    # Who ruled and when. Dismissals used to leave no trace at all, which made them useless as calibration:
+    # confirmed over confirmed-plus-dismissed is the detector's precision, and an untimestamped verdict
+    # cannot be attributed to a detector version or a period.
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_error_candidate_status", "status"), Index("ix_error_candidate_object", "object_id"))
+    __table_args__ = (Index("ix_error_candidate_status", "status"), Index("ix_error_candidate_object", "object_id"),
+                      Index("ix_error_candidate_kind_status", "kind", "status"))
 
 
 class RelabelRun(Base):
@@ -1644,6 +1837,13 @@ class AgentRun(Base):
     changes: Mapped[dict] = mapped_column(JSONB, default=dict)     # {object_id: {from_state, to_state, from_source, to_source}}
     critic: Mapped[dict] = mapped_column(JSONB, default=dict)      # critic findings summary (by check, by object)
     error: Mapped[str | None] = mapped_column(Text)
+    # Written as the job progresses. A `running` row whose heartbeat has gone stale is a job whose process
+    # died, which is the only way to tell it from live work: the task lives in the API process and leaves no
+    # trace when that process goes away.
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The resume cursor, shaped by the job. Opaque on purpose: the only thing every job shares is needing to
+    # say how much is done, and a common shape would make each one lie about its unit of work.
+    progress: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     created_by: Mapped[str | None] = mapped_column(String(64))     # user id that launched it, or "flywheel"
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

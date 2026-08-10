@@ -22,6 +22,20 @@ from core.logging import get_logger
 log = get_logger(__name__)
 
 
+# A frame whose img_uri names no object key can never be fetched, so a batch job that walks the corpus must
+# skip it rather than retry it forever. Expressed as SQL rather than in Python because the jobs that need it
+# select their work with a query, and filtering after the fact still lets the rows consume the batch.
+FETCHABLE_URI_SQL = r"^s3://[^/]+/.+"
+
+
+def is_fetchable_uri(uri: str | None) -> bool:
+    """Whether an object URI has both a bucket and a key, and so could resolve to bytes."""
+    if not uri or not uri.startswith("s3://"):
+        return False
+    _, _, key = uri[len("s3://"):].partition("/")
+    return bool(key)
+
+
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -70,6 +84,12 @@ class ObjectStore:
             raise ValueError(f"not an s3 uri: {uri}")
         rest = uri[len("s3://") :]
         bucket, _, key = rest.partition("/")
+        if not key:
+            # `s3://x.jpg` parses to bucket "x.jpg" and an empty key, which boto3 rejects with
+            # "Invalid length for parameter Key, value: 0" and no mention of the URI that caused it. Fifteen
+            # frames carry exactly that, and chasing the boto3 message back to a row took considerably longer
+            # than it should have. Name the input instead.
+            raise ValueError(f"s3 uri has no object key, only a bucket: {uri}")
         return bucket, key
 
     def put_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:

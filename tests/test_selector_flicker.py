@@ -11,7 +11,6 @@ from core.timebase import now_ns, seconds_to_ns
 
 @pytest.mark.asyncio
 async def test_track_flicker_distinguishes_jittery_from_stable():
-    from sqlalchemy import delete
 
     from db.models import Frame, Object, OntologyClass, OntologyVersion, Track
     from db.models import Session as DbSession
@@ -71,3 +70,22 @@ async def test_track_flicker_distinguishes_jittery_from_stable():
         # re-read track per object to attribute (objects in `scored` do not carry track_id, so check the spread)
         flickers = [it["scores"]["flicker"] for it in scored]
         assert max(flickers) > min(flickers)                 # flicker actually varies across the pool
+
+
+def test_the_flicker_window_is_an_approximation_with_a_stated_bound():
+    """A prefix is a sample, not the whole track, and that has a measured cost.
+
+    Against the exact computation on the live pool a prefix reads flicker about 14% high, because a track
+    jitters most just after initialisation, and per-track ordering is not preserved. What survives is the
+    final value ranking, since flicker is one of seven terms at weight 0.15: window 64 gives Spearman 0.9975
+    with 58 of the top 60 queue positions unchanged. Window 32 was faster and dropped to 54 of 60, which is
+    a visible change to what somebody is asked to review.
+
+    This pins the choice so that lowering it later is a deliberate act rather than a tuning accident.
+    """
+    from services.activelearn.selector import FLICKER_WINDOW
+
+    assert FLICKER_WINDOW >= 64, (
+        "below 64 the review queue's top positions start moving; if this is lowered, re-measure the final "
+        "value ranking rather than the flicker term alone")
+    assert FLICKER_WINDOW < 1000, "an unbounded window is the cost this constant exists to avoid"

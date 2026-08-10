@@ -9,7 +9,7 @@ from uuid import UUID
 
 import cv2
 import numpy as np
-from sqlalchemy import exists, select
+from sqlalchemy import select
 
 from core.config import get_settings
 from core.embeddings import model_versions
@@ -19,6 +19,7 @@ from db.models import Frame, FrameEmbedding, Object, ObjectEmbedding
 from db.session import get_sessionmaker
 from services.autolabel.paths.path_c_qwen3vl import crop_object
 from services.intelligence.embed import dinov3, siglip2
+from services.intelligence.embed.pending import frame_needs_embedding, object_needs_embedding
 from services.intelligence.embed.prep import square_letterbox
 
 log = get_logger("embed_service")
@@ -42,8 +43,8 @@ async def embed_frames(session_id: UUID | None = None, limit: int | None = None,
         if only_missing:
             # NOT EXISTS, not NOT IN: the membership test over the whole id set takes minutes at corpus scale;
             # a hash anti-join on the embedding PK is sub-second (see services/intelligence/embed/daemon.py).
-            stmt = stmt.where(~exists().where(FrameEmbedding.frame_id == Frame.frame_id,
-                                              FrameEmbedding.dino_vec.isnot(None)))
+            # Completeness means both vectors, not a row: see services/intelligence/embed/pending.py.
+            stmt = stmt.where(frame_needs_embedding())
         if limit:
             stmt = stmt.limit(limit)
         rows = (await db.execute(stmt)).all()
@@ -78,7 +79,7 @@ async def embed_objects(session_id: UUID | None = None, limit: int | None = None
         if session_id is not None:
             stmt = stmt.where(Frame.session_id == session_id)
         if only_missing:
-            stmt = stmt.where(~exists().where(ObjectEmbedding.object_id == Object.object_id))
+            stmt = stmt.where(object_needs_embedding())
         if limit:
             stmt = stmt.limit(limit)
         rows = (await db.execute(stmt)).all()

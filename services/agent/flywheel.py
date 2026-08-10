@@ -21,19 +21,19 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
-from db.models import AgentRun, TrainingJob
+from db.models import AgentRun
 from services.agent.frame_agent import commit_frame, plan_frame
 from services.agent.policy import PolicyThresholds
+from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("agent.flywheel")
 
 
 async def _training_running(db: AsyncSession) -> bool:
-    return (await db.execute(select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1))).first() is not None
+    return await training_holds_gpu(db)
 
 
 async def _top_frames(db: AsyncSession, max_frames: int, session_id: str | None) -> list[tuple[str, float]]:

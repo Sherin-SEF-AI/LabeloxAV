@@ -24,7 +24,25 @@ def _infra_up() -> bool:
         return False
 
 
-requires_infra = pytest.mark.skipif(not _infra_up(), reason="infra not up (make up)")
+def _lakefs_up() -> bool:
+    """Relabel lands every proposal on a real lakeFS branch, so Redis answering does not mean this can run.
+
+    Worth checking separately because of how the omission presented. With lakeFS down the test died on a raw
+    urllib3 ConnectionRefusedError four frames inside the SDK, which reads as a broken test rather than a
+    service nobody started, and that is how it came to be recorded as an order-dependent failure when
+    ordering had nothing to do with it. A skip names the missing service instead.
+    """
+    try:
+        import httpx
+
+        ep = get_settings().phase4.lakefs.endpoint
+        return httpx.get(f"{ep}/api/v1/healthcheck", timeout=2).status_code < 400
+    except Exception:
+        return False
+
+
+requires_infra = pytest.mark.skipif(not (_infra_up() and _lakefs_up()),
+                                    reason="infra not up (make up): needs redis and lakefs")
 
 
 def test_diff_classifier_protects_human_and_flags_regression():

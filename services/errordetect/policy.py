@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from db.models import Frame, Object
+from services.errordetect.score import as_suspicion
 
 log = get_logger("ed.policy")
 
@@ -88,7 +89,7 @@ async def detect_policy_violations(db: AsyncSession, session_id: str | None = No
         objs = (await db.execute(select(Object).where(Object.frame_id == fid, Object.source != "human"))).scalars().all()
         for o in objs:
             for rule, score, reason in check_object(o, objs, onto, frame.width, frame.height):
-                out.append({"object_id": str(o.object_id), "kind": "policy_violation", "score": round(score, 4),
+                out.append({"object_id": str(o.object_id), "kind": "policy_violation", "score": as_suspicion(score),
                             "proposed_label": None, "detail": {"rule": rule, "reason": reason}})
     log.info("ed.policy.done", frames=len(frame_ids), violations=len(out), scope=session_id or "corpus")
     return out

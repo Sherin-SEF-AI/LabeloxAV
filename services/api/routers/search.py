@@ -35,6 +35,11 @@ class SimilarIn(BaseModel):
     exclude_track: bool = True    # object search only: drop other crops of the very object you started from
     city: str | None = None       # restrict to one city
     session_id: str | None = None  # restrict to one session
+    # Which plane an uploaded crop searches. `object_id` has always searched objects and `frame_id` frames,
+    # because the query itself said which; an uploaded image says nothing, so it silently meant frames.
+    # "here is a picture of the thing, find me more of it" is the exemplar query people actually want, and
+    # it was unreachable. Defaults to frame so existing callers are unchanged.
+    target: str = "frame"         # frame | object
 
 
 def _decorate_frames(nbrs) -> list[dict]:
@@ -102,6 +107,18 @@ async def search_similar(body: SimilarIn, db: AsyncSession = Depends(db_session)
         img = cv2.imdecode(np.frombuffer(base64.b64decode(body.image_b64), np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             raise HTTPException(400, "could not decode image")
+        if body.target == "object":
+            # An uploaded crop against the object plane: the exemplar query. DINOv3 only, because that is
+            # the space object crops are indexed in and the one that answers "more things that look like
+            # this"; SigLIP2 on a crop would compare a picture against a text-aligned space for no gain.
+            # Letterboxed the same way the indexed crops were, so the query sits in the same distribution
+            # rather than a stretched version of it.
+            from services.intelligence.embed.prep import square_letterbox
+
+            qv = dinov3.encode_image(square_letterbox(img)).tolist()
+            nbrs = await find_similar_objects(db, qv, **common)
+            return {"kind": "object", "mode": "visual",
+                    "results": _decorate_objects(get_ontology(), nbrs)}
         if fused:
             nbrs = await fused_frame_neighbors(db, dinov3.encode_image(img).tolist(),
                                                siglip2.encode_image(img).tolist(), k=body.k)
@@ -149,11 +166,18 @@ async def objects_similar(object_id: str, db: AsyncSession = Depends(db_session)
 
 
 @router.get("/search/semantic")
-async def search_semantic(db: AsyncSession = Depends(db_session), q: str = Query(...), k: int = 24):
-    """Natural-language frame search: parse scene/class filters then SigLIP 2 pgvector rerank."""
-    from services.intelligence.search.query import semantic_search
+async def search_semantic(db: AsyncSession = Depends(db_session), q: str = Query(...), k: int = 24,
+                          rarity_weight: float | None = None):
+    """Natural-language frame search: parse scene/class filters, SigLIP 2 pgvector rerank, rarity blend.
 
-    return await semantic_search(db, q, k=k)
+    `rarity_weight` trades match against how much a frame would teach. The corpus is 88% one class across
+    34,132 frames, so a broad query returns a screenful of the commonest thing in it while the frame worth
+    labelling sits just under the cut. Set 0 for pure similarity; the response always reports which was used.
+    """
+    from services.intelligence.search.query import DEFAULT_RARITY_WEIGHT, semantic_search
+
+    w = DEFAULT_RARITY_WEIGHT if rarity_weight is None else rarity_weight
+    return await semantic_search(db, q, k=k, rarity_weight=w)
 
 
 @router.post("/scene/classify")

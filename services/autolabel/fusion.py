@@ -222,7 +222,7 @@ class FusionEngine:
 
         # class-distribution entropy of the ensemble votes, batched over the frame's objects through the accel
         # kernel; persisted so the active-learning value score reads it (agreement -> 0, split votes -> high).
-        for fo, ent in zip(out, _frame_vote_entropy(vote_weights)):
+        for fo, ent in zip(out, _frame_vote_entropy(vote_weights), strict=False):
             fo.obj.provenance.entropy = ent
         return self._suppress_duplicates(out)
 

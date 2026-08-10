@@ -1,3 +1,13 @@
+// How loudly a queue reason reads. Decided server-side alongside the evidence, so the client renders the
+// ordering rather than recovering it by pattern-matching prose.
+export type TriageSeverity = "high" | "medium" | "low";
+
+export type TriageFlag = {
+  code: string;
+  label: string;
+  severity: TriageSeverity;
+};
+
 export type TriageRow = {
   object_id: string;
   frame_id: string;
@@ -7,6 +17,7 @@ export type TriageRow = {
   conf: number;
   state: string;
   why: string;
+  flags?: TriageFlag[];   // worst first; absent on rows from an older API
   priority: number;
   source?: string;
   import_format?: string | null;
@@ -38,6 +49,13 @@ export type ObjectDetail = {
   keypoints?: Keypoints | null;
   polyline?: number[][] | null;
   cuboid_3d?: { center: number[]; size: number[]; yaw: number } | null;
+  // Sign typing and road text. Read-only: the classifier decides these and a reviewer corrects them by
+  // re-running recognition. Absent until a sign has been typed, and null when it was examined and declined.
+  sign_type?: string | null;
+  sign_category?: string | null;
+  ocr_text?: string | null;
+  ocr_lang?: string | null;
+  ocr_conf?: number | null;
 };
 
 export type OntologyClass = { id: number; name: string; l0: string; l1: string; india: boolean };
@@ -1087,4 +1105,39 @@ export type EventCorpusSummary = {
   by_severity: Record<string, number>;
   cities: Record<string, number>;
   sessions_with_events: number;
+};
+
+// A job whose process stopped before it finished. `fraction` is derived from the job's own cursor and is
+// null when it never recorded a total, which is a different statement from zero progress.
+export type InterruptedRun = {
+  run_id: string;
+  kind: string;
+  scope: Record<string, unknown>;
+  progress: Record<string, unknown>;
+  counts: Record<string, unknown>;
+  fraction: number | null;
+  created_at: string | null;
+  heartbeat_at: string | null;
+  resumable: boolean;
+  error: string | null;
+};
+
+// One unit of autonomous agent work. `fraction` comes from the job's own cursor and is null when the job
+// never recorded a total, which is a different statement from no progress.
+export type AgentRunRow = {
+  run_id: string;
+  kind: string;
+  status: string;
+  scope: Record<string, unknown>;
+  policy: Record<string, unknown>;
+  counts: Record<string, unknown>;
+  critic: Record<string, unknown>;
+  changed: number;
+  created_by: string | null;
+  created_at: string | null;
+  reverted_at: string | null;
+  progress: Record<string, unknown>;
+  heartbeat_at: string | null;
+  fraction: number | null;
+  error?: string | null;
 };

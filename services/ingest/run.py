@@ -20,6 +20,7 @@ from geoalchemy2.elements import WKTElement
 from core.bus import TOPIC_FRAME_READY, EventBus
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
+from core.observability import spawn
 from core.schemas import SessionManifest
 from core.storage import get_object_store
 from core.timebase import now_ns
@@ -220,22 +221,20 @@ async def ingest(
     # off the ingestion critical path; a failure here never fails the ingest.
     if mcap_uri:
         try:
-            import asyncio
 
             from services.inspector.indexer import index_session_bg
 
-            asyncio.create_task(index_session_bg(session_id))
+            spawn(index_session_bg(session_id), name="index_session_bg")
         except Exception as exc:  # noqa: BLE001
             log.warning("ingest.index_schedule_failed", error=str(exc))
 
     # Multi-camera (M-MC.0): assemble the synchronized frame groups so the rig canvas can navigate whole
     # groups and surface dropouts. Best-effort and off the critical path, like the Inspector index.
     try:
-        import asyncio
 
         from services.multicam.sync import persist_groups
 
-        asyncio.create_task(persist_groups(session_id))
+        spawn(persist_groups(session_id), name="persist_groups")
     except Exception as exc:  # noqa: BLE001
         log.warning("ingest.frame_groups_schedule_failed", error=str(exc))
 

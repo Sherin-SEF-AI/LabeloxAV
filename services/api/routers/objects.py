@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from uuid import UUID
 
@@ -162,6 +163,14 @@ def _detail(obj: Object, frame: Frame, onto) -> ObjectDetail:
         keypoints=obj.keypoints,
         polyline=obj.polyline,
         cuboid_3d=obj.cuboid_3d,
+        # Sign typing and road text have lived on the object since 0016 and were served by nothing, so a
+        # wrong sign_type was invisible to the one person able to correct it. Read-only here; correcting it
+        # is a review action, not a field edit.
+        sign_type=obj.sign_type,
+        sign_category=obj.sign_category,
+        ocr_text=obj.ocr_text,
+        ocr_lang=obj.ocr_lang,
+        ocr_conf=obj.ocr_conf,
     )
 
 
@@ -526,6 +535,101 @@ async def _log_frame_view(db: AsyncSession, frame, user) -> None:
         pass
 
 
+class CropSheetIn(BaseModel):
+    object_ids: list[str]
+    cell: int = 128                  # each crop is letterboxed into a square cell of this many pixels
+    pad: float = 0.15
+    cols: int = 0                    # 0 = choose a near-square sheet
+
+
+# A grid of 200 crops is 200 of these, and each one fetches a whole frame from the object store and decodes
+# it. Objects cluster on frames (16 to a frame on this corpus), so the same JPEG is fetched and decoded
+# dozens of times over. That is what makes a contact sheet unusable rather than slow.
+MAX_SHEET_CROPS = 400
+
+
+@router.post("/objects/crops")
+async def object_crop_sheet(payload: CropSheetIn, db: AsyncSession = Depends(db_session)):
+    """One sprite sheet holding many crops, plus the map of where each landed.
+
+    Grouped by frame so every frame is fetched and decoded exactly once however many of its objects are
+    requested, and the decode runs in a worker thread because it is CPU-bound work inside an async handler.
+
+    Returned as a sheet rather than as N images because a grid wants one request, not N: at 200 tiles the
+    per-request overhead alone dominates, and browsers cap concurrent connections per host, so the tail of
+    the grid arrives long after the reviewer has looked at it.
+    """
+    import asyncio
+    import base64
+
+    ids = payload.object_ids[:MAX_SHEET_CROPS]
+    if not ids:
+        return {"cell": payload.cell, "cols": 0, "rows": 0, "count": 0, "placements": [], "sheet": None}
+    cell = max(32, min(int(payload.cell), 512))
+
+    rows = (await db.execute(
+        select(Object.object_id, Object.bbox, Frame.frame_id, Frame.img_uri)
+        .join(Frame, Frame.frame_id == Object.frame_id)
+        .where(Object.object_id.in_([UUID(i) for i in ids])))).all()
+    # Requested order is the reviewer's order, so the sheet must follow it rather than the database's.
+    by_id = {str(r[0]): r for r in rows}
+    ordered = [by_id[i] for i in ids if i in by_id]
+    if not ordered:
+        raise HTTPException(404, "none of those objects exist")
+
+    cols = payload.cols or max(1, int(math.ceil(math.sqrt(len(ordered)))))
+    n_rows = int(math.ceil(len(ordered) / cols))
+
+    def _build() -> tuple[bytes | None, list[dict]]:
+        store = get_object_store()
+        sheet = np.zeros((n_rows * cell, cols * cell, 3), dtype=np.uint8)
+        placements: list[dict] = []
+        cache_uri, cache_img = None, None
+        for i, (oid, bbox, _fid, uri) in enumerate(ordered):
+            if uri != cache_uri:
+                cache_uri = uri
+                try:
+                    buf = np.frombuffer(store.get_bytes(uri), dtype=np.uint8)
+                    cache_img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+                except Exception:  # noqa: BLE001  one missing frame must not lose the whole sheet
+                    cache_img = None
+            r, c = divmod(i, cols)
+            # A tile is emitted even when its crop failed, so the client's index arithmetic still lines up
+            # and the gap is visible as a blank cell rather than shifting every later tile by one.
+            place = {"object_id": str(oid), "row": r, "col": c, "ok": False}
+            if cache_img is not None:
+                h, w = cache_img.shape[:2]
+                x1, y1, x2, y2 = bbox
+                px, py = (x2 - x1) * payload.pad, (y2 - y1) * payload.pad
+                cx1, cy1 = max(0, int(x1 - px)), max(0, int(y1 - py))
+                cx2, cy2 = min(w, int(x2 + px)), min(h, int(y2 + py))
+                crop = cache_img[cy1:cy2, cx1:cx2]
+                if crop.size:
+                    ch, cw = crop.shape[:2]
+                    s = min(cell / cw, cell / ch)
+                    tw, th = max(1, int(cw * s)), max(1, int(ch * s))
+                    resized = cv2.resize(crop, (tw, th), interpolation=cv2.INTER_AREA)
+                    # Letterboxed rather than stretched: a squashed crop changes the aspect ratio a
+                    # reviewer uses to tell a rider from a pedestrian.
+                    oy, ox = (cell - th) // 2, (cell - tw) // 2
+                    sheet[r*cell + oy: r*cell + oy + th, c*cell + ox: c*cell + ox + tw] = resized
+                    place.update(ok=True, w=tw, h=th)
+            placements.append(place)
+        ok, enc = cv2.imencode(".jpg", sheet, [cv2.IMWRITE_JPEG_QUALITY, 82])
+        return (enc.tobytes() if ok else None), placements
+
+    data, placements = await asyncio.get_running_loop().run_in_executor(None, _build)
+    frames_touched = len({r[3] for r in ordered})
+    return {
+        "cell": cell, "cols": cols, "rows": n_rows, "count": len(ordered),
+        # How much work the grouping saved, so the claim that this is cheaper is checkable rather than
+        # asserted: one decode per frame against one per crop.
+        "frames_decoded": frames_touched, "crops": len(ordered),
+        "placements": placements,
+        "sheet": ("data:image/jpeg;base64," + base64.b64encode(data).decode()) if data else None,
+    }
+
+
 @router.get("/objects/{object_id}/crop")
 async def object_crop(object_id: str, pad: float = 0.15, db: AsyncSession = Depends(db_session)):
     """A JPEG crop of the object's bbox (with padding) for the track timeline thumbnails."""
@@ -554,20 +658,19 @@ async def object_crop(object_id: str, pad: float = 0.15, db: AsyncSession = Depe
 
 @router.post("/segment")
 async def segment(payload: SegmentIn, db: AsyncSession = Depends(db_session)):
-    from sqlalchemy import select
-
-    from db.models import TrainingJob
     from services.api.sam_service import segment as run_segment
+    from services.training.gpu_lease import gpu_busy_detail
 
     # Single-GPU discipline: interactive segmentation yields to an active training job. Loading SAM
     # on top of a running train would OOM and KILL the multi-hour job, so refuse cleanly (no GPU touch).
     # Box-level review (accept/reject/reclassify) needs no GPU and still works.
-    running = (await db.execute(
-        select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1)
-    )).first()
-    if running is not None:
-        raise HTTPException(503, "GPU reserved for an active training job. Interactive segmentation is "
-                                 "paused until it finishes; box review (accept/reject/reclassify) still works.")
+    #
+    # Liveness comes from the job's heartbeat rather than its status column, because a run killed by a crash
+    # or a stopped container leaves the column at "running" and would otherwise refuse every request from
+    # then on, promising a GPU that is already free.
+    busy = await gpu_busy_detail(db)
+    if busy:
+        raise HTTPException(503, busy)
 
     frame = await db.get(Frame, UUID(payload.frame_id))
     if frame is None:

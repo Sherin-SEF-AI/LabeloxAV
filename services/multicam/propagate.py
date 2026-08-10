@@ -19,7 +19,6 @@ review (a human confirms the geometry), and linked into the source's rig identit
 
 from __future__ import annotations
 
-import math
 from uuid import UUID
 
 import numpy as np

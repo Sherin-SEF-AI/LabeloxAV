@@ -16,7 +16,7 @@ from services.forgyx.capabilities import available_targets
 from services.forgyx.cooptimize import plan_cooptimization
 from services.forgyx.gate import dual_gate
 from services.forgyx.packaging import plan_rollout
-from services.forgyx.run import benchmark_matrix, record_benchmark
+from services.forgyx.run import audit_benchmarks, benchmark_matrix, record_benchmark
 from services.forgyx.thermal import thermal_envelope
 
 router = APIRouter()
@@ -62,6 +62,39 @@ async def ingest_benchmark(payload: BenchIn, db: AsyncSession = Depends(db_sessi
     """Ingest a benchmark measured on a target device (Jetson/Android/Hailo report their real numbers here)."""
     return await record_benchmark(db, payload.model_version, payload.target, payload.latency_ms,
                                   payload.throughput_fps, payload.power_w, artifact_uri=payload.artifact_uri)
+
+
+class ExportIn(BaseModel):
+    imgsz: int = 640
+    runs: int = 50
+    prefer_cuda: bool = True
+
+
+@router.post("/forgyx/export/{model_version}")
+async def export_model(model_version: str, payload: ExportIn, db: AsyncSession = Depends(db_session)):
+    """Export a registered model to ONNX, store the artifact, and time it on this machine.
+
+    The first thing in FORGYX that produces an artifact. The module could rank targets, sign manifests and
+    plan rollouts, but nothing in it could make the thing all of that was about.
+
+    The target is named for the runtime that actually served the measurement, so a CPU fallback is never
+    filed as a GPU result. Boards this system does not host report their own numbers through
+    POST /forgyx/benchmark instead: an Orin figure has to come from an Orin.
+    """
+    from services.forgyx.export import export_and_benchmark
+
+    return await export_and_benchmark(db, model_version, imgsz=payload.imgsz, runs=payload.runs,
+                                      prefer_cuda=payload.prefer_cuda)
+
+
+@router.get("/forgyx/benchmarks/audit")
+async def benchmarks_audit(db: AsyncSession = Depends(db_session)):
+    """Which recorded benchmarks name an artifact that is not in object storage.
+
+    Reports rather than deletes. A missing artifact can mean a fabricated row or a rotated bucket under a
+    real measurement, and this cannot tell those apart; naming them is what lets somebody who knows decide.
+    """
+    return await audit_benchmarks(db)
 
 
 class GateIn(BaseModel):

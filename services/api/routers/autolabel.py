@@ -8,7 +8,6 @@ heavy, so the API is somewhat less responsive while it runs. A dedicated worker 
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,10 +15,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
-from db.models import AutolabelJob, TrainingJob
+from core.observability import spawn
+from db.models import AutolabelJob
 from db.models import Session as DbSession
 from db.session import get_sessionmaker
 from services.api.deps import AutolabelStartIn, db_session
+from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("api_autolabel")
 router = APIRouter()
@@ -58,7 +59,7 @@ async def _run_guarded(job_id, session_id, limit) -> None:
 
 @router.post("/autolabel/start")
 async def start(payload: AutolabelStartIn, db: AsyncSession = Depends(db_session)):
-    if (await db.execute(select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1))).first():
+    if await training_holds_gpu(db):
         raise HTTPException(503, "GPU reserved for a training job; autolabel is paused until it finishes")
     if (await db.execute(select(AutolabelJob.job_id).where(AutolabelJob.status == "running").limit(1))).first():
         raise HTTPException(409, "an autolabel job is already running")
@@ -82,7 +83,7 @@ async def start(payload: AutolabelStartIn, db: AsyncSession = Depends(db_session
         await mark_queued_for_cloud(job_id, payload.session_id, payload.limit)
         return {"job_id": str(job_id), "status": "queued-cloud"}
 
-    asyncio.create_task(_run_guarded(job_id, uuid.UUID(payload.session_id), payload.limit))
+    spawn(_run_guarded(job_id, uuid.UUID(payload.session_id), payload.limit), name="_run_guarded")
     return {"job_id": str(job_id), "status": "pending"}
 
 
@@ -107,7 +108,7 @@ async def pii_backfill(limit: int = 2000, session_id: str | None = None, db: Asy
         except Exception as exc:  # noqa: BLE001
             log.error("pii_backfill.failed", error=str(exc))
 
-    asyncio.create_task(_go())
+    spawn(_go(), name="_go")
     return {"status": "running", "limit": limit}
 
 
@@ -117,16 +118,15 @@ async def redetect_all(backfill_pii: bool = True, db: AsyncSession = Depends(db_
     plus a PII backfill of pre-gate frames. Sequential on one GPU, yields to training. Background; poll the
     returned run and the per-session autolabel jobs."""
     from db.models import AgentRun
-
     from services.autolabel.redetect import redetect_and_backfill
 
-    if (await db.execute(select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1))).first():
+    if await training_holds_gpu(db):
         raise HTTPException(503, "GPU reserved for a training job; re-detection is paused until it finishes")
     run_id = uuid.uuid4()
     db.add(AgentRun(run_id=run_id, kind="redetect_all", scope={}, status="running", policy={}, counts={},
                     changes={}, critic={}, created_by="redetect"))
     await db.commit()
-    asyncio.create_task(redetect_and_backfill(run_id, backfill_pii=backfill_pii))
+    spawn(redetect_and_backfill(run_id, backfill_pii=backfill_pii), name="redetect_and_backfill")
     return {"run_id": str(run_id), "status": "running"}
 
 

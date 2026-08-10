@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,7 +61,7 @@ async def run_audit(run_id: uuid.UUID, *, sample_size: int = 200, vlm_calls: int
 
     onto = get_ontology()
     store = get_object_store()
-    since = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+    since = datetime.now(UTC) - timedelta(hours=since_hours)
     budget = TokenBudget(vlm_calls)
 
     # VLM verifier (independent-model spot check). Absent/disabled Ollama -> critic + control only.
@@ -234,7 +234,7 @@ async def maybe_run_nightly(db: AsyncSession) -> dict:
     """Off-hours hook for the runtime scheduler: run once per calendar day (AgentRun as the marker)."""
     from services.agent.runtime.report import ran_since
 
-    day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    day_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     if await ran_since(db, _KIND, day_start):
         return {"ran": False, "reason": "already ran today"}
     res = await launch_audit(db, created_by="scheduler")

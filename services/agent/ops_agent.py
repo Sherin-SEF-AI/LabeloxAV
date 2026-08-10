@@ -17,7 +17,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
+from core.observability import spawn
 from db.models import AgentRun
+from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("agent.ops_agent")
 
@@ -56,12 +58,11 @@ async def _t_materialize(db: AsyncSession, args: dict) -> dict:
 
 
 async def _t_autolabel(db: AsyncSession, args: dict) -> dict:
-    import asyncio
 
-    from db.models import AutolabelJob, TrainingJob
+    from db.models import AutolabelJob
     from db.session import get_sessionmaker
 
-    if (await db.execute(select(TrainingJob.job_id).where(TrainingJob.status == "running").limit(1))).first():
+    if await training_holds_gpu(db):
         return {"error": "GPU reserved for a training job; autolabel paused"}
     if (await db.execute(select(AutolabelJob.job_id).where(AutolabelJob.status == "running").limit(1))).first():
         return {"error": "an autolabel job is already running"}
@@ -90,12 +91,11 @@ async def _t_autolabel(db: AsyncSession, args: dict) -> dict:
                     j.status, j.error = "error", str(exc)
                     await d.commit()
 
-    asyncio.create_task(_run())
+    spawn(_run(), name="_run")
     return {"job_id": str(job_id), "status": "running"}
 
 
 async def _t_export(db: AsyncSession, args: dict) -> dict:
-    import asyncio
 
     from services.export.dataset import SliceSpec, export_dataset
 
@@ -109,7 +109,7 @@ async def _t_export(db: AsyncSession, args: dict) -> dict:
         except Exception as exc:  # noqa: BLE001
             log.error("ops.export_failed", error=str(exc))
 
-    asyncio.create_task(_run())
+    spawn(_run(), name="_run")
     return {"status": "export started", "formats": spec.formats, "name": spec.name}
 
 

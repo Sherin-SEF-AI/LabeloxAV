@@ -45,13 +45,44 @@ const STATE_COLOR: Record<string, string> = {
   challenger: "text-info border-info",
 };
 
-export function StateBadge({ state }: { state: string }) {
+// Which sources mean "a machine put this here". `source` collapses to "human" the moment a person touches
+// the row, so anything not in this set was last written by a person.
+const MACHINE_SOURCES = new Set([
+  "fused", "auto_accept", "imported", "recall", "interpolated", "interp", "propagated", "relabel",
+]);
+
+export function StateBadge({ state, source, conf }: { state: string; source?: string; conf?: number }) {
   const cls = STATE_COLOR[state] ?? "text-ink-2 border-line";
+
+  // Who accepted this, drawn rather than described.
+  //
+  // `accepted` and `auto_accept` both rendered solid green with no actor, so an object sitting at 0.34
+  // confidence looked exactly like one a reviewer had ruled on. That badge is what an annotator reads to
+  // decide whether to trust a label, and it was answering a different question than the one being asked.
+  //
+  // Dashed is machine, solid is human, matching the stroke grammar used on canvas. A machine acceptance is
+  // still green, because the gate did accept it; it just no longer claims a person did.
+  const machine = source != null && MACHINE_SOURCES.has(source);
+  const border = machine ? "border-dashed" : "border-solid";
+
+  // The pathology worth naming: accepted, but on a score the gate would not auto-accept today. Silent
+  // before, and the exact case where "accepted" reads as more settled than it is.
+  const weak = conf != null && conf < 0.6 && (state === "accepted" || state === "auto_accept");
+
+  const title = machine
+    ? `accepted by ${source}, no human has ruled on it`
+    : source
+      ? `last written by ${source}`
+      : undefined;
+
   return (
     // Never wraps. "queued-cloud" broke onto two lines in the jobs and training tables and pushed those
     // rows taller than their neighbours, which reads as a layout fault rather than a long word.
-    <span className={`inline-block whitespace-nowrap font-mono text-[11px] uppercase tracking-wide border px-1.5 py-0.5 ${cls}`}>
+    <span title={title}
+      className={`inline-flex items-center gap-1 whitespace-nowrap font-mono text-[11px] uppercase tracking-wide border ${border} px-1.5 py-0.5 ${cls}`}>
       {state}
+      {machine && <span className="opacity-70 normal-case tracking-normal">auto</span>}
+      {weak && <span className="text-warn normal-case tracking-normal" title="below the auto-accept floor">low</span>}
     </span>
   );
 }

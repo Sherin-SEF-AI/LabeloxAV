@@ -109,10 +109,28 @@ class VlmSettings(BaseModel):
     enabled: bool = True
     # ollama is the working default on this box (bitsandbytes 4-bit is unusable on Blackwell here,
     # and transformers 4.47 lacks Qwen3-VL). transformers backend kept for boxes where it works.
-    backend: str = "ollama"  # ollama | transformers | vllm
+    backend: str = "ollama"  # ollama | llamacpp | transformers | vllm
+    # llama-server (llama.cpp) as an alternative local backend. It takes a JSON schema in `response_format`
+    # and compiles it to GBNF itself, so the shortlist is enforced during sampling rather than requested in
+    # the prompt, and the prompt is then identical across objects and worth prefix-caching. Unset by
+    # default: this changes which process serves Path C, and that is a deployment decision, not a default.
+    llamacpp_url: str = "http://localhost:8080"
+    llamacpp_model: str = ""   # empty means whatever the server has loaded
     model: str = "Qwen/Qwen2-VL-2B-Instruct"  # transformers backend; target: Qwen3-VL-4B
     ollama_url: str = "http://localhost:11434"
     ollama_tag: str = "qwen2.5vl:7b"  # locally available; target: qwen3-vl:4b
+    # The model that judges existing labels, when it should differ from the one that proposes them.
+    #
+    # Separate because the two jobs are different and were measured separately. `ollama_tag` is read by
+    # eight call sites: the Path C verifier, road-text and ANPR OCR, captioning, VLM QA and the ops agent.
+    # The judge was measured against 118 human decisions and qwen3-vl:8b-instruct-q8_0 won on the axes that
+    # matter (specificity 0.89 against 0.80, equal superclass sensitivity, and it actually abstains where
+    # qwen2.5vl:7b returned `unsure` zero times in 547 crops). None of that says anything about naming an
+    # object, which is what the other seven callers ask for, so changing one tag for all of them would be
+    # generalising a measurement past what it covers.
+    #
+    # Empty means "use ollama_tag", so this costs nothing until somebody sets it.
+    judge_tag: str = ""
     quant: str = "nf4"
     max_context: int = 8192
     crop_margin: float = 0.15
@@ -126,10 +144,10 @@ class VlmSettings(BaseModel):
     # cloud path. Text (nl/intent) and vision (Path C) are chosen independently so text can go cloud while
     # vision stays local. A missing GROQ_API_KEY, a cloud failure, or an open circuit all fall back to ollama,
     # so the cloud is never a hard dependency.
-    text_provider: str = "ollama"      # ollama | groq  (nl.py / intent, text-only, no media leaves the box)
-    vision_provider: str = "ollama"    # ollama | groq  (Path C VLM verifier)
+    text_provider: str = "ollama"      # ollama | groq | anthropic  (nl.py / intent, text-only, no media leaves the box)
+    vision_provider: str = "ollama"    # ollama | groq | anthropic  (Path C VLM verifier)
     escalate_provider: str | None = None  # optional stronger provider re-asked only on a not-confident verdict
-    allow_cloud_media: bool = True     # False keeps image crops local even when vision_provider=groq (data residency)
+    allow_cloud_media: bool = True     # False keeps crops local even when the provider is a cloud one (data residency)
     breaker_threshold: int = 3         # consecutive cloud failures before the circuit opens
     breaker_cooldown_s: float = 60.0   # how long the circuit stays open before a half-open retry
 
@@ -144,6 +162,41 @@ class GroqSettings(BaseModel):
     text_model: str = "llama-3.3-70b-versatile"
     vision_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     timeout_s: float = 30.0
+
+
+class AnthropicSettings(BaseModel):
+    """Anthropic cloud inference (Messages API). Optional in exactly the way Groq is: an empty api_key means
+    "not configured" and the router falls back to the local provider, so nothing here is a hard dependency.
+
+    Present alongside Groq rather than instead of it because they answer different questions. Groq is the
+    fast cloud path for the autolabel stream; this is the judge, re-read on a crop the corpus could not
+    otherwise get a verdict on, where being right matters more than being quick.
+
+    The key comes from the environment (LBX_ANTHROPIC__API_KEY or ANTHROPIC_API_KEY) and is an outbound
+    credential rather than a secret protecting LabeloxAV, so it stays out of _require_prod_secrets.
+    """
+    api_key: str = ""
+    base_url: str = "https://api.anthropic.com/v1"
+    api_version: str = "2023-06-01"
+    text_model: str = "claude-sonnet-5"
+    vision_model: str = "claude-sonnet-5"
+    # The judge re-reads one crop and answers with a short JSON object, so the ceiling only has to cover a
+    # verdict plus a one-line reason. Kept tight because a runaway generation on a 300-crop batch is a real
+    # cost, not a theoretical one.
+    max_tokens: int = 1024
+    timeout_s: float = 60.0
+
+
+class BillingSettings(BaseModel):
+    """Prices for metered deliveries, in INR per unit.
+
+    Zero by default, and deliberately so: a system that starts charging because somebody deployed a new
+    version is worse than one that meters quantity and leaves the rate to be set explicitly. A price of
+    zero still records the delivery, the quantity and the certification status, which is the part that
+    cannot be reconstructed after the fact.
+    """
+    unit_price_inr: dict[str, float] = {"export": 0.0, "inference": 0.0, "judge": 0.0}
+    default_account: str = "default"
 
 
 class ClipSettings(BaseModel):
@@ -166,7 +219,12 @@ class DrivableSettings(BaseModel):
 
 class SignSettings(BaseModel):
     taxonomy_path: str = "ontology/signs_in_v0.yaml"
-    siglip_scale: float = 100.0    # softmax temperature on the zero-shot logits
+    # How far the best sign type must beat the best "not a sign" prompt before the type is written. Cosine
+    # similarities from SigLIP 2 are already L2-normalised, so this is in similarity units, not probability.
+    # Set from the corpus: real sign crops clear the negatives comfortably, while vehicles and blank patches,
+    # which the previous version typed confidently, do not. Raising it types fewer signs and gets fewer
+    # wrong; a sign left untyped costs a lookup, a sign typed wrongly is exported and believed.
+    min_margin: float = 0.02
     vlm_for_unusual: bool = True   # read unusual / text-bearing signs with Qwen-VL (duty-cycled)
 
 
@@ -443,6 +501,9 @@ class OntologySettings(BaseModel):
         "cattle", "dog", "buffalo", "goat",
         # the real, common road infrastructure (IDD has sign/light; pole and barrier are everywhere)
         "traffic_sign", "traffic_signal", "pole", "barrier", "road_divider", "speed_bump",
+        # Advertising is grounded alongside signs rather than left out. Without a class of its own to land
+        # in, every hoarding the detector saw was proposed as a traffic_sign.
+        "hoarding",
     ])
     promotion_min_instances: int = 50  # verified (gate-accepted) instances a class must earn to re-enter
 
@@ -904,6 +965,8 @@ class Settings(BaseSettings):
     forgyx: ForgyxSettings = ForgyxSettings()  # FORGYX edge-deployment signing (data engine plane)
     anpr: AnprSettings = AnprSettings()        # ANPR-India (security domain; pack-gated on 'anpr')
     groq: GroqSettings = GroqSettings()        # optional Groq cloud inference (text + vision), ollama fallback
+    anthropic: AnthropicSettings = AnthropicSettings()  # optional frontier judge (text + vision), same fallback
+    billing: BillingSettings = BillingSettings()  # metered delivery pricing (0 by default; metering still records)
 
     @model_validator(mode="after")
     def _groq_key_from_env(self):
@@ -911,6 +974,14 @@ class Settings(BaseSettings):
         environment variable just works. The explicit LBX form still wins if both are set."""
         if not self.groq.api_key:
             self.groq.api_key = os.environ.get("GROQ_API_KEY", "")
+        return self
+
+    @model_validator(mode="after")
+    def _anthropic_key_from_env(self):
+        """Same courtesy for ANTHROPIC_API_KEY. Separate validator rather than folded into the Groq one so
+        that adding a third provider does not mean editing a function named after the first."""
+        if not self.anthropic.api_key:
+            self.anthropic.api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         return self
 
     @classmethod

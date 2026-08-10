@@ -17,28 +17,80 @@ from services.autolabel.ontology import get_ontology
 router = APIRouter()
 
 
-def _why_and_priority(obj: Object, onto) -> tuple[str, float]:
+# How loudly each reason should read. A defect and a piece of context are not the same news, and rendering
+# them identically is what made a screen of flags unsortable by eye.
+#
+#   high    something is probably wrong with this object
+#   medium  worth a look, and the reason the ranker put it here
+#   low     context; true, but not on its own a call to act
+#
+# Severity lives here rather than in the client because the evidence that decides it lives here. The web app
+# previously recovered it by running regexes over the joined prose, which put the taxonomy in two places and
+# meant a wording change silently restyled the queue.
+FLAG_SEVERITY = {
+    "mask_box": "high",
+    "class_conflict": "high",
+    "low_conf": "medium",
+    "rare_class": "low",
+    "review_band": "low",
+}
+
+# Named for what the reader is being asked to check, not for the comparison that produced them. "mask != box"
+# is a column name; the annotator's question is whether the outline fits the box.
+FLAG_LABEL = {
+    "mask_box": "Outline off box",
+    "class_conflict": "Class conflict",
+    "low_conf": "Low confidence",
+    "rare_class": "Rare class",
+    "review_band": "In review band",
+}
+
+# The prose kept on `why`, so existing readers of that field are unaffected.
+FLAG_PROSE = {
+    "mask_box": "mask != box",
+    "class_conflict": "class conflict",
+    "rare_class": "rare class",
+    "low_conf": "low conf",
+    "review_band": "review band",
+}
+
+_SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
+
+# The score below which a detection counts as unconfident. Strictly below: 0.6 is the floor and is not itself
+# low, which is the sort of boundary a later `<=` moves without anybody noticing.
+LOW_CONF_FLOOR = 0.6
+
+
+def _why_and_priority(obj: Object, onto) -> tuple[str, float, list[dict]]:
+    """The reasons this object is in the queue, its rank, and those reasons as sorted structured flags."""
     c = onto.by_id(obj.class_id)
     prov = obj.provenance or {}
     rare = c.india or c.l1 == "fallback"
     mask_box = bool(prov.get("mask_box_disagree"))
     conflict = sum(1 for p in prov.get("proposals", []) if p.get("verdict") == "overruled") > 0 and len(prov.get("proposals", [])) > 1
 
-    reasons = []
+    codes = []
     if mask_box:
-        reasons.append("mask != box")
+        codes.append("mask_box")
     if conflict:
-        reasons.append("class conflict")
+        codes.append("class_conflict")
     if rare:
-        reasons.append("rare class")
-    if obj.conf < 0.6:
-        reasons.append("low conf")
-    why = ", ".join(reasons) or "review band"
+        codes.append("rare_class")
+    if obj.conf < LOW_CONF_FLOOR:
+        codes.append("low_conf")
+    # An object can sit in the review band with nothing wrong with it. That is not a defect and must not be
+    # dressed as one, so it gets its own low flag rather than an empty list the client has to interpret.
+    if not codes:
+        codes.append("review_band")
+
+    codes.sort(key=lambda code: _SEVERITY_RANK[FLAG_SEVERITY[code]])
+    flags = [{"code": code, "label": FLAG_LABEL[code], "severity": FLAG_SEVERITY[code]} for code in codes]
+    why = ", ".join(FLAG_PROSE[code] for code in codes)
 
     uncertainty = 1.0 - obj.conf
     rarity = 2.0 if rare else 1.0
     boost = 1.0 + (0.5 if mask_box else 0.0) + (0.5 if conflict else 0.0)
-    return why, round(uncertainty * rarity * boost, 4)
+    return why, round(uncertainty * rarity * boost, 4), flags
 
 
 @router.get("/triage", response_model=list[TriageRow])
@@ -74,7 +126,7 @@ async def triage(
     rows = (await db.execute(stmt)).all()
     out: list[TriageRow] = []
     for obj, sid in rows:
-        why, priority = _why_and_priority(obj, onto)
+        why, priority, flags = _why_and_priority(obj, onto)
         out.append(
             TriageRow(
                 object_id=str(obj.object_id),
@@ -85,6 +137,7 @@ async def triage(
                 conf=obj.conf,
                 state=obj.state,
                 why=why,
+                flags=flags,
                 priority=priority,
                 source=obj.source,
                 import_format=(obj.provenance or {}).get("import_format"),

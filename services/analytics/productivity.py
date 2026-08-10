@@ -12,7 +12,6 @@ from collections import defaultdict
 
 from sqlalchemy import func, select
 
-from core.config import get_settings
 from core.logging import get_logger
 from db.models import Object, Review, TrainingJob
 from db.session import get_sessionmaker

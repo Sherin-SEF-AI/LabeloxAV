@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,17 +56,41 @@ async def lichtblick_link(session_id: str, db: AsyncSession = Depends(db_session
 
 @router.get("/inspector/sessions", dependencies=[Depends(require_role("annotator"))])
 async def list_sessions(limit: int = 100, db: AsyncSession = Depends(db_session)) -> list[dict]:
-    """MCAP sessions available to inspect, each with its latest health verdict for the session-list chip."""
-    from db.models import SessionHealth
+    """Sessions there is something to inspect in, each with its latest health verdict for the list chip.
 
+    Not only MCAP sessions. That filter was correct when every panel was fed by a recording, and it stopped
+    being correct when the 3D panel arrived: this deployment has one session with an MCAP and 124 with point
+    clouds, so the panel was effectively unreachable through the product's own navigation.
+
+    A session with clouds but no recording still has a clock of its own, extracted frames and geometry, all
+    addressed by timestamp. What it does not have is topics, so the flags travel with each row and the page
+    can say which panels will do anything rather than opening seven empty ones.
+    """
+    from sqlalchemy import func, or_
+
+    from db.models import PointCloud, SessionHealth
+
+    cloud_sessions = select(PointCloud.session_id).distinct().scalar_subquery()
     rows = (await db.execute(
-        select(DbSession).where(DbSession.mcap_uri.isnot(None)).order_by(DbSession.created_at.desc()).limit(limit))).scalars().all()
+        select(DbSession)
+        .where(or_(DbSession.mcap_uri.isnot(None), DbSession.session_id.in_(cloud_sessions)))
+        .order_by(DbSession.created_at.desc()).limit(limit))).scalars().all()
+
+    ids = [s.session_id for s in rows]
+    cloud_counts: dict = {}
+    if ids:
+        cloud_counts = {sid: int(n) for sid, n in (await db.execute(
+            select(PointCloud.session_id, func.count())
+            .where(PointCloud.session_id.in_(ids)).group_by(PointCloud.session_id))).all()}
+
     out = []
     for s in rows:
         h = (await db.execute(select(SessionHealth.verdict).where(SessionHealth.session_id == s.session_id)
                               .order_by(SessionHealth.created_at.desc()).limit(1))).scalar_one_or_none()
         out.append({"session_id": str(s.session_id), "vehicle_id": s.vehicle_id, "city": s.city,
-                    "start_ts_ns": s.start_ts_ns, "end_ts_ns": s.end_ts_ns, "verdict": h})
+                    "start_ts_ns": s.start_ts_ns, "end_ts_ns": s.end_ts_ns, "verdict": h,
+                    "has_mcap": s.mcap_uri is not None,
+                    "n_clouds": cloud_counts.get(s.session_id, 0)})
     return out
 
 
@@ -103,6 +127,35 @@ async def annotations_at(session_id: str, ts_ns: int, db: AsyncSession = Depends
     from services.inspector.events import annotations_at as _ann
 
     return await _ann(db, _parse_sid(session_id), ts_ns)
+
+
+@router.get("/inspector/sessions/{session_id}/cloud", dependencies=[Depends(require_role("annotator"))])
+async def session_cloud(session_id: str, ts_ns: int, max_points: int = 200_000,
+                        db: AsyncSession = Depends(db_session)) -> Response:
+    """The point cloud nearest `ts_ns`, as interleaved float32 [x, y, z, intensity].
+
+    Binary rather than JSON: a 500,000-point cloud is about 6MB raw and several times that as text, and the
+    browser can map these bytes straight into a Float32Array with no parse step at all.
+
+    The counts and the time offset ride in headers so the panel can caption itself honestly: how many points
+    of how many it is drawing, and how far from the playhead the nearest cloud actually was.
+    """
+    from services.inspector.cloud import cloud_payload
+
+    out = await cloud_payload(db, _parse_sid(session_id), ts_ns, max_points=max_points)
+    if out is None:
+        raise HTTPException(404, "no point cloud for this session")
+    return Response(
+        content=out["bytes"], media_type="application/octet-stream",
+        headers={
+            "X-Cloud-Id": out["cloud_id"], "X-Cloud-Ts-Ns": out["ts_ns"],
+            "X-Cloud-Source": out["source"], "X-Cloud-Points": str(out["returned"]),
+            "X-Cloud-Total": str(out["total"]), "X-Cloud-Truncated": str(out["truncated"]).lower(),
+            "X-Cloud-Delta-Ms": str(out["delta_ms"]),
+            # Without this the browser cannot read any of the above from a fetch response.
+            "Access-Control-Expose-Headers": ("X-Cloud-Id, X-Cloud-Ts-Ns, X-Cloud-Source, X-Cloud-Points, "
+                                              "X-Cloud-Total, X-Cloud-Truncated, X-Cloud-Delta-Ms"),
+        })
 
 
 def _parse_sid(session_id: str) -> uuid.UUID:

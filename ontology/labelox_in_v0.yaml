@@ -24,6 +24,21 @@ attributes:
   indicator:      { type: enum, values: ["off", left, right, hazard] }
   lane_position:  { type: enum, values: [ego, left, right, oncoming, opposite] }
   occlusion_pct:  { type: int }                 # precise 0-100 occlusion when the bucket is not enough
+  # Body style, as an attribute rather than as nine classes.
+  #
+  # The four_wheeler classes claim to separate sedan, hatchback, SUV, MPV, pickup and the rest. The corpus
+  # does not: 134,281 of 142,447 four-wheelers are labelled `sedan`, which is 94.3%, against a hatchback
+  # share of 0.3% on roads where the best-selling cars are hatchbacks. `sedan` is functioning as a `car`
+  # class that happens to be spelled sedan.
+  #
+  # A judge good enough to notice makes that visible rather than causing it: re-judging a random 300-crop
+  # sample, 128 of its 140 rejections proposed another four-wheeler and only 2 said the label named the
+  # wrong kind of thing. That reads as 51% label precision on the strict class and 96% at superclass level.
+  #
+  # Declared here so the distinction has somewhere to live that is not the class id. Additive on purpose:
+  # no class is removed, no object is relabelled, and nothing downstream changes until somebody chooses to
+  # populate it. Collapsing the classes or relabelling 142,447 objects is a larger decision and is not this.
+  body_style:     { type: enum, values: [sedan, hatchback, suv, mpv, van, pickup, coupe, wagon, unknown] }
   signal_arrow:   { type: enum, values: ["none", left, right, straight, u_turn] }
   signal_kind:    { type: enum, values: [vehicle, pedestrian, cyclist] }
   signal_mount:   { type: enum, values: [pole, gantry, wall, portable] }
@@ -35,7 +50,7 @@ attributes:
 attribute_scope:
   two_wheeler:   [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, helmet, passenger_load, overload, static]
   three_wheeler: [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, passenger_load, overload, livery, static]
-  four_wheeler:  [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, livery, static]
+  four_wheeler:  [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, livery, static, body_style]
   heavy:         [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, articulated, overload, livery, static]
   vru:           [occlusion, occlusion_pct, truncation, direction, motion, lane_position, on_shoulder, helmet]
   animal:        [occlusion, occlusion_pct, truncation, motion, on_shoulder, static]

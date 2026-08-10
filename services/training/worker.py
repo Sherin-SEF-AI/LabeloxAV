@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 
 import click
-from sqlalchemy import select, text, update
+from sqlalchemy import select, text
 
 from core.config import get_settings
 from core.logging import get_logger, setup_logging

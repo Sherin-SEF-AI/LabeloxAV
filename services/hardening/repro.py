@@ -45,7 +45,7 @@ def _first_divergence(a, b, path="") -> str | None:
     if isinstance(a, list) and isinstance(b, list):
         if len(a) != len(b):
             return f"{path}[len {len(a)} != {len(b)}]"
-        for i, (x, y) in enumerate(zip(a, b)):
+        for i, (x, y) in enumerate(zip(a, b, strict=False)):
             d = _first_divergence(x, y, f"{path}[{i}]")
             if d is not None:
                 return d

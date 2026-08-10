@@ -78,17 +78,18 @@ def cluster_labels(X: np.ndarray, min_cluster_size: int = 15) -> np.ndarray:
     """HDBSCAN density labels over the source vectors (-1 = noise). Clustering the high-dimensional vectors
     rather than the 2D coordinates keeps the grouping faithful to the real embedding structure instead of to
     projection artifacts. Returns all-noise when the set is too small or the fit fails."""
+    from core.clustering import hdbscan_labels
+
     n = X.shape[0]
     if n < max(3, min_cluster_size):
         return np.full(n, -1, dtype=int)
-    try:
-        import hdbscan  # noqa: PLC0415
-
-        return np.asarray(
-            hdbscan.HDBSCAN(min_cluster_size=min_cluster_size).fit_predict(X), dtype=int)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("projection.hdbscan_failed", error=str(exc))
+    labels = hdbscan_labels(X, min_cluster_size=min_cluster_size)
+    if labels is None:
+        # All-noise rather than a threshold fallback: this feeds a visual map, and a map drawn by a
+        # different algorithm than the one the legend describes is worse than a map with no clusters.
+        log.warning("projection.hdbscan_unavailable", n=n)
         return np.full(n, -1, dtype=int)
+    return labels
 
 
 def _fit_2d(X: np.ndarray, method: str, n_neighbors: int, min_dist: float,

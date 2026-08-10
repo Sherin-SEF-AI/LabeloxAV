@@ -64,6 +64,12 @@ models:
     model: Qwen/Qwen2-VL-2B-Instruct
     ollama_url: http://localhost:11434
     ollama_tag: "qwen2.5vl:7b"
+    # The judge, measured against 118 human decisions taken from review history.
+    # qwen3-vl:8b-instruct-q8_0 beats qwen2.5vl:7b on specificity (0.89 to 0.80), ties on superclass
+    # sensitivity (0.946 to 0.947), and abstains on hard crops where the older model returned `unsure`
+    # zero times in 547. Set here rather than on ollama_tag, because that tag also drives Path C, road-text
+    # and ANPR OCR, captioning, VLM QA and the ops agent, and none of those were measured.
+    judge_tag: "qwen3-vl:8b-instruct-q8_0"
     quant: nf4               # 30B forbidden on this box; context capped well below 256K
     max_context: 8192
     crop_margin: 0.15

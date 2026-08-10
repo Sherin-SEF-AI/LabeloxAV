@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.api.deps import current_user, db_session, require_role
+from services.api.deps import db_session, require_role
 from services.labelops import issues as issue_svc
 from services.labelops import jobs as job_svc
 from services.labelops import quality as quality_svc
@@ -195,3 +195,76 @@ async def resolve_issue(issue_id: str, reopen: bool = False, user=Depends(requir
 async def scorecards(project_id: str | None = None, db: AsyncSession = Depends(db_session)):
     """Per-annotator throughput and honeypot quality."""
     return {"scorecards": await quality_svc.annotator_scorecards(db, project_id=project_id)}
+
+
+@router.post("/labelops/precision-batch", dependencies=[Depends(require_role("reviewer"))])
+async def make_precision_batch(target: int = 300, db: AsyncSession = Depends(db_session)):
+    """Stamp a random sample of machine labels for review, to measure how many of them are correct.
+
+    Distinct from the active-learning queue on purpose. That queue surfaces the hardest objects, which is
+    right for improving a model and wrong for measuring one: judging it reports the accuracy of the worst
+    objects in the corpus rather than of the corpus. This samples randomly within class instead.
+    """
+    from services.labelops.precision_batch import build_precision_batch
+
+    return await build_precision_batch(db, target=target)
+
+
+@router.get("/labelops/precision/{batch_id}")
+async def read_precision(batch_id: str, db: AsyncSession = Depends(db_session)):
+    """Precision per class and for the corpus, from whatever of the batch has been judged so far.
+
+    Reports both the sample figure and a corpus figure re-weighted by how common each class actually is,
+    because the batch over-samples rare classes deliberately and quoting the first as the second is the
+    mistake this exists to prevent. Every rate carries a Wilson interval, so a number from 12 objects cannot
+    be mistaken for one from 12,000.
+    """
+    from services.labelops.precision_batch import corpus_precision
+
+    return await corpus_precision(db, batch_id)
+
+
+@router.post("/labelops/prereview/{batch_id}", dependencies=[Depends(require_role("reviewer"))])
+async def run_prereview(batch_id: str, limit: int | None = None,
+                        db: AsyncSession = Depends(db_session)):
+    """Have a VLM judge every label in a batch, so a person adjudicates instead of judging from scratch.
+
+    A reviewer action because it spends money and writes verdicts. Idempotent: re-running the same judge
+    updates rows rather than doubling them, and a different model version stands beside the old one instead
+    of overwriting it, which is what lets two judges be compared on the same crops.
+    """
+    from services.labelops.vlm_review import prereview_batch
+
+    return await prereview_batch(db, batch_id, limit=limit)
+
+
+@router.get("/labelops/prereview/{batch_id}")
+async def read_prereview(batch_id: str, model_version: str | None = None,
+                         agreement_batch_id: str | None = None,
+                         db: AsyncSession = Depends(db_session)):
+    """Machine-judged precision for a batch, and how much that judgement is worth.
+
+    Returns the judge's raw agreement rate and, separately, that rate corrected for the judge's own measured
+    error. The two are never collapsed: the raw figure is a blend of how good the labels are and how good
+    the judge is, and quoting it as precision embeds the judge's error in every claim downstream. When too
+    few objects carry both a machine verdict and a human ruling, the corrected figure is null and the caveat
+    says what the raw number actually represents.
+    """
+    from services.labelops.vlm_review import judged_precision
+
+    return await judged_precision(db, batch_id, model_version=model_version,
+                                  agreement_batch_id=agreement_batch_id)
+
+
+@router.get("/labelops/judge-agreement")
+async def read_judge_agreement(model_version: str | None = None, batch_id: str | None = None,
+                               db: AsyncSession = Depends(db_session)):
+    """How well the machine judge tracks human reviewers, on the objects where both have ruled.
+
+    The scoreboard for the judge itself. Sensitivity and specificity here are what make a machine-derived
+    precision quotable, and `usable` is false when the judge has not been compared against enough human
+    verdicts to say anything, which is the honest state for most of this corpus today.
+    """
+    from services.labelops.vlm_review import judge_agreement
+
+    return await judge_agreement(db, model_version=model_version, batch_id=batch_id)

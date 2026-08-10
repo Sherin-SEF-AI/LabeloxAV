@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import get_settings
 from db.models import Object
 from services.autolabel.calibrate import calibrate_confidence
-from services.autolabel.gate import class_auto_accept, is_rare, vlm_confirmed
+from services.autolabel.gate import class_auto_accept, is_rare
 from services.autolabel.ontology import get_ontology
 
 _PATH_LABEL = {

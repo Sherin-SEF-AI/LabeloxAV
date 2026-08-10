@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, type AgentPlan , humanizeError } from "@/lib/api";
 import { Busy } from "@/components/Spinner";
+import { OpPrecisionChip, fetchOpState } from "@/components/agent/OpPrecision";
 
 // The frame agent, surfaced in the editor. It runs a dry-run plan first (writes nothing), shows what it
 // would auto-accept vs route to a human plus any consistency-critic flags, and only then lets a reviewer
@@ -13,7 +14,10 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
   const [plan, setPlan] = useState<AgentPlan | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
+  const [previewed, setPreviewed] = useState<Set<string>>(new Set());
   const [msg, setMsg] = useState<string | null>(null);
+  const [intent, setIntent] = useState<{ action: string; classes: string[] | string;
+                                         conf_min: number | null } | null>(null);
   const [cmd, setCmd] = useState("");
   const [suggestions, setSuggestions] = useState<{ action: string; label: string }[]>([]);
   const [copilot, setCopilot] = useState<{ pattern: { from_name: string; to_name: string; to_class: number; count: number } | null; candidates: string[] } | null>(null);
@@ -26,6 +30,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
   }, [frameId]);
 
   const doBatchFix = async () => {
+    if (!(await guardUnmeasured("copilot_batch", "batch-fix"))) return;
     if (!copilot?.pattern || !copilot.candidates.length) return;
     setBusy("batch"); setMsg(null);
     try {
@@ -37,6 +42,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
   };
 
   const doAttributes = async () => {
+    if (!(await guardUnmeasured("attribute", "fill attributes"))) return;
     setBusy("attrs"); setMsg(null);
     try {
       const p = await api.agentAttributesPlan(frameId);
@@ -50,6 +56,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
   };
 
   const doRelabel = async () => {
+    if (!(await guardUnmeasured("relabel", "relabel this frame"))) return;
     setBusy("relabel"); setMsg(null);
     try {
       const p = await api.agentRelabelPlan(frameId);
@@ -63,6 +70,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
   };
 
   const doCuboids = async () => {
+    if (!(await guardUnmeasured("cuboid", "fit 3D boxes"))) return;
     setBusy("cuboids"); setMsg(null);
     try {
       const p = await api.agentCuboidsPlan(frameId);
@@ -107,8 +115,15 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
     try {
       const r = await api.agentCommand(frameId, text);
       setMsg(r.summary);
+      // The resolved intent, shown rather than discarded. services/agent/nl.py returns it precisely so a
+      // person sees what the agent understood before and after it acts, and this panel was reading it only
+      // to decide whether to refresh. An agent whose interpretation is invisible is one you have to trust
+      // instead of check.
+      setIntent(r.intent);
       if (["accept", "revert"].includes(r.intent.action) && !r.blocked) onApplied?.();
-    } catch (e) { setMsg("command failed: " + humanizeError(e)); }
+    // Clear the intent on failure: a stale "understood as accept" beside an error reads as though
+    // the agent acted, which is the opposite of what happened.
+    } catch (e) { setIntent(null); setMsg("command failed: " + humanizeError(e)); }
     finally { setBusy(null); }
   };
 
@@ -129,6 +144,20 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
     } catch (e) { setMsg("commit failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };
+  // An operation with no measurement behind it cannot apply straight away. It has to be previewed first,
+  // and what it produces goes to review rather than being auto-accepted. This is the product behaviour the
+  // 404 from the harness is for, not a degraded mode: the alternative is a button that writes to the corpus
+  // on the strength of a number nobody computed.
+  const guardUnmeasured = async (opType: string, label: string): Promise<boolean> => {
+    const st = await fetchOpState(opType);
+    if (st.measured) return true;
+    if (previewed.has(opType)) return true;
+    setPreviewed((v) => new Set(v).add(opType));
+    setMsg(`${label} has no measured precision. Previewed instead of applied; press again to apply, and `
+      + "results will route to review.");
+    return false;
+  };
+
   const doRevert = async () => {
     if (!runId) return;
     setBusy("revert"); setMsg(null);
@@ -157,17 +186,17 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
         <button onClick={doCuboids} disabled={!!busy}
           title="lift every 2D vehicle/VRU box on this frame to a 3D cuboid (monocular, reprojection-validated)"
           className="font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
-          {busy === "cuboids" ? "fitting..." : "fit 3D boxes"}
+          {busy === "cuboids" ? "fitting..." : "fit 3D boxes"} <OpPrecisionChip opType="cuboid" />
         </button>
         <button onClick={doAttributes} disabled={!!busy}
           title="auto-fill the derivable attributes (occlusion, truncation, static, direction)"
           className="font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
-          {busy === "attrs" ? "filling..." : "fill attributes"}
+          {busy === "attrs" ? "filling..." : "fill attributes"} <OpPrecisionChip opType="attribute" />
         </button>
         <button onClick={doRelabel} disabled={!!busy}
           title="an independent model re-reads every box and corrects the class where it decisively disagrees (reversible)"
           className={`col-span-2 flex items-center justify-center gap-1.5 font-mono text-[10px] border px-2 py-1 rounded hover:border-accent disabled:opacity-40 ${busy === "relabel" ? "running border-accent/40" : "border-line"}`}>
-          {busy === "relabel" && <Busy />}{busy === "relabel" ? "re-reading labels..." : "relabel this frame (AI reasoning)"}
+          {busy === "relabel" && <Busy />}{busy === "relabel" ? "re-reading labels..." : "relabel this frame (AI reasoning)"} <OpPrecisionChip opType="relabel" />
         </button>
       </div>
 
@@ -268,6 +297,21 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
         </div>
       )}
       {msg && <div className="px-1 pt-1 font-mono text-[9.5px] text-ink-3">{msg}</div>}
+      {intent && (
+        <div className="px-1 pt-0.5 font-mono text-[9.5px] text-ink-3">
+          understood as{" "}
+          <span className="text-accent">{intent.action}</span>
+          {Array.isArray(intent.classes) && intent.classes.length > 0 && (
+            <> on <span className="text-ink">{intent.classes.join(", ")}</span></>
+          )}
+          {!Array.isArray(intent.classes) && intent.classes && (
+            <> on <span className="text-ink">{String(intent.classes)}</span></>
+          )}
+          {intent.conf_min != null && <> above <span className="text-ink">{intent.conf_min}</span></>}
+          {(!intent.classes || (Array.isArray(intent.classes) && !intent.classes.length)) &&
+            intent.conf_min == null && <span className="text-warn"> nothing in particular</span>}
+        </div>
+      )}
     </div>
   );
 }

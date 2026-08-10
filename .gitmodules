@@ -1,0 +1,4 @@
+[submodule "integrations/dashlab"]
+	path = integrations/dashlab
+	url = https://github.com/Sherin-SEF-AI/DashLab.git
+	branch = main

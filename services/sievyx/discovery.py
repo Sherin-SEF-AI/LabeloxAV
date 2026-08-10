@@ -7,8 +7,6 @@ Reuses the existing SIEVYX DINO embeddings; pure over an embedding matrix, so it
 
 from __future__ import annotations
 
-import importlib.util
-
 import numpy as np
 
 
@@ -17,23 +15,16 @@ def _normalize(X: np.ndarray) -> np.ndarray:
 
 
 def _connected_components(cos: np.ndarray, thr: float) -> list[list[int]]:
-    n = cos.shape[0]
-    parent = list(range(n))
+    """Transitive closure of "similar above thr", from core.clustering.
 
-    def find(a):
-        while parent[a] != a:
-            parent[a] = parent[parent[a]]
-            a = parent[a]
-        return a
+    Components rather than greedy centroids on purpose: a rare group strung out in embedding space is still
+    one group, and splitting it because its members form a chain is exactly the failure this detector exists
+    to avoid. That chaining would be wrong for the ontology steward, which is why the two linkages stay
+    distinct rather than being merged into one clustering function.
+    """
+    from core.clustering import connected_components
 
-    for i in range(n):
-        for j in range(i + 1, n):
-            if cos[i, j] >= thr:
-                parent[find(i)] = find(j)
-    groups: dict[int, list[int]] = {}
-    for i in range(n):
-        groups.setdefault(find(i), []).append(i)
-    return list(groups.values())
+    return connected_components(cos, thr)
 
 
 def discover_rare_clusters(embeddings, ids: list[str], min_size: int = 2, sim_thr: float = 0.6) -> list[dict]:
@@ -44,12 +35,15 @@ def discover_rare_clusters(embeddings, ids: list[str], min_size: int = 2, sim_th
     if n < min_size:
         return []
 
-    if importlib.util.find_spec("hdbscan") is not None:
-        import hdbscan
-        labels = hdbscan.HDBSCAN(min_cluster_size=max(2, min_size)).fit_predict(X)
+    from core.clustering import hdbscan_labels
+
+    labels = hdbscan_labels(X, min_cluster_size=max(2, min_size))
+    if labels is not None:
         clusters = [[i for i in range(n) if labels[i] == c] for c in sorted(set(labels)) if c != -1]
         method = "hdbscan"
     else:
+        # Recorded in the output, because the two methods do not agree and a run that silently substituted
+        # one for the other would be uncomparable with the run before it.
         clusters = _connected_components(X @ X.T, sim_thr)
         method = "threshold_cc"
 

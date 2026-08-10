@@ -95,7 +95,7 @@ def _check_temporal(obj, v: CriticVerdict, c: CriticContext) -> None:
     # teleport: consecutive centroids jumping most of the frame in one step
     diag = (c.width ** 2 + c.height ** 2) ** 0.5
     ordered = sorted(hist, key=lambda r: r[0])
-    for (t0, _c0, x0, y0), (t1, _c1, x1, y1) in zip(ordered, ordered[1:]):
+    for (t0, _c0, x0, y0), (t1, _c1, x1, y1) in zip(ordered, ordered[1:], strict=False):
         if diag > 0 and ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5 > _TELEPORT_FRAC * diag:
             v.flag("temporal", "track centroid teleports between consecutive frames")
             break

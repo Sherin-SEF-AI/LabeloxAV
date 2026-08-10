@@ -29,6 +29,12 @@ dependencies = [
     "opencv-python-headless==4.10.0.84",
     "supervision==0.25.1",
     "pyarrow==18.1.0",
+    # The annotation lake. A SQL catalog on the Postgres already running and data files in the object store
+    # already running, so publishing labels as Iceberg needs no catalog service of its own.
+    "pyiceberg[s3fs,sql-postgres]==0.11.1",
+    # Not a runtime dependency of the API: it is what verifies the published lake is readable by an ordinary
+    # query engine, which is the whole claim the lake makes.
+    "duckdb==1.5.5",
     "mcap==1.2.1",
     "mcap-protobuf-support==0.5.2",
     "mcap-ros2-support==0.5.7",
@@ -81,6 +87,19 @@ edge = [
     # exported model the simplified one and keeps the export offline-safe.
     "onnxslim==0.1.34",
 ]
+# Telemetry sinks. Both stay inert without configuration (no SENTRY_DSN, no OTLP endpoint), which is why
+# they are pinned here rather than left to a deployment to remember: the path that reports a dead background
+# job should not be one an environment can forget to install.
+observability = [
+    "sentry-sdk[fastapi]>=2.19",
+    # Client only. The tracking server runs as a container against the Postgres and MinIO already here.
+    "mlflow-skinny>=2.19",
+    "opentelemetry-sdk>=1.29",
+    "opentelemetry-exporter-otlp-proto-http>=1.29",
+    "opentelemetry-instrumentation-fastapi>=0.50b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.50b0",
+]
+
 dev = [
     "pytest==8.3.4",
     "pytest-asyncio==0.25.0",
@@ -139,7 +158,10 @@ target-version = "py311"
 # would mean either hand-editing a file whose whole point is that it is regenerated, or teaching the
 # generator every style rule. Its correctness is checked by parsing it and by `--check` in CI, which is the
 # property that actually matters: that it matches the server.
-extend-exclude = ["sdk/generated_client.py"]
+# integrations/ holds git submodules: other repositories, vendored at a pinned commit. Linting them reports
+# 321 findings nobody here can act on, and `make fmt` runs `ruff check --fix` over the tree, which would
+# rewrite another project's source in place and leave its submodule permanently dirty.
+extend-exclude = ["sdk/generated_client.py", "integrations/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

@@ -232,3 +232,11 @@ fmt: ## Format and lint
 .PHONY: lint-imports
 lint-imports: ## Enforce the engine-core-does-not-import-packs contract (.importlinter)
 	$(RUN) lint-imports
+
+.PHONY: lint-web
+lint-web: ## ESLint the frontend (blocking on errors; hook-dependency findings are warnings)
+	cd web && npx next lint
+
+.PHONY: check-gold
+check-gold: ## Fail if the gold set evaluations score against has lost objects (needs a live corpus, not CI)
+	$(RUN) python -m scripts.check_gold_integrity --active-only
