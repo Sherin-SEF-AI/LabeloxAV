@@ -416,10 +416,15 @@ export async function lidarCloudPoints(
 export const api = {
   // Measured precision for one batch operation. Throws on 404, which is the unmeasured state and is a real
   // answer rather than an error to swallow silently.
+  //
+  // The `/api` prefix was missing on both of these, so they resolved against the Next.js page router and
+  // 404ed there instead of reaching the backend. The client could not tell: its unmeasured path is also a
+  // 404, so a route that never existed read exactly like a measurement nobody had taken, and the batch
+  // panels have been silently forcing dry runs on that basis rather than on evidence.
   opPrecisionLatest: (opType: string) =>
     get<{ precision: number; recall: number | null; n: number; dataset_slice: string; caveat: string }>(
-      `/eval/operations/${encodeURIComponent(opType)}/latest`),
-  opPrecisionAll: () => get<{ operations: Record<string, unknown>; kinds: string[] }>("/eval/operations"),
+      `/api/eval/operations/${encodeURIComponent(opType)}/latest`),
+  opPrecisionAll: () => get<{ operations: Record<string, unknown>; kinds: string[] }>("/api/eval/operations"),
 
   lidarClouds: (sessionId: string) =>
     get<{ session_id: string; clouds: LidarCloud[] }>(`/api/lidar/sessions/${sessionId}/clouds`),

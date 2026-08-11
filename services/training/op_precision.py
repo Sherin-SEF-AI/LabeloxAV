@@ -58,7 +58,21 @@ OPERATION_KINDS = (
 )
 
 
-async def measure_operation(db, op_kind: str, *, since_ns: int | None = None) -> dict:
+# asyncpg refuses a statement carrying more than 32,767 bound parameters, so an IN clause over the objects a
+# kind has touched cannot be sent in one go. `relabel` alone reaches that: the corpus pass left 34,067
+# committed child runs, one per frame, and this endpoint began returning 500 the moment it finished. Chunked
+# well under the ceiling rather than at it, because the same statement carries a handful of other parameters
+# and a limit hit in production is a 500, not a slow query.
+ID_CHUNK = 8_000
+
+
+def _chunks(items: list, size: int) -> list[list]:
+    """Split a list into batches of at most `size`, preserving order."""
+    return [items[i:i + size] for i in range(0, len(items), size)] if items else []
+
+
+async def measure_operation(db, op_kind: str, *, since_ns: int | None = None,
+                            id_chunk: int = ID_CHUNK) -> dict:
     """Precision for one operation kind, or an explicit statement that it is not measurable yet."""
     from sqlalchemy import select
 
@@ -82,10 +96,18 @@ async def measure_operation(db, op_kind: str, *, since_ns: int | None = None) ->
     if not touched:
         return _unmeasured(op_kind, 0, "no committed runs of this operation")
 
-    rows = (await db.execute(
-        select(Review.object_id, Review.action, Review.ts_ns)
-        .where(Review.object_id.in_([__import__("uuid").UUID(o) for o in touched]))
-    )).all()
+    import uuid as _uuid
+
+    ids = [_uuid.UUID(o) for o in touched]
+    rows: list = []
+    for batch in _chunks(ids, max(1, id_chunk)):
+        rows += (await db.execute(
+            select(Review.object_id, Review.action, Review.ts_ns)
+            .where(Review.object_id.in_(batch)))).all()
+    # Ordered by review time across the whole set, not per batch. The loop below keeps the first verdict per
+    # object, and "first" has to mean first overall: batching is an artefact of a driver limit and must not
+    # decide which human ruling counts.
+    rows.sort(key=lambda r: (r[2] or 0))
 
     hits = misses = 0
     seen: set[str] = set()
