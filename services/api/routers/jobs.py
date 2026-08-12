@@ -17,6 +17,23 @@ def _iso(dt) -> str | None:
     return dt.isoformat() if dt else None
 
 
+def _import_label(source_uri: str | None, fmt: str | None) -> str:
+    """What to call an import row: the file it came from, not the format it is in.
+
+    Every import was labelled by its format, so a folder of 186 clips produced 186 rows all reading "video".
+    The page exists to tell one run from another and that label made it impossible. The filename is already
+    in source_uri; the format is still the fallback for an import that has no file behind it.
+    """
+    if source_uri:
+        # Drop the scheme before looking for a basename, or a bare "s3://" yields "s3:" and a job row is
+        # labelled with a fragment of its own URL.
+        path = source_uri.split("://", 1)[-1] if "://" in source_uri else source_uri
+        name = path.rstrip("/").rsplit("/", 1)[-1]
+        if name:
+            return name
+    return fmt or "import"
+
+
 @router.get("/jobs")
 async def jobs(limit: int = 100, db: AsyncSession = Depends(db_session)):
     limit = min(max(limit, 1), 1000)
@@ -25,7 +42,8 @@ async def jobs(limit: int = 100, db: AsyncSession = Depends(db_session)):
     for j in (await db.execute(select(ImportJob).order_by(ImportJob.created_at.desc()).limit(limit))).scalars():
         c = j.counts or {}
         out.append({"job_id": str(j.job_id), "kind": "import", "status": j.status, "progress": j.progress,
-                    "label": j.format, "detail": f"{c.get('frames', 0)}fr / {c.get('objects', 0)}obj",
+                    "label": _import_label(j.source_uri, j.format),
+                    "detail": f"{c.get('frames', 0)}fr / {c.get('objects', 0)}obj",
                     "link": "/import", "error": j.error,
                     "created_at": _iso(j.created_at), "updated_at": _iso(j.updated_at)})
 

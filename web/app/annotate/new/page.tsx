@@ -297,9 +297,14 @@ export default function NewAnnotationPage() {
             </Section>
           )}
 
-          <div className="font-mono text-[11px] text-ink-3 px-1">
+          <div className="font-mono text-[11px] text-ink-3 px-1 flex items-center gap-4">
             <button onClick={() => router.push("/annotations")} className="text-accent hover:underline">
               browse existing annotations -&gt;
+            </button>
+            {/* Added because the batch now keeps running after you leave, and nothing pointed at where to
+                watch it. An import is a job like any other, and the jobs page already lists them all. */}
+            <button onClick={() => router.push("/jobs")} className="text-accent hover:underline">
+              watch all import jobs -&gt;
             </button>
           </div>
         </div>
