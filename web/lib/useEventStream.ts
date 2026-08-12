@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { getUser } from "./user";
+import { getJobs, jobsConnected, subscribeJobs } from "./jobStream";
 
 // Subscribe to a server-sent event stream.
 //
@@ -99,7 +100,12 @@ export type JobStream = {
 };
 
 export function useJobStream(): StreamState<JobStream> {
-  return useEventStream<JobStream>("/api/events/jobs", "jobs");
+  // Backed by the shared module-level stream rather than its own EventSource. Six pages call this and the
+  // top bar now does too, so a connection per caller meant every one of those pages held two to the same
+  // endpoint carrying identical frames. The signature is unchanged, so no caller had to move.
+  const [data, setData] = useState<JobStream | null>(getJobs());
+  useEffect(() => subscribeJobs(setData), []);
+  return { data, connected: jobsConnected(), error: null };
 }
 
 export function useTrainingStream(jobId: string | null): StreamState<JobStreamRow> {

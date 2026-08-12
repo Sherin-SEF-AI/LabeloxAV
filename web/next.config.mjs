@@ -3,6 +3,16 @@ const API = process.env.LBX_API_URL || "http://localhost:8000";
 
 const nextConfig = {
   reactStrictMode: true,
+  // Next gzips what it serves, including what it proxies, and a compressed stream is buffered until the
+  // compressor has enough bytes to flush. Server-sent events are a small frame followed by silence, so
+  // nothing ever reached a browser: curl saw every frame because it does not ask for compression, while a
+  // browser, which always sends Accept-Encoding: gzip, waited forever. The whole live layer was quietly
+  // running on the REST polling fallbacks instead, which is why it looked like it worked.
+  //
+  // Off at this layer rather than per route, because Next has no per-route switch. A production ingress in
+  // front of this should compress normally and exclude text/event-stream, which is the same rule stated
+  // where it can actually be expressed.
+  compress: false,
   // react-konva + konva ship as ESM with a non-standard default-export shape; without transpiling them,
   // next/dynamic's convertModule can receive a bad module and throw "Cannot use 'in' operator to search
   // for 'default' in Layer" on a (StrictMode) re-mount. Transpiling them fixes the interop.
