@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 // One source of truth: the palette lists exactly what the menu bar offers, so the two cannot drift.
 import { MENU_DESTINATIONS } from "@/lib/menus";
+import { rankDestinations } from "@/lib/paletteRank";
 
 // Cmd+K fuzzy navigation to any destination. Opens on Cmd/Ctrl+K or a "lbx:palette" event (so a button
 // can open it). Keyboard-first: type to filter, arrows to move, Enter to go. This is how nav scales: no
@@ -33,8 +34,9 @@ export default function CommandPalette() {
   }, []);
 
   if (!open) return null;
-  const results = MENU_DESTINATIONS.filter(
-    (d) => (d.label + " " + (d.hint ?? "")).toLowerCase().includes(q.toLowerCase()));
+  // Ranked, not just filtered. Matching label and hint as one string put Projects above Jobs for the query
+  // "jobs", because Projects is described as "assign jobs, stages, scorecards" and comes first in the menu.
+  const results = rankDestinations(MENU_DESTINATIONS, q);
   const go = (href: string) => { setOpen(false); router.push(href); };
 
   return (
