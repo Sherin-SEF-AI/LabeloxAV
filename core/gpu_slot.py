@@ -90,6 +90,36 @@ async def gpu_slot(holder: str, *, timeout_s: float | None = 3600.0,
             log.info("gpu_slot.released", holder=holder, held_s=round(time.monotonic() - t0, 1))
 
 
+def cuda_report() -> dict:
+    """Whether this process can see a GPU, and what it thinks it is.
+
+    Asked from inside the API rather than from a shell, because those are different answers and only one of
+    them matters: autolabel refuses with "CUDA not available; the autolabel plane requires a GPU", and that
+    is a statement about the API process. A shell where `torch.cuda.is_available()` returns True proves
+    nothing about the process that raised it, so without this an operator can only guess.
+    """
+    try:
+        import torch
+
+        available = bool(torch.cuda.is_available())
+        out: dict = {"available": available, "torch": torch.__version__,
+                     "devices": int(torch.cuda.device_count()) if available else 0}
+        if available:
+            out["name"] = torch.cuda.get_device_name(0)
+            free, total = torch.cuda.mem_get_info(0)
+            out["free_mb"] = round(free / 1e6)
+            out["total_mb"] = round(total / 1e6)
+        else:
+            # The two things that actually cause this, so the answer is actionable rather than a flat no.
+            out["detail"] = ("torch cannot see a CUDA device from this process. A driver that came up after "
+                             "the API did, or a CUDA_VISIBLE_DEVICES that hides it, both look like this; "
+                             "restarting the API is the usual fix.")
+            out["cuda_visible_devices"] = os.environ.get("CUDA_VISIBLE_DEVICES")
+        return out
+    except Exception as exc:  # noqa: BLE001 - a missing torch is a real answer, not a 500
+        return {"available": False, "detail": f"torch unavailable: {exc}"[:200]}
+
+
 async def slot_is_free(key: int = GPU_SLOT_KEY) -> bool:
     """Whether the slot is currently unheld.
 

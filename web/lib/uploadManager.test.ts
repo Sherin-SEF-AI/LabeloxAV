@@ -14,6 +14,7 @@ import {
   clearUploads,
   enqueue,
   getUploadState,
+  startAutolabel,
   startUploads,
   subscribeUploads,
 } from "./uploadManager";
@@ -179,5 +180,91 @@ describe("clear", () => {
     expect(getUploadState().items).toHaveLength(1);
     released!();
     await run;
+  });
+});
+
+
+describe("autolabel pass", () => {
+  const auto = (over: Partial<UploadDeps> = {}) => deps({
+    startAutolabel: async () => ({ job_id: "al-1" }),
+    watchAutolabel: async (_id, onProgress) => { onProgress({ progress: 1 }); return { objects: 42 }; },
+    ...over,
+  });
+
+  it("labels every session the import produced, in queue order", async () => {
+    const seen: string[] = [];
+    enqueue([file("a.mp4"), file("b.mp4")]);
+    await startUploads(TARGET, deps());
+    await startAutolabel(auto({
+      startAutolabel: async (sid) => { seen.push(sid); return { job_id: "al-1" }; },
+    }));
+    expect(seen).toHaveLength(2);
+    expect(getUploadState().items.map((i) => i.status)).toEqual(["labeled", "labeled"]);
+    expect(getUploadState().items[0].labeled).toBe(42);
+  });
+
+  it("skips the clips that never imported", async () => {
+    // There is no session to label, and inventing one would send autolabel at a null id.
+    enqueue([file("a.mp4"), file("b.mp4")]);
+    let n = 0;
+    await startUploads(TARGET, deps({
+      watchImport: async () => { n++; if (n === 1) throw new Error("cannot open video"); return "sess-1"; },
+    }));
+    const calls: string[] = [];
+    await startAutolabel(auto({ startAutolabel: async (s) => { calls.push(s); return { job_id: "x" }; } }));
+    expect(calls).toHaveLength(1);
+    expect(getUploadState().items.map((i) => i.status)).toEqual(["error", "labeled"]);
+  });
+
+  it("a failed labelling leaves the clip imported, not failed", async () => {
+    // The session plainly exists. Calling it an error would lose it in the UI over a second-pass problem.
+    enqueue([file("a.mp4")]);
+    await startUploads(TARGET, deps());
+    await startAutolabel(auto({ watchAutolabel: async () => { throw new Error("gpu busy"); } }));
+    const item = getUploadState().items[0];
+    expect(item.status).toBe("done");
+    expect(item.sessionId).toBe("sess-1");
+    expect(item.detail).toContain("gpu busy");
+  });
+
+  it("one failure does not stop the ones after it", async () => {
+    enqueue([file("a.mp4"), file("b.mp4"), file("c.mp4")]);
+    await startUploads(TARGET, deps());
+    let n = 0;
+    await startAutolabel(auto({
+      watchAutolabel: async () => { n++; if (n === 1) throw new Error("boom"); return { objects: 5 }; },
+    }));
+    expect(getUploadState().items.map((i) => i.status)).toEqual(["done", "labeled", "labeled"]);
+  });
+
+  it("refuses to start while the import is still running", async () => {
+    // Two GPU jobs in flight for no gain, and the ordering is the thing that was asked for.
+    enqueue([file("a.mp4")]);
+    let released: (() => void) | null = null;
+    const gate = new Promise<void>((res) => { released = res; });
+    const run = startUploads(TARGET, deps({ upload: async () => { await gate; return "s3://x/y"; } }));
+    const calls: string[] = [];
+    await startAutolabel(auto({ startAutolabel: async (s) => { calls.push(s); return { job_id: "x" }; } }));
+    expect(calls).toEqual([]);
+    released!();
+    await run;
+  });
+
+  it("does nothing when nothing imported", async () => {
+    enqueue([file("a.mp4")]);
+    await startUploads(TARGET, deps({ watchImport: async () => { throw new Error("no"); } }));
+    await startAutolabel(auto());
+    expect(getUploadState().items[0].status).toBe("error");
+  });
+
+  it("reports which pass is in flight", async () => {
+    enqueue([file("a.mp4")]);
+    await startUploads(TARGET, deps());
+    const phases: string[] = [];
+    const unsub = subscribeUploads((s) => phases.push(s.phase));
+    await startAutolabel(auto());
+    unsub();
+    expect(phases).toContain("autolabeling");
+    expect(getUploadState().phase).toBe("idle");
   });
 });

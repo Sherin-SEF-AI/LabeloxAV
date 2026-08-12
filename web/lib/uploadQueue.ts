@@ -22,7 +22,11 @@
 // would compete, and a browser uploading ten multipart streams at once is its own problem. The queue runs
 // one at a time and says which one.
 
-export type ItemStatus = "pending" | "uploading" | "importing" | "done" | "error" | "skipped";
+export type ItemStatus =
+  | "pending" | "uploading" | "importing" | "done" | "error" | "skipped"
+  // A second pass over the sessions the first pass produced. Kept in the same item so one row tells the
+  // whole story of one clip, from bytes to labels, instead of splitting it across two lists.
+  | "autolabeling" | "labeled";
 
 export type QueueItem = {
   id: string;
@@ -35,6 +39,8 @@ export type QueueItem = {
   detail?: string;
   sessionId?: string;
   frameId?: string;
+  /** Objects the autolabel pass produced, once it has run. */
+  labeled?: number;
 };
 
 const VIDEO_EXTS = ["mp4", "mov", "mkv", "avi", "webm", "m4v"];
@@ -124,14 +130,17 @@ export type Summary = {
 
 export function summarize(items: QueueItem[]): Summary {
   const total = items.length;
-  const done = items.filter((i) => i.status === "done").length;
+  // `labeled` is a later state of `done`, so it counts as done for progress: a clip that has been through
+  // both passes is not less finished than one that has been through the first.
+  const done = items.filter((i) => i.status === "done" || i.status === "labeled").length;
   const failed = items.filter((i) => i.status === "error").length;
-  const active = items.filter((i) => i.status === "uploading" || i.status === "importing").length;
+  const active = items.filter((i) =>
+    i.status === "uploading" || i.status === "importing" || i.status === "autolabeling").length;
   const pending = items.filter((i) => i.status === "pending").length;
   // Partial credit for the item in flight, so a single large video does not leave the bar frozen at 0 for
   // several minutes and look stuck.
   const partial = items
-    .filter((i) => i.status === "uploading" || i.status === "importing")
+    .filter((i) => i.status === "uploading" || i.status === "importing" || i.status === "autolabeling")
     .reduce((a, i) => a + Math.max(0, Math.min(1, i.progress)), 0);
   return {
     total,
@@ -152,6 +161,13 @@ export function summarize(items: QueueItem[]): Summary {
  */
 export function shouldAutoOpen(items: QueueItem[]): boolean {
   return items.length === 1 && items[0].status === "done" && !!items[0].frameId;
+}
+
+/** Sessions the import produced, in queue order, which is what a second pass runs over. */
+export function importedSessions(items: QueueItem[]): { id: string; sessionId: string }[] {
+  return items
+    .filter((i) => (i.status === "done" || i.status === "labeled") && i.sessionId)
+    .map((i) => ({ id: i.id, sessionId: i.sessionId! }));
 }
 
 /** Human file size, for a row that has to fit a filename beside it. */

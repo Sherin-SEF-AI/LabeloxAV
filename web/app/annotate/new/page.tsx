@@ -4,15 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
-import { watchImportJob } from "@/lib/useEventStream";
+import { watchAutolabelJob, watchImportJob } from "@/lib/useEventStream";
 import { type QueueItem, humanSize, shouldAutoOpen, summarize } from "@/lib/uploadQueue";
 import {
   clearUploads,
   enqueue,
   getUploadState,
+  startAutolabel,
   startUploads,
   subscribeUploads,
 } from "@/lib/uploadManager";
+import { importedSessions } from "@/lib/uploadQueue";
 import ImportedPanel from "@/components/annotate/ImportedPanel";
 
 // New Annotation: upload clips, a folder of them, or an mcap; import each into its own session, then jump
@@ -133,6 +135,7 @@ export default function NewAnnotationPage() {
   // Keep the open panel pointed at the live row, so its counts follow the import rather than freezing at
   // whatever they were when it was clicked.
   const openedLive = opened ? items.find((i) => i.id === opened.id) ?? opened : null;
+  const labelable = importedSessions(items).length;
 
   const take = useCallback((list: FileList | File[] | null) => {
     if (!list) return;
@@ -142,16 +145,27 @@ export default function NewAnnotationPage() {
     setErr(null);
   }, []);
 
+  // Deps are assembled once here rather than inside each handler, so the import pass and the label pass
+  // cannot drift apart on which client they call.
+  const deps = {
+    upload: api.uploadMultipart,
+    startImport: api.startImport,
+    watchImport: watchImportJob,
+    firstFrame: api.firstFrame,
+    humanizeError,
+    startAutolabel: (sessionId: string) => api.startAutolabel(sessionId),
+    watchAutolabel: watchAutolabelJob,
+  };
+
+  async function onAutolabel() {
+    if (running) return;
+    await startAutolabel(deps);
+  }
+
   async function onGo() {
     if (!items.length || running) return;
     setErr(null);
-    await startUploads({ format, vehicle, city }, {
-      upload: api.uploadMultipart,
-      startImport: api.startImport,
-      watchImport: watchImportJob,
-      firstFrame: api.firstFrame,
-      humanizeError,
-    });
+    await startUploads({ format, vehicle, city }, deps);
     // Only ever for a queue of one. Navigating unmounts the page, which is now survivable, but it is still
     // not what somebody importing a folder asked for.
     const after = getUploadState().items;
@@ -284,12 +298,23 @@ export default function NewAnnotationPage() {
                   <ImportedPanel item={openedLive} onClose={() => setOpened(null)} />
                 )}
               </div>
-              {summary.finished && (
-                <div className="reveal font-mono text-[11px] text-ink-2 mt-2">
-                  {summary.done} session{summary.done === 1 ? "" : "s"} imported
-                  {summary.failed > 0 && <span className="text-block"> · {summary.failed} failed</span>}
-                  {" · "}
-                  <button onClick={() => router.push("/annotations")} className="text-accent hover:underline">
+              {summary.finished && !running && (
+                <div className="reveal flex items-center gap-3 mt-2">
+                  <span className="font-mono text-[11px] text-ink-2">
+                    {summary.done} session{summary.done === 1 ? "" : "s"} imported
+                    {summary.failed > 0 && <span className="text-block"> · {summary.failed} failed</span>}
+                  </span>
+                  {/* Offered only once every import has finished. Autolabel is GPU work on a machine with one
+                      slot, so starting it while clips are still decoding would put two jobs in flight and
+                      lose the ordering that makes a batch followable. */}
+                  {labelable > 0 && (
+                    <button onClick={onAutolabel}
+                      className="font-mono text-[11px] border border-accent/50 text-accent rounded px-2 py-1 hover:bg-accent/10 transition-colors">
+                      autolabel {labelable} session{labelable === 1 ? "" : "s"}
+                    </button>
+                  )}
+                  <button onClick={() => router.push("/annotations")}
+                    className="ml-auto font-mono text-[11px] text-accent hover:underline">
                     browse annotations -&gt;
                   </button>
                 </div>

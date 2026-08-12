@@ -20,14 +20,19 @@ import { toast } from "./toast";
 import {
   type QueueItem,
   buildQueue,
+  importedSessions,
   nextPending,
   patchItem,
   summarize,
 } from "./uploadQueue";
 
+export type Phase = "idle" | "importing" | "autolabeling";
+
 export type UploadState = {
   items: QueueItem[];
   running: boolean;
+  /** Which pass is in flight, so a global indicator can say what it is doing rather than only that it is. */
+  phase: Phase;
   /** The settings the run was started with, so a view can show what a queue is importing as. */
   target: { format: string; vehicle: string; city: string } | null;
 };
@@ -39,13 +44,16 @@ export type UploadDeps = {
   watchImport: (jobId: string, onProgress: (j: { progress?: number | null }) => void) => Promise<string>;
   firstFrame: (sessionId: string) => Promise<{ frame_id: string }>;
   humanizeError: (e: unknown) => string;
+  startAutolabel?: (sessionId: string) => Promise<{ job_id: string }>;
+  watchAutolabel?: (jobId: string, onProgress: (j: { progress?: number | null }) => void)
+    => Promise<{ objects?: number }>;
 };
 
 type Listener = (s: UploadState) => void;
 
 const listeners = new Set<Listener>();
 const blobs = new Map<string, File>();
-let state: UploadState = { items: [], running: false, target: null };
+let state: UploadState = { items: [], running: false, phase: "idle", target: null };
 
 function emit() {
   // A fresh object each time, so a subscriber comparing by reference sees the change.
@@ -79,7 +87,7 @@ export function enqueue(files: File[]): { skipped: string[]; duplicates: number;
 export function clearUploads(): void {
   if (state.running) return;
   blobs.clear();
-  state = { items: [], running: false, target: null };
+  state = { items: [], running: false, phase: "idle", target: null };
   emit();
 }
 
@@ -184,7 +192,7 @@ async function runOne(item: QueueItem, deps: UploadDeps, target: NonNullable<Upl
 export async function startUploads(target: NonNullable<UploadState["target"]>, deps: UploadDeps)
   : Promise<void> {
   if (state.running || !state.items.length) return;
-  state = { ...state, running: true, target };
+  state = { ...state, running: true, phase: "importing", target };
   emit();
   armGuard(true);
   requestNotifyPermission();
@@ -197,11 +205,60 @@ export async function startUploads(target: NonNullable<UploadState["target"]>, d
       patch(next.id, result);
     }
   } finally {
-    state = { ...state, running: false };
+    state = { ...state, running: false, phase: "idle" };
     emit();
     armGuard(false);
   }
 
   const s = summarize(state.items);
   notifyDone(s.done, s.failed);
+}
+
+/**
+ * Label every session the import produced, one after another.
+ *
+ * A second pass rather than a step inside the first, because they answer different questions. The import
+ * has to finish before there is anything to label, and somebody may well want the clips in and nothing
+ * else. Running it here rather than per session in another tab is what keeps "in order" true: autolabel is
+ * GPU work on a machine with one slot, so firing 186 of them at once would queue them server-side anyway,
+ * with no way to see where it had got to.
+ *
+ * Refused while the import is still running. Labelling a session while its sibling is still decoding puts
+ * two GPU jobs in flight for no gain, and the ordering the caller asked for is the point.
+ */
+export async function startAutolabel(deps: UploadDeps): Promise<void> {
+  if (state.running || !deps.startAutolabel || !deps.watchAutolabel) return;
+  const targets = importedSessions(state.items);
+  if (!targets.length) return;
+
+  state = { ...state, running: true, phase: "autolabeling" };
+  emit();
+  armGuard(true);
+
+  let labeled = 0;
+  let failed = 0;
+  try {
+    for (const t of targets) {
+      patch(t.id, { status: "autolabeling", progress: 0 });
+      try {
+        const { job_id } = await deps.startAutolabel(t.sessionId);
+        const res = await deps.watchAutolabel(job_id, (j) => patch(t.id, { progress: j.progress || 0 }));
+        patch(t.id, { status: "labeled", progress: 1, labeled: res?.objects ?? 0 });
+        labeled++;
+      } catch (e) {
+        // The clip is still imported: the labelling failed, not the ingest. It goes back to `done` rather
+        // than to `error`, because calling it an error would lose the session that plainly exists.
+        patch(t.id, { status: "done", progress: 1, detail: "autolabel failed: " + deps.humanizeError(e) });
+        failed++;
+      }
+    }
+  } finally {
+    state = { ...state, running: false, phase: "idle" };
+    emit();
+    armGuard(false);
+  }
+
+  toast(failed ? `Autolabel finished: ${labeled} labelled, ${failed} failed`
+               : `Autolabel finished: ${labeled} session${labeled === 1 ? "" : "s"} labelled`,
+        failed ? "warn" : "success");
 }
