@@ -148,8 +148,8 @@ export function subscribeJobSummary(fn: (s: JobsSummary) => void): () => void {
 /** Flatten a stream frame into what a status chip needs. */
 export function summarizeJobs(s: JobStream | null): JobsSummary {
   const running: JobsSummary["running"] = [];
-  let waiting = 0;
-  if (!s) return { running, waiting };
+  let windowWaiting = 0;
+  if (!s) return { running, waiting: 0 };
   // `ingest` rides the same stream but is a progress summary rather than a list of jobs, so it has no job_id
   // to key on and is not a job for this purpose.
   for (const kind of ["import", "autolabel", "training", "export"] as const) {
@@ -157,9 +157,15 @@ export function summarizeJobs(s: JobStream | null): JobsSummary {
       if (ACTIVE.has(r.status)) {
         running.push({ job_id: r.job_id, kind, progress: Math.max(0, Math.min(1, r.progress ?? 0)) });
       } else if (WAITING.has(r.status)) {
-        waiting++;
+        windowWaiting++;
       }
     }
   }
-  return { running, waiting };
+  // The server's total when it sends one, since the lists above are a recent tail and counting them
+  // under-reports. Counting the window is the fallback for a server that predates the field, and it is a
+  // floor rather than an answer.
+  const total = s.waiting
+    ? Object.values(s.waiting).reduce((a: number, b) => a + (b ?? 0), 0)
+    : windowWaiting;
+  return { running, waiting: total };
 }

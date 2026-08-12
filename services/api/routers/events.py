@@ -27,7 +27,7 @@ import json
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
@@ -81,6 +81,9 @@ router = APIRouter(dependencies=[Depends(require_stream_user)])
 POLL_INTERVAL_S = 2.0
 # A proxy will drop an idle connection; a comment frame keeps it open without pretending to be an event.
 HEARTBEAT_EVERY = 15
+# Held but not moving. `pending` covers work nobody has picked up; `queued-cloud` is parked for the A100 on
+# purpose. Neither is progress, and both are the answer to why a quiet system is quiet.
+WAITING_STATUSES = ("pending", "queued", "queued-cloud")
 
 
 # ---------------------------------------------------------------- wakeups
@@ -132,9 +135,10 @@ async def _job_snapshot(db: AsyncSession) -> dict:
     """The state every job view needs, in one round trip per table.
 
     Only active work plus a small tail of recent terminal jobs: a client watching progress does not need the
-    entire history, and sending it on every tick is what made the polling endpoints expensive.
+    entire history, and sending it on every tick is what made the polling endpoints expensive. The one thing
+    that cannot be answered from a tail, how much work is queued in total, is carried alongside as a count.
     """
-    out: dict[str, list[dict]] = {}
+    out: dict[str, object] = {}
 
     training = (await db.execute(
         select(TrainingJob).order_by(TrainingJob.created_at.desc()).limit(20))).scalars().all()
@@ -150,6 +154,20 @@ async def _job_snapshot(db: AsyncSession) -> dict:
                      "progress": getattr(r, "progress", None),
                      "counts": getattr(r, "counts", None) or {},
                      "error": getattr(r, "error", None)} for r in rows]
+
+    # How much work is held but not moving, counted over every row rather than over the window above.
+    #
+    # The lists are capped at a recent tail, which is right for showing progress and wrong for answering "why
+    # is nothing happening". This deployment holds 67 autolabel jobs parked for a cloud A100 since late June;
+    # all of them are older than the ten most recent, so a client counting the window reported one queued job
+    # when there were sixty-eight. Under-reporting is worse than not reporting: it reads as a healthy system.
+    waiting: dict[str, int] = {}
+    for wkey, wmodel in (("training", TrainingJob), ("import", ImportJob),
+                         ("export", ExportJob), ("autolabel", AutolabelJob)):
+        waiting[wkey] = int((await db.execute(
+            select(func.count()).select_from(wmodel)
+            .where(wmodel.status.in_(WAITING_STATUSES)))).scalar() or 0)
+    out["waiting"] = waiting
 
     # Ingest progress rides the same stream rather than getting one of its own. It is the signal the home
     # page shows while a fleet sweep runs, and it used to be scraped out of a log file with a regex, which

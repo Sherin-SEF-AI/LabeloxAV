@@ -189,6 +189,22 @@ describe("summarizeJobs", () => {
     expect(s.running[0].progress).toBe(1);
   });
 
+  it("prefers the server's queued total over what fits in the window", () => {
+    // The lists are a recent tail. 67 autolabel jobs parked for the cloud A100 are all older than the ten
+    // most recent, so counting the window said 1 queued when the answer was 68, and a top bar that reports
+    // a healthy system while sixty-eight jobs sit untouched is worse than one that reports nothing.
+    const s = summarizeJobs(frame({
+      training: [row("t1", "pending")],
+      waiting: { training: 1, autolabel: 67 },
+    }));
+    expect(s.waiting).toBe(68);
+  });
+
+  it("falls back to counting the window when the server does not send a total", () => {
+    const s = summarizeJobs(frame({ training: [row("t1", "pending")], autolabel: [row("a1", "pending")] }));
+    expect(s.waiting).toBe(2);
+  });
+
   it("an empty or absent frame is empty, not an error", () => {
     expect(summarizeJobs(null)).toEqual({ running: [], waiting: 0 });
     expect(summarizeJobs(frame())).toEqual({ running: [], waiting: 0 });
