@@ -1,19 +1,19 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { watchImportJob } from "@/lib/useEventStream";
+import { type QueueItem, humanSize, shouldAutoOpen, summarize } from "@/lib/uploadQueue";
 import {
-  type QueueItem,
-  buildQueue,
-  humanSize,
-  nextPending,
-  patchItem,
-  shouldAutoOpen,
-  summarize,
-} from "@/lib/uploadQueue";
+  clearUploads,
+  enqueue,
+  getUploadState,
+  startUploads,
+  subscribeUploads,
+} from "@/lib/uploadManager";
+import ImportedPanel from "@/components/annotate/ImportedPanel";
 
 // New Annotation: upload clips, a folder of them, or an mcap; import each into its own session, then jump
 // into the editor when there was exactly one. The bytes go browser -> storage via presigned multipart; the
@@ -58,7 +58,7 @@ const DOT: Record<string, string> = {
 };
 
 /** One queue row. The bar is the item's own phase fraction, so it moves during a long single upload. */
-function Row({ item, index }: { item: QueueItem; index: number }) {
+function Row({ item, index, onOpen }: { item: QueueItem; index: number; onOpen: (i: QueueItem) => void }) {
   const active = item.status === "uploading" || item.status === "importing";
   return (
     <div
@@ -89,10 +89,14 @@ function Row({ item, index }: { item: QueueItem; index: number }) {
           </span>
         )}
       </span>
-      {item.frameId && (
-        <a href={`/frame/${item.frameId}`} className="font-mono text-[10px] text-accent hover:underline shrink-0">
+      {item.sessionId && (
+        // A button, not a link. This was an <a href>, so opening a finished clip navigated away, unmounted
+        // the page and abandoned every upload still running, which is the same bug the auto-open rule
+        // exists to prevent, left in a second place. It opens a panel beside the queue instead.
+        <button onClick={() => onOpen(item)}
+          className="font-mono text-[10px] text-accent hover:underline shrink-0">
           open
-        </a>
+        </button>
       )}
       {item.detail && item.status === "error" && (
         <span className="font-mono text-[10px] text-block truncate max-w-[14rem]" title={item.detail}>
@@ -108,91 +112,50 @@ export default function NewAnnotationPage() {
   const [format, setFormat] = useState("auto");
   const [vehicle, setVehicle] = useState("ANNO-01");
   const [city, setCity] = useState("BLR");
-  const [items, setItems] = useState<QueueItem[]>([]);
+  // The queue itself lives in lib/uploadManager, module-scoped, so it survives this page unmounting. A
+  // 41GB batch is over an hour of transfer, and holding it in component state meant any navigation
+  // abandoned it. This component is a view over that store, not its owner.
+  const [state, setState] = useState(getUploadState);
   const [skipped, setSkipped] = useState<string[]>([]);
   const [duplicates, setDuplicates] = useState(0);
   const [drag, setDrag] = useState(false);
-  const [running, setRunning] = useState(false);
+  const [opened, setOpened] = useState<QueueItem | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
-  // Keeps the File objects out of React state: they are not serialisable, they can be gigabytes, and the
-  // queue only needs their metadata to render.
-  const blobs = useRef(new Map<string, File>());
 
+  useEffect(() => subscribeUploads(setState), []);
+
+  const items = state.items;
+  const running = state.running;
   const summary = useMemo(() => summarize(items), [items]);
+
+  // Keep the open panel pointed at the live row, so its counts follow the import rather than freezing at
+  // whatever they were when it was clicked.
+  const openedLive = opened ? items.find((i) => i.id === opened.id) ?? opened : null;
 
   const take = useCallback((list: FileList | File[] | null) => {
     if (!list) return;
-    const arr = Array.from(list);
-    const built = buildQueue(arr.map((f) => ({ name: f.name, size: f.size, type: f.type })));
-    for (const f of arr) blobs.current.set(`${f.name}:${f.size}`, f);
-    setItems(built.items);
-    setSkipped(built.skipped);
-    setDuplicates(built.duplicates);
+    const r = enqueue(Array.from(list));
+    setSkipped(r.skipped);
+    setDuplicates(r.duplicates);
     setErr(null);
   }, []);
 
-  async function runOne(item: QueueItem): Promise<Partial<QueueItem>> {
-    const file = blobs.current.get(item.id);
-    if (!file) return { status: "error", detail: "file handle lost, re-select it" };
-
-    let uri: string;
-    try {
-      setItems((cur) => patchItem(cur, item.id, { status: "uploading", progress: 0 }));
-      uri = await api.uploadMultipart(file, (frac) =>
-        setItems((cur) => patchItem(cur, item.id, { progress: frac })));
-    } catch (e) {
-      return { status: "error", detail: "upload failed: " + humanizeError(e) };
-    }
-
-    let jobId: string;
-    try {
-      setItems((cur) => patchItem(cur, item.id, { status: "importing", progress: 0 }));
-      const res = await api.startImport({
-        format: format === "auto" ? item.format : format,
-        source_uri: uri, target_vehicle: vehicle, city,
-      });
-      jobId = res.job_id;
-    } catch (e) {
-      return { status: "error", detail: "import did not start: " + humanizeError(e) };
-    }
-
-    let sessionId: string;
-    try {
-      sessionId = await watchImportJob(jobId, (job) =>
-        setItems((cur) => patchItem(cur, item.id, { progress: job.progress || 0 })));
-    } catch (e) {
-      return { status: "error", detail: "import failed: " + humanizeError(e) };
-    }
-
-    // A session that imported with no frames is a real outcome, not a failure: the row says so and offers
-    // no editor link rather than sending somebody to a 404.
-    try {
-      const { frame_id } = await api.firstFrame(sessionId);
-      return { status: "done", progress: 1, sessionId, frameId: frame_id };
-    } catch {
-      return { status: "done", progress: 1, sessionId, detail: "imported, no frames to open" };
-    }
-  }
-
   async function onGo() {
     if (!items.length || running) return;
-    setRunning(true);
     setErr(null);
-
-    // Sequential, and driven from a local copy so each pass sees the results of the last one.
-    let cur = items;
-    for (;;) {
-      const next = nextPending(cur);
-      if (!next) break;
-      const patch = await runOne(next);
-      cur = patchItem(cur, next.id, patch);
-      setItems(cur);
-    }
-    setRunning(false);
-
-    if (shouldAutoOpen(cur)) router.push("/frame/" + cur[0].frameId);
+    await startUploads({ format, vehicle, city }, {
+      upload: api.uploadMultipart,
+      startImport: api.startImport,
+      watchImport: watchImportJob,
+      firstFrame: api.firstFrame,
+      humanizeError,
+    });
+    // Only ever for a queue of one. Navigating unmounts the page, which is now survivable, but it is still
+    // not what somebody importing a folder asked for.
+    const after = getUploadState().items;
+    if (shouldAutoOpen(after)) router.push("/frame/" + after[0].frameId);
   }
 
   const label = running
@@ -214,7 +177,7 @@ export default function NewAnnotationPage() {
           <Section
             title="new annotation - upload images, video, or mcap"
             right={items.length ? (
-              <button onClick={() => { setItems([]); setSkipped([]); setDuplicates(0); blobs.current.clear(); }}
+              <button onClick={() => { clearUploads(); setSkipped([]); setDuplicates(0); setOpened(null); }}
                 disabled={running}
                 className="font-mono text-[10px] text-ink-3 hover:text-ink disabled:opacity-40">clear</button>
             ) : null}
@@ -294,8 +257,9 @@ export default function NewAnnotationPage() {
 
             <div className="font-mono text-[11px] text-ink-3 mt-3 leading-relaxed">
               Each file uploads straight to storage and imports into its own session (PII faces and plates
-              are blurred on every frame). One file opens the editor when it finishes; a batch stays here so
-              nothing still uploading is interrupted. Larger videos take longer to decode.
+              are blurred on every frame). One file opens the editor when it finishes. A batch keeps running
+              if you move around the app, and notifies you when it is done, so you can carry on working;
+              closing the tab is the only thing that stops it. Larger videos take longer to decode.
             </div>
           </Section>
 
@@ -312,8 +276,13 @@ export default function NewAnnotationPage() {
                 <div className="h-full bg-accent transition-[width] duration-500 ease-out"
                   style={{ width: `${summary.progress * 100}%` }} />
               </div>
-              <div className="border hairline rounded overflow-hidden max-h-80 overflow-y-auto">
-                {items.map((i, n) => <Row key={i.id} item={i} index={n} />)}
+              <div className="flex gap-3 items-start">
+                <div className="flex-1 min-w-0 border hairline rounded overflow-hidden max-h-[36rem] overflow-y-auto">
+                  {items.map((i, n) => <Row key={i.id} item={i} index={n} onOpen={setOpened} />)}
+                </div>
+                {openedLive?.sessionId && (
+                  <ImportedPanel item={openedLive} onClose={() => setOpened(null)} />
+                )}
               </div>
               {summary.finished && (
                 <div className="reveal font-mono text-[11px] text-ink-2 mt-2">
