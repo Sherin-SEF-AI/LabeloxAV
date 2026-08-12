@@ -219,6 +219,21 @@ export default function NewAnnotationPage() {
                 className="font-mono text-[10px] text-ink-3 hover:text-ink disabled:opacity-40">clear</button>
             ) : null}
           >
+            {/* Outside the dropzone, deliberately. These were inside it, and calling .click() on one
+                dispatches a click that bubbles up to the dropzone's own onClick, which opens a second
+                chooser in the same gesture. The browser refuses that and says so:
+                  "File chooser dialog can only be shown with a user activation."
+                A hidden input does not need to live inside the drop target, and keeping it out means the
+                two handlers can never trigger each other. */}
+            <input ref={fileRef} type="file" accept={ACCEPT} multiple className="hidden"
+              onChange={(e) => take(e.target.files)} />
+            {/* A second input carrying webkitdirectory: one element cannot offer both a file picker and a
+                folder picker, and a folder is how these clips sit on disk. The prop is not in React's
+                HTMLInputElement types but is what every browser implements, so it is spread through a
+                typed record rather than cast away with `any`. */}
+            <input ref={dirRef} type="file" className="hidden" multiple
+              {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+              onChange={(e) => take(e.target.files)} />
             <div
               onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
               onDragLeave={() => setDrag(false)}
@@ -226,16 +241,6 @@ export default function NewAnnotationPage() {
               onClick={() => !running && fileRef.current?.click()}
               className={`border border-dashed rounded p-8 text-center cursor-pointer font-mono text-xs transition-all duration-150
                 ${drag ? "border-accent bg-accent/5 text-ink scale-[1.01]" : "border-line text-ink-3 hover:border-ink-3"}`}>
-              <input ref={fileRef} type="file" accept={ACCEPT} multiple className="hidden"
-                onChange={(e) => take(e.target.files)} />
-              {/* A second input with webkitdirectory: the same element cannot offer both a file picker and a
-                  folder picker, and a folder is how these clips actually sit on disk. */}
-              {/* `webkitdirectory` is not in React's HTMLInputElement types but is what every browser
-                  implements for a directory picker, so the props are spread through a typed record rather
-                  than cast away with `any`. */}
-              <input ref={dirRef} type="file" className="hidden" multiple
-                {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
-                onChange={(e) => take(e.target.files)} />
               {items.length ? (
                 <span className="text-ink">
                   {items.length} file{items.length === 1 ? "" : "s"} ready

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
+import { isNavigable } from "@/lib/routeGaps";
+
 // The location trail, so you can see where you are in the platform -> tool -> session -> frame -> object
 // hierarchy and click up a level instead of guessing. Computed from the pathname by default; a page with
 // real context (a frame that knows its session) passes explicit `items` to name the middle of the trail.
@@ -37,7 +39,12 @@ function fromPath(pathname: string): Crumb[] {
   let acc = "";
   segs.forEach((s, i) => {
     acc += "/" + s;
-    out.push({ label: humanSeg(s), href: i < segs.length - 1 ? acc : undefined });
+    // Only link an ancestor that is actually a page. Eleven of them are not: /annotate/new renders
+    // "Home / Annotate / New" and linked Annotate to /annotate, where nothing is routed, and Link
+    // prefetches, so every page under one fired an RSC 404 on render. The gaps are listed in routeGaps.ts
+    // and a test walks web/app to keep that list true.
+    const linkable = i < segs.length - 1 && isNavigable(acc);
+    out.push({ label: humanSeg(s), href: linkable ? acc : undefined });
   });
   return out;
 }
