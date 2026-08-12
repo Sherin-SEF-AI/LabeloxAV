@@ -84,6 +84,34 @@ export function enqueue(files: File[]): { skipped: string[]; duplicates: number;
   return { skipped: built.skipped, duplicates: built.duplicates, accepted: built.items.length };
 }
 
+/**
+ * Load already-imported sessions into the queue so the same runner can label them.
+ *
+ * The autolabel pass was only reachable for a queue still in memory, which meant it could label what you had
+ * just uploaded and nothing else. After a page reload, or on any of the sessions imported yesterday, there
+ * was no batch path at all: the only control was per session, behind a dropdown, on the home page.
+ *
+ * They become queue items already in the `done` state, because that is what they are. Everything downstream
+ * (the runner, the indicator, the row) then works unchanged, rather than growing a second notion of a
+ * batch that would have to be kept in step with this one.
+ */
+export function enqueueSessions(rows: { sessionId: string; name: string }[]): number {
+  if (state.running) return 0;
+  blobs.clear();
+  const items: QueueItem[] = rows.map((r) => ({
+    id: `session:${r.sessionId}`,
+    name: r.name,
+    size: 0,
+    format: "session",
+    status: "done" as const,
+    progress: 1,
+    sessionId: r.sessionId,
+  }));
+  state = { ...state, items };
+  emit();
+  return items.length;
+}
+
 export function clearUploads(): void {
   if (state.running) return;
   blobs.clear();

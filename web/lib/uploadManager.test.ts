@@ -13,6 +13,7 @@ import {
   type UploadDeps,
   clearUploads,
   enqueue,
+  enqueueSessions,
   getUploadState,
   startAutolabel,
   startUploads,
@@ -266,5 +267,41 @@ describe("autolabel pass", () => {
     unsub();
     expect(phases).toContain("autolabeling");
     expect(getUploadState().phase).toBe("idle");
+  });
+});
+
+
+describe("labelling sessions that were imported earlier", () => {
+  const auto = () => deps({
+    startAutolabel: async () => ({ job_id: "al-1" }),
+    watchAutolabel: async () => ({ objects: 7 }),
+  });
+
+  it("loads existing sessions as a queue the same runner can work", async () => {
+    // Autolabel used to be reachable only for a queue still in memory, so a reload or yesterday's imports
+    // had no batch path at all.
+    const n = enqueueSessions([
+      { sessionId: "s1", name: "20260606_a.MP4" },
+      { sessionId: "s2", name: "20260606_b.MP4" },
+    ]);
+    expect(n).toBe(2);
+    await startAutolabel(auto());
+    expect(getUploadState().items.map((i) => i.status)).toEqual(["labeled", "labeled"]);
+    expect(getUploadState().items[0].labeled).toBe(7);
+  });
+
+  it("keeps the session names, so a row says which drive it is", () => {
+    enqueueSessions([{ sessionId: "s1", name: "20260606_a.MP4" }]);
+    expect(getUploadState().items[0].name).toBe("20260606_a.MP4");
+  });
+
+  it("refuses to load sessions over a batch that is still running", async () => {
+    enqueue([file("a.mp4")]);
+    let released: (() => void) | null = null;
+    const gate = new Promise<void>((res) => { released = res; });
+    const run = startUploads(TARGET, deps({ upload: async () => { await gate; return "s3://x/y"; } }));
+    expect(enqueueSessions([{ sessionId: "s9", name: "x" }])).toBe(0);
+    released!();
+    await run;
   });
 });

@@ -1,10 +1,12 @@
 "use client";
 
 export const dynamic = "force-dynamic";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, humanizeError } from "@/lib/api";
+import { enqueueSessions, startAutolabel } from "@/lib/uploadManager";
+import { watchAutolabelJob, watchImportJob } from "@/lib/useEventStream";
 import type { SessionRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import Pager from "@/components/shell/Pager";
@@ -51,17 +53,30 @@ function SessionCard({
   onOpen,
   onResume,
   rigMode,
+  selected,
+  onSelect,
 }: {
   session: SessionRow;
   stats: SessionStats | undefined;
   onOpen: (s: SessionRow) => void;
   onResume: (s: SessionRow) => void;
   rigMode: boolean;
+  selected: boolean;
+  onSelect: (id: string, on: boolean) => void;
 }) {
   return (
-    <div className="panel p-3 space-y-2">
+    <div className={`panel p-3 space-y-2 transition-colors ${selected ? "border-accent/60" : ""}`}>
       <div className="flex items-baseline justify-between gap-2 min-w-0">
-        <div className="font-mono text-sm text-ink truncate" title={session.vehicle_id}>
+        {/* Ticking a card is what makes the batch autolabel reachable. Before this the only way to label a
+            session already imported was one at a time, through a dropdown on the home page. */}
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={(e) => onSelect(session.session_id, e.target.checked)}
+          title="select for batch autolabel"
+          className="shrink-0 accent-accent"
+        />
+        <div className="font-mono text-sm text-ink truncate flex-1 min-w-0" title={session.vehicle_id}>
           {session.vehicle_id}
         </div>
         <div className="font-mono text-xs text-ink-3 truncate">{session.city ?? ""}</div>
@@ -126,6 +141,10 @@ function AnnotationsBody() {
   const router = useRouter();
   const { offset, limit, setOffset } = usePager(24);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
+  // Selection for the batch autolabel. Kept here rather than in the manager: which sessions somebody has
+  // ticked is a property of this screen, and only the ones they confirm are handed over.
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [labelBusy, setLabelBusy] = useState(false);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<Record<string, SessionStats>>({});
   const [loading, setLoading] = useState(true);
@@ -159,6 +178,41 @@ function AnnotationsBody() {
   function flash(text: string) {
     setMsg(text);
     setTimeout(() => setMsg(null), 2500);
+  }
+
+  const toggle = useCallback((id: string, on: boolean) => {
+    setSel((cur) => {
+      const next = new Set(cur);
+      if (on) next.add(id); else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  async function onAutolabelSelected() {
+    if (!sel.size || labelBusy) return;
+    setLabelBusy(true);
+    try {
+      const picked = sessions.filter((s) => sel.has(s.session_id));
+      const n = enqueueSessions(picked.map((s) => ({
+        sessionId: s.session_id,
+        name: s.vehicle_id ? `${s.vehicle_id} ${s.session_id.slice(0, 8)}` : s.session_id.slice(0, 8),
+      })));
+      if (!n) { setMsg("a batch is already running; watch it in the top bar"); return; }
+      // Runs through the same module-scoped queue as an upload batch, so it survives leaving this page and
+      // reports in the same top-bar indicator rather than inventing a second progress surface.
+      await startAutolabel({
+        upload: api.uploadMultipart,
+        startImport: api.startImport,
+        watchImport: watchImportJob,
+        firstFrame: api.firstFrame,
+        humanizeError,
+        startAutolabel: (sessionId: string) => api.startAutolabel(sessionId),
+        watchAutolabel: watchAutolabelJob,
+      });
+      setSel(new Set());
+    } finally {
+      setLabelBusy(false);
+    }
   }
 
   async function onOpen(s: SessionRow) {
@@ -198,12 +252,24 @@ function AnnotationsBody() {
         ) : undefined
       }
       primaryAction={
-        <Link
-          href="/annotate/new"
-          className="font-mono text-xs border border-accent text-accent px-3 py-1 hover:bg-accent/10"
-        >
-          + new annotation
-        </Link>
+        <div className="flex items-center gap-2">
+          {sel.size > 0 && (
+            <button
+              onClick={onAutolabelSelected}
+              disabled={labelBusy}
+              className="reveal font-mono text-xs border border-accent/50 text-accent px-3 py-1 rounded hover:bg-accent/10 disabled:opacity-50 transition-colors"
+            >
+              {labelBusy && <span className="running-dot mr-1.5 align-middle" />}
+              autolabel {sel.size} session{sel.size === 1 ? "" : "s"}
+            </button>
+          )}
+          <Link
+            href="/annotate/new"
+            className="font-mono text-xs border border-accent text-accent px-3 py-1 hover:bg-accent/10"
+          >
+            + new annotation
+          </Link>
+        </div>
       }
     >
       <div className="p-4 space-y-4">
@@ -231,6 +297,8 @@ function AnnotationsBody() {
                 onOpen={onOpen}
                 onResume={onResume}
                 rigMode={rigMode}
+                selected={sel.has(s.session_id)}
+                onSelect={toggle}
               />
             ))}
           </div>
