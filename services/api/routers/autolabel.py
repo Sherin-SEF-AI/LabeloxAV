@@ -45,11 +45,21 @@ async def _bump(job_id, **fields) -> None:
 
 
 async def _run_guarded(job_id, session_id, limit) -> None:
+    from services.autolabel.progress import ProgressBand
     from services.autolabel.runner import autolabel_session
 
     await _bump(job_id, status="running", progress=0.05)
+    band = ProgressBand()
+
+    async def report(done: int, total: int) -> None:
+        # Rationed by the band: one write per percent, not one per frame. A five thousand frame session
+        # would otherwise commit five thousand times to move a bar a few pixels.
+        f = band.next_if_due(done, total)
+        if f is not None:
+            await _bump(job_id, progress=f)
+
     try:
-        result = await autolabel_session(session_id, limit)
+        result = await autolabel_session(session_id, limit, on_progress=report)
         await _bump(job_id, status="done", progress=1.0, counts=result)
         log.info("autolabel.done", job_id=str(job_id), **{k: result[k] for k in result if k in ("n_frames", "n_objects")})
     except Exception as exc:  # noqa: BLE001

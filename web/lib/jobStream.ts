@@ -48,12 +48,12 @@ function open() {
 
   const es = new EventSource(`/api/events/jobs?token=${encodeURIComponent(token)}`);
   source = es;
-  es.addEventListener("open", () => { connected = true; });
+  es.addEventListener("open", () => { connected = true; notify(); });
   es.addEventListener("jobs", (ev) => {
     try {
       snapshot = JSON.parse((ev as MessageEvent).data) as JobStream;
       connected = true;
-      listeners.forEach((fn) => fn(snapshot));
+      notify();
     } catch {
       // A malformed frame must not tear down a working stream; the next one is usually fine.
     }
@@ -62,7 +62,15 @@ function open() {
     // EventSource reconnects on its own with backoff. Reopening here would stack duplicate connections,
     // which is the failure this module exists to prevent.
     connected = false;
+    // Subscribers are told even though the data did not change, because losing the connection IS the change
+    // for anything showing a live indicator. Without this a dropped stream keeps claiming to be live, since
+    // the only thing that used to wake a subscriber was a frame and a dead stream sends none.
+    notify();
   });
+}
+
+function notify() {
+  listeners.forEach((fn) => fn(snapshot));
 }
 
 function closeIfIdle() {

@@ -103,9 +103,13 @@ export function useJobStream(): StreamState<JobStream> {
   // Backed by the shared module-level stream rather than its own EventSource. Six pages call this and the
   // top bar now does too, so a connection per caller meant every one of those pages held two to the same
   // endpoint carrying identical frames. The signature is unchanged, so no caller had to move.
-  const [data, setData] = useState<JobStream | null>(getJobs());
-  useEffect(() => subscribeJobs(setData), []);
-  return { data, connected: jobsConnected(), error: null };
+  // Connectivity is held in state alongside the data rather than read at render time, because a stream that
+  // drops sends no frame and so would never trigger the render that noticed it had gone.
+  const [state, setState] = useState<StreamState<JobStream>>(
+    () => ({ data: getJobs(), connected: jobsConnected(), error: null }));
+  useEffect(() => subscribeJobs(
+    (s) => setState({ data: s, connected: jobsConnected(), error: null })), []);
+  return state;
 }
 
 export function useTrainingStream(jobId: string | null): StreamState<JobStreamRow> {

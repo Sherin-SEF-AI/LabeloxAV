@@ -15,8 +15,10 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getJobs, type JobsSummary, resetJobStream, subscribeJobs, subscribeJobSummary, summarizeJobs }
-  from "./jobStream";
+import {
+  getJobs, jobsConnected, type JobsSummary, resetJobStream,
+  subscribeJobs, subscribeJobSummary, summarizeJobs,
+} from "./jobStream";
 import type { JobStream } from "./useEventStream";
 
 // A minimal EventSource stand-in that records how many were constructed and closed.
@@ -114,6 +116,20 @@ describe("the snapshot", () => {
     FakeES.last!.push(frame({ import: [row("j1", "running")] }));
     a();
     expect(getJobs()?.import).toHaveLength(1);
+  });
+
+  it("wakes subscribers when the connection drops, not only when a frame lands", () => {
+    // A dead stream sends no frames, so a subscriber whose only wake-up is a frame would go on claiming the
+    // connection is live for as long as it stays down. That is precisely when a live indicator matters.
+    let woke = 0;
+    const a = subscribeJobs(() => { woke++; });
+    const before = woke;
+    FakeES.last!.listeners.get("open")?.({} as Event);
+    expect(jobsConnected()).toBe(true);
+    FakeES.last!.listeners.get("error")?.({} as Event);
+    expect(jobsConnected()).toBe(false);
+    expect(woke).toBeGreaterThan(before + 1);
+    a();
   });
 
   it("ignores a malformed frame rather than tearing down the stream", () => {
