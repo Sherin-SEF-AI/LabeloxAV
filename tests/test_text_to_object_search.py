@@ -77,7 +77,7 @@ async def test_nearest_crop_in_the_shared_space_ranks_first(monkeypatch):
     from db.session import get_sessionmaker
 
     # Stand in for the encoder: the query encodes to the same direction as the second crop.
-    monkeypatch.setattr(emb, "_prompt_vector", lambda text, s: _unit(5))
+    monkeypatch.setattr(emb, "prompt_vector", lambda text, s: _unit(5))
 
     async with get_sessionmaker()() as db:
         sid, oids = await _seed(db, [_unit(1), _unit(5), _unit(9)])
@@ -95,7 +95,7 @@ async def test_unembedded_crops_are_skipped_not_ranked_poorly(monkeypatch):
     from core import embeddings as emb
     from db.session import get_sessionmaker
 
-    monkeypatch.setattr(emb, "_prompt_vector", lambda text, s: _unit(3))
+    monkeypatch.setattr(emb, "prompt_vector", lambda text, s: _unit(3))
 
     async with get_sessionmaker()() as db:
         sid, oids = await _seed(db, [_unit(3), None, None])
@@ -109,7 +109,7 @@ async def test_session_filter_scopes_the_search(monkeypatch):
     from core import embeddings as emb
     from db.session import get_sessionmaker
 
-    monkeypatch.setattr(emb, "_prompt_vector", lambda text, s: _unit(7))
+    monkeypatch.setattr(emb, "prompt_vector", lambda text, s: _unit(7))
 
     async with get_sessionmaker()() as db:
         sid_a, oids_a = await _seed(db, [_unit(7)])
@@ -125,7 +125,7 @@ async def test_class_filter_scopes_the_search(monkeypatch):
     from db.session import get_sessionmaker
     from services.autolabel.ontology import get_ontology
 
-    monkeypatch.setattr(emb, "_prompt_vector", lambda text, s: _unit(2))
+    monkeypatch.setattr(emb, "prompt_vector", lambda text, s: _unit(2))
     onto = get_ontology()
 
     async with get_sessionmaker()() as db:
@@ -142,7 +142,7 @@ async def test_min_sim_drops_weak_matches(monkeypatch):
     from core import embeddings as emb
     from db.session import get_sessionmaker
 
-    monkeypatch.setattr(emb, "_prompt_vector", lambda text, s: _unit(4))
+    monkeypatch.setattr(emb, "prompt_vector", lambda text, s: _unit(4))
 
     async with get_sessionmaker()() as db:
         sid, oids = await _seed(db, [_unit(4), _unit(11)])   # one identical, one orthogonal
@@ -154,7 +154,7 @@ async def test_min_sim_drops_weak_matches(monkeypatch):
 def test_query_is_wrapped_in_the_caption_template():
     # SigLIP was trained on captions, so a bare noun phrase sits off-distribution; the crop classifier already
     # uses this template and retrieval must match it or the two disagree about what a class looks like.
-    from core.embeddings import _prompt_vector
+    from core.embeddings import prompt_vector
 
     seen: list[str] = []
 
@@ -164,6 +164,6 @@ def test_query_is_wrapped_in_the_caption_template():
             seen.append(t)
             return [0.0] * _DIM
 
-    _prompt_vector("cattle at night", _Enc())
-    _prompt_vector("a photo of a bus", _Enc())
+    prompt_vector("cattle at night", _Enc())
+    prompt_vector("a photo of a bus", _Enc())
     assert seen == ["a photo of cattle at night", "a photo of a bus"]   # not double-wrapped

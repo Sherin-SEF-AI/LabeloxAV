@@ -539,17 +539,6 @@ class Scenario(Base):
     )
 
 
-class Embedding(Base):
-    __tablename__ = "embedding"
-
-    object_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("object.object_id", ondelete="CASCADE"), primary_key=True
-    )
-    model: Mapped[str] = mapped_column(String(48), nullable=False)
-    dim: Mapped[int] = mapped_column(Integer, nullable=False)
-    vec: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)  # L2-normalized
-
-
 class FrameEmbedding(Base):
     # Whole-frame embeddings on pgvector (Data Intelligence Layer). DINOv3 (visual: dedup, novelty,
     # clustering) + SigLIP 2 (text-aligned: semantic search, zero-shot scene). HNSW cosine on both.

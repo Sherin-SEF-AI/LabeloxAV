@@ -130,7 +130,7 @@ async def object_neighbors_by_text(
     from services.intelligence.embed import siglip2
 
     await tune_recall(db)
-    vec = _prompt_vector(query_text, siglip2)
+    vec = prompt_vector(query_text, siglip2)
     dist = ObjectEmbedding.siglip_vec.cosine_distance(vec).label("d")
     stmt = select(ObjectEmbedding.object_id, dist).where(ObjectEmbedding.siglip_vec.isnot(None))
     if class_id is not None or session_id is not None:
@@ -147,7 +147,7 @@ async def object_neighbors_by_text(
     return hits if min_sim is None else [h for h in hits if h[1] >= min_sim]
 
 
-def _prompt_vector(query_text: str, siglip2) -> list[float]:
+def prompt_vector(query_text: str, siglip2) -> list[float]:
     """Encode a query with the caption-style prompt SigLIP was trained on.
 
     A bare noun phrase sits off the distribution of the captions the model saw, and the standard remedy

@@ -848,3 +848,18 @@ async def revert(run_id: str, db: AsyncSession = Depends(db_session)):
         return await revert_run(db, uuid.UUID(run_id))
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/agent/contamination", dependencies=[Depends(require_role("annotator"))])
+async def contamination(min_count: int = 25, refused_only: bool = False,
+                        db: AsyncSession = Depends(db_session)):
+    """Class moves a past relabel run made, grouped by the mistake rather than by the object.
+
+    Fifty thousand individual rewrites are not reviewable; the several hundred decisions behind them are.
+    `refused_now` marks the ones the ontology guard would reject today, which are the lineages that need no
+    judgement call to identify.
+    """
+    from services.agent.contamination import agent_relabel_lineages, summarize
+
+    rows = await agent_relabel_lineages(db, min_count=min_count, refused_only=refused_only)
+    return {"summary": summarize(rows), "lineages": rows}

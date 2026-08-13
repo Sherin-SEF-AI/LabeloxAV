@@ -7,6 +7,7 @@ import PageShell from "@/components/shell/PageShell";
 import ActivityLog from "@/components/agent/ActivityLog";
 import InterruptedRuns from "@/components/agent/InterruptedRuns";
 import JobWatcher from "@/components/agent/JobWatcher";
+import ContaminationPanel from "@/components/agent/ContaminationPanel";
 import { describeFailure } from "@/lib/actionError";
 import { type ActivityLog as Log, emptyLog, record } from "@/lib/activityLog";
 import { Spinner } from "@/components/Spinner";
@@ -548,6 +549,10 @@ export default function AgentConsole() {
           <JobWatcher />
 
           <ActivityLog log={log} onClear={() => setLog((l) => ({ entries: [], seq: l.seq }))} />
+
+          {/* What a past relabel run did, grouped by the decision rather than by the object. Fifty
+              thousand individual rewrites are not reviewable; the hundred decisions behind them are. */}
+          <ContaminationPanel />
 
           {/* Fix queue */}
           <div className="panel">

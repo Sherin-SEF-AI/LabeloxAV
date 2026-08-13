@@ -158,6 +158,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/agent/command",
                           params=None, json_body=body)
 
+    def get_agent_contamination(self, min_count: int | None = 25, refused_only: bool | None = False) -> Any:
+        """Contamination"""
+        return self._call("GET", f"/api/agent/contamination",
+                          params={"min_count": min_count, "refused_only": refused_only}, json_body=None)
+
     def post_agent_copilot_batch_fix(self, body: Any = None) -> Any:
         """Copilot Batch Fix"""
         return self._call("POST", f"/api/agent/copilot/batch-fix",
@@ -3296,4 +3301,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 642 routes generated from the server schema.
+# 643 routes generated from the server schema.

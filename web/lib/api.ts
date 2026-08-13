@@ -607,6 +607,17 @@ export const api = {
     post<{ run_id: string; objects_updated: number; counts: { attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes`, {}),
   agentAsk: (text: string) =>
     post<{ understood: string; count: number; frames: { frame_id: string; session_id: string }[] }>(`/api/agent/ask`, { text }),
+  // Class moves a past relabel run made, grouped by the mistake rather than by the object. `refused_now`
+  // marks the lineages the ontology guard would reject today.
+  agentContamination: (minCount = 25, refusedOnly = false) =>
+    get<{
+      summary: { lineages: number; objects: number; refused_lineages: number; refused_objects: number };
+      lineages: {
+        from_name: string; to_name: string; count: number;
+        refused_now: boolean; reason: string | null;
+        examples: { object_id: string; frame_id: string }[];
+      }[];
+    }>(`/api/agent/contamination?min_count=${minCount}&refused_only=${refusedOnly}`),
   agentReport: () =>
     get<{ size: { sessions: number; objects: number; human_labeled: number }; class_balance: { missing: number; rare: number }; coverage_gaps: string[]; fix_queue: Record<string, number>; fix_queue_total: number; scenarios: Record<string, number>; geo: Record<string, number> }>(`/api/agent/report`),
   agentSuggest: (frame_id: string) =>
