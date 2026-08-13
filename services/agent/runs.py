@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from db.models import AgentRun, Object
+from services import review_batch
 from services.agent.resume import fraction_done
 
 log = get_logger("agent.runs")
@@ -48,6 +49,12 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
         from services.agent.ontology_merge import revert_merge
 
         return await revert_merge(db, run)
+
+    # A bulk review is a human decision, so the generic restore below cannot undo it: that path refuses to
+    # touch anything whose source is `human`, and a human review is precisely what set the column to human.
+    # This kind checks ownership by the stamped run id instead.
+    if run.kind == review_batch.KIND:
+        return await review_batch.revert_batch(db, run)
 
     # A cleanup sweep removed objects; reverting re-inserts them from the stored snapshots.
     if run.kind == "cleanup_sweep":

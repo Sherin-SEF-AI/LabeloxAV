@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+from uuid import UUID
 
 import click
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
 from core.storage import get_object_store
-from db.models import GoldSet
+from db.models import GoldSet, Object
 from db.session import get_sessionmaker
 from services.training.gold import gold_data_yaml
 
@@ -24,11 +25,29 @@ log = get_logger("quality")
 
 
 async def list_gold_sets() -> list[dict]:
+    """Every sealed gold set, with how much of it still exists.
+
+    A gold set is a list of object ids, so it rots silently when those objects are deleted: re-importing a
+    session, or rebuilding a corpus, takes its objects with it and leaves the gold set claiming a size it no
+    longer has. This deployment carries five in that state, one of them listing 171 objects of which zero
+    survive, and until now they were indistinguishable on this page from the two that are intact. A rotted
+    set grades nothing: honeypots seeded from it produce no frames and a quality sheet measured against it
+    has no truth to compare with, both silently.
+    """
     async with get_sessionmaker()() as db:
         rows = (await db.execute(select(GoldSet).order_by(GoldSet.created_at.desc()))).scalars().all()
+        alive: dict[str, int] = {}
+        for g in rows:
+            ids = [UUID(str(o)) for o in (g.object_ids or [])]
+            alive[g.gold_id] = int((await db.execute(
+                select(func.count()).select_from(Object)
+                .where(Object.object_id.in_(ids)))).scalar() or 0) if ids else 0
     return [
         {"gold_id": g.gold_id, "name": g.name, "n_objects": g.n_objects, "n_frames": g.n_frames,
          "ontology_version": g.ontology_version, "measured": bool(g.metrics),
+         # `n_objects` is what was sealed; `n_alive` is what is left to grade against.
+         "n_alive": alive[g.gold_id], "n_missing": max(0, len(g.object_ids or []) - alive[g.gold_id]),
+         "usable": alive[g.gold_id] > 0,
          "created_at": g.created_at.isoformat() if g.created_at else None}
         for g in rows
     ]

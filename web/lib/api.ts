@@ -1060,6 +1060,8 @@ export const api = {
       updated: number; action: string;
       skipped_missing: string[];
       skipped_stale: { object_id: string; expected: number; current: number }[];
+      // The handle for taking the whole batch back in one move. Null for a batch that changed nothing.
+      run_id: string | null;
     }>("/api/objects/bulk-review",
        { object_ids, action, class_name, state, attrs, ...(extra ?? {}) }),
   // One sprite sheet for many crops. A grid asking for its tiles one at a time is N whole-frame decodes and
@@ -1527,10 +1529,16 @@ export type PiiCoverage = {
 export type GoldSetRow = {
   gold_id: string;
   name: string;
+  /** What was sealed. */
   n_objects: number;
   n_frames: number;
   ontology_version: string;
   measured: boolean;
+  /** What is left. A gold set is a list of object ids and rots when those objects are deleted. */
+  n_alive: number;
+  n_missing: number;
+  /** False means it grades nothing: no honeypot can be seeded and no sheet can be measured. */
+  usable: boolean;
   created_at: string | null;
 };
 

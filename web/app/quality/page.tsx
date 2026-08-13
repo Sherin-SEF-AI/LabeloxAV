@@ -113,6 +113,21 @@ export default function QualityPage() {
                 >
                   {g.name} · {g.n_objects} obj · {g.n_frames} fr{" "}
                   <StateBadge state={g.measured ? "measured" : "unmeasured"} />
+                  {/* A gold set is a list of object ids, so it rots when those objects are deleted and goes
+                      on claiming its sealed size. A rotted set seeds no honeypots and measures nothing, and
+                      it looked identical to a healthy one here. */}
+                  {g.usable === false && (
+                    <span className="ml-1 text-block"
+                      title={`${g.n_missing} of ${g.n_objects} objects no longer exist; this set grades nothing`}>
+                      rotted
+                    </span>
+                  )}
+                  {g.usable && g.n_missing > 0 && (
+                    <span className="ml-1 text-warn"
+                      title={`${g.n_missing} of ${g.n_objects} objects no longer exist`}>
+                      {g.n_alive}/{g.n_objects} left
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

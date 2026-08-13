@@ -23,17 +23,56 @@ from services.intelligence.embed.prep import PREP_TAG
 # (SET LOCAL) right before each ANN query so it never leaks into unrelated statements.
 HNSW_EF_SEARCH = 200
 
+# ef_search alone is not enough once a query carries a WHERE clause, and the failure is silent.
+#
+# A plain HNSW scan visits ef_search candidates and stops. The filter is applied to those candidates, so if
+# none of them satisfies it the query returns ZERO ROWS rather than searching further. Measured here: a
+# search filtered to `hoarding`, a class with 26,216 embedded objects, returned nothing at every ef_search up
+# to the 1,000 maximum, because the query object sat inside a cluster of 2,354 near-identical crops that
+# filled the entire window. Nothing in the result distinguishes that from "there are genuinely no
+# neighbours", which is how a broken find-similar can look like an empty corpus.
+#
+# Iterative scan is pgvector 0.8's answer: when the filter eats the candidates, it keeps scanning instead of
+# giving up. `relaxed_order` rather than `strict_order` because these callers rerank by similarity anyway and
+# strict ordering costs a sort for a guarantee nobody here depends on. max_scan_tuples bounds the worst case
+# so a filter that matches nothing cannot turn into a full table scan of half a million vectors.
+HNSW_ITERATIVE_SCAN = "relaxed_order"
+HNSW_MAX_SCAN_TUPLES = 100_000
+
 
 def model_versions() -> dict:
     """The exact checkpoints + crop prep currently in use, recorded on every vector written."""
     return {"dino": dinov3.model_tag(), "siglip": siglip2.model_tag(), "prep": PREP_TAG}
 
 
-async def _tune_recall(db: AsyncSession) -> None:
-    try:
-        await db.execute(text(f"SET LOCAL hnsw.ef_search = {int(HNSW_EF_SEARCH)}"))
-    except Exception:  # noqa: BLE001 -- non-pg backend or missing GUC: fall back to the default silently
-        pass
+# Which hnsw.* settings this server actually has, learned once. Asking first rather than setting and
+# catching: a failed SET aborts the surrounding transaction in Postgres, so a try/except per statement would
+# turn a missing GUC on an older pgvector into "current transaction is aborted" for the query that follows.
+_HNSW_GUCS: set[str] | None = None
+
+
+async def _hnsw_settings(db: AsyncSession) -> set[str]:
+    global _HNSW_GUCS
+    if _HNSW_GUCS is None:
+        try:
+            rows = await db.execute(text("SELECT name FROM pg_settings WHERE name LIKE 'hnsw.%'"))
+            _HNSW_GUCS = {r[0] for r in rows}
+        except Exception:  # noqa: BLE001 -- not Postgres, or pgvector absent
+            _HNSW_GUCS = set()
+    return _HNSW_GUCS
+
+
+async def tune_recall(db: AsyncSession) -> None:
+    """Widen the ANN search for one transaction, and let it keep looking when a filter empties the window."""
+    have = await _hnsw_settings(db)
+    wanted = {
+        "hnsw.ef_search": str(int(HNSW_EF_SEARCH)),
+        "hnsw.iterative_scan": f"'{HNSW_ITERATIVE_SCAN}'",
+        "hnsw.max_scan_tuples": str(int(HNSW_MAX_SCAN_TUPLES)),
+    }
+    for name, value in wanted.items():
+        if name in have:
+            await db.execute(text(f"SET LOCAL {name} = {value}"))
 
 
 async def frame_neighbors(
@@ -41,7 +80,7 @@ async def frame_neighbors(
     exclude_frame_id: UUID | None = None, session_id: UUID | None = None, city: str | None = None,
 ) -> list[tuple[str, float]]:
     """Top-k frames by cosine to query_vec in the DINOv3 (visual) or SigLIP 2 (semantic) space."""
-    await _tune_recall(db)
+    await tune_recall(db)
     col = FrameEmbedding.dino_vec if space == "dino" else FrameEmbedding.siglip_vec
     dist = col.cosine_distance(list(map(float, query_vec))).label("d")
     stmt = select(FrameEmbedding.frame_id, dist).where(col.isnot(None))
@@ -62,7 +101,7 @@ async def object_neighbors(
     exclude_object_id: UUID | None = None, class_id: int | None = None,
 ) -> list[tuple[str, float]]:
     """Top-k object crops by DINOv3 cosine to query_vec, optionally restricted to one class."""
-    await _tune_recall(db)
+    await tune_recall(db)
     dist = ObjectEmbedding.dino_vec.cosine_distance(list(map(float, query_vec))).label("d")
     stmt = select(ObjectEmbedding.object_id, dist)
     if exclude_object_id is not None:
@@ -90,7 +129,7 @@ async def object_neighbors_by_text(
     """
     from services.intelligence.embed import siglip2
 
-    await _tune_recall(db)
+    await tune_recall(db)
     vec = _prompt_vector(query_text, siglip2)
     dist = ObjectEmbedding.siglip_vec.cosine_distance(vec).label("d")
     stmt = select(ObjectEmbedding.object_id, dist).where(ObjectEmbedding.siglip_vec.isnot(None))
@@ -132,7 +171,7 @@ async def object_candidates(
     sluggish. This fetches everything the reranker needs at once: the crop vector (to measure candidate to
     candidate similarity for dedup) and the class/track (to filter) alongside the score.
     """
-    await _tune_recall(db)
+    await tune_recall(db)
     dist = ObjectEmbedding.dino_vec.cosine_distance(list(map(float, query_vec))).label("d")
     stmt = (select(ObjectEmbedding.object_id, dist, ObjectEmbedding.dino_vec,
                    Object.class_id, Object.track_id, Object.frame_id, Object.conf)
@@ -159,7 +198,7 @@ async def frame_candidates(
     exclude_frame_id: UUID | None = None, session_id: UUID | None = None, city: str | None = None,
 ) -> list[dict]:
     """Top-k frame candidates with vector + scene metadata, the frame analogue of object_candidates."""
-    await _tune_recall(db)
+    await tune_recall(db)
     col = FrameEmbedding.dino_vec if space == "dino" else FrameEmbedding.siglip_vec
     dist = col.cosine_distance(list(map(float, query_vec))).label("d")
     stmt = (select(FrameEmbedding.frame_id, dist, col, Frame.session_id, Frame.scene)

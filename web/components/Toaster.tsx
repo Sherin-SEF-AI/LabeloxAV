@@ -33,6 +33,16 @@ export default function Toaster() {
         <div key={t.id}
           className={`pointer-events-auto bg-bg-2 border ${STYLE[t.kind]} px-3 py-2 font-mono text-[11px] shadow-lg flex items-start gap-2`}>
           <span className="flex-1 break-words">{t.message}</span>
+          {t.action && (
+            <button
+              onClick={async () => {
+                setToasts((cur) => cur.filter((x) => x.id !== t.id));
+                await t.action?.run();
+              }}
+              className="shrink-0 border border-line px-1.5 text-ink-2 hover:border-accent">
+              {t.action.label}
+            </button>
+          )}
           <button onClick={() => setToasts((cur) => cur.filter((x) => x.id !== t.id))}
             aria-label="dismiss" className="text-ink-3 hover:text-ink shrink-0">✕</button>
         </div>

@@ -204,12 +204,26 @@ async def commit_relabel(db: AsyncSession, frame_id: uuid.UUID, *, created_by: s
     if unstorable:
         log.warning("agent.relabel.unstorable_class", frame_id=str(frame_id), class_ids=sorted(unstorable))
 
+    from services.agent.class_move import refuse_reason
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
     for item in plan["items"]:
         if int(item["to_class"]) not in storable:
             plan["counts"]["skipped_unknown_class"] = plan["counts"].get("skipped_unknown_class", 0) + 1
             continue
         obj = await db.get(Object, uuid.UUID(item["object_id"]))
         if obj is None or obj.source == "human" or int(obj.class_id) == item["to_class"]:
+            continue
+        # A relabel may sharpen a class and may not change what kind of thing it is. This run once moved
+        # 1,047 buses into a bus shelter at confidence 0.989, over the top of two detectors and a reasoner
+        # all saying `bus`, and into a class the persist layer refuses to store as an instance at all.
+        # Confidence cannot catch that; the ontology can.
+        refusal = refuse_reason(onto, int(obj.class_id), int(item["to_class"]))
+        if refusal:
+            plan["counts"]["skipped_category_change"] = plan["counts"].get("skipped_category_change", 0) + 1
+            log.warning("agent.relabel.refused_category_change", object_id=item["object_id"],
+                        move=f"{item['from_name']} -> {item['to_name']}", reason=refusal)
             continue
         changes[item["object_id"]] = {"from_class": int(obj.class_id), "from_state": obj.state, "from_source": obj.source}
         obj.class_id = item["to_class"]

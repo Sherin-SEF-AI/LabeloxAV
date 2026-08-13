@@ -34,6 +34,9 @@ class SuggestIn(BaseModel):
     filters: dict = {}                 # cam_id, city, conf_min/max, area_min/max
     limit: int = 200
     threshold: float = 0.82
+    # Off by default: one systematic error is usually spread over several source classes, and scoping to the
+    # class the operator happened to start from surfaces one lineage of several.
+    same_class: bool = False
 
 
 @router.post("/corrections/suggest")
@@ -56,6 +59,7 @@ async def suggest(body: SuggestIn, db: AsyncSession = Depends(db_session)):
         db, body.object_id, kind=body.kind, old_class_id=old_class_id,
         attr_key=body.attr_key, old_value=body.old_value, new_value=new_value,
         filters=body.filters, limit=body.limit, threshold=body.threshold,
+        same_class=body.same_class,
     )
     return {"kind": body.kind, "change": change, **res}
 

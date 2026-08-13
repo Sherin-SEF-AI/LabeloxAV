@@ -714,7 +714,13 @@ export default function FrameEditor() {
   }, [mode, meta, reviewLoaded, id]);
 
   // Accept or reject the selected object (persisted directly with an explicit state), then advance the queue.
-  const reviewObject = async (newState: "accepted" | "rejected") => {
+  //
+  // The accepted state comes from the role, not from the verb. An annotator's "accept" means submitted, so
+  // the work lands in the QA queue the triage page's `submitted` band exists to serve. This file's own
+  // `save()` already used `acceptState(role)`; these two paths hardcoded `accepted`, so the same person
+  // pressing A skipped the review step that pressing Cmd+S respected. `/review/rapid` was always right.
+  const reviewObject = async (verdict: "accept" | "reject") => {
+    const newState = verdict === "accept" ? acceptState(getUser()?.role) : "rejected";
     const o = selected;
     if (!o) { flash("select an object to review"); return; }
     if (o.isNew) { flash("save the new object first"); return; }
@@ -726,7 +732,7 @@ export default function FrameEditor() {
       // already blocked above, so there is nothing to clobber. Gating the human's decision on a version that
       // a background re-autolabel or embed pass may have bumped just produced spurious 409s. The optimistic
       // lock still guards the geometry-edit path (adjust_geometry), where a concurrent box edit does matter.
-      const r = await api.review(o.id, { action: newState === "accepted" ? "accept" : "reject", state: newState });
+      const r = await api.review(o.id, { action: verdict, state: newState });
       dispatch({ t: "reviewed", id: o.id, state: newState, version: r.version });
       setAlItems((s) => s.filter((it) => it.object_id !== o.id)); // drop the handled item so the queue advances
       flash(newState);
@@ -1040,8 +1046,8 @@ export default function FrameEditor() {
       const k = e.key.toLowerCase();
       // Review mode rebinds a/x to accept/reject the selected object (and advance the queue).
       if (mode === "review") {
-        if (k === "a") { reviewObject("accepted"); return; }
-        if (k === "x") { reviewObject("rejected"); return; }
+        if (k === "a") { reviewObject("accept"); return; }
+        if (k === "x") { reviewObject("reject"); return; }
       }
       if (k === "a") dispatch({ t: "acceptAll" });
       else if (k === "v") dispatch({ t: "tool", tool: "select" });
@@ -1369,8 +1375,8 @@ export default function FrameEditor() {
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 panel px-3 py-1.5 flex items-center gap-3 font-mono text-[11px]">
               <span className="text-ink-2">{selected.class_name}</span>
               <ConfBar conf={selected.conf} />
-              <button onClick={() => reviewObject("accepted")} className="border border-pass text-pass px-2 py-0.5 hover:bg-pass/10">accept (A)</button>
-              <button onClick={() => reviewObject("rejected")} className="border border-block text-block px-2 py-0.5 hover:bg-block/10">reject (X)</button>
+              <button onClick={() => reviewObject("accept")} className="border border-pass text-pass px-2 py-0.5 hover:bg-pass/10">accept (A)</button>
+              <button onClick={() => reviewObject("reject")} className="border border-block text-block px-2 py-0.5 hover:bg-block/10">reject (X)</button>
               <button onClick={() => advanceReview(selected.id)} className="text-ink-3 hover:text-ink">skip</button>
             </div>
           )}
@@ -1711,8 +1717,8 @@ export default function FrameEditor() {
                   </div>
                   <ConfBar conf={selected.conf} />
                   <div className="flex gap-1">
-                    <button onClick={() => reviewObject("accepted")} className="flex-1 border border-pass text-pass px-2 py-1 hover:bg-pass/10">accept (A)</button>
-                    <button onClick={() => reviewObject("rejected")} className="flex-1 border border-block text-block px-2 py-1 hover:bg-block/10">reject (X)</button>
+                    <button onClick={() => reviewObject("accept")} className="flex-1 border border-pass text-pass px-2 py-1 hover:bg-pass/10">accept (A)</button>
+                    <button onClick={() => reviewObject("reject")} className="flex-1 border border-block text-block px-2 py-1 hover:bg-block/10">reject (X)</button>
                   </div>
                 </div>
               ) : <div className="text-ink-3 border-b hairline pb-2">click an object on the canvas to accept or reject it.</div>}
