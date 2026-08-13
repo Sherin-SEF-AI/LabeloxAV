@@ -141,8 +141,13 @@ export type SystemStream = {
  * stream is events read from the database, and folding them together would make every job push carry an
  * nvidia-smi call.
  */
-export function useSystemStream(): StreamState<SystemStream> {
-  return useEventStream<SystemStream>("/api/events/system", "system");
+/**
+ * @param enabled pass false to hold the connection closed. The canvas console is collapsed by default and a
+ *   frame editor holding a stream for a panel nobody opened is one connection per tab, ticking every three
+ *   seconds, for nothing.
+ */
+export function useSystemStream(enabled = true): StreamState<SystemStream> {
+  return useEventStream<SystemStream>(enabled ? "/api/events/system" : null, "system");
 }
 
 export function useTrainingStream(jobId: string | null): StreamState<JobStreamRow> {

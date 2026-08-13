@@ -9,6 +9,8 @@ import type { ColorBy } from "@/components/lidar/PointCloudViewer";
 import type { AdverseRegion, AlItem, DrivingEvent, ErrorCandidateRow, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, ProjectedCuboid, Relationship } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
+import { beginOp, endOp, resetOps, trackOp } from "@/lib/canvasOps";
+import CanvasConsole from "@/components/editor/CanvasConsole";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
 import { PERSON_17 } from "@/lib/skeleton";
 import BackButton from "@/components/BackButton";
@@ -268,6 +270,9 @@ export default function FrameEditor() {
   // so any one 500 rejects the whole load).
   useEffect(() => {
     let live = true;
+    // The operation board belongs to this frame. Carrying the previous frame's segmentations into the next
+    // one would attribute work to an image it never touched.
+    resetOps();
     (async () => {
       setLoadError(null);
       try {
@@ -407,7 +412,9 @@ export default function FrameEditor() {
   // magic-wand: a single SAM point click that auto-creates (or refines) the object, no accept step
   const runMagicWand = async (pt: number[]) => {
     try {
-      const r = await api.segmentPrompt(id, { points: [pt], labels: [1], precise: segKind === "panoptic" });
+      const r = await trackOp("sam", "magic wand",
+        () => api.segmentPrompt(id, { points: [pt], labels: [1], precise: segKind === "panoptic" }),
+        (res) => `${res.polygons.length} region${res.polygons.length === 1 ? "" : "s"}`);
       if (!r.polygons.length) { flash("magic-wand found nothing here"); return; }
       const box = bboxOfPolys(r.polygons);
       if (selected && overlapFrac(box, selected.bbox) > 0.5) {
@@ -424,7 +431,8 @@ export default function FrameEditor() {
   const onBrushStroke = async (ops: { op: string; center: number[]; radius: number }[]) => {
     if (!meta) return;
     try {
-      const r = await api.composeMask({ polygons: selected?.mask ?? [], ops, width: meta.width, height: meta.height });
+      const r = await trackOp("mask", "brush stroke",
+        () => api.composeMask({ polygons: selected?.mask ?? [], ops, width: meta.width, height: meta.height }));
       if (selected) {
         dispatch({ t: "update", id: selected.id, patch: { mask: r.polygons, bbox: r.polygons.length ? bboxOfPolys(r.polygons) : selected.bbox } });
       } else if (currentClass && r.polygons.length) {
@@ -515,7 +523,11 @@ export default function FrameEditor() {
   }, []);
   const segRoad = useCallback(async () => {
     flash("segmenting road surface...");
-    try { await api.segmentDrivable(id); await loadLayers(); flash("drivable area updated"); }
+    try {
+      await trackOp("drivable", "drivable surface", () => api.segmentDrivable(id));
+      await loadLayers();
+      flash("drivable area updated");
+    }
     catch (e) { flash("segment road failed: " + humanizeError(e)); }
   }, [id, loadLayers]);
   const genLanes = useCallback(async () => {
@@ -564,7 +576,11 @@ export default function FrameEditor() {
     if (!(await confirm({ title: "Delete this lane?", danger: true, confirmLabel: "Delete" }))) return;
     await api.deleteLane(laneSel); setLaneSel(null); await loadLayers(); flash("lane deleted");
   };
-  const propagateLanes = async () => { const r = await api.propagateLanes(id, 8); flash(`propagated to ${r.created} lane-frames`); };
+  const propagateLanes = async () => {
+    const r = await trackOp("propagate", "propagate lanes", () => api.propagateLanes(id, 8),
+      (res) => `${res.created} frames`);
+    flash(`propagated to ${r.created} lane-frames`);
+  };
 
   // ---- drivable surface editing --------------------------------------------------------------------
   // The mask is stored as flat [x,y,x,y,...] rings per class, which is what the API takes and returns, so
@@ -841,7 +857,9 @@ export default function FrameEditor() {
     async (prompt: { points?: number[][]; labels?: number[]; box?: number[] }) => {
       if (st.candidate?.length) acceptCandidate(); // commit the pending mask before starting the next
       try {
-        const r = await api.segmentPrompt(id, { ...prompt, precise: segKind === "panoptic" });
+        const r = await trackOp("sam", segKind === "panoptic" ? "SAM (precise)" : "SAM segment",
+          () => api.segmentPrompt(id, { ...prompt, precise: segKind === "panoptic" }),
+          (res) => `${res.polygons.length} region${res.polygons.length === 1 ? "" : "s"}`);
         dispatch({ t: "candidate", polys: r.polygons });
         if (!r.polygons.length) flash("SAM found nothing here");
       } catch (e) {
@@ -876,6 +894,11 @@ export default function FrameEditor() {
     savingRef.current = true;
     setSaving(true);
     const tgt = acceptState(getUser()?.role);  // annotator -> submitted (QA), reviewer/admin -> accepted
+    // Tracked rather than wrapped in trackOp: this function already owns a try/catch/finally with a
+    // savingRef guard, and threading a wrapper through it would have meant restructuring the one path in
+    // this file that must not grow another way to leak.
+    const pending = st.objects.filter((o) => o.isNew || o.dirty).length + st.deleted.length;
+    const opId = beginOp("save", pending === 1 ? "saving 1 object" : `saving ${pending} objects`);
     try {
       // Delete is idempotent: a 404 means the object is already gone, which is the desired end state. Without
       // this, deleting an already-removed object throws, aborts the save before the "saved" dispatch clears
@@ -912,9 +935,11 @@ export default function FrameEditor() {
       lastFailRef.current = "";                  // succeeded: clear the no-retry guard
       flash("saved");
       setCuboids(await api.frameCuboids(id).catch(() => [])); // refresh projected cuboid wireframes
+      endOp(opId, "ok", pending === 1 ? "1 object" : `${pending} objects`);
     } catch (e) {
       const msg = humanizeError(e);
       lastFailRef.current = pendingSig();         // do not auto-retry this exact set until something changes
+      endOp(opId, "failed", msg.includes("409") ? "another annotator changed this object" : msg);
       flash(msg.includes("409") ? "conflict: another annotator changed this object; reload to continue" : "save failed: " + msg);
     } finally {
       savingRef.current = false;
@@ -1018,6 +1043,13 @@ export default function FrameEditor() {
       }
       if (mod && e.key.toLowerCase() === "i") {
         e.preventDefault(); dispatch({ t: "selectBy", how: "invert" }); return;
+      }
+      // Backslash: near Enter on every layout, and unclaimed. Toggling the console has to be reachable
+      // without leaving the drawing hand, or it is a panel people open once.
+      if (!mod && e.key === "\\") {
+        e.preventDefault();
+        window.dispatchEvent(new Event("lbx:canvas-console"));
+        return;
       }
       if (mod && e.key.toLowerCase() === "c" && st.selectedId) {
         const o = stRef.current.objects.find((x) => x.id === st.selectedId);
@@ -1276,6 +1308,9 @@ export default function FrameEditor() {
             } />
           </div>
         <div ref={canvasWrapRef} className="flex-1 min-w-0 relative">
+          {/* What the canvas is doing, in the canvas. Everything here ran fire-and-forget with a one-line
+              flash, so a slow call and a call that never went looked the same from the image. */}
+          <CanvasConsole />
           {mode === "events" ? (
             // Opaque: this panel replaces the image rather than floating over it, and inheriting the
             // transparent canvas let what is behind print through the controls.
@@ -1861,7 +1896,8 @@ export default function FrameEditor() {
                 disabled={selected.isNew}
                 title={selected.isNew ? "save the frame first, then propagate" : "optical-flow propagate this box across the next 12 frames as a track to confirm"}
                 onClick={async () => {
-                  const r = await api.propagateObject(selected.id, 12);
+                  const r = await trackOp("propagate", "propagate object",
+                    () => api.propagateObject(selected.id, 12));
                   toast(r.created ? `propagated forward ${r.created} frames (track ${r.track_id?.slice(0, 8)}). Open the track to review/confirm.` : `could not propagate: ${r.reason || "no motion"}`);
                 }}
                 className="w-full mb-1 font-mono text-[10px] border border-line text-ink-2 px-1.5 py-1 hover:border-accent disabled:opacity-40">
