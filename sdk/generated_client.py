@@ -1828,6 +1828,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/jobs",
                           params={"limit": limit}, json_body=None)
 
+    def post_jobs_by_kind_by_job_id_cancel(self, kind: str, job_id: str) -> Any:
+        """Cancel"""
+        return self._call("POST", f"/api/jobs/{kind}/{job_id}/cancel",
+                          params=None, json_body=None)
+
     def get_labelops_issues(self, frame_id: Any | None = None, job_id: Any | None = None, object_id: Any | None = None, status: Any | None = None) -> Any:
         """List Issues"""
         return self._call("GET", f"/api/labelops/issues",
@@ -3291,4 +3296,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 641 routes generated from the server schema.
+# 642 routes generated from the server schema.

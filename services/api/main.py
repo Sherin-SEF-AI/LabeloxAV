@@ -183,9 +183,14 @@ async def lifespan(app: FastAPI):
     try:
         from db.session import get_sessionmaker
         from services.agent.resume import reap_interrupted
+        from services.job_reaper import reap_stale_jobs
 
         async with get_sessionmaker()() as db:
             await reap_interrupted(db)
+            # The five job tables that are not AgentRun. One of them is not cosmetic: the autolabel router
+            # refuses to start while any row reads `running`, so a single row left behind by a restart
+            # disabled auto-labeling for everyone until somebody ran an UPDATE by hand.
+            await reap_stale_jobs(db)
     except Exception as exc:  # noqa: BLE001
         log.warning("api.reap_interrupted_failed", error=str(exc))
     watchdog = spawn(_cloud_watchdog(), name="_cloud_watchdog")

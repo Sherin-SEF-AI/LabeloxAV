@@ -19,6 +19,7 @@ import uuid
 from core.logging import get_logger
 from db.models import RelabelJob
 from db.session import get_sessionmaker
+from services.job_control import QUEUED_CLOUD
 
 log = get_logger("relabel_cloud")
 
@@ -34,8 +35,8 @@ async def mark_queued_for_cloud_relabel(job_id, model_version, session_ids) -> N
         j = await db.get(RelabelJob, uuid.UUID(str(job_id)))
         if j is None:
             return
-        j.status = "pending"
-        j.stage = "queued-cloud"
+        j.status = QUEUED_CLOUD
+        j.stage = QUEUED_CLOUD
         j.counts = {"compute_target": "cloud", "model_version": model_version,
                     "sessions": len(session_ids or []), "note": _NOTE}
         await db.commit()

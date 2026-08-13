@@ -124,14 +124,17 @@ def _load_image(image_ref: str, root: Path) -> np.ndarray | None:
 
 
 async def _bump_job(job_id, **fields) -> None:
+    """Write a job's progress, and stop the run if somebody cancelled it.
+
+    The conditional update in `services/job_control.py` is what makes a cancel real: without it the row
+    would say cancelled while this import carried on writing frames for another twenty minutes.
+    """
     if not job_id:
         return
+    from services.job_control import raise_if_canceled
+
     async with get_sessionmaker()() as db:
-        j = await db.get(ImportJob, uuid.UUID(str(job_id)))
-        if j:
-            for k, v in fields.items():
-                setattr(j, k, v)
-            await db.commit()
+        await raise_if_canceled(db, ImportJob, uuid.UUID(str(job_id)), **fields)
 
 
 async def _import_raw(spec: ImportSpec, job_id, root: Path) -> dict:
@@ -268,6 +271,8 @@ async def import_dataset(spec: ImportSpec, job_id=None) -> dict:
 
                 if i % 100 == 0:
                     await db.commit()
+                    # The progress write doubles as the cancel check, so a cancelled import stops here
+                    # rather than at the end of a corpus somebody has already changed their mind about.
                     await _bump_job(job_id, progress=round(i / total, 3), counts=counts)
 
             session_row.start_ts_ns = ts_lo or base
@@ -283,11 +288,21 @@ async def import_dataset(spec: ImportSpec, job_id=None) -> dict:
 async def run_import_guarded(spec: ImportSpec, job_id) -> None:
     """Background entrypoint: run the import on the API event loop and record failures on the job row
     (so a crashed import is visible as status=error rather than a silent hang)."""
+    from services.job_control import JobCanceled
+
     try:
         await import_dataset(spec, job_id)
+    except JobCanceled:
+        # Not a failure. The row already says `canceled`, and writing `error` over it would turn somebody's
+        # deliberate decision into a fault report.
+        log.info("import.canceled", job_id=str(job_id))
     except Exception as exc:  # noqa: BLE001
         log.error("import.failed", job_id=str(job_id), error=str(exc))
-        await _bump_job(job_id, status="error", error=str(exc))
+        try:
+            await _bump_job(job_id, status="error", error=str(exc))
+        except JobCanceled:
+            # Cancelled while this failure was being recorded. The cancel is the newer fact and wins.
+            log.info("import.canceled_during_failure", job_id=str(job_id))
 
 
 @click.command()

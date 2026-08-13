@@ -1288,6 +1288,10 @@ export const api = {
   trainingStatus: (jobId: string) => get<TrainingJob>(`/api/training/${jobId}`),
   listTraining: () => get<TrainingJob[]>("/api/training"),
   cancelTraining: (jobId: string) => post<TrainingJob>(`/api/training/${jobId}/cancel`, {}),
+  // One cancel for the five kinds the API runs itself. `stopped` distinguishes a job that is now definitely
+  // not running from one that has been asked to stop and will end at its next checkpoint.
+  cancelJob: (path: string) =>
+    post<{ job_id: string; canceled: boolean; stopped?: boolean; detail: string }>(path, {}),
   trainingRegistry: () => get<ModelLine[]>("/api/training/registry"),
   trainingRuns: () => get<ModelRunRow[]>("/api/training/runs"),
   trainingRunCurve: (runId: string) => get<TrainingCurve>(`/api/training/runs/${encodeURIComponent(runId)}/curve`),
