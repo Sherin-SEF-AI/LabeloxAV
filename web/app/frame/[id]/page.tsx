@@ -10,6 +10,7 @@ import type { AdverseRegion, AlItem, DrivingEvent, ErrorCandidateRow, FrameMeta,
 import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
 import { beginOp, endOp, resetOps, trackOp } from "@/lib/canvasOps";
+import { openConsole } from "@/components/console/ConsoleModal";
 import { simplifyMask, simplifyPolygon } from "@/lib/simplify";
 import CanvasConsole from "@/components/editor/CanvasConsole";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
@@ -1256,6 +1257,11 @@ export default function FrameEditor() {
             <span className={`w-1.5 h-1.5 rounded-full ${saving ? "bg-warn" : dirty ? "bg-ink-3" : "bg-pass"}`} />
             <span className="font-mono text-[10px] text-ink-3">{saving ? "saving" : dirty ? (autosave ? "autosave on" : "unsaved") : "saved"}</span>
           </button>
+          {/* The console, over the frame. The editor has its own top bar and so never carried the global
+              activity chip, which left the busiest page in the application as the one with no way to ask
+              what the machine was doing. */}
+          <button onClick={() => openConsole()} title="console: jobs, GPU, host, background work"
+            className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink"><Icon name="activity" size={17} /></button>
           <span className="w-px h-5 bg-line mx-0.5" />
           <CloudControl />
           <span className="w-px h-5 bg-line mx-0.5" />

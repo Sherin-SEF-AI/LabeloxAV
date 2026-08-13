@@ -23,6 +23,16 @@ const ICONS: Record<string, Prim[]> = {
   cuboid: [["path", { d: "M12 2 3 7v10l9 5 9-5V7z" }], ["path", { d: "M3 7l9 5 9-5M12 12v10" }]],
   person: [["circle", { cx: 12, cy: 4.5, r: 2 }], ["path", { d: "M12 6.5v7M8 10.5h8M9 21l3-7 3 7" }]],
   activity: [["path", { d: "M22 12h-4l-3 9L9 3l-3 9H2" }]],
+  // The console sidebar: a section list reads as a list of things, so each needs its own glyph rather than
+  // three rows of the same activity squiggle.
+  chip: [["rect", { x: 6, y: 6, width: 12, height: 12, rx: 1.5 }], ["rect", { x: 9.5, y: 9.5, width: 5, height: 5, rx: 0.5 }],
+         ["path", { d: "M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3" }]],
+  server: [["rect", { x: 3, y: 4, width: 18, height: 7, rx: 1.5 }], ["rect", { x: 3, y: 13, width: 18, height: 7, rx: 1.5 }],
+           ["path", { d: "M7 7.5h.01M7 16.5h.01" }]],
+  terminal: [["path", { d: "m5 8 4 4-4 4M12 16h7" }], ["rect", { x: 2, y: 3, width: 20, height: 18, rx: 2 }]],
+  play: [["path", { d: "M7 4.5v15l12-7.5z" }]],
+  robot: [["rect", { x: 4, y: 8, width: 16, height: 11, rx: 2 }], ["path", { d: "M12 4v4M2 13h2M20 13h2" }],
+          ["circle", { cx: 9, cy: 13, r: 1.2 }], ["circle", { cx: 15, cy: 13, r: 1.2 }]],
   bell: [["path", { d: "M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" }],
          ["path", { d: "M13.7 21a2 2 0 0 1-3.4 0" }]],
   user: [["circle", { cx: 12, cy: 8, r: 4 }], ["path", { d: "M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" }]],
@@ -93,4 +103,5 @@ export const MODE_ICON: Record<string, string> = {
   review: "clipboard",
   semantic: "layers",
   events: "activity",
+  shapes: "objects",
 };

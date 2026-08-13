@@ -8,6 +8,7 @@ import GlobalLoadingBar from "@/components/GlobalLoadingBar";
 import AuthBootstrap from "@/components/AuthBootstrap";
 import Toaster from "@/components/Toaster";
 import ConfirmProvider from "@/components/ConfirmProvider";
+import ConsoleModal from "@/components/console/ConsoleModal";
 
 const display = Space_Grotesk({ subsets: ["latin"], variable: "--font-display" });
 
@@ -28,6 +29,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Shown once per person, only when signed in. Mounted here rather than per page so it does not
             depend on which page they happen to land on first. */}
         <Onboarding />
+        {/* The console opens over whatever raised the question, so it is mounted once here rather than per
+            page: the frame editor is exactly where somebody asks why something is slow, and that is the one
+            page they cannot afford to navigate away from. */}
+        <ConsoleModal />
       </body>
     </html>
   );

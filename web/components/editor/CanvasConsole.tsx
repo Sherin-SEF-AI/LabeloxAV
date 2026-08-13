@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { openConsole } from "@/components/console/ConsoleModal";
 import { type CanvasOp, subscribeOps, summarizeOps } from "@/lib/canvasOps";
 import { level, mb } from "@/lib/console";
 import { useSystemStream } from "@/lib/useEventStream";
@@ -87,8 +88,12 @@ export default function CanvasConsole() {
           <div className="flex items-center gap-2 px-2.5 py-1.5 border-b hairline">
             <span className="text-ink-2">canvas</span>
             <span className="text-ink-3">{summary.label}</span>
+            {/* The full console, over the frame rather than instead of it: the same operations plus the
+                machine they are queued behind, without leaving the annotation in progress. */}
+            <button onClick={() => openConsole("canvas")} aria-label="open the full console"
+              className="ml-auto text-ink-3 hover:text-ink" title="everything (jobs, GPU, host)">all</button>
             <button onClick={toggle} aria-label="close console"
-              className="ml-auto text-ink-3 hover:text-ink">esc</button>
+              className="text-ink-3 hover:text-ink">esc</button>
           </div>
 
           <div className="max-h-52 overflow-auto">

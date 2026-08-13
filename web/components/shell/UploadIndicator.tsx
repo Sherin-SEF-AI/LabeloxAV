@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { openConsole } from "@/components/console/ConsoleModal";
 import { indicatorView } from "@/lib/indicatorState";
 import { type JobsSummary, subscribeJobSummary } from "@/lib/jobStream";
 import { subscribeUploads, type UploadState } from "@/lib/uploadManager";
@@ -27,7 +27,6 @@ import { summarize } from "@/lib/uploadQueue";
 // where the rules are tested; this file is the rendering of that answer and nothing else.
 
 export default function UploadIndicator() {
-  const router = useRouter();
   const [jobs, setJobs] = useState<JobsSummary>({ running: [], waiting: 0 });
   const [local, setLocal] = useState<UploadState | null>(null);
 
@@ -55,7 +54,10 @@ export default function UploadIndicator() {
 
   return (
     <button
-      onClick={() => router.push(view.href)}
+      // Opens the console over the current page rather than navigating to it. The chip is most often
+      // clicked from the frame editor, which is the one page where being taken somewhere else costs the
+      // reader the thing they were looking at.
+      onClick={() => openConsole()}
       title={view.tip}
       aria-label={view.tip}
       data-state={view.kind}
