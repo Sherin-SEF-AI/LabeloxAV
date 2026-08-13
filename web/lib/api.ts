@@ -1269,6 +1269,22 @@ export const api = {
     get<{ total: number; judged: number; pending: number; confirmed: number; rejected: number;
           per_channel: Record<string, { pending: number; confirmed: number; rejected: number }> }>(
       "/api/recall/progress"),
+  // Auto-accepted objects mirrored into an always-reviewed stream. The fraction judged incorrect is the
+  // gate's MEASURED precision, which the drift detector watches. 601 were seeded and none judged, because
+  // nothing listed them and the verdict route had no caller.
+  controlPending: (limit = 100) =>
+    get<{ count: number; samples: {
+      sample_id: string; was_auto_accepted: boolean; object_id: string; frame_id: string;
+      session_id: string; class_name: string; conf: number | null; state: string;
+      crop_url: string; created_at: string | null;
+    }[] }>(`/api/govern/control/pending?limit=${limit}`),
+  controlVerdict: (sampleId: string, verdict: "correct" | "incorrect") =>
+    post<{ sample_id: string; human_verdict: string }>(
+      `/api/govern/control/${sampleId}/verdict`, { verdict }),
+  // Score a sealed gold set. The page used to print `make m9 ARGS=...` at an operator who has no shell.
+  measureGold: (goldId: string) =>
+    post<{ started: boolean; gold_id: string; n_alive: number }>(
+      `/api/quality/gold/${goldId}/measure`, {}),
   goldSets: () => get<GoldSetRow[]>("/api/quality/gold-sets"),
   qualitySheet: (gold_id: string) =>
     get<QualitySheet>("/api/quality/sheet?" + new URLSearchParams({ gold_id }).toString()),

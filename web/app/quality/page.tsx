@@ -66,6 +66,21 @@ export default function QualityPage() {
     }
   }
 
+  const selectedUsable = goldSets.find((g) => g.gold_id === selected)?.usable !== false;
+
+  async function measure() {
+    if (!selected) return;
+    setBusy("measure");
+    try {
+      const r = await api.measureGold(selected);
+      toast(`measuring against ${r.n_alive} objects; the sheet appears when it finishes`);
+    } catch (e) {
+      toast(humanizeError(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function onFit() {
     setBusy("fit");
     try {
@@ -190,10 +205,21 @@ export default function QualityPage() {
             </Section>
           </>
         ) : (
-          <div className="font-mono text-xs text-ink-3 py-8 text-center panel">
-            {sheet?.found
-              ? "gold set sealed but not measured. Run: make m9 ARGS=\"--gold " + (selected ?? "<id>") + "\""
-              : "select or seal a gold set"}
+          <div className="font-mono text-xs text-ink-3 py-8 text-center panel space-y-2">
+            {sheet?.found ? (
+              <>
+                <div>this gold set is sealed but has never been scored.</div>
+                {/* It used to print `make m9 ARGS="--gold <id>"` here, at a reviewer who has no shell. A
+                    rotted set is refused by the server rather than spending GPU measuring nothing. */}
+                <button onClick={measure} disabled={busy === "measure" || !selectedUsable}
+                  title={selectedUsable
+                    ? "score it against the current champion (GPU, runs in the background)"
+                    : "this gold set's objects no longer exist, so there is nothing to measure against"}
+                  className="border border-line px-3 py-1 text-ink-2 hover:border-accent disabled:opacity-40">
+                  {busy === "measure" ? "measuring..." : "measure now"}
+                </button>
+              </>
+            ) : "select or seal a gold set"}
           </div>
         )}
       </div>

@@ -202,6 +202,19 @@ async def control_verdict(sample_id: str, payload: VerdictIn, db: AsyncSession =
     return await record_verdict(db, sample_id, payload.verdict)
 
 
+@router.get("/govern/control/pending")
+async def control_pending(limit: int = 100, db: AsyncSession = Depends(db_session)):
+    """The control samples awaiting a verdict.
+
+    This corpus holds 601 of them, every one unjudged, because there was no way to list what needed judging
+    and the verdict route had no caller. Measured precision, which the drift detector watches and which is
+    meant to be the number a buyer trusts over a self-reported one, has been null since the feature shipped.
+    """
+    from services.govern.control_sample import pending_samples
+
+    return await pending_samples(db, limit)
+
+
 @router.get("/govern/control/precision")
 async def control_precision(db: AsyncSession = Depends(db_session)):
     return await measured_precision(db)

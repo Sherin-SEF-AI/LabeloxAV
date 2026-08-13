@@ -18,7 +18,7 @@ const ExplainPanel = dynamic(() => import("@/components/ExplainPanel"), { ssr: f
 
 export default function ReviewQueuePage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"value" | "errors" | "recall">("value");
+  const [tab, setTab] = useState<"value" | "errors" | "recall" | "control">("value");
   const [items, setItems] = useState<AlItem[]>([]);
   const [errs, setErrs] = useState<ErrorCandidateRow[]>([]);
   // Objects the detector missed entirely, found by a track gap, an open-vocabulary hit or a region
@@ -27,6 +27,12 @@ export default function ReviewQueuePage() {
   const [recall, setRecall] = useState<Awaited<ReturnType<typeof api.recallCandidates>>["candidates"]>([]);
   const [recallProg, setRecallProg] =
     useState<Awaited<ReturnType<typeof api.recallProgress>> | null>(null);
+  // The gate's own auto-accepts, mirrored into an always-reviewed stream. The fraction judged incorrect is
+  // the measured precision the drift detector watches; 601 were seeded and none had ever been judged,
+  // because nothing listed them.
+  const [control, setControl] = useState<Awaited<ReturnType<typeof api.controlPending>>["samples"]>([]);
+  const [precision, setPrecision] =
+    useState<Awaited<ReturnType<typeof api.governPrecision>> | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [whyOpen, setWhyOpen] = useState<string | null>(null);  // M-F.0 expanded rationale row
   const [err, setErr] = useState<unknown>(null);
@@ -37,14 +43,17 @@ export default function ReviewQueuePage() {
     setLoading(true);
     setErr(null);
     try {
-      const [al, ec, rc, rp] = await Promise.all([
+      const [al, ec, rc, rp, cs, pr] = await Promise.all([
         api.alScore(undefined, 60), api.errorCandidates("pending", 80),
         api.recallCandidates("pending", 100), api.recallProgress(),
+        api.controlPending(100), api.governPrecision(),
       ]);
       setItems(al.items);
       setErrs(ec);
       setRecall(rc.candidates);
       setRecallProg(rp);
+      setControl(cs.samples);
+      setPrecision(pr);
     } catch (e) {
       // There was a finally and no catch, so a failed fetch left the table empty and silent. An empty
       // review queue is a meaningful state here (the shift is done) and must not be what a dropped request
@@ -60,6 +69,11 @@ export default function ReviewQueuePage() {
   const confirm = async (id: string) => { await api.errorConfirm(id); setMsg("confirmed as error (fed to retrain)"); await load(); };
   const dismiss = async (id: string) => { await api.errorDismiss(id); await load(); };
   const runDetect = async () => { const r = await api.errorRun(); setMsg(`detected ${r.persisted}`); await load(); };
+  const ruleControl = async (id: string, verdict: "correct" | "incorrect") => {
+    await api.controlVerdict(id, verdict);
+    setMsg(verdict === "correct" ? "the gate was right here" : "recorded as a gate error");
+    await load();
+  };
   const ruleRecall = async (id: string, verdict: "confirmed" | "rejected") => {
     const r = await api.recallRule(id, verdict);
     setMsg(verdict === "confirmed"
@@ -76,6 +90,7 @@ export default function ReviewQueuePage() {
           <button onClick={() => setTab("value")} className={`px-2 py-1 border ${tab === "value" ? "border-accent text-accent" : "border-line text-ink-3"}`}>value queue ({items.length})</button>
           <button onClick={() => setTab("errors")} className={`px-2 py-1 border ${tab === "errors" ? "border-accent text-accent" : "border-line text-ink-3"}`}>error candidates ({errs.length})</button>
           <button onClick={() => setTab("recall")} className={`px-2 py-1 border ${tab === "recall" ? "border-accent text-accent" : "border-line text-ink-3"}`}>missed objects ({recall.length})</button>
+          <button onClick={() => setTab("control")} className={`px-2 py-1 border ${tab === "control" ? "border-accent text-accent" : "border-line text-ink-3"}`}>gate audit ({control.length})</button>
           {tab === "errors" && <button onClick={runDetect} className="border border-line px-2 py-1 hover:border-accent">re-run detection</button>}
         </>
       }>
@@ -153,7 +168,7 @@ export default function ReviewQueuePage() {
               {!errs.length && <tr><td colSpan={5} className="text-ink-3 text-center py-4">no error candidates (run detection)</td></tr>}
             </tbody>
           </table>
-        ) : (
+        ) : tab === "recall" ? (
           <>
             {/* Per channel, not only a total: the reliability fit needs a minimum number of verdicts per
                 channel before it will apply a measurement, so a healthy-looking total can hide a channel
@@ -198,6 +213,41 @@ export default function ReviewQueuePage() {
                 )}
               </tbody>
             </table>
+          </>
+        ) : (
+          <>
+            {/* The number this queue exists to produce. Null is not zero: it means nobody has judged a
+                single sample, which is what the drift detector has been watching all along. */}
+            <div className="text-ink-3">
+              measured gate precision:{" "}
+              {precision?.precision == null
+                ? <span className="text-warn">not measured yet ({precision?.pending ?? 0} awaiting a verdict)</span>
+                : <span className="text-ink-2">{(precision.precision * 100).toFixed(1)}% over {precision.reviewed} judged</span>}
+            </div>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+              {control.map((c) => (
+                <div key={c.sample_id} className="border border-line">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={c.crop_url} alt="" className="w-full h-20 object-cover bg-bg-2" />
+                  <div className="px-1 py-0.5 text-[10px] text-ink-2 truncate" title={c.class_name}>
+                    {c.class_name} {c.conf != null ? c.conf.toFixed(2) : ""}
+                  </div>
+                  <div className="flex border-t hairline">
+                    <button onClick={() => ruleControl(c.sample_id, "correct")}
+                      title="the gate labelled this correctly"
+                      className="flex-1 text-pass text-[10px] py-0.5 hover:bg-pass/10">right</button>
+                    <button onClick={() => ruleControl(c.sample_id, "incorrect")}
+                      title="the gate got this wrong; it counts against measured precision"
+                      className="flex-1 text-block text-[10px] py-0.5 hover:bg-block/10 border-l hairline">wrong</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {!control.length && (
+              <div className="text-ink-3 text-center py-4">
+                nothing awaiting a verdict. The gate mirrors a small random share of its auto-accepts here.
+              </div>
+            )}
           </>
         )}
       </div>

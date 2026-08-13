@@ -1513,6 +1513,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/govern/consent/{consent_status}/gate",
                           params=None, json_body=None)
 
+    def get_govern_control_pending(self, limit: int | None = 100) -> Any:
+        """Control Pending"""
+        return self._call("GET", f"/api/govern/control/pending",
+                          params={"limit": limit}, json_body=None)
+
     def get_govern_control_precision(self) -> Any:
         """Control Precision"""
         return self._call("GET", f"/api/govern/control/precision",
@@ -2553,6 +2558,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/quality/gold/seal",
                           params=None, json_body=body)
 
+    def post_quality_gold_by_gold_id_measure(self, gold_id: str) -> Any:
+        """Measure"""
+        return self._call("POST", f"/api/quality/gold/{gold_id}/measure",
+                          params=None, json_body=None)
+
     def post_quality_iaa(self, body: Any = None) -> Any:
         """Inter Annotator Agreement"""
         return self._call("POST", f"/api/quality/iaa",
@@ -3321,4 +3331,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 647 routes generated from the server schema.
+# 649 routes generated from the server schema.
