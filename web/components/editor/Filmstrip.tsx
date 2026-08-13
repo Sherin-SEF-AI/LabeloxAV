@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
+import { type TileState, tileProgress } from "@/lib/filmstrip";
 
 // A strip of neighbouring frames under the canvas.
 //
@@ -16,8 +17,15 @@ type Tile = {
   frame_id: string;
   ts_ns: number;
   n_objects: number;
+  n_confirmed: number;
   image_url: string;
   current: boolean;
+};
+
+// The bar under each tile. Colour carries the state and length carries how much of it is done, so a strip
+// read at a glance answers "where did I stop" without counting anything.
+const BAR: Record<TileState, string> = {
+  empty: "bg-transparent", untouched: "bg-line", partial: "bg-warn", done: "bg-pass",
 };
 
 export default function Filmstrip({
@@ -62,28 +70,37 @@ export default function Filmstrip({
       role="listbox"
       aria-label="nearby frames"
     >
-      {tiles.map((t) => (
-        <button
-          key={t.frame_id}
-          ref={t.current ? currentRef : undefined}
-          onClick={() => !t.current && onPick(t.frame_id)}
-          role="option"
-          aria-selected={t.current}
-          aria-label={`frame with ${t.n_objects} objects`}
-          title={`${t.n_objects} objects`}
-          className={`relative shrink-0 rounded overflow-hidden border ${
-            t.current ? "border-accent" : "border-line hover:border-ink-3"
-          }`}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element -- the frame proxy streams raw jpeg; the
-              Next image loader would re-encode every tile for no benefit on a strip this small. */}
-          <img src={t.image_url} alt="" width={72} height={48}
-               className="w-[72px] h-[48px] object-cover bg-bg-2" loading="lazy" />
-          <span className="absolute bottom-0 right-0 px-1 bg-bg/80 font-mono text-[9px] text-ink-3">
-            {t.n_objects}
-          </span>
-        </button>
-      ))}
+      {tiles.map((t) => {
+        const p = tileProgress(t.n_objects, t.n_confirmed ?? 0);
+        return (
+          <button
+            key={t.frame_id}
+            ref={t.current ? currentRef : undefined}
+            onClick={() => !t.current && onPick(t.frame_id)}
+            role="option"
+            aria-selected={t.current}
+            aria-label={`frame, ${p.label}`}
+            title={p.label}
+            className={`relative shrink-0 rounded overflow-hidden border ${
+              t.current ? "border-accent" : "border-line hover:border-ink-3"
+            }`}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element -- the frame proxy streams raw jpeg; the
+                Next image loader would re-encode every tile for no benefit on a strip this small. */}
+            <img src={t.image_url} alt="" width={72} height={48}
+                 className={`w-[72px] h-[48px] object-cover bg-bg-2 ${
+                   p.state === "done" && !t.current ? "opacity-55" : ""}`} loading="lazy" />
+            <span className="absolute bottom-1 right-0 px-1 bg-bg/80 font-mono text-[9px] text-ink-3">
+              {p.state === "done" ? "done" : t.n_objects}
+            </span>
+            {/* Length is the confirmed fraction, so a frame left halfway is visibly halfway. */}
+            <span className="absolute bottom-0 left-0 h-1 w-full bg-bg-2">
+              <span className={`block h-full ${BAR[p.state]}`}
+                    style={{ width: p.state === "untouched" ? "100%" : `${p.frac * 100}%` }} />
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -318,6 +318,12 @@ async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
     ]
 
 
+# States that mean a person has dealt with the object, which is what "is this frame finished" asks. A
+# rejection is as settled as an acceptance. auto_accept is deliberately not here: it is the machine's
+# opinion, and counting it would draw a strip of finished frames nobody has looked at.
+_SETTLED_STATES = ("accepted", "rejected")
+
+
 @router.get("/frames/{frame_id}/filmstrip")
 async def frame_filmstrip(frame_id: str, span: int = 12, db: AsyncSession = Depends(db_session)):
     """The frames on either side of this one, in capture order, for the editor's filmstrip.
@@ -350,12 +356,24 @@ async def frame_filmstrip(frame_id: str, span: int = 12, db: AsyncSession = Depe
     # Object counts in one query rather than one per tile: a 25-tile strip would otherwise issue 25 round
     # trips every time the reviewer moved a frame.
     ids = [fid for fid, _ in tiles]
-    counts = dict((await db.execute(
-        select(Object.frame_id, func.count()).where(Object.frame_id.in_(ids))
-        .group_by(Object.frame_id))).all())
+    # Confirmed counts alongside the totals, in the same pass. The strip showed how many objects a
+    # neighbouring frame holds but not whether anyone had finished with it, so a reviewer working a session
+    # could not see which frames they had already done or where they had stopped, and reopened frames that
+    # were finished. The counts have to be per state rather than a boolean because a partly confirmed frame
+    # is the interesting case: it is the one somebody left halfway.
+    rows = (await db.execute(
+        select(Object.frame_id, Object.state, func.count()).where(Object.frame_id.in_(ids))
+        .group_by(Object.frame_id, Object.state))).all()
+    counts: dict[UUID, int] = {}
+    confirmed: dict[UUID, int] = {}
+    for fid, state, n in rows:
+        counts[fid] = counts.get(fid, 0) + int(n)
+        if state in _SETTLED_STATES:
+            confirmed[fid] = confirmed.get(fid, 0) + int(n)
 
     return {"frame_id": frame_id, "cam_id": frame.cam_id, "frames": [
         {"frame_id": str(fid), "ts_ns": int(ts), "n_objects": int(counts.get(fid, 0)),
+         "n_confirmed": int(confirmed.get(fid, 0)),
          "image_url": f"/api/frames/{fid}/image", "current": str(fid) == frame_id}
         for fid, ts in tiles]}
 
