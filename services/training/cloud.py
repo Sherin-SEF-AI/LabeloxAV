@@ -65,8 +65,12 @@ async def dispatch_cloud_job(job_id, *, dataset_dir=None, entrypoint: str = "tra
         j = await db.get(TrainingJob, uuid.UUID(job_id))
         if j is None:
             raise ValueError(f"training job {job_id} not found")
-        spec = dict(j.dataset_spec or {})
-        hparams = dict(j.hparams or {})
+        # The spec lives inside config, which holds the whole TrainJobSpec. Reading j.dataset_spec and
+        # j.hparams as if they were columns raised AttributeError before the pod was ever contacted, so
+        # every cloud dispatch failed at its first line.
+        cfg = j.config or {}
+        spec = dict(cfg.get("dataset_spec") or {})
+        hparams = dict(cfg.get("hparams") or {})
         task_type = j.task_type
 
     if dataset_dir is None:
