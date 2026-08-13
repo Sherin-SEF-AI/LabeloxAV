@@ -8,11 +8,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Circle, Group, Image as KImage, Layer, Line, Rect, Shape, Stage, Text as KText, Transformer } from "react-konva";
 import type Konva from "konva";
+import { objectTag } from "@/lib/canvasTag";
+import { handleIndices } from "@/lib/simplify";
 import { classColor, classFill } from "@/lib/colors";
 import type { EdObject, Tool, Viewport } from "./useEditor";
 
 type LaneOverlay = { lane_id: string; control_points: number[][]; lane_type: string; is_ego: boolean; source: string };
-export type LayerFlags = { boxes: boolean; masks: boolean; lanes: boolean; drivable: boolean; adverse: boolean; cuboids: boolean; seg: boolean };
+export type LayerFlags = { boxes: boolean; masks: boolean; labels: boolean; lanes: boolean; drivable: boolean; adverse: boolean; cuboids: boolean; seg: boolean };
 type AdverseOverlay = { region_id: string; geometry: number[]; condition: string };
 type CuboidOverlay = { object_id: string; corners_uv: number[][]; edges: number[][] };
 
@@ -166,7 +168,7 @@ export default function EditorCanvas(p: Props) {
   // sentinel (see the fit effect above), so guard the divisor: a zero or non-finite scale would make every
   // strokeWidth/radius/anchorSize Infinity and flood Konva with warnings until the first fit lands.
   const s = v.scale > 0 && Number.isFinite(v.scale) ? v.scale : 1;
-  const L = p.layers ?? { boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true };
+  const L = p.layers ?? { boxes: true, masks: true, labels: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true };
   const toImg = (): number[] => {
     const pt = stageRef.current?.getRelativePointerPosition();
     return pt ? [pt.x, pt.y] : [0, 0];
@@ -418,6 +420,27 @@ export default function EditorCanvas(p: Props) {
             );
           })}
 
+          {/* Class and the model's own confidence, on the box rather than in a panel one object at a time.
+              Drawn after every box so a tag is never hidden under a neighbouring rectangle, and never
+              listening: this is a readout, and a tag that swallowed a click would make the object under it
+              unselectable. Font size divides by the scale so the text stays 11px on screen at any zoom,
+              which is also what makes the width test below meaningful. */}
+          {L.boxes && L.labels && boxOrder.map((o: EdObject) => {
+            const widthPx = (o.bbox[2] - o.bbox[0]) * s;
+            const tag = objectTag(o, widthPx);
+            if (!tag.show) return null;
+            const pad = 3 / s;
+            const fs = 11 / s;
+            return (
+              <Group key={`tag-${o.id}`} listening={false} x={o.bbox[0]} y={o.bbox[1] - fs - pad * 2}>
+                <Rect width={(tag.text.length * fs * 0.58) + pad * 2} height={fs + pad * 2}
+                      fill={tag.low ? "#F85149" : "#0B0C0EE6"} cornerRadius={2 / s} />
+                <KText x={pad} y={pad} text={tag.text} fontSize={fs} fontFamily="ui-monospace, monospace"
+                       fill={tag.low ? "#0B0C0E" : classColor(o.class_id)} />
+              </Group>
+            );
+          })}
+
           {/* relationship connectors: a thin dashed line between the centres of two related objects */}
           {p.relationships?.map((r) => {
             const a = objectById.get(r.from_object_id);
@@ -440,10 +463,15 @@ export default function EditorCanvas(p: Props) {
               stroke={sel ? "#FF7A2F" : "#58A6FF"} strokeWidth={(sel ? 2 : 1.25) / s} />;
           }))}
 
-          {/* selected object's mask vertices: drag to move, right-click to delete */}
+          {/* Selected object's mask vertices: drag to move, right-click to delete.
+              Only the vertices far enough apart to be aimed at. A SAM mask carries several hundred points a
+              fraction of a pixel apart, and a handle on every one buried the object under its own controls
+              and made the vertex somebody wanted unhittable among twenty overlapping neighbours. The
+              indices are the real ones, so a handle still drags its own vertex, and zooming in brings the
+              rest back. */}
           {sel && p.tool === "select" && sel.mask.map((poly, pi) =>
-            poly.map((_, k) =>
-              k % 2 === 0 ? (
+            handleIndices(poly, s).map((k) =>
+              (
                 <Circle key={`v${pi}-${k}`} x={poly[k]} y={poly[k + 1]} radius={3.5 / s}
                   fill="#0B0C0E" stroke={classColor(sel.class_id)} strokeWidth={1.5 / s} draggable
                   onDragEnd={(e) => {
@@ -459,7 +487,7 @@ export default function EditorCanvas(p: Props) {
                     next[pi].splice(k, 2);
                     p.onUpdateMask(sel.id, next);
                   }} />
-              ) : null,
+              ),
             ),
           )}
 

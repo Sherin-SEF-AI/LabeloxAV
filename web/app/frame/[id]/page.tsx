@@ -10,6 +10,7 @@ import type { AdverseRegion, AlItem, DrivingEvent, ErrorCandidateRow, FrameMeta,
 import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
 import { beginOp, endOp, resetOps, trackOp } from "@/lib/canvasOps";
+import { simplifyMask, simplifyPolygon } from "@/lib/simplify";
 import CanvasConsole from "@/components/editor/CanvasConsole";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
 import { PERSON_17 } from "@/lib/skeleton";
@@ -169,6 +170,13 @@ function overlapFrac(box: number[], ref: number[]): number {
   return (ix * iy) / area;
 }
 
+// Every mask that comes back from a model is traced at pixel resolution: a segmented car is several hundred
+// vertices, most of them a fraction of a pixel apart. That size is carried in every payload and every
+// export, and it is what put a draggable handle every two pixels along the outline. One image pixel of
+// tolerance removes what cannot be seen at 100% zoom and keeps every corner that can.
+const MASK_TOLERANCE_PX = 1;
+const trim = (polys: number[][]) => simplifyMask(polys, MASK_TOLERANCE_PX);
+
 export default function FrameEditor() {
   const router = useRouter();
   const confirm = useConfirm();
@@ -256,7 +264,7 @@ export default function FrameEditor() {
     const tools = MODE_TOOLS[m] ?? [];
     if (!tools.includes(stRef.current.tool)) dispatch({ t: "tool", tool: (tools[0] ?? "select") as Tool });
   };
-  const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true });
+  const [layers, setLayers] = useState({ boxes: true, masks: true, labels: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true });
   // Driving events on this frame's session (lane changes, signal phases), shown in the events mode.
   const [frameEvents, setFrameEvents] = useState<DrivingEvent[]>([]);
 
@@ -416,13 +424,14 @@ export default function FrameEditor() {
         () => api.segmentPrompt(id, { points: [pt], labels: [1], precise: segKind === "panoptic" }),
         (res) => `${res.polygons.length} region${res.polygons.length === 1 ? "" : "s"}`);
       if (!r.polygons.length) { flash("magic-wand found nothing here"); return; }
-      const box = bboxOfPolys(r.polygons);
+      const polys = trim(r.polygons);
+      const box = bboxOfPolys(polys);
       if (selected && overlapFrac(box, selected.bbox) > 0.5) {
-        dispatch({ t: "update", id: selected.id, patch: { mask: r.polygons, bbox: box } });
+        dispatch({ t: "update", id: selected.id, patch: { mask: polys, bbox: box } });
       } else if (currentClass) {
         const nid = tmpId();
         dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name,
-          bbox: box, mask: r.polygons, attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
+          bbox: box, mask: polys, attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
         autoClassify(nid, box);
       }
     } catch (e) { flash(humanizeError(e).includes("503") ? "GPU busy (training)" : "magic-wand failed"); }
@@ -434,17 +443,18 @@ export default function FrameEditor() {
       const r = await trackOp("mask", "brush stroke",
         () => api.composeMask({ polygons: selected?.mask ?? [], ops, width: meta.width, height: meta.height }));
       if (selected) {
-        dispatch({ t: "update", id: selected.id, patch: { mask: r.polygons, bbox: r.polygons.length ? bboxOfPolys(r.polygons) : selected.bbox } });
+        dispatch({ t: "update", id: selected.id, patch: { mask: trim(r.polygons), bbox: r.polygons.length ? bboxOfPolys(r.polygons) : selected.bbox } });
       } else if (currentClass && r.polygons.length) {
         dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
-          bbox: bboxOfPolys(r.polygons), mask: r.polygons, attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
+          bbox: bboxOfPolys(r.polygons), mask: trim(r.polygons), attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
       }
     } catch (e) { flash("brush failed: " + humanizeError(e)); }
   };
   // superpixel: add the clicked SLIC cell to the active mask
   const pickSuperpixel = (pt: number[]) => {
-    const poly = superpixels.find((pp) => pointInPoly(pt, pp));
-    if (!poly) return;
+    const found = superpixels.find((pp) => pointInPoly(pt, pp));
+    if (!found) return;
+    const poly = simplifyPolygon(found, MASK_TOLERANCE_PX);
     if (selected) {
       const next = [...selected.mask, poly];
       dispatch({ t: "update", id: selected.id, patch: { mask: next, bbox: bboxOfPolys(next) } });
@@ -860,7 +870,7 @@ export default function FrameEditor() {
         const r = await trackOp("sam", segKind === "panoptic" ? "SAM (precise)" : "SAM segment",
           () => api.segmentPrompt(id, { ...prompt, precise: segKind === "panoptic" }),
           (res) => `${res.polygons.length} region${res.polygons.length === 1 ? "" : "s"}`);
-        dispatch({ t: "candidate", polys: r.polygons });
+        dispatch({ t: "candidate", polys: trim(r.polygons) });
         if (!r.polygons.length) flash("SAM found nothing here");
       } catch (e) {
         const msg = humanizeError(e);
