@@ -546,7 +546,7 @@ export const api = {
   // Neighbouring frames for the editor filmstrip: same camera, capture order, with object counts.
   frameFilmstrip: (id: string, span = 12) =>
     get<{ frame_id: string; cam_id: string; frames: { frame_id: string; ts_ns: number;
-          n_objects: number; image_url: string; current: boolean }[] }>(
+          n_objects: number; n_confirmed: number; image_url: string; current: boolean }[] }>(
       `/api/frames/${id}/filmstrip?span=${span}`),
   explainObject: (id: string) => get<ObjectExplanation>(`/api/objects/${id}/explain`),
   // M-F.5 scene-graph relations + VLM dataset generation
