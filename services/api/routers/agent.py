@@ -863,3 +863,26 @@ async def contamination(min_count: int = 25, refused_only: bool = False,
 
     rows = await agent_relabel_lineages(db, min_count=min_count, refused_only=refused_only)
     return {"summary": summarize(rows), "lineages": rows}
+
+
+class LineageRevertIn(BaseModel):
+    from_name: str
+    to_name: str
+    limit: int | None = None
+
+
+@router.post("/agent/contamination/revert", dependencies=[Depends(require_role("reviewer"))])
+async def contamination_revert(body: LineageRevertIn, db: AsyncSession = Depends(db_session),
+                               user=Depends(current_user)):
+    """Put one refused class move back, as a single reversible action.
+
+    Reviewer-gated: this rewrites thousands of labels at once. Refused only, because a refinement is a
+    judgement call and reverting it in bulk would swap one bulk opinion for another.
+    """
+    from services.agent.contamination import revert_lineage
+
+    try:
+        return await revert_lineage(db, body.from_name, body.to_name, limit=body.limit,
+                                    created_by=getattr(user, "name", None))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc

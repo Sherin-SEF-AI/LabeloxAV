@@ -415,6 +415,12 @@ class PiiSettings(BaseModel):
     plate_conf: float = 0.35
     face_weights: str = ".scratch/models/pii/face_yunet.onnx"
     plate_weights: str = ".scratch/models/pii/plate_yolov8.pt"
+    # Inference resolution for the plate detector, capped. Ultralytics defaults to 640, which on a 1920x1080
+    # dashcam frame is a 3x downsample: an Indian registration plate around 150x40 pixels arrives as 50x13
+    # and is invisible. Measured on a frame with three legible plates: 0 detections at 640, 960 and 1280,
+    # and 2 at 1920. Every model size in the family behaved identically, so this was a preprocessing
+    # setting, not a capacity problem. Lower it only if a GPU cannot hold the activations.
+    plate_imgsz_cap: int = 1920
     device: str = "cpu"
     # DPDPA: when the gate is on, BOTH face and plate detectors must be available, otherwise ingestion
     # fails loud rather than silently passing un-blurred plates into the object store. Set false only for

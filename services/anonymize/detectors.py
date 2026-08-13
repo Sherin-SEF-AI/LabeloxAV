@@ -53,11 +53,30 @@ class FaceDetector:
         return out
 
 
+def _detect_size(h: int, w: int, cap: int) -> int:
+    """The inference resolution for one frame: its own long side, rounded to a stride and capped.
+
+    Ultralytics defaults to 640. On a 1920x1080 dashcam frame that is a 3x downsample, and an Indian
+    registration plate roughly 150x40 pixels becomes 50x13, which is below what the detector can see.
+    Measured on a frame carrying three legible plates: 0 detections at 640, 960 and 1280, and 2 at 1920,
+    scoring 0.73 and 0.37. The same is true of every model size in that family, so this was never about
+    capacity.
+
+    Derived from the frame rather than fixed, so a 1280x720 source is not upscaled for nothing and a 4K one
+    is not silently shrunk back to where the problem started. The cap is memory, not policy.
+    """
+    long_side = max(h, w)
+    stride = 32
+    size = ((min(long_side, cap) + stride - 1) // stride) * stride
+    return max(size, 640)
+
+
 class PlateDetector:
-    def __init__(self, weights: str, conf: float, device: str) -> None:
+    def __init__(self, weights: str, conf: float, device: str, imgsz_cap: int = 1920) -> None:
         self.weights = weights
         self.conf = conf
         self.device = device
+        self.imgsz_cap = imgsz_cap
         self._model = None
         if Path(weights).exists():
             try:
@@ -77,7 +96,12 @@ class PlateDetector:
     def detect(self, image_bgr: np.ndarray) -> list[Region]:
         if self._model is None:
             return []
-        res = self._model.predict(image_bgr, conf=self.conf, device=self.device, verbose=False)
+        h, w = image_bgr.shape[:2]
+        # At the library default this ran on a 3x downsample and saw none of the small plates. The face
+        # detector beside it has always used the frame's own size (`setInputSize`), which is why faces were
+        # redacted and plates were not.
+        res = self._model.predict(image_bgr, conf=self.conf, device=self.device, verbose=False,
+                                  imgsz=_detect_size(h, w, self.imgsz_cap))
         out: list[Region] = []
         for r in res:
             if r.boxes is None:

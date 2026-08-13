@@ -611,13 +611,21 @@ export const api = {
   // marks the lineages the ontology guard would reject today.
   agentContamination: (minCount = 25, refusedOnly = false) =>
     get<{
-      summary: { lineages: number; objects: number; refused_lineages: number; refused_objects: number };
+      summary: {
+        lineages: number; objects: number; refused_lineages: number; refused_objects: number;
+        // What is still wrong, as opposed to what once happened. This is the number that can reach zero.
+        outstanding: number; refused_outstanding: number;
+      };
       lineages: {
-        from_name: string; to_name: string; count: number;
+        from_name: string; to_name: string; count: number; outstanding: number;
         refused_now: boolean; reason: string | null;
         examples: { object_id: string; frame_id: string }[];
       }[];
     }>(`/api/agent/contamination?min_count=${minCount}&refused_only=${refusedOnly}`),
+  // Put one refused class move back, as a single reversible action. Reviewer-gated server-side.
+  agentContaminationRevert: (from_name: string, to_name: string, limit?: number) =>
+    post<{ from_name: string; to_name: string; reverted: number; run_id: string | null; reason: string }>(
+      "/api/agent/contamination/revert", { from_name, to_name, limit }),
   agentReport: () =>
     get<{ size: { sessions: number; objects: number; human_labeled: number }; class_balance: { missing: number; rare: number }; coverage_gaps: string[]; fix_queue: Record<string, number>; fix_queue_total: number; scenarios: Record<string, number>; geo: Record<string, number> }>(`/api/agent/report`),
   agentSuggest: (frame_id: string) =>
