@@ -84,6 +84,9 @@ HEARTBEAT_EVERY = 15
 # Held but not moving. `pending` covers work nobody has picked up; `queued-cloud` is parked for the A100 on
 # purpose. Neither is progress, and both are the answer to why a quiet system is quiet.
 WAITING_STATUSES = ("pending", "queued", "queued-cloud")
+# Slower than the job stream: these are gauges, not events, and a console that redraws twice a second reads
+# as noise rather than as information. Fast enough that a job starting is visible while you are looking.
+SYSTEM_INTERVAL_S = 3.0
 
 
 # ---------------------------------------------------------------- wakeups
@@ -316,6 +319,34 @@ async def notification_events(request: Request):
             raise
         except Exception as exc:  # noqa: BLE001
             log.warning("events.notification_stream_failed", error=str(exc))
+            yield _sse("error", {"detail": "stream ended"})
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no",
+    })
+
+
+@router.get("/events/system")
+async def system_events():
+    """Stream machine state for the console.
+
+    Unlike the job stream this emits every tick rather than only on change: utilisation and temperature are
+    never equal two ticks running, so change detection would emit constantly anyway, and a console whose
+    numbers freeze is indistinguishable from one whose connection died.
+    """
+    from starlette.responses import StreamingResponse
+
+    from services.hardening.resources import snapshot
+
+    async def gen() -> AsyncIterator[str]:
+        try:
+            while True:
+                yield _sse("system", snapshot())
+                await _sleep_or_wake("system", SYSTEM_INTERVAL_S)
+        except (asyncio.CancelledError, GeneratorExit):
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning("events.system_failed", error=str(exc))
             yield _sse("error", {"detail": "stream ended"})
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={

@@ -116,6 +116,35 @@ export function useJobStream(): StreamState<JobStream> {
   return state;
 }
 
+export type GpuInfo = {
+  index: number; name: string;
+  memory_used_mb: number | null; memory_total_mb: number | null; memory_used_frac: number | null;
+  utilization_pct: number | null; temperature_c: number | null; power_w: number | null;
+  processes: { pid: number | null; name: string; used_mb: number | null }[];
+};
+
+export type SystemStream = {
+  ts: number;
+  gpus: GpuInfo[];
+  host: {
+    cpu_pct: number; cpu_count: number; load: { "1m": number; "5m": number; "15m": number };
+    memory_used_mb: number; memory_total_mb: number; memory_used_frac: number;
+    disk: { path: string; used_mb: number; total_mb: number; used_frac: number | null };
+  };
+  process: { pid: number; rss_mb: number; cpu_pct: number; threads: number; uptime_s: number };
+};
+
+/**
+ * Machine state for the console.
+ *
+ * Its own connection rather than a field on the job stream: these are gauges read from the host, the job
+ * stream is events read from the database, and folding them together would make every job push carry an
+ * nvidia-smi call.
+ */
+export function useSystemStream(): StreamState<SystemStream> {
+  return useEventStream<SystemStream>("/api/events/system", "system");
+}
+
 export function useTrainingStream(jobId: string | null): StreamState<JobStreamRow> {
   return useEventStream<JobStreamRow>(jobId ? `/api/events/training/${jobId}` : null, "training");
 }

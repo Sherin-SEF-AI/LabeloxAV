@@ -3023,6 +3023,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/superpixels/{frame_id}",
                           params={"n": n}, json_body=None)
 
+    def get_system_resources(self) -> Any:
+        """System Resources"""
+        return self._call("GET", f"/api/system/resources",
+                          params=None, json_body=None)
+
     def post_tracklets_objects_by_object_id_keyframe(self, object_id: str, body: Any = None) -> Any:
         """Set Keyframe"""
         return self._call("POST", f"/api/tracklets/objects/{object_id}/keyframe",
@@ -3331,4 +3336,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 649 routes generated from the server schema.
+# 650 routes generated from the server schema.

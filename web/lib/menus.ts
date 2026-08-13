@@ -226,6 +226,10 @@ export const MENUS: Menu[] = [
       { key: "shortcuts", label: "Keyboard shortcuts", icon: "keyboard", shortcut: "?",
         event: "lbx:shortcuts" },
       { key: "platformsw", label: "Platforms", icon: "grid", href: "/platforms", separatorBefore: true },
+      // One place that answers "is anything happening". It was three before, and two of them were a
+      // terminal and a log file on the box.
+      { key: "console", label: "Console", icon: "activity", href: "/console",
+        hint: "GPU, memory, disk and everything running right now" },
     ],
   },
   {
