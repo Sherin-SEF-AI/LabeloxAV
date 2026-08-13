@@ -1250,6 +1250,25 @@ export const api = {
   analyticsPii: (session_id?: string) =>
     get<PiiCoverage>("/api/analytics/pii" + (session_id ? `?session_id=${session_id}` : "")),
   analyticsProductivity: () => get<ProductivityReport>("/api/analytics/productivity"),
+  // What the importer can actually read. Served rather than hardcoded, because the page's own copy drifted
+  // to ten formats against the backend's nineteen and silently rewrote the difference to COCO.
+  importFormats: () =>
+    get<{ formats: string[]; annotated: string[]; raw: string[] }>("/api/imports/formats"),
+  // Mined candidates: objects the detector missed, found by a track gap, an open-vocabulary hit or a region
+  // proposal. Nothing could rule on these before, so the per-channel reliability fit read an empty set and
+  // the priors stayed hand-guessed.
+  recallCandidates: (status = "pending", limit = 100) =>
+    get<{ status: string; count: number; candidates: {
+      candidate_id: string; object_id: string; frame_id: string;
+      channels: string[]; fn_value: number; class_id: number; status: string;
+    }[] }>(`/api/recall/candidates?status=${status}&limit=${limit}`),
+  recallRule: (candidateId: string, verdict: "confirmed" | "rejected") =>
+    post<{ candidate_id: string; verdict: string; was: string; object_routed_to_review: boolean }>(
+      `/api/recall/candidates/${candidateId}/${verdict}`, {}),
+  recallProgress: () =>
+    get<{ total: number; judged: number; pending: number; confirmed: number; rejected: number;
+          per_channel: Record<string, { pending: number; confirmed: number; rejected: number }> }>(
+      "/api/recall/progress"),
   goldSets: () => get<GoldSetRow[]>("/api/quality/gold-sets"),
   qualitySheet: (gold_id: string) =>
     get<QualitySheet>("/api/quality/sheet?" + new URLSearchParams({ gold_id }).toString()),

@@ -12,18 +12,11 @@ import { useQueryParam } from "@/lib/useQueryParam";
 // presigned multipart; the API only signs and runs the import as a background job. PII (Gate A) runs
 // on every imported frame; objects land in triage as source=imported / state=review.
 
-const FORMATS = [
-  "coco",
-  "yolo",
-  "pascalvoc",
-  "openlabel",
-  "nuscenes",
-  "parquet",
-  "mapillary",
-  "images",
-  "video",
-  "mcap",
-];
+// The starting list, replaced by the server's the moment it answers. It exists only so the select is not
+// empty on the first paint; it is deliberately not the source of truth. A hardcoded list here is what let
+// this page offer ten formats while the importer registered nineteen, and silently rewrite the other nine
+// to COCO: deep-linking File > Import > CVAT XML landed you on the COCO importer with no message.
+const FALLBACK_FORMATS = ["coco", "yolo", "pascalvoc", "images", "video", "mcap"];
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -44,9 +37,22 @@ export default function ImportPage() {
 function ImportBody() {
   const router = useRouter();
   const qsFormat = useQueryParam("format");
-  // the File > Import menu deep-links a format per entry; honour it instead of always defaulting to coco
-  const [format, setFormat] = useState(
-    qsFormat && (FORMATS as readonly string[]).includes(qsFormat) ? qsFormat : "coco");
+  const [formats, setFormats] = useState<string[]>(FALLBACK_FORMATS);
+  const [rawFormats, setRawFormats] = useState<string[]>([]);
+  // The File > Import menu deep-links a format per entry. Honoured as given: whether the importer knows it
+  // is the server's question, and answering it from a stale local list is what silently sent nine formats
+  // to the wrong importer.
+  const [format, setFormat] = useState(qsFormat || "coco");
+  const [unknownFormat, setUnknownFormat] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.importFormats().then((r) => {
+      setFormats(r.formats);
+      setRawFormats(r.raw);
+      // Said out loud rather than corrected behind the user's back.
+      if (qsFormat && !r.formats.includes(qsFormat)) setUnknownFormat(qsFormat);
+    }).catch(() => {});
+  }, [qsFormat]);
   const [vehicle, setVehicle] = useState("IMPORT-01");
   const [city, setCity] = useState("BLR");
   const [files, setFiles] = useState<File[]>([]);
@@ -161,12 +167,19 @@ function ImportBody() {
                 onChange={(e) => setFormat(e.target.value)}
                 className="bg-panel border border-line px-2 py-1 text-ink"
               >
-                {FORMATS.map((f) => (
+                {formats.map((f) => (
                   <option key={f} value={f}>
-                    {f}
+                    {f}{rawFormats.includes(f) ? " (media only)" : ""}
                   </option>
                 ))}
               </select>
+              {/* A deep link the importer does not recognise used to be rewritten to COCO in silence, so
+                  the run started, read nothing it understood, and reported success. */}
+              {unknownFormat && (
+                <span className="text-block text-[11px]">
+                  the importer does not know the format &quot;{unknownFormat}&quot;; pick one above
+                </span>
+              )}
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-ink-3 uppercase text-[11px]">vehicle</span>

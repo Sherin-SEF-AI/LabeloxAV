@@ -18,9 +18,15 @@ const ExplainPanel = dynamic(() => import("@/components/ExplainPanel"), { ssr: f
 
 export default function ReviewQueuePage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"value" | "errors">("value");
+  const [tab, setTab] = useState<"value" | "errors" | "recall">("value");
   const [items, setItems] = useState<AlItem[]>([]);
   const [errs, setErrs] = useState<ErrorCandidateRow[]>([]);
+  // Objects the detector missed entirely, found by a track gap, an open-vocabulary hit or a region
+  // proposal. These have always been mined and never been rulable, which is why the per-channel reliability
+  // fit read an empty set and the priors stayed guesses.
+  const [recall, setRecall] = useState<Awaited<ReturnType<typeof api.recallCandidates>>["candidates"]>([]);
+  const [recallProg, setRecallProg] =
+    useState<Awaited<ReturnType<typeof api.recallProgress>> | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [whyOpen, setWhyOpen] = useState<string | null>(null);  // M-F.0 expanded rationale row
   const [err, setErr] = useState<unknown>(null);
@@ -31,9 +37,14 @@ export default function ReviewQueuePage() {
     setLoading(true);
     setErr(null);
     try {
-      const [al, ec] = await Promise.all([api.alScore(undefined, 60), api.errorCandidates("pending", 80)]);
+      const [al, ec, rc, rp] = await Promise.all([
+        api.alScore(undefined, 60), api.errorCandidates("pending", 80),
+        api.recallCandidates("pending", 100), api.recallProgress(),
+      ]);
       setItems(al.items);
       setErrs(ec);
+      setRecall(rc.candidates);
+      setRecallProg(rp);
     } catch (e) {
       // There was a finally and no catch, so a failed fetch left the table empty and silent. An empty
       // review queue is a meaningful state here (the shift is done) and must not be what a dropped request
@@ -49,6 +60,13 @@ export default function ReviewQueuePage() {
   const confirm = async (id: string) => { await api.errorConfirm(id); setMsg("confirmed as error (fed to retrain)"); await load(); };
   const dismiss = async (id: string) => { await api.errorDismiss(id); await load(); };
   const runDetect = async () => { const r = await api.errorRun(); setMsg(`detected ${r.persisted}`); await load(); };
+  const ruleRecall = async (id: string, verdict: "confirmed" | "rejected") => {
+    const r = await api.recallRule(id, verdict);
+    setMsg(verdict === "confirmed"
+      ? (r.object_routed_to_review ? "confirmed; the object is in the review queue" : "confirmed")
+      : "rejected; the object was left alone");
+    await load();
+  };
 
   return (
     <PageShell active="REVIEW" title="Review Queue"
@@ -57,6 +75,7 @@ export default function ReviewQueuePage() {
         <>
           <button onClick={() => setTab("value")} className={`px-2 py-1 border ${tab === "value" ? "border-accent text-accent" : "border-line text-ink-3"}`}>value queue ({items.length})</button>
           <button onClick={() => setTab("errors")} className={`px-2 py-1 border ${tab === "errors" ? "border-accent text-accent" : "border-line text-ink-3"}`}>error candidates ({errs.length})</button>
+          <button onClick={() => setTab("recall")} className={`px-2 py-1 border ${tab === "recall" ? "border-accent text-accent" : "border-line text-ink-3"}`}>missed objects ({recall.length})</button>
           {tab === "errors" && <button onClick={runDetect} className="border border-line px-2 py-1 hover:border-accent">re-run detection</button>}
         </>
       }>
@@ -115,7 +134,7 @@ export default function ReviewQueuePage() {
               ))}
             </tbody>
           </table>
-        ) : (
+        ) : tab === "errors" ? (
           <table className="w-full">
             <thead><tr className="text-ink-3 text-left border-b hairline"><th className="px-2 py-1">kind</th><th>score</th><th>proposed fix</th><th>detail</th><th></th></tr></thead>
             <tbody>
@@ -134,6 +153,52 @@ export default function ReviewQueuePage() {
               {!errs.length && <tr><td colSpan={5} className="text-ink-3 text-center py-4">no error candidates (run detection)</td></tr>}
             </tbody>
           </table>
+        ) : (
+          <>
+            {/* Per channel, not only a total: the reliability fit needs a minimum number of verdicts per
+                channel before it will apply a measurement, so a healthy-looking total can hide a channel
+                nobody has ruled on and the priors for it stay guesses. */}
+            {recallProg && (
+              <div className="text-ink-3">
+                {recallProg.judged} of {recallProg.total} judged
+                {Object.entries(recallProg.per_channel).map(([ch, t]) => (
+                  <span key={ch} className="ml-3">
+                    {ch}: <span className="text-ink-2">{t.confirmed + t.rejected}</span>/{t.confirmed + t.rejected + t.pending}
+                  </span>
+                ))}
+              </div>
+            )}
+            <table className="w-full">
+              <thead><tr className="text-ink-3 text-left border-b hairline">
+                <th className="px-2 py-1">found by</th><th>value</th><th>frame</th><th></th>
+              </tr></thead>
+              <tbody>
+                {recall.map((c) => (
+                  <tr key={c.candidate_id} className="border-b hairline">
+                    <td className="px-2 py-1 text-ink-2">{c.channels.join(", ")}</td>
+                    <td><ScoreBar value={c.fn_value} tone="warn" /></td>
+                    <td>
+                      <button onClick={() => router.push(`/frame/${c.frame_id}?focus=${c.object_id}`)}
+                        className="text-info hover:text-accent">{c.frame_id.slice(0, 8)}</button>
+                    </td>
+                    <td className="text-right pr-2 space-x-2">
+                      <button onClick={() => ruleRecall(c.candidate_id, "confirmed")}
+                        title="a real object the detector missed; route it to the review queue"
+                        className="text-pass hover:text-accent">confirm</button>
+                      <button onClick={() => ruleRecall(c.candidate_id, "rejected")}
+                        title="a bad suggestion; the object is left alone"
+                        className="text-ink-3 hover:text-ink">reject</button>
+                    </td>
+                  </tr>
+                ))}
+                {!recall.length && (
+                  <tr><td colSpan={4} className="text-ink-3 text-center py-4">
+                    nothing mined yet. Recall mining runs per session and finds objects the detector missed.
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </>
         )}
       </div>
     </PageShell>

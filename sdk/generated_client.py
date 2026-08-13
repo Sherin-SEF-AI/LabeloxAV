@@ -1683,6 +1683,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/imports/dry-run",
                           params=None, json_body=body)
 
+    def get_imports_formats(self) -> Any:
+        """Formats"""
+        return self._call("GET", f"/api/imports/formats",
+                          params=None, json_body=None)
+
     def post_imports_start(self, body: Any = None) -> Any:
         """Start"""
         return self._call("POST", f"/api/imports/start",
@@ -2608,6 +2613,16 @@ class LabeloxClient:
         return self._call("GET", f"/api/recall/candidates",
                           params={"status": status, "session_id": session_id, "limit": limit}, json_body=None)
 
+    def post_recall_candidates_by_candidate_id_by_verdict(self, candidate_id: str, verdict: str) -> Any:
+        """Rule"""
+        return self._call("POST", f"/api/recall/candidates/{candidate_id}/{verdict}",
+                          params=None, json_body=None)
+
+    def get_recall_progress(self) -> Any:
+        """Progress"""
+        return self._call("GET", f"/api/recall/progress",
+                          params=None, json_body=None)
+
     def post_recall_run_by_session_id(self, session_id: str, shortlist_only: bool | None = False) -> Any:
         """Run"""
         return self._call("POST", f"/api/recall/run/{session_id}",
@@ -3306,4 +3321,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 644 routes generated from the server schema.
+# 647 routes generated from the server schema.
