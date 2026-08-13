@@ -576,7 +576,7 @@ export const api = {
     body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][]; cuboid_3d?: { center: number[]; size: number[]; yaw: number } },
   ) => post<ObjectDetail>(`/api/frames/${frame_id}/objects`, body),
   updateMask: (object_id: string, polygons: number[][], width?: number, height?: number) =>
-    put<{ object_id: string }>(`/api/objects/${object_id}/mask`, { polygons, width, height }),
+    put<{ object_id: string; version: number }>(`/api/objects/${object_id}/mask`, { polygons, width, height }),
   deleteObject: (object_id: string) => del<{ deleted: string }>(`/api/objects/${object_id}`),
   // object relationships / grouping (rider_of, towed_by, part_of, member_of, occludes)
   relateObject: (object_id: string, body: { to_object_id: string; kind: string }) =>
