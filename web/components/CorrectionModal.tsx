@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api , humanizeError } from "@/lib/api";
+import { applicableCount, defaultSelection, emptyReason } from "@/lib/correctionCandidates";
+import { toast } from "@/lib/toast";
 import type { CorrectionCandidate, CorrectionCoverage, CorrectionSuggestion } from "@/lib/types";
 
 // Interactive AI correction: after one fix (Truck->Bus, or an attribute), find visually-similar objects
@@ -27,6 +29,10 @@ export default function CorrectionModal({
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [threshold, setThreshold] = useState(0.82);
   const [sameCam, setSameCam] = useState(false);
+  // Off by default. One systematic error is usually spread over several source classes: the relabel agent
+  // put objects into bmtc_bus_shelter from bus, traffic_sign and hoarding, so scoping to the class the
+  // operator happened to start from surfaces one lineage of three.
+  const [sameClass, setSameClass] = useState(false);
   const [camId, setCamId] = useState<string | null>(null);
   const [cov, setCov] = useState<CorrectionCoverage | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,17 +52,19 @@ export default function CorrectionModal({
     try {
       const body =
         kind === "class"
-          ? { object_id: objectId, kind, old_class_name: String(change.old), new_class_name: String(change.new), filters, threshold }
-          : { object_id: objectId, kind, attr_key: change.attrKey, old_value: change.old, new_value: change.new, filters, threshold };
+          ? { object_id: objectId, kind, old_class_name: String(change.old), new_class_name: String(change.new), filters, threshold, same_class: sameClass }
+          : { object_id: objectId, kind, attr_key: change.attrKey, old_value: change.old, new_value: change.new, filters, threshold, same_class: sameClass };
       const r = await api.correctionSuggest(body as Parameters<typeof api.correctionSuggest>[0]);
       setSug(r);
-      setSel(new Set(r.candidates.filter((c) => !c.already).map((c) => c.object_id))); // default-select non-already
+      // Anything a person already ruled on stays visible and unticked: a bulk apply that quietly overwrites
+      // somebody's decision is worse than one that does nothing.
+      setSel(defaultSelection(r.candidates));
     } catch (e) {
       setMsg(humanizeError(e));
     } finally {
       setLoading(false);
     }
-  }, [objectId, kind, change, threshold, sameCam, camId]);
+  }, [objectId, kind, change, threshold, sameCam, sameClass, camId]);
 
   // debounce re-query on threshold / filter change
   useEffect(() => {
@@ -76,8 +84,27 @@ export default function CorrectionModal({
     setApplying(true);
     try {
       const ids = [...sel];
-      if (kind === "class") await api.bulkReview(ids, "reclassify", String(change.new));
-      else await api.bulkReview(ids, "set_attrs", undefined, undefined, { [change.attrKey as string]: change.new });
+      const r = kind === "class"
+        ? await api.bulkReview(ids, "reclassify", String(change.new))
+        : await api.bulkReview(ids, "set_attrs", undefined, undefined, { [change.attrKey as string]: change.new });
+      // One handle for the whole batch. Without it, taking back a fifty-object apply meant fifty manual
+      // reversals from memory.
+      if (r.run_id) {
+        const runId = r.run_id;
+        toast(`applied to ${r.updated} objects`, "success", 12000, {
+          label: "undo",
+          run: async () => {
+            try {
+              const u = await api.agentRevert(runId);
+              toast(`undone: ${u.reverted} restored`
+                    + (u.skipped ? `, ${u.skipped} left alone (edited since)` : ""), "info");
+              onApplied?.(0);
+            } catch (e) {
+              toast(`could not undo: ${humanizeError(e)}`, "error");
+            }
+          },
+        });
+      }
       onApplied?.(ids.length);
       onClose();
     } catch (e) {
@@ -106,7 +133,13 @@ export default function CorrectionModal({
             <span className="text-accent">{title}</span>
             {sug && (
               <span className="text-ink-3">
-                {" "}— {sug.count} similar {kind === "class" ? `${change.old}` : ""} found
+                {" "}— {applicableCount(sug.candidates)} to fix
+                {sug.count > applicableCount(sug.candidates)
+                  ? ` of ${sug.count} similar` : " similar"}
+                {/* A count of crops is not a count of objects: one mislabelled billboard appears once per
+                    frame of its track. All of them still need fixing, but the operator should know whether
+                    they are agreeing to two hundred findings or to one seen two hundred times. */}
+                {sug.n_tracks ? ` across ${sug.n_tracks} track${sug.n_tracks === 1 ? "" : "s"}` : ""}
               </span>
             )}
           </div>
@@ -124,6 +157,11 @@ export default function CorrectionModal({
             <input type="checkbox" checked={sameCam} onChange={(e) => setSameCam(e.target.checked)} disabled={!camId} className="accent-accent" />
             same camera{camId ? ` (${camId})` : ""}
           </label>
+          <label className="flex items-center gap-1.5 cursor-pointer"
+            title={`only objects still labelled ${String(change.old)}; off, the search spans classes, because one mistake is usually spread over several`}>
+            <input type="checkbox" checked={sameClass} onChange={(e) => setSameClass(e.target.checked)} className="accent-accent" />
+            same class only
+          </label>
           <span className="ml-auto text-ink-2">{sel.size} selected</span>
         </div>
 
@@ -140,8 +178,14 @@ export default function CorrectionModal({
           {loading ? (
             <div className="text-center font-mono text-xs text-ink-3 py-10">searching…</div>
           ) : !sug || !sug.candidates.length ? (
+            /* Three different situations used to render as one sentence about similarity. The one this
+               feature actually hit was "nothing was compared", because it searched an empty table. */
             <div className="text-center font-mono text-xs text-ink-3 py-10">
-              no similar objects above the threshold{msg ? ` — ${msg}` : ""}.
+              <div>{emptyReason(sug)?.headline ?? "no similar objects found"}</div>
+              {emptyReason(sug)?.detail && (
+                <div className="mt-1 text-ink-3/70">{emptyReason(sug)?.detail}</div>
+              )}
+              {msg && <div className="mt-1 text-block">{msg}</div>}
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
@@ -150,14 +194,24 @@ export default function CorrectionModal({
                 return (
                   <button key={c.object_id} onClick={() => toggle(c.object_id)}
                     className={`relative border ${on ? "border-accent" : "border-line opacity-60"} hover:opacity-100`}
-                    title={`${c.class_name} · sim ${c.score.toFixed(2)} · conf ${c.conf.toFixed(2)}`}>
+                    title={`${c.class_name} · sim ${c.score.toFixed(2)}`
+                           + (c.conf != null ? ` · conf ${c.conf.toFixed(2)}` : "")
+                           + (c.human ? " · a person already reviewed this one" : "")}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={c.crop_url} alt="" className="w-full h-20 object-cover bg-bg-2" />
                     <span className={`absolute top-0 left-0 px-1 font-mono text-[10px] ${on ? "bg-accent text-bg" : "bg-bg/80 text-ink-3"}`}>
                       {on ? "✓" : "○"}
                     </span>
                     <span className="absolute bottom-0 right-0 bg-bg/80 font-mono text-[9px] px-0.5 text-ink-2">{c.score.toFixed(2)}</span>
+                    {/* The class is load-bearing now that the candidate set spans classes: a person
+                        agreeing to a batch has to see what each thing currently is. */}
+                    <span className="absolute top-0 right-0 bg-bg/80 font-mono text-[9px] px-0.5 text-ink-2 max-w-full truncate">
+                      {c.class_name}
+                    </span>
                     {c.already && <span className="absolute bottom-0 left-0 bg-bg/80 font-mono text-[9px] px-0.5 text-pass">already</span>}
+                    {c.human && !c.already && (
+                      <span className="absolute bottom-0 left-0 bg-bg/80 font-mono text-[9px] px-0.5 text-warn">human</span>
+                    )}
                   </button>
                 );
               })}

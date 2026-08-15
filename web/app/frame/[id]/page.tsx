@@ -9,6 +9,10 @@ import type { ColorBy } from "@/components/lidar/PointCloudViewer";
 import type { AdverseRegion, AlItem, DrivingEvent, ErrorCandidateRow, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, ProjectedCuboid, Relationship } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
+import { beginOp, endOp, resetOps, trackOp } from "@/lib/canvasOps";
+import { openConsole } from "@/components/console/ConsoleModal";
+import { simplifyMask, simplifyPolygon } from "@/lib/simplify";
+import CanvasConsole from "@/components/editor/CanvasConsole";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
 import { PERSON_17 } from "@/lib/skeleton";
 import BackButton from "@/components/BackButton";
@@ -167,6 +171,13 @@ function overlapFrac(box: number[], ref: number[]): number {
   return (ix * iy) / area;
 }
 
+// Every mask that comes back from a model is traced at pixel resolution: a segmented car is several hundred
+// vertices, most of them a fraction of a pixel apart. That size is carried in every payload and every
+// export, and it is what put a draggable handle every two pixels along the outline. One image pixel of
+// tolerance removes what cannot be seen at 100% zoom and keeps every corner that can.
+const MASK_TOLERANCE_PX = 1;
+const trim = (polys: number[][]) => simplifyMask(polys, MASK_TOLERANCE_PX);
+
 export default function FrameEditor() {
   const router = useRouter();
   const confirm = useConfirm();
@@ -254,7 +265,7 @@ export default function FrameEditor() {
     const tools = MODE_TOOLS[m] ?? [];
     if (!tools.includes(stRef.current.tool)) dispatch({ t: "tool", tool: (tools[0] ?? "select") as Tool });
   };
-  const [layers, setLayers] = useState({ boxes: true, masks: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true });
+  const [layers, setLayers] = useState({ boxes: true, masks: true, labels: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true });
   // Driving events on this frame's session (lane changes, signal phases), shown in the events mode.
   const [frameEvents, setFrameEvents] = useState<DrivingEvent[]>([]);
 
@@ -268,6 +279,9 @@ export default function FrameEditor() {
   // so any one 500 rejects the whole load).
   useEffect(() => {
     let live = true;
+    // The operation board belongs to this frame. Carrying the previous frame's segmentations into the next
+    // one would attribute work to an image it never touched.
+    resetOps();
     (async () => {
       setLoadError(null);
       try {
@@ -407,15 +421,18 @@ export default function FrameEditor() {
   // magic-wand: a single SAM point click that auto-creates (or refines) the object, no accept step
   const runMagicWand = async (pt: number[]) => {
     try {
-      const r = await api.segmentPrompt(id, { points: [pt], labels: [1], precise: segKind === "panoptic" });
+      const r = await trackOp("sam", "magic wand",
+        () => api.segmentPrompt(id, { points: [pt], labels: [1], precise: segKind === "panoptic" }),
+        (res) => `${res.polygons.length} region${res.polygons.length === 1 ? "" : "s"}`);
       if (!r.polygons.length) { flash("magic-wand found nothing here"); return; }
-      const box = bboxOfPolys(r.polygons);
+      const polys = trim(r.polygons);
+      const box = bboxOfPolys(polys);
       if (selected && overlapFrac(box, selected.bbox) > 0.5) {
-        dispatch({ t: "update", id: selected.id, patch: { mask: r.polygons, bbox: box } });
+        dispatch({ t: "update", id: selected.id, patch: { mask: polys, bbox: box } });
       } else if (currentClass) {
         const nid = tmpId();
         dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name,
-          bbox: box, mask: r.polygons, attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
+          bbox: box, mask: polys, attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
         autoClassify(nid, box);
       }
     } catch (e) { flash(humanizeError(e).includes("503") ? "GPU busy (training)" : "magic-wand failed"); }
@@ -424,19 +441,21 @@ export default function FrameEditor() {
   const onBrushStroke = async (ops: { op: string; center: number[]; radius: number }[]) => {
     if (!meta) return;
     try {
-      const r = await api.composeMask({ polygons: selected?.mask ?? [], ops, width: meta.width, height: meta.height });
+      const r = await trackOp("mask", "brush stroke",
+        () => api.composeMask({ polygons: selected?.mask ?? [], ops, width: meta.width, height: meta.height }));
       if (selected) {
-        dispatch({ t: "update", id: selected.id, patch: { mask: r.polygons, bbox: r.polygons.length ? bboxOfPolys(r.polygons) : selected.bbox } });
+        dispatch({ t: "update", id: selected.id, patch: { mask: trim(r.polygons), bbox: r.polygons.length ? bboxOfPolys(r.polygons) : selected.bbox } });
       } else if (currentClass && r.polygons.length) {
         dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
-          bbox: bboxOfPolys(r.polygons), mask: r.polygons, attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
+          bbox: bboxOfPolys(r.polygons), mask: trim(r.polygons), attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
       }
     } catch (e) { flash("brush failed: " + humanizeError(e)); }
   };
   // superpixel: add the clicked SLIC cell to the active mask
   const pickSuperpixel = (pt: number[]) => {
-    const poly = superpixels.find((pp) => pointInPoly(pt, pp));
-    if (!poly) return;
+    const found = superpixels.find((pp) => pointInPoly(pt, pp));
+    if (!found) return;
+    const poly = simplifyPolygon(found, MASK_TOLERANCE_PX);
     if (selected) {
       const next = [...selected.mask, poly];
       dispatch({ t: "update", id: selected.id, patch: { mask: next, bbox: bboxOfPolys(next) } });
@@ -515,7 +534,11 @@ export default function FrameEditor() {
   }, []);
   const segRoad = useCallback(async () => {
     flash("segmenting road surface...");
-    try { await api.segmentDrivable(id); await loadLayers(); flash("drivable area updated"); }
+    try {
+      await trackOp("drivable", "drivable surface", () => api.segmentDrivable(id));
+      await loadLayers();
+      flash("drivable area updated");
+    }
     catch (e) { flash("segment road failed: " + humanizeError(e)); }
   }, [id, loadLayers]);
   const genLanes = useCallback(async () => {
@@ -564,7 +587,11 @@ export default function FrameEditor() {
     if (!(await confirm({ title: "Delete this lane?", danger: true, confirmLabel: "Delete" }))) return;
     await api.deleteLane(laneSel); setLaneSel(null); await loadLayers(); flash("lane deleted");
   };
-  const propagateLanes = async () => { const r = await api.propagateLanes(id, 8); flash(`propagated to ${r.created} lane-frames`); };
+  const propagateLanes = async () => {
+    const r = await trackOp("propagate", "propagate lanes", () => api.propagateLanes(id, 8),
+      (res) => `${res.created} frames`);
+    flash(`propagated to ${r.created} lane-frames`);
+  };
 
   // ---- drivable surface editing --------------------------------------------------------------------
   // The mask is stored as flat [x,y,x,y,...] rings per class, which is what the API takes and returns, so
@@ -714,7 +741,13 @@ export default function FrameEditor() {
   }, [mode, meta, reviewLoaded, id]);
 
   // Accept or reject the selected object (persisted directly with an explicit state), then advance the queue.
-  const reviewObject = async (newState: "accepted" | "rejected") => {
+  //
+  // The accepted state comes from the role, not from the verb. An annotator's "accept" means submitted, so
+  // the work lands in the QA queue the triage page's `submitted` band exists to serve. This file's own
+  // `save()` already used `acceptState(role)`; these two paths hardcoded `accepted`, so the same person
+  // pressing A skipped the review step that pressing Cmd+S respected. `/review/rapid` was always right.
+  const reviewObject = async (verdict: "accept" | "reject") => {
+    const newState = verdict === "accept" ? acceptState(getUser()?.role) : "rejected";
     const o = selected;
     if (!o) { flash("select an object to review"); return; }
     if (o.isNew) { flash("save the new object first"); return; }
@@ -726,7 +759,7 @@ export default function FrameEditor() {
       // already blocked above, so there is nothing to clobber. Gating the human's decision on a version that
       // a background re-autolabel or embed pass may have bumped just produced spurious 409s. The optimistic
       // lock still guards the geometry-edit path (adjust_geometry), where a concurrent box edit does matter.
-      const r = await api.review(o.id, { action: newState === "accepted" ? "accept" : "reject", state: newState });
+      const r = await api.review(o.id, { action: verdict, state: newState });
       dispatch({ t: "reviewed", id: o.id, state: newState, version: r.version });
       setAlItems((s) => s.filter((it) => it.object_id !== o.id)); // drop the handled item so the queue advances
       flash(newState);
@@ -835,8 +868,10 @@ export default function FrameEditor() {
     async (prompt: { points?: number[][]; labels?: number[]; box?: number[] }) => {
       if (st.candidate?.length) acceptCandidate(); // commit the pending mask before starting the next
       try {
-        const r = await api.segmentPrompt(id, { ...prompt, precise: segKind === "panoptic" });
-        dispatch({ t: "candidate", polys: r.polygons });
+        const r = await trackOp("sam", segKind === "panoptic" ? "SAM (precise)" : "SAM segment",
+          () => api.segmentPrompt(id, { ...prompt, precise: segKind === "panoptic" }),
+          (res) => `${res.polygons.length} region${res.polygons.length === 1 ? "" : "s"}`);
+        dispatch({ t: "candidate", polys: trim(r.polygons) });
         if (!r.polygons.length) flash("SAM found nothing here");
       } catch (e) {
         const msg = humanizeError(e);
@@ -870,6 +905,11 @@ export default function FrameEditor() {
     savingRef.current = true;
     setSaving(true);
     const tgt = acceptState(getUser()?.role);  // annotator -> submitted (QA), reviewer/admin -> accepted
+    // Tracked rather than wrapped in trackOp: this function already owns a try/catch/finally with a
+    // savingRef guard, and threading a wrapper through it would have meant restructuring the one path in
+    // this file that must not grow another way to leak.
+    const pending = st.objects.filter((o) => o.isNew || o.dirty).length + st.deleted.length;
+    const opId = beginOp("save", pending === 1 ? "saving 1 object" : `saving ${pending} objects`);
     try {
       // Delete is idempotent: a 404 means the object is already gone, which is the desired end state. Without
       // this, deleting an already-removed object throws, aborts the save before the "saved" dispatch clears
@@ -906,9 +946,11 @@ export default function FrameEditor() {
       lastFailRef.current = "";                  // succeeded: clear the no-retry guard
       flash("saved");
       setCuboids(await api.frameCuboids(id).catch(() => [])); // refresh projected cuboid wireframes
+      endOp(opId, "ok", pending === 1 ? "1 object" : `${pending} objects`);
     } catch (e) {
       const msg = humanizeError(e);
       lastFailRef.current = pendingSig();         // do not auto-retry this exact set until something changes
+      endOp(opId, "failed", msg.includes("409") ? "another annotator changed this object" : msg);
       flash(msg.includes("409") ? "conflict: another annotator changed this object; reload to continue" : "save failed: " + msg);
     } finally {
       savingRef.current = false;
@@ -1013,6 +1055,13 @@ export default function FrameEditor() {
       if (mod && e.key.toLowerCase() === "i") {
         e.preventDefault(); dispatch({ t: "selectBy", how: "invert" }); return;
       }
+      // Backslash: near Enter on every layout, and unclaimed. Toggling the console has to be reachable
+      // without leaving the drawing hand, or it is a panel people open once.
+      if (!mod && e.key === "\\") {
+        e.preventDefault();
+        window.dispatchEvent(new Event("lbx:canvas-console"));
+        return;
+      }
       if (mod && e.key.toLowerCase() === "c" && st.selectedId) {
         const o = stRef.current.objects.find((x) => x.id === st.selectedId);
         if (o) { clipboardRef.current = o; flash("copied object"); }
@@ -1040,8 +1089,8 @@ export default function FrameEditor() {
       const k = e.key.toLowerCase();
       // Review mode rebinds a/x to accept/reject the selected object (and advance the queue).
       if (mode === "review") {
-        if (k === "a") { reviewObject("accepted"); return; }
-        if (k === "x") { reviewObject("rejected"); return; }
+        if (k === "a") { reviewObject("accept"); return; }
+        if (k === "x") { reviewObject("reject"); return; }
       }
       if (k === "a") dispatch({ t: "acceptAll" });
       else if (k === "v") dispatch({ t: "tool", tool: "select" });
@@ -1208,6 +1257,11 @@ export default function FrameEditor() {
             <span className={`w-1.5 h-1.5 rounded-full ${saving ? "bg-warn" : dirty ? "bg-ink-3" : "bg-pass"}`} />
             <span className="font-mono text-[10px] text-ink-3">{saving ? "saving" : dirty ? (autosave ? "autosave on" : "unsaved") : "saved"}</span>
           </button>
+          {/* The console, over the frame. The editor has its own top bar and so never carried the global
+              activity chip, which left the busiest page in the application as the one with no way to ask
+              what the machine was doing. */}
+          <button onClick={() => openConsole()} title="console: jobs, GPU, host, background work"
+            className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink"><Icon name="activity" size={17} /></button>
           <span className="w-px h-5 bg-line mx-0.5" />
           <CloudControl />
           <span className="w-px h-5 bg-line mx-0.5" />
@@ -1270,6 +1324,9 @@ export default function FrameEditor() {
             } />
           </div>
         <div ref={canvasWrapRef} className="flex-1 min-w-0 relative">
+          {/* What the canvas is doing, in the canvas. Everything here ran fire-and-forget with a one-line
+              flash, so a slow call and a call that never went looked the same from the image. */}
+          <CanvasConsole />
           {mode === "events" ? (
             // Opaque: this panel replaces the image rather than floating over it, and inheriting the
             // transparent canvas let what is behind print through the controls.
@@ -1369,8 +1426,8 @@ export default function FrameEditor() {
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 panel px-3 py-1.5 flex items-center gap-3 font-mono text-[11px]">
               <span className="text-ink-2">{selected.class_name}</span>
               <ConfBar conf={selected.conf} />
-              <button onClick={() => reviewObject("accepted")} className="border border-pass text-pass px-2 py-0.5 hover:bg-pass/10">accept (A)</button>
-              <button onClick={() => reviewObject("rejected")} className="border border-block text-block px-2 py-0.5 hover:bg-block/10">reject (X)</button>
+              <button onClick={() => reviewObject("accept")} className="border border-pass text-pass px-2 py-0.5 hover:bg-pass/10">accept (A)</button>
+              <button onClick={() => reviewObject("reject")} className="border border-block text-block px-2 py-0.5 hover:bg-block/10">reject (X)</button>
               <button onClick={() => advanceReview(selected.id)} className="text-ink-3 hover:text-ink">skip</button>
             </div>
           )}
@@ -1711,8 +1768,8 @@ export default function FrameEditor() {
                   </div>
                   <ConfBar conf={selected.conf} />
                   <div className="flex gap-1">
-                    <button onClick={() => reviewObject("accepted")} className="flex-1 border border-pass text-pass px-2 py-1 hover:bg-pass/10">accept (A)</button>
-                    <button onClick={() => reviewObject("rejected")} className="flex-1 border border-block text-block px-2 py-1 hover:bg-block/10">reject (X)</button>
+                    <button onClick={() => reviewObject("accept")} className="flex-1 border border-pass text-pass px-2 py-1 hover:bg-pass/10">accept (A)</button>
+                    <button onClick={() => reviewObject("reject")} className="flex-1 border border-block text-block px-2 py-1 hover:bg-block/10">reject (X)</button>
                   </div>
                 </div>
               ) : <div className="text-ink-3 border-b hairline pb-2">click an object on the canvas to accept or reject it.</div>}
@@ -1855,7 +1912,8 @@ export default function FrameEditor() {
                 disabled={selected.isNew}
                 title={selected.isNew ? "save the frame first, then propagate" : "optical-flow propagate this box across the next 12 frames as a track to confirm"}
                 onClick={async () => {
-                  const r = await api.propagateObject(selected.id, 12);
+                  const r = await trackOp("propagate", "propagate object",
+                    () => api.propagateObject(selected.id, 12));
                   toast(r.created ? `propagated forward ${r.created} frames (track ${r.track_id?.slice(0, 8)}). Open the track to review/confirm.` : `could not propagate: ${r.reason || "no motion"}`);
                 }}
                 className="w-full mb-1 font-mono text-[10px] border border-line text-ink-2 px-1.5 py-1 hover:border-accent disabled:opacity-40">

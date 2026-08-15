@@ -8,6 +8,8 @@ import PageShell from "@/components/shell/PageShell";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import { Spinner, SkeletonRows } from "@/components/Spinner";
 import { useJobStream } from "@/lib/useEventStream";
+import { canCancel, cancelPath, jobCounts, jobKinds } from "@/lib/jobActions";
+import { toast } from "@/lib/toast";
 
 // Unified jobs dashboard: import, training, and autolabel jobs in one live stream. The single place
 // to watch everything the engine is doing.
@@ -17,6 +19,7 @@ export default function JobsPage() {
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [kind, setKind] = useState<string>("all");
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
 
   // Live via server-sent events. This page used to re-fetch every two seconds forever, whether or not
   // anything had changed and whether or not the tab was even visible. The stream pushes only on change; the
@@ -47,9 +50,25 @@ export default function JobsPage() {
     setLoading(false);
   }, [stream]);
 
-  const kinds = ["all", "import", "training", "autolabel"];
+  // Derived from the rows that arrived rather than from a hardcoded list, which is how export, map_fusion
+  // and relabel came to be visible under "all" and impossible to filter to.
+  const kinds = jobKinds(jobs);
   const shown = kind === "all" ? jobs : jobs.filter((j) => j.kind === kind);
-  const active = jobs.filter((j) => j.status === "running" || j.status === "pending").length;
+  const counts = jobCounts(jobs);
+
+  const cancel = async (j: JobRow) => {
+    setBusy(j.job_id);
+    try {
+      const r = await api.cancelJob(cancelPath(j));
+      toast(r.detail || "cancelled");
+      const fresh = await api.jobs();
+      setJobs(fresh);
+    } catch (e) {
+      toast(`could not cancel: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const filters = (
     <div className="flex items-center gap-1 font-mono text-[11px]">
@@ -72,7 +91,16 @@ export default function JobsPage() {
               stalled dot is the difference between "nothing is happening" and "you are not being told". */}
           <span className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-pass" : "bg-ink-3"}`}
                 title={connected ? "live" : "not connected; showing last known state"} />
-          <span>{active} active</span>
+          {/* Three numbers rather than one called "active". This deployment parks 67 auto-label jobs for a
+              GPU pod that is not provisioned, and reporting 68 active on an idle machine is how a status
+              line stops being read. */}
+          <span>{counts.running} running</span>
+          {counts.queued > 0 && <span className="text-ink-3">{counts.queued} queued</span>}
+          {counts.parked > 0 && (
+            <span className="text-ink-3" title="parked for a GPU pod; nothing local will pick these up">
+              {counts.parked} parked
+            </span>
+          )}
         </span>
       )}
       filters={filters}
@@ -83,11 +111,11 @@ export default function JobsPage() {
               fixed-width bar held a full 1fr while the only explanation of a failure was squeezed into
               140px and truncated, so the one column that matters when something breaks was the one you
               could not read. */}
-          <div className="grid grid-cols-[80px_minmax(0,14rem)_100px_120px_minmax(0,1fr)_70px] gap-2 px-3 py-2 border-b hairline font-mono text-[10px] uppercase text-ink-3">
+          <div className="grid grid-cols-[80px_minmax(0,14rem)_100px_120px_minmax(0,1fr)_112px] gap-2 px-3 py-2 border-b hairline font-mono text-[10px] uppercase text-ink-3">
             <span>kind</span><span>label</span><span>status</span><span>progress</span><span>detail</span><span></span>
           </div>
           {shown.map((j) => (
-            <div key={j.job_id} className="grid grid-cols-[80px_minmax(0,14rem)_100px_120px_minmax(0,1fr)_70px] gap-2 px-3 py-2 border-b hairline items-center font-mono text-[11px]">
+            <div key={j.job_id} className="grid grid-cols-[80px_minmax(0,14rem)_100px_120px_minmax(0,1fr)_112px] gap-2 px-3 py-2 border-b hairline items-center font-mono text-[11px]">
               <span><StateBadge state={j.kind} /></span>
               <span className="text-ink-2 truncate" title={j.label}>{j.label}</span>
               <span><StateBadge state={j.status} /></span>
@@ -99,7 +127,17 @@ export default function JobsPage() {
               <span className="text-ink-3 leading-tight min-w-0" title={j.error || j.detail}>
                 {j.error ? <span className="text-block line-clamp-2">{j.error}</span> : j.detail}
               </span>
-              <button onClick={() => router.push(j.link)} className="border border-line px-1.5 py-0.5 text-ink-3 hover:border-accent">open</button>
+              <span className="flex items-center gap-1">
+                <button onClick={() => router.push(j.link)}
+                  className="border border-line px-1.5 py-0.5 text-ink-3 hover:border-accent">open</button>
+                {canCancel(j) && (
+                  <button onClick={() => cancel(j)} disabled={busy === j.job_id}
+                    title="stop this job"
+                    className="border border-line px-1.5 py-0.5 text-ink-3 hover:border-fail hover:text-fail disabled:opacity-40">
+                    {busy === j.job_id ? "..." : "stop"}
+                  </button>
+                )}
+              </span>
             </div>
           ))}
           {loading && !shown.length

@@ -48,6 +48,22 @@ def _job_dict(j: ImportJob) -> dict:
     }
 
 
+@router.get("/imports/formats")
+async def formats():
+    """Every format the importer can actually read, and which of them are raw media.
+
+    Served rather than hardcoded in the client because it drifted: the import page carried a list of ten
+    while the backend registered nineteen, and a format missing from that list was silently rewritten to
+    COCO. Nine formats, including all four competitor migrations, quietly landed on the wrong importer.
+    """
+    from services.imports.run import ADAPTERS, RAW_FORMATS
+
+    return {"formats": sorted(set(ADAPTERS) | RAW_FORMATS),
+            "annotated": sorted(ADAPTERS),
+            # Raw media has no labels to read, so the page can say what a choice will and will not bring in.
+            "raw": sorted(RAW_FORMATS)}
+
+
 @router.post("/imports/dry-run")
 async def dry_run(payload: ImportStartIn):
     """Parse a source and report what importing it would cost, without writing anything.

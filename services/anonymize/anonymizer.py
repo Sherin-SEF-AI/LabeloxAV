@@ -39,7 +39,8 @@ class PiiAnonymizer:
         self.cfg = cfg
         self.face = face_detector if face_detector is not None else FaceDetector(cfg.face_weights, cfg.face_conf)
         self.plate = (
-            plate_detector if plate_detector is not None else PlateDetector(cfg.plate_weights, cfg.plate_conf, cfg.device)
+            plate_detector if plate_detector is not None else PlateDetector(cfg.plate_weights, cfg.plate_conf, cfg.device,
+                                        imgsz_cap=cfg.plate_imgsz_cap)
         )
         # Fail loud when the gate is on but a required detector is unavailable: storing un-anonymized
         # frames would create a legally-unsellable dataset (DPDPA). Faces are always required. Plates are
@@ -57,8 +58,14 @@ class PiiAnonymizer:
                 f"(run `make pii-models`), or set LBX_PII__PLATE_MANDATORY=false for a provably face-only "
                 f"corpus (audited opt-out)."
             )
+        # The inference resolution is part of the method, not a tuning detail. Every frame in this corpus
+        # was processed at the library default of 640, which downsampled a 1920x1080 dashcam frame by three
+        # and hid every small plate in it. Recording the cap is what lets a backfill find those frames
+        # afterwards: without it, a frame processed by a method that could not see plates is indistinguishable
+        # from one that genuinely had none.
         self.method_version = (
-            f"{Path(cfg.face_weights).stem}+{Path(cfg.plate_weights).stem}@{cfg.blur_method}-k{cfg.kernel}"
+            f"{Path(cfg.face_weights).stem}+{Path(cfg.plate_weights).stem}"
+            f"@{cfg.blur_method}-k{cfg.kernel}-imgsz{cfg.plate_imgsz_cap}"
         )
 
     def _blur_region(self, image_bgr: np.ndarray, x1: float, y1: float, x2: float, y2: float) -> None:

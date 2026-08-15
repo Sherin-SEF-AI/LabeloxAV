@@ -92,7 +92,10 @@ async def test_cloud_job_not_claimed_by_local_worker():
                                               dataset_spec={"limit": 5}))
     async with get_sessionmaker()() as db:
         j = await db.get(TrainingJob, uuid.UUID(cloud_id))
-        assert j.compute_target == "cloud" and j.stage == "queued-cloud"
+        # Both, now. The stage always said `queued-cloud` while the status said `pending`, which is the
+        # word for work a runner is about to take, so parked work was indistinguishable from queued work
+        # to every consumer that reads status rather than stage.
+        assert j.compute_target == "cloud" and j.stage == "queued-cloud" and j.status == "queued-cloud"
 
     # a local job sitting behind it still gets claimed (cloud one is skipped)
     local_id = await enqueue_job(TrainJobSpec(purpose="local-test-line", compute_target="local",
@@ -109,7 +112,7 @@ async def test_cloud_job_not_claimed_by_local_worker():
 
     async with get_sessionmaker()() as db:
         cj = await db.get(TrainingJob, uuid.UUID(cloud_id))
-        assert cj.status == "pending"  # cloud job untouched by the local worker
+        assert cj.status == "queued-cloud"  # cloud job untouched by the local worker
         # cleanup, including whatever was actually claimed: a job left `running` makes the autolabel
         # endpoints return 503 ("GPU reserved for a training job") for every later test in the suite.
         for jid in (cloud_id, local_id, claimed):

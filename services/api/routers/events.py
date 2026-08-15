@@ -27,7 +27,7 @@ import json
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
@@ -81,6 +81,12 @@ router = APIRouter(dependencies=[Depends(require_stream_user)])
 POLL_INTERVAL_S = 2.0
 # A proxy will drop an idle connection; a comment frame keeps it open without pretending to be an event.
 HEARTBEAT_EVERY = 15
+# Held but not moving. `pending` covers work nobody has picked up; `queued-cloud` is parked for the A100 on
+# purpose. Neither is progress, and both are the answer to why a quiet system is quiet.
+WAITING_STATUSES = ("pending", "queued", "queued-cloud")
+# Slower than the job stream: these are gauges, not events, and a console that redraws twice a second reads
+# as noise rather than as information. Fast enough that a job starting is visible while you are looking.
+SYSTEM_INTERVAL_S = 3.0
 
 
 # ---------------------------------------------------------------- wakeups
@@ -132,9 +138,10 @@ async def _job_snapshot(db: AsyncSession) -> dict:
     """The state every job view needs, in one round trip per table.
 
     Only active work plus a small tail of recent terminal jobs: a client watching progress does not need the
-    entire history, and sending it on every tick is what made the polling endpoints expensive.
+    entire history, and sending it on every tick is what made the polling endpoints expensive. The one thing
+    that cannot be answered from a tail, how much work is queued in total, is carried alongside as a count.
     """
-    out: dict[str, list[dict]] = {}
+    out: dict[str, object] = {}
 
     training = (await db.execute(
         select(TrainingJob).order_by(TrainingJob.created_at.desc()).limit(20))).scalars().all()
@@ -150,6 +157,20 @@ async def _job_snapshot(db: AsyncSession) -> dict:
                      "progress": getattr(r, "progress", None),
                      "counts": getattr(r, "counts", None) or {},
                      "error": getattr(r, "error", None)} for r in rows]
+
+    # How much work is held but not moving, counted over every row rather than over the window above.
+    #
+    # The lists are capped at a recent tail, which is right for showing progress and wrong for answering "why
+    # is nothing happening". This deployment holds 67 autolabel jobs parked for a cloud A100 since late June;
+    # all of them are older than the ten most recent, so a client counting the window reported one queued job
+    # when there were sixty-eight. Under-reporting is worse than not reporting: it reads as a healthy system.
+    waiting: dict[str, int] = {}
+    for wkey, wmodel in (("training", TrainingJob), ("import", ImportJob),
+                         ("export", ExportJob), ("autolabel", AutolabelJob)):
+        waiting[wkey] = int((await db.execute(
+            select(func.count()).select_from(wmodel)
+            .where(wmodel.status.in_(WAITING_STATUSES)))).scalar() or 0)
+    out["waiting"] = waiting
 
     # Ingest progress rides the same stream rather than getting one of its own. It is the signal the home
     # page shows while a fleet sweep runs, and it used to be scraped out of a log file with a regex, which
@@ -298,6 +319,34 @@ async def notification_events(request: Request):
             raise
         except Exception as exc:  # noqa: BLE001
             log.warning("events.notification_stream_failed", error=str(exc))
+            yield _sse("error", {"detail": "stream ended"})
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no",
+    })
+
+
+@router.get("/events/system")
+async def system_events():
+    """Stream machine state for the console.
+
+    Unlike the job stream this emits every tick rather than only on change: utilisation and temperature are
+    never equal two ticks running, so change detection would emit constantly anyway, and a console whose
+    numbers freeze is indistinguishable from one whose connection died.
+    """
+    from starlette.responses import StreamingResponse
+
+    from services.hardening.resources import snapshot
+
+    async def gen() -> AsyncIterator[str]:
+        try:
+            while True:
+                yield _sse("system", snapshot())
+                await _sleep_or_wake("system", SYSTEM_INTERVAL_S)
+        except (asyncio.CancelledError, GeneratorExit):
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning("events.system_failed", error=str(exc))
             yield _sse("error", {"detail": "stream ended"})
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={

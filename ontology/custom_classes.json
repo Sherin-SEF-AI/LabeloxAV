@@ -138,5 +138,12 @@
     "l0": "object",
     "l1": "custom",
     "name": "test_new_vehicle"
+  },
+  {
+    "id": 228,
+    "india": true,
+    "l0": "object",
+    "l1": "custom",
+    "name": "name_board"
   }
 ]

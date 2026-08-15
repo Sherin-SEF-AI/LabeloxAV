@@ -1,285 +1,335 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api , humanizeError } from "@/lib/api";
+import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
-import { watchImportJob } from "@/lib/useEventStream";
+import { watchAutolabelJob, watchImportJob } from "@/lib/useEventStream";
+import { type QueueItem, humanSize, shouldAutoOpen, summarize } from "@/lib/uploadQueue";
+import {
+  clearUploads,
+  enqueue,
+  getUploadState,
+  startAutolabel,
+  startUploads,
+  subscribeUploads,
+} from "@/lib/uploadManager";
+import { importedSessions } from "@/lib/uploadQueue";
+import ImportedPanel from "@/components/annotate/ImportedPanel";
 
-// New Annotation: upload a folder of images (zip), a video, or an mcap; import it into a fresh
-// session, then jump straight into the frame editor on the first frame. The bytes go browser ->
-// storage via presigned multipart; the API only signs and runs the import as a background job.
+// New Annotation: upload clips, a folder of them, or an mcap; import each into its own session, then jump
+// into the editor when there was exactly one. The bytes go browser -> storage via presigned multipart; the
+// API only signs and runs each import as a background job.
+//
+// This took one file at a time, which is the wrong unit for how the footage arrives. A dashcam session is a
+// folder of clips and the corpus was built from 186 of them, so ingesting it singly meant sitting through an
+// upload, a decode and an editor open before picking the next. It now takes a multi-select or a whole
+// directory, and runs them one at a time: each import decodes video on a machine with a single GPU slot, so
+// ten at once would compete rather than finish sooner.
+//
+// The one behaviour that had to change rather than extend is the navigation. The old page pushed to
+// /frame/<id> the moment its import finished, which unmounts everything, and with a queue behind it that
+// abandons uploads mid-transfer. Auto-open is now a property of a queue of exactly one.
 
-// Only the source formats that make sense for "start annotating from raw media". Richer dataset
-// imports (coco/yolo/nuscenes/...) live on the IMPORT page.
 const FORMATS = [
+  { value: "auto", label: "auto (detect per file)" },
   { value: "images", label: "images (zip / folder of images)" },
   { value: "video", label: "video (.mp4 / .mov / .mkv / .avi)" },
   { value: "mcap", label: "mcap (robotics log)" },
 ];
 
-const VIDEO_EXTS = ["mp4", "mov", "mkv", "avi", "webm", "m4v"];
-const IMAGE_EXTS = ["jpg", "jpeg", "png", "bmp", "webp", "tif", "tiff"];
+const ACCEPT = "image/*,video/*,.zip,.mp4,.mov,.mkv,.avi,.webm,.m4v,.mcap";
 
-// Guess the import format from a chosen file's extension. The user can still override the select.
-function formatForFile(file: File): string {
-  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-  if (ext === "mcap") return "mcap";
-  if (VIDEO_EXTS.includes(ext)) return "video";
-  if (ext === "zip" || IMAGE_EXTS.includes(ext)) return "images";
-  // Fall back on the broad mime type when the extension is missing or unknown.
-  if (file.type.startsWith("video/")) return "video";
-  if (file.type.startsWith("image/")) return "images";
-  return "images";
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, right, children }: {
+  title: string; right?: React.ReactNode; children: React.ReactNode;
+}) {
   return (
     <section className="panel">
-      <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
-        {title}
+      <div className="flex items-center gap-2 font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+        <span>{title}</span>
+        {right && <span className="ml-auto normal-case">{right}</span>}
       </div>
       <div className="p-3">{children}</div>
     </section>
   );
 }
 
-type Phase = "idle" | "uploading" | "importing" | "opening";
+const DOT: Record<string, string> = {
+  pending: "bg-line", uploading: "bg-info", importing: "bg-warn",
+  done: "bg-pass", error: "bg-block", skipped: "bg-line",
+};
+
+/** One queue row. The bar is the item's own phase fraction, so it moves during a long single upload. */
+function Row({ item, index, onOpen }: { item: QueueItem; index: number; onOpen: (i: QueueItem) => void }) {
+  const active = item.status === "uploading" || item.status === "importing";
+  return (
+    <div
+      // Staggered so a folder of forty clips arrives as a list being filled rather than as a flash of forty
+      // rows. Capped, because past about ten the stagger stops reading as motion and starts reading as lag.
+      // `.fade-up` and its `--d` delay are the shell's existing entrance, so this inherits the
+      // prefers-reduced-motion handling instead of adding a second animation nobody would remember to
+      // disable.
+      style={{ "--d": `${Math.min(index, 10) * 25}ms` } as React.CSSProperties}
+      className="fade-up flex items-center gap-2 px-2 py-1.5 border-b hairline last:border-0">
+      {active
+        ? <span className="running-dot shrink-0" />
+        : <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT[item.status]}`} />}
+      <span className="font-mono text-[11px] text-ink truncate flex-1 min-w-0" title={item.name}>
+        {item.name}
+      </span>
+      <span className="font-mono text-[10px] text-ink-3 shrink-0">{humanSize(item.size)}</span>
+      <span className="font-mono text-[10px] text-ink-3 w-14 text-right shrink-0">{item.format}</span>
+      <span className="w-24 shrink-0">
+        {active ? (
+          <span className="block h-1 bg-line rounded overflow-hidden">
+            <span className="block h-full bg-accent transition-[width] duration-300 ease-out"
+              style={{ width: `${Math.round(item.progress * 100)}%` }} />
+          </span>
+        ) : (
+          <span className={`font-mono text-[10px] ${item.status === "error" ? "text-block" : item.status === "done" ? "text-pass" : "text-ink-3"}`}>
+            {item.status}
+          </span>
+        )}
+      </span>
+      {item.sessionId && (
+        // A button, not a link. This was an <a href>, so opening a finished clip navigated away, unmounted
+        // the page and abandoned every upload still running, which is the same bug the auto-open rule
+        // exists to prevent, left in a second place. It opens a panel beside the queue instead.
+        <button onClick={() => onOpen(item)}
+          className="font-mono text-[10px] text-accent hover:underline shrink-0">
+          open
+        </button>
+      )}
+      {item.detail && item.status === "error" && (
+        <span className="font-mono text-[10px] text-block truncate max-w-[14rem]" title={item.detail}>
+          {item.detail}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export default function NewAnnotationPage() {
   const router = useRouter();
-  const [format, setFormat] = useState("images");
+  const [format, setFormat] = useState("auto");
   const [vehicle, setVehicle] = useState("ANNO-01");
   const [city, setCity] = useState("BLR");
-  const [file, setFile] = useState<File | null>(null);
+  // The queue itself lives in lib/uploadManager, module-scoped, so it survives this page unmounting. A
+  // 41GB batch is over an hour of transfer, and holding it in component state meant any navigation
+  // abandoned it. This component is a view over that store, not its owner.
+  const [state, setState] = useState(getUploadState);
+  const [skipped, setSkipped] = useState<string[]>([]);
+  const [duplicates, setDuplicates] = useState(0);
   const [drag, setDrag] = useState(false);
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [uploadFrac, setUploadFrac] = useState(0);
-  const [status, setStatus] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
+  const [opened, setOpened] = useState<QueueItem | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [emptyHint, setEmptyHint] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const dirRef = useRef<HTMLInputElement>(null);
 
-  // Choosing a file auto-picks a sensible format; the select still lets the user override it.
-  function pickFile(f: File) {
-    setFile(f);
-    setFormat(formatForFile(f));
+  useEffect(() => subscribeUploads(setState), []);
+
+  const items = state.items;
+  const running = state.running;
+  const summary = useMemo(() => summarize(items), [items]);
+
+  // Keep the open panel pointed at the live row, so its counts follow the import rather than freezing at
+  // whatever they were when it was clicked.
+  const openedLive = opened ? items.find((i) => i.id === opened.id) ?? opened : null;
+  const labelable = importedSessions(items).length;
+
+  const take = useCallback((list: FileList | File[] | null) => {
+    if (!list) return;
+    const r = enqueue(Array.from(list));
+    setSkipped(r.skipped);
+    setDuplicates(r.duplicates);
     setErr(null);
-    setEmptyHint(false);
+  }, []);
+
+  // Deps are assembled once here rather than inside each handler, so the import pass and the label pass
+  // cannot drift apart on which client they call.
+  const deps = {
+    upload: api.uploadMultipart,
+    startImport: api.startImport,
+    watchImport: watchImportJob,
+    firstFrame: api.firstFrame,
+    humanizeError,
+    startAutolabel: (sessionId: string) => api.startAutolabel(sessionId),
+    watchAutolabel: watchAutolabelJob,
+  };
+
+  async function onAutolabel() {
+    if (running) return;
+    await startAutolabel(deps);
   }
 
   async function onGo() {
-    if (!file) return;
+    if (!items.length || running) return;
     setErr(null);
-    setEmptyHint(false);
-    setProgress(0);
-
-    // a. Upload the file straight to storage, surfacing the per-part progress fraction.
-    let uri: string;
-    try {
-      setPhase("uploading");
-      setUploadFrac(0);
-      setStatus("uploading file to storage...");
-      uri = await api.uploadMultipart(file, setUploadFrac);
-    } catch (e) {
-      setErr("upload failed: " + humanizeError(e));
-      setPhase("idle");
-      return;
-    }
-
-    // b. Kick off the import job for the uploaded object.
-    let jobId: string;
-    try {
-      setPhase("importing");
-      setStatus("starting import...");
-      const res = await api.startImport({
-        format,
-        source_uri: uri,
-        target_vehicle: vehicle,
-        city,
-      });
-      jobId = res.job_id;
-    } catch (e) {
-      setErr("could not start import: " + humanizeError(e));
-      setPhase("idle");
-      return;
-    }
-
-    // c. Follow the import job on the shared event stream until it finishes.
-    //
-    // The server pushes on change, so the wizard's progress bar moves when the import moves rather than on
-    // a two-second tick that ran whether or not anything had happened. The terminal state is fetched once
-    // at the end because the stream carries status and progress and not the session id the wizard needs to
-    // navigate to; asking for it on every frame would put a full job record on the wire for each update.
-    let sessionId: string;
-    try {
-      sessionId = await watchImportJob(jobId, (job) => {
-        setProgress(job.progress || 0);
-        const frames = job.counts?.frames ?? 0;
-        const objects = job.counts?.objects ?? 0;
-        setStatus(
-          `import ${job.status} - ${((job.progress || 0) * 100).toFixed(0)}% - ${frames} frames / ${objects} objects`,
-        );
-      });
-    } catch (e) {
-      setErr("import error: " + humanizeError(e));
-      setPhase("idle");
-      return;
-    }
-
-    // d. Open the editor on the first frame of the new session.
-    try {
-      setPhase("opening");
-      setStatus("opening editor...");
-      const { frame_id } = await api.firstFrame(sessionId);
-      router.push("/frame/" + frame_id);
-    } catch (e) {
-      const msg = humanizeError(e);
-      // A 404 means the session imported but has no frames to open yet.
-      if (msg.includes("404")) {
-        setStatus("session created, but it has no frames to open.");
-        setEmptyHint(true);
-      } else {
-        setErr("could not open editor: " + msg);
-      }
-      setPhase("idle");
-    }
+    await startUploads({ format, vehicle, city }, deps);
+    // Only ever for a queue of one. Navigating unmounts the page, which is now survivable, but it is still
+    // not what somebody importing a folder asked for.
+    const after = getUploadState().items;
+    if (shouldAutoOpen(after)) router.push("/frame/" + after[0].frameId);
   }
 
-  const busy = phase !== "idle";
+  const label = running
+    ? `working ${summary.done + summary.failed}/${summary.total}`
+    : items.length > 1 ? `Import ${items.length} files` : "Create annotation";
 
   const primaryAction = (
-    <button
-      onClick={onGo}
-      disabled={!file || busy}
-      className="font-mono text-xs border border-line px-3 py-1 hover:border-accent disabled:opacity-50"
-    >
-      {phase === "uploading"
-        ? `uploading ${(uploadFrac * 100).toFixed(0)}%`
-        : phase === "importing"
-          ? "importing..."
-          : phase === "opening"
-            ? "opening..."
-            : "Create annotation"}
+    <button onClick={onGo} disabled={!items.length || running}
+      className="font-mono text-xs border border-line px-3 py-1 hover:border-accent disabled:opacity-50 transition-colors">
+      {running && <span className="running-dot mr-1.5 align-middle" />}
+      {label}
     </button>
   );
 
   return (
     <PageShell active="NEW" title="New Annotation" primaryAction={primaryAction}>
       <div className="p-4">
-        <div className="max-w-2xl w-full mx-auto space-y-4">
-          <Section title="new annotation - upload images, video, or mcap">
+        <div className="max-w-3xl w-full mx-auto space-y-4">
+          <Section
+            title="new annotation - upload images, video, or mcap"
+            right={items.length ? (
+              <button onClick={() => { clearUploads(); setSkipped([]); setDuplicates(0); setOpened(null); }}
+                disabled={running}
+                className="font-mono text-[10px] text-ink-3 hover:text-ink disabled:opacity-40">clear</button>
+            ) : null}
+          >
+            {/* Outside the dropzone, deliberately. These were inside it, and calling .click() on one
+                dispatches a click that bubbles up to the dropzone's own onClick, which opens a second
+                chooser in the same gesture. The browser refuses that and says so:
+                  "File chooser dialog can only be shown with a user activation."
+                A hidden input does not need to live inside the drop target, and keeping it out means the
+                two handlers can never trigger each other. */}
+            <input ref={fileRef} type="file" accept={ACCEPT} multiple className="hidden"
+              onChange={(e) => take(e.target.files)} />
+            {/* A second input carrying webkitdirectory: one element cannot offer both a file picker and a
+                folder picker, and a folder is how these clips sit on disk. The prop is not in React's
+                HTMLInputElement types but is what every browser implements, so it is spread through a
+                typed record rather than cast away with `any`. */}
+            <input ref={dirRef} type="file" className="hidden" multiple
+              {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+              onChange={(e) => take(e.target.files)} />
             <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDrag(true);
-              }}
+              onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
               onDragLeave={() => setDrag(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDrag(false);
-                if (e.dataTransfer.files[0]) pickFile(e.dataTransfer.files[0]);
-              }}
-              onClick={() => !busy && inputRef.current?.click()}
-              className={`border border-dashed ${
-                drag ? "border-accent" : "border-line"
-              } p-8 text-center cursor-pointer font-mono text-xs text-ink-3`}
-            >
-              <input
-                ref={inputRef}
-                type="file"
-                accept="image/*,.zip,.mp4,.mov,.mkv,.avi,.mcap"
-                className="hidden"
-                onChange={(e) => e.target.files?.[0] && pickFile(e.target.files[0])}
-              />
-              {file ? (
+              onDrop={(e) => { e.preventDefault(); setDrag(false); if (!running) take(e.dataTransfer.files); }}
+              onClick={() => !running && fileRef.current?.click()}
+              className={`border border-dashed rounded p-8 text-center cursor-pointer font-mono text-xs transition-all duration-150
+                ${drag ? "border-accent bg-accent/5 text-ink scale-[1.01]" : "border-line text-ink-3 hover:border-ink-3"}`}>
+              {items.length ? (
                 <span className="text-ink">
-                  {file.name}{" "}
-                  <span className="text-ink-3">({(file.size / 1e6).toFixed(1)} MB)</span>
+                  {items.length} file{items.length === 1 ? "" : "s"} ready
+                  <span className="text-ink-3"> ({humanSize(items.reduce((a, i) => a + i.size, 0))})</span>
                 </span>
               ) : (
-                "drag a .zip of images / a video / a .mcap here, or click to browse"
+                <>drag clips, a folder, or a .mcap here, or click to browse</>
               )}
             </div>
+
+            <div className="flex items-center gap-3 mt-2">
+              <button onClick={() => !running && dirRef.current?.click()} disabled={running}
+                className="font-mono text-[11px] border border-line rounded px-2 py-1 text-ink-2 hover:border-accent hover:text-ink disabled:opacity-40 transition-colors">
+                choose a folder
+              </button>
+              <span className="font-mono text-[10px] text-ink-3">
+                every clip becomes its own session, imported one at a time
+              </span>
+            </div>
+
+            {(skipped.length > 0 || duplicates > 0) && (
+              <div className="reveal font-mono text-[10px] text-ink-3 mt-2">
+                {/* Said rather than silent: a folder pick sweeps up sidecars and dotfiles, and uploading
+                    those would produce one failed import each and bury the real ones. */}
+                {skipped.length > 0 && <>{skipped.length} non-media file{skipped.length === 1 ? "" : "s"} skipped ({skipped.slice(0, 3).join(", ")}{skipped.length > 3 ? ", ..." : ""}). </>}
+                {duplicates > 0 && <>{duplicates} duplicate{duplicates === 1 ? "" : "s"} ignored.</>}
+              </div>
+            )}
 
             <div className="grid grid-cols-3 gap-3 mt-3 font-mono text-xs">
               <label className="flex flex-col gap-1">
                 <span className="text-ink-3 uppercase text-[11px]">format</span>
-                <select
-                  value={format}
-                  onChange={(e) => setFormat(e.target.value)}
-                  disabled={busy}
-                  className="bg-panel border border-line px-2 py-1 text-ink"
-                >
-                  {FORMATS.map((f) => (
-                    <option key={f.value} value={f.value}>
-                      {f.label}
-                    </option>
-                  ))}
+                <select value={format} onChange={(e) => setFormat(e.target.value)} disabled={running}
+                  className="bg-panel border border-line px-2 py-1 text-ink">
+                  {FORMATS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
                 </select>
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-ink-3 uppercase text-[11px]">vehicle</span>
-                <input
-                  value={vehicle}
-                  onChange={(e) => setVehicle(e.target.value)}
-                  disabled={busy}
-                  className="bg-panel border border-line px-2 py-1 text-ink"
-                />
+                <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} disabled={running}
+                  className="bg-panel border border-line px-2 py-1 text-ink" />
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-ink-3 uppercase text-[11px]">city</span>
-                <input
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  disabled={busy}
-                  className="bg-panel border border-line px-2 py-1 text-ink"
-                />
+                <input value={city} onChange={(e) => setCity(e.target.value)} disabled={running}
+                  className="bg-panel border border-line px-2 py-1 text-ink" />
               </label>
             </div>
 
-            <div className="flex items-center gap-3 mt-3">
-              {(phase === "uploading" || phase === "importing") && (
-                <div className="flex-1 h-2 bg-line relative">
-                  <div
-                    className="absolute left-0 top-0 h-full bg-accent"
-                    style={{
-                      width: `${(phase === "uploading" ? uploadFrac : progress) * 100}%`,
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-
-            {status && !err && (
-              <div className="font-mono text-[11px] text-ink-2 mt-2">{status}</div>
-            )}
             {err && <div className="font-mono text-[11px] text-block mt-2">{err}</div>}
-            {emptyHint && (
-              <div className="font-mono text-[11px] text-ink-3 mt-1">
-                <button
-                  onClick={() => router.push("/annotations")}
-                  className="text-accent hover:underline"
-                >
-                  browse existing annotations -&gt;
-                </button>
-              </div>
-            )}
 
             <div className="font-mono text-[11px] text-ink-3 mt-3 leading-relaxed">
-              Your file uploads straight to storage, imports into a new session (PII faces and plates
-              are blurred on every frame), and the editor opens on the first frame so you can start
-              annotating. Larger videos take longer to decode.
+              Each file uploads straight to storage and imports into its own session (PII faces and plates
+              are blurred on every frame). One file opens the editor when it finishes. A batch keeps running
+              if you move around the app, and notifies you when it is done, so you can carry on working;
+              closing the tab is the only thing that stops it. Larger videos take longer to decode.
             </div>
           </Section>
 
-          <div className="font-mono text-[11px] text-ink-3 px-1">
-            <button
-              onClick={() => router.push("/annotations")}
-              className="text-accent hover:underline"
+          {items.length > 0 && (
+            <Section
+              title={`queue - ${summary.done} done, ${summary.failed} failed, ${summary.pending} waiting`}
+              right={
+                <span className="font-mono text-[10px] text-ink-3">
+                  {Math.round(summary.progress * 100)}%
+                </span>
+              }
             >
+              <div className="h-1 bg-line rounded overflow-hidden mb-2">
+                <div className="h-full bg-accent transition-[width] duration-500 ease-out"
+                  style={{ width: `${summary.progress * 100}%` }} />
+              </div>
+              <div className="flex gap-3 items-start">
+                <div className="flex-1 min-w-0 border hairline rounded overflow-hidden max-h-[36rem] overflow-y-auto">
+                  {items.map((i, n) => <Row key={i.id} item={i} index={n} onOpen={setOpened} />)}
+                </div>
+                {openedLive?.sessionId && (
+                  <ImportedPanel item={openedLive} onClose={() => setOpened(null)} />
+                )}
+              </div>
+              {summary.finished && !running && (
+                <div className="reveal flex items-center gap-3 mt-2">
+                  <span className="font-mono text-[11px] text-ink-2">
+                    {summary.done} session{summary.done === 1 ? "" : "s"} imported
+                    {summary.failed > 0 && <span className="text-block"> · {summary.failed} failed</span>}
+                  </span>
+                  {/* Offered only once every import has finished. Autolabel is GPU work on a machine with one
+                      slot, so starting it while clips are still decoding would put two jobs in flight and
+                      lose the ordering that makes a batch followable. */}
+                  {labelable > 0 && (
+                    <button onClick={onAutolabel}
+                      className="font-mono text-[11px] border border-accent/50 text-accent rounded px-2 py-1 hover:bg-accent/10 transition-colors">
+                      autolabel {labelable} session{labelable === 1 ? "" : "s"}
+                    </button>
+                  )}
+                  <button onClick={() => router.push("/annotations")}
+                    className="ml-auto font-mono text-[11px] text-accent hover:underline">
+                    browse annotations -&gt;
+                  </button>
+                </div>
+              )}
+            </Section>
+          )}
+
+          <div className="font-mono text-[11px] text-ink-3 px-1 flex items-center gap-4">
+            <button onClick={() => router.push("/annotations")} className="text-accent hover:underline">
               browse existing annotations -&gt;
+            </button>
+            {/* Added because the batch now keeps running after you leave, and nothing pointed at where to
+                watch it. An import is a job like any other, and the jobs page already lists them all. */}
+            <button onClick={() => router.push("/jobs")} className="text-accent hover:underline">
+              watch all import jobs -&gt;
             </button>
           </div>
         </div>

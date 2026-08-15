@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { getUser } from "./user";
+import { getJobs, jobsConnected, subscribeJobs } from "./jobStream";
 
 // Subscribe to a server-sent event stream.
 //
@@ -96,10 +97,57 @@ export type JobStream = {
   // Ingest rides the same stream rather than getting one of its own: one connection serves every page
   // that watches work happen, instead of each opening its own.
   ingest: IngestProgress[];
+  // Queued totals over every row, not over the tails above. The lists are capped at a recent window, so a
+  // client counting them under-reports: 67 autolabel jobs parked for the cloud A100 are all older than the
+  // ten most recent, and the top bar read "1 queued" against 68. Optional so an older server still parses.
+  waiting?: { training?: number; import?: number; export?: number; autolabel?: number };
 };
 
 export function useJobStream(): StreamState<JobStream> {
-  return useEventStream<JobStream>("/api/events/jobs", "jobs");
+  // Backed by the shared module-level stream rather than its own EventSource. Six pages call this and the
+  // top bar now does too, so a connection per caller meant every one of those pages held two to the same
+  // endpoint carrying identical frames. The signature is unchanged, so no caller had to move.
+  // Connectivity is held in state alongside the data rather than read at render time, because a stream that
+  // drops sends no frame and so would never trigger the render that noticed it had gone.
+  const [state, setState] = useState<StreamState<JobStream>>(
+    () => ({ data: getJobs(), connected: jobsConnected(), error: null }));
+  useEffect(() => subscribeJobs(
+    (s) => setState({ data: s, connected: jobsConnected(), error: null })), []);
+  return state;
+}
+
+export type GpuInfo = {
+  index: number; name: string;
+  memory_used_mb: number | null; memory_total_mb: number | null; memory_used_frac: number | null;
+  utilization_pct: number | null; temperature_c: number | null; power_w: number | null;
+  processes: { pid: number | null; name: string; used_mb: number | null }[];
+};
+
+export type SystemStream = {
+  ts: number;
+  gpus: GpuInfo[];
+  host: {
+    cpu_pct: number; cpu_count: number; load: { "1m": number; "5m": number; "15m": number };
+    memory_used_mb: number; memory_total_mb: number; memory_used_frac: number;
+    disk: { path: string; used_mb: number; total_mb: number; used_frac: number | null };
+  };
+  process: { pid: number; rss_mb: number; cpu_pct: number; threads: number; uptime_s: number };
+};
+
+/**
+ * Machine state for the console.
+ *
+ * Its own connection rather than a field on the job stream: these are gauges read from the host, the job
+ * stream is events read from the database, and folding them together would make every job push carry an
+ * nvidia-smi call.
+ */
+/**
+ * @param enabled pass false to hold the connection closed. The canvas console is collapsed by default and a
+ *   frame editor holding a stream for a panel nobody opened is one connection per tab, ticking every three
+ *   seconds, for nothing.
+ */
+export function useSystemStream(enabled = true): StreamState<SystemStream> {
+  return useEventStream<SystemStream>(enabled ? "/api/events/system" : null, "system");
 }
 
 export function useTrainingStream(jobId: string | null): StreamState<JobStreamRow> {
@@ -115,6 +163,79 @@ export function useTrainingStream(jobId: string | null): StreamState<JobStreamRo
 //
 // A poll fallback is kept and deliberately slow. If the stream cannot connect (an old proxy that buffers
 // event streams, for instance) the wizard must still finish rather than hanging on a progress bar forever.
+/**
+ * Follow one autolabel job to completion, resolving with what it produced.
+ *
+ * The same shape as watchImportJob and for the same reasons: the shared jobs stream is the fast path and a
+ * slow poll is the safety net for when it never connects. It is a separate function rather than a parameter
+ * on that one because the two settle differently. An import resolves with the session it created, which
+ * needs a second fetch; an autolabel already carries its counts on the status row.
+ */
+export function watchAutolabelJob(
+  jobId: string,
+  onProgress: (job: { status: string; progress?: number | null }) => void,
+  opts: { fallbackMs?: number; timeoutMs?: number } = {},
+): Promise<{ objects?: number }> {
+  const fallbackMs = opts.fallbackMs ?? 8000;
+  const timeoutMs = opts.timeoutMs ?? 60 * 60 * 1000;
+
+  return new Promise((resolve, reject) => {
+    const token = getUser()?.token;
+    let done = false;
+    let es: EventSource | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
+    let deadline: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      done = true;
+      es?.close();
+      if (poll) clearInterval(poll);
+      if (deadline) clearTimeout(deadline);
+    };
+
+    const settle = async (status: string, error?: string | null, counts?: Record<string, number> | null) => {
+      if (done) return;
+      if (status === "error") { cleanup(); reject(new Error(error || "autolabel failed")); return; }
+      if (status !== "done" && status !== "complete") return;
+      cleanup();
+      if (counts) { resolve({ objects: counts.objects ?? counts.written ?? 0 }); return; }
+      try {
+        const { apiGet } = await import("./api");
+        const j = await apiGet<{ counts?: Record<string, number> }>(`/api/autolabel/${jobId}`);
+        resolve({ objects: j.counts?.objects ?? 0 });
+      } catch (e) { reject(e); }
+    };
+
+    if (token) {
+      es = new EventSource(`/api/events/jobs?token=${encodeURIComponent(token)}`);
+      es.addEventListener("jobs", (ev) => {
+        try {
+          const snap = JSON.parse((ev as MessageEvent).data) as JobStream;
+          const row = (snap.autolabel ?? []).find((r) => r.job_id === jobId);
+          if (!row) return;
+          onProgress(row);
+          void settle(row.status, (row as { error?: string }).error);
+        } catch { /* a malformed frame must not fail the run the user is watching */ }
+      });
+    }
+
+    poll = setInterval(async () => {
+      try {
+        const { apiGet } = await import("./api");
+        const j = await apiGet<{ status: string; progress?: number; error?: string | null;
+                                 counts?: Record<string, number> }>(`/api/autolabel/${jobId}`);
+        onProgress(j);
+        void settle(j.status, j.error, j.counts);
+      } catch (e) { cleanup(); reject(e); }
+    }, fallbackMs);
+
+    deadline = setTimeout(() => {
+      cleanup();
+      reject(new Error("the autolabel run did not finish in time; check the jobs page for its state"));
+    }, timeoutMs);
+  });
+}
+
 export function watchImportJob(
   jobId: string,
   onProgress: (job: { status: string; progress?: number | null; counts?: Record<string, number> }) => void,

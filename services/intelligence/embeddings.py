@@ -18,10 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
 from core.logging import get_logger
-from core.storage import get_object_store
-from db.models import Embedding, Frame, Object
+from db.models import Object, ObjectEmbedding
 from services.autolabel.ontology import get_ontology
-from services.autolabel.paths.path_c_qwen3vl import crop_object
 
 log = get_logger("embeddings")
 
@@ -80,56 +78,20 @@ def cosine_topk(query: np.ndarray, mat: np.ndarray, k: int) -> list[tuple[int, f
 
 
 async def compute_session_embeddings(session_id: UUID, limit: int | None = None) -> dict:
-    store = get_object_store()
-    from db.session import get_sessionmaker
+    """Embed a session's object crops. Kept under its old name because two routes call it by that name.
 
-    maker = get_sessionmaker()
-    tag = model_tag()
-    margin = get_settings().models.clip.crop_margin
-    n = 0
-    async with maker() as db:
-        stmt = (
-            select(Object, Frame.img_uri)
-            .join(Frame, Object.frame_id == Frame.frame_id)
-            .where(Frame.session_id == session_id, Object.state != "rejected")
-        )
-        if limit:
-            stmt = stmt.limit(limit)
-        rows = (await db.execute(stmt)).all()
+    It used to run CLIP and write the legacy `embedding` table, which nothing reads. Two endpoints exposed
+    it, including the correction dialog's own "compute embeddings" button, so pressing that button spent GPU
+    time filling a dead table while the coverage figure beside it read `object_embedding` and did not move.
+    A button that cannot affect the number it offers to fix is worse than no button.
 
-        # Decode each frame once.
-        cache: dict[str, np.ndarray] = {}
-        for obj, img_uri in rows:
-            if img_uri not in cache:
-                buf = np.frombuffer(store.get_bytes(img_uri), dtype=np.uint8)
-                cache[img_uri] = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-            img = cache[img_uri]
-            if img is None:
-                continue
-            crop = crop_object(img, tuple(obj.bbox), margin)
-            vec = encode_image(crop)
-            await db.merge(Embedding(object_id=obj.object_id, model=tag, dim=int(vec.shape[0]), vec=vec.tolist()))
-            n += 1
-        await db.commit()
-    log.info("embeddings.computed", session_id=str(session_id), n=n)
-    return {"session_id": str(session_id), "embedded": n, "model": tag}
+    It now delegates to the real embedder, which writes the DINOv3 and SigLIP2 vectors that find-similar,
+    text search and the correction dialog actually read. `_load_matrix` went with it: its only caller was the
+    correction search, which no longer loads a whole table into memory to cosine it in Python.
+    """
+    from services.intelligence.embed.service import embed_objects
 
-
-async def _load_matrix(db: AsyncSession, session_id: str | None = None):
-    stmt = select(Embedding.object_id, Embedding.vec)
-    if session_id:
-        stmt = (
-            select(Embedding.object_id, Embedding.vec)
-            .join(Object, Embedding.object_id == Object.object_id)
-            .join(Frame, Object.frame_id == Frame.frame_id)
-            .where(Frame.session_id == UUID(session_id))
-        )
-    rows = (await db.execute(stmt)).all()
-    if not rows:
-        return [], np.zeros((0, 1), dtype=np.float32)
-    ids = [r[0] for r in rows]
-    mat = np.array([r[1] for r in rows], dtype=np.float32)
-    return ids, mat
+    return await embed_objects(session_id=session_id, limit=limit, only_missing=True)
 
 
 async def _decorate(db: AsyncSession, ids: list[UUID], scores: dict[UUID, float]) -> list[dict]:
@@ -199,20 +161,33 @@ async def similar_objects(db: AsyncSession, object_id: str, limit: int = 12,
 
 
 async def scenario_embedding(db: AsyncSession, actor_ids: list[str]) -> np.ndarray | None:
-    """Mean of a scenario's actor-object embeddings, for semantic scenario ranking. Actor ids are
-    track ids; gather each track's object embeddings and average."""
+    """Mean of a scenario's actor-object crops, for semantic scenario ranking. Actor ids are track ids.
+
+    Reads the SigLIP2 vector rather than the legacy CLIP table. That table was abandoned when the pipeline
+    moved to pgvector, and this function was the last thing still reading it: with 39 rows against 567,527
+    in `object_embedding`, it returned None for every scenario and the semantic half of the ranking was
+    silently zero for all of them.
+
+    SigLIP2 rather than DINOv3 because the caller compares this mean against a text vector, and DINOv3 has
+    no text tower. SigLIP2 puts images and text in one space, which is what makes the comparison meaningful
+    rather than merely well typed.
+
+    One query per scenario rather than one per object: a scenario with forty actors was forty round trips,
+    each fetching a vector to average and throw away.
+    """
     if not actor_ids:
         return None
-    vecs = []
-    for aid in actor_ids:
-        objs = (await db.execute(select(Object.object_id).where(Object.track_id == UUID(aid)))).scalars().all()
-        for oid in objs:
-            emb = await db.get(Embedding, oid)
-            if emb is not None:
-                vecs.append(np.array(emb.vec, dtype=np.float32))
-    if not vecs:
+    try:
+        track_ids = [UUID(a) for a in actor_ids]
+    except (ValueError, AttributeError):
         return None
-    m = np.mean(vecs, axis=0)
+    rows = (await db.execute(
+        select(ObjectEmbedding.siglip_vec)
+        .join(Object, Object.object_id == ObjectEmbedding.object_id)
+        .where(Object.track_id.in_(track_ids), ObjectEmbedding.siglip_vec.isnot(None)))).scalars().all()
+    if not rows:
+        return None
+    m = np.mean([np.asarray(v, dtype=np.float32) for v in rows], axis=0)
     return m / (np.linalg.norm(m) + 1e-8)
 
 

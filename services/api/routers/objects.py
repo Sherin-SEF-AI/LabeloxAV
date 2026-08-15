@@ -29,6 +29,7 @@ from services.api.deps import (
     require_role,
 )
 from services.autolabel.ontology import get_ontology
+from services.govern.audit import record as audit_record
 
 router = APIRouter()
 
@@ -318,6 +319,12 @@ async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
     ]
 
 
+# States that mean a person has dealt with the object, which is what "is this frame finished" asks. A
+# rejection is as settled as an acceptance. auto_accept is deliberately not here: it is the machine's
+# opinion, and counting it would draw a strip of finished frames nobody has looked at.
+_SETTLED_STATES = ("accepted", "rejected")
+
+
 @router.get("/frames/{frame_id}/filmstrip")
 async def frame_filmstrip(frame_id: str, span: int = 12, db: AsyncSession = Depends(db_session)):
     """The frames on either side of this one, in capture order, for the editor's filmstrip.
@@ -350,12 +357,24 @@ async def frame_filmstrip(frame_id: str, span: int = 12, db: AsyncSession = Depe
     # Object counts in one query rather than one per tile: a 25-tile strip would otherwise issue 25 round
     # trips every time the reviewer moved a frame.
     ids = [fid for fid, _ in tiles]
-    counts = dict((await db.execute(
-        select(Object.frame_id, func.count()).where(Object.frame_id.in_(ids))
-        .group_by(Object.frame_id))).all())
+    # Confirmed counts alongside the totals, in the same pass. The strip showed how many objects a
+    # neighbouring frame holds but not whether anyone had finished with it, so a reviewer working a session
+    # could not see which frames they had already done or where they had stopped, and reopened frames that
+    # were finished. The counts have to be per state rather than a boolean because a partly confirmed frame
+    # is the interesting case: it is the one somebody left halfway.
+    rows = (await db.execute(
+        select(Object.frame_id, Object.state, func.count()).where(Object.frame_id.in_(ids))
+        .group_by(Object.frame_id, Object.state))).all()
+    counts: dict[UUID, int] = {}
+    confirmed: dict[UUID, int] = {}
+    for fid, state, n in rows:
+        counts[fid] = counts.get(fid, 0) + int(n)
+        if state in _SETTLED_STATES:
+            confirmed[fid] = confirmed.get(fid, 0) + int(n)
 
     return {"frame_id": frame_id, "cam_id": frame.cam_id, "frames": [
         {"frame_id": str(fid), "ts_ns": int(ts), "n_objects": int(counts.get(fid, 0)),
+         "n_confirmed": int(confirmed.get(fid, 0)),
          "image_url": f"/api/frames/{fid}/image", "current": str(fid) == frame_id}
         for fid, ts in tiles]}
 
@@ -449,24 +468,57 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
     return _detail(obj, frame, onto)
 
 
-@router.put("/objects/{object_id}/mask")
-async def update_mask(object_id: str, payload: MaskIn, db: AsyncSession = Depends(db_session)):
+@router.put("/objects/{object_id}/mask", dependencies=[Depends(require_role("annotator"))])
+async def update_mask(object_id: str, payload: MaskIn, db: AsyncSession = Depends(db_session),
+                      user=Depends(current_user)):
+    """Replace an object's mask, and record who replaced it.
+
+    Every other geometry change writes a Review row; this one rewrote the mask in place with no reviewer,
+    no before-state and no role check, so a segment could be redrawn by anyone the API let in and the change
+    left no trace. The mask blob itself is content-addressed and the old key is not deleted, so the
+    recorded uri is enough to go back and look at what was there.
+    """
     obj = await db.get(Object, UUID(object_id))
     if obj is None:
         raise HTTPException(404, "object not found")
     frame = await db.get(Frame, obj.frame_id)
+    before = {"mask_uri": obj.mask_uri, "mask_encoding": obj.mask_encoding,
+              "source": obj.source, "conf": obj.conf, "state": obj.state, "version": obj.version}
     obj.mask_uri = _write_mask(get_object_store(), frame.session_id, frame.frame_id, obj.object_id,
                                payload.polygons, payload.width or frame.width, payload.height or frame.height)
     obj.mask_encoding = "polygon"
+    obj.version = (obj.version or 0) + 1
+    db.add(Review(object_id=obj.object_id, reviewer=user.name if user else "anon",
+                  user_id=user.user_id if user else None, action="edit_mask", before=before,
+                  after={"mask_uri": obj.mask_uri, "mask_encoding": "polygon",
+                         "n_polygons": len(payload.polygons), "version": obj.version},
+                  time_spent_ms=0, ts_ns=now_ns()))
     await db.commit()
-    return {"object_id": str(obj.object_id), "mask_polygons": payload.polygons}
+    return {"object_id": str(obj.object_id), "mask_polygons": payload.polygons, "version": obj.version}
 
 
-@router.delete("/objects/{object_id}")
-async def delete_object(object_id: str, db: AsyncSession = Depends(db_session)):
+@router.delete("/objects/{object_id}", dependencies=[Depends(require_role("annotator"))])
+async def delete_object(object_id: str, db: AsyncSession = Depends(db_session),
+                        user=Depends(current_user)):
+    """Delete an object, leaving a record that outlives it.
+
+    Deleting an object cascades its Review rows, so the object and its entire history left the database
+    together and nothing said anyone had done it: the audit trail was destroyed by the very action most
+    worth auditing. AuditDecision carries no foreign key to the object, which is exactly why the record
+    goes there and survives. The full state is written into the rationale, because after the delete there
+    is nothing left to join against.
+    """
     obj = await db.get(Object, UUID(object_id))
     if obj is None:
         raise HTTPException(404, "object not found")
+    await audit_record(
+        db, actor=(user.name if user else "anon"), decision="delete_object", subject=str(obj.object_id),
+        rationale={"frame_id": str(obj.frame_id), "track_id": str(obj.track_id) if obj.track_id else None,
+                   "class_id": obj.class_id, "bbox": list(obj.bbox or []), "conf": obj.conf,
+                   "source": obj.source, "state": obj.state, "attrs": obj.attrs,
+                   "mask_uri": obj.mask_uri, "provenance": obj.provenance, "version": obj.version,
+                   "user_id": str(user.user_id) if user else None},
+        commit=False)
     await db.delete(obj)  # Review rows cascade; the mask blob is left (harmless, content-addressed path)
     await db.commit()
     return {"deleted": object_id}

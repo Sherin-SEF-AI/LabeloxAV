@@ -79,7 +79,10 @@ async def attach_run(db: AsyncSession, *, experiment: str, job_id: str,
     row = ExperimentRun(
         experiment_id=exp.experiment_id, job_id=job.job_id,
         label=label or job.purpose or str(job.job_id)[:8],
-        hparams=dict(job.hparams or {}), dataset_spec=dict(job.dataset_spec or {}),
+        # Both come out of config, which holds the whole TrainJobSpec; as attributes they do not
+        # exist, and attaching any job to an experiment raised AttributeError.
+        hparams=dict((job.config or {}).get("hparams") or {}),
+        dataset_spec=dict((job.config or {}).get("dataset_spec") or {}),
         metrics=metrics, curve=curve,
         gold_id=(job.metrics or {}).get("gold_id"),
         baseline_run_id=uuid.UUID(baseline_run_id) if baseline_run_id else None,

@@ -57,10 +57,12 @@ async def gpu_slot_status():
     Advisory: the answer can be stale the instant it is returned, which is why nothing decides whether to
     start work from it. Deciding is what acquiring the slot is for.
     """
-    from core.gpu_slot import slot_is_free
+    from core.gpu_slot import cuda_report, slot_is_free
 
     free = await slot_is_free()
-    return {"free": free,
+    # The card itself, not only the lock on it. Autolabel refuses with "CUDA not available" and until now
+    # nothing in the product could tell you whether that was true of the API process.
+    return {"free": free, "cuda": cuda_report(),
             "detail": ("no job is holding the local GPU slot" if free else
                        "a job holds the local GPU slot; other GPU work waits rather than sharing the card")}
 

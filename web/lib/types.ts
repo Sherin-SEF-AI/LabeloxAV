@@ -224,11 +224,18 @@ export type CorrectionCandidate = {
   frame_id: string;
   class_name: string;
   current: string | number | boolean | null;
-  conf: number;
+  conf: number | null;
   state: string;
   score: number;
   crop_url: string;
+  /** Already carries the corrected value, so it is shown but not pre-selected. */
   already: boolean;
+  source: string;
+  /** A person already ruled on this one. Applying over it would overwrite their decision. */
+  human: boolean;
+  /** One mislabelled object appears once per frame of its track, so a count of rows is not a count of
+   *  objects. Every one still needs fixing; the grouping just has to be visible. */
+  track_id: string | null;
 };
 
 export type CorrectionSuggestion = {
@@ -236,7 +243,16 @@ export type CorrectionSuggestion = {
   change: Record<string, unknown>;
   count: number;
   candidates: CorrectionCandidate[];
-  reason?: string;
+  /** Why the list is empty. "no similar objects above the threshold" is a claim about similarity and was
+   *  shown even when the truth was that the object had no embedding to compare with at all. */
+  reason?: string | null;
+  /** How many neighbours were examined before thresholding, so a person can tell a strict slider from an
+   *  empty corpus. */
+  examined?: number;
+  /** Distinct objects behind the count: 200 crops of one billboard across its track is one finding, not
+   *  two hundred. */
+  n_tracks?: number;
+  untracked?: number;
 };
 
 export type ConfusionRow = { old_class: string; new_class: string; count: number; group?: string };

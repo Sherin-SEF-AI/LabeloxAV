@@ -58,13 +58,63 @@ async def seed_from_recent_auto_accepts(db: AsyncSession, limit: int = 500, rate
     return {"mirrored": n, "pool": len(oids), "rate": rate}
 
 
+VERDICTS = ("correct", "incorrect")
+
+
 async def record_verdict(db: AsyncSession, sample_id: str, verdict: str) -> dict:
+    """Rule on one control sample. The verdict is the measurement, so a bad value cannot be stored.
+
+    It used to take any string. `human_verdict` is counted by `measured_precision`, which treats anything
+    that is not the literal "incorrect" as correct, so a typo silently reported the gate as more accurate
+    than it is. The number this table exists to produce is one a buyer is meant to trust over a
+    self-reported figure, which is exactly the number that must not be quietly wrong.
+    """
+    if verdict not in VERDICTS:
+        return {"error": f"verdict must be one of {VERDICTS}"}
     cs = await db.get(ControlSample, UUID(sample_id))
     if cs is None:
         return {"error": "sample not found"}
-    cs.human_verdict = verdict  # correct | incorrect
+    cs.human_verdict = verdict
     await db.commit()
+    log.info("control.verdict", sample_id=sample_id, verdict=verdict)
     return {"sample_id": sample_id, "human_verdict": verdict}
+
+
+async def pending_samples(db: AsyncSession, limit: int = 100) -> dict:
+    """Control samples awaiting a verdict, with enough of the object to rule on one.
+
+    Seeding has worked all along: this corpus holds 601 samples. Every one of them is unjudged, because the
+    verdict route had no caller and there was no way to list what needed judging, so the measured precision
+    the drift detector watches has been null since the feature shipped. A worklist nobody can see is the
+    same as no worklist.
+    """
+    from db.models import Frame
+
+    rows = (await db.execute(
+        select(ControlSample.sample_id, ControlSample.was_auto_accepted, ControlSample.created_at,
+               Object.object_id, Object.class_id, Object.conf, Object.state, Object.frame_id, Frame.session_id)
+        .join(Object, Object.object_id == ControlSample.object_id)
+        .join(Frame, Frame.frame_id == Object.frame_id)
+        .where(ControlSample.human_verdict.is_(None))
+        .order_by(ControlSample.created_at.desc()).limit(limit))).all()
+
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
+
+    def _name(cid: int) -> str:
+        try:
+            return onto.by_id(int(cid)).name
+        except KeyError:
+            return f"class {cid}"
+
+    return {"count": len(rows), "samples": [
+        {"sample_id": str(sid), "was_auto_accepted": bool(auto),
+         "object_id": str(oid), "frame_id": str(fid), "session_id": str(sess),
+         "class_name": _name(cid), "conf": float(conf) if conf is not None else None, "state": state,
+         "crop_url": f"/api/objects/{oid}/crop",
+         "created_at": created.isoformat() if created else None}
+        for sid, auto, created, oid, cid, conf, state, fid, sess in rows]}
 
 
 async def measured_precision(db: AsyncSession) -> dict:

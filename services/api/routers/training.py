@@ -89,11 +89,18 @@ async def sweep_status(name: str, metric: str = "map50"):
     """The ranking for a sweep, with an honest count of trials that produced no metric."""
     from services.training.sweep import summarize_sweep
 
+    # Both the trial's notes and its hyperparameters live inside the job's config, which holds the whole
+    # TrainJobSpec. This read used to go at TrainingJob.notes and j.hparams, neither of which is a column,
+    # so every request for a sweep's ranking raised AttributeError before it could answer: the sweep could
+    # be started and never read back. autoescape keeps a sweep named with a percent sign from matching
+    # every other sweep.
     async with get_sessionmaker()() as db:
         rows = (await db.execute(
-            select(TrainingJob).where(TrainingJob.notes.like(f"sweep '{name}' %"))
+            select(TrainingJob)
+            .where(TrainingJob.config["notes"].astext.startswith(f"sweep '{name}' ", autoescape=True))
             .order_by(TrainingJob.created_at))).scalars().all()
-    results = [{"job_id": str(j.job_id), "status": j.status, "hparams": j.hparams or {},
+    results = [{"job_id": str(j.job_id), "status": j.status,
+                "hparams": (j.config or {}).get("hparams") or {},
                 "metrics": j.metrics or {}} for j in rows]
     return {"sweep": name, **summarize_sweep(results, metric),
             "trials_detail": [{"job_id": r["job_id"], "status": r["status"]} for r in results]}

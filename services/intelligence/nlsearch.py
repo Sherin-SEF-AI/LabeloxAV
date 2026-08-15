@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,10 +108,17 @@ async def search_scenarios(
     matched = [(scn, scity, vehicle) for scn, scity, vehicle in rows if _matches(scn, parsed)]
 
     if semantic and query.strip():
-        # Blend structured match with a CLIP text-vs-actor-crop cosine, when embeddings exist.
-        from services.intelligence.embeddings import encode_text, scenario_embedding
+        # Blend the structured match with a text-vs-actor-crop cosine, when embeddings exist.
+        #
+        # SigLIP2 on both sides. This encoded the query with CLIP and compared it against a mean of CLIP
+        # object vectors from a table the pipeline abandoned, so the mean was None for every scenario and the
+        # semantic half of the score was silently zero throughout. DINOv3 cannot stand in here: it has no
+        # text tower, and only SigLIP2 puts images and text in one space.
+        from core.embeddings import prompt_vector
+        from services.intelligence.embed import siglip2
+        from services.intelligence.embeddings import scenario_embedding
 
-        qv = encode_text(query)
+        qv = np.asarray(prompt_vector(query, siglip2), dtype=np.float32)
         scored = []
         for scn, scity, vehicle in matched:
             emb = await scenario_embedding(db, scn.actors)

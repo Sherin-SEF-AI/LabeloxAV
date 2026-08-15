@@ -279,7 +279,12 @@ def test_corrections_endpoints():
 
 @requires_infra
 def test_autolabel_cloud_routing():
-    """compute_target='cloud' parks the job for the A100 and never runs it locally (no GPU touched)."""
+    """compute_target='cloud' parks the job for the A100 and never runs it locally (no GPU touched).
+
+    Parking is allowed while a local job is running. The single-GPU guard used to run before the branch, so
+    a cloud job, which touches no GPU here, was refused with 409 because a local one was busy. That turned a
+    scheduling rule into a queueing rule and made the cloud path unreachable exactly when it was wanted.
+    """
     with _client() as c:
         sessions = c.get("/api/sessions").json()
         if not sessions:
@@ -288,7 +293,11 @@ def test_autolabel_cloud_routing():
         r = c.post("/api/autolabel/start", json={"session_id": sid, "compute_target": "cloud"})
         assert r.status_code == 200 and r.json()["status"] == "queued-cloud"
         j = c.get(f"/api/autolabel/{r.json()['job_id']}").json()
-        assert j["counts"]["compute_target"] == "cloud" and j["status"] == "pending"
+        # The row says what the start response said. It used to answer `pending` here, so a caller that
+        # believed the start response and then polled was told two different things about one job, and
+        # everything reading the database directly could not tell 67 jobs parked for absent hardware from
+        # work a local runner was about to pick up.
+        assert j["counts"]["compute_target"] == "cloud" and j["status"] == "queued-cloud"
 
 
 @requires_infra

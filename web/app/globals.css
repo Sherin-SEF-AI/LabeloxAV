@@ -206,6 +206,17 @@ button:not(:disabled) {
   animation: lbx-reveal 150ms ease-out;
 }
 
+/* A dialog arriving over the page. It rises and settles rather than fading, because a panel that appears
+   without moving reads as having been there all along, and the console is answering a question asked a
+   moment ago. Slightly longer than `reveal` since it travels further and carries more. */
+@keyframes lbx-reveal-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.reveal-pop {
+  animation: lbx-reveal-pop 190ms cubic-bezier(0.16, 0.84, 0.44, 1);
+}
+
 @keyframes lbx-shimmer {
   0%   { background-position: -160% 0; }
   100% { background-position: 160% 0; }
@@ -284,7 +295,7 @@ button:not(:disabled) {
 .rail:hover::before, .rail[data-active="true"]::before { transform: scaleY(1); }
 
 @media (prefers-reduced-motion: reduce) {
-  .reveal, .skeleton, .running-dot, .running, .lbx-progress-bar, .fade-up { animation: none; }
-  .reveal, .fade-up { opacity: 1; transform: none; }
+  .reveal, .reveal-pop, .skeleton, .running-dot, .running, .lbx-progress-bar, .fade-up { animation: none; }
+  .reveal, .reveal-pop, .fade-up { opacity: 1; transform: none; }
   .lift, .sheen::after, .rail::before { transition: none; }
 }

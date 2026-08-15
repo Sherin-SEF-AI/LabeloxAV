@@ -27,6 +27,7 @@ from core.gpu_slot import gpu_slot
 from core.logging import get_logger
 from core.storage import FETCHABLE_URI_SQL, get_object_store
 from db.models import AgentRun, Frame, Object, OntologyClass
+from services.agent.relabel_reasoning import adjudicate, corpus_pairs
 from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("agent.relabel")
@@ -82,6 +83,8 @@ def _decide(crop_bgr, current_id: int, *, min_conf: float, margin: float, strong
 
     conf = float(top["conf"])
     gap = conf - cur_conf
+    # Returned alongside the decision so the second stage can reason about the same numbers rather than
+    # recomputing them from a crop it would have to re-encode.
 
     onto = get_ontology()
     try:
@@ -94,19 +97,26 @@ def _decide(crop_bgr, current_id: int, *, min_conf: float, margin: float, strong
             return None
         # Never auto-kept. A model that wants to move an object between superclasses may be right, and it is
         # not right often enough to change the corpus without somebody looking.
-        return int(top["class_id"]), top["class_name"], round(conf, 3), "relabel_review"
+        return int(top["class_id"]), top["class_name"], round(conf, 3), "relabel_review", round(gap, 3), False
 
     if conf < min_conf or gap < margin:
         return None
     decisive = conf >= strong_conf and gap >= strong_margin
     action = "relabel_keep" if (decisive and auto_keep) else "relabel_review"
-    return int(top["class_id"]), top["class_name"], round(conf, 3), action
+    return int(top["class_id"]), top["class_name"], round(conf, 3), action, round(gap, 3), True
 
 
 async def plan_relabel(db: AsyncSession, frame_id: uuid.UUID, *, min_conf: float = 0.45, margin: float = 0.15,
                        strong_conf: float = 0.60, strong_margin: float = 0.30,
-                       auto_keep: bool = False) -> dict:
+                       auto_keep: bool = False, reason: bool = False, judge=None) -> dict:
     """Dry-run: which objects the reasoning layer would relabel, and how. No writes.
+
+    `reason` turns on the second-stage reasoning in relabel_reasoning.py, and it is off by default for the
+    same reason `auto_keep` is. It only ever removes proposals, and nothing has yet measured that the ones it
+    removes are the wrong ones. On the current corpus that claim cannot be tested at all: the classifier
+    proposes 3 changes in 3,227 objects and 0 on the 332 human-verified labels, because the corpus relabel
+    pass already converged. Defaulting a filter to on before it has been shown to filter correctly is the
+    mistake this module already made once with auto_keep.
 
     `auto_keep` is off by default, so every proposal lands in review. Measured against the 302 objects a
     human verified in this corpus, all 10 changes the agent would have applied without review overruled a
@@ -127,25 +137,47 @@ async def plan_relabel(db: AsyncSession, frame_id: uuid.UUID, *, min_conf: float
     img = load_image_bgr(get_object_store(), frame.img_uri)
     h, w = img.shape[:2]
     items = []
-    counts = {"total": len(objs), "relabel_keep": 0, "relabel_review": 0}
+    suppressed: list[dict] = []
+    counts = {"total": len(objs), "relabel_keep": 0, "relabel_review": 0, "rejected_by_reasoning": 0}
+    # Read once per frame, not per object: a scan of the whole review trail, whose answer changes on the
+    # timescale of a review session.
+    pairs = await corpus_pairs(db) if reason else {}
     for o in objs:
         x1, y1, x2, y2 = (int(round(float(v))) for v in o.bbox)
         x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
         if x2 - x1 < 3 or y2 - y1 < 3:
             continue
-        d = _decide(img[y1:y2, x1:x2], int(o.class_id), min_conf=min_conf, margin=margin,
+        crop = img[y1:y2, x1:x2]
+        d = _decide(crop, int(o.class_id), min_conf=min_conf, margin=margin,
                     strong_conf=strong_conf, strong_margin=strong_margin, auto_keep=auto_keep)
         if d is None:
             continue
-        sug_id, sug_name, conf, action = d
-        counts[action] += 1
+        sug_id, sug_name, conf, action, gap, same_l1 = d
         try:
             cur = onto.by_id(int(o.class_id)).name
         except Exception:  # noqa: BLE001
             cur = str(o.class_id)
-        items.append({"object_id": str(o.object_id), "from_name": cur, "to_class": sug_id, "to_name": sug_name,
-                      "conf": conf, "action": action})
-    return {"frame_id": str(frame_id), "counts": counts, "items": items}
+
+        item = {"object_id": str(o.object_id), "from_name": cur, "to_class": sug_id, "to_name": sug_name,
+                "conf": conf, "action": action}
+
+        if reason:
+            verdict, why = await adjudicate(
+                crop, cur, sug_name, pairs, conf=conf, margin=gap, cross_l1=not same_l1,
+                cross_conf=CROSS_L1_CONF, cross_margin=CROSS_L1_MARGIN, judge=judge)
+            item.update(why)
+            if not why["kept"]:
+                # Dropped before it reaches a queue somebody has to work, but kept visible. A second stage
+                # that silently removes proposals is indistinguishable from a first stage that got quieter,
+                # and the dry run is exactly where somebody is trying to decide whether to trust it. These
+                # never enter `items`, so nothing downstream sees them as proposals.
+                counts["rejected_by_reasoning"] += 1
+                suppressed.append(item)
+                continue
+
+        counts[action] += 1
+        items.append(item)
+    return {"frame_id": str(frame_id), "counts": counts, "items": items, "suppressed": suppressed}
 
 
 async def commit_relabel(db: AsyncSession, frame_id: uuid.UUID, *, created_by: str | None = None, **kw) -> dict:
@@ -172,12 +204,26 @@ async def commit_relabel(db: AsyncSession, frame_id: uuid.UUID, *, created_by: s
     if unstorable:
         log.warning("agent.relabel.unstorable_class", frame_id=str(frame_id), class_ids=sorted(unstorable))
 
+    from services.agent.class_move import refuse_reason
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
     for item in plan["items"]:
         if int(item["to_class"]) not in storable:
             plan["counts"]["skipped_unknown_class"] = plan["counts"].get("skipped_unknown_class", 0) + 1
             continue
         obj = await db.get(Object, uuid.UUID(item["object_id"]))
         if obj is None or obj.source == "human" or int(obj.class_id) == item["to_class"]:
+            continue
+        # A relabel may sharpen a class and may not change what kind of thing it is. This run once moved
+        # 1,047 buses into a bus shelter at confidence 0.989, over the top of two detectors and a reasoner
+        # all saying `bus`, and into a class the persist layer refuses to store as an instance at all.
+        # Confidence cannot catch that; the ontology can.
+        refusal = refuse_reason(onto, int(obj.class_id), int(item["to_class"]))
+        if refusal:
+            plan["counts"]["skipped_category_change"] = plan["counts"].get("skipped_category_change", 0) + 1
+            log.warning("agent.relabel.refused_category_change", object_id=item["object_id"],
+                        move=f"{item['from_name']} -> {item['to_name']}", reason=refusal)
             continue
         changes[item["object_id"]] = {"from_class": int(obj.class_id), "from_state": obj.state, "from_source": obj.source}
         obj.class_id = item["to_class"]

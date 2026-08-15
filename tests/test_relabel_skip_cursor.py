@@ -25,8 +25,14 @@ from services.agent.relabel_agent import run_relabel_all
 pytestmark = pytest.mark.db
 
 
-async def _seed_unreadable(db) -> uuid.UUID:
-    """A frame whose URI is well formed but whose object is not in the store, which is what the eleven are."""
+async def _seed_unreadable(db) -> tuple[uuid.UUID, uuid.UUID]:
+    """A frame whose URI is well formed but whose object is not in the store, which is what the eleven are.
+
+    Returns the session too, because every walk below is scoped to it. Unscoped, `run_relabel_all` reads the
+    whole database: this suite shares one, and once enough dead fixtures accumulate the walk trips its own
+    consecutive-failure guard on somebody else's frames and stops before it ever reaches this one. The test
+    then fails for a reason that has nothing to do with what it is asserting, which is what it did.
+    """
     sess = DbSession(session_id=uuid.uuid4(), vehicle_id="TEST-SKIP", start_ts_ns=0, end_ts_ns=1,
                      ontology_version="test")
     db.add(sess)
@@ -37,7 +43,7 @@ async def _seed_unreadable(db) -> uuid.UUID:
     db.add(Object(object_id=uuid.uuid4(), frame_id=fid, class_id=1, bbox=[10, 10, 200, 200],
                   conf=0.5, source="auto_accept", state="review"))
     await db.commit()
-    return fid
+    return fid, sess.session_id
 
 
 async def _child_runs(db, frame_id) -> int:
@@ -49,12 +55,12 @@ async def _child_runs(db, frame_id) -> int:
 async def test_an_unreadable_frame_is_recorded_so_the_walk_moves_past_it():
     """Without this the frame has no child run, so every later pass selects it again."""
     async with get_sessionmaker()() as db:
-        fid = await _seed_unreadable(db)
+        fid, sid = await _seed_unreadable(db)
         rid = uuid.uuid4()
         db.add(AgentRun(run_id=rid, kind="relabel_all", status="running", scope={}, created_by="t"))
         await db.commit()
 
-    await run_relabel_all(rid, max_frames=500, created_by="t")
+    await run_relabel_all(rid, max_frames=500, created_by="t", session_id=str(sid))
 
     async with get_sessionmaker()() as db:
         assert await _child_runs(db, fid) >= 1
@@ -63,12 +69,12 @@ async def test_an_unreadable_frame_is_recorded_so_the_walk_moves_past_it():
 async def test_the_skip_is_marked_as_a_skip_not_as_work_done():
     """It must not read as "this frame was relabelled". It was read and could not be used."""
     async with get_sessionmaker()() as db:
-        fid = await _seed_unreadable(db)
+        fid, sid = await _seed_unreadable(db)
         rid = uuid.uuid4()
         db.add(AgentRun(run_id=rid, kind="relabel_all", status="running", scope={}, created_by="t"))
         await db.commit()
 
-    await run_relabel_all(rid, max_frames=500, created_by="t")
+    await run_relabel_all(rid, max_frames=500, created_by="t", session_id=str(sid))
 
     async with get_sessionmaker()() as db:
         row = (await db.execute(
@@ -83,18 +89,18 @@ async def test_the_skip_is_marked_as_a_skip_not_as_work_done():
 async def test_a_second_pass_does_not_select_the_same_dead_frame_again():
     """The behaviour that was missing: the corpus pass has to be able to reach zero remaining."""
     async with get_sessionmaker()() as db:
-        fid = await _seed_unreadable(db)
+        fid, sid = await _seed_unreadable(db)
         rid = uuid.uuid4()
         db.add(AgentRun(run_id=rid, kind="relabel_all", status="running", scope={}, created_by="t"))
         await db.commit()
-    await run_relabel_all(rid, max_frames=500, created_by="t")
+    await run_relabel_all(rid, max_frames=500, created_by="t", session_id=str(sid))
 
     async with get_sessionmaker()() as db:
         before = await _child_runs(db, fid)
         rid2 = uuid.uuid4()
         db.add(AgentRun(run_id=rid2, kind="relabel_all", status="running", scope={}, created_by="t"))
         await db.commit()
-    await run_relabel_all(rid2, max_frames=500, created_by="t")
+    await run_relabel_all(rid2, max_frames=500, created_by="t", session_id=str(sid))
 
     async with get_sessionmaker()() as db:
         after = await _child_runs(db, fid)

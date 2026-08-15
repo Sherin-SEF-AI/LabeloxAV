@@ -235,9 +235,15 @@ async def process_session(
     on_frame: Callable[[FrameDetections], Awaitable[None]],
     yolo_weights: str | None = None,
     supported_ids: set[int] | None = None,
+    on_progress: Callable[[int, int], Awaitable[None]] | None = None,
 ) -> dict:
     """Stream a session's frames through Stage 1, invoking on_frame per frame. The callback is the
-    plug point for fusion + gate + persistence (M3) and the VLM pass (M4)."""
+    plug point for fusion + gate + persistence (M3) and the VLM pass (M4).
+
+    on_progress is told (frames done, frames total) after each frame. This loop is the only place that knows
+    both numbers, and a job that reports nothing between its first frame and its last leaves every watcher
+    guessing whether it is working or wedged.
+    """
     frames = await fetch_frames(session_id, limit)
     if not frames:
         raise RuntimeError(f"no frames for session {session_id}")
@@ -247,12 +253,14 @@ async def process_session(
     n_a = 0
     n_b = 0
     try:
-        for fm in frames:
+        for i, fm in enumerate(frames, start=1):
             img = load_image(fm.img_uri)
             dets_a, dets_b = runner.run_stage1_frame(img)
             n_a += len(dets_a)
             n_b += len(dets_b)
             await on_frame(FrameDetections(frame=fm, image_bgr=img, dets_a=dets_a, dets_b=dets_b))
+            if on_progress is not None:
+                await on_progress(i, len(frames))
     finally:
         runner.close_stage1()
 
@@ -270,9 +278,13 @@ async def process_session(
     return summary
 
 
-async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None) -> dict:
+async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None,
+                            on_progress: Callable[[int, int], Awaitable[None]] | None = None) -> dict:
     """Full pipeline: detect + segment -> fuse -> calibrate -> gate -> (Path C VLM on the uncertain
     subset) -> persist objects.
+
+    on_progress is passed straight through to the frame loop, which is where the counts are. The caller that
+    owns the job row decides what to do with them; this function does not know it has a row.
 
     Path C is duty-cycled (Principle 08): the VLM runs only on objects the gate would not
     auto-accept, capped by a per-session budget. The VLM call rate is tracked as a first-class
@@ -439,7 +451,7 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
 
         try:
             summary = await process_session(session_id, limit, on_frame, yolo_weights=champion_weights,
-                                            supported_ids=supported_ids)
+                                            supported_ids=supported_ids, on_progress=on_progress)
             await db.commit()
         finally:
             await bus.stop()

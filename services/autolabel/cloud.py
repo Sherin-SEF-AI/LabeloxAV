@@ -22,6 +22,7 @@ import uuid
 from core.logging import get_logger
 from db.models import AutolabelJob
 from db.session import get_sessionmaker
+from services.job_control import QUEUED_CLOUD
 
 log = get_logger("autolabel_cloud")
 
@@ -39,7 +40,7 @@ async def mark_queued_for_cloud(job_id, session_id, limit) -> None:
         j = await db.get(AutolabelJob, uuid.UUID(str(job_id)))
         if j is None:
             return
-        j.status = "pending"
+        j.status = QUEUED_CLOUD
         j.counts = {"compute_target": "cloud", "session_id": str(session_id),
                     "limit": limit, "note": _NOTE}
         await db.commit()

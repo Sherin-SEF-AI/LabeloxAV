@@ -45,13 +45,32 @@ async def _bump(job_id, **fields) -> None:
 
 
 async def _run_guarded(job_id, session_id, limit) -> None:
+    from services.autolabel.progress import ProgressBand
     from services.autolabel.runner import autolabel_session
+    from services.job_control import JobCanceled, raise_if_canceled
 
     await _bump(job_id, status="running", progress=0.05)
+    band = ProgressBand()
+
+    async def report(done: int, total: int) -> None:
+        # Rationed by the band: one write per percent, not one per frame. A five thousand frame session
+        # would otherwise commit five thousand times to move a bar a few pixels.
+        f = band.next_if_due(done, total)
+        if f is None:
+            return
+        # The same write asks whether the job is still wanted. A cancel that only set a column would leave
+        # this loop labelling for another twenty minutes on a GPU somebody has taken back.
+        async with get_sessionmaker()() as db:
+            await raise_if_canceled(db, AutolabelJob, uuid.UUID(str(job_id)), progress=f)
+
     try:
-        result = await autolabel_session(session_id, limit)
+        result = await autolabel_session(session_id, limit, on_progress=report)
         await _bump(job_id, status="done", progress=1.0, counts=result)
         log.info("autolabel.done", job_id=str(job_id), **{k: result[k] for k in result if k in ("n_frames", "n_objects")})
+    except JobCanceled:
+        # Not a failure. The row already says `canceled`; overwriting it with `error` would turn somebody's
+        # deliberate decision into a fault report.
+        log.info("autolabel.canceled", job_id=str(job_id))
     except Exception as exc:  # noqa: BLE001
         log.error("autolabel.failed", job_id=str(job_id), error=str(exc))
         await _bump(job_id, status="error", error=str(exc))
@@ -59,10 +78,17 @@ async def _run_guarded(job_id, session_id, limit) -> None:
 
 @router.post("/autolabel/start")
 async def start(payload: AutolabelStartIn, db: AsyncSession = Depends(db_session)):
-    if await training_holds_gpu(db):
-        raise HTTPException(503, "GPU reserved for a training job; autolabel is paused until it finishes")
-    if (await db.execute(select(AutolabelJob.job_id).where(AutolabelJob.status == "running").limit(1))).first():
-        raise HTTPException(409, "an autolabel job is already running")
+    # Both of these guard one thing: the single GPU in this box. A cloud-targeted job never touches it, it
+    # is parked for a pod, so refusing to park one because a local job is busy turned a scheduling rule into
+    # a queueing rule and made the cloud branch unreachable exactly when somebody would reach for it.
+    local = payload.compute_target != "cloud"
+    if local:
+        if await training_holds_gpu(db):
+            raise HTTPException(503,
+                                "GPU reserved for a training job; autolabel is paused until it finishes")
+        if (await db.execute(
+                select(AutolabelJob.job_id).where(AutolabelJob.status == "running").limit(1))).first():
+            raise HTTPException(409, "an autolabel job is already running")
     sess = await db.get(DbSession, uuid.UUID(payload.session_id))
     if sess is None:
         raise HTTPException(404, "session not found")

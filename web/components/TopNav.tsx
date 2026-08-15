@@ -6,6 +6,7 @@ import PlatformSwitcher from "./shell/PlatformSwitcher";
 import CommandPalette from "./shell/CommandPalette";
 import ShortcutOverlay from "./shell/ShortcutOverlay";
 import CloudControl from "./shell/CloudControl";
+import UploadIndicator from "./shell/UploadIndicator";
 import MenuBar from "./shell/MenuBar";
 import Icon from "./shell/Icon";
 import NotificationBell from "./shell/NotificationBell";
@@ -77,6 +78,9 @@ export default function TopNav({ active, right, showCrumb = true }: {
           <Icon name="search" size={12} />
           <kbd className="text-ink-3 hidden sm:inline">Cmd K</kbd>
         </button>
+        {/* Before the cloud chip: an upload is something the user started and is waiting on, so it
+            outranks a standing status light. Renders nothing when nothing is running. */}
+        <UploadIndicator />
         <PlatformSwitcher />
         <CloudControl />
         <NotificationBell />

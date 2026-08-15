@@ -158,6 +158,16 @@ class LabeloxClient:
         return self._call("POST", f"/api/agent/command",
                           params=None, json_body=body)
 
+    def get_agent_contamination(self, min_count: int | None = 25, refused_only: bool | None = False) -> Any:
+        """Contamination"""
+        return self._call("GET", f"/api/agent/contamination",
+                          params={"min_count": min_count, "refused_only": refused_only}, json_body=None)
+
+    def post_agent_contamination_revert(self, body: Any = None) -> Any:
+        """Contamination Revert"""
+        return self._call("POST", f"/api/agent/contamination/revert",
+                          params=None, json_body=body)
+
     def post_agent_copilot_batch_fix(self, body: Any = None) -> Any:
         """Copilot Batch Fix"""
         return self._call("POST", f"/api/agent/copilot/batch-fix",
@@ -1078,15 +1088,15 @@ class LabeloxClient:
         return self._call("GET", f"/api/errordetect/summary",
                           params=None, json_body=None)
 
-    def get_eval_operations(self) -> Any:
+    def get_eval_operations(self, window_days: Any | None = 30) -> Any:
         """Operations"""
         return self._call("GET", f"/api/eval/operations",
-                          params=None, json_body=None)
+                          params={"window_days": window_days}, json_body=None)
 
-    def get_eval_operations_by_op_type_latest(self, op_type: str) -> Any:
+    def get_eval_operations_by_op_type_latest(self, op_type: str, window_days: Any | None = 30) -> Any:
         """Operation Latest"""
         return self._call("GET", f"/api/eval/operations/{op_type}/latest",
-                          params=None, json_body=None)
+                          params={"window_days": window_days}, json_body=None)
 
     def post_eval_tracking(self, gold_id: str, run_id: str, iou_thr: float | None = 0.5) -> Any:
         """Score Tracking"""
@@ -1503,6 +1513,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/govern/consent/{consent_status}/gate",
                           params=None, json_body=None)
 
+    def get_govern_control_pending(self, limit: int | None = 100) -> Any:
+        """Control Pending"""
+        return self._call("GET", f"/api/govern/control/pending",
+                          params={"limit": limit}, json_body=None)
+
     def get_govern_control_precision(self) -> Any:
         """Control Precision"""
         return self._call("GET", f"/api/govern/control/precision",
@@ -1673,6 +1688,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/imports/dry-run",
                           params=None, json_body=body)
 
+    def get_imports_formats(self) -> Any:
+        """Formats"""
+        return self._call("GET", f"/api/imports/formats",
+                          params=None, json_body=None)
+
     def post_imports_start(self, body: Any = None) -> Any:
         """Start"""
         return self._call("POST", f"/api/imports/start",
@@ -1827,6 +1847,11 @@ class LabeloxClient:
         """Jobs"""
         return self._call("GET", f"/api/jobs",
                           params={"limit": limit}, json_body=None)
+
+    def post_jobs_by_kind_by_job_id_cancel(self, kind: str, job_id: str) -> Any:
+        """Cancel"""
+        return self._call("POST", f"/api/jobs/{kind}/{job_id}/cancel",
+                          params=None, json_body=None)
 
     def get_labelops_issues(self, frame_id: Any | None = None, job_id: Any | None = None, object_id: Any | None = None, status: Any | None = None) -> Any:
         """List Issues"""
@@ -2533,6 +2558,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/quality/gold/seal",
                           params=None, json_body=body)
 
+    def post_quality_gold_by_gold_id_measure(self, gold_id: str) -> Any:
+        """Measure"""
+        return self._call("POST", f"/api/quality/gold/{gold_id}/measure",
+                          params=None, json_body=None)
+
     def post_quality_iaa(self, body: Any = None) -> Any:
         """Inter Annotator Agreement"""
         return self._call("POST", f"/api/quality/iaa",
@@ -2592,6 +2622,16 @@ class LabeloxClient:
         """Candidates"""
         return self._call("GET", f"/api/recall/candidates",
                           params={"status": status, "session_id": session_id, "limit": limit}, json_body=None)
+
+    def post_recall_candidates_by_candidate_id_by_verdict(self, candidate_id: str, verdict: str) -> Any:
+        """Rule"""
+        return self._call("POST", f"/api/recall/candidates/{candidate_id}/{verdict}",
+                          params=None, json_body=None)
+
+    def get_recall_progress(self) -> Any:
+        """Progress"""
+        return self._call("GET", f"/api/recall/progress",
+                          params=None, json_body=None)
 
     def post_recall_run_by_session_id(self, session_id: str, shortlist_only: bool | None = False) -> Any:
         """Run"""
@@ -2983,6 +3023,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/superpixels/{frame_id}",
                           params={"n": n}, json_body=None)
 
+    def get_system_resources(self) -> Any:
+        """System Resources"""
+        return self._call("GET", f"/api/system/resources",
+                          params=None, json_body=None)
+
     def post_tracklets_objects_by_object_id_keyframe(self, object_id: str, body: Any = None) -> Any:
         """Set Keyframe"""
         return self._call("POST", f"/api/tracklets/objects/{object_id}/keyframe",
@@ -3291,4 +3336,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 641 routes generated from the server schema.
+# 650 routes generated from the server schema.

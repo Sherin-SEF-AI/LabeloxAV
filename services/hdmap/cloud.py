@@ -20,6 +20,7 @@ import uuid
 from core.logging import get_logger
 from db.models import MapFusionJob
 from db.session import get_sessionmaker
+from services.job_control import QUEUED_CLOUD
 
 log = get_logger("hdmap_cloud")
 
@@ -36,8 +37,8 @@ async def mark_queued_for_cloud_fusion(job_id, session_ids, region) -> None:
         j = await db.get(MapFusionJob, uuid.UUID(str(job_id)))
         if j is None:
             return
-        j.status = "pending"
-        j.stage = "queued_cloud"
+        j.status = QUEUED_CLOUD
+        j.stage = QUEUED_CLOUD
         j.counts = {"compute_target": "cloud", "region": region, "sessions": len(session_ids), "note": _NOTE}
         await db.commit()
     log.info("hdmap.queued_for_cloud", job_id=str(job_id), sessions=len(session_ids))

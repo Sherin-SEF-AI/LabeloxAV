@@ -416,10 +416,15 @@ export async function lidarCloudPoints(
 export const api = {
   // Measured precision for one batch operation. Throws on 404, which is the unmeasured state and is a real
   // answer rather than an error to swallow silently.
+  //
+  // The `/api` prefix was missing on both of these, so they resolved against the Next.js page router and
+  // 404ed there instead of reaching the backend. The client could not tell: its unmeasured path is also a
+  // 404, so a route that never existed read exactly like a measurement nobody had taken, and the batch
+  // panels have been silently forcing dry runs on that basis rather than on evidence.
   opPrecisionLatest: (opType: string) =>
     get<{ precision: number; recall: number | null; n: number; dataset_slice: string; caveat: string }>(
-      `/eval/operations/${encodeURIComponent(opType)}/latest`),
-  opPrecisionAll: () => get<{ operations: Record<string, unknown>; kinds: string[] }>("/eval/operations"),
+      `/api/eval/operations/${encodeURIComponent(opType)}/latest`),
+  opPrecisionAll: () => get<{ operations: Record<string, unknown>; kinds: string[] }>("/api/eval/operations"),
 
   lidarClouds: (sessionId: string) =>
     get<{ session_id: string; clouds: LidarCloud[] }>(`/api/lidar/sessions/${sessionId}/clouds`),
@@ -541,7 +546,7 @@ export const api = {
   // Neighbouring frames for the editor filmstrip: same camera, capture order, with object counts.
   frameFilmstrip: (id: string, span = 12) =>
     get<{ frame_id: string; cam_id: string; frames: { frame_id: string; ts_ns: number;
-          n_objects: number; image_url: string; current: boolean }[] }>(
+          n_objects: number; n_confirmed: number; image_url: string; current: boolean }[] }>(
       `/api/frames/${id}/filmstrip?span=${span}`),
   explainObject: (id: string) => get<ObjectExplanation>(`/api/objects/${id}/explain`),
   // M-F.5 scene-graph relations + VLM dataset generation
@@ -571,7 +576,7 @@ export const api = {
     body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][]; cuboid_3d?: { center: number[]; size: number[]; yaw: number } },
   ) => post<ObjectDetail>(`/api/frames/${frame_id}/objects`, body),
   updateMask: (object_id: string, polygons: number[][], width?: number, height?: number) =>
-    put<{ object_id: string }>(`/api/objects/${object_id}/mask`, { polygons, width, height }),
+    put<{ object_id: string; version: number }>(`/api/objects/${object_id}/mask`, { polygons, width, height }),
   deleteObject: (object_id: string) => del<{ deleted: string }>(`/api/objects/${object_id}`),
   // object relationships / grouping (rider_of, towed_by, part_of, member_of, occludes)
   relateObject: (object_id: string, body: { to_object_id: string; kind: string }) =>
@@ -602,6 +607,25 @@ export const api = {
     post<{ run_id: string; objects_updated: number; counts: { attrs_filled: number; by_attr: Record<string, number> } }>(`/api/agent/frames/${frame_id}/attributes`, {}),
   agentAsk: (text: string) =>
     post<{ understood: string; count: number; frames: { frame_id: string; session_id: string }[] }>(`/api/agent/ask`, { text }),
+  // Class moves a past relabel run made, grouped by the mistake rather than by the object. `refused_now`
+  // marks the lineages the ontology guard would reject today.
+  agentContamination: (minCount = 25, refusedOnly = false) =>
+    get<{
+      summary: {
+        lineages: number; objects: number; refused_lineages: number; refused_objects: number;
+        // What is still wrong, as opposed to what once happened. This is the number that can reach zero.
+        outstanding: number; refused_outstanding: number;
+      };
+      lineages: {
+        from_name: string; to_name: string; count: number; outstanding: number;
+        refused_now: boolean; reason: string | null;
+        examples: { object_id: string; frame_id: string }[];
+      }[];
+    }>(`/api/agent/contamination?min_count=${minCount}&refused_only=${refusedOnly}`),
+  // Put one refused class move back, as a single reversible action. Reviewer-gated server-side.
+  agentContaminationRevert: (from_name: string, to_name: string, limit?: number) =>
+    post<{ from_name: string; to_name: string; reverted: number; run_id: string | null; reason: string }>(
+      "/api/agent/contamination/revert", { from_name, to_name, limit }),
   agentReport: () =>
     get<{ size: { sessions: number; objects: number; human_labeled: number }; class_balance: { missing: number; rare: number }; coverage_gaps: string[]; fix_queue: Record<string, number>; fix_queue_total: number; scenarios: Record<string, number>; geo: Record<string, number> }>(`/api/agent/report`),
   agentSuggest: (frame_id: string) =>
@@ -1055,6 +1079,8 @@ export const api = {
       updated: number; action: string;
       skipped_missing: string[];
       skipped_stale: { object_id: string; expected: number; current: number }[];
+      // The handle for taking the whole batch back in one move. Null for a batch that changed nothing.
+      run_id: string | null;
     }>("/api/objects/bulk-review",
        { object_ids, action, class_name, state, attrs, ...(extra ?? {}) }),
   // One sprite sheet for many crops. A grid asking for its tiles one at a time is N whole-frame decodes and
@@ -1224,6 +1250,41 @@ export const api = {
   analyticsPii: (session_id?: string) =>
     get<PiiCoverage>("/api/analytics/pii" + (session_id ? `?session_id=${session_id}` : "")),
   analyticsProductivity: () => get<ProductivityReport>("/api/analytics/productivity"),
+  // What the importer can actually read. Served rather than hardcoded, because the page's own copy drifted
+  // to ten formats against the backend's nineteen and silently rewrote the difference to COCO.
+  importFormats: () =>
+    get<{ formats: string[]; annotated: string[]; raw: string[] }>("/api/imports/formats"),
+  // Mined candidates: objects the detector missed, found by a track gap, an open-vocabulary hit or a region
+  // proposal. Nothing could rule on these before, so the per-channel reliability fit read an empty set and
+  // the priors stayed hand-guessed.
+  recallCandidates: (status = "pending", limit = 100) =>
+    get<{ status: string; count: number; candidates: {
+      candidate_id: string; object_id: string; frame_id: string;
+      channels: string[]; fn_value: number; class_id: number; status: string;
+    }[] }>(`/api/recall/candidates?status=${status}&limit=${limit}`),
+  recallRule: (candidateId: string, verdict: "confirmed" | "rejected") =>
+    post<{ candidate_id: string; verdict: string; was: string; object_routed_to_review: boolean }>(
+      `/api/recall/candidates/${candidateId}/${verdict}`, {}),
+  recallProgress: () =>
+    get<{ total: number; judged: number; pending: number; confirmed: number; rejected: number;
+          per_channel: Record<string, { pending: number; confirmed: number; rejected: number }> }>(
+      "/api/recall/progress"),
+  // Auto-accepted objects mirrored into an always-reviewed stream. The fraction judged incorrect is the
+  // gate's MEASURED precision, which the drift detector watches. 601 were seeded and none judged, because
+  // nothing listed them and the verdict route had no caller.
+  controlPending: (limit = 100) =>
+    get<{ count: number; samples: {
+      sample_id: string; was_auto_accepted: boolean; object_id: string; frame_id: string;
+      session_id: string; class_name: string; conf: number | null; state: string;
+      crop_url: string; created_at: string | null;
+    }[] }>(`/api/govern/control/pending?limit=${limit}`),
+  controlVerdict: (sampleId: string, verdict: "correct" | "incorrect") =>
+    post<{ sample_id: string; human_verdict: string }>(
+      `/api/govern/control/${sampleId}/verdict`, { verdict }),
+  // Score a sealed gold set. The page used to print `make m9 ARGS=...` at an operator who has no shell.
+  measureGold: (goldId: string) =>
+    post<{ started: boolean; gold_id: string; n_alive: number }>(
+      `/api/quality/gold/${goldId}/measure`, {}),
   goldSets: () => get<GoldSetRow[]>("/api/quality/gold-sets"),
   qualitySheet: (gold_id: string) =>
     get<QualitySheet>("/api/quality/sheet?" + new URLSearchParams({ gold_id }).toString()),
@@ -1283,6 +1344,10 @@ export const api = {
   trainingStatus: (jobId: string) => get<TrainingJob>(`/api/training/${jobId}`),
   listTraining: () => get<TrainingJob[]>("/api/training"),
   cancelTraining: (jobId: string) => post<TrainingJob>(`/api/training/${jobId}/cancel`, {}),
+  // One cancel for the five kinds the API runs itself. `stopped` distinguishes a job that is now definitely
+  // not running from one that has been asked to stop and will end at its next checkpoint.
+  cancelJob: (path: string) =>
+    post<{ job_id: string; canceled: boolean; stopped?: boolean; detail: string }>(path, {}),
   trainingRegistry: () => get<ModelLine[]>("/api/training/registry"),
   trainingRuns: () => get<ModelRunRow[]>("/api/training/runs"),
   trainingRunCurve: (runId: string) => get<TrainingCurve>(`/api/training/runs/${encodeURIComponent(runId)}/curve`),
@@ -1518,10 +1583,16 @@ export type PiiCoverage = {
 export type GoldSetRow = {
   gold_id: string;
   name: string;
+  /** What was sealed. */
   n_objects: number;
   n_frames: number;
   ontology_version: string;
   measured: boolean;
+  /** What is left. A gold set is a list of object ids and rots when those objects are deleted. */
+  n_alive: number;
+  n_missing: number;
+  /** False means it grades nothing: no honeypot can be seeded and no sheet can be measured. */
+  usable: boolean;
   created_at: string | null;
 };
 

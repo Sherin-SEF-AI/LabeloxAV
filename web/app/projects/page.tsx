@@ -7,6 +7,7 @@ import type { AssetRow, BoardCell, LabelJobRow, LabelProjectRow, ScorecardRow, U
 import PageShell from "@/components/shell/PageShell";
 import { useQueryFlag } from "@/lib/useQueryParam";
 import { getUser } from "@/lib/user";
+import { honeypotVerdict, nextAction } from "@/lib/labelJobActions";
 
 // The labeling-operations board: who is doing what, where it is stuck, and whether the work is any good.
 // stage runs left to right; state is the column within a stage, so "in validation, not yet started" is a
@@ -70,17 +71,39 @@ function ProjectsBody() {
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 5000); };
 
+  // Take a job, and hand it back. `set_state` and `submit_job` are the two calls that make a label job
+  // finishable at all: submit is the only writer of `honeypot_accuracy` and the only thing that advances
+  // annotation to validation to acceptance.
+  const act = async (j: LabelJobRow, kind: "start" | "submit") => {
+    setBusy(true);
+    try {
+      if (kind === "start") {
+        await api.lopSetState(j.job_id, "in_progress", j.version);
+        flash(`started ${j.job_id.slice(0, 8)}`);
+      } else {
+        const r = await api.lopSubmit(j.job_id, j.version);
+        flash(r.honeypot_failed
+          ? `sent back: honeypot accuracy ${(r.honeypot_accuracy ?? 0).toFixed(2)} is below the `
+            + `project floor of ${r.min_honeypot_accuracy.toFixed(2)}`
+          : `submitted; now ${r.stage} / ${r.state}`);
+      }
+      await refreshProject(projectId);
+    } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
+  };
+
   const refreshProject = useCallback(async (pid: string) => {
     if (!pid) { setCells([]); setJobs([]); setLoad([]); return; }
     try {
       const [b, j, s, as, st] = await Promise.all([
-        api.lopBoard(pid), api.lopJobs({ project_id: pid }), api.lopScorecards(pid),
-        api.projectAssets(pid), api.projectStats(pid),
+        api.lopBoard(pid),
+        // "My jobs" asks the server, which answers across every project. Filtering `lopJobs` by assignee on
+        // the client only ever showed the jobs inside whichever project happened to be selected, and showed
+        // nothing at all when none was, which is not what the menu entry promises.
+        mineOnly ? api.lopMyJobs() : api.lopJobs({ project_id: pid }),
+        api.lopScorecards(pid), api.projectAssets(pid), api.projectStats(pid),
       ]);
       setCells(b.cells); setLoad(b.open_load); setCards(s.scorecards);
-      // ?mine=1 (Label > My jobs) narrows the board to the signed-in user's assignments
-      const me = getUser()?.user_id;
-      setJobs(mineOnly && me ? j.jobs.filter((x) => x.assignee_id === me) : j.jobs);
+      setJobs(j.jobs);
       setAssets(as); setAnnKinds(st.annotations_by_kind ?? {});
     } catch (e) { flash(humanizeError(e)); }
   }, [mineOnly]);
@@ -261,8 +284,11 @@ function ProjectsBody() {
                       <td className={STATE_TONE[j.state] ?? "text-ink-3"}>{j.state}</td>
                       <td className="text-ink-3">{j.n_frames}</td>
                       <td className="text-ink-3">{j.n_honeypots || "-"}</td>
-                      <td className={j.honeypot_accuracy == null ? "text-ink-3"
-                        : j.honeypot_accuracy >= (project?.min_honeypot_accuracy ?? 0.9) ? "text-pass" : "text-block"}>
+                      {/* Unmeasured is not failing. Until submit existed every job in the system was
+                          unmeasured, and colouring those red would be a board that means nothing. */}
+                      <td className={{ unmeasured: "text-ink-3", pass: "text-pass", fail: "text-block" }[
+                        honeypotVerdict(j.honeypot_accuracy, project?.min_honeypot_accuracy)]}
+                        title={j.honeypot_accuracy == null ? "not scored yet; a job is scored when it is submitted" : ""}>
                         {j.honeypot_accuracy == null ? "-" : j.honeypot_accuracy.toFixed(2)}
                       </td>
                       <td>
@@ -272,12 +298,21 @@ function ProjectsBody() {
                           {users.map((u) => <option key={u.user_id} value={u.user_id}>{u.name}</option>)}
                         </select>
                       </td>
-                      <td className="text-right">
+                      <td className="text-right whitespace-nowrap">
                         {j.frame_ids[0] && (
                           <button onClick={() => router.push(`/frame/${j.frame_ids[0]}`)}
                             title="open the first frame of this job"
                             className="text-ink-3 hover:text-accent">open</button>
                         )}
+                        {(() => {
+                          const a = nextAction(j, getUser()?.user_id ?? null);
+                          return a ? (
+                            <button onClick={() => act(j, a.kind)} disabled={busy} title={a.hint}
+                              className="ml-2 border border-line px-1.5 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
+                              {a.label}
+                            </button>
+                          ) : null;
+                        })()}
                       </td>
                     </tr>
                   ))}

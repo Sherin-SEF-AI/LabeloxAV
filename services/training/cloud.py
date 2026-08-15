@@ -23,6 +23,7 @@ import uuid
 from core.logging import get_logger
 from db.models import TrainingJob
 from db.session import get_sessionmaker
+from services.job_control import QUEUED_CLOUD
 
 log = get_logger("training_cloud")
 
@@ -38,7 +39,8 @@ async def mark_queued_for_cloud(job_id) -> None:
         j = await db.get(TrainingJob, uuid.UUID(str(job_id)))
         if j is None:
             return
-        j.stage = "queued-cloud"
+        j.status = QUEUED_CLOUD
+        j.stage = QUEUED_CLOUD
         j.result = {"note": _QUEUED_NOTE}
         await db.commit()
     log.info("training.queued_for_cloud", job_id=str(job_id))
@@ -63,8 +65,12 @@ async def dispatch_cloud_job(job_id, *, dataset_dir=None, entrypoint: str = "tra
         j = await db.get(TrainingJob, uuid.UUID(job_id))
         if j is None:
             raise ValueError(f"training job {job_id} not found")
-        spec = dict(j.dataset_spec or {})
-        hparams = dict(j.hparams or {})
+        # The spec lives inside config, which holds the whole TrainJobSpec. Reading j.dataset_spec and
+        # j.hparams as if they were columns raised AttributeError before the pod was ever contacted, so
+        # every cloud dispatch failed at its first line.
+        cfg = j.config or {}
+        spec = dict(cfg.get("dataset_spec") or {})
+        hparams = dict(cfg.get("hparams") or {})
         task_type = j.task_type
 
     if dataset_dir is None:

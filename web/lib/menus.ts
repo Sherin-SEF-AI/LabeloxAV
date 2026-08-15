@@ -137,7 +137,9 @@ export const MENUS: Menu[] = [
         hint: "autonomous QA and fix queue" },
       { key: "multicam", label: "Multi-camera", icon: "layers", href: "/annotations?rig=1",
         separatorBefore: true, hint: "synchronized rig annotation" },
-      { key: "jobsrun", label: "Runs", icon: "activity", href: "/jobs",
+      // Named for the page it opens. It read "Runs" while the page is titled "Jobs", so somebody looking
+      // for the jobs page could not find it in the menu that leads there.
+      { key: "jobsrun", label: "Jobs", icon: "activity", href: "/jobs",
         hint: "import, training and autolabel runs" },
     ],
   },
@@ -224,6 +226,10 @@ export const MENUS: Menu[] = [
       { key: "shortcuts", label: "Keyboard shortcuts", icon: "keyboard", shortcut: "?",
         event: "lbx:shortcuts" },
       { key: "platformsw", label: "Platforms", icon: "grid", href: "/platforms", separatorBefore: true },
+      // One place that answers "is anything happening". It was three before, and two of them were a
+      // terminal and a log file on the box.
+      { key: "console", label: "Console", icon: "activity", href: "/console",
+        hint: "GPU, memory, disk and everything running right now" },
     ],
   },
   {

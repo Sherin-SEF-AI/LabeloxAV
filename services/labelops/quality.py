@@ -40,6 +40,12 @@ async def seed_honeypots(db: AsyncSession, job: LabelJob, project: LabelProject)
     gold_frames = (await db.execute(
         select(Object.frame_id).where(Object.object_id.in_(gold_obj_ids)).distinct())).scalars().all()
     if not gold_frames:
+        # A gold set is a list of object ids, so it rots when those objects are deleted and keeps claiming
+        # its original size. Returning 0 in silence made a project configured for quality measurement look
+        # identical to one that was not, and no honeypot in it would ever be scored.
+        log.warning("labelops.honeypot_gold_rotted", gold_id=project.gold_id,
+                    listed=len(gold_obj_ids),
+                    detail="the gold set's objects no longer exist; nothing can be seeded from it")
         return 0
 
     n = max(1, int(round(len(job.frame_ids or []) * project.honeypot_frac)))

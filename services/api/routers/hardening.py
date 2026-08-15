@@ -54,3 +54,16 @@ async def efficiency(payload: EfficiencyIn):
     """The label-budget efficiency report: per-slice ROI ranked best-first, the overall gain per 1000 labels,
     and the slices whose spend returned nothing."""
     return efficiency_report(payload.entries)
+
+
+@router.get("/system/resources")
+async def system_resources():
+    """GPU, memory, CPU and disk, read now.
+
+    Every slow thing in this system is slow for one of a few reasons and none of them were visible from
+    inside the app: a GPU held by another tenant, a full disk, work parked for hardware that is not here.
+    Those were questions you answered in a terminal, and most people using this do not have one.
+    """
+    from services.hardening.resources import snapshot
+
+    return snapshot()

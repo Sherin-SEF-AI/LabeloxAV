@@ -16,6 +16,8 @@ from db.models import Frame, Object, Review
 from services.api.deps import BulkReviewIn, ReviewIn, current_user, db_session
 from services.api.routers.objects import _write_mask
 from services.autolabel.ontology import get_ontology
+from services.review_batch import change_record, record_batch
+from services.review_policy import ReviewStateError, state_for
 from services.training.gpu_lease import training_holds_gpu
 
 log = get_logger("api_review")
@@ -44,7 +46,6 @@ async def qa_vlm(session_id: str, limit: int = 40, db: AsyncSession = Depends(db
     spawn(_run(), name="_run")
     return {"started": True, "session_id": session_id, "limit": limit}
 
-_ACTION_STATE = {"confirm": "accepted", "accept": "accepted", "reject": "rejected"}
 
 
 def _attrib(user, fallback: str) -> tuple[str, object]:
@@ -62,12 +63,16 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
         if not onto.has_name(payload.class_name):
             raise HTTPException(400, f"unknown class '{payload.class_name}'")
         cid = onto.by_name(payload.class_name).id
-    new_state = payload.state or _ACTION_STATE.get(payload.action)
+    try:
+        new_state = state_for(payload.action, payload.state, getattr(user, "role", None), None)
+    except ReviewStateError as exc:
+        raise HTTPException(400, str(exc)) from exc
     reviewer, uid = _attrib(user, payload.reviewer)
 
     n = 0
     missing: list[str] = []
     stale: list[dict] = []
+    batch_changes: dict[str, dict] = {}
     from uuid import UUID as _UUID
 
     expected = payload.expected_versions or {}
@@ -91,6 +96,10 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
             continue
         before = {"class_id": obj.class_id, "bbox": list(obj.bbox), "attrs": dict(obj.attrs or {}), "state": obj.state,
                   "source": obj.source, "conf": obj.conf, "provenance": dict(obj.provenance or {})}
+        # What the undo needs, captured before the edit. A Review row per object is the audit trail and
+        # answers what changed; it is not an undo, because taking back a fifty-object batch through it means
+        # fifty manual reversals with the operator remembering each prior value.
+        batch_changes[oid] = change_record(obj)
         if cid is not None:
             obj.class_id = cid
         if payload.attrs:
@@ -112,6 +121,12 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
         n += 1
     await db.commit()
 
+    # One reversible unit for the whole batch. Recorded after the commit so a failed edit cannot leave a run
+    # claiming objects it never changed.
+    run_id = await record_batch(db, batch_changes, created_by=reviewer,
+                                policy={"action": payload.action, "class_name": payload.class_name,
+                                        "attrs": payload.attrs or {}}) if batch_changes else None
+
     # One activity entry for the batch, not one per object: the feed is a human timeline and sixty identical
     # rows is not a record of what somebody did, it is noise that buries everything either side of it.
     if n:
@@ -132,7 +147,9 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
     return {"updated": n, "action": payload.action,
             # Named rather than silently dropped: a caller that asked for sixty and changed fifty-eight has
             # to be able to find out which two, and why.
-            "skipped_missing": missing, "skipped_stale": stale}
+            "skipped_missing": missing, "skipped_stale": stale,
+            # The handle for taking the whole batch back in one move.
+            "run_id": run_id}
 
 
 @router.post("/objects/{object_id}/review")
@@ -193,8 +210,15 @@ async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = D
                                    payload.mask_polygons, frame.width, frame.height)
         obj.mask_encoding = "polygon"
 
-    # State: explicit override wins, else derive from the action verb.
-    obj.state = payload.state or _ACTION_STATE.get(payload.action, obj.state)
+    # The state depends on the caller's role, not only on the verb. An annotator's accept is a submission,
+    # which is the QA queue the triage page's `submitted` band exists to serve. This used to take the state
+    # straight from the request body, so the whole review step was advisory.
+    try:
+        new_state = state_for(payload.action, payload.state, getattr(user, "role", None), obj.state)
+    except ReviewStateError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if new_state is not None:
+        obj.state = new_state
     obj.source = "human"
     obj.version = (obj.version or 1) + 1  # advance the optimistic-lock version on every human edit
 

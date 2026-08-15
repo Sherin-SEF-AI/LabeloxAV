@@ -42,6 +42,44 @@ class TrainJobSpec(BaseModel):
     notes: str | None = None
 
 
+async def _promote_run(db, run_id: str, task_type: str) -> dict:
+    """Actually promote, rather than recording that promotion was wanted.
+
+    `promote: true` used to set a boolean on the run row and log a line telling somebody to export an
+    environment variable by hand. Nothing became champion, nothing served the new weights, and the run said
+    "promoted" while the old model kept answering every request. This routes through the same champion gate
+    as POST /govern/promote, so the gold-set comparison, the auto-promote kill switch and the single-champion
+    constraint all apply, and the same notification goes out when the gate refuses: a blocked promotion that
+    nobody is told about is how the flywheel idles for a day.
+    """
+    from services.govern.champion import evaluate_and_promote
+    from services.notify import notify
+
+    try:
+        result = await evaluate_and_promote(db, run_id, task_type)
+    except Exception as exc:  # noqa: BLE001
+        # A promotion failure must not discard a finished training run: the weights are already stored and
+        # the run row is already written, and losing all of that to a governance error would be worse than
+        # the missed promotion.
+        log.warning("training.promote_failed", run_id=run_id, error=str(exc))
+        return {"promoted": False, "error": str(exc)}
+
+    promoted = bool(result.get("promoted"))
+    try:
+        await notify(
+            db, kind="model_promoted" if promoted else "promotion_blocked",
+            severity="info" if promoted else "warn",
+            title=(f"{task_type} model {run_id} promoted" if promoted
+                   else f"{task_type} promotion blocked: {run_id}"),
+            body=result.get("reason") or result.get("detail"),
+            href="/govern", subject_type="model", subject_id=run_id,
+            meta={"task": task_type, "metrics": result.get("metrics") or {}})
+    except Exception as exc:  # noqa: BLE001
+        log.warning("training.promote_notify_failed", run_id=run_id, error=str(exc))
+    log.info("training.promotion", run_id=run_id, promoted=promoted, reason=result.get("reason"))
+    return result
+
+
 def _safe_name(purpose: str, job_id) -> str:
     base = re.sub(r"[^a-zA-Z0-9_-]+", "-", purpose).strip("-") or "model"
     return f"{base}-{str(job_id)[:8]}"
@@ -193,12 +231,17 @@ async def run_job(job_id) -> dict:
 
         epochs = int(spec.hparams.get("epochs", settings.training.default_epochs))
         run_id = _run_id(name, ds, epochs)
-        do_promote = spec.promote and gate["promote"]
+        # The training gate compares this candidate against its own baseline. Promotion is a separate,
+        # stricter question answered against the gold set by the champion gate, so this flag records only
+        # that promotion was asked for and cleared the first hurdle. Whether it happened is decided below,
+        # after the run is registered, and written back over this value.
+        promotion_requested = spec.promote and gate["promote"]
+        promotion: dict | None = None
         async with get_sessionmaker()() as db:
             await db.merge(ModelRun(
                 run_id=run_id, base_weights=base_weights, weights_uri=weights_uri, dataset_name=name,
                 n_train=ds["n_train_images"], n_val=ds["n_val_images"], epochs=epochs,
-                metrics=candidate, baseline_metrics=baseline, gate=gate, promoted=do_promote,
+                metrics=candidate, baseline_metrics=baseline, gate=gate, promoted=False,
                 ontology_version=onto.version, purpose=spec.purpose, task_type=spec.task_type,
                 job_id=uuid.UUID(str(job_id)), notes=spec.notes or f"task={spec.task_type}",
             ))
@@ -213,16 +256,29 @@ async def run_job(job_id) -> dict:
             except Exception as exc:  # noqa: BLE001
                 log.warning("registry.auto_register_failed", job_id=str(job_id), run_id=run_id, error=str(exc))
 
+            if promotion_requested:
+                promotion = await _promote_run(db, run_id, spec.task_type)
+
+        do_promote = bool(promotion and promotion.get("promoted"))
+        if do_promote:
+            async with get_sessionmaker()() as db:
+                run = await db.get(ModelRun, run_id)
+                if run is not None:
+                    run.promoted = True
+                    await db.commit()
+
         result = {
             "run_id": run_id, "weights_uri": weights_uri, "gate": gate, "promoted": do_promote,
             "baseline_map50": baseline.get("map50"), "candidate_map50": candidate.get("map50"),
         }
+        if promotion is not None:
+            # The whole champion verdict, so a blocked promotion says which metric refused it rather than
+            # leaving a run that asked to be promoted and silently was not.
+            result["promotion"] = promotion
         await _bump(job_id, status="done", stage="done", progress=1.0, run_id=run_id, result=result,
                     metrics={"baseline": _slim(baseline), "candidate": _slim(candidate)})
         log.info("training.done", job_id=str(job_id), run_id=run_id, promoted=do_promote,
                  candidate_map50=candidate.get("map50"))
-        if do_promote:
-            log.info("training.promote_hint", hint=f"export LBX_MODELS__YOLO__WEIGHTS={weights}")
         return result
     finally:
         await pq.put(None)

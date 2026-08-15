@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
@@ -49,7 +50,14 @@ async def create_project(db: AsyncSession, *, name: str, description: str | None
                      honeypot_frac=honeypot_frac, min_honeypot_accuracy=min_honeypot_accuracy,
                      gold_id=gold_id, created_by=UUID(created_by) if created_by else None)
     db.add(p)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        # `label_project.name` is unique. Reusing a name is an ordinary mistake, and letting the constraint
+        # surface as a 500 tells the person who made it that the server broke rather than that the name is
+        # taken. The rollback matters too: without it the session is poisoned for everything after.
+        await db.rollback()
+        raise JobError(f"a project named {name.strip()!r} already exists") from exc
     log.info("labelops.project_created", project=str(p.project_id), name=name)
     return _project_dict(p)
 

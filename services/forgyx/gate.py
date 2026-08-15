@@ -48,19 +48,40 @@ def dual_gate(baseline_latency: dict, candidate_latency: dict,
 
 
 def pareto_rank(benchmarks: list[dict], latency_key: str = "p95", accuracy_key: str = "map50") -> list[dict]:
-    """Rank (model, target) benchmarks by Pareto dominance on latency (lower better) vs accuracy (higher
-    better). rank 0 is the Pareto front. Each item needs latency_ms[latency_key] and accuracy_ref_map."""
-    def lat(b):
-        return float((b.get("latency_ms") or {}).get(latency_key, float("inf")))
+    """Rank (model, target) benchmarks by Pareto dominance on latency (lower better) against accuracy
+    (higher better). rank 0 is the Pareto front.
 
-    def acc(b):
-        return float(b.get(accuracy_key, 0.0))
+    A benchmark with no accuracy is not ranked at all, rather than ranked as accuracy zero. The two are very
+    different claims: zero says the model was measured and is useless, while absent says nobody has scored it
+    on this target yet, and a Pareto plot that conflates them recommends against a model on evidence that
+    does not exist. Unranked rows still come back, marked, and sort last, because dropping them would hide a
+    real artifact from the page that lists artifacts.
 
+    This also stopped being a hypothetical the moment the first honest benchmark landed. Every row here used
+    to be seeded demo data that carried an accuracy reference, so `float(None)` was unreachable; the first
+    real export, which has no accuracy because nothing has scored it, made the endpoint 500.
+    """
+    def lat(b) -> float:
+        v = (b.get("latency_ms") or {}).get(latency_key)
+        return float(v) if v is not None else float("inf")
+
+    def acc(b) -> float | None:
+        v = b.get(accuracy_key)
+        return float(v) if v is not None else None
+
+    scored = [b for b in benchmarks if acc(b) is not None]
     out = []
     for b in benchmarks:
+        a = acc(b)
+        if a is None:
+            out.append({**b, "pareto_rank": None, "unranked": True,
+                        "unranked_reason": f"no {accuracy_key} measured for this benchmark"})
+            continue
         dominated_by = sum(
-            1 for o in benchmarks
-            if o is not b and lat(o) <= lat(b) and acc(o) >= acc(b)
-            and (lat(o) < lat(b) or acc(o) > acc(b)))
-        out.append({**b, "pareto_rank": dominated_by})
-    return sorted(out, key=lambda x: (x["pareto_rank"], lat(x)))
+            1 for o in scored
+            if o is not b and lat(o) <= lat(b) and (acc(o) or 0.0) >= a
+            and (lat(o) < lat(b) or (acc(o) or 0.0) > a))
+        out.append({**b, "pareto_rank": dominated_by, "unranked": False})
+    # Unranked last, then by rank, then by latency. `None` cannot be compared to an int, so the flag carries
+    # the ordering rather than the rank itself.
+    return sorted(out, key=lambda x: (x["pareto_rank"] is None, x["pareto_rank"] or 0, lat(x)))
