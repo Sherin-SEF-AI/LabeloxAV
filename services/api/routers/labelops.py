@@ -37,6 +37,9 @@ class TaskIn(BaseModel):
     session_id: str | None = None
     predicate: dict = {}
     jobs_of: int = 50
+    # More than one sends each chunk of frames to that many annotators independently, which is what buys a
+    # measurement of how much they agree. It costs proportionally, so it belongs on a sample.
+    replicas: int = 1
 
 
 class AssignIn(BaseModel):
@@ -86,6 +89,30 @@ async def list_projects(limit: int = 100, db: AsyncSession = Depends(db_session)
 async def project_board(project_id: str, db: AsyncSession = Depends(db_session)):
     """Job counts per stage and state, plus who is currently loaded."""
     return await job_svc.project_board(db, project_id)
+
+
+@router.post("/labelops/replica-groups/{replica_group}/agreement",
+             dependencies=[Depends(require_role("reviewer"))])
+async def score_agreement(replica_group: str, iou_thresh: float = 0.5,
+                          db: AsyncSession = Depends(db_session)):
+    """Compare the replicas of one group and open an issue on every object they disagree about."""
+    from services.labelops.agreement import AgreementError, score_replica_group
+
+    try:
+        return await score_replica_group(db, replica_group, iou_thresh=iou_thresh)
+    except AgreementError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@router.get("/labelops/tasks/{task_id}/agreement", dependencies=[Depends(require_role("annotator"))])
+async def task_agreement(task_id: str, db: AsyncSession = Depends(db_session)):
+    """How much the annotators on this task agreed, and which frames to look at first."""
+    from services.labelops.agreement import AgreementError, group_agreement
+
+    try:
+        return await group_agreement(db, task_id)
+    except AgreementError as exc:
+        raise HTTPException(404, str(exc)) from None
 
 
 @router.post("/labelops/tasks")

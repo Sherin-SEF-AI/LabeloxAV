@@ -21,7 +21,10 @@ from db.models import Issue, IssueComment, User
 
 log = get_logger("labelops_issues")
 
-KINDS = ("comment", "wrong_class", "bad_geometry", "missing", "duplicate", "unclear")
+# `disagreement` is opened by the agreement pass rather than by a person: two annotators labelled the
+# same frame independently and did not produce the same answer. It carries the same lifecycle as the
+# rest, because settling it is the same act.
+KINDS = ("comment", "wrong_class", "bad_geometry", "missing", "duplicate", "unclear", "disagreement")
 
 
 class IssueError(RuntimeError):

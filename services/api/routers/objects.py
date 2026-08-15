@@ -293,11 +293,31 @@ async def vlm_dataset_export(session_id: str | None = None):
 
 
 @router.get("/frames/{frame_id}/objects")
-async def frame_objects(frame_id: str, db: AsyncSession = Depends(db_session)):
+async def frame_objects(frame_id: str, job_id: str | None = None,
+                        db: AsyncSession = Depends(db_session)):
+    """Every object on a frame, or only this job's when the job is a blind replica.
+
+    A replica job exists to be compared against another annotator's independent answer. If the editor
+    handed it the machine pre-labels, both annotators would be correcting the same proposals and the
+    agreement between them would measure how well two people agree with a third party neither of them can
+    see. 82.6% of frames here are pre-labelled, so this is the normal case.
+
+    The filter is server-side deliberately: hiding the pre-labels in the browser still ships them to the
+    browser, and a hidden label is one keystroke away from being an unhidden one.
+    """
     from sqlalchemy import select
 
+    from db.models import LabelJob
+
     onto = get_ontology()
-    rows = (await db.execute(select(Object).where(Object.frame_id == UUID(frame_id)))).scalars().all()
+    q = select(Object).where(Object.frame_id == UUID(frame_id))
+    if job_id:
+        job = await db.get(LabelJob, UUID(job_id))
+        if job is None:
+            raise HTTPException(404, "job not found")
+        if job.replica_group is not None:
+            q = q.where(Object.job_id == job.job_id)
+    rows = (await db.execute(q)).scalars().all()
     return [
         {
             "object_id": str(o.object_id),
@@ -446,6 +466,20 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         if existing is not None:
             return _detail(existing, frame, onto)
 
+    # A job in the payload is a claim that this label belongs to that job's work. It is checked, because an
+    # annotator whose next/prev walked out of their job's frame set would otherwise stamp every box after
+    # that with a job that does not contain the frame, and the agreement pass would compare work nobody was
+    # asked to do.
+    job = None
+    if payload.job_id:
+        from db.models import LabelJob
+
+        job = await db.get(LabelJob, UUID(payload.job_id))
+        if job is None:
+            raise HTTPException(404, "job not found")
+        if str(frame.frame_id) not in {str(f) for f in (job.frame_ids or [])}:
+            raise HTTPException(400, f"frame {frame.frame_id} is not part of job {payload.job_id}")
+
     oid = uuid.uuid4()
     mask_uri = mask_encoding = None
     if payload.mask_polygons:
@@ -457,6 +491,10 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         bbox=payload.bbox, mask_uri=mask_uri, mask_encoding=mask_encoding, attrs=payload.attrs or {},
         conf=1.0, source="human", state=payload.state, rot_deg=payload.rot_deg, keypoints=payload.keypoints,
         polyline=payload.polyline, cuboid_3d=payload.cuboid_3d,
+        # Who drew it and under which job. Both null for a label drawn outside a job, which is every
+        # existing flow and stays exactly as it was.
+        job_id=job.job_id if job is not None else None,
+        annotator_id=user.user_id if user else None,
         provenance={"created_by": "human-annotation", "idem_key": payload.idem_key},
     )
     db.add(obj)

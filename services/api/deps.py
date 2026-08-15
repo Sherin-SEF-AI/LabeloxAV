@@ -215,6 +215,10 @@ class CreateObjectIn(BaseModel):
     keypoints: dict | None = None                  # {"skeleton": str, "points": [[x,y,v],...]} image px
     polyline: list[list[float]] | None = None      # open polyline points [[x,y],...] for linear features
     cuboid_3d: dict | None = None                  # ego-frame {center:[x,y,z], size:[w,l,h], yaw:rad}
+    # The job this label was drawn under, when the annotator reached the frame through one. In the body
+    # rather than the query string so it survives the idempotency branch, which returns an existing object
+    # for a retried create and would otherwise drop the attribution on the retry.
+    job_id: str | None = None
 
 
 class MaskIn(BaseModel):

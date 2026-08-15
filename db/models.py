@@ -174,6 +174,14 @@ class Object(Base):
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="fused")
     provenance: Mapped[dict] = mapped_column(JSONB, default=dict)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="review")
+    # Who made this label and under which job. Null for everything that predates job attribution and for
+    # anything not made inside a job, which is most of the corpus: an autolabel run has no annotator.
+    # Without these two, two people's boxes on one frame are one undifferentiated pile and agreement
+    # between them cannot be measured at all.
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("label_job.job_id", ondelete="SET NULL"))
+    annotator_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("app_user.user_id", ondelete="SET NULL"))
     # Optimistic-concurrency version: bumped on every human edit; a stale write is rejected (409) so two
     # annotators on the same object do not silently overwrite each other (last-write-wins).
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
@@ -746,6 +754,9 @@ class LabelTask(Base):
     slice_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("curation_slice.slice_id", ondelete="SET NULL"))
     predicate: Mapped[dict] = mapped_column(JSONB, default=dict)   # the explorer predicate that defined it
+    # How many independent annotators each chunk of frames goes to. 1 is ordinary work; more than 1 buys a
+    # measurement of how much they agree, at a proportional cost in annotation spend.
+    replicas: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_label_task_project", "project_id"),)
@@ -770,6 +781,15 @@ class LabelJob(Base):
         ForeignKey("app_user.user_id", ondelete="SET NULL"))
     stage: Mapped[str] = mapped_column(String(12), nullable=False, default="annotation")
     state: Mapped[str] = mapped_column(String(12), nullable=False, default="new")
+    # Two jobs over the same frames, labelled independently so their agreement can be measured. The pairing
+    # cannot be recovered by comparing frame_ids: seed_honeypots appends gold frames chosen per job id, so
+    # replicas diverge the moment they are created.
+    #
+    # A job in a replica group is also a BLIND job: it hides existing labels, because two annotators
+    # correcting the same machine proposals produce one label set with two editors, not two label sets, and
+    # agreement over that measures nothing. 82.6% of this corpus is pre-labelled, so this is the normal case.
+    replica_group: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    replica_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     # Hidden gold frames mixed into this job, and the measured accuracy against them once submitted.
     honeypot_frame_ids: Mapped[list] = mapped_column(JSONB, default=list)
     honeypot_accuracy: Mapped[float | None] = mapped_column(Float)
@@ -783,6 +803,39 @@ class LabelJob(Base):
     __table_args__ = (
         Index("ix_label_job_task", "task_id"),
         Index("ix_label_job_assignee", "assignee_id", "state"),
+    )
+
+
+class JobAgreement(Base):
+    """How much two annotators agreed on one frame, and how much they did not.
+
+    Stored per frame per pair rather than rolled up, because the rolled-up number tells you a task is at
+    0.7 and nothing about which frames to look at. The pair is ordered by the caller so recomputing a
+    group updates these rows rather than accumulating a second opinion beside the first.
+    """
+
+    __tablename__ = "job_agreement"
+
+    agreement_id: Mapped[uuid.UUID] = _uuid_pk()
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("label_task.task_id", ondelete="CASCADE"), nullable=False)
+    replica_group: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    frame_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("frame.frame_id", ondelete="CASCADE"), nullable=False)
+    job_a_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("label_job.job_id", ondelete="CASCADE"), nullable=False)
+    job_b_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("label_job.job_id", ondelete="CASCADE"), nullable=False)
+    # The iaa_score dict verbatim: detection_agreement, class_agreement, mean_iou, cohen_kappa, n_matched,
+    # n_a, n_b. Stored whole rather than as columns so the measurement can gain a term without a migration.
+    metrics: Mapped[dict] = mapped_column(JSONB, default=dict)
+    n_disagreements: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("frame_id", "job_a_id", "job_b_id", name="uq_job_agreement_pair"),
+        Index("ix_job_agreement_task", "task_id"),
+        Index("ix_job_agreement_group", "replica_group"),
     )
 
 

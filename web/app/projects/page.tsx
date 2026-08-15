@@ -300,7 +300,7 @@ function ProjectsBody() {
                       </td>
                       <td className="text-right whitespace-nowrap">
                         {j.frame_ids[0] && (
-                          <button onClick={() => router.push(`/frame/${j.frame_ids[0]}`)}
+                          <button onClick={() => router.push(`/frame/${j.frame_ids[0]}?job=${j.job_id}`)}
                             title="open the first frame of this job"
                             className="text-ink-3 hover:text-accent">open</button>
                         )}

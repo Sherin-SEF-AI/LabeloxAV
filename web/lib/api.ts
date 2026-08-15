@@ -542,7 +542,10 @@ export const api = {
     post<SegmentResult>("/api/segment", { frame_id, points: [point], labels: [1] }),
   // Frame-centric editor
   frame: (id: string) => get<FrameMeta>(`/api/frames/${id}`),
-  frameObjects: (id: string) => get<FrameObject[]>(`/api/frames/${id}/objects`),
+  // The job, when the annotator reached this frame through one: a blind replica job is served only its own
+  // labels, so two annotators cannot correct the same machine proposals and call the result agreement.
+  frameObjects: (id: string, jobId?: string) =>
+    get<FrameObject[]>(`/api/frames/${id}/objects${jobId ? `?job_id=${jobId}` : ""}`),
   // Neighbouring frames for the editor filmstrip: same camera, capture order, with object counts.
   frameFilmstrip: (id: string, span = 12) =>
     get<{ frame_id: string; cam_id: string; frames: { frame_id: string; ts_ns: number;
@@ -573,7 +576,7 @@ export const api = {
     post<{ predictions: { class_id: number; class_name: string; conf: number }[] }>("/api/objects/classify", { frame_id, box }),
   createObject: (
     frame_id: string,
-    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][]; cuboid_3d?: { center: number[]; size: number[]; yaw: number } },
+    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][]; cuboid_3d?: { center: number[]; size: number[]; yaw: number }; job_id?: string },
   ) => post<ObjectDetail>(`/api/frames/${frame_id}/objects`, body),
   updateMask: (object_id: string, polygons: number[][], width?: number, height?: number) =>
     put<{ object_id: string; version: number }>(`/api/objects/${object_id}/mask`, { polygons, width, height }),

@@ -184,6 +184,10 @@ export default function FrameEditor() {
   const { id } = useParams<{ id: string }>();
   const focus = useSearchParams().get("focus");
   const rigParam = useSearchParams().get("rig");   // M-MC.1 deep link: keep rig view + layout across camera focus
+  // The job this frame was opened from, when it was opened from one. It is what attributes a drawn box to
+  // an annotator and a job, which is the whole basis of measuring how much two annotators agree; and for a
+  // blind replica job it is also what tells the server to withhold the existing labels.
+  const jobParam = useSearchParams().get("job");
 
   const [st, dispatch] = useEditor();
   const [meta, setMeta] = useState<FrameMeta | null>(null);
@@ -285,7 +289,8 @@ export default function FrameEditor() {
     (async () => {
       setLoadError(null);
       try {
-        const [m, objs, o] = await Promise.all([api.frame(id), api.frameObjects(id), api.ontology()]);
+        const [m, objs, o] = await Promise.all([
+          api.frame(id), api.frameObjects(id, jobParam ?? undefined), api.ontology()]);
         if (!live) return;
         setMeta(m);
         setOnto(o);
@@ -929,6 +934,7 @@ export default function FrameEditor() {
             class_name: o.class_name, bbox: o.bbox, attrs: o.attrs,
             mask_polygons: o.mask.length ? o.mask : undefined, state: tgt, idem_key: o.id, rot_deg: o.rot ?? 0,
             keypoints: o.keypoints ?? null, polyline: o.polyline, cuboid_3d: o.cuboid_3d ?? undefined,
+            job_id: jobParam ?? undefined,
           });
           remap[o.id] = created.object_id;
           if (created.version != null) versions[o.id] = created.version;

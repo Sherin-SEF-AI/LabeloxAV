@@ -1433,10 +1433,10 @@ class LabeloxClient:
         return self._call("GET", f"/api/frames/{frame_id}/lift_ground",
                           params={"u": u, "v": v}, json_body=None)
 
-    def get_frames_by_frame_id_objects(self, frame_id: str) -> Any:
+    def get_frames_by_frame_id_objects(self, frame_id: str, job_id: Any | None = None) -> Any:
         """Frame Objects"""
         return self._call("GET", f"/api/frames/{frame_id}/objects",
-                          params=None, json_body=None)
+                          params={"job_id": job_id}, json_body=None)
 
     def post_frames_by_frame_id_objects(self, frame_id: str, body: Any = None) -> Any:
         """Create Object"""
@@ -1943,6 +1943,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/labelops/projects/{project_id}/board",
                           params=None, json_body=None)
 
+    def post_labelops_replica_groups_by_replica_group_agreement(self, replica_group: str, iou_thresh: float | None = 0.5) -> Any:
+        """Score Agreement"""
+        return self._call("POST", f"/api/labelops/replica-groups/{replica_group}/agreement",
+                          params={"iou_thresh": iou_thresh}, json_body=None)
+
     def get_labelops_scorecards(self, project_id: Any | None = None) -> Any:
         """Scorecards"""
         return self._call("GET", f"/api/labelops/scorecards",
@@ -1952,6 +1957,11 @@ class LabeloxClient:
         """Create Task"""
         return self._call("POST", f"/api/labelops/tasks",
                           params=None, json_body=body)
+
+    def get_labelops_tasks_by_task_id_agreement(self, task_id: str) -> Any:
+        """Task Agreement"""
+        return self._call("GET", f"/api/labelops/tasks/{task_id}/agreement",
+                          params=None, json_body=None)
 
     def post_labelox_propagate4d(self, body: Any = None) -> Any:
         """Propagate4D"""
@@ -3341,4 +3351,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 651 routes generated from the server schema.
+# 653 routes generated from the server schema.

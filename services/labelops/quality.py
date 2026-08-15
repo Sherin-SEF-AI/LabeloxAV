@@ -107,10 +107,17 @@ async def score_honeypots(db: AsyncSession, job: LabelJob, project: LabelProject
         return {"accuracy": None, "detail": "no gold objects on the honeypot frames"}
 
     # The annotator's work: human-sourced objects on those frames that are not themselves the gold rows.
-    ann_rows = (await db.execute(
-        select(Object.object_id, Object.frame_id, Object.class_id, Object.bbox)
-        .where(Object.frame_id.in_(hp), Object.source == "human",
-               Object.object_id.notin_(gold_ids)))).all()
+    #
+    # Scoped to this job once the job is known. Without that scope, two annotators working replicas of the
+    # same frames are graded against each other's boxes as well as their own, so one person's honeypot
+    # score moves when a different person draws. Objects predating job attribution carry no job_id and are
+    # matched by the fallback, which is every job that existed before replicas did.
+    ann_q = (select(Object.object_id, Object.frame_id, Object.class_id, Object.bbox)
+             .where(Object.frame_id.in_(hp), Object.source == "human",
+                    Object.object_id.notin_(gold_ids)))
+    if job.replica_group is not None:
+        ann_q = ann_q.where(Object.job_id == job.job_id)
+    ann_rows = (await db.execute(ann_q)).all()
 
     by_frame_gold: dict = {}
     for _oid, fid, cid, bbox in gold_rows:
