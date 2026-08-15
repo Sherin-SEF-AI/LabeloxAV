@@ -1,0 +1,124 @@
+"""The limiter in the request path, not just the arithmetic.
+
+`tests/test_ratelimit.py` covers the bucket, the classification and the eviction as pure functions. What
+those cannot show is whether the thing is actually wired: a limiter that is correct and unreachable is the
+same as no limiter, and this codebase has already found several capabilities that were built and never
+called.
+
+The suite disables rate limiting globally (a limiter that throttles the tests hides real failures behind
+429s), so these turn it back on for the duration, which is the same shape as
+`tests/test_webhook_hardening.py` re-enabling the SSRF guard it needs.
+"""
+
+from __future__ import annotations
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from core.config import get_settings
+from services.api.ratelimit import Budget, MemoryLimiter
+from services.api.ratelimit_middleware import RateLimitMiddleware
+
+
+@pytest.fixture
+def limiting():
+    """Rate limiting on for this test, restored afterwards."""
+    s = get_settings()
+    before = s.ratelimit.enabled
+    s.ratelimit.enabled = True
+    yield
+    s.ratelimit.enabled = before
+
+
+def _app(limiter: MemoryLimiter) -> FastAPI:
+    app = FastAPI()
+    app.middleware("http")(RateLimitMiddleware(limiter=limiter))
+
+    @app.get("/api/frames/{fid}/image")
+    async def image(fid: str):
+        return {"fid": fid}
+
+    @app.get("/api/health")
+    async def health():
+        return {"ok": True}
+
+    @app.post("/api/upload/presign-put")
+    async def presign():
+        return {"url": "s3://signed"}
+
+    return app
+
+
+class TestItIsActuallyWired:
+    def test_a_caller_over_budget_gets_429(self, limiting):
+        lim = MemoryLimiter()
+        # A budget of one, so the second request is over it. The point is the wiring, not the arithmetic.
+        lim.check("addr:testclient", "media", Budget(rate_per_s=0.001, burst=1.0), 1.0, now=0.0)
+        client = TestClient(_app(lim))
+
+        first = client.get("/api/frames/abc/image")
+        second = client.get("/api/frames/abc/image")
+        assert first.status_code == 200
+        assert second.status_code == 429, "the limiter is not in the request path"
+
+    def test_a_refusal_says_when_to_come_back(self, limiting):
+        """A 429 without Retry-After is an invitation to retry immediately, which turns a limit into a
+        busy loop."""
+        lim = MemoryLimiter()
+        lim.check("addr:testclient", "media", Budget(rate_per_s=0.001, burst=1.0), 1.0, now=0.0)
+        client = TestClient(_app(lim))
+        client.get("/api/frames/abc/image")
+        r = client.get("/api/frames/abc/image")
+
+        assert r.status_code == 429
+        assert int(r.headers["Retry-After"]) >= 1
+        assert r.headers["X-RateLimit-Class"] == "media"
+        assert "retry in" in r.json()["detail"]
+
+    def test_an_allowed_request_says_which_budget_it_drew_on(self, limiting):
+        client = TestClient(_app(MemoryLimiter()))
+        r = client.get("/api/frames/abc/image")
+        assert r.status_code == 200
+        assert r.headers["X-RateLimit-Class"] == "media"
+        # Which key was used changes the meaning of the limit entirely behind a proxy, so it is stated
+        # rather than left for an operator to infer.
+        assert r.headers["X-RateLimit-Keyed-By"] in ("principal", "address")
+
+
+class TestWhatItMustNotThrottle:
+    def test_health_is_never_limited(self, limiting):
+        """A health check that gets a 429 takes an instance out of a load balancer."""
+        lim = MemoryLimiter()
+        client = TestClient(_app(lim))
+        for _ in range(50):
+            assert client.get("/api/health").status_code == 200
+
+    def test_turning_it_off_turns_it_off(self):
+        """The suite runs with it off, so this is the configuration everything else depends on."""
+        s = get_settings()
+        before = s.ratelimit.enabled
+        s.ratelimit.enabled = False
+        try:
+            lim = MemoryLimiter()
+            lim.check("addr:testclient", "media", Budget(rate_per_s=0.001, burst=1.0), 1.0, now=0.0)
+            client = TestClient(_app(lim))
+            for _ in range(10):
+                assert client.get("/api/frames/abc/image").status_code == 200
+        finally:
+            s.ratelimit.enabled = before
+
+
+class TestTheBudgetsThemselves:
+    def test_presign_is_tighter_than_ordinary_media(self, limiting):
+        """Each presign hands out a credential that outlives the request, so it is the one path where a
+        burst is worth refusing."""
+        from services.api.ratelimit import MEDIA, PRESIGN
+
+        assert PRESIGN.rate_per_s < MEDIA.rate_per_s
+        assert PRESIGN.burst < MEDIA.burst
+
+        lim = MemoryLimiter()
+        client = TestClient(_app(lim))
+        codes = [client.post("/api/upload/presign-put").status_code for _ in range(int(PRESIGN.burst) + 5)]
+        assert 429 in codes, "the credential-minting path had no effective ceiling"

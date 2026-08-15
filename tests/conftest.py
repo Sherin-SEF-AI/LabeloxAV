@@ -29,6 +29,11 @@ os.environ.setdefault("LBX_INTEGRATIONS__ALLOW_PRIVATE_WEBHOOK_TARGETS", "true")
 # sessions from prior runs against the live DB). Override LBX_POSTGRES__DB in CI to change the name.
 os.environ.setdefault("LBX_POSTGRES__DB", "labeloxav_test")
 
+# A rate limiter that throttles the test suite hides real failures behind 429s, and several tests
+# deliberately hammer one endpoint to prove a behaviour. Off by default here; the tests that exercise the
+# limiter turn it back on for their own duration, the same way the webhook tests re-enable the SSRF guard.
+os.environ.setdefault("LBX_RATELIMIT__ENABLED", "false")
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _provision_test_db(request):

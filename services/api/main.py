@@ -346,6 +346,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 async with get_sessionmaker()() as db:
                     u = await db.get(User, UUID(uid))
                     role = u.role if u else None
+                # Published for the rate limiter, which runs outside this middleware and would otherwise
+                # resolve identity a third time (this gate, the route dependency, and then the limiter).
+                request.state.principal_id = uid
             except Exception:  # noqa: BLE001
                 role = None
         elif authz:
@@ -399,6 +402,13 @@ app.add_middleware(
 from services.api.metrics import MetricsMiddleware  # noqa: E402
 
 app.middleware("http")(MetricsMiddleware())
+
+# A budget per caller. Registered after metrics so it is the outermost layer: a refused request should cost
+# as little as possible, and it is still counted, because a throttled scraper is exactly the traffic worth
+# seeing on a dashboard.
+from services.api.ratelimit_middleware import RateLimitMiddleware  # noqa: E402
+
+app.middleware("http")(RateLimitMiddleware())
 
 
 @app.get("/metrics")
