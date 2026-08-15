@@ -3318,6 +3318,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/workforce/{workforce_id}/return",
                           params=None, json_body=None)
 
+    def post_workforce_by_workforce_id_return_upload(self, workforce_id: str) -> Any:
+        """Submit Return Upload"""
+        return self._call("POST", f"/api/workforce/{workforce_id}/return/upload",
+                          params=None, json_body=None)
+
     def get_metrics_2(self) -> Any:
         """Metrics Endpoint"""
         return self._call("GET", f"/metrics",
@@ -3336,4 +3341,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 650 routes generated from the server schema.
+# 651 routes generated from the server schema.
