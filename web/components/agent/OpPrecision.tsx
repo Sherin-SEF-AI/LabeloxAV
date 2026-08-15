@@ -23,9 +23,11 @@ import { api } from "@/lib/api";
 // console, and this codebase has already had to clean that up once. The aggregate returns 200 with every
 // kind's state in one response, which is the same information without the noise, and one request instead of
 // one per chip.
-export type OpState = { measured: boolean; precision?: number; n?: number; reason?: string };
+export type OpState = { measured: boolean; precision?: number; n?: number; reason?: string;
+                        runs_scored?: number; excluded_runs?: number };
 
-type AggRow = { measured?: boolean; precision?: number; n?: number; reason?: string };
+type AggRow = { measured?: boolean; precision?: number; n?: number; reason?: string;
+                runs_scored?: number; excluded_runs?: number };
 
 const TTL_MS = 60_000;
 
@@ -58,8 +60,11 @@ async function loadAll(): Promise<Record<string, AggRow>> {
 export async function fetchOpState(opType: string): Promise<OpState> {
   const ops = await loadAll();
   const row = ops[opType];
-  if (!row?.measured) return { measured: false, n: row?.n, reason: row?.reason };
-  return { measured: true, precision: row.precision, n: row.n };
+  if (!row?.measured) {
+    return { measured: false, n: row?.n, reason: row?.reason, excluded_runs: row?.excluded_runs };
+  }
+  return { measured: true, precision: row.precision, n: row.n,
+           runs_scored: row.runs_scored, excluded_runs: row.excluded_runs };
 }
 
 /** For tests and for a caller that has just run an operation and wants the next read to be fresh. */
@@ -94,8 +99,14 @@ export function OpPrecisionChip({ opType }: { opType: string }) {
   }
   const p = s.precision ?? 0;
   const tone = p >= 0.9 ? "border-pass/50 text-pass" : p >= 0.7 ? "border-warn/50 text-warn" : "border-block/50 text-block";
+  // The window is part of the claim. A score over recent runs and a score over everything the operation
+  // ever did are different statements, and a chip that shows only the number lets the reader assume the
+  // wrong one.
+  const scope = s.excluded_runs
+    ? `; recent runs only (${s.excluded_runs} older runs excluded, so a fixed operation can recover)`
+    : "";
   return (
-    <span title={`measured over ${s.n} reviewed outcomes; review is not a random sample`}
+    <span title={`measured over ${s.n} reviewed outcomes; review is not a random sample${scope}`}
       className={`font-mono text-[9px] tracking-wide border ${tone} rounded px-1 leading-tight`}>
       {(p * 100).toFixed(0)}%
     </span>

@@ -65,6 +65,15 @@ OPERATION_KINDS = (
 # and a limit hit in production is a 500, not a slow query.
 ID_CHUNK = 8_000
 
+# How far back a score looks, in days.
+#
+# An operation's code changes and its old behaviour should not follow it forever. Thirty days is short enough
+# that a fix can prove itself within a working month and long enough to clear MIN_SAMPLES on an operation
+# anybody actually uses. It is a rolling window rather than a marker at the last code change because nothing
+# in the database records when an operation's behaviour changed, and inventing that link would be a guess
+# dressed as a measurement.
+WINDOW_DAYS = 30
+
 
 def _chunks(items: list, size: int) -> list[list]:
     """Split a list into batches of at most `size`, preserving order."""
@@ -72,21 +81,43 @@ def _chunks(items: list, size: int) -> list[list]:
 
 
 async def measure_operation(db, op_kind: str, *, since_ns: int | None = None,
+                            runs_since_ns: int | None = None,
                             id_chunk: int = ID_CHUNK) -> dict:
-    """Precision for one operation kind, or an explicit statement that it is not measurable yet."""
+    """Precision for one operation kind, or an explicit statement that it is not measurable yet.
+
+    `runs_since_ns` bounds which runs are scored, and it is the window that matters. An operation's score is
+    meant to answer "how right is this as it now behaves", and a run is the only record of which behaviour
+    produced an object. Without the bound a fault that has since been fixed is scored forever: `relabel`
+    moved 1,047 buses into a bus shelter in August, the ontology guard that makes that impossible landed
+    afterwards, and the 63 corrections a human made while cleaning it up sat in the denominator with no way
+    for the repaired operation to ever outvote them.
+
+    `since_ns` bounds the reviews instead, and does not solve that: the corrections to an old run arrive
+    whenever somebody gets round to cleaning up, which is exactly when a review window would count them.
+    """
     from sqlalchemy import select
 
     from db.models import AgentRun, Review
 
-    runs = (await db.execute(
+    all_runs = (await db.execute(
         select(AgentRun).where(AgentRun.kind == op_kind, AgentRun.status == "committed"))).scalars().all()
+
+    def _started(run) -> int:
+        return int((run.created_at.timestamp() if run.created_at else 0) * 1e9)
+
+    runs = all_runs if runs_since_ns is None else [r for r in all_runs if _started(r) >= runs_since_ns]
+    excluded = len(all_runs) - len(runs)
 
     # A reverted run is excluded entirely rather than counted as a miss. Reverting is a human saying "undo
     # all of this", which is a verdict on the run, not a per-object review, and mixing the two would
     # double-count the same judgement.
+    #
+    # Runs outside the window are dropped before this, so "earliest run that touched an object" means
+    # earliest among the runs being scored. An object an old run and a new run both touched carries the new
+    # run's state, so the human is ruling on the new one.
     touched: dict[str, int] = {}
     for run in runs:
-        started = int((run.created_at.timestamp() if run.created_at else 0) * 1e9)
+        started = _started(run)
         for object_id in (run.changes or {}):
             # Keep the earliest run that touched an object: a later operation's outcome should not be
             # attributed to an earlier one.
@@ -94,7 +125,11 @@ async def measure_operation(db, op_kind: str, *, since_ns: int | None = None,
             if prev is None or started < prev:
                 touched[str(object_id)] = started
     if not touched:
-        return _unmeasured(op_kind, 0, "no committed runs of this operation")
+        # "No runs" and "no runs recently" are different facts, and a reader deciding whether to trust the
+        # operation needs to know which one they are looking at.
+        why = ("no committed runs of this operation" if not excluded
+               else f"no committed runs in the window; {excluded} older runs excluded")
+        return _unmeasured(op_kind, 0, why, excluded_runs=excluded)
 
     import uuid as _uuid
 
@@ -132,7 +167,8 @@ async def measure_operation(db, op_kind: str, *, since_ns: int | None = None,
 
     n = hits + misses
     if n < MIN_SAMPLES:
-        return _unmeasured(op_kind, n, f"only {n} reviewed outcomes, {MIN_SAMPLES} needed")
+        return _unmeasured(op_kind, n, f"only {n} reviewed outcomes, {MIN_SAMPLES} needed",
+                           excluded_runs=excluded)
 
     precision = hits / n
     return {
@@ -147,21 +183,35 @@ async def measure_operation(db, op_kind: str, *, since_ns: int | None = None,
         "misses": misses,
         "objects_touched": len(touched),
         "reviewed_fraction": round(n / len(touched), 4),
-        "dataset_slice": "reviewed outcomes after the operation ran",
+        "runs_scored": len(runs),
+        "excluded_runs": excluded,
+        "dataset_slice": ("reviewed outcomes after the operation ran"
+                          if not excluded else
+                          f"reviewed outcomes after the operation ran, over the {len(runs)} runs in the "
+                          f"window ({excluded} older runs excluded)"),
         "caveat": ("precision over reviewed outcomes only; objects reach review because something drew "
                    "attention to them, so this is not a random sample of the operation's output"),
     }
 
 
-def _unmeasured(op_kind: str, n: int, why: str) -> dict:
-    return {"op_type": op_kind, "measured": False, "precision": None, "recall": None, "n": n, "reason": why}
+def _unmeasured(op_kind: str, n: int, why: str, *, excluded_runs: int = 0) -> dict:
+    return {"op_type": op_kind, "measured": False, "precision": None, "recall": None, "n": n,
+            "reason": why, "excluded_runs": excluded_runs}
 
 
-async def measure_all(db) -> dict:
-    """Every operation kind, measured or explicitly not."""
+async def measure_all(db, *, window_days: int | None = WINDOW_DAYS) -> dict:
+    """Every operation kind, measured or explicitly not, over the recent window.
+
+    `window_days=None` restores the all-time view, which is the right answer for an audit of what an
+    operation has ever done and the wrong one for a chip that is supposed to say whether to trust it today.
+    """
+    from core.timebase import now_ns
+
+    runs_since_ns = None if window_days is None else now_ns() - int(window_days) * 86_400 * 1_000_000_000
     out = {}
     for kind in OPERATION_KINDS:
-        out[kind] = await measure_operation(db, kind)
+        out[kind] = await measure_operation(db, kind, runs_since_ns=runs_since_ns)
     measured = sum(1 for v in out.values() if v.get("measured"))
-    log.info("op_precision.measured", kinds=len(OPERATION_KINDS), measured=measured)
+    log.info("op_precision.measured", kinds=len(OPERATION_KINDS), measured=measured,
+             window_days=window_days)
     return out

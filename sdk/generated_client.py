@@ -1088,15 +1088,15 @@ class LabeloxClient:
         return self._call("GET", f"/api/errordetect/summary",
                           params=None, json_body=None)
 
-    def get_eval_operations(self) -> Any:
+    def get_eval_operations(self, window_days: Any | None = 30) -> Any:
         """Operations"""
         return self._call("GET", f"/api/eval/operations",
-                          params=None, json_body=None)
+                          params={"window_days": window_days}, json_body=None)
 
-    def get_eval_operations_by_op_type_latest(self, op_type: str) -> Any:
+    def get_eval_operations_by_op_type_latest(self, op_type: str, window_days: Any | None = 30) -> Any:
         """Operation Latest"""
         return self._call("GET", f"/api/eval/operations/{op_type}/latest",
-                          params=None, json_body=None)
+                          params={"window_days": window_days}, json_body=None)
 
     def post_eval_tracking(self, gold_id: str, run_id: str, iou_thr: float | None = 0.5) -> Any:
         """Score Tracking"""
