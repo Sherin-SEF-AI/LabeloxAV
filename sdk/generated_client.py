@@ -2488,6 +2488,26 @@ class LabeloxClient:
         return self._call("POST", f"/api/ontology/classes",
                           params=None, json_body=body)
 
+    def post_ontology_classes_merge(self, body: Any = None) -> Any:
+        """Merge Classes"""
+        return self._call("POST", f"/api/ontology/classes/merge",
+                          params=None, json_body=body)
+
+    def post_ontology_classes_rename(self, body: Any = None) -> Any:
+        """Rename Class"""
+        return self._call("POST", f"/api/ontology/classes/rename",
+                          params=None, json_body=body)
+
+    def post_ontology_classes_retire(self, body: Any = None) -> Any:
+        """Retire Classes"""
+        return self._call("POST", f"/api/ontology/classes/retire",
+                          params=None, json_body=body)
+
+    def post_ontology_merges_by_run_id_revert(self, run_id: str) -> Any:
+        """Revert Merge Run"""
+        return self._call("POST", f"/api/ontology/merges/{run_id}/revert",
+                          params=None, json_body=None)
+
     def get_oraclyx_board(self) -> Any:
         """Board"""
         return self._call("GET", f"/api/oraclyx/board",
@@ -3361,4 +3381,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 655 routes generated from the server schema.
+# 659 routes generated from the server schema.
