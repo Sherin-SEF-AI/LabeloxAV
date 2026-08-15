@@ -82,6 +82,8 @@ import type {
   BoardCell,
   IssueRow,
   ScorecardRow,
+  ScorecardRowFull,
+  ScorecardsFull,
   ExplorePredicate,
   Facets,
   ProjectionRow,
@@ -1022,6 +1024,11 @@ export const api = {
     Object.entries(q).forEach(([k, v]) => { if (v) p.set(k, String(v)); });
     return get<{ issues: IssueRow[] }>(`/api/labelops/issues?${p.toString()}`);
   },
+  // People and vendors in one table, with the per-class record. The vendor half surfaces workforce_rating,
+  // which has been computed since it was written and rendered on no page in this app.
+  lopScorecardsFull: (confidence = 0.95) =>
+    get<ScorecardsFull>(`/api/labelops/scorecards/full?confidence=${confidence}`),
+  lopMyScorecard: () => get<ScorecardRowFull>("/api/labelops/scorecards/me"),
   lopCreateIssue: (body: Record<string, unknown>) => post<IssueRow>("/api/labelops/issues", body),
   lopIssue: (issueId: string) => get<IssueRow>(`/api/labelops/issues/${issueId}`),
   lopComment: (issueId: string, body: string) =>

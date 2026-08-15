@@ -148,6 +148,39 @@ export type ScorecardRow = {
   jobs: number; honeypot_accuracy: number | null;
 };
 
+// A rate with its uncertainty. Every rate on a scorecard carries one, because three right out of three is
+// 1.0 and means very little: `proven` is what separates "good" from "unchecked".
+export type Rate = {
+  p: number | null; lo: number; hi: number; n: number; half_width: number;
+  proven: boolean; note: string | null;
+};
+
+export type ClassRate = Rate & { class_name: string; judged: number; correct: number };
+
+export type ScorecardRowFull = ScorecardRow & {
+  kind: "person";
+  judged: number;
+  accuracy: Rate;
+  per_class: ClassRate[];
+  agreement: { frames_compared: number; mean_disagreements: number } | null;
+  detail?: string;
+};
+
+export type VendorScorecard = {
+  kind: "vendor"; workforce_id: string; name: string; active: boolean;
+  capabilities: Record<string, unknown>; min_honeypot_accuracy: number;
+  batch: {
+    decided?: number; accepted?: number; rejected?: number;
+    accept_rate?: Rate; proven?: boolean; routing_weight?: number; note?: string | null;
+  };
+  judged: number; accuracy: Rate; per_class: ClassRate[];
+};
+
+export type ScorecardsFull = {
+  people: ScorecardRowFull[]; vendors: VendorScorecard[];
+  confidence: number; min_judged: number; caveat: string; judged_total: number;
+};
+
 // ---- Explore workspace (embeddings map, facets, tags, saved views, eval drill-down) ----
 
 // The predicate is the same shape a CurationSlice stores, so a filter built in the explorer saves as a

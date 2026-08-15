@@ -1953,6 +1953,16 @@ class LabeloxClient:
         return self._call("GET", f"/api/labelops/scorecards",
                           params={"project_id": project_id}, json_body=None)
 
+    def get_labelops_scorecards_full(self, confidence: float | None = 0.95) -> Any:
+        """Full Scorecards"""
+        return self._call("GET", f"/api/labelops/scorecards/full",
+                          params={"confidence": confidence}, json_body=None)
+
+    def get_labelops_scorecards_me(self) -> Any:
+        """My Scorecard"""
+        return self._call("GET", f"/api/labelops/scorecards/me",
+                          params=None, json_body=None)
+
     def post_labelops_tasks(self, body: Any = None) -> Any:
         """Create Task"""
         return self._call("POST", f"/api/labelops/tasks",
@@ -3351,4 +3361,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 653 routes generated from the server schema.
+# 655 routes generated from the server schema.
