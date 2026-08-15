@@ -20,6 +20,8 @@ One ontology, 170 classes, tuned for the chaos that global datasets never saw: a
 
 ![Fleet analytics](docs/screenshots/01-analytics.png)
 
+<img width="1914" height="938" alt="image" src="https://github.com/user-attachments/assets/21173515-1251-473d-96cd-58cab202ebef" />
+
 ---
 
 ## The interface
