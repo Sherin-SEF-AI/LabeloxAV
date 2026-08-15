@@ -77,6 +77,11 @@ class Session(Base):
     # The domain pack this session belongs to (routes it to its ontology/scene model/etc). Nullable with an
     # 'av' server default so every pre-pack row backfills to the AV pack.
     pack_id: Mapped[str | None] = mapped_column(String(32), server_default="av")
+    # The tenant this drive belongs to. Frames, tracks and objects reach it through session_id, which is why
+    # this is the only column in the corpus spine: three tables inherit their tenant from one hop that is
+    # already indexed, rather than from a backfill of 576,393 rows.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("label_project.project_id", ondelete="SET NULL"))
     # Nullable since SEC-M2: a static-camera (CCTV) session has no ego vehicle. The AV ingestion still sets it.
     vehicle_id: Mapped[str | None] = mapped_column(String(64))
     start_ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
