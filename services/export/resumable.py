@@ -126,6 +126,7 @@ async def run_resumable_export(db: AsyncSession, job_id: str, *, resume: bool = 
     """
     from db.models import ExportJob
     from services.export.dataset import SliceSpec, fetch_records, validate_formats
+    from services.export.splits import assign_splits
 
     jid = uuid.UUID(str(job_id))
     job = await db.get(ExportJob, jid)
@@ -141,6 +142,13 @@ async def run_resumable_export(db: AsyncSession, job_id: str, *, resume: bool = 
     await db.commit()
 
     records = await fetch_records(spec)
+    # The chunk files this path writes are built from the records directly, so a split stamped only inside
+    # export_dataset would be invisible to a resumed export.
+    if records:
+        assignment = assign_splits(records, val_frac=spec.val_frac, test_frac=spec.test_frac,
+                                   group_by=spec.split_group_by, seed=spec.split_seed or spec.name)
+        for r in records:
+            r.split = assignment.get(str(r.frame_id), "train")
     if not records:
         await _set_progress(db, jid, progress=1.0, checkpoint=checkpoint, status="done")
         return {"job_id": job_id, "records": 0, "detail": "the slice selected no objects"}

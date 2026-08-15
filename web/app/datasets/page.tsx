@@ -41,6 +41,11 @@ function DatasetsBody() {
   // the File > Export menu deep-links a target format; preselect it alongside the lossless sidecar
   const [fmts, setFmts] = useState<string[]>(
     qsFormat ? [qsFormat, "parquet"] : ["coco", "parquet"]);
+  // Zero is no split, which is what every export did before this existed. A delivered dataset with no
+  // split gets split by whoever receives it, and the obvious way to do that (per frame) is the wrong way:
+  // consecutive dashcam frames are near-duplicates, so it puts the same road on both sides of the line.
+  const [valFrac, setValFrac] = useState(0);
+  const [testFrac, setTestFrac] = useState(0);
 
   async function refresh() {
     try {
@@ -64,7 +69,10 @@ function DatasetsBody() {
 
   async function runExport() {
     try {
-      await api.startExport({ name, states: states.split(",").map((s) => s.trim()).filter(Boolean), formats: fmts });
+      await api.startExport({
+        name, states: states.split(",").map((s) => s.trim()).filter(Boolean), formats: fmts,
+        val_frac: valFrac, test_frac: testFrac, split_group_by: "session",
+      });
       setMsg("export queued - watch it on Jobs, it appears here when sealed");
       refresh();
     } catch (e) {
@@ -102,6 +110,27 @@ function DatasetsBody() {
                 ))}
               </div>
             </div>
+          </div>
+          <div className="flex flex-wrap items-end gap-3 mt-3">
+            {/* Split at the session boundary. A session is one drive, so holding out whole sessions is
+                what keeps the same road out of both train and val. */}
+            <label className="flex flex-col gap-1">
+              <span className="text-ink-3 uppercase text-[11px]">val %</span>
+              <input type="number" min={0} max={90} step={5} value={Math.round(valFrac * 100)}
+                onChange={(e) => setValFrac(Math.max(0, Math.min(90, Number(e.target.value))) / 100)}
+                className="bg-panel border border-line px-2 py-1 text-ink w-20 font-mono text-xs" />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-ink-3 uppercase text-[11px]">test %</span>
+              <input type="number" min={0} max={90} step={5} value={Math.round(testFrac * 100)}
+                onChange={(e) => setTestFrac(Math.max(0, Math.min(90, Number(e.target.value))) / 100)}
+                className="bg-panel border border-line px-2 py-1 text-ink w-20 font-mono text-xs" />
+            </label>
+            <span className="font-mono text-[10px] text-ink-3 max-w-[260px]">
+              {valFrac || testFrac
+                ? "held out by session, so no drive appears in two splits"
+                : "no split: the whole slice is delivered as train"}
+            </span>
           </div>
           <div className="flex items-center gap-3 mt-3">
             <button onClick={runExport} disabled={!fmts.length}

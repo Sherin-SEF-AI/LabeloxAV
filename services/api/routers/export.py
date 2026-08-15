@@ -31,6 +31,10 @@ async def export(payload: ExportIn):
         min_conf=payload.min_conf,
         formats=payload.formats,
         limit=payload.limit,
+        val_frac=payload.val_frac,
+        test_frac=payload.test_frac,
+        split_group_by=payload.split_group_by,
+        split_seed=payload.split_seed,
     )
     result = await export_dataset(spec)
     result["reimport_sanity"] = reimport_sanity(Path(result["out_dir"]))

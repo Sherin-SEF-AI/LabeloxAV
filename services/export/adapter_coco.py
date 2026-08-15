@@ -59,6 +59,13 @@ def write_coco(
                 "ts_ns": r.ts_ns,
                 "session_id": str(r.session_id),
                 "cam_id": r.cam_id,
+                # On the image, not on each annotation: a split is a fact about the frame, and N copies
+                # per frame is a file that can contradict itself.
+                "split": r.split,
+                # The bare basename is not unique across sessions (two drives both have 000001.jpg), so a
+                # consumer keying on file_name silently merges them. Kept for COCO compatibility, with the
+                # unambiguous name beside it.
+                "frame_id": str(r.frame_id),
             }
         x1, y1, x2, y2 = r.bbox
         w, h = max(0.0, x2 - x1), max(0.0, y2 - y1)

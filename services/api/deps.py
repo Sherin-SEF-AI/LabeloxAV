@@ -272,6 +272,12 @@ class ExportIn(BaseModel):
     min_conf: float | None = None
     formats: list[str] = ["coco", "parquet"]
     limit: int | None = None
+    # Train/val/test, split at a boundary that does not leak. Zero means no split, which is what an
+    # existing caller gets and why their exports are unchanged.
+    val_frac: float = 0.0
+    test_frac: float = 0.0
+    split_group_by: str = "session"
+    split_seed: str | None = None
 
 
 class GoldSealIn(BaseModel):

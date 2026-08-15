@@ -1068,7 +1068,8 @@ export const api = {
     post<{ started: boolean }>("/api/curation/embed" + (session_id ? `?session_id=${session_id}` : ""), {}),
   datasets: () => get<DatasetRow[]>("/api/datasets"),
   dataset: (id: string) => get<DatasetDetail>(`/api/datasets/${id}`),
-  startExport: (body: { name: string; states?: string[]; class_names?: string[]; cities?: string[]; session_id?: string; formats: string[] }) =>
+  startExport: (body: { name: string; states?: string[]; class_names?: string[]; cities?: string[]; session_id?: string; formats: string[];
+                        val_frac?: number; test_frac?: number; split_group_by?: string; split_seed?: string }) =>
     post<{ job_id: string; status: string }>("/api/datasets/export", body),
   jobs: () => get<JobRow[]>("/api/jobs"),
   ingestProgress: () => get<{ active: boolean; finished: boolean; done: number; total: number; current: string | null; frames: number }>("/api/ingest/progress"),

@@ -96,9 +96,17 @@ async def test_export_seals_commit_and_passes_reimport():
     assert any(len(a["segmentation"]) > 0 for a in coco["annotations"])
     # extension block preserves attributes COCO cannot natively carry
     assert any(a["labelox"]["attributes"].get("overload") is True for a in coco["annotations"])
-    # YOLO labels written
+    # YOLO labels written, now under their split. An export that asked for no split is all train, which is
+    # why this is labels/train rather than labels/ as it was before splits existed.
     assert (out_dir / "data.yaml").exists()
-    assert list((out_dir / "labels").glob("*.txt"))
+    assert list((out_dir / "labels" / "train").glob("*.txt"))
+    assert (out_dir / "train.txt").exists()
+
+    # And the split manifest, which is written even when nothing was split so a reader never has to infer
+    # from its absence whether a split was considered.
+    splits = json.loads((out_dir / "splits.json").read_text())
+    assert splits["frames"]["train"] > 0 and splits["frames"]["val"] == 0
+    assert splits["groups_shared_between_splits"] == []
 
     report = reimport_sanity(out_dir)
     assert report["ok"] is True
