@@ -131,10 +131,14 @@ jobs:
       # CPU torch + imagehash so the suite actually runs the accel/embedding/dedup paths in CI instead of
       # erroring on a missing import. The runner has no GPU, so the CUDA (cu128) wheels the ml extra pins are
       # wrong here; the CPU wheel satisfies `import torch` and the modules that only check torch is present.
+      # `uv` comes from setup-uv and lives on PATH; it is never installed into the venv, so `.venv/bin/uv`
+      # has never existed. This step therefore exited 127 before pytest was ever reached, which meant the
+      # test job had not run at all across every red build on this branch. --python points uv at the venv
+      # it should install into, which is what the old path was trying to express.
       - name: Install CPU torch + imagehash for the test suite
         run: |
-          .venv/bin/uv pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cpu
-          .venv/bin/uv pip install imagehash==4.3.1
+          uv pip install --python .venv/bin/python torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cpu
+          uv pip install --python .venv/bin/python imagehash==4.3.1
 
       - name: Start infra (postgis+pgvector, minio, redis, redpanda)
         run: make up
