@@ -107,6 +107,33 @@ async def test_video_ingest(tmp_path):
         assert frame.quality > 0.0
 
 
+def _scene_frame(i: int) -> np.ndarray:
+    """A frame that is an image rather than static.
+
+    The fixture used `np.random`, and random noise has enormous Laplacian variance, which is exactly what
+    the ingest quality gate rejects as a corrupted frame. It survived here only because JPEG compression
+    smooths noise and this machine's OpenCV build happened to smooth it just past the threshold; a CI runner
+    with a different build landed on the other side and every frame was rejected. Three sibling tests carry
+    an xfail for the same root cause.
+
+    A gradient with edges in it is deterministic on any build and sits in the middle of the gate's window
+    rather than at either end. The window is narrow at both ends and both ends are real: a plain gradient
+    measures 50 and is rejected as blurred, random static measures 24,000 and is rejected as corrupted, and
+    the frame below measures around 840 against a floor of 60 and a ceiling of 8,000.
+    """
+    y = np.linspace(60, 200, 480, dtype=np.uint8)[:, None]
+    img = np.repeat(np.repeat(y, 640, axis=1)[:, :, None], 3, axis=2)
+    # Converging lines: the edge energy a lane-marked road actually carries, and the reason this passes
+    # the sharpness floor that a plain gradient does not.
+    for k in range(14):
+        x = 20 + k * 44
+        cv2.line(img, (x, 120), (x + 18, 460), (40, 40, 45), 3)
+    cv2.rectangle(img, (100 + i, 200), (260 + i, 380), (90, 90, 95), -1)
+    cv2.circle(img, (480, 150), 40, (210, 205, 190), -1)
+    cv2.putText(img, "LBX", (300, 440), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (230, 230, 230), 3)
+    return img
+
+
 @requires_infra
 async def test_mcap_ingest(tmp_path):
     foxglove = pytest.importorskip("foxglove_schemas_protobuf")
@@ -115,13 +142,12 @@ async def test_mcap_ingest(tmp_path):
     from mcap_protobuf.writer import Writer
 
     mcap_path = tmp_path / "session.mcap"
-    rng = np.random.default_rng(11)
     start = now_ns()
 
     with open(mcap_path, "wb") as fh, Writer(fh) as writer:
         for i in range(20):
             ts = start + seconds_to_ns(i / 10.0)
-            img = rng.integers(40, 220, size=(480, 640, 3), dtype=np.uint8)
+            img = _scene_frame(i)
             ok, buf = cv2.imencode(".jpg", img)
             assert ok
             ci = CompressedImage()

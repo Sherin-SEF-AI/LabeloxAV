@@ -90,15 +90,23 @@ def test_low_confidence_routes_to_annotate():
     fid = uuid.uuid4()
     # Below review_low a pre-label is too weak to even review, so it routes to annotate.
     #
-    # The threshold is stated here rather than read from settings. This test used to assert against
-    # `get_settings().gate`, whose review_low is 0.08 on this machine because a gitignored `.env` says so
-    # and 0.60 everywhere else, so it passed locally and failed the moment CI ran it for the first time. A
-    # test of where a band boundary lies has to carry the boundary it is testing.
+    # Both the threshold and the confidence are stated here rather than inherited from the environment.
+    # This test used to read `get_settings().gate`, whose review_low is 0.08 on this machine because a
+    # gitignored `.env` says so and 0.60 elsewhere; and it relied on the calibrator mapping a raw 0.05 to
+    # ~0, which happens only when the fitted isotonic curve is present in object storage. On a fresh CI
+    # runner neither held, so a test of the gate was really testing which artifacts a machine happened to
+    # have. The object still comes from a real fusion so its shape is real; only the two numbers the claim
+    # is about are pinned.
     cfg = get_settings().gate.model_copy(update={"review_low": 0.08})
     a = RawDetection("path_a_yolo26", (100, 100, 130, 130), 0.05, "yolo11l.pt", "object_fallback", 45)
     fo = eng.fuse_frame(fid, [a], [])[0]
-    assert fo.obj.conf < cfg.review_low, "the fixture no longer sits below the band being tested"
-    assert gate_object(fo.obj, get_ontology(), cfg) == GateState.annotate
+    weak = fo.obj.model_copy(update={"conf": 0.01})
+    assert weak.conf < cfg.review_low
+    assert gate_object(weak, get_ontology(), cfg) == GateState.annotate
+
+    # And the band boundary itself, which is the actual claim: at review_low it is review, below it annotate.
+    at_band = fo.obj.model_copy(update={"conf": cfg.review_low})
+    assert gate_object(at_band, get_ontology(), cfg) != GateState.annotate
 
 
 # --- DB: provenance walk -----------------------------------------------------
