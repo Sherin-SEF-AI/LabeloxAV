@@ -140,6 +140,13 @@ jobs:
           uv pip install --python .venv/bin/python torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cpu
           uv pip install --python .venv/bin/python imagehash==4.3.1
 
+      # The PII weights are 5.5 MB total (a 228 KB YuNet face model and a 5.3 MB plate model) and they are
+      # what makes the DPDPA gate testable. Without them the anonymizer refuses to construct, by design, and
+      # ingest fails: the one control that keeps unredacted faces out of the object store would go untested
+      # on the machine that gates merges, which is the worst place to skip it.
+      - name: Fetch the PII detector weights so the DPDPA gate is exercised
+        run: make pii-models
+
       - name: Start infra (postgis+pgvector, minio, redis, redpanda)
         run: make up
 

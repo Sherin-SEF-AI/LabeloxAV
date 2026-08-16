@@ -24,9 +24,14 @@ _HAS_ORT = importlib.util.find_spec("onnxruntime") is not None
 requires_ort = pytest.mark.skipif(not _HAS_ORT, reason="edge extra not installed")
 
 
+@requires_ort
 def test_onnx_backends_are_installable_and_detected():
     # The regression this guards: these two dropping out of the dependency set again would silently turn the
     # whole subsystem back into unreachable code, with the gate dutifully reporting it as unavailable.
+    #
+    # The skipif was written for this and never applied to it, so on a runner that deliberately does not
+    # install the edge extra the test asserted that an uninstalled package was installed. It is the first
+    # thing CI reported when CI first ran.
     targets = available_targets()
     assert targets["onnx"] is True
     assert targets["onnxruntime"] is True

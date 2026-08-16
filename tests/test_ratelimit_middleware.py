@@ -50,24 +50,36 @@ def _app(limiter: MemoryLimiter) -> FastAPI:
     return app
 
 
+@pytest.fixture
+def one_request_budget(monkeypatch):
+    """Shrink the media budget to a single request for the duration of a test.
+
+    The first version of these tests pre-spent a real bucket at `now=0.0` and relied on the refill between
+    then and `time.monotonic()` being capped at the burst. That silently depends on the machine's uptime:
+    large on a workstation that has been on for days, near zero on a fresh CI runner, where the bucket had
+    not refilled and even the FIRST request was refused. Shrinking the budget instead is deterministic
+    everywhere.
+    """
+    from services.api import ratelimit_middleware as mw
+
+    tiny = Budget(rate_per_s=0.001, burst=1.0)
+    monkeypatch.setattr(mw, "classify", lambda path, method: ("media", tiny, 1.0))
+    return tiny
+
+
 class TestItIsActuallyWired:
-    def test_a_caller_over_budget_gets_429(self, limiting):
-        lim = MemoryLimiter()
-        # A budget of one, so the second request is over it. The point is the wiring, not the arithmetic.
-        lim.check("addr:testclient", "media", Budget(rate_per_s=0.001, burst=1.0), 1.0, now=0.0)
-        client = TestClient(_app(lim))
+    def test_a_caller_over_budget_gets_429(self, limiting, one_request_budget):
+        client = TestClient(_app(MemoryLimiter()))
 
         first = client.get("/api/frames/abc/image")
         second = client.get("/api/frames/abc/image")
         assert first.status_code == 200
         assert second.status_code == 429, "the limiter is not in the request path"
 
-    def test_a_refusal_says_when_to_come_back(self, limiting):
+    def test_a_refusal_says_when_to_come_back(self, limiting, one_request_budget):
         """A 429 without Retry-After is an invitation to retry immediately, which turns a limit into a
         busy loop."""
-        lim = MemoryLimiter()
-        lim.check("addr:testclient", "media", Budget(rate_per_s=0.001, burst=1.0), 1.0, now=0.0)
-        client = TestClient(_app(lim))
+        client = TestClient(_app(MemoryLimiter()))
         client.get("/api/frames/abc/image")
         r = client.get("/api/frames/abc/image")
 
@@ -100,9 +112,7 @@ class TestWhatItMustNotThrottle:
         before = s.ratelimit.enabled
         s.ratelimit.enabled = False
         try:
-            lim = MemoryLimiter()
-            lim.check("addr:testclient", "media", Budget(rate_per_s=0.001, burst=1.0), 1.0, now=0.0)
-            client = TestClient(_app(lim))
+            client = TestClient(_app(MemoryLimiter()))
             for _ in range(10):
                 assert client.get("/api/frames/abc/image").status_code == 200
         finally:
