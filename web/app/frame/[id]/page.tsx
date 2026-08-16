@@ -290,7 +290,8 @@ export default function FrameEditor() {
       setLoadError(null);
       try {
         const [m, objs, o] = await Promise.all([
-          api.frame(id), api.frameObjects(id, jobParam ?? undefined), api.ontology()]);
+          api.frame(id, jobParam ?? undefined), api.frameObjects(id, jobParam ?? undefined),
+          api.ontology()]);
         if (!live) return;
         setMeta(m);
         setOnto(o);
@@ -1000,8 +1001,12 @@ export default function FrameEditor() {
   const gotoFrame = useCallback(async (fid: string | null) => {
     if (!fid) return;
     if (isDirty(st)) await save();  // flush before leaving so no edit is lost
-    router.push(`/frame/${fid}`);
-  }, [router, st, save]);
+    // The job travels with the frame. Dropping it here was silent and total: blind mode ended so the
+    // pre-labels reappeared, and every box drawn from that point carried no job and no annotator, so the
+    // agreement pass saw nothing for those frames. One keypress after opening a replica job, the feature
+    // had stopped working and said nothing.
+    router.push(jobParam ? `/frame/${fid}?job=${jobParam}` : `/frame/${fid}`);
+  }, [router, st, save, jobParam]);
 
   // ---- keypoint pose tool + object clipboard ----
   const [kpDraft, setKpDraft] = useState<number[][] | null>(null);

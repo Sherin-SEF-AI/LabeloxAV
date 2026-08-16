@@ -543,7 +543,10 @@ export const api = {
   segment: (frame_id: string, point: number[]) =>
     post<SegmentResult>("/api/segment", { frame_id, points: [point], labels: [1] }),
   // Frame-centric editor
-  frame: (id: string) => get<FrameMeta>(`/api/frames/${id}`),
+  // With a job, prev/next stay inside that job's frames rather than walking the session by capture time
+  // and out of the assignment.
+  frame: (id: string, jobId?: string) =>
+    get<FrameMeta>(`/api/frames/${id}${jobId ? `?job_id=${jobId}` : ""}`),
   // The job, when the annotator reached this frame through one: a blind replica job is served only its own
   // labels, so two annotators cannot correct the same machine proposals and call the result agreement.
   frameObjects: (id: string, jobId?: string) =>

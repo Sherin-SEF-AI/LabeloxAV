@@ -1353,10 +1353,10 @@ class LabeloxClient:
         return self._call("POST", f"/api/forgyx/thermal",
                           params=None, json_body=body)
 
-    def get_frames_by_frame_id(self, frame_id: str) -> Any:
+    def get_frames_by_frame_id(self, frame_id: str, job_id: Any | None = None) -> Any:
         """Get Frame"""
         return self._call("GET", f"/api/frames/{frame_id}",
-                          params=None, json_body=None)
+                          params={"job_id": job_id}, json_body=None)
 
     def get_frames_by_frame_id_adverse(self, frame_id: str) -> Any:
         """List Adverse"""

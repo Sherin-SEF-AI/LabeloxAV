@@ -400,18 +400,41 @@ async def frame_filmstrip(frame_id: str, span: int = 12, db: AsyncSession = Depe
 
 
 @router.get("/frames/{frame_id}")
-async def get_frame(frame_id: str, db: AsyncSession = Depends(db_session)):
-    """Frame meta for the editor: dimensions, image url, object count, and prev/next frame in the
-    session (by ts_ns) for keyboard frame navigation."""
+async def get_frame(frame_id: str, job_id: str | None = None,
+                    db: AsyncSession = Depends(db_session)):
+    """Frame meta for the editor: dimensions, image url, object count, and prev/next for keyboard
+    navigation.
+
+    With a job, prev/next stay inside that job's frames. Without one they walk the session by capture time,
+    which is the right answer for somebody reviewing a drive and the wrong one for somebody working an
+    assignment: session order walks straight out of the job at its first or last frame, and on a replica
+    job that means leaving blind mode and drawing boxes the agreement pass will never see.
+    """
     frame = await db.get(Frame, UUID(frame_id))
     if frame is None:
         raise HTTPException(404, "frame not found")
-    prev = (await db.execute(
-        select(Frame.frame_id).where(Frame.session_id == frame.session_id, Frame.ts_ns < frame.ts_ns)
-        .order_by(Frame.ts_ns.desc()).limit(1))).scalar_one_or_none()
-    nxt = (await db.execute(
-        select(Frame.frame_id).where(Frame.session_id == frame.session_id, Frame.ts_ns > frame.ts_ns)
-        .order_by(Frame.ts_ns.asc()).limit(1))).scalar_one_or_none()
+
+    job_frames: list[str] | None = None
+    if job_id:
+        from db.models import LabelJob
+
+        job = await db.get(LabelJob, UUID(job_id))
+        if job is not None:
+            job_frames = [str(f) for f in (job.frame_ids or [])]
+
+    if job_frames and str(frame.frame_id) in job_frames:
+        # The job's own order, which is the order its frames were assigned in, not capture order: a job
+        # drawn from an explorer predicate is not contiguous in time and its frames may span sessions.
+        i = job_frames.index(str(frame.frame_id))
+        prev = UUID(job_frames[i - 1]) if i > 0 else None
+        nxt = UUID(job_frames[i + 1]) if i + 1 < len(job_frames) else None
+    else:
+        prev = (await db.execute(
+            select(Frame.frame_id).where(Frame.session_id == frame.session_id, Frame.ts_ns < frame.ts_ns)
+            .order_by(Frame.ts_ns.desc()).limit(1))).scalar_one_or_none()
+        nxt = (await db.execute(
+            select(Frame.frame_id).where(Frame.session_id == frame.session_id, Frame.ts_ns > frame.ts_ns)
+            .order_by(Frame.ts_ns.asc()).limit(1))).scalar_one_or_none()
     n = (await db.execute(select(func.count()).select_from(Object).where(Object.frame_id == frame.frame_id))).scalar_one()
     # The dominant annotation source on this frame, so the editor can say plainly whether these labels are
     # imported from a public dataset (Mapillary / IDD / BDD) or produced in-app.
