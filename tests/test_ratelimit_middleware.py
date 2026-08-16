@@ -122,3 +122,57 @@ class TestTheBudgetsThemselves:
         client = TestClient(_app(lim))
         codes = [client.post("/api/upload/presign-put").status_code for _ in range(int(PRESIGN.burst) + 5)]
         assert 429 in codes, "the credential-minting path had no effective ceiling"
+
+
+class TestItRunsAfterAuth:
+    """The bug this class exists for took the whole application down on one page load.
+
+    Middleware added last is outermost, so registering the limiter last put it *before* AuthMiddleware.
+    `request.state.principal_id` did not exist yet, every request fell back to keying on the client address,
+    and behind the Next proxy that is one address for every user of the app. One person opening a frame
+    exhausted the budget for everybody, and the editor issues about seventy requests to open a single frame.
+    """
+
+    def test_the_limiter_is_registered_before_auth_so_it_sits_inside_it(self):
+        from services.api.main import app
+        from services.api.main import AuthMiddleware
+
+        names = [m.cls.__name__ for m in app.user_middleware]
+        # user_middleware is outermost-first, so the limiter must appear AFTER auth in this list.
+        auth_at = next(i for i, n in enumerate(names) if n == AuthMiddleware.__name__)
+        limiter_at = next(
+            i for i, m in enumerate(app.user_middleware)
+            if "RateLimit" in repr(getattr(m, "kwargs", {}).get("dispatch", "")) or "RateLimit" in repr(m))
+        assert limiter_at > auth_at, (
+            "the limiter runs before auth, so it cannot see who the caller is and keys every user of the "
+            "app onto one proxy address")
+
+    def test_an_authenticated_request_is_keyed_by_the_person_not_the_address(self, limiting):
+        """Behind a proxy, keying by address is keying every user together."""
+        from starlette.middleware.base import BaseHTTPMiddleware
+
+        app = FastAPI()
+
+        class FakeAuth(BaseHTTPMiddleware):
+            async def dispatch(self, request, call_next):
+                request.state.principal_id = "user-123"
+                return await call_next(request)
+
+        # Added first, so it is innermost and runs after FakeAuth, which is the real ordering.
+        app.middleware("http")(RateLimitMiddleware(limiter=MemoryLimiter()))
+        app.add_middleware(FakeAuth)
+
+        @app.get("/api/frames/{fid}/image")
+        async def image(fid: str):
+            return {"fid": fid}
+
+        r = TestClient(app).get("/api/frames/abc/image")
+        assert r.headers["X-RateLimit-Keyed-By"] == "principal"
+
+    def test_the_media_budget_covers_opening_a_frame(self, limiting):
+        """Roughly seventy requests before anybody has drawn anything: frame, objects, lanes, drivable,
+        relationships, adverse, cuboids, segmentation, dynamics, ontology, users, eleven thumbnails and a
+        crop per object."""
+        from services.api.ratelimit import MEDIA
+
+        assert MEDIA.burst >= 70, "one page load would exhaust the media budget"

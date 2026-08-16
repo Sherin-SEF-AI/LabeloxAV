@@ -26,6 +26,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
+
 # Requests per second, sustained, and how much burst is tolerated above it. The burst is what makes an
 # editor opening a frame with forty crops feel instant while a loop pulling the same route flat out does not.
 @dataclass(frozen=True)
@@ -38,20 +39,30 @@ class Budget:
             raise ValueError("a budget must allow something through")
 
 
+# These are sized against what the application actually does, not against what a limiter looks tidy at.
+# Opening ONE frame in the editor issues the frame, its objects, lanes, drivable, relationships, adverse,
+# cuboids, segmentation, dynamics, the ontology, the users list, eleven filmstrip thumbnails and a crop per
+# object: roughly seventy requests before anybody has drawn anything. A budget that reads as generous on
+# paper is a broken editor in practice, and the first version of this file proved it.
+#
+# The threat being bounded is bulk exfiltration of frames of Indian roads, not a person working quickly. A
+# reviewer peaks at a frame or two a second; an unbounded loop goes as fast as the disk. Sustained rates
+# here sit far above the first and far below the second.
+
 # The default budget for an authenticated caller doing ordinary work.
-DEFAULT = Budget(rate_per_s=20.0, burst=60.0)
+DEFAULT = Budget(rate_per_s=50.0, burst=200.0)
 
 # Media reads: an editor opens a frame and pulls its crops in a burst, then goes quiet while somebody looks
-# at it. Generous burst, modest sustained rate, which is the shape of a person working and not the shape of
-# a loop.
-MEDIA = Budget(rate_per_s=8.0, burst=90.0)
+# at it. The burst has to cover a whole page load with room for a reviewer paging quickly through frames.
+MEDIA = Budget(rate_per_s=30.0, burst=300.0)
 
-# Minting a presigned URL hands out a credential that outlives the request, so this is the one budget that
-# is tight on burst as well as rate.
-PRESIGN = Budget(rate_per_s=1.0, burst=10.0)
+# Minting a presigned URL hands out a credential that outlives the request, so this stays the tightest
+# budget. The burst covers a multipart upload's parts, which legitimately need one presign each.
+PRESIGN = Budget(rate_per_s=5.0, burst=60.0)
 
-# An unauthenticated caller gets very little: enough to log in and to load a page that says so.
-ANONYMOUS = Budget(rate_per_s=2.0, burst=15.0)
+# An unauthenticated caller gets enough to load the login page and sign in, and not enough to walk the
+# media routes.
+ANONYMOUS = Budget(rate_per_s=5.0, burst=40.0)
 
 
 @dataclass
