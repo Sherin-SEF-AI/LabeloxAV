@@ -131,7 +131,7 @@ entries that remain here are ones where a specific piece of hardware or a paid r
 
 | Gap | What it needs |
 | --- | --- |
-| Notifications do not exist: issue comments, job assignments, kill-switch, drift, and SLO breaches are all silent | A notification table, an API, a bell in the shell, and emitters at each event site. |
+| ~~Notifications do not exist~~ **Done.** `services/notify.py`, the `notification` table, the routes, and the bell in the shell all exist, with emitters at the issue, job-assignment and promotion sites. | Nothing. This row is kept struck through rather than deleted because it appeared as open in two places and a reader who found the other one deserves to see it settled. |
 
 Text-to-object search and the OCR index were in this section and are now done (migration 0073). The
 outstanding part is operational, not structural: existing crops need their `siglip_vec` backfilled by
@@ -158,6 +158,6 @@ ingest.
 | Gap | The decision |
 | --- | --- |
 | No password, OAuth, OIDC, SSO, or MFA; the only credential path is admin-issued tokens and a local dev-login | Which identity model to adopt. This is the single largest blocker to a real deployment and it is a choice, not a coding task. |
-| Single-tenant by construction: no tenant column on any of ~130 tables, and `GovernanceState` is a global singleton row | Whether to be multi-tenant at all. Retrofitting a tenant boundary touches every table and every query. |
+| Single-tenant by construction. **Partly addressed**: migration 0092 put `project_id` on `session`, so frames, tracks and objects reach a tenant through one indexed hop, all 377 existing sessions are in a default project, and `services/api/tenancy.py` is the single seam that scopes a query. `GovernanceState` is still a global singleton row, and the scope is a convention until something enforces it on every read. | Whether to be multi-tenant at all, and if so whether to enforce the scope in the session layer or in Postgres row-level security. The column exists now, so this is a smaller decision than it was: what remains is enforcement and the singleton tables, not a 130-table retrofit. |
 | Authorization is three global roles by path prefix, with no per-project or per-object ACL | What the permission model should be before building it. |
 | No deployment story: compose has no api or web service, no TLS, no supervisor, and `.env.example` omits all seven required secrets | Target platform. The Dockerfiles are production-shaped; nothing composes them. |
