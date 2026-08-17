@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.logging import get_logger
 from core.storage import get_object_store
 from core.timebase import now_ns
 from db.models import Frame, Object, ObjectRelationship, Review
@@ -32,6 +33,7 @@ from services.autolabel.ontology import get_ontology
 from services.govern.audit import record as audit_record
 
 router = APIRouter()
+log = get_logger("api.objects")
 
 # Directed relationship kinds the editor offers (the India case is rider_of on a two-wheeler).
 _RELATION_KINDS = {"rider_of", "towed_by", "part_of", "member_of", "occludes"}
@@ -785,6 +787,16 @@ async def segment(payload: SegmentIn, db: AsyncSession = Depends(db_session)):
     if busy:
         raise HTTPException(503, busy)
 
+    # Shape-checked here rather than left to the model. A box of the wrong length reached SAM and came back
+    # as an unhandled 500, which reads to a caller as the segmentation service being broken rather than as
+    # their own request being malformed. `/objects/classify` beside this has always checked its box.
+    if payload.box is not None and len(payload.box) != 4:
+        raise HTTPException(400, "box must be [x1,y1,x2,y2]")
+    if payload.points and payload.labels and len(payload.labels) != len(payload.points):
+        raise HTTPException(400, "labels must have one entry per point")
+    if not payload.points and payload.box is None:
+        raise HTTPException(400, "a point or a box is required")
+
     frame = await db.get(Frame, UUID(payload.frame_id))
     if frame is None:
         raise HTTPException(404, "frame not found")
@@ -795,14 +807,34 @@ async def segment(payload: SegmentIn, db: AsyncSession = Depends(db_session)):
     try:
         return run_segment(img, points=payload.points, labels=payload.labels, box=payload.box, precise=payload.precise)
     except Exception as exc:  # noqa: BLE001
-        # On a single GPU, a running training job can consume all VRAM. Surface that cleanly (503)
-        # instead of an unhandled 500 so the UI can show a friendly "GPU busy" notice. Box-level
-        # review (accept/reject/reclassify) does not need the GPU and still works.
-        name = type(exc).__name__
-        if "OutOfMemory" in name or "GpuCapacity" in name or "CUDA" in str(exc):
-            raise HTTPException(503, "GPU busy (a training job is using the GPU). Interactive "
-                                     "segmentation is unavailable until it finishes; box review still works.")
-        raise
+        # Log first, always. This branch used to swallow the exception and answer with a sentence naming a
+        # cause it had never checked: any error whose text merely contained "CUDA" was reported to the user
+        # as "a training job is using the GPU", and nothing was written down. On a box with a free card and
+        # no training job that is a dead end, because the one fact that would explain it is gone.
+        log.exception("segment.failed", frame_id=payload.frame_id, error_type=type(exc).__name__)
+        detail = segment_failure_detail(exc, gpu_busy=bool(await gpu_busy_detail(db)))
+        if detail is None:
+            raise
+        raise HTTPException(503, detail) from exc
+
+
+def segment_failure_detail(exc: BaseException, *, gpu_busy: bool) -> str | None:
+    """What to tell a caller when interactive segmentation fails, or None to let the error through as a 500.
+
+    This used to answer every GPU-shaped failure with "a training job is using the GPU", a sentence it had
+    never checked. On a machine with an idle card and no training job that is worse than no message: it names
+    a cause, so the person reading it goes and looks for a job that does not exist, and the branch logged
+    nothing on the way past. The two cases need opposite responses (wait for the job, versus go and look at
+    the card), so the caller passes in which one is true rather than the message assuming.
+    """
+    name = type(exc).__name__
+    if not ("OutOfMemory" in name or "GpuCapacity" in name or "CUDA" in str(exc)):
+        return None
+    if gpu_busy:
+        return ("GPU busy (a training job is using the GPU). Interactive segmentation is unavailable until "
+                "it finishes; box review still works.")
+    return (f"the GPU is free, but segmentation could not use it ({name}: {str(exc)[:200]}). "
+            f"Box review still works.")
 
 
 class ClassifyIn(BaseModel):
