@@ -886,3 +886,60 @@ async def contamination_revert(body: LineageRevertIn, db: AsyncSession = Depends
                                     created_by=getattr(user, "name", None))
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+class ReanalyzeAllIn(BaseModel):
+    session_id: str | None = None    # scope to one session, or None for the whole corpus
+    max_frames: int = 500
+
+
+@router.post("/agent/frames/{frame_id}/reanalyze/plan", dependencies=[Depends(require_role("annotator"))])
+async def reanalyze_plan(frame_id: str, db: AsyncSession = Depends(db_session)):
+    """Dry-run the re-check on this frame: what it would blur, and what it would put on the review queue.
+
+    Writes nothing. The plan form exists because the redaction half is one-way: the unredacted original is
+    deliberately never stored, so a blur cannot be taken back and has to be inspectable first.
+    """
+    from services.agent.reanalyze import reanalyze_frame
+
+    try:
+        return await reanalyze_frame(db, uuid.UUID(frame_id), apply=False)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/agent/frames/{frame_id}/reanalyze", dependencies=[Depends(require_role("reviewer"))])
+async def reanalyze(frame_id: str, db: AsyncSession = Depends(db_session)):
+    """Re-check this frame: blur the PII the first pass missed, and queue what looks wrong with the labels.
+
+    Reviewer-gated because it writes to the stored image. It never changes a label: the annotation findings
+    become review-queue candidates for a human to rule on.
+    """
+    from services.agent.reanalyze import reanalyze_frame
+
+    try:
+        return await reanalyze_frame(db, uuid.UUID(frame_id), apply=True)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/agent/reanalyze/all", dependencies=[Depends(require_role("reviewer"))])
+async def reanalyze_all(body: ReanalyzeAllIn | None = None, db: AsyncSession = Depends(db_session),
+                        user=Depends(current_user)):
+    """Re-check every frame in one session, or across the corpus, in the background.
+
+    Poll GET /agent/runs/{run_id} for progress; the console's Background panel shows it without being told
+    about this kind, because it renders whatever the run list returns.
+    """
+    from services.agent.reanalyze import run_reanalyze_all
+
+    body = body or ReanalyzeAllIn()
+    run_id = uuid.uuid4()
+    db.add(AgentRun(run_id=run_id, kind="reanalyze_all", status="running",
+                    scope={"session_id": body.session_id, "max_frames": body.max_frames},
+                    policy={}, counts={}, changes={}, critic={},
+                    created_by=str(user.user_id) if user else "daemon"))
+    await db.commit()
+    spawn(run_reanalyze_all(run_id, session_id=body.session_id, max_frames=max(1, body.max_frames),
+                            created_by=str(user.user_id) if user else None), name="run_reanalyze_all")
+    return {"run_id": str(run_id), "status": "running"}

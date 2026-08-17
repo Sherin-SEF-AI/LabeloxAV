@@ -106,6 +106,72 @@ export async function trackOp<T>(
   }
 }
 
+/** What a poll of a background run has to tell this store. Anything else about the run is the run's business. */
+export type RunSnapshot = {
+  status: string;
+  /** 0..1 when the run recorded a total. Null when it did not, which is a different statement from zero. */
+  fraction?: number | null;
+  detail?: string;
+};
+
+/** Statuses that mean the run is over, matching the set `JobWatcher` uses so the two cannot disagree. */
+export const TERMINAL_RUN_STATUSES: ReadonlySet<string> =
+  new Set(["committed", "reverted", "error", "interrupted", "skipped"]);
+
+/**
+ * Follow a background run started from the canvas, so it appears here rather than only in the console.
+ *
+ * An action taken in the editor that hands back a `run_id` used to vanish from the canvas the moment it
+ * returned: the work carried on for minutes in the API process, and the surface that had just launched it
+ * showed nothing at all. That is the same gap `trackOp` closes for in-flight requests, one level up.
+ *
+ * The poll is injected rather than imported so this module stays a store with no network of its own, which
+ * is also what lets the loop be tested without a server.
+ */
+export async function trackRun(
+  kind: string, label: string, runId: string,
+  poll: (runId: string) => Promise<RunSnapshot>,
+  { intervalMs = 2_500, maxMs = 6 * 60 * 60 * 1000 }: { intervalMs?: number; maxMs?: number } = {},
+): Promise<RunSnapshot | null> {
+  const id = beginOp(kind, label);
+  const deadline = Date.now() + maxMs;
+  let consecutiveErrors = 0;
+  try {
+    for (;;) {
+      let snap: RunSnapshot;
+      try {
+        snap = await poll(runId);
+        consecutiveErrors = 0;
+      } catch (e) {
+        // A restart or a blip must not report a running job as failed. Three in a row is the backend being
+        // gone, which is worth saying; one is not.
+        if (++consecutiveErrors < 3) {
+          await new Promise((r) => setTimeout(r, intervalMs));
+          continue;
+        }
+        endOp(id, "failed", e instanceof Error ? e.message : String(e));
+        return null;
+      }
+      if (typeof snap.fraction === "number") updateOp(id, { progress: snap.fraction });
+      if (snap.detail) updateOp(id, { detail: snap.detail });
+      if (TERMINAL_RUN_STATUSES.has(snap.status)) {
+        endOp(id, snap.status === "error" ? "failed" : "ok", snap.detail);
+        return snap;
+      }
+      if (Date.now() > deadline) {
+        // Giving up on watching is not the same as the run failing, and saying otherwise would be the lie
+        // this console exists to remove. The run is still in the console's Background panel.
+        endOp(id, "ok", "still running; follow it in the console");
+        return snap;
+      }
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+  } catch (e) {
+    endOp(id, "failed", e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
 /** For tests, and for leaving a frame: the next frame's canvas is not still doing the last one's work. */
 export function resetOps(): void {
   ops = [];

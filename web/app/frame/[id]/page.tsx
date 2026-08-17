@@ -2028,7 +2028,8 @@ export default function FrameEditor() {
           </PanelSection>
 
           <PanelSection title="agent · auto-label" defaultOpen>
-            <AgentPanel frameId={id} selectedId={st.selectedId} onApplied={loadLayers} embedded />
+            <AgentPanel frameId={id} sessionId={meta?.session_id ?? null} selectedId={st.selectedId}
+              onApplied={loadLayers} embedded />
           </PanelSection>
 
           <PanelSection title="natural-language bulk edit" defaultOpen>

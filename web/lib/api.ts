@@ -1,5 +1,6 @@
 import type {
   AgentRunRow,
+  ReanalyzeResult,
   InterruptedRun,
   AlItem,
   AssignmentRow,
@@ -119,6 +120,10 @@ import type {
   WatchlistEntry,
   PlateReadRow,
 } from "./types";
+
+// Re-exported so a component can name the shape without reaching past this module, which is the
+// convention the agent types here already follow.
+export type { ReanalyzeResult, ReanalyzeFinding } from "./types";
 
 // Same-origin: next.config rewrites /api/* to the FastAPI backend. Every request carries the current
 // user (X-Lbx-User-Id) for attribution.
@@ -686,7 +691,16 @@ export const api = {
     post<{ run_id: string; kind: string; restarted: boolean; detail?: string }>(
       `/api/agent/runs/${run_id}/resume`, {}),
   agentRunStatus: (run_id: string) =>
-    get<{ run_id: string; kind: string; status: string; counts: Record<string, number>; changed: number }>(`/api/agent/runs/${run_id}`),
+    get<{ run_id: string; kind: string; status: string; counts: Record<string, number>; changed: number;
+         fraction: number | null }>(`/api/agent/runs/${run_id}`),
+  // Reanalyse: one press re-checks a frame's redaction against its own annotations and re-runs every
+  // per-frame label check. The plan form writes nothing, which matters because the blur cannot be undone.
+  agentReanalyzePlan: (frame_id: string) =>
+    post<ReanalyzeResult>(`/api/agent/frames/${frame_id}/reanalyze/plan`, {}),
+  agentReanalyze: (frame_id: string) =>
+    post<ReanalyzeResult>(`/api/agent/frames/${frame_id}/reanalyze`, {}),
+  agentReanalyzeAll: (opts: { session_id?: string; max_frames?: number } = {}) =>
+    post<{ run_id: string; status: string }>(`/api/agent/reanalyze/all`, opts),
   // Overnight Auditor: run the nightly patrol, read the morning report
   agentAuditRun: (opts: { sample_size?: number; vlm_calls?: number; since_hours?: number } = {}) =>
     post<{ run_id: string; status: string }>(`/api/agent/audit/run`, opts),

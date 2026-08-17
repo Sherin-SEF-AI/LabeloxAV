@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type AgentPlan , humanizeError } from "@/lib/api";
+import { api, type AgentPlan, type ReanalyzeResult, humanizeError } from "@/lib/api";
+import { trackOp, trackRun } from "@/lib/canvasOps";
 import { Busy } from "@/components/Spinner";
 import { OpPrecisionChip, fetchOpState } from "@/components/agent/OpPrecision";
 
@@ -10,7 +11,7 @@ import { OpPrecisionChip, fetchOpState } from "@/components/agent/OpPrecision";
 // commit. Every commit is one reversible run, so the Revert button undoes it exactly. This is the
 // "human supervises exceptions" surface: you see the 80% the system is sure about before it touches them.
 
-export default function AgentPanel({ frameId, selectedId, onApplied, embedded = false }: { frameId: string; selectedId?: string | null; onApplied?: () => void; embedded?: boolean }) {
+export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, embedded = false }: { frameId: string; sessionId?: string | null; selectedId?: string | null; onApplied?: () => void; embedded?: boolean }) {
   const [plan, setPlan] = useState<AgentPlan | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
@@ -20,6 +21,7 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
                                          conf_min: number | null } | null>(null);
   const [cmd, setCmd] = useState("");
   const [suggestions, setSuggestions] = useState<{ action: string; label: string }[]>([]);
+  const [reanalysis, setReanalysis] = useState<ReanalyzeResult | null>(null);
   const [copilot, setCopilot] = useState<{ pattern: { from_name: string; to_name: string; to_class: number; count: number } | null; candidates: string[] } | null>(null);
 
   useEffect(() => {
@@ -158,6 +160,58 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
     return false;
   };
 
+  // Reanalyse is the one action here that previews before it applies no matter how well measured it is.
+  // Its redaction half writes blurred pixels over the stored image, and the unredacted original is
+  // deliberately never kept, so there is no revert to fall back on: the preview IS the safety mechanism.
+  // Everything else on this panel is reversible, which is why nothing else works this way.
+  const doReanalyzePlan = async () => {
+    setBusy("reanalyze"); setMsg(null); setReanalysis(null);
+    try {
+      const r = await trackOp("reanalyze", "reanalyse this frame",
+        () => api.agentReanalyzePlan(frameId),
+        (res) => `${res.redaction.faces_added} faces, ${res.redaction.plates_added} plates, `
+          + `${res.findings.length} label findings`);
+      setReanalysis(r);
+      if (!r.redaction.faces_added && !r.redaction.plates_added && !r.findings.length) {
+        setMsg(`nothing to fix: checked ${r.redaction.windows} annotated people/vehicles and every region `
+          + "is already redacted");
+      }
+    } catch (e) { setMsg("reanalyse failed: " + humanizeError(e)); }
+    finally { setBusy(null); }
+  };
+
+  const doReanalyzeApply = async () => {
+    setBusy("reanalyze"); setMsg(null);
+    try {
+      const r = await trackOp("reanalyze", "applying reanalyse",
+        () => api.agentReanalyze(frameId),
+        (res) => `blurred ${res.redaction.faces_added + res.redaction.plates_added}, `
+          + `queued ${res.persisted}`);
+      const blurred = r.redaction.faces_added + r.redaction.plates_added;
+      setMsg(`blurred ${blurred} missed region${blurred === 1 ? "" : "s"}`
+        + ` and queued ${r.persisted} label finding${r.persisted === 1 ? "" : "s"} for review`
+        + (r.findings_dropped ? ` (${r.findings_dropped} lower-ranked findings not queued)` : ""));
+      setReanalysis(null);
+      onApplied?.();
+    } catch (e) { setMsg("reanalyse failed (needs reviewer role): " + humanizeError(e)); }
+    finally { setBusy(null); }
+  };
+
+  const doReanalyzeSession = async () => {
+    if (!sessionId) return;
+    setBusy("reanalyze-all"); setMsg(null);
+    try {
+      const { run_id } = await api.agentReanalyzeAll({ session_id: sessionId });
+      setMsg("re-checking every frame in this session; follow it in the console");
+      // Deliberately not awaited: the run outlives this press by minutes, and blocking the panel on it would
+      // make the editor unusable for exactly as long as the job takes. The op it registers is what carries
+      // the progress, in the canvas console and the modal alike.
+      void trackRun("reanalyze", "reanalysing this session", run_id,
+        async (id) => await api.agentRunStatus(id));
+    } catch (e) { setMsg("could not start the session re-check: " + humanizeError(e)); }
+    finally { setBusy(null); }
+  };
+
   const doRevert = async () => {
     if (!runId) return;
     setBusy("revert"); setMsg(null);
@@ -198,7 +252,64 @@ export default function AgentPanel({ frameId, selectedId, onApplied, embedded = 
           className={`col-span-2 flex items-center justify-center gap-1.5 font-mono text-[10px] border px-2 py-1 rounded hover:border-accent disabled:opacity-40 ${busy === "relabel" ? "running border-accent/40" : "border-line"}`}>
           {busy === "relabel" && <Busy />}{busy === "relabel" ? "re-reading labels..." : "relabel this frame (AI reasoning)"} <OpPrecisionChip opType="relabel" />
         </button>
+        <button onClick={doReanalyzePlan} disabled={!!busy}
+          title="look again at this frame: re-check the face/plate redaction inside every annotated person and vehicle, and re-run every label check at once"
+          className={`${sessionId ? "" : "col-span-2 "}flex items-center justify-center gap-1.5 font-mono text-[10px] border px-2 py-1 rounded hover:border-accent disabled:opacity-40 ${busy === "reanalyze" ? "running border-accent/40" : "border-line"}`}>
+          {busy === "reanalyze" && <Busy />}{busy === "reanalyze" ? "reanalysing..." : "reanalyse this frame"}
+        </button>
+        {sessionId && (
+          <button onClick={doReanalyzeSession} disabled={!!busy}
+            title="reanalyse every frame in this session in the background; progress shows in the console"
+            className="font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+            {busy === "reanalyze-all" ? "starting..." : "reanalyse session"}
+          </button>
+        )}
       </div>
+
+      {reanalysis && (
+        <div className="px-1 pb-1.5">
+          {/* Shown before anything is written, because the redaction half cannot be undone: the unredacted
+              original is deliberately never stored. Every other action on this panel is reversible. */}
+          <div className="border border-warn/40 rounded p-2 space-y-1.5">
+            <div className="font-mono text-[10px] text-ink-2">
+              checked {reanalysis.redaction.windows} annotated {reanalysis.redaction.windows === 1 ? "person/vehicle" : "people and vehicles"}
+              {reanalysis.redaction.already_covered > 0 && `, ${reanalysis.redaction.already_covered} region(s) already redacted`}
+            </div>
+            <div className="font-mono text-[10px] text-ink">
+              would blur <span className="text-warn">{reanalysis.redaction.faces_added}</span> missed face
+              {reanalysis.redaction.faces_added === 1 ? "" : "s"} and{" "}
+              <span className="text-warn">{reanalysis.redaction.plates_added}</span> missed plate
+              {reanalysis.redaction.plates_added === 1 ? "" : "s"} (permanent)
+            </div>
+            <div className="font-mono text-[10px] text-ink">
+              and queue <span className="text-accent">{reanalysis.findings.length}</span> label finding
+              {reanalysis.findings.length === 1 ? "" : "s"} for review (nothing is relabelled)
+              {reanalysis.findings_dropped > 0 && (
+                <span className="text-ink-3"> · {reanalysis.findings_dropped} lower-ranked not queued</span>
+              )}
+            </div>
+            {reanalysis.findings.length > 0 && (
+              <ul className="space-y-0.5 max-h-24 overflow-auto">
+                {reanalysis.findings.slice(0, 6).map((f, i) => (
+                  <li key={`${f.object_id}-${i}`} className="font-mono text-[9px] text-ink-3 truncate">
+                    <span className="text-ink-2">{f.detail.rule}</span> · {f.detail.reason}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex gap-1.5">
+              <button onClick={doReanalyzeApply} disabled={!!busy}
+                className="flex-1 font-mono text-[10px] border border-warn/60 text-warn px-2 py-1 rounded hover:bg-warn/10 disabled:opacity-40">
+                apply
+              </button>
+              <button onClick={() => setReanalysis(null)} disabled={!!busy}
+                className="font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+                discard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {copilot?.pattern && copilot.candidates.length > 0 && (
         <div className="px-1 pb-1.5">
