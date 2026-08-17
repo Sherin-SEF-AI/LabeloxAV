@@ -15,8 +15,10 @@ import inspect
 import uuid
 
 from services.agent.reanalyze import (
-    _MACHINE,
+    _HUMAN,
     _MAX_FINDINGS_PER_FRAME,
+    _SYSTEMIC_MIN_OBJECTS,
+    _drop_systemic,
     FINDING_KIND,
     _persist,
     out_of_bounds,
@@ -84,10 +86,24 @@ class TestItProposesAndNeverApplies:
         samples too small to measure. The rule goes in the detail, as policy_violation already does."""
         assert len(FINDING_KIND) <= 24
 
-    def test_human_labels_are_out_of_scope(self):
-        """A person looked at it, which is more evidence than any check here can offer."""
-        assert "human" not in _MACHINE
-        assert set(_MACHINE) == {"fused", "auto_accept", "interpolated"}
+    def test_only_human_labels_are_out_of_scope(self):
+        """A person looked at that box, which is more evidence than any check here can offer.
+
+        Everything else is in scope, deliberately wider than the cleanup sweep these checks are borrowed
+        from. That sweep deletes, so its narrow source tuple is right; this only proposes, and 60,171 objects
+        in this corpus carry `imported`. Excluding them would leave whole sessions that came from a
+        competitor export permanently unexamined.
+        """
+        import inspect
+
+        from services.agent import reanalyze as mod
+
+        assert _HUMAN == "human"
+        src = inspect.getsource(mod)
+        assert "Object.source != _HUMAN" in src
+        for machine_only in ('source.in_(("fused"', 'Object.source.in_(_MACHINE)'):
+            assert machine_only not in src, (
+                "imported and propagated objects would never be re-checked")
 
 
 class TestTheCapIsStatedNotHidden:
@@ -130,3 +146,52 @@ def test_a_finding_is_shaped_like_every_other_queue_candidate():
     assert set(f) == {"object_id", "kind", "score", "proposed_label", "detail"}
     assert f["score"] == 1.0, "a badly scaled rule was not clamped onto the shared suspicion scale"
     assert f["detail"] == {"rule": "out_of_bounds", "reason": "reason"}
+
+
+class TestARuleThatObjectsToEverything:
+    """A rule firing on every object of a frame is describing the pipeline, not the objects.
+
+    Measured on a 40-frame sweep of this corpus: `attr_validity` fired on 39 of 39, 122 of 122 and 64 of 64
+    objects, because the attribute writer puts `occlusion_pct` on classes the ontology says it does not apply
+    to, and `critic_flag` fired on nearly all of them because one track-level fact is restated per object.
+    Between them they produced 5,825 of 5,982 findings. Queuing those buries the ones a reviewer can act on.
+    """
+
+    @staticmethod
+    def _findings(rule, n, start=0):
+        return [{"object_id": f"obj-{i}", "kind": "reanalyze", "score": 0.7,
+                 "proposed_label": None, "detail": {"rule": rule, "reason": "r"}}
+                for i in range(start, start + n)]
+
+    def test_a_rule_on_every_object_is_counted_not_queued(self):
+        kept, systemic = _drop_systemic(self._findings("attr_validity", 40), 40)
+        assert kept == []
+        assert systemic == {"attr_validity": 40}
+
+    def test_the_findings_a_reviewer_can_act_on_survive_beside_it(self):
+        """The whole point: the real ones must not be lost with the noise."""
+        noisy = self._findings("attr_validity", 40)
+        real = self._findings("out_of_bounds", 2, start=100)
+        kept, systemic = _drop_systemic(noisy + real, 40)
+        assert [f["detail"]["rule"] for f in kept] == ["out_of_bounds", "out_of_bounds"]
+        assert "out_of_bounds" not in systemic
+
+    def test_a_rule_on_a_minority_of_objects_is_a_real_finding(self):
+        kept, systemic = _drop_systemic(self._findings("duplicate", 4), 40)
+        assert len(kept) == 4 and systemic == {}
+
+    def test_a_frame_with_a_couple_of_objects_is_never_judged_this_way(self):
+        """On three objects, "fires on 80% of them" is two boxes and says nothing."""
+        n = _SYSTEMIC_MIN_OBJECTS - 1
+        kept, systemic = _drop_systemic(self._findings("attr_validity", n), n)
+        assert len(kept) == n and systemic == {}
+
+    def test_it_is_reported_rather_than_hidden(self):
+        """A count per rule is what tells somebody to go and fix the writer. Dropping them silently would
+        read as a clean corpus."""
+        import inspect
+
+        from services.agent.reanalyze import reanalyze_frame, run_reanalyze_all
+
+        assert '"systemic": systemic' in inspect.getsource(reanalyze_frame)
+        assert "systemic_totals" in inspect.getsource(run_reanalyze_all)

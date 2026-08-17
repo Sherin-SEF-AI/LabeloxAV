@@ -288,6 +288,13 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
                 <span className="text-ink-3"> · {reanalysis.findings_dropped} lower-ranked not queued</span>
               )}
             </div>
+            {Object.keys(reanalysis.systemic).length > 0 && (
+              <div className="font-mono text-[9px] text-ink-3 border-t hairline pt-1.5">
+                fires on the whole frame, so counted rather than queued:{" "}
+                {Object.entries(reanalysis.systemic).map(([rule, n]) => `${rule} (${n})`).join(", ")}
+                <div className="text-ink-3/70">a rule that objects to every object is describing the pipeline, not the labels</div>
+              </div>
+            )}
             {reanalysis.findings.length > 0 && (
               <ul className="space-y-0.5 max-h-24 overflow-auto">
                 {reanalysis.findings.slice(0, 6).map((f, i) => (

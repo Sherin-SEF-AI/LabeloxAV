@@ -43,9 +43,15 @@ log = get_logger("agent.reanalyze")
 # a dozen samples too small to measure.
 FINDING_KIND = "reanalyze"
 
-# Machine-written sources. A human's box is never questioned by this: a person looked at it, which is more
-# evidence than any check here can offer.
-_MACHINE = ("fused", "auto_accept", "interpolated")
+# The one source this never questions. A person looked at that box, which is more evidence than any check
+# here can offer.
+#
+# Everything else is in scope, which is wider than the `cleanup_sweep` tuple this borrows its checks from.
+# That sweep DELETES, so restricting it to the three sources it was written for is right. This only ever
+# proposes, and 60,171 objects in this corpus carry `imported`: excluding them would leave whole sessions
+# whose every object came from a competitor export permanently unexamined, which is the opposite of what a
+# re-check is for. `policy.detect_policy_violations` already draws the line in exactly this place.
+_HUMAN = "human"
 
 # How far outside the image a box may reach before it is a finding rather than a rounding artifact. Boxes
 # are stored in pixels and a detector legitimately puts an edge a fraction of a pixel past the boundary.
@@ -67,6 +73,12 @@ _SCORES = {"out_of_bounds": 0.7, "stuff": 0.8, "oversize": 0.75, "ego_hood": 0.7
 # reported rather than applied quietly, because a queue that silently drops two thirds of what it found
 # reads as a clean frame.
 _MAX_FINDINGS_PER_FRAME = 12
+
+# When a rule objects to at least this share of a frame's objects, it is describing the pipeline rather than
+# the objects, and its findings are counted instead of queued. See `_drop_systemic` for the measurement.
+_SYSTEMIC_FRACTION = 0.8
+# Below a handful of objects, "fires on 80% of them" is two boxes and says nothing.
+_SYSTEMIC_MIN_OBJECTS = 5
 
 
 def out_of_bounds(bbox: list[float], w: int, h: int) -> tuple[float, str] | None:
@@ -118,8 +130,8 @@ def _finding(object_id, rule: str, score: float, reason: str) -> dict:
             "proposed_label": None, "detail": {"rule": rule, "reason": reason}}
 
 
-async def check_labels(db: AsyncSession, frame: Frame) -> list[dict]:
-    """Every label finding on one frame, from the checks that already exist plus the bounds check.
+async def check_labels(db: AsyncSession, frame: Frame) -> tuple[list[dict], dict[str, int]]:
+    """Every label finding on one frame, plus the rules that fired on the whole frame and were set aside.
 
     Composed rather than reimplemented: each of these was written for a different sweep that a person had to
     know to run. The point of this function is that one press runs all of them on the frame in front of you.
@@ -133,9 +145,9 @@ async def check_labels(db: AsyncSession, frame: Frame) -> list[dict]:
     from services.errordetect.policy import check_object
 
     objs = list((await db.execute(select(Object).where(
-        Object.frame_id == frame.frame_id, Object.source.in_(_MACHINE)))).scalars().all())
+        Object.frame_id == frame.frame_id, Object.source != _HUMAN))).scalars().all())
     if not objs:
-        return []
+        return [], {}
 
     onto = get_ontology()
     settings = get_settings()
@@ -208,7 +220,34 @@ async def check_labels(db: AsyncSession, frame: Frame) -> list[dict]:
         key = (f["object_id"], f["detail"]["rule"])
         if key not in best or f["score"] > best[key]["score"]:
             best[key] = f
-    return sorted(best.values(), key=lambda f: f["score"], reverse=True)
+    kept, systemic = _drop_systemic(list(best.values()), len(objs))
+    return sorted(kept, key=lambda f: f["score"], reverse=True), systemic
+
+
+def _drop_systemic(findings: list[dict], n_objects: int) -> tuple[list[dict], dict[str, int]]:
+    """Split findings into ones a reviewer can act on and rules that fired on the whole frame.
+
+    A rule that objects to every object on a frame is not reporting a hundred label errors, it is reporting
+    one fact about the pipeline. Measured on this corpus: `attr_validity` fires on 39 of 39, 122 of 122 and
+    64 of 64 objects because the attribute writer puts `occlusion_pct` on classes the ontology says it does
+    not apply to, and `critic_flag` fires on nearly all of them because the track-level "this track's class
+    flips across frames" is restated once per object on the track. Between them they generated 5,825 of the
+    5,982 findings in a 40-frame sweep.
+
+    Queuing those would bury the ones that matter under noise nobody can clear box by box, which is the same
+    failure the reasoning layer already found once: a check firing more often on the objects that were fine
+    is not a weak check, it is a harmful one. So they are counted and named rather than queued, and the count
+    is what tells somebody to go and fix the writer.
+    """
+    if n_objects < _SYSTEMIC_MIN_OBJECTS:
+        return findings, {}
+    per_rule: dict[str, int] = {}
+    for f in findings:
+        per_rule[f["detail"]["rule"]] = per_rule.get(f["detail"]["rule"], 0) + 1
+    systemic = {rule: n for rule, n in per_rule.items() if n / n_objects >= _SYSTEMIC_FRACTION}
+    if not systemic:
+        return findings, {}
+    return [f for f in findings if f["detail"]["rule"] not in systemic], systemic
 
 
 async def _persist(db: AsyncSession, frame_id: uuid.UUID, findings: list[dict]) -> int:
@@ -243,7 +282,7 @@ async def reanalyze_frame(db: AsyncSession, frame_id: uuid.UUID, *, apply: bool 
         raise ValueError(f"no such frame: {frame_id}")
 
     redaction = await recheck_frame(db, get_object_store(), get_anonymizer(), frame, apply=apply)
-    all_findings = await check_labels(db, frame)
+    all_findings, systemic = await check_labels(db, frame)
     findings = all_findings[:_MAX_FINDINGS_PER_FRAME]
     dropped = len(all_findings) - len(findings)
     persisted = await _persist(db, frame_id, findings) if apply else 0
@@ -252,9 +291,10 @@ async def reanalyze_frame(db: AsyncSession, frame_id: uuid.UUID, *, apply: bool 
 
     log.info("reanalyze.frame", frame_id=str(frame_id), applied=apply,
              faces=redaction["faces_added"], plates=redaction["plates_added"],
-             findings=len(findings), dropped=dropped)
+             findings=len(findings), dropped=dropped, systemic=systemic)
     return {"frame_id": str(frame_id), "applied": apply, "redaction": redaction,
-            "findings": findings, "findings_dropped": dropped, "persisted": persisted}
+            "findings": findings, "findings_dropped": dropped, "systemic": systemic,
+            "persisted": persisted}
 
 
 async def run_reanalyze_all(run_id: uuid.UUID, *, session_id: str | None = None, max_frames: int = 500,
@@ -278,7 +318,7 @@ async def run_reanalyze_all(run_id: uuid.UUID, *, session_id: str | None = None,
         # label half and no annotations to crop for the redaction half, so it is not in scope for either.
         q = (select(distinct(Object.frame_id))
              .join(Frame, Frame.frame_id == Object.frame_id)
-             .where(Object.source.in_(_MACHINE)))
+             .where(Object.source != _HUMAN))
         if session_id:
             q = q.where(Frame.session_id == uuid.UUID(session_id))
         frame_ids = list((await db.execute(q.order_by(Object.frame_id).limit(max_frames))).scalars().all())
@@ -289,6 +329,9 @@ async def run_reanalyze_all(run_id: uuid.UUID, *, session_id: str | None = None,
 
     for k in ("frames", "faces_added", "plates_added", "findings", "findings_dropped", "skipped_error"):
         totals.setdefault(k, 0)
+    # Rules that objected to a whole frame, counted across the sweep. One number per rule is what says "go
+    # and fix the attribute writer" rather than "here are 5,825 boxes to look at".
+    systemic_totals: dict[str, int] = dict(totals.get("systemic") or {})
     if not frame_ids:
         async with maker() as db:
             run = await db.get(AgentRun, run_id)
@@ -313,6 +356,9 @@ async def run_reanalyze_all(run_id: uuid.UUID, *, session_id: str | None = None,
                 totals["plates_added"] += res["redaction"]["plates_added"]
                 totals["findings"] += res["persisted"]
                 totals["findings_dropped"] += res["findings_dropped"]
+                for rule, n in res["systemic"].items():
+                    systemic_totals[rule] = systemic_totals.get(rule, 0) + n
+                totals["systemic"] = dict(systemic_totals)
                 consecutive_failures = 0
             except Exception as exc:  # noqa: BLE001
                 # One frame must not end a corpus pass. It is marked done so a resume does not stop on the

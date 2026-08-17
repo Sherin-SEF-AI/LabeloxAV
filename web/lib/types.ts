@@ -1201,6 +1201,10 @@ export type ReanalyzeResult = {
   /** Findings beyond the per-frame cap. Reported rather than hidden: a queue that silently drops most of
    *  what it found reads as a clean frame. */
   findings_dropped: number;
+  /** Rules that objected to the whole frame, with how many objects each hit. A rule firing on every object
+   *  is describing the pipeline rather than the objects, so it is counted here instead of queued: a reviewer
+   *  cannot fix "the attribute writer disagrees with the ontology" one box at a time. */
+  systemic: Record<string, number>;
   persisted: number;
 };
 
