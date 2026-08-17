@@ -22,9 +22,10 @@ def write_parquet(records: list[ExportRecord], out_dir: Path, filename: str = "o
         "bbox_x1": [], "bbox_y1": [], "bbox_x2": [], "bbox_y2": [],
         "conf": [], "quality_score": [], "state": [], "source": [], "mask_uri": [], "mask_encoding": [],
         "rot_deg": [], "keypoints_json": [], "polyline_json": [], "relationships_json": [],
-        "attrs_json": [], "provenance_json": [],
+        "attrs_json": [], "provenance_json": [], "split": [],
     }
     for r in records:
+        cols["split"].append(r.split)
         cols["object_id"].append(str(r.object_id))
         cols["frame_id"].append(str(r.frame_id))
         cols["session_id"].append(str(r.session_id))

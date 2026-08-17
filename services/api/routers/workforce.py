@@ -106,6 +106,76 @@ class ReturnIn(BaseModel):
     detail: dict = {}
 
 
+class ReturnUploadIn(BaseModel):
+    assignment_id: str
+    # Where the finished work is, and in which of the supported interchange formats. An s3 uri or a local
+    # path; the import pipeline's own acquisition step handles zips and downloads, so a vendor can return a
+    # single archive the way every one of these tools exports.
+    source_uri: str
+    format: str = "cvat"
+    external_ref: str | None = None
+
+
+@router.post("/workforce/{workforce_id}/return/upload")
+async def submit_return_upload(workforce_id: str, request: Request,
+                               x_labelox_signature: str = Header(default=""),
+                               db: AsyncSession = Depends(db_session)):
+    """A workforce returns its actual annotations, not a count of them.
+
+    The plain return endpoint takes `objects_returned` as a number the vendor asserts, and nothing it sends
+    becomes a row. That made the honeypot gate meaningless for an outside team: `score_honeypots` grades
+    human-sourced objects on the gold frames, and a vendor had no way to create one, so it was scoring rows
+    the vendor could not have written.
+
+    This ingests the batch first and then settles the assignment against what actually arrived, so the count
+    is measured rather than claimed and the quality check has something real to check. A batch that fails
+    its bar is removed whole, because the verdict lands after the write.
+    """
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from services.imports.run import _acquire_source
+    from services.labelops.return_ingest import ReturnIngestError, ingest_return, revert_ingest
+
+    raw = await request.body()
+    wf = await _authenticate(db, workforce_id, raw, x_labelox_signature)
+    try:
+        payload = ReturnUploadIn.model_validate_json(raw)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail=f"unparseable return body: {exc}") from exc
+
+    asg = await wf_svc.get_assignment(db, payload.assignment_id)
+    if asg is None:
+        raise HTTPException(status_code=404, detail="assignment not found")
+    if str(asg.workforce_id) != str(wf.workforce_id):
+        raise HTTPException(status_code=403, detail="assignment belongs to a different workforce")
+
+    with TemporaryDirectory() as tmp:
+        try:
+            root = _acquire_source(payload.source_uri, Path(tmp))
+            ingested = await ingest_return(db, assignment_id=payload.assignment_id, fmt=payload.format,
+                                           root=root, created_by=wf.name)
+        except ReturnIngestError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    written = ingested["counts"]["objects_written"]
+    try:
+        decided = await wf_svc.submit_return(db, assignment_id=payload.assignment_id,
+                                             external_ref=payload.external_ref,
+                                             objects_returned=written,
+                                             detail={"ingest": ingested["counts"],
+                                                     "ingest_run_id": ingested["run_id"]})
+    except wf_svc.WorkforceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # A rejected batch does not stay in the corpus. Leaving it would mean the labels a quality gate just
+    # refused are indistinguishable from the ones it accepted, which is the gate deciding nothing.
+    if decided.get("state") == "rejected":
+        decided["reverted"] = await revert_ingest(db, ingested["run_id"])
+
+    return {**decided, "ingested": ingested}
+
+
 @router.post("/workforce/{workforce_id}/return")
 async def submit_return(workforce_id: str, request: Request,
                         x_labelox_signature: str = Header(default=""),

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.api.deps import db_session
+from services.api.deps import db_session, require_role
 from services.govern import killswitch as K
 from services.govern.audit import list_audit
 from services.govern.champion import evaluate_and_promote
@@ -188,7 +188,10 @@ async def promote(model_version: str, task: str = "detection", db: AsyncSession 
 
 
 # ---- control sample ----
-@router.post("/govern/control/seed")
+# The control sample is the only measurement of whether the auto-accept gate is right, so a verdict on one
+# is a governance act: anyone who could write these could move the number the corpus is judged by. Reading
+# is annotator-level because judging them is work an annotator does.
+@router.post("/govern/control/seed", dependencies=[Depends(require_role("reviewer"))])
 async def control_seed(limit: int = 500, rate: float | None = None, db: AsyncSession = Depends(db_session)):
     return await seed_from_recent_auto_accepts(db, limit, rate)
 
@@ -197,12 +200,12 @@ class VerdictIn(BaseModel):
     verdict: str
 
 
-@router.post("/govern/control/{sample_id}/verdict")
+@router.post("/govern/control/{sample_id}/verdict", dependencies=[Depends(require_role("reviewer"))])
 async def control_verdict(sample_id: str, payload: VerdictIn, db: AsyncSession = Depends(db_session)):
     return await record_verdict(db, sample_id, payload.verdict)
 
 
-@router.get("/govern/control/pending")
+@router.get("/govern/control/pending", dependencies=[Depends(require_role("annotator"))])
 async def control_pending(limit: int = 100, db: AsyncSession = Depends(db_session)):
     """The control samples awaiting a verdict.
 
@@ -215,7 +218,7 @@ async def control_pending(limit: int = 100, db: AsyncSession = Depends(db_sessio
     return await pending_samples(db, limit)
 
 
-@router.get("/govern/control/precision")
+@router.get("/govern/control/precision", dependencies=[Depends(require_role("annotator"))])
 async def control_precision(db: AsyncSession = Depends(db_session)):
     return await measured_precision(db)
 

@@ -4,6 +4,7 @@ run_async engine-cache-clear pattern (same as test_m6_api). Requires infra (DB +
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import uuid
 
 import cv2
@@ -25,6 +26,13 @@ def _infra_up() -> bool:
 
 
 requires_infra = pytest.mark.skipif(not _infra_up(), reason="infra not up (make up)")
+
+# The embedding path imports transformers, which the ml extra pins and CI deliberately does not install (the
+# runner has no GPU and the CUDA wheels are wrong there). Named rather than left to surface as a bare
+# ModuleNotFoundError, so a reader can tell "this needs a dependency" from "this is broken".
+_HAS_TRANSFORMERS = importlib.util.find_spec("transformers") is not None
+requires_transformers = pytest.mark.skipif(
+    not _HAS_TRANSFORMERS, reason="ml extra not installed (transformers)")
 
 
 def _clear_db_cache():
@@ -238,6 +246,7 @@ def test_users_and_attribution():
 
 
 @requires_infra
+@requires_transformers
 def test_intelligence_endpoints():
     """Data Intelligence Layer endpoints return well-formed shapes."""
     with _client() as c:

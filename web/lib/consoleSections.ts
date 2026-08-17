@@ -9,7 +9,7 @@
 // than fit the eye.
 
 export type ConsoleSectionId =
-  | "overview" | "jobs" | "background" | "canvas" | "gpu" | "machine" | "process";
+  | "overview" | "jobs" | "background" | "canvas" | "gate" | "gpu" | "machine" | "process";
 
 export type ConsoleSection = {
   id: ConsoleSectionId;
@@ -30,6 +30,8 @@ export const CONSOLE_SECTIONS: ConsoleSection[] = [
     keywords: ["agent", "runs", "sweep", "relabel", "batch", "corpus"] },
   { id: "canvas", label: "Canvas", group: "Activity", icon: "shapes",
     keywords: ["editor", "sam", "segment", "propagate", "mask", "save", "frame"] },
+  { id: "gate", label: "Gate audit", group: "Activity", icon: "shield",
+    keywords: ["precision", "control", "sample", "verdict", "unmeasured", "auto-accept", "quality"] },
   { id: "gpu", label: "GPU", group: "Machine", icon: "chip",
     keywords: ["cuda", "vram", "memory", "utilisation", "utilization", "temperature", "nvidia", "busy"] },
   { id: "machine", label: "Host", group: "Machine", icon: "server",

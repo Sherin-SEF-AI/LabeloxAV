@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.api.deps import db_session, require_role
+from services.api.deps import current_user, db_session, require_role
 from services.labelops import issues as issue_svc
 from services.labelops import jobs as job_svc
 from services.labelops import quality as quality_svc
@@ -37,6 +37,9 @@ class TaskIn(BaseModel):
     session_id: str | None = None
     predicate: dict = {}
     jobs_of: int = 50
+    # More than one sends each chunk of frames to that many annotators independently, which is what buys a
+    # measurement of how much they agree. It costs proportionally, so it belongs on a sample.
+    replicas: int = 1
 
 
 class AssignIn(BaseModel):
@@ -86,6 +89,30 @@ async def list_projects(limit: int = 100, db: AsyncSession = Depends(db_session)
 async def project_board(project_id: str, db: AsyncSession = Depends(db_session)):
     """Job counts per stage and state, plus who is currently loaded."""
     return await job_svc.project_board(db, project_id)
+
+
+@router.post("/labelops/replica-groups/{replica_group}/agreement",
+             dependencies=[Depends(require_role("reviewer"))])
+async def score_agreement(replica_group: str, iou_thresh: float = 0.5,
+                          db: AsyncSession = Depends(db_session)):
+    """Compare the replicas of one group and open an issue on every object they disagree about."""
+    from services.labelops.agreement import AgreementError, score_replica_group
+
+    try:
+        return await score_replica_group(db, replica_group, iou_thresh=iou_thresh)
+    except AgreementError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@router.get("/labelops/tasks/{task_id}/agreement", dependencies=[Depends(require_role("annotator"))])
+async def task_agreement(task_id: str, db: AsyncSession = Depends(db_session)):
+    """How much the annotators on this task agreed, and which frames to look at first."""
+    from services.labelops.agreement import AgreementError, group_agreement
+
+    try:
+        return await group_agreement(db, task_id)
+    except AgreementError as exc:
+        raise HTTPException(404, str(exc)) from None
 
 
 @router.post("/labelops/tasks")
@@ -191,10 +218,36 @@ async def resolve_issue(issue_id: str, reopen: bool = False, user=Depends(requir
 
 # ---- scorecards -----------------------------------------------------------------------------------------
 
-@router.get("/labelops/scorecards")
+@router.get("/labelops/scorecards", dependencies=[Depends(require_role("reviewer"))])
 async def scorecards(project_id: str | None = None, db: AsyncSession = Depends(db_session)):
-    """Per-annotator throughput and honeypot quality."""
+    """Per-annotator throughput and honeypot quality.
+
+    Reviewer-gated, like its neighbours. It was the one route in this section with no role floor, which
+    made every annotator's performance record readable by anybody the API let in, including an annotator
+    reading their colleagues'. Reading your own record is a different question and has its own route below.
+    """
     return {"scorecards": await quality_svc.annotator_scorecards(db, project_id=project_id)}
+
+
+@router.get("/labelops/scorecards/full", dependencies=[Depends(require_role("reviewer"))])
+async def full_scorecards(confidence: float = 0.95, db: AsyncSession = Depends(db_session)):
+    """People and vendors in one table, with the per-class record that decides what to send whom."""
+    from services.labelops.scorecard import scorecards as build
+
+    return await build(db, confidence=confidence)
+
+
+@router.get("/labelops/scorecards/me", dependencies=[Depends(require_role("annotator"))])
+async def my_scorecard(user=Depends(current_user), db: AsyncSession = Depends(db_session)):
+    """Your own record. Everyone can see how they are doing; that is not a ranking of anybody else."""
+    from services.labelops.scorecard import scorecard_for
+
+    if user is None:
+        raise HTTPException(401, "sign in to see your own scorecard")
+    out = await scorecard_for(db, str(user.user_id))
+    if out is None:
+        raise HTTPException(404, "no such user")
+    return out
 
 
 @router.post("/labelops/precision-batch", dependencies=[Depends(require_role("reviewer"))])

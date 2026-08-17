@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  BackgroundPanel, CanvasPanel, GpuPanel, HostPanel, ProcessPanel, RunningNowPanel, useAgentRuns,
+  BackgroundPanel, CanvasPanel, GatePanel, GpuPanel, HostPanel, ProcessPanel, RunningNowPanel,
+  useAgentRuns,
 } from "@/components/console/Panels";
 import Icon from "@/components/shell/Icon";
 import { headline, uptime, workInFlight } from "@/lib/console";
@@ -160,6 +161,7 @@ export default function ConsoleModal() {
             {shown === "overview" && (
               <div className="space-y-5">
                 <Section title="Running now"><RunningNowPanel jobs={jobs} /></Section>
+                <Section title="Gate audit"><GatePanel /></Section>
                 <Section title="GPU"><GpuPanel sys={sys} /></Section>
                 <Section title="Host"><HostPanel sys={sys} /></Section>
               </div>
@@ -167,6 +169,7 @@ export default function ConsoleModal() {
             {shown === "jobs" && <RunningNowPanel jobs={jobs} />}
             {shown === "background" && <BackgroundPanel runs={runs} />}
             {shown === "canvas" && <CanvasPanel />}
+            {shown === "gate" && <GatePanel />}
             {shown === "gpu" && <GpuPanel sys={sys} />}
             {shown === "machine" && <HostPanel sys={sys} />}
             {shown === "process" && <ProcessPanel sys={sys} waitingTotal={waitingTotal} />}

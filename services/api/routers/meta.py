@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Frame, Object, OntologyClass
 from db.models import Session as DbSession
 from platforms.registry import as_dicts as platform_dicts
-from services.api.deps import OntologyClassOut, db_session
+from services.api.deps import OntologyClassOut, current_user, db_session, require_role
 from services.autolabel.ontology import add_custom_class, get_ontology
 
 router = APIRouter()
@@ -33,20 +33,112 @@ class NewClassIn(BaseModel):
     india: bool = True
 
 
-@router.post("/ontology/classes")
+@router.post("/ontology/classes", dependencies=[Depends(require_role("reviewer"))])
 async def create_class(payload: NewClassIn, db: AsyncSession = Depends(db_session)):
     """Add an annotator-defined custom class. It lands in the custom id block, is marked rare so the gate
-    routes it to human review, and is mirrored into the DB ontology table for the current version."""
+    routes it to human review, and is mirrored into the DB ontology table for the current version.
+
+    Reviewer-gated. Minting a class is not a per-object edit: it changes the vocabulary every subsequent
+    label is drawn from, and a class the sidecar offers but the database will not store is what killed a
+    corpus relabel run at frame 13 of 25.
+    """
     try:
         cls = add_custom_class(payload.name, payload.l0, payload.l1, payload.india)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from None
     onto = get_ontology()
     if await db.get(OntologyClass, cls["id"]) is None:
         db.add(OntologyClass(id=cls["id"], version=onto.version, name=cls["name"], l0=cls["l0"],
                              l1=cls["l1"], india=cls["india"], map_to={}))
         await db.commit()
     return cls
+
+
+class MergeIn(BaseModel):
+    from_id: int
+    to_id: int
+
+
+class RenameIn(BaseModel):
+    class_id: int
+    new_name: str
+
+
+@router.post("/ontology/classes/merge", dependencies=[Depends(require_role("admin"))])
+async def merge_classes(payload: MergeIn, user=Depends(current_user),
+                        db: AsyncSession = Depends(db_session)):
+    """Move every object and track from one class into another, as one reversible run.
+
+    `merge_class` has existed in services/agent/ontology_merge.py and been reachable from nothing: the only
+    ontology write in the application was minting a class, so a mistake in the vocabulary could be added to
+    and never repaired. Admin-gated because it rewrites the class of every object that carries it.
+    """
+    from services.agent.ontology_merge import MergeError, merge_class
+
+    try:
+        return await merge_class(db, from_id=payload.from_id, to_id=payload.to_id,
+                                 created_by=str(user.user_id) if user else None)
+    except MergeError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@router.post("/ontology/merges/{run_id}/revert", dependencies=[Depends(require_role("admin"))])
+async def revert_merge_run(run_id: str, db: AsyncSession = Depends(db_session)):
+    """Undo a merge, putting every object back on the class it carried."""
+    import uuid as _uuid
+
+    from db.models import AgentRun
+    from services.agent.ontology_merge import KIND, revert_merge
+
+    run = await db.get(AgentRun, _uuid.UUID(run_id))
+    if run is None or run.kind != KIND:
+        raise HTTPException(404, "no such merge run")
+    return await revert_merge(db, run)
+
+
+@router.post("/ontology/classes/rename", dependencies=[Depends(require_role("admin"))])
+async def rename_class(payload: RenameIn, db: AsyncSession = Depends(db_session)):
+    """Rename a custom class, keeping its id so every object that carries it follows the rename.
+
+    Only sidecar classes: the governed YAML is the versioned vocabulary and is edited in the file, not
+    through an endpoint that would leave the file and the database disagreeing.
+    """
+    from services.agent.ontology_merge import MergeError, rename_in_sidecar
+
+    try:
+        out = rename_in_sidecar(payload.class_id, payload.new_name)
+    except MergeError as exc:
+        raise HTTPException(400, str(exc)) from None
+    # The DB mirror has to follow, or the API serves one name and every join serves the other.
+    row = await db.get(OntologyClass, payload.class_id)
+    if row is not None:
+        row.name = out["to"]
+        await db.commit()
+    return out
+
+
+@router.post("/ontology/classes/retire", dependencies=[Depends(require_role("admin"))])
+async def retire_classes(class_ids: list[int], db: AsyncSession = Depends(db_session)):
+    """Stop offering these classes, without deleting the rows objects still point at.
+
+    Retiring removes a class from the sidecar so nothing new can be labelled with it. The database row
+    stays, because `prediction` and `eval_patch` hold immutable history that still references it, and
+    deleting it would either fail on a foreign key or take that history with it.
+    """
+    from services.agent.ontology_merge import retire_from_sidecar
+
+    still_used = {
+        cid: (await db.execute(
+            select(func.count()).select_from(Object).where(Object.class_id == cid))).scalar()
+        for cid in class_ids
+    }
+    in_use = {cid: n for cid, n in still_used.items() if n}
+    if in_use:
+        # Retiring a class objects still carry would leave them on a name nothing offers, which is exactly
+        # how a corpus ends up with labels no picker can select and no reviewer can correct.
+        raise HTTPException(400, {"detail": "these classes are still on objects; merge them first",
+                                  "in_use": in_use})
+    return retire_from_sidecar(set(class_ids))
 
 
 @router.get("/ontology")

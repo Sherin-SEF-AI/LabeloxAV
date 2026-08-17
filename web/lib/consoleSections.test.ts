@@ -52,7 +52,8 @@ describe("the sidebar grouping", () => {
   it("keeps declared order and does not repeat a heading", () => {
     const groups = groupSections(CONSOLE_SECTIONS);
     expect(groups.map((g) => g.group)).toEqual(["Activity", "Machine"]);
-    expect(groups[0].items.map((i) => i.id)).toEqual(["overview", "jobs", "background", "canvas"]);
+    expect(groups[0].items.map((i) => i.id)).toEqual(
+      ["overview", "jobs", "background", "canvas", "gate"]);
   });
 
   it("groups whatever it is given, so a filtered list keeps its headings", () => {

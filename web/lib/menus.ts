@@ -151,6 +151,8 @@ export const MENUS: Menu[] = [
         hint: "gold set and gate metrics" },
       { key: "errorqueue", label: "Error candidates", icon: "layers", href: "/quality/errors",
         hint: "confirm or dismiss in bulk, and see which detector is worth trusting" },
+      { key: "scorecards", label: "Labeller scorecards", icon: "person", href: "/scorecards",
+        hint: "how good each person and vendor is, per class" },
       { key: "reasoner", label: "Reasoning layer", icon: "target", href: "/reasoner",
         hint: "what ran before each label, and whether it was right" },
       { key: "calibration", label: "Calibration", icon: "ruler", href: "/calibration",

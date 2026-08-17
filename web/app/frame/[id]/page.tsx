@@ -184,6 +184,10 @@ export default function FrameEditor() {
   const { id } = useParams<{ id: string }>();
   const focus = useSearchParams().get("focus");
   const rigParam = useSearchParams().get("rig");   // M-MC.1 deep link: keep rig view + layout across camera focus
+  // The job this frame was opened from, when it was opened from one. It is what attributes a drawn box to
+  // an annotator and a job, which is the whole basis of measuring how much two annotators agree; and for a
+  // blind replica job it is also what tells the server to withhold the existing labels.
+  const jobParam = useSearchParams().get("job");
 
   const [st, dispatch] = useEditor();
   const [meta, setMeta] = useState<FrameMeta | null>(null);
@@ -285,7 +289,9 @@ export default function FrameEditor() {
     (async () => {
       setLoadError(null);
       try {
-        const [m, objs, o] = await Promise.all([api.frame(id), api.frameObjects(id), api.ontology()]);
+        const [m, objs, o] = await Promise.all([
+          api.frame(id, jobParam ?? undefined), api.frameObjects(id, jobParam ?? undefined),
+          api.ontology()]);
         if (!live) return;
         setMeta(m);
         setOnto(o);
@@ -929,6 +935,7 @@ export default function FrameEditor() {
             class_name: o.class_name, bbox: o.bbox, attrs: o.attrs,
             mask_polygons: o.mask.length ? o.mask : undefined, state: tgt, idem_key: o.id, rot_deg: o.rot ?? 0,
             keypoints: o.keypoints ?? null, polyline: o.polyline, cuboid_3d: o.cuboid_3d ?? undefined,
+            job_id: jobParam ?? undefined,
           });
           remap[o.id] = created.object_id;
           if (created.version != null) versions[o.id] = created.version;
@@ -994,8 +1001,12 @@ export default function FrameEditor() {
   const gotoFrame = useCallback(async (fid: string | null) => {
     if (!fid) return;
     if (isDirty(st)) await save();  // flush before leaving so no edit is lost
-    router.push(`/frame/${fid}`);
-  }, [router, st, save]);
+    // The job travels with the frame. Dropping it here was silent and total: blind mode ended so the
+    // pre-labels reappeared, and every box drawn from that point carried no job and no annotator, so the
+    // agreement pass saw nothing for those frames. One keypress after opening a replica job, the feature
+    // had stopped working and said nothing.
+    router.push(jobParam ? `/frame/${fid}?job=${jobParam}` : `/frame/${fid}`);
+  }, [router, st, save, jobParam]);
 
   // ---- keypoint pose tool + object clipboard ----
   const [kpDraft, setKpDraft] = useState<number[][] | null>(null);

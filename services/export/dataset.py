@@ -44,6 +44,7 @@ from services.export.adapter_scene import (
 )
 from services.export.adapter_yolo import write_yolo
 from services.export.records import ExportRecord
+from services.export.splits import assign_splits, split_summary
 
 log = get_logger("export")
 
@@ -59,6 +60,13 @@ class SliceSpec(BaseModel):
     session_id: str | None = None
     limit: int | None = None
     formats: list[str] = Field(default_factory=lambda: ["coco", "parquet"])
+    # Train/val/test. Zero fractions mean no split, which is what every existing caller gets and what keeps
+    # their exports byte-identical. The grouping is what makes a split defensible: see services/export/splits.
+    val_frac: float = 0.0
+    test_frac: float = 0.0
+    split_group_by: str = "session"
+    # Defaults to the slice name, so each named dataset splits stably and independently of the others.
+    split_seed: str | None = None
 
 
 async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
@@ -150,16 +158,38 @@ def _fp_dicts(records: list[ExportRecord]) -> list[dict]:
             for r in records]
 
 
+# The split settings, which are deliberately kept out of the seals below.
+#
+# `seal_content_fingerprint` is rebuilt from a stored `slice_spec` by /release/{id}/verify, so any field
+# added to SliceSpec changes the recomputed hash for every commit sealed before that field existed, and the
+# release registry starts reporting `immutable: false` across the board. Stripping these keys is what keeps
+# a four-field addition from reading as corpus-wide tampering. It is also correct on its own terms: a
+# partitioning does not change which objects are in the release, so two split variants of one slice have the
+# same content.
+_SPLIT_KEYS = frozenset({"val_frac", "test_frac", "split_group_by", "split_seed"})
+
+
+def _seal_spec_dict(spec: SliceSpec, *, always: bool) -> dict:
+    """The spec as the seals see it. `always` strips the split keys even when a split was requested."""
+    d = spec.model_dump()
+    if always or (not d.get("val_frac") and not d.get("test_frac")):
+        for k in _SPLIT_KEYS:
+            d.pop(k, None)
+    return d
+
+
 def seal_content_fingerprint(spec: SliceSpec, records: list[ExportRecord], ontology_version: str) -> str:
     """Content hash of a release (class/geometry/state), so a mutated annotation yields a distinct id."""
     from services.release.fingerprint import content_fingerprint
 
-    return content_fingerprint(_fp_dicts(records), spec.model_dump(), ontology_version)
+    return content_fingerprint(_fp_dicts(records), _seal_spec_dict(spec, always=True), ontology_version)
 
 
 def seal_commit_id(spec: SliceSpec, records: list[ExportRecord], ontology_version: str) -> str:
+    # Stripped only when no split was asked for, so an unsplit export keeps the commit id it has always
+    # had, while two different splits of one slice are two different releases with their own directories.
     h = hashlib.sha256()
-    h.update(json.dumps(spec.model_dump(), sort_keys=True).encode())
+    h.update(json.dumps(_seal_spec_dict(spec, always=False), sort_keys=True).encode())
     h.update(ontology_version.encode())
     for oid in sorted(str(r.object_id) for r in records):
         h.update(oid.encode())
@@ -273,6 +303,13 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
 
     records = await fetch_records(spec)
     await _dpdpa_pre_sale_gate(records)   # fail-closed: refuse any clip with un-redacted face, plate, or speech
+    # Stamped here rather than inside fetch_records, which is also called by /release/verify and by commit
+    # diffing, where computing a split is wasted work on a read that must not vary.
+    split_seed = spec.split_seed or spec.name
+    assignment = assign_splits(records, val_frac=spec.val_frac, test_frac=spec.test_frac,
+                               group_by=spec.split_group_by, seed=split_seed)
+    for r in records:
+        r.split = assignment.get(str(r.frame_id), "train")
     commit_id = seal_commit_id(spec, records, onto.version)
     out_dir = (out_root or settings.scratch_path() / "exports") / spec.name / commit_id
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -293,6 +330,13 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
     frame_ids = sorted({str(r.frame_id) for r in records if r.frame_id})
     for fmt in _requested_scene(spec.formats):
         written.append(await _SCENE_WRITERS[fmt](frame_ids, store, out_dir, commit_id))
+
+    # The authoritative record of how this dataset was cut. Written even when nothing was split, so a
+    # reader never has to infer from absence whether a split was considered.
+    summary = split_summary(records, assignment, group_by=spec.split_group_by, seed=split_seed,
+                            val_frac=spec.val_frac, test_frac=spec.test_frac)
+    (out_dir / "splits.json").write_text(json.dumps({**summary, "frames_by_split": assignment}, indent=2))
+    written.append(out_dir / "splits.json")
 
     delivered = ["parquet", *_requested(spec.formats), *_requested_scene(spec.formats)]
 

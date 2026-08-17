@@ -88,12 +88,25 @@ def test_rare_class_forces_review_even_at_high_confidence():
 def test_low_confidence_routes_to_annotate():
     eng = _engine()
     fid = uuid.uuid4()
-    # Below review_low (0.08 on the calibrated scale) a pre-label is too weak to even review, so it routes to
-    # annotate. A raw 0.05 fallback calibrates to ~0 and lands there; the old 0.30 now calibrates into the
-    # review band, which is the retuned gate working as intended.
+    # Below review_low a pre-label is too weak to even review, so it routes to annotate.
+    #
+    # Both the threshold and the confidence are stated here rather than inherited from the environment.
+    # This test used to read `get_settings().gate`, whose review_low is 0.08 on this machine because a
+    # gitignored `.env` says so and 0.60 elsewhere; and it relied on the calibrator mapping a raw 0.05 to
+    # ~0, which happens only when the fitted isotonic curve is present in object storage. On a fresh CI
+    # runner neither held, so a test of the gate was really testing which artifacts a machine happened to
+    # have. The object still comes from a real fusion so its shape is real; only the two numbers the claim
+    # is about are pinned.
+    cfg = get_settings().gate.model_copy(update={"review_low": 0.08})
     a = RawDetection("path_a_yolo26", (100, 100, 130, 130), 0.05, "yolo11l.pt", "object_fallback", 45)
     fo = eng.fuse_frame(fid, [a], [])[0]
-    assert gate_object(fo.obj, get_ontology(), get_settings().gate) == GateState.annotate
+    weak = fo.obj.model_copy(update={"conf": 0.01})
+    assert weak.conf < cfg.review_low
+    assert gate_object(weak, get_ontology(), cfg) == GateState.annotate
+
+    # And the band boundary itself, which is the actual claim: at review_low it is review, below it annotate.
+    at_band = fo.obj.model_copy(update={"conf": cfg.review_low})
+    assert gate_object(at_band, get_ontology(), cfg) != GateState.annotate
 
 
 # --- DB: provenance walk -----------------------------------------------------

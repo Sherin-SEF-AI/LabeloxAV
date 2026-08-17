@@ -346,6 +346,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 async with get_sessionmaker()() as db:
                     u = await db.get(User, UUID(uid))
                     role = u.role if u else None
+                # Published for the rate limiter, which runs outside this middleware and would otherwise
+                # resolve identity a third time (this gate, the route dependency, and then the limiter).
+                request.state.principal_id = uid
             except Exception:  # noqa: BLE001
                 role = None
         elif authz:
@@ -384,7 +387,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-# Order matters: add auth first so CORS (added last) is the outermost layer and a 401/403 still
+# A budget per caller. Added FIRST, which makes it the innermost layer and therefore the one that runs
+# after AuthMiddleware has resolved who the caller is. Registering it last instead put it outermost, where
+# request.state.principal_id does not exist yet: every request then keyed on the client address, and behind
+# the Next proxy that is one address for the entire application, so one person opening a frame exhausted
+# the budget for everybody. The editor issues forty-odd requests to open a single frame, so this is not a
+# theoretical collapse: it took the whole app down on the first page load.
+from services.api.ratelimit_middleware import RateLimitMiddleware  # noqa: E402
+
+app.middleware("http")(RateLimitMiddleware())
+
+# Order matters: add auth next so CORS (added last) is the outermost layer and a 401/403 still
 # carries CORS headers for the browser.
 app.add_middleware(AuthMiddleware)
 app.add_middleware(

@@ -15,6 +15,7 @@ is immediately visible in every job that contains it.
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -26,6 +27,10 @@ from core.logging import get_logger
 from db.models import Frame, LabelJob, LabelProject, LabelTask, User
 
 log = get_logger("labelops_jobs")
+
+# More than a handful of independent passes over the same frames stops being a measurement and starts being
+# the budget. Two is the normal choice; three breaks ties without anyone deciding they are the tiebreaker.
+MAX_REPLICAS = 5
 
 STAGES = ("annotation", "validation", "acceptance")
 STATES = ("new", "in_progress", "completed", "rejected")
@@ -75,6 +80,8 @@ def _job_dict(j: LabelJob) -> dict:
             "assignee_id": str(j.assignee_id) if j.assignee_id else None,
             "stage": j.stage, "state": j.state, "version": j.version,
             "n_frames": len(j.frame_ids or []), "frame_ids": [str(f) for f in (j.frame_ids or [])],
+            "replica_group": str(j.replica_group) if j.replica_group else None,
+            "replica_index": j.replica_index,
             "n_honeypots": len(j.honeypot_frame_ids or []),
             "honeypot_accuracy": j.honeypot_accuracy, "honeypot_detail": j.honeypot_detail or {},
             "started_at": j.started_at.isoformat() if j.started_at else None,
@@ -84,17 +91,24 @@ def _job_dict(j: LabelJob) -> dict:
 
 async def create_task(db: AsyncSession, *, project_id: str, name: str,
                       session_id: str | None = None, predicate: dict | None = None,
-                      jobs_of: int = 50) -> dict:
+                      jobs_of: int = 50, replicas: int = 1) -> dict:
     """Create a task over a session or an explorer predicate, and split its frames into jobs of `jobs_of`.
 
     The split happens once, at creation, so a job's contents are stable while someone works on it: a frame
     ingested later must not silently appear inside a job already in review.
+
+    `replicas` sends each chunk to that many annotators independently, which is what buys a measurement of
+    how much they agree. It costs proportionally: two replicas is twice the annotation spend and twice the
+    honeypot budget, so it belongs on a sample of the work rather than all of it. Replica jobs are blind,
+    which is what makes the measurement mean anything.
     """
     project = await db.get(LabelProject, UUID(project_id))
     if project is None:
         raise JobError("project not found")
     if jobs_of < 1:
         raise JobError("jobs_of must be at least 1")
+    if not 1 <= replicas <= MAX_REPLICAS:
+        raise JobError(f"replicas must be between 1 and {MAX_REPLICAS}")
 
     pred = dict(predicate or {})
     if session_id:
@@ -109,16 +123,23 @@ async def create_task(db: AsyncSession, *, project_id: str, name: str,
         raise JobError("no frames match this task definition")
 
     task = LabelTask(project_id=project.project_id, name=name,
-                     session_id=UUID(session_id) if session_id else None, predicate=pred)
+                     session_id=UUID(session_id) if session_id else None, predicate=pred,
+                     replicas=replicas)
     db.add(task)
     await db.flush()
 
     jobs = []
     for i in range(0, len(frame_ids), jobs_of):
         chunk = frame_ids[i:i + jobs_of]
-        job = LabelJob(task_id=task.task_id, frame_ids=chunk, stage="annotation", state="new")
-        db.add(job)
-        jobs.append(job)
+        # One group id per chunk, so two jobs over the same frames know they are a pair. The pairing cannot
+        # be recovered later by comparing frame_ids: seed_honeypots appends gold frames chosen per job id,
+        # so the two lists diverge before this function returns.
+        group = uuid.uuid4() if replicas > 1 else None
+        for r in range(replicas):
+            job = LabelJob(task_id=task.task_id, frame_ids=list(chunk), stage="annotation", state="new",
+                           replica_group=group, replica_index=r)
+            db.add(job)
+            jobs.append(job)
     await db.flush()
 
     # Seed hidden gold frames per job when the project asks for it.
@@ -131,10 +152,12 @@ async def create_task(db: AsyncSession, *, project_id: str, name: str,
 
     await db.commit()
     log.info("labelops.task_created", task=str(task.task_id), frames=len(frame_ids),
-             jobs=len(jobs), honeypots=seeded)
+             jobs=len(jobs), replicas=replicas, honeypots=seeded)
     return {"task_id": str(task.task_id), "project_id": project_id, "name": name,
-            "n_frames": len(frame_ids), "n_jobs": len(jobs), "honeypots_seeded": seeded,
-            "jobs": [_job_dict(j) for j in jobs]}
+            # Distinct frames, not frames times replicas. A board reporting 2x the work because the same
+            # frames went to two people would misprice every task.
+            "n_frames": len(frame_ids), "n_jobs": len(jobs), "replicas": replicas,
+            "honeypots_seeded": seeded, "jobs": [_job_dict(j) for j in jobs]}
 
 
 async def assign_job(db: AsyncSession, job_id: str, assignee_id: str | None,
@@ -150,6 +173,17 @@ async def assign_job(db: AsyncSession, job_id: str, assignee_id: str | None,
         user = await db.get(User, UUID(assignee_id))
         if user is None:
             raise JobError("assignee not found")
+        if job.replica_group is not None:
+            # One person labelling both replicas is one opinion recorded twice, and it would read as
+            # perfect agreement.
+            sibling = (await db.execute(
+                select(LabelJob).where(LabelJob.replica_group == job.replica_group,
+                                       LabelJob.job_id != job.job_id,
+                                       LabelJob.assignee_id == user.user_id))).scalars().first()
+            if sibling is not None:
+                raise JobError(
+                    "this annotator already holds the other replica of these frames; agreement between "
+                    "one person and themselves is not a measurement")
         job.assignee_id = user.user_id
     else:
         job.assignee_id = None

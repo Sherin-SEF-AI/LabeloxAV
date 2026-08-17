@@ -215,6 +215,10 @@ class CreateObjectIn(BaseModel):
     keypoints: dict | None = None                  # {"skeleton": str, "points": [[x,y,v],...]} image px
     polyline: list[list[float]] | None = None      # open polyline points [[x,y],...] for linear features
     cuboid_3d: dict | None = None                  # ego-frame {center:[x,y,z], size:[w,l,h], yaw:rad}
+    # The job this label was drawn under, when the annotator reached the frame through one. In the body
+    # rather than the query string so it survives the idempotency branch, which returns an existing object
+    # for a retried create and would otherwise drop the attribution on the retry.
+    job_id: str | None = None
 
 
 class MaskIn(BaseModel):
@@ -272,6 +276,12 @@ class ExportIn(BaseModel):
     min_conf: float | None = None
     formats: list[str] = ["coco", "parquet"]
     limit: int | None = None
+    # Train/val/test, split at a boundary that does not leak. Zero means no split, which is what an
+    # existing caller gets and why their exports are unchanged.
+    val_frac: float = 0.0
+    test_frac: float = 0.0
+    split_group_by: str = "session"
+    split_seed: str | None = None
 
 
 class GoldSealIn(BaseModel):

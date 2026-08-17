@@ -672,6 +672,17 @@ class Phase4Settings(BaseModel):
     recall: RecallSettings = RecallSettings()
 
 
+class RateLimitSettings(BaseModel):
+    """A budget per caller. On by default, because the alternative is what shipped: no bound at all on how
+    fast anyone can pull frames of Indian roads out of the media routes.
+
+    Off only for a test that means to hammer an endpoint, and the suite turns it off for exactly that
+    reason: a rate limiter that throttles the test suite hides real failures behind 429s.
+    """
+
+    enabled: bool = True
+
+
 class AuthSettings(BaseModel):
     # Deny-by-default API auth. When enabled, every mutating /api request needs a valid signed Bearer token
     # (services/api/auth_token.py) and role floors gate destructive/governance routes. Reads under
@@ -962,6 +973,7 @@ class Settings(BaseSettings):
     paths: PathsSettings = PathsSettings()
     phase4: Phase4Settings = Phase4Settings()  # Phase 4 closed loop + governance
     auth: AuthSettings = AuthSettings()        # deny-by-default API auth
+    ratelimit: RateLimitSettings = RateLimitSettings()   # per-caller budgets on the API
     integrations: IntegrationsSettings = IntegrationsSettings()   # outbound webhook safety
     lidar: LidarSettings = LidarSettings()     # 3D LiDAR module (ingestion, clean, viewer)
     inspector: InspectorSettings = InspectorSettings()  # Session Inspector (MCAP viewer + health)

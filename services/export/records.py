@@ -41,3 +41,7 @@ class ExportRecord:
     ocr_text: str | None = None        # road text read off a sign or board; never a license plate
     ocr_lang: str | None = None
     ocr_conf: float | None = None      # None means unmeasured, never assume a number
+    # train | val | test. Stamped by the export, not read from the database: a split is a property of a
+    # delivered dataset, not of the object, and the same object belongs to different splits in different
+    # releases.
+    split: str = "train"

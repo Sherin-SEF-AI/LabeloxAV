@@ -1353,10 +1353,10 @@ class LabeloxClient:
         return self._call("POST", f"/api/forgyx/thermal",
                           params=None, json_body=body)
 
-    def get_frames_by_frame_id(self, frame_id: str) -> Any:
+    def get_frames_by_frame_id(self, frame_id: str, job_id: Any | None = None) -> Any:
         """Get Frame"""
         return self._call("GET", f"/api/frames/{frame_id}",
-                          params=None, json_body=None)
+                          params={"job_id": job_id}, json_body=None)
 
     def get_frames_by_frame_id_adverse(self, frame_id: str) -> Any:
         """List Adverse"""
@@ -1433,10 +1433,10 @@ class LabeloxClient:
         return self._call("GET", f"/api/frames/{frame_id}/lift_ground",
                           params={"u": u, "v": v}, json_body=None)
 
-    def get_frames_by_frame_id_objects(self, frame_id: str) -> Any:
+    def get_frames_by_frame_id_objects(self, frame_id: str, job_id: Any | None = None) -> Any:
         """Frame Objects"""
         return self._call("GET", f"/api/frames/{frame_id}/objects",
-                          params=None, json_body=None)
+                          params={"job_id": job_id}, json_body=None)
 
     def post_frames_by_frame_id_objects(self, frame_id: str, body: Any = None) -> Any:
         """Create Object"""
@@ -1943,15 +1943,35 @@ class LabeloxClient:
         return self._call("GET", f"/api/labelops/projects/{project_id}/board",
                           params=None, json_body=None)
 
+    def post_labelops_replica_groups_by_replica_group_agreement(self, replica_group: str, iou_thresh: float | None = 0.5) -> Any:
+        """Score Agreement"""
+        return self._call("POST", f"/api/labelops/replica-groups/{replica_group}/agreement",
+                          params={"iou_thresh": iou_thresh}, json_body=None)
+
     def get_labelops_scorecards(self, project_id: Any | None = None) -> Any:
         """Scorecards"""
         return self._call("GET", f"/api/labelops/scorecards",
                           params={"project_id": project_id}, json_body=None)
 
+    def get_labelops_scorecards_full(self, confidence: float | None = 0.95) -> Any:
+        """Full Scorecards"""
+        return self._call("GET", f"/api/labelops/scorecards/full",
+                          params={"confidence": confidence}, json_body=None)
+
+    def get_labelops_scorecards_me(self) -> Any:
+        """My Scorecard"""
+        return self._call("GET", f"/api/labelops/scorecards/me",
+                          params=None, json_body=None)
+
     def post_labelops_tasks(self, body: Any = None) -> Any:
         """Create Task"""
         return self._call("POST", f"/api/labelops/tasks",
                           params=None, json_body=body)
+
+    def get_labelops_tasks_by_task_id_agreement(self, task_id: str) -> Any:
+        """Task Agreement"""
+        return self._call("GET", f"/api/labelops/tasks/{task_id}/agreement",
+                          params=None, json_body=None)
 
     def post_labelox_propagate4d(self, body: Any = None) -> Any:
         """Propagate4D"""
@@ -2467,6 +2487,26 @@ class LabeloxClient:
         """Create Class"""
         return self._call("POST", f"/api/ontology/classes",
                           params=None, json_body=body)
+
+    def post_ontology_classes_merge(self, body: Any = None) -> Any:
+        """Merge Classes"""
+        return self._call("POST", f"/api/ontology/classes/merge",
+                          params=None, json_body=body)
+
+    def post_ontology_classes_rename(self, body: Any = None) -> Any:
+        """Rename Class"""
+        return self._call("POST", f"/api/ontology/classes/rename",
+                          params=None, json_body=body)
+
+    def post_ontology_classes_retire(self, body: Any = None) -> Any:
+        """Retire Classes"""
+        return self._call("POST", f"/api/ontology/classes/retire",
+                          params=None, json_body=body)
+
+    def post_ontology_merges_by_run_id_revert(self, run_id: str) -> Any:
+        """Revert Merge Run"""
+        return self._call("POST", f"/api/ontology/merges/{run_id}/revert",
+                          params=None, json_body=None)
 
     def get_oraclyx_board(self) -> Any:
         """Board"""
@@ -3318,6 +3358,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/workforce/{workforce_id}/return",
                           params=None, json_body=None)
 
+    def post_workforce_by_workforce_id_return_upload(self, workforce_id: str) -> Any:
+        """Submit Return Upload"""
+        return self._call("POST", f"/api/workforce/{workforce_id}/return/upload",
+                          params=None, json_body=None)
+
     def get_metrics_2(self) -> Any:
         """Metrics Endpoint"""
         return self._call("GET", f"/metrics",
@@ -3336,4 +3381,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 650 routes generated from the server schema.
+# 659 routes generated from the server schema.
