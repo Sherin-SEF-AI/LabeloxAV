@@ -67,11 +67,9 @@ _SCORES = {"out_of_bounds": 0.7, "stuff": 0.8, "oversize": 0.75, "ego_hood": 0.7
 
 # How many findings one frame may put on the review queue, highest suspicion first.
 #
-# Measured on six live frames: 8, 10, 0, 27, 26 and 30 findings. Most of the tail is one track-level fact
-# ("this track's class flips across frames") restated once per object on the track, and 30 rows per frame
-# across the 33,547 frames in scope would be a million candidates nobody can work through. The cap is
-# reported rather than applied quietly, because a queue that silently drops two thirds of what it found
-# reads as a clean frame.
+# Measured on six live frames: 8, 10, 0, 27, 26 and 30 findings, and 30 rows per frame across the 33,547
+# frames in scope would be a million candidates nobody can work through. The cap is reported rather than
+# applied quietly, because a queue that silently drops two thirds of what it found reads as a clean frame.
 _MAX_FINDINGS_PER_FRAME = 12
 
 # When a rule objects to at least this share of a frame's objects, it is describing the pipeline rather than
@@ -227,17 +225,21 @@ async def check_labels(db: AsyncSession, frame: Frame) -> tuple[list[dict], dict
 def _drop_systemic(findings: list[dict], n_objects: int) -> tuple[list[dict], dict[str, int]]:
     """Split findings into ones a reviewer can act on and rules that fired on the whole frame.
 
-    A rule that objects to every object on a frame is not reporting a hundred label errors, it is reporting
-    one fact about the pipeline. Measured on this corpus: `attr_validity` fires on 39 of 39, 122 of 122 and
-    64 of 64 objects because the attribute writer puts `occlusion_pct` on classes the ontology says it does
-    not apply to, and `critic_flag` fires on nearly all of them because the track-level "this track's class
-    flips across frames" is restated once per object on the track. Between them they generated 5,825 of the
-    5,982 findings in a 40-frame sweep.
+    A rule that objects to every object on a frame is reporting one fact, and the queue is the wrong place to
+    say it a hundred times. Both rules this caught turned out to be real, and neither is fixable box by box:
 
-    Queuing those would bury the ones that matter under noise nobody can clear box by box, which is the same
-    failure the reasoning layer already found once: a check firing more often on the objects that were fine
-    is not a weak check, it is a harmful one. So they are counted and named rather than queued, and the count
-    is what tells somebody to go and fix the writer.
+      - `attr_validity` fired on 39 of 39, 122 of 122 and 64 of 64 objects, because the VLM path asked the
+        model for every attribute in the ontology on every crop and validated the reply without a class id.
+        7,477 objects that are not traffic signals carried a `signal_state`. Fixed at the writer and
+        migrated out of the stored labels, so this one no longer fires at all.
+      - `critic_flag` still fires on nearly every object, and it is right to: 10,006 of 11,287 tracks in
+        this corpus (89%) change class somewhere along their length. That is a real and large problem with
+        tracking or classification, and one number saying so is worth more than 2,433 rows saying it once
+        per object.
+
+    Counting them rather than queuing them is the same lesson the reasoning layer already learned here: a
+    check that fires more often on the objects that were fine is not a weak check, it is a harmful one. The
+    count is what tells somebody where to go and look.
     """
     if n_objects < _SYSTEMIC_MIN_OBJECTS:
         return findings, {}

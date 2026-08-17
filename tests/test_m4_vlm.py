@@ -149,3 +149,78 @@ def test_ollama_backend_returns_structured_result():
     res = client.verify(img, ["autorickshaw", "sedan", "object_fallback"], {"overload": {"type": "bool"}})
     assert isinstance(res, VlmResult)
     assert isinstance(res.attrs, dict)
+
+
+class _WholeOntologyVlm:
+    """A VLM that answers every attribute it is asked about, which is what a real one does.
+
+    Asked for a traffic signal's state while looking at an autorickshaw, a model does not reply "not
+    applicable". This stand-in returns whatever the schema offers, so the test measures what the schema
+    asked for rather than what a particular model happened to volunteer.
+    """
+
+    def __init__(self):
+        self.schemas: list[dict] = []
+
+    def verify(self, crop_bgr, shortlist, attr_schema, temperature=0.0) -> VlmResult:
+        self.schemas.append(attr_schema)
+        sample = {"enum": lambda a: (a.get("values") or ["x"])[0], "bool": lambda a: False,
+                  "int": lambda a: 1, "float": lambda a: 0.1, "bool_array": lambda a: [False]}
+        return VlmResult(
+            class_name="autorickshaw",
+            attrs={k: sample.get(spec["type"], lambda a: "x")(spec) for k, spec in attr_schema.items()},
+            caption="", confident=True,
+        )
+
+
+class TestAnAttributeThatCannotApply:
+    """7,500 objects in this corpus that are not signals carry a `signal_state`.
+
+    One autorickshaw held signal_state, signal_kind, signal_mount, signal_arrow, marking_state, articulated
+    and helmet at once. None of those are observations of anything: the schema handed the model every
+    attribute in the ontology on every crop, and `validate_attrs` was called without a class id, which is the
+    argument that turns its applicability check on. The values were checked and the applicability never was.
+    """
+
+    def test_the_model_is_not_asked_about_attributes_the_class_cannot_have(self):
+        onto = get_ontology()
+        fake = _WholeOntologyVlm()
+        verifier = VlmVerifier(fake, onto, get_settings())
+        img = np.zeros((240, 320, 3), dtype=np.uint8)
+
+        verifier.verify_object(img, (50, 50, 150, 150), onto.by_name("autorickshaw").id)
+
+        assert fake.schemas, "the verifier never called the model"
+        asked = set(fake.schemas[0])
+        for cannot in ("signal_state", "signal_kind", "signal_mount", "signal_arrow", "marking_state"):
+            assert cannot not in asked, (
+                f"the model was asked for '{cannot}' while looking at a three-wheeler; a model asked for a "
+                f"fact that cannot apply invents one")
+        # The ones a three-wheeler really does carry are still asked for, so this is a scope and not a mute.
+        assert {"occlusion", "motion", "passenger_load", "livery"} <= asked
+
+    def test_an_inapplicable_attribute_never_reaches_the_object(self):
+        """Belt and braces: even if a model volunteers one unasked, it does not land."""
+        onto = get_ontology()
+        obj = _obj(onto.by_name("autorickshaw").id, "autorickshaw", 0.9, True)
+        res = VlmResult(class_name="autorickshaw", confident=True,
+                        attrs={"signal_state": "R", "articulated": True, "helmet": [False],
+                               "marking_state": "present", "motion": "moving", "livery": True})
+        apply_vlm(obj, res, onto, "test")
+
+        for cannot in ("signal_state", "articulated", "helmet", "marking_state"):
+            assert cannot not in obj.attrs, f"'{cannot}' landed on a three-wheeler"
+        assert obj.attrs["motion"] == "moving" and obj.attrs["livery"] is True
+
+    def test_a_reclassification_keeps_the_attributes_of_the_class_it_moved_to(self):
+        """The ordering that matters. Filtering before the reclassification judges the reply against the
+        class the object is leaving, which drops exactly the attributes the new class does carry."""
+        onto = get_ontology()
+        obj = _obj(onto.by_name("sedan").id, "sedan", 0.9, True)
+        res = VlmResult(class_name="autorickshaw", confident=True, votes=3, agreement=1.0,
+                        attrs={"overload": True, "passenger_load": 2})
+        apply_vlm(obj, res, onto, "test")
+
+        assert obj.class_name == "autorickshaw"
+        assert obj.attrs.get("overload") is True, "filtered against the class it was leaving"
+        assert obj.attrs.get("passenger_load") == 2

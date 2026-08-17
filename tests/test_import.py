@@ -71,6 +71,35 @@ def test_mapillary_adapter_parse(tmp_path: Path):
     assert len(f.objects) == 1
     o = f.objects[0]
     assert o.name == "sedan" and o.bbox == [10, 10, 30, 25]
+    # The source's own class name is provenance, not an annotation attribute. Written to `attrs` it is a key
+    # the ontology has never heard of, so every imported object fails attribute validation permanently and
+    # no annotator can clear it: 60,204 objects in the live corpus did exactly that, and they were 90% of
+    # every invalid-attribute finding, drowning the 10% that were real.
+    assert o.attrs == {}, "the source label is not an annotation attribute"
+    assert o.provenance == {"mapillary_label": "object--vehicle--car"}, (
+        "the pre-remap name is the evidence for auditing a class mapping and must survive")
+
+
+def test_the_import_carries_an_adapters_provenance_onto_the_object():
+    """`run.py` merges an adapter's provenance beside import_format and original_name, which is the whole
+    reason the adapter can put the source label there instead of in attrs."""
+    import inspect
+
+    from services.imports import run
+
+    src = inspect.getsource(run)
+    assert 'prov = {**(o.provenance or {})' in src
+
+
+def test_the_ontology_rejects_a_source_label_as_an_attribute():
+    """The validation that was firing on every imported object, stated so the reason the move was needed
+    does not have to be taken on trust."""
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
+    assert onto.validate_attrs({"mapillary_label": "object--vehicle--car"}), (
+        "if this ever becomes valid, the migration that moved it is no longer needed")
+    assert onto.validate_attrs({}) == []
 
 
 def _infra_up() -> bool:

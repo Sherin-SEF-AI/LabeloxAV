@@ -151,10 +151,12 @@ def test_a_finding_is_shaped_like_every_other_queue_candidate():
 class TestARuleThatObjectsToEverything:
     """A rule firing on every object of a frame is describing the pipeline, not the objects.
 
-    Measured on a 40-frame sweep of this corpus: `attr_validity` fired on 39 of 39, 122 of 122 and 64 of 64
-    objects, because the attribute writer puts `occlusion_pct` on classes the ontology says it does not apply
-    to, and `critic_flag` fired on nearly all of them because one track-level fact is restated per object.
-    Between them they produced 5,825 of 5,982 findings. Queuing those buries the ones a reviewer can act on.
+    Measured on a 40-frame sweep of this corpus, two rules produced 5,825 of 5,982 findings, and both were
+    real rather than noisy. `attr_validity` fired on 39 of 39, 122 of 122 and 64 of 64 objects because the
+    VLM path asked for every attribute in the ontology and validated the reply without a class id (fixed at
+    the writer and migrated out of the stored labels). `critic_flag` still fires on nearly every object and
+    is right to: 10,006 of 11,287 tracks in this corpus change class somewhere along their length. Neither
+    is fixable one box at a time, which is why the queue is the wrong place to state them.
     """
 
     @staticmethod
