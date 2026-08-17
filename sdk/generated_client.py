@@ -273,6 +273,16 @@ class LabeloxClient:
         return self._call("POST", f"/api/agent/frames/{frame_id}/plan",
                           params=None, json_body=body)
 
+    def post_agent_frames_by_frame_id_reanalyze(self, frame_id: str) -> Any:
+        """Reanalyze"""
+        return self._call("POST", f"/api/agent/frames/{frame_id}/reanalyze",
+                          params=None, json_body=None)
+
+    def post_agent_frames_by_frame_id_reanalyze_plan(self, frame_id: str) -> Any:
+        """Reanalyze Plan"""
+        return self._call("POST", f"/api/agent/frames/{frame_id}/reanalyze/plan",
+                          params=None, json_body=None)
+
     def post_agent_frames_by_frame_id_reconcile(self, frame_id: str, body: Any = None) -> Any:
         """Reconcile"""
         return self._call("POST", f"/api/agent/frames/{frame_id}/reconcile",
@@ -356,6 +366,11 @@ class LabeloxClient:
     def post_agent_ops_ask(self, body: Any = None) -> Any:
         """Ops Ask"""
         return self._call("POST", f"/api/agent/ops/ask",
+                          params=None, json_body=body)
+
+    def post_agent_reanalyze_all(self, body: Any = None) -> Any:
+        """Reanalyze All"""
+        return self._call("POST", f"/api/agent/reanalyze/all",
                           params=None, json_body=body)
 
     def post_agent_relabel_all(self, body: Any = None) -> Any:
@@ -3381,4 +3396,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 659 routes generated from the server schema.
+# 662 routes generated from the server schema.

@@ -194,4 +194,9 @@ class TestARuleThatObjectsToEverything:
         from services.agent.reanalyze import reanalyze_frame, run_reanalyze_all
 
         assert '"systemic": systemic' in inspect.getsource(reanalyze_frame)
-        assert "systemic_totals" in inspect.getsource(run_reanalyze_all)
+        src = inspect.getsource(run_reanalyze_all)
+        assert "systemic_totals" in src
+        # Flat in counts and broken down in `critic`. The console renders counts as "key value" pairs, so a
+        # nested dict there reaches the operator as the literal text "[object Object]".
+        assert 'totals["systemic"] = sum(systemic_totals.values())' in src
+        assert "run.critic = dict(systemic_totals)" in src

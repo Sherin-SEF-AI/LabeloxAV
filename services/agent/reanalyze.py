@@ -330,8 +330,11 @@ async def run_reanalyze_all(run_id: uuid.UUID, *, session_id: str | None = None,
     for k in ("frames", "faces_added", "plates_added", "findings", "findings_dropped", "skipped_error"):
         totals.setdefault(k, 0)
     # Rules that objected to a whole frame, counted across the sweep. One number per rule is what says "go
-    # and fix the attribute writer" rather than "here are 5,825 boxes to look at".
-    systemic_totals: dict[str, int] = dict(totals.get("systemic") or {})
+    # and fix the attribute writer" rather than "here are 5,825 boxes to look at". Resumed from `critic`
+    # rather than `counts`, since that is where the breakdown is written.
+    async with maker() as db:
+        _prior = await db.get(AgentRun, run_id)
+        systemic_totals: dict[str, int] = dict((_prior.critic or {}) if _prior is not None else {})
     if not frame_ids:
         async with maker() as db:
             run = await db.get(AgentRun, run_id)
@@ -358,7 +361,10 @@ async def run_reanalyze_all(run_id: uuid.UUID, *, session_id: str | None = None,
                 totals["findings_dropped"] += res["findings_dropped"]
                 for rule, n in res["systemic"].items():
                     systemic_totals[rule] = systemic_totals.get(rule, 0) + n
-                totals["systemic"] = dict(systemic_totals)
+                # Flat in `counts`, because the console renders counts as "key value" pairs and a nested
+                # dict there arrives as "[object Object]". The per-rule breakdown belongs in `critic`, which
+                # is the column already defined as the run's findings summary by check.
+                totals["systemic"] = sum(systemic_totals.values())
                 consecutive_failures = 0
             except Exception as exc:  # noqa: BLE001
                 # One frame must not end a corpus pass. It is marked done so a resume does not stop on the
@@ -371,6 +377,10 @@ async def run_reanalyze_all(run_id: uuid.UUID, *, session_id: str | None = None,
             async with maker() as db:
                 await beat(db, run_id, progress={"done": sorted(done), "total": len(frame_ids)},
                            counts=dict(totals))
+                run = await db.get(AgentRun, run_id)
+                if run is not None and systemic_totals:
+                    run.critic = dict(systemic_totals)
+                    await db.commit()
             if consecutive_failures >= 20:
                 # Twenty in a row is the object store being down or full, not twenty unlucky frames.
                 log.error("reanalyze.aborting", run_id=str(run_id), **totals)
