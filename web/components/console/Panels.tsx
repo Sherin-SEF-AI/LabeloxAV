@@ -138,6 +138,42 @@ export function RunningNowPanel({ jobs }: { jobs: JobStream | null }) {
   );
 }
 
+/**
+ * How far the auto-accept gate is from being measured at all.
+ *
+ * The gate decides, unattended, which machine labels enter the corpus without a person seeing them. The
+ * only measurement of whether it is right is the control sample, and 601 of them sit unjudged because the
+ * one place that shows them is a tab on another page. A number that lives only where somebody has already
+ * decided to look is not a signal.
+ */
+export function GatePanel() {
+  const [p, setP] = useState<{ reviewed: number; precision: number | null; pending: number } | null>(null);
+  useEffect(() => {
+    api.governPrecision().then(setP).catch(() => {});
+  }, []);
+  if (!p) return <div className="font-mono text-[11px] text-ink-3">no reading</div>;
+  return (
+    <div className="font-mono text-[11px] space-y-1 text-ink-3">
+      <div className="flex justify-between">
+        <span>gate precision</span>
+        {p.precision == null
+          ? <span className="text-warn">unmeasured</span>
+          : <span className="text-ink-2">{(p.precision * 100).toFixed(1)}% over {p.reviewed} judged</span>}
+      </div>
+      <div className="flex justify-between">
+        <span>awaiting a verdict</span>
+        <span className={p.pending ? "text-warn" : "text-ink-2"}>{p.pending}</span>
+      </div>
+      {p.precision == null && p.pending > 0 && (
+        <a href="/review/queue" className="block pt-1 text-accent hover:underline">
+          judge them in the review queue
+        </a>
+      )}
+    </div>
+  );
+}
+
+
 /** Agent runs, polled rather than streamed: a corpus sweep going for an hour is no more informative for
  *  being re-read every three seconds. */
 export function useAgentRuns(enabled = true) {

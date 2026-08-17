@@ -347,6 +347,7 @@ The genuinely order-dependent ones had a shared cause: the suite seeds and commi
 | Precision batch | 300 crops machine-judged, judge calibrated | **measured**: label precision at least 0.94 (see below) |
 | Error detectors | bulk verdicts, per-detector precision | **24 candidates, 1 decided**; the 298,528 this line used to quote were mostly test fixtures and went with the corpus cleanup |
 | Workforce | dispatch, callback, rating, **and now a return leg that ingests the labels** | **0 registered** |
+| Gate audit | control samples, verdicts, measured precision | **0 of 601 judged**, so gate precision is unmeasured; the backlog is now on the console and on the review tab with its true size rather than the page of 100 that was fetched |
 | Labeller scorecards | per class, per person and vendor, with intervals | **0 judged**: no human-drawn label in this corpus has a second person's verdict on it |
 | Annotator agreement | replica jobs, blind, scored, disagreements raised as issues | **1 replica task**, created to verify the path end to end; no annotator has worked one |
 | Metered delivery | usage records, invoices | **0 records**; no export has run since |

@@ -90,7 +90,11 @@ export default function ReviewQueuePage() {
           <button onClick={() => setTab("value")} className={`px-2 py-1 border ${tab === "value" ? "border-accent text-accent" : "border-line text-ink-3"}`}>value queue ({items.length})</button>
           <button onClick={() => setTab("errors")} className={`px-2 py-1 border ${tab === "errors" ? "border-accent text-accent" : "border-line text-ink-3"}`}>error candidates ({errs.length})</button>
           <button onClick={() => setTab("recall")} className={`px-2 py-1 border ${tab === "recall" ? "border-accent text-accent" : "border-line text-ink-3"}`}>missed objects ({recall.length})</button>
-          <button onClick={() => setTab("control")} className={`px-2 py-1 border ${tab === "control" ? "border-accent text-accent" : "border-line text-ink-3"}`}>gate audit ({control.length})</button>
+          {/* The whole backlog, not the page of it that was fetched. This read `control.length`, which is
+              capped at 100 by the request, so a queue of 601 unjudged samples announced itself as 100: the
+              one number that says how far the gate is from being measured, understated six-fold on the tab
+              somebody decides whether to open. */}
+          <button onClick={() => setTab("control")} className={`px-2 py-1 border ${tab === "control" ? "border-accent text-accent" : precision?.pending ? "border-warn text-warn" : "border-line text-ink-3"}`}>gate audit ({precision?.pending ?? control.length})</button>
           {tab === "errors" && <button onClick={runDetect} className="border border-line px-2 py-1 hover:border-accent">re-run detection</button>}
         </>
       }>
