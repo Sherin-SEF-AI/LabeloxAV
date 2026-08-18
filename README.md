@@ -412,6 +412,8 @@ That reframes the recall figures above rather than invalidating them. `real-v1-n
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | Installing and running it with Docker: the one-command installer, signing in, serving to other machines, TLS, GPU, upgrades, and backups. |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operating it: bring-up, auth bootstrap, the measurement-and-promotion sequence, the test tiers, and troubleshooting. |
 | [`docs/REMEDIATION_STATUS.md`](docs/REMEDIATION_STATUS.md) | What a codebase audit found, what is fixed (each with the test that fails without it), and what is open with what it needs. |
+| [`docs/TESTING.md`](docs/TESTING.md) | How the suite is organised, and the two things about it that are not obvious: `pytest.mark.db` is what arms the production-database guard, and nothing rolls back between individual tests. |
+| [`docs/DATA_RETENTION.md`](docs/DATA_RETENTION.md) | Retention windows, subject-rights requests, and erasure. The machinery was tested and undocumented, which is the half a regulator asks for. States plainly what it does not cover. |
 | [`docs/adr/`](docs/adr/) | Decision records. ADR-0001 is the immutable prediction plane and the alternatives rejected. |
 | [`tests/KNOWN_FAILURES.md`](tests/KNOWN_FAILURES.md) | The recorded test baseline, so a red run is interpretable. |
 
