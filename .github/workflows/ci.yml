@@ -139,6 +139,13 @@ jobs:
         run: |
           uv pip install --python .venv/bin/python torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cpu
           uv pip install --python .venv/bin/python imagehash==4.3.1
+          # ultralytics lives in the `ml` extra, which CI does not install, so the plate weight fetched
+          # below landed in an environment that could not load it: every run logged
+          # `pii.plate_detector_load_failed: No module named 'ultralytics'` and the plate half of the DPDPA
+          # gate went unexercised on the machine that gates merges - the same hole the comment below is
+          # about, one detector over. Installed after CPU torch so it resolves against that rather than
+          # dragging in the CUDA wheel the ml extra pins.
+          uv pip install --python .venv/bin/python ultralytics==8.3.0
 
       # The PII weights are 5.5 MB total (a 228 KB YuNet face model and a 5.3 MB plate model) and they are
       # what makes the DPDPA gate testable. Without them the anonymizer refuses to construct, by design, and
