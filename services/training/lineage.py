@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 from core.logging import get_logger
 
@@ -32,7 +33,8 @@ log = get_logger("training.lineage")
 _LABEL_DIRS = ("labels/train", "labels/val", "labels")
 
 
-def dataset_fingerprint(build_dir: str | Path, ontology_version: str, spec: dict | None = None) -> str:
+def dataset_fingerprint(build_dir: str | Path, ontology_version: str,
+                        spec: dict[str, Any] | None = None) -> str:
     """A content hash of the labels in a built training set.
 
     Order-independent (paths are sorted) and content-sensitive: one changed box changes the hash. Returns
@@ -65,7 +67,8 @@ def dataset_fingerprint(build_dir: str | Path, ontology_version: str, spec: dict
     return f"lbx-{h.hexdigest()[:16]}"
 
 
-async def record_dataset_commit(db, commit_id: str, *, build: dict, spec: dict, fingerprint: str) -> None:
+async def record_dataset_commit(db: Any, commit_id: str, *, build: dict[str, Any],
+                                spec: dict[str, Any], fingerprint: str) -> None:
     """Write the DatasetCommit row a trained model points at. Idempotent on commit_id."""
     from db.models import DatasetCommit
 

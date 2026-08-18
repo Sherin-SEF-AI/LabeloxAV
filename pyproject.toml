@@ -156,6 +156,36 @@ markers = [
     "infra: needs Redis or another running service",
 ]
 
+[tool.mypy]
+# There was no [tool.mypy] section at all. Every setting lived as CLI flags in .github/workflows/ci.yml,
+# which meant `mypy` run locally checked something different from `mypy` run in CI, and the strict surface
+# was invisible unless you read the workflow.
+#
+# Deliberately not strict globally. This tree is ~90,000 lines with heavy numpy/cv2/torch boundaries, and a
+# blanket strict flag would produce thousands of findings nobody triages, which is how a type gate becomes
+# noise that gets turned off.
+#
+# To be plain about what this is and is not: the whole tree does NOT pass even the settings below. It
+# reports ~547 findings, against ~543 under the flags CI was already using informally, so this section
+# changes almost nothing about what is reported - what it changes is that `mypy` run locally now checks the
+# same thing CI checks, which was not true when every setting lived in a workflow file. The whole-tree run
+# stays informational. The gate is the strict allowlist in ci.yml, and that list only ever grows.
+python_version = "3.11"
+ignore_missing_imports = true
+# Cheap and unambiguous. These catch real mistakes without demanding annotations the tree does not have.
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+strict_equality = true
+# Off by design, for now: turning these on is the ratchet's job, per module, not a flag day.
+disallow_untyped_defs = false
+check_untyped_defs = false
+
+[[tool.mypy.overrides]]
+# Third-party surfaces with no usable stubs. Named rather than blanket-ignored so the list is reviewable.
+module = ["cv2.*", "ultralytics.*", "sklearn.*", "umap.*", "hdbscan.*", "lakefs_client.*", "mcap.*"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

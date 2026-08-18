@@ -62,7 +62,9 @@ jobs:
         # type regression in this critical code fails the build.
         run: >
           .venv/bin/mypy --strict --ignore-missing-imports
-          core/accel/ap.py core/version.py services/api/auth_token.py
+          core/accel/ap.py core/version.py core/timebase.py
+          services/api/auth_token.py services/review_policy.py
+          services/anonymize/coverage.py services/training/lineage.py
 
       - name: Dependency audit (pip-audit)
         # Informational: a new advisory should not block an unrelated PR, but it must be visible in the log.

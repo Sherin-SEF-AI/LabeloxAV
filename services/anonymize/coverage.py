@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 # Which annotated classes imply which redaction, by ontology group rather than by name, so a class added
 # later inherits the behaviour instead of falling outside a hardcoded list. Faces include the two- and
@@ -111,7 +112,7 @@ def inside_fraction(region_bbox: Sequence[float], window: tuple[int, int, int, i
     return (ix * iy) / area
 
 
-def unmet(demands_: Sequence[Demand], regions: Iterable[dict]) -> list[Demand]:
+def unmet(demands_: Sequence[Demand], regions: Iterable[dict[str, Any]]) -> list[Demand]:
     """The demands no stored region satisfies.
 
     Matching is greedy and one-to-one: a single blurred face on a frame carrying three annotated pedestrians
@@ -146,7 +147,7 @@ def unmet(demands_: Sequence[Demand], regions: Iterable[dict]) -> list[Demand]:
     return missing
 
 
-def summarize(missing: Sequence[Demand]) -> dict:
+def summarize(missing: Sequence[Demand]) -> dict[str, Any]:
     """The per-frame payload shape the gate reports: what is missing, and for which classes."""
     counts: dict[str, int] = {}
     classes: list[str] = []
