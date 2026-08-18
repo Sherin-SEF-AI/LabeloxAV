@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.logging import get_logger
 from db.models import Frame, Object, OntologyClass, PiiAudit
 from services.anonymize.backfill import ROI_SUFFIX, StoreRefused, _audit_of, _put_with_backoff
+from services.anonymize.coverage import FACE_GROUPS, MARGIN, MIN_CROP_PX, PLATE_GROUPS, crop_window
 from services.quality.iaa import iou
 from services.recall.backends import load_image_bgr
 
@@ -42,12 +43,14 @@ log = get_logger("anonymize.recheck")
 #
 # Faces include the two- and three-wheeler groups because a rider's head routinely sits inside the vehicle's
 # box rather than inside their own, and on a motorcycle the two boxes are nearly the same rectangle.
-_FACE_GROUPS = frozenset({"vru", "two_wheeler", "three_wheeler"})
-_PLATE_GROUPS = frozenset({"two_wheeler", "three_wheeler", "four_wheeler", "heavy"})
+# Imported from services/anonymize/coverage.py, which the export gate also reads. If these two disagreed,
+# the gate could refuse a frame for a region the re-check would never look for.
+_FACE_GROUPS = FACE_GROUPS
+_PLATE_GROUPS = PLATE_GROUPS
 
 # A face sits at the top of a person's box and a plate straddles the edge of a tightly drawn vehicle box, so
 # a crop taken at the annotation's exact bounds cuts off the thing being looked for.
-_MARGIN = 0.15
+_MARGIN = MARGIN
 
 # Below this the detector sees nothing at all, which is the entire reason the whole-frame pass missed these
 # regions in the first place. Upscaling a small crop to it is what makes the second look different from the
@@ -56,7 +59,7 @@ _UPSCALE_FLOOR_PX = 320
 
 # A crop smaller than this carries too few real pixels for an upscale to recover anything; what comes back
 # from one is noise, and noise here becomes permanent blur.
-_MIN_CROP_PX = 16
+_MIN_CROP_PX = MIN_CROP_PX
 
 # A detection covering this much of its own crop is the detector agreeing with the crop, not finding
 # something inside it. Faces are the stricter of the two because a "face" the size of the whole person is
@@ -99,15 +102,8 @@ class Candidate:
     where: str         # "frame" or "roi", kept in the audit so a reviewer can see which pass found it
 
 
-def _crop_window(box: list[float], w: int, h: int) -> tuple[int, int, int, int] | None:
-    """A margined, frame-clamped crop around one annotation, or None if too small to be worth reading."""
-    x1, y1, x2, y2 = (float(v) for v in box[:4])
-    mx, my = (x2 - x1) * _MARGIN, (y2 - y1) * _MARGIN
-    cx1, cy1 = max(0, int(x1 - mx)), max(0, int(y1 - my))
-    cx2, cy2 = min(w, int(round(x2 + mx))), min(h, int(round(y2 + my)))
-    if cx2 - cx1 < _MIN_CROP_PX or cy2 - cy1 < _MIN_CROP_PX:
-        return None
-    return cx1, cy1, cx2, cy2
+# The same window the export gate measures coverage in, by construction rather than by agreement.
+_crop_window = crop_window
 
 
 def _upscaled(crop: np.ndarray) -> tuple[np.ndarray, float]:

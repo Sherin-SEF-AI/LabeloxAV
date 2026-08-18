@@ -433,6 +433,19 @@ class PiiSettings(BaseModel):
         "https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/"
         "license-plate-finetune-v1n.pt"
     )
+    # DPDPA gate v2: whether the export gate checks that a blur COVERED an annotated person or vehicle, as
+    # opposed to only checking that the frame carries an anonymization audit row at all.
+    #
+    #   off       - the pre-v2 verdict, audit-row existence only.
+    #   advisory  - the coverage gaps are computed and returned as warnings; `pass` is unchanged.
+    #   enforcing - they are a blocker.
+    #
+    # Ships as "advisory" deliberately. 82.4% of frames holding an annotated person have zero faces
+    # redacted, so flipping straight to enforcing would refuse most of the corpus, including exports that
+    # are legitimate today. The route to enforcing is to run the re-check over the corpus
+    # (POST /api/agent/reanalyze/all), watch the advisory count fall to zero, and then turn it on - which
+    # makes this a measurement first and a gate second, in that order.
+    coverage_gate: str = "advisory"      # off | advisory | enforcing
 
 
 class M9Settings(BaseModel):

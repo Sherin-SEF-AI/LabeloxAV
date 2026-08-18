@@ -51,7 +51,18 @@ async def _seed_objects() -> uuid.UUID:
         await db.flush()
         # the frame was anonymized at ingest (0 faces/plates here), so the DPDPA export gate passes
         from db.models import PiiAudit
-        db.add(PiiAudit(frame_id=fid, session_id=sid, n_faces=0, n_plates=0, regions=[],
+        # The two objects below are an autorickshaw (class 6, three_wheeler) and a sedan (class 11,
+        # four_wheeler), both of which carry a registration plate. The audit therefore has to evidence a
+        # plate redaction inside each of them, or the DPDPA coverage gate refuses this export - correctly,
+        # because a delivered frame showing two legible plates is exactly what that gate is for. This used
+        # to be an empty regions list, which passed only because the gate checked that a row existed.
+        # The autorickshaw is a three_wheeler, which is in the face groups as well as the plate ones: a
+        # driver's head sits inside the vehicle's box rather than inside a box of their own, so it owes a
+        # face redaction too.
+        db.add(PiiAudit(frame_id=fid, session_id=sid, n_faces=1, n_plates=2,
+                        regions=[{"type": "face", "bbox": [130.0, 110.0, 160.0, 140.0], "score": 0.8},
+                                 {"type": "plate", "bbox": [140.0, 170.0, 175.0, 185.0], "score": 0.8},
+                                 {"type": "plate", "bbox": [315.0, 235.0, 345.0, 248.0], "score": 0.8}],
                         method_version="test", ts_ns=start))
         # one masked autorickshaw, one box-only sedan, both auto_accept
         oid = uuid.uuid4()

@@ -72,7 +72,13 @@ async def _seed_coro():
         # then record a clean anonymization audit so the DPDPA pre-sale gate lets the export through.
         await db.flush()
         from db.models import PiiAudit
-        db.add(PiiAudit(frame_id=fid, session_id=sid, n_faces=0, n_plates=0, regions=[],
+        # The object below is an autorickshaw (class 6), which owes both a plate redaction and - because a
+        # driver's head sits inside the vehicle box rather than their own - a face one. An empty regions
+        # list satisfied the old row-existence gate; the coverage gate asks whether a blur landed on the
+        # thing that needed it, so the audit has to evidence both.
+        db.add(PiiAudit(frame_id=fid, session_id=sid, n_faces=1, n_plates=1,
+                        regions=[{"type": "face", "bbox": [130.0, 110.0, 160.0, 140.0], "score": 0.8},
+                                 {"type": "plate", "bbox": [140.0, 170.0, 175.0, 185.0], "score": 0.8}],
                         method_version="test", ts_ns=start))
         db.add(Object(object_id=oid, frame_id=fid, class_id=6, bbox=[100, 100, 200, 200], conf=0.41,
                       attrs={}, source="fused", state="annotate",
