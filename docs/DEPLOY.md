@@ -167,17 +167,23 @@ misbehaves. Take a backup first regardless.
 
 ## Backups
 
-`make backup` dumps Postgres. **It does not back up the object store**, which holds every frame, mask, point
-cloud, and export, so a Postgres-only restore gives you a corpus of dangling references. Mirror the MinIO
-volume as well:
-
 ```bash
-docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip > backup-db.sql.gz
-docker run --rm -v labeloxav_miniodata:/data -v "$PWD:/out" alpine \
-  tar czf /out/backup-blobs.tar.gz -C /data .
+make backup                                    # -> .scratch/backups/<timestamp>/
+make restore DIR=.scratch/backups/<timestamp>  # destructive; asks for confirmation
 ```
 
-Store both off the machine. Restoring one without the other is not a restore.
+Both halves, together, because they are one unit: Postgres holds the labels and the object store holds
+every frame, mask, point cloud and export. Restoring one without the other is not a restore - the app comes
+up, the counts look right, and every image 404s. `restore.sh` refuses a directory missing either half for
+exactly that reason, and warns if it ends up with frames in the database and no blobs behind them.
+
+This replaces a `make backup` that had three faults, all silent. It piped `pg_dump` into `gzip`, so the
+recipe's exit status was gzip's: a dump that failed on a wrong password or a stopped container produced a
+small, valid `.gz` and a green target, and you found out at restore time. It hardcoded the database name
+`labeloxav`, ignoring `POSTGRES_DB`. And it *printed* the MinIO mirror command rather than running it, so
+the half the warning above is about was the half nobody took.
+
+Store the whole timestamped directory off the machine. `MANIFEST` inside it records what was taken.
 
 ---
 

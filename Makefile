@@ -62,11 +62,13 @@ nuke: ## Stop infra and delete volumes (destroys local data)
 	docker compose down -v
 
 .PHONY: backup
-backup: ## Back up Postgres (pg_dump.gz) and note the MinIO mirror command, into .scratch/backups/
-	@mkdir -p .scratch/backups
-	docker compose exec -T postgres pg_dump -U labelox labeloxav | gzip > .scratch/backups/pg_$$(date +%Y%m%d_%H%M%S).sql.gz
-	@echo "Postgres dumped to .scratch/backups/"
-	@echo "MinIO: configure an mc alias, then 'mc mirror local/labeloxav .scratch/backups/minio' to mirror blobs"
+backup: ## Back up Postgres AND the MinIO blobs together, into .scratch/backups/<timestamp>/
+	./scripts/backup.sh
+
+.PHONY: restore
+restore: ## Restore both halves from a backup dir: make restore DIR=.scratch/backups/<timestamp>
+	@test -n "$(DIR)" || { echo "usage: make restore DIR=.scratch/backups/<timestamp>" >&2; exit 2; }
+	./scripts/restore.sh "$(DIR)"
 
 .PHONY: migrate
 migrate: ## Apply Alembic migrations
