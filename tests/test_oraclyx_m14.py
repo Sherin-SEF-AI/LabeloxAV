@@ -39,15 +39,59 @@ def test_radar_fusion_adopts_and_rejects():
 
 
 def test_mono_depth_recovers_known_size():
-    # a 1.7 m pedestrian, 340 px tall, focal 1000 -> depth ~ 5 m
+    # A 1.7 m pedestrian, 340 px tall, focal 1000 -> depth ~ 5 m.
+    #
+    # The class id is resolved through the ontology rather than written as a literal. This test used to
+    # pass class_id=0 and call it "a pedestrian", which asserted the height table against itself: it read
+    # CLASS_HEIGHT_M[0], got 1.7, and confirmed 1.7. There is no id 0 in the governed ontology, so the one
+    # test covering this prior could never detect that the whole table was keyed 0-based against 1-based
+    # ids - which is how latent bug #1 survived after #2, #3 and #4 were fixed.
+    from services.autolabel.ontology import get_ontology
+
     focal = 1000.0
-    d = depth_from_size([0, 0, 40, 340], class_id=0, focal_px=focal)
+    pedestrian = get_ontology().by_name("pedestrian").id
+    d = depth_from_size([0, 0, 40, 340], class_id=pedestrian, focal_px=focal)
     assert abs(d - 5.0) < 0.01
-    fused = metric_depth([0, 380, 40, 720], class_id=0, focal_px=focal, cy=360.0, cam_height_m=1.4,
+    fused = metric_depth([0, 380, 40, 720], class_id=pedestrian, focal_px=focal, cy=360.0, cam_height_m=1.4,
                          pitch_rad=0.0)
     assert fused is not None and fused["depth_m"] > 0 and 0.0 <= fused["uncertainty"] <= 1.0
     # no calibration and no size prior -> refused, not guessed
     assert metric_depth([0, 0, 40, 100], class_id=999, focal_px=focal, cy=360.0, cam_height_m=None) is None
+
+
+def test_every_size_prior_names_a_class_the_ontology_has():
+    """The table is only correct if its names resolve. A typo silently drops a prior to None, which reads
+    as "this class has no known size" rather than as a mistake."""
+    from services.autolabel.ontology import get_ontology
+    from services.oraclyx.mono_depth import CLASS_HEIGHT_M_BY_NAME, _height_by_id
+
+    onto = get_ontology()
+    missing = sorted(n for n in CLASS_HEIGHT_M_BY_NAME if not onto.has_name(n))
+    assert missing == [], f"size priors naming classes the ontology does not have: {missing}"
+    assert len(_height_by_id()) == len(CLASS_HEIGHT_M_BY_NAME)
+
+
+def test_the_vru_and_animal_classes_have_a_size_prior_again():
+    """pedestrian, rider and cattle are the classes this prior most needs, and under the 0-based table all
+    three fell outside it and returned None - the size prior was silently off for every VRU."""
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
+    for name in ("pedestrian", "rider", "cattle"):
+        d = depth_from_size([0, 0, 40, 340], class_id=onto.by_name(name).id, focal_px=1000.0)
+        assert d is not None and d > 0, name
+
+
+def test_a_delivery_bike_is_not_given_a_trucks_height():
+    """id 5 was commented "truck" at 3.2 m and is actually delivery_rider_bike, so a scooter with a box on
+    the back was placed at roughly twice its true distance."""
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
+    box, focal = [0, 0, 40, 340], 1000.0
+    bike = depth_from_size(box, class_id=onto.by_name("delivery_rider_bike").id, focal_px=focal)
+    truck = depth_from_size(box, class_id=onto.by_name("truck").id, focal_px=focal)
+    assert bike < truck / 1.5, f"delivery bike {bike:.1f} m is still being modelled like a truck {truck:.1f} m"
 
 
 def test_uncertainty_monotonic_and_soft_target():

@@ -10,19 +10,74 @@ scene."""
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 
-# nominal real-world heights (metres) for the India ontology classes that carry a stable size prior
-CLASS_HEIGHT_M = {
-    0: 1.7,    # pedestrian
-    1: 1.7,    # rider
-    2: 1.5,    # motorcycle
-    3: 1.5,    # bicycle
-    4: 1.5,    # car
-    5: 3.2,    # truck
-    6: 1.6,    # autorickshaw
-    7: 3.1,    # bus
-    8: 1.3,    # cattle
+# Nominal real-world heights (metres), BY NAME, for the classes that carry a stable size prior.
+#
+# This table used to be keyed by id, 0-based, against a 1-based governed ontology - latent bug #1 in
+# docs/AV_ASSUMPTIONS.md, and the same defect already fixed once in services/verdyx/safety_recall.py. The
+# ids did not mean what their comments said: entry 0 was dead (no such class), `pedestrian`, `rider` and
+# `cattle` fell outside the table entirely and silently returned None from the size prior, and id 5 - which
+# the comment called "truck" - is `delivery_rider_bike`, so a scooter with a delivery box was modelled as
+# 3.2 m tall and placed at roughly twice its real distance.
+#
+# Names are resolved through the ontology at call time, so an id can never drift out from under this again.
+# A class with no entry has no size prior and is refused (None), which is the module's stated contract.
+CLASS_HEIGHT_M_BY_NAME: dict[str, float] = {
+    # vru
+    "pedestrian": 1.70,
+    "rider": 1.70,
+    "traffic_police": 1.70,
+    "street_vendor": 1.70,
+    "animal_handler": 1.70,
+    "child": 1.20,
+    # two-wheelers, measured to the top of the machine rather than the rider
+    "motorcycle": 1.50,
+    "scooter": 1.40,
+    "moped": 1.30,
+    "cycle": 1.40,
+    "delivery_rider_bike": 1.50,
+    # three-wheelers
+    "autorickshaw": 1.60,
+    "e_auto": 1.70,
+    "e_rickshaw": 1.70,
+    "cycle_rickshaw": 1.60,
+    # four-wheelers. There is no bare "car" in this ontology; the body styles differ enough in height to
+    # be worth separating, which the old single 1.5 m "car" entry could not express.
+    "hatchback": 1.50,
+    "sedan": 1.45,
+    "suv": 1.80,
+    "taxi": 1.50,
+    "app_cab": 1.50,
+    "pickup": 1.85,
+    "minivan": 1.90,
+    # heavy
+    "bus": 3.10,
+    "school_bus": 3.10,
+    "lcv": 2.60,
+    "truck": 3.20,
+    "water_tanker": 3.20,
+    "garbage_truck": 3.20,
+    "tipper": 3.20,
+    # animals
+    "cattle": 1.30,
+    "dog": 0.55,
+    "goat": 0.65,
 }
+
+
+@lru_cache(maxsize=1)
+def _height_by_id() -> dict[int, float]:
+    """The name table resolved to the governed ontology's ids.
+
+    Lazy and cached rather than resolved at import, so importing this module does not require an ontology -
+    the same shape services/verdyx/safety_recall.py uses. Names absent from the active pack's ontology are
+    skipped rather than raising, so a pack with a smaller vocabulary simply has fewer size priors.
+    """
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
+    return {onto.by_name(n).id: h for n, h in CLASS_HEIGHT_M_BY_NAME.items() if onto.has_name(n)}
 
 
 def depth_from_ground(box: list[float], cam_height_m: float, focal_px: float, cy: float,
@@ -43,7 +98,7 @@ def depth_from_size(box: list[float], class_id: int, focal_px: float) -> float |
     """Range from the known-size prior: real height * focal / pixel height. Returns None when the class has no
     size prior or the box is degenerate."""
     h_px = box[3] - box[1]
-    real_h = CLASS_HEIGHT_M.get(class_id)
+    real_h = _height_by_id().get(int(class_id))
     if real_h is None or h_px <= 1 or focal_px <= 0:
         return None
     return real_h * focal_px / h_px
