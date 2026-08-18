@@ -22,6 +22,8 @@ import pytest
 from db.models import TrainingJob
 from db.session import get_sessionmaker
 
+pytestmark = pytest.mark.db
+
 SPEC = {
     "purpose": "perception",
     "task_type": "detection",

@@ -15,6 +15,8 @@ from core.config import get_settings
 from services.lidar.link import compute_object_properties, projected_bbox
 from services.lidar.link.object_identity import _iou
 
+pytestmark = pytest.mark.db
+
 W, H = 1280, 960
 
 

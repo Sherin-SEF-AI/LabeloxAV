@@ -23,6 +23,8 @@ from services.lidar.segment3d import (
     segment_ptv3,
 )
 
+pytestmark = pytest.mark.db
+
 
 def _box_points(center, dims, yaw=0.0, n=1500, seed=0):
     rng = np.random.default_rng(seed)

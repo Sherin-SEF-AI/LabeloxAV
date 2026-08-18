@@ -8,6 +8,8 @@ import pytest
 
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 @pytest.mark.asyncio
 async def test_track_flicker_distinguishes_jittery_from_stable():

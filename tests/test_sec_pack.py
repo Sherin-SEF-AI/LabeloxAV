@@ -17,6 +17,8 @@ from packs.base import DomainPack, IngestionAdapter, IngestSource, SceneModelFac
 from packs.registry import get_pack
 from services.autolabel.ontology import get_ontology
 
+pytestmark = pytest.mark.db
+
 
 def _write_clip(path: Path, n: int = 8, fps: int = 8, size: int = 32) -> bool:
     writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), fps, (size, size))

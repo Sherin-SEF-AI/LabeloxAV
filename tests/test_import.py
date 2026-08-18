@@ -12,6 +12,8 @@ from core.config import get_settings
 from services.autolabel.ontology import get_ontology
 from services.imports.remap import remap_name
 
+pytestmark = pytest.mark.db
+
 
 def test_remap_known_and_fallback():
     onto = get_ontology()
@@ -47,6 +49,7 @@ def test_coco_adapter_parse(tmp_path: Path):
 
 def test_mapillary_adapter_parse(tmp_path: Path):
     import numpy as np
+
     from services.imports.adapter_mapillary import parse
 
     (tmp_path / "images").mkdir()

@@ -22,6 +22,8 @@ from services.export.adapter_openscenario import (
     category_for,
 )
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:

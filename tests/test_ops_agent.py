@@ -9,6 +9,8 @@ import pytest
 
 from core.config import get_settings
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -55,8 +57,8 @@ def _force_rules(monkeypatch=None):
 
 @requires_infra
 def test_execute_gates_mutating_step():
-    from services.agent.ops_agent import execute, plan
     from db.session import get_sessionmaker
+    from services.agent.ops_agent import execute, plan
 
     _force_rules()
 
@@ -75,8 +77,8 @@ def test_execute_gates_mutating_step():
 
 @requires_infra
 def test_ask_runs_read_plan():
-    from services.agent.ops_agent import ask
     from db.session import get_sessionmaker
+    from services.agent.ops_agent import ask
 
     _force_rules()
 

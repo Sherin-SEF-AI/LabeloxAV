@@ -14,6 +14,8 @@ from core.config import get_settings
 from core.storage import get_object_store
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -53,11 +55,12 @@ def test_token_budget():
 
 
 async def _seed_auto_accept():
+    from sqlalchemy import delete
+
     from db.models import ControlSample, Frame, Object, OntologyClass, OntologyVersion
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
     from services.autolabel.ontology import get_ontology
-    from sqlalchemy import delete
 
     store = get_object_store()
     store.ensure_bucket()
@@ -156,12 +159,11 @@ def test_audit_queues_vlm_suspects_and_reports_reversibly(monkeypatch):
 
 @requires_infra
 def test_maybe_run_nightly_is_once_per_day(monkeypatch):
-    from db.session import get_sessionmaker
-    from services.agent.overnight_auditor import maybe_run_nightly
-
     from sqlalchemy import delete
 
     from db.models import AgentRun
+    from db.session import get_sessionmaker
+    from services.agent.overnight_auditor import maybe_run_nightly
 
     run_async(_seed_auto_accept())
     _stub_vlm(monkeypatch, "autorickshaw")

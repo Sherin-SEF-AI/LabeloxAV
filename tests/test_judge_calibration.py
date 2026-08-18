@@ -16,6 +16,8 @@ import pytest
 from core.config import get_settings
 from services.labelops.sampling import rogan_gladen_interval
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:

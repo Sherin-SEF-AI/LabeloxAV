@@ -16,6 +16,8 @@ import pytest
 
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 async def _seed(db, onto, cid, sid, boxes, confs=None):
     """One frame per box.

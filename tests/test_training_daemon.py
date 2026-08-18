@@ -9,6 +9,8 @@ import pytest
 
 from core.config import get_settings
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -39,9 +41,10 @@ def run_async(coro):
 
 async def _seed_champion(baseline_map: float):
     """A champion at baseline_map promoted over a prior version, so a rollback has somewhere to go."""
+    from sqlalchemy import delete
+
     from db.models import ModelRegistry
     from db.session import get_sessionmaker
-    from sqlalchemy import delete
 
     tag = f"champ-{uuid.uuid4().hex[:8]}"
     prev = f"prev-{uuid.uuid4().hex[:8]}"

@@ -24,6 +24,8 @@ from db.session import get_sessionmaker
 from services.api.routers.objects import get_frame
 from services.autolabel.ontology import get_ontology
 
+pytestmark = pytest.mark.db
+
 
 async def _session_of_frames(db, n: int):
     onto = get_ontology()

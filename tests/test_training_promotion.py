@@ -20,6 +20,8 @@ from db.models import Notification
 from db.session import get_sessionmaker
 from services.training import jobs as jobs_mod
 
+pytestmark = pytest.mark.db
+
 
 @pytest.mark.asyncio
 async def test_a_promotion_that_the_champion_gate_refuses_is_reported_as_refused():

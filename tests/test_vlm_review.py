@@ -22,6 +22,8 @@ from services.labelops.vlm_review import (
     parse_judge_reply,
 )
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:

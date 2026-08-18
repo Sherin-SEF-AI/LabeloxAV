@@ -14,6 +14,8 @@ import pytest
 from core.config import get_settings
 from services.intelligence.scene_graph import SCENE_RELATIONS, propose_from_geometry, vocab
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -59,7 +61,8 @@ def test_geometry_single_best_partner_no_explosion():
 @requires_infra
 def test_vlm_target_review_gate_and_export():
     from sqlalchemy import delete, select
-    from db.models import Frame, ObjectRelationship, Object, VlmTarget
+
+    from db.models import Frame, Object, ObjectRelationship, VlmTarget
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
     from services.intelligence.vlm_dataset import export_dataset, set_target_status

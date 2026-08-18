@@ -17,6 +17,8 @@ from geoalchemy2 import WKTElement
 from core.config import get_settings
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -184,7 +186,6 @@ def test_review_agreement_confirmed_vs_reclassified():
 @requires_infra
 def test_overview_rollup():
     from services.analytics.dashboards import overview
-
     from services.autolabel.ontology import get_ontology
 
     sid = _seed()

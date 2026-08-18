@@ -16,6 +16,8 @@ import pytest
 
 from core.config import get_settings
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -32,11 +34,17 @@ requires_infra = pytest.mark.skipif(not _infra_up(), reason="infra not up (make 
 @requires_infra
 def test_rig_track_handoff_and_consistency():
     from sqlalchemy import delete, select
+
     from db.models import ErrorCandidate, Frame, FrameGroup, Object, RigObject, Track
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
     from services.multicam.rigident import link_objects
-    from services.multicam.rigtrack import build_rig_tracks, check_consistency, rig_track_timeline, rig_tracks
+    from services.multicam.rigtrack import (
+        build_rig_tracks,
+        check_consistency,
+        rig_track_timeline,
+        rig_tracks,
+    )
     from services.multicam.sync import persist_groups
 
     sid = uuid.uuid4()

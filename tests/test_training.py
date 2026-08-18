@@ -12,6 +12,8 @@ from core.config import get_settings
 from services.training.jobs import TrainJobSpec
 from services.training.tasks import get_task, list_tasks
 
+pytestmark = pytest.mark.db
+
 
 def test_task_registry():
     types = {t["task_type"] for t in list_tasks()}

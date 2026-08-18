@@ -25,6 +25,8 @@ from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
 from services.training import op_precision as op
 
+pytestmark = pytest.mark.db
+
 KIND = "test_window_op"
 DAY_NS = 86_400 * 1_000_000_000
 

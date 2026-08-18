@@ -13,6 +13,8 @@ from core.config import get_settings
 from core.storage import get_object_store
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -100,10 +102,11 @@ async def _seed_disagreeing_object():
 
 @requires_infra
 def test_mine_disagreements_writes_scenario():
+    from sqlalchemy import select
+
     from db.models import ScenarioCandidate
     from db.session import get_sessionmaker
     from services.agent.disagreement import mine_disagreements
-    from sqlalchemy import select
 
     sid = run_async(_seed_disagreeing_object())
 

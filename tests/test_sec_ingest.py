@@ -16,6 +16,8 @@ import pytest
 from packs.base import FrameDraft, IngestSource, SessionDraft
 from packs.sec.ingest import StaticCameraIngestionAdapter
 
+pytestmark = pytest.mark.db
+
 
 def _write_clip(path: Path, n: int = 10, fps: int = 10, size: int = 32) -> bool:
     """Write a short MJPG/AVI clip: a grey scene with a moving square. Returns False if no writer codec."""

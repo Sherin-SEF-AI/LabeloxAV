@@ -24,6 +24,8 @@ from db.session import get_sessionmaker
 from services.agent.ontology_merge import KIND, MergeError, merge_class, revert_merge
 from services.autolabel.ontology import get_ontology
 
+pytestmark = pytest.mark.db
+
 
 async def _two_classes_with_objects(db, n_a: int = 3):
     """Two real ontology classes, with objects on the first."""

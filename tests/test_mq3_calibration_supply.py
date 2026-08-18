@@ -5,11 +5,14 @@ monotone curve, where the old source=='human' filter found none (human draws car
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import delete, select
 
 from db.models import Object, Review
 from db.session import get_sessionmaker
 from services.autolabel.isotonic import _collect_pairs, fit_isotonic
+
+pytestmark = pytest.mark.db
 
 _REVIEWER = "test-human-mq3"
 

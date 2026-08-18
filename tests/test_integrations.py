@@ -14,6 +14,8 @@ import pytest
 from core.config import get_settings
 from services.integrations.webhooks import EVENTS, sign, verify
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:

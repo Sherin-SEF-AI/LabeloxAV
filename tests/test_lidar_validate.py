@@ -17,6 +17,8 @@ from services.lidar.clean.qualitypc import check_cloud_quality
 from services.lidar.ingest import Cloud
 from services.lidar.project import project_to_camera
 
+pytestmark = pytest.mark.db
+
 W, H = 1280, 960
 
 

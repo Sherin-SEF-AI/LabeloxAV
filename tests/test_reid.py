@@ -3,7 +3,11 @@ frame blocks a merge); a split partitions objects at a boundary; the merged span
 
 from __future__ import annotations
 
+import pytest
+
 from services.temporal.reid import partition_at, span_union, tracks_overlap
+
+pytestmark = pytest.mark.db
 
 
 def test_disjoint_tracks_can_merge():

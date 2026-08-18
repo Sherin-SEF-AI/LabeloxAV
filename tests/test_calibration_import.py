@@ -19,6 +19,8 @@ from services.calibration.import_calib import (
 from services.calibration.resolve import resolve_calibration
 from services.calibration.store import upsert_calibration
 
+pytestmark = pytest.mark.db
+
 _CAM = "cam_import_mcal3"
 
 _KITTI = """P0: 7.2e+02 0 6.0e+02 0 0 7.2e+02 1.7e+02 0 0 0 1 0

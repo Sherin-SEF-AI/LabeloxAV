@@ -35,15 +35,64 @@ os.environ.setdefault("LBX_POSTGRES__DB", "labeloxav_test")
 os.environ.setdefault("LBX_RATELIMIT__ENABLED", "false")
 
 
+def pytest_sessionfinish(session, exitstatus):
+    """Fail a run that passed everything it ran but did not run enough of the suite.
+
+    Active only when LBX_MIN_PASSED / LBX_MAX_SKIPPED are set, which `make test` does. Most of this suite
+    skips rather than fails when infra is missing, so "1495 passed, 215 skipped" and "2471 passed, 16
+    skipped" are both green and only the counts tell them apart. KNOWN_FAILURES.md has described that
+    failure mode for months; nothing checked for it, which is how a run against half-dead infra could
+    report success. An ad-hoc `pytest tests/test_foo.py` sets neither variable and is unaffected.
+    """
+    floor = int(os.environ.get("LBX_MIN_PASSED") or 0)
+    ceiling = int(os.environ.get("LBX_MAX_SKIPPED") or -1)
+    if floor <= 0 and ceiling < 0:
+        return
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is None:      # -p no:terminal, or a non-reporting embedding of pytest
+        return
+    passed = len(reporter.stats.get("passed", []))
+    skipped = len(reporter.stats.get("skipped", []))
+    problems = []
+    if floor > 0 and passed < floor:
+        problems.append(f"only {passed} tests passed, floor is {floor}")
+    if ceiling >= 0 and skipped > ceiling:
+        problems.append(f"{skipped} tests skipped, ceiling is {ceiling}")
+    if problems:
+        reporter.write_line("")
+        for p in problems:
+            reporter.write_line(f"SUITE FLOOR: {p}", red=True, bold=True)
+        reporter.write_line(
+            "A green run that executed a fraction of the suite is not a smaller green. Check that infra is "
+            "up (make up) before trusting this result.", red=True)
+        session.exitstatus = 1
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _provision_test_db(request):
     """Create the isolated test database (if missing) and bring it to the head schema once per session, so
     tests run against a real-schema DB that is never the production corpus. Refuses unless the target db
     name looks like a test db: a guard against accidentally pointing the suite at production.
 
-    Skipped when the selected run has no db-marked test (e.g. make test-unit): the pure-unit tier must run
-    without a Postgres. Tests that truly need the DB carry the `db` marker; the marker both selects them out
-    of the unit tier and triggers provisioning here."""
+    Provisioning is skipped when the selected run has no db-marked test (e.g. make test-unit): the pure-unit
+    tier must run without a Postgres. Tests that truly need the DB carry the `db` marker; the marker both
+    selects them out of the unit tier and triggers provisioning here.
+
+    The refusal below is NOT skipped, and that ordering is the whole point. It used to sit after the marker
+    early-return, so the one run that most needed it - a run where nothing is marked `db` because 115 files
+    open a session without saying so - was the one run that skipped it entirely, and still committed rows to
+    whatever LBX_POSTGRES__DB happened to name. tests/test_db_markers.py keeps the marker set honest; this
+    ordering makes the guard unbypassable regardless."""
+    from core.config import get_settings
+
+    # cache_clear immediately before the read, with nothing between them: the os.environ.setdefault calls
+    # above run at import, and core.config may already have been imported and cached during collection.
+    get_settings.cache_clear()
+    pg = get_settings().postgres
+    if "test" not in pg.db.lower():
+        raise RuntimeError(f"refusing to run the suite against non-test database '{pg.db}'. "
+                           "Set LBX_POSTGRES__DB to a *_test database.")
+
     if not any(item.get_closest_marker("db") for item in request.session.items):
         yield
         return
@@ -52,12 +101,6 @@ def _provision_test_db(request):
 
     import psycopg
 
-    from core.config import get_settings
-    get_settings.cache_clear()
-    pg = get_settings().postgres
-    if "test" not in pg.db.lower():
-        raise RuntimeError(f"refusing to run the suite against non-test database '{pg.db}'. "
-                           "Set LBX_POSTGRES__DB to a *_test database.")
     admin = psycopg.connect(host=pg.host, port=pg.port, user=pg.user, password=pg.password,
                             dbname="postgres", autocommit=True)
     with admin.cursor() as cur:

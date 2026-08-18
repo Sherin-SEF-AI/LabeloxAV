@@ -11,8 +11,10 @@ import uuid
 import pytest
 
 from core.config import get_settings
-from services.autolabel.ontology import get_ontology
 from services.agent.nl_edit import parse_edit
+from services.autolabel.ontology import get_ontology
+
+pytestmark = pytest.mark.db
 
 
 def _infra_up() -> bool:
@@ -42,6 +44,7 @@ def test_parse_operations_and_filters():
 @requires_infra
 def test_preview_apply_and_revert():
     from sqlalchemy import select
+
     from db.models import AgentRun, AuditDecision, Frame, Object
     from db.models import Session as DbSession
     from db.session import get_sessionmaker

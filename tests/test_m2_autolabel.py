@@ -18,7 +18,7 @@ from db.models import Frame
 from db.models import Session as DbSession
 from db.session import get_sessionmaker
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.db]
 
 
 def _cuda_ready() -> bool:

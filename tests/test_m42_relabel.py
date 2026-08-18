@@ -14,6 +14,8 @@ from core.config import get_settings
 from services.autolabel.ontology import get_ontology
 from services.relabel.diff import classify_change
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -62,12 +64,11 @@ def test_diff_classifier_protects_human_and_flags_regression():
 
 @requires_infra
 def test_relabel_promotes_applies_safely_and_reverts():
-    from db.models import Frame, Object, RelabelRun
+    from db.models import Frame, Object, RelabelJob, RelabelRun
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
     from services.relabel.apply import revert_run
     from services.relabel.run import run_relabel_job, start_relabel
-    from db.models import RelabelJob
 
     sid = uuid.uuid4()
     onto = get_ontology()

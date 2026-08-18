@@ -18,6 +18,8 @@ import pytest
 
 from core.config import get_settings
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -144,10 +146,9 @@ def test_a_machine_verdict_never_touches_the_queue_s_own_status():
     """A machine confirming its own detector into error_candidate.status would corrupt the one honest
     signal in that table, and the human-verdict precision would then be measuring the machine."""
     import inspect
+    import re
 
     from services.errordetect import judge_detectors
-
-    import re
 
     src = inspect.getsource(judge_detectors)
 
@@ -293,11 +294,12 @@ def test_judging_an_object_in_a_second_batch_does_not_steal_it_from_the_first():
     """
     import uuid as _uuid
 
+    from sqlalchemy import func, select
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     from core.timebase import now_ns
     from db.models import MachineVerdict
     from db.session import get_sessionmaker
-    from sqlalchemy import func, select
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     async def _flow():
         oids = await _seed_candidates(f"t_{_uuid.uuid4().hex[:6]}", 1)

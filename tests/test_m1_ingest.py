@@ -22,7 +22,7 @@ from services.ingest.reader_mcap import read_mcap
 from services.ingest.reader_video import read_video
 from services.ingest.run import ingest
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.db]
 
 
 def _infra_up() -> bool:

@@ -8,6 +8,7 @@ concept phrases and the Path C VLM shortlist, are restricted to the grounded set
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from services.autolabel.grounding import (
     promoted_ids,
@@ -18,6 +19,8 @@ from services.autolabel.grounding import (
 from services.autolabel.ontology import get_ontology
 from services.autolabel.paths.path_b_sam3 import Sam3Path
 from services.autolabel.paths.path_c_qwen3vl import VlmResult, VlmVerifier
+
+pytestmark = pytest.mark.db
 
 HALLUCINATED = ["bus_shelter", "water_bottles", "vintage_car", "balloon_seller", "buildings", "multi_axle_trailer"]
 CORE = ["pedestrian", "autorickshaw", "sedan", "motorcycle", "rider", "cattle"]

@@ -11,6 +11,8 @@ import pytest
 from core.config import PiiSettings, Settings, get_settings
 from services.anonymize.anonymizer import PiiAnonymizer
 
+pytestmark = pytest.mark.db
+
 
 class _StubFace:
     available = True

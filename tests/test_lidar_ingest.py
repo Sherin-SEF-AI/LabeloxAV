@@ -23,6 +23,8 @@ from services.lidar.ingest import (
     write_pointclouds_mcap,
 )
 
+pytestmark = pytest.mark.db
+
 
 def _sample_xyzi(n: int = 50, seed: int = 3) -> np.ndarray:
     rng = np.random.default_rng(seed)

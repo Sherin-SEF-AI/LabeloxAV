@@ -15,6 +15,8 @@ from core.config import get_settings
 from services.autolabel.ontology import get_ontology
 from services.govern.champion import champion_gate
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -98,6 +100,7 @@ def test_governance_end_to_end():
 
             # control sample: 5 auto-accepted controls (real object FKs), 2 judged incorrect -> precision 0.6
             from sqlalchemy import select
+
             from db.models import Object
             sids = []
             obj_ids = (await db.execute(select(Object.object_id).limit(5))).scalars().all()

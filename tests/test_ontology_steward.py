@@ -12,6 +12,8 @@ import pytest
 from core.config import get_settings
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -61,12 +63,19 @@ def _unit(rng, d):
 
 
 async def _seed_fallback_cluster(n: int = 35):
-    from db.models import Frame, Object, ObjectEmbedding, OntologyClass, OntologyVersion
+    from sqlalchemy import delete
+
+    from db.models import (
+        Frame,
+        Object,
+        ObjectEmbedding,
+        OntologyClass,
+        OntologyVersion,
+        PromotionProposal,
+    )
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
     from services.autolabel.ontology import get_ontology
-    from sqlalchemy import delete
-    from db.models import PromotionProposal
 
     onto = get_ontology()
     fb = onto.fallback_ids()[0]

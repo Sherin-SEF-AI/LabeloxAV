@@ -12,6 +12,8 @@ import pytest
 
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 async def _objects(db, onto, n: int, *, class_name: str = "rider"):
     from db.models import Frame, Object, OntologyClass, OntologyVersion

@@ -22,6 +22,8 @@ import sqlalchemy as sa
 from core.config import get_settings
 from services.autolabel.ontology import get_ontology
 
+pytestmark = pytest.mark.db
+
 # The module name starts with a digit, so it cannot be imported by name.
 _mig = importlib.machinery.SourceFileLoader(
     "mig_0094", str(Path(__file__).resolve().parents[1]

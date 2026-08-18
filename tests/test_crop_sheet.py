@@ -19,6 +19,8 @@ import pytest
 
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 async def _frame_with_objects(db, onto, *, n_objects: int, session_id=None, boxes=None):
     """One frame carrying n objects, so co-location can be exercised."""

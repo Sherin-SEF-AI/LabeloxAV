@@ -25,6 +25,8 @@ from services.lidar.detect3d import (
     native_class_to_ontology,
 )
 
+pytestmark = pytest.mark.db
+
 W, H = 1280, 960
 
 

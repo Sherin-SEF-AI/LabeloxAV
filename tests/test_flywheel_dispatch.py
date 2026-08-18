@@ -12,12 +12,14 @@ from core.timebase import now_ns, seconds_to_ns
 from services.agent.runs import revert_run
 from services.flywheel.dispatch import dispatch_worklist
 
+pytestmark = pytest.mark.db
+
 
 @pytest.mark.asyncio
 async def test_dispatch_bumps_to_review_and_reverts():
     from sqlalchemy import delete
 
-    from db.models import AgentRun, Frame, FlywheelCycle, Object, OntologyClass, OntologyVersion
+    from db.models import AgentRun, FlywheelCycle, Frame, Object, OntologyClass, OntologyVersion
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
     from services.autolabel.ontology import get_ontology

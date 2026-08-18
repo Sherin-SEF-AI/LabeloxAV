@@ -10,6 +10,8 @@ from core.config import CalibrateSettings, get_settings
 from services.autolabel.ontology import get_ontology
 from services.training.safe_miou import affinity_cost, safe_miou
 
+pytestmark = pytest.mark.db
+
 _VRU = {"vru", "animal"}
 
 

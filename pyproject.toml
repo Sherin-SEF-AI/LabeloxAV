@@ -141,6 +141,11 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
+# --strict-markers turns a typo'd marker into a collection error instead of a test that is silently never
+# selected; --strict-config does the same for a misspelled key in this block. Deliberately nothing else
+# here: both make targets pass their own -m and -q, and putting -p no:cacheprovider here would make --lf
+# silently a full run.
+addopts = "--strict-markers --strict-config"
 # Test tiers, so the fast pure-unit set can be run without infra. A test that needs a real Postgres/MinIO is
 # marked `db`, one that needs a GPU or model weights `gpu`, and one that reaches Redis or other services
 # `infra`. `make test-unit` deselects all three. Most of the suite is already infra-gated with a runtime

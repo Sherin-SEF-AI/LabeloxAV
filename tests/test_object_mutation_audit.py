@@ -21,11 +21,19 @@ from sqlalchemy import select
 
 from core.timebase import now_ns, seconds_to_ns
 from db.models import (
-    AuditDecision, Frame, Object, OntologyClass, OntologyVersion, Review, User,
+    AuditDecision,
+    Frame,
+    Object,
+    OntologyClass,
+    OntologyVersion,
+    Review,
+    User,
 )
 from db.models import Session as DbSession
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
+
+pytestmark = pytest.mark.db
 
 
 async def _user(db, name="asha", role="annotator") -> User:

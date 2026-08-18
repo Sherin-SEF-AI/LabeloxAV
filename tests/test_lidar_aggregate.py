@@ -21,6 +21,8 @@ from services.lidar.aggregate import (
 )
 from services.lidar.ingest import Cloud
 
+pytestmark = pytest.mark.db
+
 
 def _scene(seed=0):
     rng = np.random.default_rng(seed)

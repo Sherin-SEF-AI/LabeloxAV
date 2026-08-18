@@ -19,6 +19,8 @@ from services.intelligence.intent import (
     vocab,
 )
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -75,8 +77,9 @@ def test_trajectory_proposes_cut_in_and_leaves_unclear_unknown():
 @requires_infra
 def test_set_and_confirm_intent():
     from sqlalchemy import select
-    from db.models import Track
+
     from db.models import Session as DbSession
+    from db.models import Track
     from db.session import get_sessionmaker
     from services.intelligence.intent import propose_track, set_intent
 

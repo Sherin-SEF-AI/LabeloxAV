@@ -13,6 +13,8 @@ from core.config import get_settings
 from core.storage import get_object_store
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -87,8 +89,8 @@ async def _seed_near_dups():
 
 @requires_infra
 def test_near_dup_flags_extra_object():
-    from services.errordetect.near_dup import detect_near_dup_inconsistent
     from db.session import get_sessionmaker
+    from services.errordetect.near_dup import detect_near_dup_inconsistent
 
     sid, extra_oid = run_async(_seed_near_dups())
 

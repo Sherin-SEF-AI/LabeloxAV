@@ -4,7 +4,11 @@ un-redacted (fail-closed), and confirmed non-personal speech does not block."""
 
 from __future__ import annotations
 
+import pytest
+
 from services.anonymize.compliance import evaluate_dpdpa
+
+pytestmark = pytest.mark.db
 
 
 def test_passes_when_all_clear():

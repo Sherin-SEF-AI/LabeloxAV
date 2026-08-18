@@ -13,6 +13,8 @@ from core.config import get_settings
 from core.storage import get_object_store
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -78,10 +80,11 @@ async def _seed_near_miss():
 
 @requires_infra
 def test_mine_surfaces_near_miss():
+    from sqlalchemy import select
+
     from db.models import ScenarioCandidate
     from db.session import get_sessionmaker
     from services.agent.scenario_miner import mine_scenarios
-    from sqlalchemy import select
 
     sid, fid = run_async(_seed_near_miss())
 

@@ -21,6 +21,8 @@ from db.models import Session as DbSession
 from db.session import get_sessionmaker
 from services.training.op_precision import MIN_SAMPLES, measure_operation
 
+pytestmark = pytest.mark.db
+
 KIND = "test_op_precision_kind"
 STARTED = datetime(2026, 7, 1, tzinfo=UTC)
 

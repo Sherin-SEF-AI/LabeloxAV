@@ -26,6 +26,8 @@ from services.lidar.export import (
 )
 from services.lidar.ingest import Cloud
 
+pytestmark = pytest.mark.db
+
 
 def _rec(name, cloud_id, conf=0.9):
     return {"object_3d_id": str(uuid.uuid4()), "cloud_id": cloud_id, "ts_ns": 1, "cloud_uri": "s3://x",

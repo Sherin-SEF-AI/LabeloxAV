@@ -33,6 +33,8 @@ from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
 from services.labelops import scorecard as sc
 
+pytestmark = pytest.mark.db
+
 
 async def _seed(db):
     onto = get_ontology()

@@ -22,6 +22,8 @@ from services.lidar.traverse import (
     freespace_grid,
 )
 
+pytestmark = pytest.mark.db
+
 PLANE = [0.0, 0.0, 1.0, 0.0]
 
 

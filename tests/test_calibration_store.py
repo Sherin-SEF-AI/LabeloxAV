@@ -14,6 +14,8 @@ from db.session import get_sessionmaker
 from services.calibration.resolve import resolve_calibration
 from services.calibration.store import spec_to_fields, upsert_calibration
 
+pytestmark = pytest.mark.db
+
 _CAM = "cam_test_mcal3"
 
 

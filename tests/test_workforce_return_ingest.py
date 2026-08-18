@@ -39,6 +39,8 @@ from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
 from services.labelops import return_ingest as ri
 
+pytestmark = pytest.mark.db
+
 CVAT_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
 <annotations>
   <version>1.1</version>
