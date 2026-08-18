@@ -1448,10 +1448,10 @@ class LabeloxClient:
         return self._call("GET", f"/api/frames/{frame_id}/lift_ground",
                           params={"u": u, "v": v}, json_body=None)
 
-    def get_frames_by_frame_id_objects(self, frame_id: str, job_id: Any | None = None) -> Any:
+    def get_frames_by_frame_id_objects(self, frame_id: str, job_id: Any | None = None, limit: int | None = 2000) -> Any:
         """Frame Objects"""
         return self._call("GET", f"/api/frames/{frame_id}/objects",
-                          params={"job_id": job_id}, json_body=None)
+                          params={"job_id": job_id, "limit": limit}, json_body=None)
 
     def post_frames_by_frame_id_objects(self, frame_id: str, body: Any = None) -> Any:
         """Create Object"""

@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
@@ -237,8 +237,15 @@ class RelabelTrackIn(BaseModel):
     state: str = "accepted"
 
 
+# The rapid-review grid submits at most a screenful and the largest deliberate sweep in the UI is a
+# lassoed selection, so this is far above any real batch. It is a bound on an N+1 whose N the caller
+# chooses: every id is a separate db.get inside one request, holding a connection from a pool of ten, and
+# an unbounded list was a way to occupy the API for as long as the caller liked.
+MAX_BULK_REVIEW_IDS = 1000
+
+
 class BulkReviewIn(BaseModel):
-    object_ids: list[str]
+    object_ids: list[str] = Field(..., max_length=MAX_BULK_REVIEW_IDS)
     action: str = "confirm"            # confirm | accept | reject | reclassify | set_attrs
     class_name: str | None = None      # required for reclassify
     attrs: dict | None = None          # set_attrs: merged into each object's attrs

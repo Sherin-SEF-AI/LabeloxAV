@@ -131,6 +131,34 @@ def _mask_polygons(mask_uri: str | None) -> list[list[float]]:
         return []
 
 
+# How many mask blobs to fetch at once. The object store is a network hop, so the useful number is bounded
+# by concurrency rather than CPU; 16 keeps a busy frame fast without turning one editor open into a burst
+# the store has to queue.
+_MASK_FETCH_CONCURRENCY = 16
+
+
+async def _mask_polygons_bulk(uris: list[str | None]) -> dict[str, list[list[float]]]:
+    """Fetch many masks at once, off the event loop.
+
+    The per-object version below is a synchronous S3 GET. Calling it in a list comprehension over a frame's
+    objects meant N sequential network round trips inside an async handler, with the loop blocked for all
+    of them - on the editor's hot path, which runs on every frame open. Sixteen objects on a frame is
+    ordinary here and each one was a separate serial fetch.
+    """
+    import asyncio
+
+    wanted = sorted({u for u in uris if u})
+    if not wanted:
+        return {}
+    sem = asyncio.Semaphore(_MASK_FETCH_CONCURRENCY)
+
+    async def one(uri: str) -> tuple[str, list[list[float]]]:
+        async with sem:
+            return uri, await asyncio.to_thread(_mask_polygons, uri)
+
+    return dict(await asyncio.gather(*(one(u) for u in wanted)))
+
+
 def _mask_key(session_id, frame_id, object_id) -> str:
     return f"masks/{session_id}/{frame_id}/{object_id}.json"
 
@@ -296,7 +324,7 @@ async def vlm_dataset_export(session_id: str | None = None):
 
 
 @router.get("/frames/{frame_id}/objects")
-async def frame_objects(frame_id: str, job_id: str | None = None,
+async def frame_objects(frame_id: str, job_id: str | None = None, limit: int = 2000,
                         db: AsyncSession = Depends(db_session)):
     """Every object on a frame, or only this job's when the job is a blind replica.
 
@@ -320,7 +348,11 @@ async def frame_objects(frame_id: str, job_id: str | None = None,
             raise HTTPException(404, "job not found")
         if job.replica_group is not None:
             q = q.where(Object.job_id == job.job_id)
-    rows = (await db.execute(q)).scalars().all()
+    # Bounded. This was unbounded, and it is the editor's hot path: a frame with a pathological object
+    # count would materialise all of them and fetch a mask blob for each. The cap is far above any real
+    # frame in this corpus (the busiest is ~60 objects) so it never truncates ordinary work.
+    rows = (await db.execute(q.limit(max(1, min(limit, 2000))))).scalars().all()
+    masks = await _mask_polygons_bulk([o.mask_uri for o in rows])
     return [
         {
             "object_id": str(o.object_id),
@@ -331,7 +363,7 @@ async def frame_objects(frame_id: str, job_id: str | None = None,
             "conf": o.conf,
             "quality_score": o.quality_score,
             "state": o.state,
-            "mask_polygons": _mask_polygons(o.mask_uri),
+            "mask_polygons": masks.get(o.mask_uri or "", []),
             "version": o.version,
             "rot_deg": o.rot_deg or 0.0,
             "keypoints": o.keypoints,
@@ -635,12 +667,23 @@ async def frame_image(frame_id: str, db: AsyncSession = Depends(db_session),
     if frame is None:
         raise HTTPException(404, "frame not found")
     try:
-        data = get_object_store().get_bytes(frame.img_uri)
+        # Off the event loop: this is a network read of a whole JPEG, and it was blocking the loop for
+        # every frame open, every filmstrip thumbnail and every prefetch.
+        import asyncio
+
+        data = await asyncio.to_thread(get_object_store().get_bytes, frame.img_uri)
     except Exception as exc:  # noqa: BLE001  (missing/unreadable blob -> 404, never a 500 that breaks the editor)
         raise HTTPException(404, "frame image unavailable") from exc
 
     await _log_frame_view(db, frame, user)
-    return Response(content=data, media_type="image/jpeg")
+    # A frame's pixels are immutable once ingested - the redaction happens before the blob is written, and
+    # an edit makes a new object rather than rewriting this one - so the browser should not re-fetch it on
+    # every navigation. There were no cache headers at all, which is why stepping back one frame in the
+    # editor re-downloaded an image the browser had just displayed. `private` because these are DPDPA
+    # frames: they may sit in the user's own cache and must not sit in a shared proxy's.
+    etag = f'W/"{frame.frame_id}"'
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=3600", "ETag": etag})
 
 
 async def _log_frame_view(db: AsyncSession, frame, user) -> None:
@@ -766,23 +809,39 @@ async def object_crop(object_id: str, pad: float = 0.15, db: AsyncSession = Depe
     if obj is None:
         raise HTTPException(404, "object not found")
     frame = await db.get(Frame, obj.frame_id)
+
+    def _render() -> bytes | None:
+        # Fetch, decode and encode together in one worker thread. Every part of this is blocking - a
+        # network read, then a full-frame JPEG decode to produce one small tile - and it all used to run
+        # on the event loop, so a timeline of forty thumbnails stalled every other request in flight.
+        raw = get_object_store().get_bytes(frame.img_uri)
+        img = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+        h, w = img.shape[:2]
+        x1, y1, x2, y2 = obj.bbox
+        px, py = (x2 - x1) * pad, (y2 - y1) * pad
+        cx1, cy1 = max(0, int(x1 - px)), max(0, int(y1 - py))
+        cx2, cy2 = min(w, int(x2 + px)), min(h, int(y2 + py))
+        crop = img[cy1:cy2, cx1:cx2]
+        if crop.size == 0:
+            crop = img
+        ok, out = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return out.tobytes() if ok else None
+
+    import asyncio
+
     try:
-        buf = np.frombuffer(get_object_store().get_bytes(frame.img_uri), dtype=np.uint8)
+        rendered = await asyncio.to_thread(_render)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "frame image unavailable") from exc
-    img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-    if img is None:
+    if rendered is None:
         raise HTTPException(404, "failed to decode frame image")
-    h, w = img.shape[:2]
-    x1, y1, x2, y2 = obj.bbox
-    px, py = (x2 - x1) * pad, (y2 - y1) * pad
-    cx1, cy1 = max(0, int(x1 - px)), max(0, int(y1 - py))
-    cx2, cy2 = min(w, int(x2 + px)), min(h, int(y2 + py))
-    crop = img[cy1:cy2, cx1:cx2]
-    if crop.size == 0:
-        crop = img
-    ok, out = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 80])
-    return Response(content=out.tobytes(), media_type="image/jpeg")
+    # A crop is a pure function of an immutable frame and a bbox, and the object's version changes when
+    # the bbox does - so the tile can be cached and correctly invalidated by that version.
+    return Response(content=rendered, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=3600",
+                             "ETag": f'W/"{obj.object_id}-{obj.version or 0}"'})
 
 
 @router.post("/segment")

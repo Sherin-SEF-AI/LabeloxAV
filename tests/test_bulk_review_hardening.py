@@ -170,3 +170,22 @@ async def test_the_batch_writes_one_activity_entry_not_one_per_object():
         after = (await db.execute(select(func.count()).select_from(ActivityEvent))).scalar_one()
         assert after == before + 1, f"expected one entry for the batch, got {after - before}"
         await db.rollback()
+
+
+def test_the_id_list_is_bounded():
+    """An N+1 whose N the caller picks is a way to occupy the API for as long as they like.
+
+    Every id in the batch is a separate db.get inside one request, holding one connection from a pool of
+    ten. The list was unbounded. The cap sits far above any real batch - the rapid grid submits a screenful
+    and the largest deliberate sweep is a lassoed selection - so it bounds abuse without truncating work.
+    """
+    import pytest
+    from pydantic import ValidationError
+
+    from services.api.deps import MAX_BULK_REVIEW_IDS, BulkReviewIn
+
+    ok = BulkReviewIn(object_ids=[str(uuid.uuid4()) for _ in range(10)])
+    assert len(ok.object_ids) == 10
+
+    with pytest.raises(ValidationError):
+        BulkReviewIn(object_ids=["x"] * (MAX_BULK_REVIEW_IDS + 1))
