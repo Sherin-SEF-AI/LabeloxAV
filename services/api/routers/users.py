@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
 from db.models import Review, User
+from services.activity import record_activity
 from services.api.auth_token import mint_token
 from services.api.deps import UserCreateIn, db_session, require_role
 
@@ -100,6 +101,13 @@ async def reissue_token(user_id: str, _admin=Depends(require_role("admin")),
         raise HTTPException(400, "invalid user id") from None
     if u is None:
         raise HTTPException(404, "user not found")
+    # Minting a working credential for another account is the most impersonation-shaped action in the API
+    # and it left no trace at all - the sign-in path records `signed_in`, this recorded nothing, so a token
+    # issued for someone else was indistinguishable from that person working. Records the admin as actor
+    # and the recipient as subject.
+    await record_activity(db, user=_admin, verb="reissued_token", subject_type="user",
+                          subject_id=str(u.user_id),
+                          summary=f"{getattr(_admin, 'name', 'an admin')} re-issued a token for {u.name}")
     return {"user_id": str(u.user_id), "name": u.name, "role": u.role, "token": _token_for(u)}
 
 
@@ -117,5 +125,9 @@ async def revoke_tokens(user_id: str, _admin=Depends(require_role("admin")),
     if u is None:
         raise HTTPException(404, "user not found")
     u.token_version = (u.token_version or 1) + 1
+    await record_activity(db, user=_admin, verb="revoked_tokens", subject_type="user",
+                          subject_id=str(u.user_id),
+                          summary=f"{getattr(_admin, 'name', 'an admin')} revoked every token for {u.name}",
+                          commit=False)
     await db.commit()
     return {"user_id": str(u.user_id), "token_version": u.token_version, "revoked": True}

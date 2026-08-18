@@ -31,6 +31,7 @@ from services.api.deps import (
 )
 from services.autolabel.ontology import get_ontology
 from services.govern.audit import record as audit_record
+from services.review_policy import ReviewStateError, state_for
 
 router = APIRouter()
 log = get_logger("api.objects")
@@ -468,7 +469,14 @@ async def get_frame(frame_id: str, job_id: str | None = None,
 
 @router.post("/frames/{frame_id}/objects", response_model=ObjectDetail)
 async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
-    """Create a human-drawn object on a frame (source=human, state=accepted). Optional mask."""
+    """Create a human-drawn object on a frame (source=human). Optional mask.
+
+    The requested state is clamped by role, exactly as a review verdict is. This path used to write
+    payload.state verbatim, and it defaulted to "accepted": an annotator could POST ground-truth-grade
+    rows straight past the validation stage the two-stage workflow exists to enforce. review_policy
+    exists for precisely this and was only ever called from /api/review, which sits behind a reviewer
+    floor - so the clamp could never fire on the one path that could reach it from below.
+    """
     frame = await db.get(Frame, UUID(frame_id))
     if frame is None:
         raise HTTPException(404, "frame not found")
@@ -477,6 +485,12 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         raise HTTPException(400, f"unknown class '{payload.class_name}'")
     if len(payload.bbox) != 4:
         raise HTTPException(400, "bbox must be [x1,y1,x2,y2]")
+    try:
+        # An unlisted state used to reach the DB and trip ck_object_state as a 500; state_for raises
+        # ReviewStateError on the same input, which is a 400 with the vocabulary in the message.
+        state = state_for(None, payload.state, getattr(user, "role", None), None) or "submitted"
+    except ReviewStateError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if payload.attrs:
         errors = onto.validate_attrs(payload.attrs, onto.by_name(payload.class_name).id)
         if errors:
@@ -514,7 +528,7 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
     obj = Object(
         object_id=oid, frame_id=frame.frame_id, class_id=onto.by_name(payload.class_name).id,
         bbox=payload.bbox, mask_uri=mask_uri, mask_encoding=mask_encoding, attrs=payload.attrs or {},
-        conf=1.0, source="human", state=payload.state, rot_deg=payload.rot_deg, keypoints=payload.keypoints,
+        conf=1.0, source="human", state=state, rot_deg=payload.rot_deg, keypoints=payload.keypoints,
         polyline=payload.polyline, cuboid_3d=payload.cuboid_3d,
         # Who drew it and under which job. Both null for a label drawn outside a job, which is every
         # existing flow and stays exactly as it was.

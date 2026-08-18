@@ -276,6 +276,21 @@ def _is_credential_path(path: str) -> bool:
 
 
 
+# The only routes allowed to carry their credential in the query string, because EventSource cannot set a
+# header. Kept as exact paths (one templated) rather than a prefix: /api/events/ also holds two mutations
+# and three plain JSON reads, and a token in a URL should not authorise any of them.
+_SSE_STREAM_PATHS = frozenset({
+    "/api/events/jobs",
+    "/api/events/notifications",
+    "/api/events/system",
+})
+_SSE_STREAM_PREFIXES = ("/api/events/training/",)   # /api/events/training/{job_id}
+
+
+def _is_sse_stream(path: str) -> bool:
+    return path in _SSE_STREAM_PATHS or path.startswith(_SSE_STREAM_PREFIXES)
+
+
 def _required_role(path: str) -> str:
     if path in _SELF_PATHS:
         return "annotator"
@@ -319,11 +334,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # who reads the public user list cannot mint one without the server signing key (C1).
         authz = request.headers.get("authorization")
         # SSE is the one exception. The browser EventSource API cannot set a request header at all, so an
-        # event stream has no way to present a bearer token except in the URL. This is accepted ONLY for the
-        # /api/events/ prefix, and those streams carry job progress and nothing sensitive, because a URL can
-        # reach a proxy or access log in a way a header does not. Everywhere else the header is the only
-        # accepted form, so this does not widen the credential surface generally.
-        if not authz and path.startswith("/api/events/"):
+        # event stream has no way to present a bearer token except in the URL. A URL reaches proxy and
+        # access logs in a way a header does not, so the exception is scoped to the four streams that
+        # actually need it and to GET, rather than to the /api/events/ prefix.
+        #
+        # The prefix was too wide. Nine routes live under it and only four are streams: PATCH and DELETE
+        # /api/events/{id} are timeline-event mutations, and three more are ordinary JSON reads. A
+        # full-privilege token in a URL was authorising row deletion. Matching exact paths also means a
+        # route added under this prefix later does not silently inherit the exception.
+        if not authz and request.method in ("GET", "HEAD") and _is_sse_stream(path):
             qs_token = request.query_params.get("token")
             if qs_token:
                 authz = f"Bearer {qs_token}"

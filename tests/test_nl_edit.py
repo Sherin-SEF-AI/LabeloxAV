@@ -55,7 +55,14 @@ def test_preview_apply_and_revert():
     fb_ids = onto.fallback_ids()
     assert fb_ids, "ontology must have a fallback class for this test"
     src_cls = fb_ids[0]
-    to_cls = onto.by_name("push_cart").id if onto.has_name("push_cart") else [c.id for c in onto.classes if c.id != src_cls][0]
+    # The target has to be a refinement of the source, not a different kind of thing. This used to pin
+    # push_cart, which the governed ontology places under l0 infra (with cone, barricade and debris) while
+    # the fallback classes are l0 object - so once apply_edit gained the same l0 guard the relabel and
+    # contamination paths already had, every edit here was correctly refused and the test measured the
+    # refusal instead of the round trip it is about. autorickshaw is object -> object, which is what
+    # "reclassify the fallback objects" means in practice.
+    _src_l0 = onto.by_id(src_cls).l0
+    to_cls = next(c.id for c in onto.classes if c.l0 == _src_l0 and c.id != src_cls and c.l1 != "fallback")
     sid, fid = uuid.uuid4(), uuid.uuid4()
 
     async def run():
