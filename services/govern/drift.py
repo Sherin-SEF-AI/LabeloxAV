@@ -141,12 +141,30 @@ async def input_embedding_drift(db: AsyncSession, ref_sessions: list[str], cur_s
 
 
 async def control_precision_drift(db: AsyncSession) -> dict:
+    """Measured auto-accept precision against its floor.
+
+    Unmeasured is reported as unmeasured, not as 1.0. It used to substitute a perfect score when no control
+    sample had a human verdict, and persist it: with 601 samples waiting and none judged, the drift ledger
+    recorded control precision as 100% and a chart of it over time was a flat line at perfect. That is the
+    one number in this system a buyer is meant to be able to trust over a self-reported one, and it was
+    reporting the absence of evidence as the strongest possible evidence.
+
+    It still does not breach, deliberately. A gate whose precision has never been measured is not the same
+    as one measured below its floor, and turning starvation into a breach would pause every promotion on a
+    live system for a reason the operator cannot fix in the moment. It is surfaced instead - `unmeasured`
+    with the size of the backlog - the same way the champion gate reports a missing safety metric in
+    `unchecked` rather than silently passing it.
+    """
     floor = get_settings().phase4.govern.control_precision_floor
     prec = await measured_precision(db)
     p = prec["precision"]
-    breach = p is not None and p < floor
-    return {"metric": "control_precision", "value": p if p is not None else 1.0, "breach": breach,
-            "floor": floor, "reviewed": prec["reviewed"]}
+    if p is None:
+        return {"metric": "control_precision", "value": None, "breach": False, "unmeasured": True,
+                "floor": floor, "reviewed": 0, "pending": prec["pending"],
+                "detail": (f"{prec['pending']} control samples are waiting for a human verdict; "
+                           "the gate's realized precision has never been measured")}
+    return {"metric": "control_precision", "value": p, "breach": p < floor, "unmeasured": False,
+            "floor": floor, "reviewed": prec["reviewed"], "pending": prec["pending"]}
 
 
 async def run_drift_scan(db: AsyncSession, ref_sessions: list[str] | None = None,
@@ -158,6 +176,11 @@ async def run_drift_scan(db: AsyncSession, ref_sessions: list[str] | None = None
         results.append(await input_embedding_drift(db, ref_sessions, cur_sessions))
 
     for r in results:
+        # An unmeasured metric is not persisted. A gap in the series is honest about there being no
+        # measurement; a row carrying a substituted value is a reading that was never taken.
+        if r.get("unmeasured") or r["value"] is None:
+            log.warning("drift.unmeasured", metric=r["metric"], detail=r.get("detail"))
+            continue
         db.add(DriftMetric(metric=r["metric"], window={"ref": ref_sessions, "cur": cur_sessions},
                            value=float(r["value"]), breach=bool(r["breach"])))
     await db.commit()
