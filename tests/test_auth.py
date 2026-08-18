@@ -227,3 +227,34 @@ def test_minting_a_key_needs_admin(auth_on):
         r = c.post("/api/service-accounts", json={"name": f"t-{uuid.uuid4().hex[:8]}"},
                    headers=_bearer(rev_id))
         assert r.status_code == 403
+
+
+@pytest.mark.db
+def test_an_annotator_cannot_seal_the_gold_set_or_force_a_retrain():
+    """The behavioural half of the write matrix in test_route_auth.py.
+
+    Gold sealing fixes the ground truth every evaluation, promotion gate and export certificate is scored
+    against; calibration fitting changes what every confidence in the system means; forced retrain occupies
+    the one GPU this deployment schedules against; the SLO ledger is the operations board's evidence. All
+    four sat at the annotator floor, because /api/quality, /api/activelearn and /api/hardening are none of
+    them reviewer prefixes - so any signed-in user could reach them. That test asserts the mechanism is
+    wired; this one asserts the server actually says no.
+    """
+    from fastapi.testclient import TestClient
+
+    from services.api.main import app
+    from _authutil import auth_headers
+
+    ann = auth_headers("annotator")
+    rev = auth_headers("reviewer")
+    with TestClient(app) as c:
+        for path, body in (("/api/quality/gold/seal", {"name": "x", "session_id": str(uuid.uuid4())}),
+                           ("/api/quality/calibrate/fit", {}),
+                           ("/api/activelearn/loop/retrain", {}),
+                           ("/api/hardening/slo", {"plane": "labelox", "metric": "x", "value": 1.0})):
+            r = c.post(path, json=body, headers=ann)
+            assert r.status_code == 403, f"{path} let an annotator through ({r.status_code})"
+            # A reviewer gets past authorization. What happens after is the route's business - a 4xx for a
+            # bad body or a 5xx for absent infra both mean the gate opened, which is what is under test.
+            r2 = c.post(path, json=body, headers=rev)
+            assert r2.status_code != 403, f"{path} refuses a reviewer ({r2.status_code})"

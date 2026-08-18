@@ -12,7 +12,7 @@ from db.models import AlSelection
 from services.activelearn.budget import select_batch
 from services.activelearn.loop import maybe_retrain, new_signal_count
 from services.activelearn.selector import score_candidates
-from services.api.deps import db_session
+from services.api.deps import db_session, require_role
 
 router = APIRouter()
 
@@ -55,6 +55,8 @@ class RetrainIn(BaseModel):
     base_weights: str | None = None
 
 
-@router.post("/activelearn/loop/retrain")
+# Queues GPU training, and with force=true it bypasses the signal threshold entirely - an unbounded
+# way for any signed-in user to occupy the one GPU this deployment schedules against.
+@router.post("/activelearn/loop/retrain", dependencies=[Depends(require_role("reviewer"))])
 async def loop_retrain(payload: RetrainIn, db: AsyncSession = Depends(db_session)):
     return await maybe_retrain(db, payload.compute_target, payload.force, payload.base_weights)

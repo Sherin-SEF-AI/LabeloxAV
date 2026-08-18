@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.api.deps import db_session
+from services.api.deps import db_session, require_role
 from services.hardening.efficiency import efficiency_report
 from services.hardening.repro import check_reproducible
 from services.hardening.run import record_slo, slo_board
@@ -21,7 +21,9 @@ class SloIn(BaseModel):
     window_s: float = 0.0
 
 
-@router.post("/hardening/slo")
+# Writes the SLO ledger the operations board reads. At the annotator floor the observability surface
+# was writable by anyone signed in, which makes it evidence of nothing.
+@router.post("/hardening/slo", dependencies=[Depends(require_role("reviewer"))])
 async def slo_tick(payload: SloIn, db: AsyncSession = Depends(db_session)):
     """Evaluate a plane's measured metrics against its SLO and record the tick to the observability ledger."""
     return await record_slo(db, payload.plane, payload.measurements, payload.window_s)
