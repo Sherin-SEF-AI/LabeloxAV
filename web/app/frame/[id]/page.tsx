@@ -32,6 +32,8 @@ import Icon, { MODE_ICON } from "@/components/shell/Icon";
 import ShortcutOverlay from "@/components/shell/ShortcutOverlay";
 import IssuePanel from "@/components/labelops/IssuePanel";
 import CloudControl from "@/components/shell/CloudControl";
+import NotificationBell from "@/components/shell/NotificationBell";
+import CommandPalette from "@/components/shell/CommandPalette";
 import { MODES, type ToolGroup } from "@/lib/editor/registry";
 import type { SelectHow } from "@/components/editor/useEditor";
 import Filmstrip from "@/components/editor/Filmstrip";
@@ -1317,6 +1319,14 @@ export default function FrameEditor() {
           )}
           <button onClick={() => window.dispatchEvent(new Event("lbx:shortcuts"))} title="keyboard shortcuts ( ? )"
             className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink"><Icon name="keyboard" size={17} /></button>
+          {/* The editor has its own header and does not mount TopNav, which is where these normally live -
+              so an annotator spent an entire shift in the one screen that could not show them a
+              notification or open the command palette. An issue filed against their work reached them
+              nowhere. Both are prop-less and the palette opens on a global event, so this is the same
+              cherry-pick the shortcut overlay and CloudControl above already are. */}
+          <button onClick={() => window.dispatchEvent(new Event("lbx:palette"))} title="jump to anything (Cmd+K)"
+            className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink"><Icon name="search" size={17} /></button>
+          <NotificationBell />
           <button onClick={() => confirmFrame(true)} disabled={!st.touched.length}
             title="confirm the objects you have reviewed and go to the next frame (A confirms without advancing)"
             className="flex items-center gap-1.5 h-[30px] px-3.5 rounded-md bg-accent text-bg font-display font-semibold text-[12.5px] hover:bg-accent/90 disabled:opacity-40"><Icon name="confirm" size={15} /><span>Confirm &amp; next</span></button>
@@ -2253,6 +2263,7 @@ export default function FrameEditor() {
         </div>
       )}
       <ShortcutOverlay />
+      <CommandPalette />
 
       {activeCorr && (
         <CorrectionModal

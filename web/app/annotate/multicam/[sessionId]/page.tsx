@@ -39,7 +39,10 @@ export default function MulticamWorkspace() {
         subtitle={sessionId.slice(0, 8)}
         meta={
           <>
-            <BackButton />
+            {/* A deep link or a fresh tab has no history, and the default fallback is "/" - which
+                drops someone who opened a rig view straight to the triage queue. The session this
+                view belongs to is the place they meant to be. */}
+            <BackButton fallback={`/annotations?session=${sessionId}`} label="session" />
             {groups && <span className="text-ink-3">{cams.length} camera{cams.length !== 1 ? "s" : ""} · {groups.n_groups} sync groups {groups.multicamera ? "" : "(single-camera)"}</span>}
             {msg && <span className="text-warn">{msg}</span>}
           </>

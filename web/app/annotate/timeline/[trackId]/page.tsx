@@ -51,7 +51,8 @@ export default function TimelineWorkspace() {
         subtitle={trackId.slice(0, 8)}
         meta={
           <>
-            <BackButton />
+            {/* Same: with no history, the track this timeline is of is the right destination, not "/". */}
+            <BackButton fallback={`/track/${trackId}`} label="track" />
             {track && <span>{track.n_frames} frames · {kfCount} keyframes · {interpCount} interpolated</span>}
             <span className="ml-1">method:</span>
             {(["linear", "cubic"] as const).map((m) => (

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useJobStream } from "@/lib/useEventStream";
 import { api , humanizeError } from "@/lib/api";
+import { toast, toastError, toastSuccess } from "@/lib/toast";
 import type { SessionRow, TriageFlag, TriageRow, TriageSeverity } from "@/lib/types";
 import { ConfBar, StateBadge } from "@/components/StateBadge";
 import PageShell from "@/components/shell/PageShell";
@@ -145,9 +146,31 @@ export default function HomePage() {
       setMsg(null);
       try {
         const r = await api.bulkReview([...sel], action, className, state);
-        setMsg(`${action}: ${r.updated} objects`);
         setSel(new Set());
         load();
+        // The server returns a handle that takes the whole batch back in one move, and ToastAction was
+        // built for exactly this - its comment says a batch that changed fifty objects and offers no way
+        // back asks the operator to be certain before acting, where one that can be undone from the
+        // confirmation asks them only to look. It had zero call sites. This is the surface that needed
+        // it: a mis-picked class across sixty selected objects was sixty manual corrections.
+        const changed = `${action}: ${r.updated} object${r.updated === 1 ? "" : "s"}`;
+        if (r.run_id) {
+          toast(changed, "success", 5000, {
+            label: "undo",
+            run: async () => {
+              try {
+                const back = await api.agentRevert(r.run_id as string);
+                toastSuccess(`undone: ${back.reverted} object${back.reverted === 1 ? "" : "s"} restored`);
+              } catch (e) {
+                // Toaster dismisses before awaiting this, so a failure has nowhere else to surface.
+                toastError(`undo failed: ${humanizeError(e)}`);
+              }
+              load();
+            },
+          });
+        } else {
+          toast(changed, "success");
+        }
       } catch (e) {
         setMsg(humanizeError(e));
       }
