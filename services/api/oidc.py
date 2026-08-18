@@ -32,6 +32,7 @@ from typing import Any
 import httpx
 
 from core.logging import get_logger
+from services.api.ephemeral import EphemeralStore
 
 log = get_logger("oidc")
 
@@ -72,15 +73,13 @@ class PendingLogin:
     next_url: str = "/"
 
 
-_pending: dict[str, PendingLogin] = {}
 _PENDING_TTL = 600
-
-
-def _sweep_pending(now: float | None = None) -> None:
-    now = now or time.time()
-    for k, v in list(_pending.items()):
-        if now - v.created_at > _PENDING_TTL:
-            _pending.pop(k, None)
+# Shared across workers when Redis answers. This was a module-level dict, and the OIDC callback is a
+# *browser redirect* - it can land on any worker, not the one that started the login. Under more than one
+# worker an (N-1)/N share of SSO sign-ins failed with "this sign-in attempt has expired", which looks like
+# a provider problem and is not one. The verifier still never reaches the browser, which is the property
+# the dict was there for.
+_pending = EphemeralStore("oidc", _PENDING_TTL)
 
 
 async def discover(issuer: str, *, client: httpx.AsyncClient | None = None) -> dict:
@@ -128,16 +127,16 @@ async def fetch_jwks(jwks_uri: str, *, client: httpx.AsyncClient | None = None) 
     return keys
 
 
-def begin(issuer_doc: dict, *, client_id: str, redirect_uri: str, scopes: str,
-          next_url: str = "/") -> tuple[str, str]:
+async def begin(issuer_doc: dict, *, client_id: str, redirect_uri: str, scopes: str,
+                next_url: str = "/") -> tuple[str, str]:
     """Start a login. Returns (authorization_url, handle); the handle goes in a short-lived cookie."""
-    _sweep_pending()
     verifier = _b64(secrets.token_bytes(48))
     challenge = _b64(hashlib.sha256(verifier.encode()).digest())
     state, nonce = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
     handle = secrets.token_urlsafe(24)
-    _pending[handle] = PendingLogin(state=state, nonce=nonce, verifier=verifier,
-                                    redirect_uri=redirect_uri, next_url=next_url)
+    await _pending.put(handle, {"state": state, "nonce": nonce, "verifier": verifier,
+                                "redirect_uri": redirect_uri, "next_url": next_url,
+                                "created_at": time.time()})
 
     from urllib.parse import urlencode
 
@@ -154,12 +153,11 @@ def begin(issuer_doc: dict, *, client_id: str, redirect_uri: str, scopes: str,
     return f"{issuer_doc['authorization_endpoint']}?{q}", handle
 
 
-def take_pending(handle: str | None) -> PendingLogin:
-    _sweep_pending()
-    p = _pending.pop(handle or "", None)   # popped: one handle, one attempt
-    if p is None:
+async def take_pending(handle: str | None) -> PendingLogin:
+    d = await _pending.take(handle)   # one handle, one attempt; read and delete are atomic
+    if d is None:
         raise OidcError("this sign-in attempt has expired; start again")
-    return p
+    return PendingLogin(**d)
 
 
 async def exchange(issuer_doc: dict, *, code: str, pending: PendingLogin, client_id: str,

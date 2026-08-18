@@ -322,14 +322,20 @@ def test_a_recovery_code_finishes_a_sign_in_and_is_then_spent(monkeypatch):
                       json={"mfa_handle": again["mfa_handle"], "code": codes[0]}).status_code == 401
 
 
-def test_an_mfa_handle_is_single_use():
-    """The challenge can finish exactly one sign-in. Reusable, it would be a bearer credential of its own."""
+async def test_an_mfa_handle_is_single_use():
+    """The challenge can finish exactly one sign-in. Reusable, it would be a bearer credential of its own.
+
+    Async because the handle now lives in a store shared across workers rather than a module-level dict:
+    the second-factor request lands wherever the load balancer sends it, and a per-process dict failed
+    (N-1)/N of MFA sign-ins with a message that reads as an expired handle. Single-use is still the
+    property under test, and it is now enforced by an atomic read-and-delete rather than dict.pop.
+    """
     from services.api.routers.identity_routes import _mfa_begin, _mfa_take
 
-    handle = _mfa_begin(uuid.uuid4())
-    assert _mfa_take(handle)
+    handle = await _mfa_begin(uuid.uuid4())
+    assert await _mfa_take(handle)
     with pytest.raises(Exception):
-        _mfa_take(handle)
+        await _mfa_take(handle)
 
 
 def test_revoking_sessions_invalidates_every_existing_token(monkeypatch):
