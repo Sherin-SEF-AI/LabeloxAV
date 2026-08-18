@@ -110,9 +110,14 @@ jobs:
         # each one needs reading rather than a bulk edit, and a gate that starts red is a gate nobody turns on.
         run: npx next lint
 
-      - name: Unit floor (vitest, blocking)
-        # Pure-logic unit tests (token-expiry decoding, nav menu wiring). Fast, no DOM.
-        run: npm test
+      - name: Unit floor + component render tests (vitest, blocking)
+        # Two tiers: pure logic in node, components in jsdom. There was no render tier at all - the config
+        # was environment "node" with an include of *.test.ts, so a .test.tsx was never collected and 79
+        # components had zero coverage that nobody could see was missing.
+        #
+        # Run with coverage so the ratchet in vitest.config.ts gates: it is set just under the measured
+        # numbers, so a drop fails the build rather than a gap sitting red until somebody deletes it.
+        run: npm run test:coverage
 
       - name: Production build (next build, blocking)
         run: npm run build

@@ -191,6 +191,23 @@ async function fail(r: Response, method: string, path: string): Promise<never> {
 export function humanizeError(e: unknown): string {
   if (e instanceof ApiError) return e.message;
   if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  // A plain object reached String() and came out as "[object Object]", which is the same non-message this
+  // codebase has already had to fix once on the console. It happens for real: FastAPI returns
+  // {"detail": ...} and a `throw {detail}` or a rejected non-Error lands here unchanged. Pull the field
+  // the API actually uses, then fall back to JSON, which is at least readable and reportable.
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    for (const key of ["detail", "message", "error"]) {
+      const v = o[key];
+      if (typeof v === "string" && v.trim()) return v;
+    }
+    try {
+      return JSON.stringify(e);
+    } catch {
+      return "an unknown error occurred";
+    }
+  }
   return String(e);
 }
 
