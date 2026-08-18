@@ -419,9 +419,17 @@ app.middleware("http")(RateLimitMiddleware())
 # Order matters: add auth next so CORS (added last) is the outermost layer and a 401/403 still
 # carries CORS headers for the browser.
 app.add_middleware(AuthMiddleware)
+# Configurable rather than hardcoded to the two dev origins. A deployment behind any other hostname had
+# every browser call blocked until somebody edited this line on the host, which is a source change that no
+# longer matches the repo. Set LBX_CORS__ORIGINS for a real deployment; the default is unchanged.
+_cors_origins = get_settings().cors.origin_list()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_cors_origins,
+    # Credentials are only meaningful for a named origin. Starlette refuses to combine allow_credentials
+    # with "*", and so would a browser, so an allow-all deployment gets a non-credentialed CORS policy
+    # rather than a silently broken one.
+    allow_credentials="*" not in _cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

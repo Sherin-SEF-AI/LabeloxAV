@@ -121,6 +121,23 @@ on every request, so an unencrypted hop is an exposed credential. If the proxy i
 
 ---
 
+## Serving behind a hostname
+
+`LBX_CORS__ORIGINS` is a comma-separated list of the browser origins allowed to call the API, defaulting to
+the two localhost dev origins. This was hardcoded in `services/api/main.py`, so a deployment behind any
+other hostname had every browser call blocked until somebody edited that line on the host.
+
+```bash
+LBX_CORS__ORIGINS=https://labelox.example.com
+```
+
+`*` is accepted and is deliberately not the default. This API is credentialed, and an allow-all origin on a
+credentialed API is how a browser gets talked into making authenticated requests on somebody else's behalf;
+setting it turns credentialed CORS off rather than combining the two, which no browser would honour anyway.
+
+Note that the web app proxies `/api` server-side, so a standard deployment where the browser only ever
+talks to the Next.js origin needs no CORS entry at all.
+
 ## What a default `up` starts
 
 The overlay brings up five things, in order: `migrate` (schema + ontology, one-shot), `pii-models` (fetches

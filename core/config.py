@@ -696,6 +696,29 @@ class RateLimitSettings(BaseModel):
     enabled: bool = True
 
 
+class CorsSettings(BaseModel):
+    """Which browser origins may call this API.
+
+    Was a hardcoded ["http://localhost:3000", "http://127.0.0.1:3000"] in services/api/main.py, so a real
+    deployment either had every browser call blocked or had the list patched in place on the host - which
+    is a source edit that no longer matches the repo and is invisible to anyone reading it.
+
+    The default keeps the two dev origins, so a laptop is unchanged. Set LBX_CORS__ORIGINS to a
+    comma-separated list for a deployment. `*` is accepted and deliberately not the default: this API is
+    credentialed, and an allow-all origin on a credentialed API is how a browser gets talked into making
+    authenticated requests on someone else's behalf.
+    """
+
+    # A comma-separated string rather than a list[str]: pydantic-settings JSON-decodes complex fields
+    # coming from the environment, so a list here would require LBX_CORS__ORIGINS to be valid JSON
+    # (["https://a"]) - a format nobody types correctly under a shell, and one that fails at boot with a
+    # JSONDecodeError rather than saying what it wanted.
+    origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    def origin_list(self) -> list[str]:
+        return [o.strip() for o in self.origins.split(",") if o.strip()]
+
+
 class AuthSettings(BaseModel):
     # Deny-by-default API auth. When enabled, every mutating /api request needs a valid signed Bearer token
     # (services/api/auth_token.py) and role floors gate destructive/governance routes. Reads under
@@ -986,6 +1009,7 @@ class Settings(BaseSettings):
     paths: PathsSettings = PathsSettings()
     phase4: Phase4Settings = Phase4Settings()  # Phase 4 closed loop + governance
     auth: AuthSettings = AuthSettings()        # deny-by-default API auth
+    cors: CorsSettings = CorsSettings()        # browser origins allowed to call this API
     ratelimit: RateLimitSettings = RateLimitSettings()   # per-caller budgets on the API
     integrations: IntegrationsSettings = IntegrationsSettings()   # outbound webhook safety
     lidar: LidarSettings = LidarSettings()     # 3D LiDAR module (ingestion, clean, viewer)

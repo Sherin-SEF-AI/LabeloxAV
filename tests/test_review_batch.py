@@ -183,3 +183,40 @@ class TestItRoutesToItsOwnRevert:
                 assert obj.source == "human"
             out = await revert_run(db, uuid.UUID(run_id))
         assert out["reverted"] == 3
+
+
+async def test_the_stamp_lands_in_the_same_transaction_as_the_edit():
+    """A committed bulk review is always revertible, because the edit and the stamp are one transaction.
+
+    The router used to commit the edits and stamp the batch afterwards, so that a failed edit could not
+    leave a run claiming objects it never changed. The reasoning was right and the ordering was the wrong
+    way to get it: dying between the two commits left the objects changed with no run id on them, and
+    revert_batch keys ownership on that stamp - so the batch was silently un-revertible, which is the one
+    thing this machinery exists to prevent.
+
+    Asserted through the property that matters rather than by simulating a crash: after a single commit,
+    every object the batch changed carries the run id, so a revert can find all of them.
+    """
+    from services.review_batch import revert_batch
+
+    maker = get_sessionmaker()
+    async with maker() as db:
+        ids = await _objects(db, 3)
+        changes = {}
+        for oid in ids:
+            obj = await db.get(Object, oid)
+            changes[str(oid)] = change_record(obj)
+            obj.state = "accepted"
+            obj.source = "human"
+        # commit=False: the stamp joins the edit above rather than opening a second transaction after it.
+        run_id = await record_batch(db, changes, created_by="tester", commit=False)
+        await db.commit()
+
+    async with maker() as db:
+        for oid in ids:
+            obj = await db.get(Object, oid)
+            assert (obj.provenance or {}).get("agent_run_id") == run_id, (
+                "an object the batch changed carries no run id, so the batch cannot be taken back")
+        run = await db.get(AgentRun, uuid.UUID(run_id))
+        out = await revert_batch(db, run)
+        assert out["reverted"] == 3 and out["skipped"] == 0

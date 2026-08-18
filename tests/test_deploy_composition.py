@@ -89,3 +89,47 @@ class TestTheWorkersAreProfiledNotAbsent:
         # `docker compose up` on a laptop must stay CPU-sized.
         for name in ("train-worker", "embed-worker"):
             assert _services()[name].get("profiles"), f"{name} would start by default"
+
+
+class TestCorsIsConfigurable:
+    """It was hardcoded to the two dev origins in services/api/main.py.
+
+    A deployment behind any other hostname had every browser call blocked until somebody edited that line
+    on the host - a source change that no longer matches the repo and is invisible to anyone reading it.
+    """
+
+    def test_the_default_is_still_the_dev_origins(self):
+        from core.config import get_settings
+
+        assert get_settings().cors.origin_list() == ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+    def test_a_deployment_can_set_its_own(self, monkeypatch):
+        from core.config import CorsSettings
+
+        assert CorsSettings(origins="https://a.example.com,https://b.example.com").origin_list() == [
+            "https://a.example.com", "https://b.example.com"]
+
+    def test_whitespace_and_empties_are_tolerated(self):
+        from core.config import CorsSettings
+
+        assert CorsSettings(origins=" https://a.example.com , ,https://b.example.com ").origin_list() == [
+            "https://a.example.com", "https://b.example.com"]
+
+    def test_allow_all_turns_credentials_off(self):
+        """A browser refuses to send credentials to an allow-all origin, and so should the server.
+
+        Combining allow_credentials with "*" is the shape that gets a browser talked into making
+        authenticated requests on somebody else's behalf; Starlette refuses it outright, so an allow-all
+        deployment would otherwise get a silently broken CORS policy rather than a non-credentialed one.
+        """
+        import re
+
+        from core.config import CorsSettings
+
+        # Read the decision out of the middleware wiring rather than restating it here, so this fails if
+        # somebody sets allow_credentials=True unconditionally.
+        main_src = (REPO_ROOT / "services/api/main.py").read_text()
+        assert re.search(r'allow_credentials\s*=\s*"\*" not in _cors_origins', main_src), (
+            "CORS credentials are no longer conditioned on the origin list being specific")
+        assert "*" in CorsSettings(origins="*").origin_list()
+        assert "*" not in CorsSettings(origins="https://a.example.com").origin_list()
