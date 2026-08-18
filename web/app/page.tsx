@@ -7,6 +7,7 @@ import { api , humanizeError } from "@/lib/api";
 import type { SessionRow, TriageFlag, TriageRow, TriageSeverity } from "@/lib/types";
 import { ConfBar, StateBadge } from "@/components/StateBadge";
 import PageShell from "@/components/shell/PageShell";
+import LoadState from "@/components/shell/LoadState";
 import CorrectionModal from "@/components/CorrectionModal";
 import { SkeletonRows, Spinner } from "@/components/Spinner";
 import { ObjectSourceBadge } from "@/components/SourceBadge";
@@ -75,6 +76,7 @@ export default function HomePage() {
   const [states, setStates] = useState<string>("review,annotate");
   const [cursor, setCursor] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<unknown>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkClass, setBulkClass] = useState("");
   const [classes, setClasses] = useState<string[]>([]);
@@ -87,6 +89,7 @@ export default function HomePage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setErr(null);
     try {
       const params: Record<string, string> = { states, limit: "200" };
       if (session) params.session_id = session;
@@ -95,6 +98,12 @@ export default function HomePage() {
       if (fw) { params.flywheel = fw; params.states = "review,annotate"; }
       setRows(await api.triage(params));
       setCursor(0);
+    } catch (e) {
+      // There was a finally and no catch, so a dropped request left rows empty and the page said
+      // "Queue is clear" - it told an annotator their shift was over because a fetch failed. An empty
+      // queue is a real and meaningful state here, which is exactly why it must not be what a failure
+      // looks like.
+      setErr(e);
     } finally {
       setLoading(false);
     }
@@ -300,7 +309,7 @@ export default function HomePage() {
                 className="flex items-center gap-2 bg-accent hover:bg-accent-2 text-white font-medium text-[13px] px-4 py-1.5 rounded disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Icon name="confirm" size={14} />
-                {rows.length ? "Review next" : "Queue is clear"}
+                {rows.length ? "Review next" : err != null ? "Queue unavailable" : loading ? "Loading" : "Queue is clear"}
               </button>
             </div>
           </div>
@@ -392,7 +401,11 @@ export default function HomePage() {
 
             {/* Table (scrolls inside the panel so the page itself stays fit-to-screen) */}
             <div className="flex-1 min-h-0 overflow-auto">
-            {loading && !rows.length ? (
+            {/* The error branch comes first, ahead of both the skeleton and the empty state, because
+                either of those reads as "nothing left to do" and a failed fetch is not that. */}
+            {err != null ? (
+              <LoadState error={err} onRetry={() => void load()} />
+            ) : loading && !rows.length ? (
               <SkeletonRows rows={8} cols="grid-cols-[32px_76px_1fr_150px_110px]" />
             ) : rows.length ? (
               <table className="w-full text-sm table-fixed">
