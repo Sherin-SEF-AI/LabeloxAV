@@ -70,6 +70,12 @@ restore: ## Restore both halves from a backup dir: make restore DIR=.scratch/bac
 	@test -n "$(DIR)" || { echo "usage: make restore DIR=.scratch/backups/<timestamp>" >&2; exit 2; }
 	./scripts/restore.sh "$(DIR)"
 
+.PHONY: e2e
+e2e: ## Browser smoke over the golden path (needs the app running: make app-up, or api + web)
+	@# Skips rather than fails when nothing is serving, because a suite that goes red on absent infra
+	@# teaches people to ignore red. Start the stack first for it to actually assert anything.
+	cd web && npx playwright test
+
 .PHONY: migrate
 migrate: ## Apply Alembic migrations
 	$(RUN) alembic upgrade head

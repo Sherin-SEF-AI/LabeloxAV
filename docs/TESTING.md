@@ -83,6 +83,30 @@ until somebody deletes the gate. Raise it as tests land.
 
 ---
 
+## End-to-end
+
+```bash
+make e2e     # needs the app running (make app-up, or api + web)
+```
+
+A smoke over the golden path, not a regression suite: it asserts the journey is walkable and that the
+specific failures this remediation fixed stay fixed — the queue not calling a dropped request a finished
+shift, the driving-events pages being reachable, the skip link being first in the tab order. A broad e2e
+suite over 71 pages would be slow and flaky, and a flaky gate gets switched off.
+
+It **skips** when nothing is serving rather than failing, because a suite that goes red on absent infra
+teaches people to ignore red.
+
+Two things learned writing it, both worth keeping:
+
+- **Assert the status, not just that the body has content.** The first version checked
+  `expect(body).not.toBeEmpty()`, which a Next error page satisfies perfectly — so a page serving 500 was
+  green. It was found exactly that way.
+- **Do not run `npm run build` while `next dev` is running.** They share `.next`, and the build leaves the
+  dev server with a chunk manifest pointing at files that no longer exist; every route then 500s with
+  `Cannot find module './NNNN.js'` until the dev server is restarted. The source is fine — it looks like a
+  code failure and is not one.
+
 ## Source-tree invariants
 
 Several tests assert things about the source rather than behaviour. They are cheap and they catch a class
