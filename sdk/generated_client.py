@@ -1868,10 +1868,10 @@ class LabeloxClient:
         return self._call("POST", f"/api/jobs/{kind}/{job_id}/cancel",
                           params=None, json_body=None)
 
-    def get_labelops_issues(self, frame_id: Any | None = None, job_id: Any | None = None, object_id: Any | None = None, status: Any | None = None) -> Any:
+    def get_labelops_issues(self, frame_id: Any | None = None, job_id: Any | None = None, object_id: Any | None = None, status: Any | None = None, mine: bool | None = False) -> Any:
         """List Issues"""
         return self._call("GET", f"/api/labelops/issues",
-                          params={"frame_id": frame_id, "job_id": job_id, "object_id": object_id, "status": status}, json_body=None)
+                          params={"frame_id": frame_id, "job_id": job_id, "object_id": object_id, "status": status, "mine": mine}, json_body=None)
 
     def post_labelops_issues(self, body: Any = None) -> Any:
         """Create Issue"""

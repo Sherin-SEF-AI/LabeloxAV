@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
+import MyIssues from "@/components/labelops/MyIssues";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "@/lib/toast";
 import { getUser, setUser } from "@/lib/user";
@@ -118,8 +119,12 @@ export default function ProfilePage() {
 
   return (
     <PageShell active="PROFILE" title="Your account"
-      subtitle="password, second factor, and sessions">
+      subtitle="feedback on your work, password, second factor, and sessions">
       <div className="p-4 space-y-4 max-w-3xl">
+        {/* Feedback on your own labels. Issues were creatable in the editor and readable nowhere, and the
+            notification they raise is addressed to the reviewer rota rather than to the person who drew
+            the label - so this is where an annotator can actually go and look. */}
+        <MyIssues />
         {profile && (
           <section className="panel p-3 flex items-center gap-4 flex-wrap">
             <div>

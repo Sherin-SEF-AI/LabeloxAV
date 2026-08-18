@@ -1036,7 +1036,10 @@ export const api = {
   lopSubmit: (jobId: string, expected_version?: number) =>
     post<LabelJobRow & { honeypot_failed: boolean; min_honeypot_accuracy: number }>(
       `/api/labelops/jobs/${jobId}/submit`, { expected_version }),
-  lopIssues: (q: { frame_id?: string; job_id?: string; object_id?: string; status?: string } = {}) => {
+  // `mine` returns the issues raised about the caller's own work - the one thing this could not be asked
+  // for. Every other filter narrows by what the issue is attached to, not by whose label it is about.
+  lopIssues: (q: { frame_id?: string; job_id?: string; object_id?: string; status?: string;
+                   mine?: boolean } = {}) => {
     const p = new URLSearchParams();
     Object.entries(q).forEach(([k, v]) => { if (v) p.set(k, String(v)); });
     return get<{ issues: IssueRow[] }>(`/api/labelops/issues?${p.toString()}`);

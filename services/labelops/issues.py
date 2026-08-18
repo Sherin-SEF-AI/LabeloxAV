@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
@@ -64,12 +64,49 @@ async def create_issue(db: AsyncSession, *, kind: str = "comment", body: str | N
     # because who picks it up is a duty rota, not a property of the issue.
     from services.notify import notify
 
+    href = f"/frame/{frame_id}" if frame_id else f"/object/{object_id}"
     await notify(db, kind="issue_opened", severity="warn" if kind != "comment" else "info",
                  title=f"{kind.replace('_', ' ')} raised",
                  body=(body or "").strip()[:280] or None,
-                 href=(f"/frame/{frame_id}" if frame_id else f"/object/{object_id}"),
+                 href=href,
                  subject_type="issue", subject_id=str(issue.issue_id), supersede=False)
+
+    # And the person whose work it is about, which the rota notification does not reach.
+    #
+    # An issue is feedback on a specific label. Telling only the reviewer role means the annotator who drew
+    # it is the one participant never informed - they find out when the job comes back, if at all, which is
+    # the slowest possible form of the correction loop and the reason issues read as write-only from their
+    # side. Addressed to the person rather than the annotator role, because "your box is wrong" is not a
+    # duty rota.
+    owner = await _work_owner(db, object_id=object_id, job_id=job_id)
+    if owner is not None and str(owner) != str(created_by or ""):
+        await notify(db, kind="issue_opened", severity="warn" if kind != "comment" else "info",
+                     user_id=owner,
+                     title=f"{kind.replace('_', ' ')} on your label",
+                     body=(body or "").strip()[:280] or None,
+                     href=href,
+                     subject_type="issue", subject_id=str(issue.issue_id), supersede=False)
     return await get_issue(db, str(issue.issue_id))
+
+
+async def _work_owner(db: AsyncSession, *, object_id: str | None, job_id: str | None):
+    """Whose work an issue is about: the annotator on the object, else the job's assignee.
+
+    The object is preferred because it is the more specific claim - an issue pinned to a box is about
+    whoever drew that box, even if the job has since been reassigned. Returns None when neither is
+    recorded, which is an ordinary state for a machine-labelled object nobody has touched.
+    """
+    from db.models import LabelJob, Object
+
+    if object_id:
+        obj = await db.get(Object, UUID(object_id))
+        if obj is not None and obj.annotator_id is not None:
+            return obj.annotator_id
+    if job_id:
+        job = await db.get(LabelJob, UUID(job_id))
+        if job is not None and job.assignee_id is not None:
+            return job.assignee_id
+    return None
 
 
 async def comment(db: AsyncSession, issue_id: str, body: str, author_id: str | None = None) -> dict:
@@ -131,8 +168,24 @@ def _issue_dict(i: Issue) -> dict:
 
 async def list_issues(db: AsyncSession, *, frame_id: str | None = None, job_id: str | None = None,
                       object_id: str | None = None, status: str | None = None,
-                      limit: int = 200) -> list[dict]:
+                      about_user: str | None = None, limit: int = 200) -> list[dict]:
+    """Issues, filtered.
+
+    `about_user` is the dimension that was missing: issues could be listed by frame, job, object or status,
+    which are all ways of asking "what is wrong with this thing" and none of them ways of asking "what has
+    been said about my work". Without it an annotator had no query that would find the feedback on their
+    own labels, which is why issues read as write-only from the side they are addressed to.
+    """
+    from db.models import LabelJob, Object
+
     stmt = select(Issue)
+    if about_user:
+        uid = UUID(about_user)
+        # Either anchor counts: the object carries who drew it, and the job carries who was working it.
+        # An issue pinned to a box on someone else's job is still about the person who drew the box.
+        mine_objects = select(Object.object_id).where(Object.annotator_id == uid)
+        mine_jobs = select(LabelJob.job_id).where(LabelJob.assignee_id == uid)
+        stmt = stmt.where(or_(Issue.object_id.in_(mine_objects), Issue.job_id.in_(mine_jobs)))
     if frame_id:
         stmt = stmt.where(Issue.frame_id == UUID(frame_id))
     if job_id:
