@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import MyIssues from "@/components/labelops/MyIssues";
+import LocalePicker from "@/components/shell/LocalePicker";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "@/lib/toast";
 import { getUser, setUser } from "@/lib/user";
@@ -125,6 +126,13 @@ export default function ProfilePage() {
             notification they raise is addressed to the reviewer rota rather than to the person who drew
             the label - so this is where an annotator can actually go and look. */}
         <MyIssues />
+
+        {/* Four locales were implemented and reachable only from inside the onboarding tour, which a user
+            sees once. A setting you can only get to from a thing you have already dismissed is not a
+            setting. */}
+        <section className="panel p-3">
+          <LocalePicker />
+        </section>
         {profile && (
           <section className="panel p-3 flex items-center gap-4 flex-wrap">
             <div>
