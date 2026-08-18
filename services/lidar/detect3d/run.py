@@ -14,6 +14,7 @@ from sqlalchemy import delete, select
 from core.logging import get_logger
 from db.models import Frame, Object, Object3D, PointCloud
 from db.session import get_sessionmaker
+from services.calibration.resolve import resolve_calibration
 from services.lidar.clean.ground import segment_ground
 from services.lidar.detect3d.fuse3d import gate_cuboid
 from services.lidar.detect3d.lift import lift_box
@@ -63,12 +64,20 @@ async def lift_frame(frame_id: uuid.UUID) -> dict:
         aae = await _auto_accept_enabled(db)
         cloud_id, cloud_uri = pc.cloud_id, pc.cloud_uri
         w, h, cam = frame.width or 1280, frame.height or 960, frame.cam_id
+        session_id = frame.session_id
+
+    # The frustum every cuboid below is cut from. Resolved once per frame rather than per object: it is one
+    # query, and the whole point is that the geometry comes from this session's real extrinsics rather than
+    # the config-declared rig. Falls back to the nominal calibration when the session has none, which is
+    # exactly the behaviour this path had before - the difference is that a calibrated session now gets its
+    # own numbers instead of being silently ignored.
+    calib = await resolve_calibration(session_id, cam, w, h)
 
     cloud = load_cloud(cloud_uri)
     _, plane, _ = segment_ground(cloud)
     proposals = []
     for o in objs:
-        cuboid = lift_box(cloud.xyz, list(o.bbox), cam, w, h, ground_plane=plane)
+        cuboid = lift_box(cloud.xyz, list(o.bbox), cam, w, h, ground_plane=plane, calib=calib)
         if cuboid is None:
             continue
         prov = o.provenance or {}

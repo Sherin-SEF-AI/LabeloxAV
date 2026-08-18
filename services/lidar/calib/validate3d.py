@@ -14,6 +14,7 @@ from core.config import get_settings
 from core.logging import get_logger
 from db.models import LidarCalibrationValidation, PointCloud
 from db.session import get_sessionmaker
+from services.calibration.resolve import resolve_calibration
 from services.lidar.calib.lidar_camera import coverage_consistency, reprojection_error
 from services.lidar.clean.qualitypc import check_cloud_quality
 from services.lidar.ingest.store import load_cloud
@@ -51,7 +52,11 @@ async def validate_lidar_camera(session_id: uuid.UUID, points_ego, observed_uv, 
     """Correspondence-based reprojection check: residual versus threshold, with drift versus the baseline.
     The precise calibration test when a target or tracked features give 3D-to-2D matches."""
     cfg = get_settings().lidar
-    res = reprojection_error(points_ego, observed_uv, cam_id, img_w, img_h)
+    # Validate the calibration this session actually uses, not the rig config. Measuring the residual
+    # through the nominal rig asks "do these points sit where the config says", which a drifted stored
+    # calibration passes trivially because it is never consulted.
+    calib = await resolve_calibration(session_id, cam_id, img_w, img_h)
+    res = reprojection_error(points_ego, observed_uv, cam_id, img_w, img_h, calib)
     rms = res["rms"]
     if rms is None:
         status = "fail"
@@ -75,6 +80,8 @@ async def validate_session(session_id: uuid.UUID, cam_id: str = "cam_f",
                            img_w: int = 1280, img_h: int = 960) -> dict:
     """The automatic per-session check: cloud quality across every cloud plus camera coverage consistency.
     Records a validation row and returns whether the session may proceed to 3D annotation."""
+    # Coverage is measured through this session's calibration, for the same reason the residual is.
+    calib = await resolve_calibration(session_id, cam_id, img_w, img_h)
     async with get_sessionmaker()() as db:
         clouds = (await db.execute(select(PointCloud).where(PointCloud.session_id == session_id)
                                    .order_by(PointCloud.ts_ns))).scalars().all()
@@ -92,7 +99,7 @@ async def validate_session(session_id: uuid.UUID, cam_id: str = "cam_f",
         if q["status"] == "fail":
             worst = "fail"
         if i == 0:
-            consistency = coverage_consistency(cloud, cam_id, img_w, img_h)
+            consistency = coverage_consistency(cloud, cam_id, img_w, img_h, calib)
 
     # a camera that sees almost none of the cloud signals a calibration mismatch
     if worst != "fail" and consistency.get("in_image_frac", 1.0) < 0.05:
