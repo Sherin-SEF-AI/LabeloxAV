@@ -504,6 +504,19 @@ export const api = {
       { object_3d_ids: ids, class_id: classId ?? null, dims: dims ?? null }),
   ontology: () => get<Ontology>("/api/ontology"),
   addClass: (name: string) => post<OntologyClass & { existed: boolean }>("/api/ontology/classes", { name }),
+  // Repair, not just growth. merge/rename/retire have existed server-side and been reachable from nothing,
+  // so the vocabulary could be added to and never fixed - which is exactly the asymmetry the commit that
+  // wrote them set out to close. Admin-gated; the API refuses a merge that crosses an l0 boundary.
+  ontologyMerge: (from_id: number, to_id: number) =>
+    post<{ run_id: string; moved: number; from: string; to: string }>(
+      "/api/ontology/classes/merge", { from_id, to_id }),
+  ontologyRevertMerge: (runId: string) =>
+    post<{ run_id: string; reverted: number; skipped: number }>(
+      `/api/ontology/merges/${runId}/revert`, {}),
+  ontologyRename: (class_id: number, new_name: string) =>
+    post<{ class_id: number; name: string }>("/api/ontology/classes/rename", { class_id, new_name }),
+  ontologyRetire: (classIds: number[]) =>
+    post<{ retired: number[]; skipped: number[] }>("/api/ontology/classes/retire", classIds),
   sessions: () => get<SessionRow[]>("/api/sessions"),
   sessionsPage: (opts: { limit?: number; offset?: number; vehicle_id?: string } = {}) => {
     const p = new URLSearchParams();
