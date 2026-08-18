@@ -33,6 +33,25 @@ from services.autolabel.ontology import get_ontology
 from services.govern.audit import record as audit_record
 from services.review_policy import ReviewStateError, state_for
 
+
+class RelationshipOut(BaseModel):
+    """One directed relationship on a frame (the India case is rider_of on a two-wheeler)."""
+
+    relationship_id: str
+    from_object_id: str
+    to_object_id: str
+    kind: str
+
+
+class CuboidProjectionOut(BaseModel):
+    """A cuboid's eight corners projected onto the camera image, so it can be drawn over the 2D frame."""
+
+    object_id: str
+    corners_uv: list[list[float]]
+    edges: list[list[int]]
+    any_in_image: bool
+
+
 router = APIRouter()
 log = get_logger("api.objects")
 
@@ -68,7 +87,7 @@ async def delete_relationship(relationship_id: str, db: AsyncSession = Depends(d
     return {"deleted": relationship_id}
 
 
-@router.get("/frames/{frame_id}/relationships")
+@router.get("/frames/{frame_id}/relationships", response_model=list[RelationshipOut])
 async def frame_relationships(frame_id: str, db: AsyncSession = Depends(db_session)):
     rows = (await db.execute(select(ObjectRelationship)
             .where(ObjectRelationship.frame_id == UUID(frame_id)))).scalars().all()
@@ -76,7 +95,7 @@ async def frame_relationships(frame_id: str, db: AsyncSession = Depends(db_sessi
              "to_object_id": str(r.to_object_id), "kind": r.kind} for r in rows]
 
 
-@router.get("/frames/{frame_id}/cuboids")
+@router.get("/frames/{frame_id}/cuboids", response_model=list[CuboidProjectionOut])
 async def frame_cuboids(frame_id: str, db: AsyncSession = Depends(db_session)):
     """Project every cuboid_3d on the frame onto the camera image, so the 3D box is visible (and editable)
     in the 2D editor. Uses the configured rig + nominal intrinsics, so it works without LiDAR calibration."""
