@@ -122,6 +122,12 @@ jobs:
       - name: Production build (next build, blocking)
         run: npm run build
 
+      # The e2e smoke needs the API, a migrated database and the web server all up. Standing that whole
+      # stack up here would roughly double this job and gate every frontend PR on infra it does not
+      # otherwise need, so it is not run in CI today. It runs locally with `make e2e` and skips cleanly
+      # when nothing is serving. Stated rather than left as a silent omission: a suite nobody runs is the
+      # same as no suite, and pretending otherwise is how the last one ended up installed and uninvoked.
+
   test:
     needs: lint
     runs-on: ubuntu-latest
