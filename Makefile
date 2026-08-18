@@ -26,12 +26,32 @@ install-ml: ## Install the ml extra (torch cu128, ultralytics, transformers)
 up: ## Start infra (postgres, minio, redis, redpanda) and wait for healthy
 	docker compose up -d
 	@echo "waiting for services to become healthy..."
-	@for i in $$(seq 1 40); do \
-		unhealthy=$$(docker compose ps --format '{{.Service}} {{.Health}}' | grep -Ev 'healthy|minio-init' | grep -c . || true); \
-		if [ "$$unhealthy" = "0" ]; then echo "all healthy"; break; fi; \
+	@# Three things were wrong here and they cancelled out into a silent success.
+	@#
+	@# `grep -Ev 'healthy'` also matches "unhealthy", so a genuinely unhealthy service was counted as
+	@# healthy. Services with no healthcheck report an empty Health and were counted as unhealthy
+	@# forever, so the loop never converged and always ran the full 120s. And the recipe ended with
+	@# `docker compose ps`, which exits 0 whenever it can reach the daemon, so the timeout was
+	@# indistinguishable from success - in CI that meant the suite ran against whatever was up and
+	@# reported a smaller green, since ~200 tests skip on a Redis ping rather than fail.
+	@#
+	@# Gate on the four services this target's own description names. lakefs/mlflow/lichtblick are
+	@# auxiliary: the suite does not need them, and blocking on them would make `make up` fail for a
+	@# reason that has nothing to do with the tests.
+	@ok=0; \
+	for i in $$(seq 1 40); do \
+		notready=$$(docker compose ps --format '{{.Service}}|{{.State}}|{{.Health}}' \
+			| awk -F'|' '$$1 ~ /^(postgres|minio|redis|redpanda)$$/ \
+				&& !($$2 == "running" && ($$3 == "" || $$3 == "healthy"))' | wc -l); \
+		if [ "$$notready" = "0" ]; then echo "core infra healthy"; ok=1; break; fi; \
 		sleep 3; \
-	done
-	docker compose ps
+	done; \
+	docker compose ps; \
+	if [ "$$ok" != "1" ]; then \
+		echo "ERROR: core infra (postgres, minio, redis, redpanda) did not become healthy within 120s;" >&2; \
+		echo "       refusing to report success - the suite would skip rather than fail against dead infra" >&2; \
+		exit 1; \
+	fi
 
 .PHONY: down
 down: ## Stop infra (keep volumes)
@@ -218,7 +238,12 @@ token: ## Mint an API token from the server (recovery when the admin token is lo
 
 .PHONY: test
 test: ## Run pytest (full suite; needs infra up)
-	$(RUN) pytest -q
+	@# Floors, enforced by pytest_sessionfinish in tests/conftest.py. Most of this suite skips rather than
+	@# fails when infra is missing, so a run against dead infra is green and only the counts give it away.
+	@# Measured baseline 2026-08-18: 2488 passed, 3 skipped, 4 xfailed. The floor sits well below that so
+	@# ordinary churn does not trip it, and well above the ~1495 a no-infra run produces, which is the
+	@# case it exists to catch.
+	LBX_MIN_PASSED=2300 LBX_MAX_SKIPPED=60 $(RUN) pytest -q
 
 .PHONY: test-unit
 test-unit: ## Run the fast pure-unit tier (no Postgres/MinIO/GPU/Redis)
