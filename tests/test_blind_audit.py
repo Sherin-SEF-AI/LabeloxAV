@@ -54,22 +54,22 @@ def _box(i: int, j: int) -> list[float]:
     return [100.0 * i, 100.0 * j, 100.0 * i + 100.0, 100.0 * j + 100.0]
 
 
-# The fixture, and the counts it is built to produce. Positions are grid cells; `p` are the model's boxes
-# and `h` the blind human's. Frames A and B land in the sparse stratum (under 5 predictions), C in
-# moderate (5 to 14), which is what makes the stratified path run rather than collapsing to one cell.
+# The fixture, and the counts it is built to produce. Positions are grid cells; the model's boxes and the
+# blind human's are listed per frame. Frames A and B land in the sparse stratum (under 10 predictions), C in
+# moderate (10 to 29), which is what makes the stratified path run rather than collapsing to one cell.
 #
-#          model                              human                      both  model_only  human_only
-#   A   (0,0) (1,0) (2,0)                  (0,0) (1,0) (9,0)               2        1           1
-#   B   (0,0) (1,0)                        (0,0)                           1        1           0
-#   C   (0,0)..(5,0)  [6 boxes]            (0,0) (1,0) (2,0) (6,0) (7,0)   3        3           2
+#          model                    human                              both  model_only  human_only
+#   A   (0,0) (1,0) (2,0)        (0,0) (1,0) (9,0)                       2        1           1
+#   B   (0,0) (1,0)              (0,0)                                   1        1           0
+#   C   (0,0)..(11,0) [12]       (0,0) (1,0) (2,0) (12,0) (13,0)         3        9           2
 #
 #   sparse (A+B):    both 3, model_only 2, human_only 1
-#   moderate (C):    both 3, model_only 3, human_only 2
+#   moderate (C):    both 3, model_only 9, human_only 2
 _FRAMES = {
     "A": {"pred": [(0, 0), (1, 0), (2, 0)], "human": [(0, 0), (1, 0), (9, 0)], "stratum": "sparse"},
     "B": {"pred": [(0, 0), (1, 0)], "human": [(0, 0)], "stratum": "sparse"},
-    "C": {"pred": [(i, 0) for i in range(6)],
-          "human": [(0, 0), (1, 0), (2, 0), (6, 0), (7, 0)], "stratum": "moderate"},
+    "C": {"pred": [(i, 0) for i in range(12)],
+          "human": [(0, 0), (1, 0), (2, 0), (12, 0), (13, 0)], "stratum": "moderate"},
 }
 # On frame C the model calls the box at (2,0) a car while the human calls it a pedestrian. Class-agnostic
 # counting is unaffected (it is still one box found by both), which is exactly what separates the pooled
@@ -362,13 +362,13 @@ class TestScoring:
           sparse    n1 = 3+2 = 5, n2 = 3+1 = 4, m2 = 3
                     N   = (6)(5)/4 - 1 = 30/4 - 1                       = 6.5
                     var = (6)(5)(5-3)(4-3) / [(4^2)(5)] = 60/80         = 0.75
-          moderate  n1 = 3+3 = 6, n2 = 3+2 = 5, m2 = 3
-                    N   = (7)(6)/4 - 1 = 42/4 - 1                       = 9.5
-                    var = (7)(6)(6-3)(5-3) / [(4^2)(5)] = 252/80        = 3.15
-          pooled    N   = 6.5 + 9.5                                     = 16.0
-                    var = 0.75 + 3.15                                   = 3.9
-                    model recall = (5+6) / 16 = 11/16                   = 0.6875
-                    human recall = (4+5) / 16 = 9/16                    = 0.5625
+          moderate  n1 = 3+9 = 12, n2 = 3+2 = 5, m2 = 3
+                    N   = (13)(6)/4 - 1 = 78/4 - 1                      = 18.5
+                    var = (13)(6)(12-3)(5-3) / [(4^2)(5)] = 1404/80     = 17.55
+          pooled    N   = 6.5 + 18.5                                    = 25.0
+                    var = 0.75 + 17.55                                  = 18.3
+                    model recall = (5+12) / 25 = 17/25                  = 0.68
+                    human recall = (4+5) / 25 = 9/25                    = 0.36
         """
         async with get_sessionmaker()() as db:
             fx = await _fixture(db)
@@ -379,15 +379,15 @@ class TestScoring:
             per = {s["stratum"]: s for s in res["per_stratum"]}
             assert abs(per["sparse"]["population"] - 6.5) < 1e-6
             assert abs(per["sparse"]["variance"] - 0.75) < 1e-6
-            assert abs(per["moderate"]["population"] - 9.5) < 1e-6
-            assert abs(per["moderate"]["variance"] - 3.15) < 1e-6
+            assert abs(per["moderate"]["population"] - 18.5) < 1e-6
+            assert abs(per["moderate"]["variance"] - 17.55) < 1e-6
 
             pooled = res["pooled"]
-            assert abs(pooled["population"] - 16.0) < 1e-6
-            assert abs(pooled["variance"] - 3.9) < 1e-6
-            assert abs(pooled["model_recall"] - 0.6875) < 1e-6
-            assert abs(pooled["human_recall"] - 0.5625) < 1e-6
-            assert (pooled["n_both"], pooled["n_model_only"], pooled["n_human_only"]) == (6, 5, 3)
+            assert abs(pooled["population"] - 25.0) < 1e-6
+            assert abs(pooled["variance"] - 18.3) < 1e-6
+            assert abs(pooled["model_recall"] - 0.68) < 1e-6
+            assert abs(pooled["human_recall"] - 0.36) < 1e-6
+            assert (pooled["n_both"], pooled["n_model_only"], pooled["n_human_only"]) == (6, 11, 3)
 
     async def test_the_per_frame_counts_are_kept_not_only_the_total(self):
         """An audit whose whole human_only comes from one frame is a different finding from a spread one.
@@ -404,7 +404,7 @@ class TestScoring:
             got = {r.frame_id: (r.n_both, r.n_model_only, r.n_human_only) for r in rows}
             assert got[fx["frames"]["A"]] == (2, 1, 1)
             assert got[fx["frames"]["B"]] == (1, 1, 0)
-            assert got[fx["frames"]["C"]] == (3, 3, 2)
+            assert got[fx["frames"]["C"]] == (3, 9, 2)
 
     async def test_the_per_class_view_is_class_aware_and_does_not_sum_to_the_pooled_one(self):
         """Two questions, two matching rules, and the difference is the cross-class box on frame C.
@@ -413,22 +413,22 @@ class TestScoring:
         is one object found by both. Class-aware it is a car the human never confirmed and a pedestrian
         the model did not find under that name.
 
-          pedestrian  both 5, model_only 5, human_only 4
-                      N = (11)(10)/6 - 1 = 110/6 - 1                    = 17.3333...
-          car         both 0                                            -> unmeasurable
+          pedestrian  both 5, model_only 11, human_only 4
+                      N = (17)(10)/6 - 1 = 170/6 - 1                    = 27.3333...
+          sedan       both 0                                            -> unmeasurable
         """
         async with get_sessionmaker()() as db:
             fx = await _fixture(db)
             await mark_frames_labeled(db, fx["audit_id"])
             res = await score_audit(db, str(fx["audit_id"]))
 
-            assert res["per_class"][str(fx["ped"])] == [5, 5, 4]
+            assert res["per_class"][str(fx["ped"])] == [5, 11, 4]
             assert res["per_class"][str(fx["sedan"])] == [0, 1, 0]
 
             rows = {(r.stratum, r.class_id): r for r in (await db.execute(select(RecaptureEstimateRow)
                     .where(RecaptureEstimateRow.audit_id == fx["audit_id"]))).scalars().all()}
             ped = rows[(None, fx["ped"])]
-            assert abs(ped.population - (110.0 / 6.0 - 1.0)) < 1e-3
+            assert abs(ped.population - (170.0 / 6.0 - 1.0)) < 1e-3
             # A class the two observers never agreed on cannot be estimated, and says so rather than
             # returning the finite number Chapman would happily produce for it.
             car = rows[(None, fx["sedan"])]
@@ -436,7 +436,7 @@ class TestScoring:
             assert car.population is None
 
             pooled = rows[(None, None)]
-            assert abs(pooled.population - 16.0) < 1e-6
+            assert abs(pooled.population - 25.0) < 1e-6
             # Deliberately different from the per-class sum: they answer different questions.
             assert abs(ped.population - pooled.population) > 1.0
 
@@ -477,8 +477,8 @@ class TestScoring:
             await mark_frames_labeled(db, fx["audit_id"], [fx["frames"]["C"]])
             res = await score_audit(db, str(fx["audit_id"]))
             assert res["n_labeled"] == 1 and res["n_frames"] == 3
-            # Frame C alone: both 3, model_only 3, human_only 2 -> the moderate row above.
-            assert abs(res["pooled"]["population"] - 9.5) < 1e-6
+            # Frame C alone: both 3, model_only 9, human_only 2 -> the moderate row above.
+            assert abs(res["pooled"]["population"] - 18.5) < 1e-6
 
     async def test_the_status_moves_and_the_estimate_is_readable_afterwards(self):
         async with get_sessionmaker()() as db:
@@ -491,7 +491,7 @@ class TestScoring:
             assert audit.status == "scored" and audit.scored_at is not None
 
             est = await pooled_estimate(db, run_id=str(fx["run_id"]))
-            assert est is not None and abs(est["population"] - 16.0) < 1e-6
+            assert est is not None and abs(est["population"] - 25.0) < 1e-6
             # No gold set on this run, so there is no gold recall to compare against and it says so
             # rather than substituting a number from somewhere else.
             assert est["gold_recall"] is None

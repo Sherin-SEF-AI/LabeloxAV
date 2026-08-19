@@ -68,12 +68,18 @@ ESTIMATOR = "chapman-lp-v1"
 
 # Density strata, by how many predictions the run left on the frame at the audit's operating point. Capture
 # probability is not constant across the corpus: an empty highway and a crowded junction do not share a
-# detection rate, and pooling one collapsed count over both assumes they do. The boundaries are fixed and
-# stated rather than fitted, so two audits of the same run are comparable.
+# detection rate, and pooling one collapsed count over both assumes they do.
+#
+# The boundaries are fixed rather than fitted to each run's histogram, because quantile boundaries would
+# make two audits of two runs incomparable, which is most of what an audit is for. They are set where they
+# are because they describe Indian road scenes: under ten objects is a quiet frame, ten to thirty is
+# ordinary traffic, thirty and up is a crowded junction. On the champion's gold run that splits 157 frames
+# 13/82/62, which is a real three-way split; boundaries an order of magnitude lower (the natural choice for
+# a sparse highway corpus) put 138 of those frames in one bucket and stratify nothing.
 _DENSITY_BOUNDS: tuple[tuple[str, int, int], ...] = (
-    ("sparse", 0, 5),        # 0 to 4 predictions
-    ("moderate", 5, 15),     # 5 to 14
-    ("dense", 15, 10**9),    # 15 and up
+    ("sparse", 0, 10),        # under 10 predictions
+    ("moderate", 10, 30),     # 10 to 29
+    ("dense", 30, 10**9),     # 30 and up
 )
 
 # Below this, a stratum's estimate is arithmetic on too little to mean anything. It is still computed and
