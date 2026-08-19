@@ -238,6 +238,13 @@ class Object(Base):
 
     tags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
 
+    # Drawn during a blind audit, where the annotator was shown the pixels and nothing else. Set, this row
+    # is one of the two independent observations a capture-recapture estimate is computed from, and it must
+    # never be pooled with ordinary review labels: an ordinary label is usually a confirmed machine box, so
+    # it carries no information about what the model missed, which is the only thing an audit measures.
+    blind_audit_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("blind_audit.audit_id", ondelete="SET NULL"))
+
     frame: Mapped[Frame] = relationship(back_populates="objects")
 
     __table_args__ = (
@@ -246,6 +253,10 @@ class Object(Base):
         Index("ix_object_class", "class_id"),
         Index("ix_object_track", "track_id"),
         Index("ix_object_tags_gin", "tags", postgresql_using="gin"),
+        # Partial: null on all 576,469 existing objects and on nearly every future one, so indexing the
+        # nulls would cover most of the corpus and answer no query anybody asks.
+        Index("ix_object_blind_audit", "blind_audit_id",
+              postgresql_where=sql_text("blind_audit_id IS NOT NULL")),
     )
 
 
@@ -717,6 +728,156 @@ class Prediction(Base):
         Index("ix_prediction_track", "run_id", "track_id"),
         Index("ix_prediction_frame", "frame_id"),
         Index("ix_prediction_run_frame", "run_id", "frame_id"),
+    )
+
+
+class BlindAudit(Base):
+    """A second, independent observation of a set of frames, for estimating what BOTH observers missed.
+
+    Every recall number this engine reports is recall against a denominator somebody already found, and the
+    two ways of finding things are not equally likely: confirming a machine box is one click, drawing a
+    missed object is thirty seconds of work. So the gold set is biased toward what the model already sees,
+    and gold recall is an overestimate by an unknown amount. Fixing the prediction plane made the numerator
+    honest; it did nothing about the denominator.
+
+    A blind audit is the denominator's fix. The annotator is served the pixels with every prediction and
+    every existing object withheld SERVER-SIDE (services/api/routers/objects.py, the same filter a replica
+    job uses, tightened to hide this job's own history too), labels the frames from scratch, and the result
+    is a human observation that is genuinely independent of the model's. Capture-recapture over the two
+    then estimates the population neither of them saw.
+
+    The blindness is not a UI preference. If the predictions reach the browser at all the audit is void,
+    because a hidden label is one keystroke from being an unhidden one and nothing afterwards could tell
+    whether it had been. That is why the filter is in the fetch handler and not in the editor.
+
+    status:  seeded (frames chosen, nobody has labelled) -> labeling -> scored | abandoned
+    """
+
+    __tablename__ = "blind_audit"
+
+    audit_id: Mapped[uuid.UUID] = _uuid_pk()
+    # The run being audited. The model's observation is this run's Prediction rows on the audit frames, at
+    # score_thr, and never anything from Object.
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("inference_run.run_id", ondelete="CASCADE"), nullable=False)
+    gold_id: Mapped[str | None] = mapped_column(String(128))
+    # The annotation job serving the frames. Nullable so an audit can be seeded and scored headlessly (a
+    # backfill, a test) without a labelling queue, but the blindness filter keys on it, so an audit that a
+    # human is meant to label must have one.
+    job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("label_job.job_id", ondelete="SET NULL"))
+    n_frames: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # How the frames were stratified, and why. Capture probability is not constant across the corpus (a
+    # crowded junction and an empty highway do not share a detection rate), and pooling over a single
+    # collapsed count assumes it is.
+    stratify_by: Mapped[str] = mapped_column(String(32), nullable=False, default="density")
+    strata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # The operating point the model's observation is taken at. Stored because the estimate is meaningless
+    # without it: the same run at a lower threshold is a different observer.
+    score_thr: Mapped[float] = mapped_column(Float, nullable=False, default=0.25)
+    iou_thr: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="seeded")
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_blind_audit_run", "run_id"),
+        Index("ix_blind_audit_gold", "gold_id"),
+        Index("ix_blind_audit_job", "job_id"),
+    )
+
+
+class BlindAuditFrame(Base):
+    """One frame in a blind audit, and the three capture counts it contributed.
+
+    Counts are stored per frame rather than only rolled up so a suspicious estimate can be opened: an
+    audit whose whole n_human_only comes from four frames is an annotator finding one thing repeatedly,
+    not a model with a systematic blind spot, and the pooled number cannot tell those apart.
+
+    labeled_at is what makes an audit scoreable. An unlabelled frame is not a frame where the human found
+    nothing, and counting it as one would report the model's recall as far better than it is.
+    """
+
+    __tablename__ = "blind_audit_frame"
+
+    audit_frame_id: Mapped[uuid.UUID] = _uuid_pk()
+    audit_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("blind_audit.audit_id", ondelete="CASCADE"), nullable=False)
+    frame_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("frame.frame_id", ondelete="CASCADE"), nullable=False)
+    stratum: Mapped[str] = mapped_column(String(64), nullable=False, default="all")
+    labeled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Null until scored. Zero and null mean different things here and the distinction is the whole point.
+    n_both: Mapped[int | None] = mapped_column(Integer)
+    n_model_only: Mapped[int | None] = mapped_column(Integer)
+    n_human_only: Mapped[int | None] = mapped_column(Integer)
+
+    __table_args__ = (
+        UniqueConstraint("audit_id", "frame_id", name="uq_blind_audit_frame"),
+        Index("ix_blind_audit_frame_audit", "audit_id"),
+        # Keyed on frame because the blindness check in the frame fetch handler asks "is this frame under
+        # an audit" on every editor request. The unique constraint's index leads with audit_id and cannot
+        # answer that, so without this the guard would sequentially scan on the editor's hot path.
+        Index("ix_blind_audit_frame_frame", "frame_id"),
+    )
+
+
+class RecaptureEstimateRow(Base):
+    """A capture-recapture population estimate, durable and keyed on (run_id, gold_id).
+
+    One row per (audit, stratum, class): stratum null means pooled across strata, class_id null means
+    pooled across classes, so the pooled corpus-wide estimate is the row with both null.
+
+    measured is False, with a reason, when the counts cannot support an estimate at all (nothing found by
+    both observers leaves the population unbounded above). Storing that as a row rather than omitting it is
+    deliberate: a missing row reads as "not computed", and "computed, and the answer is that we cannot
+    tell" is a different and more useful statement.
+
+    gold_recall is carried alongside so the two denominators sit in one row. The gap between gold_recall
+    and model_recall IS the measurement, and putting them in separate tables would make the comparison a
+    join nobody performs.
+    """
+
+    __tablename__ = "recapture_estimate"
+
+    estimate_id: Mapped[uuid.UUID] = _uuid_pk()
+    audit_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("blind_audit.audit_id", ondelete="CASCADE"), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("inference_run.run_id", ondelete="CASCADE"), nullable=False)
+    gold_id: Mapped[str | None] = mapped_column(String(128))
+    stratum: Mapped[str | None] = mapped_column(String(64))
+    class_id: Mapped[int | None] = mapped_column(Integer)
+
+    n_both: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    n_model_only: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    n_human_only: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    measured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    population: Mapped[float | None] = mapped_column(Float)
+    population_lo: Mapped[float | None] = mapped_column(Float)
+    population_hi: Mapped[float | None] = mapped_column(Float)
+    variance: Mapped[float | None] = mapped_column(Float)
+    model_recall: Mapped[float | None] = mapped_column(Float)
+    recall_lo: Mapped[float | None] = mapped_column(Float)
+    recall_hi: Mapped[float | None] = mapped_column(Float)
+    human_recall: Mapped[float | None] = mapped_column(Float)
+    # Recall against the sealed gold denominator, for the same run and slice. The number the engine
+    # reported before this table existed.
+    gold_recall: Mapped[float | None] = mapped_column(Float)
+    estimator: Mapped[str] = mapped_column(String(32), nullable=False, default="chapman-lp-v1")
+    n_strata_pooled: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        # NULLS NOT DISTINCT because null is a meaningful value in both key columns here (pooled), and the
+        # SQL default would let the pooled row be inserted twice while refusing a duplicate on every other
+        # slice. Postgres 15+; this engine requires 16 for the PostGIS and pgvector versions it pins.
+        UniqueConstraint("audit_id", "stratum", "class_id", name="uq_recapture_estimate_slice",
+                         postgresql_nulls_not_distinct=True),
+        Index("ix_recapture_estimate_run_gold", "run_id", "gold_id"),
+        Index("ix_recapture_estimate_audit", "audit_id"),
     )
 
 

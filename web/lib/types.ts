@@ -480,6 +480,10 @@ export type FrameMeta = {
   is_lidar?: boolean;
   lidar_points?: number | null;
   lidar_res?: number | null;
+  // Set when this frame is being served under a blind audit for the current user. The server has already
+  // withheld every prediction and existing label, and scoped n_objects to the auditor's own work; this is
+  // only so the editor can say what the pass is for.
+  blind_audit_id?: string | null;
 };
 
 export type Relationship = { relationship_id: string; from_object_id: string; to_object_id: string; kind: string };

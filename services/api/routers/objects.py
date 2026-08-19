@@ -344,29 +344,46 @@ async def vlm_dataset_export(session_id: str | None = None):
 
 @router.get("/frames/{frame_id}/objects")
 async def frame_objects(frame_id: str, job_id: str | None = None, limit: int = 2000,
-                        db: AsyncSession = Depends(db_session)):
-    """Every object on a frame, or only this job's when the job is a blind replica.
+                        db: AsyncSession = Depends(db_session),
+                        user=Depends(current_user)):
+    """Every object on a frame, or only this job's when the job is blind.
 
-    A replica job exists to be compared against another annotator's independent answer. If the editor
+    Two kinds of blindness, for two different measurements:
+
+    A REPLICA job exists to be compared against another annotator's independent answer. If the editor
     handed it the machine pre-labels, both annotators would be correcting the same proposals and the
     agreement between them would measure how well two people agree with a third party neither of them can
     see. 82.6% of frames here are pre-labelled, so this is the normal case.
 
+    A BLIND AUDIT job is stricter still: it hides everything, including this job's own earlier work from
+    other sources, because the audit's whole purpose is a human observation that is statistically
+    independent of the model. An auditor who has seen one prediction is no longer a second observer, and
+    the capture-recapture estimate built on them is not conservative, it is arbitrary.
+
     The filter is server-side deliberately: hiding the pre-labels in the browser still ships them to the
-    browser, and a hidden label is one keystroke away from being an unhidden one.
+    browser, and a hidden label is one keystroke away from being an unhidden one. For the same reason the
+    audit filter also applies when no job_id is passed at all, provided the caller is the auditor: dropping
+    the query parameter must not be a way to see the answers.
     """
     from sqlalchemy import select
 
     from db.models import LabelJob
+    from services.verdyx.blind_audit import active_audit_id
 
     onto = get_ontology()
     q = select(Object).where(Object.frame_id == UUID(frame_id))
+    job = None
     if job_id:
         job = await db.get(LabelJob, UUID(job_id))
         if job is None:
             raise HTTPException(404, "job not found")
-        if job.replica_group is not None:
-            q = q.where(Object.job_id == job.job_id)
+    audit_id = await active_audit_id(db, frame_id=UUID(frame_id),
+                                     job_id=job.job_id if job is not None else None,
+                                     user_id=user.user_id if user is not None else None)
+    if audit_id is not None:
+        q = q.where(Object.blind_audit_id == audit_id)
+    elif job is not None and job.replica_group is not None:
+        q = q.where(Object.job_id == job.job_id)
     # Bounded. This was unbounded, and it is the editor's hot path: a frame with a pathological object
     # count would materialise all of them and fetch a mask blob for each. The cap is far above any real
     # frame in this corpus (the busiest is ~60 objects) so it never truncates ordinary work.
@@ -455,7 +472,8 @@ async def frame_filmstrip(frame_id: str, span: int = 12, db: AsyncSession = Depe
 
 @router.get("/frames/{frame_id}")
 async def get_frame(frame_id: str, job_id: str | None = None,
-                    db: AsyncSession = Depends(db_session)):
+                    db: AsyncSession = Depends(db_session),
+                    user=Depends(current_user)):
     """Frame meta for the editor: dimensions, image url, object count, and prev/next for keyboard
     navigation.
 
@@ -463,6 +481,11 @@ async def get_frame(frame_id: str, job_id: str | None = None,
     which is the right answer for somebody reviewing a drive and the wrong one for somebody working an
     assignment: session order walks straight out of the job at its first or last frame, and on a replica
     job that means leaving blind mode and drawing boxes the agreement pass will never see.
+
+    Under a blind audit this route is a leak if it is not scoped, and a worse one than it looks. The boxes
+    are withheld by the objects route, but `n_objects` is a count of them: an auditor shown an empty canvas
+    beside "14 objects" has been told exactly how many things they missed and roughly how hard to look. So
+    the count is scoped to their own work, and `annotation_source` is dropped for the same reason.
     """
     frame = await db.get(Frame, UUID(frame_id))
     if frame is None:
@@ -489,18 +512,30 @@ async def get_frame(frame_id: str, job_id: str | None = None,
         nxt = (await db.execute(
             select(Frame.frame_id).where(Frame.session_id == frame.session_id, Frame.ts_ns > frame.ts_ns)
             .order_by(Frame.ts_ns.asc()).limit(1))).scalar_one_or_none()
-    n = (await db.execute(select(func.count()).select_from(Object).where(Object.frame_id == frame.frame_id))).scalar_one()
+    from services.verdyx.blind_audit import active_audit_id
+
+    audit_id = await active_audit_id(db, frame_id=frame.frame_id,
+                                     job_id=UUID(job_id) if job_id else None,
+                                     user_id=user.user_id if user is not None else None)
+
+    count_q = select(func.count()).select_from(Object).where(Object.frame_id == frame.frame_id)
+    if audit_id is not None:
+        count_q = count_q.where(Object.blind_audit_id == audit_id)
+    n = (await db.execute(count_q)).scalar_one()
+
     # The dominant annotation source on this frame, so the editor can say plainly whether these labels are
-    # imported from a public dataset (Mapillary / IDD / BDD) or produced in-app.
-    src_rows = (await db.execute(
-        select(Object.source, func.count()).where(Object.frame_id == frame.frame_id)
-        .group_by(Object.source).order_by(func.count().desc()))).all()
-    annotation_source = src_rows[0][0] if src_rows else None
-    import_format = None
-    if annotation_source == "imported":
-        prov = (await db.execute(select(Object.provenance).where(
-            Object.frame_id == frame.frame_id, Object.source == "imported").limit(1))).scalar()
-        import_format = (prov or {}).get("import_format")
+    # imported from a public dataset (Mapillary / IDD / BDD) or produced in-app. Withheld under an audit:
+    # "this frame is mostly machine labels" is a statement about labels the auditor is not being shown.
+    annotation_source = import_format = None
+    if audit_id is None:
+        src_rows = (await db.execute(
+            select(Object.source, func.count()).where(Object.frame_id == frame.frame_id)
+            .group_by(Object.source).order_by(func.count().desc()))).all()
+        annotation_source = src_rows[0][0] if src_rows else None
+        if annotation_source == "imported":
+            prov = (await db.execute(select(Object.provenance).where(
+                Object.frame_id == frame.frame_id, Object.source == "imported").limit(1))).scalar()
+            import_format = (prov or {}).get("import_format")
     # whether this session has an MCAP recording, so the editor only offers the Session Inspector when there is
     # a timeline to inspect (image/video/imagery sessions have no MCAP and the Inspector would 409).
     from db.models import Session as DbSession
@@ -515,6 +550,10 @@ async def get_frame(frame_id: str, job_id: str | None = None,
         "prev_frame_id": str(prev) if prev else None, "next_frame_id": str(nxt) if nxt else None,
         "is_lidar": bool(frame.lidar), "lidar_points": (frame.lidar or {}).get("n_points"),
         "lidar_res": ((frame.lidar or {}).get("bev") or {}).get("res"),  # metres per pixel, for the ruler
+        # Told to the editor so it can say what this pass is for. Somebody who does not know they are in an
+        # audit works it like ordinary review, skims the frames that look already-done, and produces the
+        # confirmation bias the audit exists to measure.
+        "blind_audit_id": str(audit_id) if audit_id else None,
     }
 
 
@@ -570,6 +609,15 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         if str(frame.frame_id) not in {str(f) for f in (job.frame_ids or [])}:
             raise HTTPException(400, f"frame {frame.frame_id} is not part of job {payload.job_id}")
 
+    # Derived server-side, by the same rule that decided what this annotator was allowed to see. Never
+    # taken from the payload: a client that omitted it would produce an audit box counted as an ordinary
+    # label, and the audit would then measure a human who apparently found nothing.
+    from services.verdyx.blind_audit import active_audit_id
+
+    audit_id = await active_audit_id(db, frame_id=frame.frame_id,
+                                     job_id=job.job_id if job is not None else None,
+                                     user_id=user.user_id if user is not None else None)
+
     oid = uuid.uuid4()
     mask_uri = mask_encoding = None
     if payload.mask_polygons:
@@ -585,6 +633,7 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         # existing flow and stays exactly as it was.
         job_id=job.job_id if job is not None else None,
         annotator_id=user.user_id if user else None,
+        blind_audit_id=audit_id,
         provenance={"created_by": "human-annotation", "idem_key": payload.idem_key},
     )
     db.add(obj)

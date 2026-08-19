@@ -5,13 +5,15 @@ gate stays in services/govern/champion and consumes these verdicts. Mounted unde
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Evaluation
-from services.api.deps import db_session
+from services.api.deps import db_session, require_role
 from services.verdyx.run import matrix, record_evaluation
 from services.verdyx.safety_recall import (
     critical_object_recall,
@@ -160,3 +162,119 @@ async def model_evals(model_version: str, limit: int = 20, db: AsyncSession = De
         {"eval_id": str(r.eval_id), "verdict": r.verdict, "aggregate": r.aggregate,
          "challenger_of": r.challenger_of, "created_at": r.created_at.isoformat() if r.created_at else None}
         for r in rows]}
+
+
+# Blind audits: the capture-recapture path that measures recall against a denominator the model did not
+# build. Seeding and scoring sit behind a reviewer floor because an audit is a measurement instrument and
+# a seeded one commits annotation budget; reading is open to anyone who can read an evaluation.
+
+
+class SeedAuditIn(BaseModel):
+    run_id: str
+    n_frames: int = 200
+    stratify_by: str = "density"
+    score_thr: float = 0.25
+    iou_thr: float = 0.5
+    project_id: str | None = None
+    notes: str | None = None
+
+
+@router.post("/verdyx/blind-audit/seed")
+async def blind_audit_seed(payload: SeedAuditIn, db: AsyncSession = Depends(db_session),
+                           _user=Depends(require_role("reviewer"))):
+    """Choose the frames and create the job that serves them blind. Nothing is measured yet."""
+    from services.verdyx.blind_audit import seed_audit
+
+    res = await seed_audit(db, run_id=payload.run_id, n_frames=payload.n_frames,
+                           stratify_by=payload.stratify_by, score_thr=payload.score_thr,
+                           iou_thr=payload.iou_thr, project_id=payload.project_id, notes=payload.notes)
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@router.post("/verdyx/blind-audit/{audit_id}/score")
+async def blind_audit_score(audit_id: str, min_frames: int = 1,
+                            db: AsyncSession = Depends(db_session),
+                            _user=Depends(require_role("reviewer"))):
+    """Match the two observations and persist the estimate. Refuses while too little of it is labelled."""
+    from services.verdyx.blind_audit import score_audit
+
+    res = await score_audit(db, audit_id, min_frames=min_frames)
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@router.post("/verdyx/blind-audit/{audit_id}/mark-labeled")
+async def blind_audit_mark_labeled(audit_id: str, db: AsyncSession = Depends(db_session),
+                                   _user=Depends(require_role("annotator"))):
+    """Declare the auditor finished with every frame that is not already marked.
+
+    Explicit rather than inferred, because a frame with no boxes on it is either an empty frame or one
+    nobody opened, and scoring the second as the first reports the model as having missed nothing exactly
+    where it was never checked.
+    """
+    from services.verdyx.blind_audit import mark_frames_labeled
+
+    n = await mark_frames_labeled(db, UUID(audit_id))
+    return {"audit_id": audit_id, "marked": n}
+
+
+@router.get("/verdyx/blind-audits")
+async def blind_audit_list(run_id: str | None = None, limit: int = 50,
+                           db: AsyncSession = Depends(db_session)):
+    from services.verdyx.blind_audit import list_audits
+
+    return {"audits": await list_audits(db, run_id=run_id, limit=limit)}
+
+
+@router.get("/verdyx/blind-audit/{audit_id}")
+async def blind_audit_get(audit_id: str, db: AsyncSession = Depends(db_session)):
+    from services.verdyx.blind_audit import audit_progress
+
+    res = await audit_progress(db, audit_id)
+    if "error" in res:
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@router.get("/verdyx/blind-audit/{audit_id}/estimate")
+async def blind_audit_estimate(audit_id: str, db: AsyncSession = Depends(db_session)):
+    """Every persisted slice of the estimate: per stratum, per class, and pooled.
+
+    An unmeasurable slice is returned as a row with measured false and a reason, not omitted. "We checked
+    and cannot tell" is a different statement from "we did not check", and only one of them is safe to
+    read as the absence of a problem.
+    """
+    from db.models import BlindAudit, RecaptureEstimateRow
+
+    audit = await db.get(BlindAudit, UUID(audit_id))
+    if audit is None:
+        raise HTTPException(404, "audit not found")
+    rows = (await db.execute(
+        select(RecaptureEstimateRow).where(RecaptureEstimateRow.audit_id == audit.audit_id)
+        .order_by(RecaptureEstimateRow.class_id.nulls_first(),
+                  RecaptureEstimateRow.stratum.nulls_first()))).scalars().all()
+    onto = None
+    if any(r.class_id is not None for r in rows):
+        from services.autolabel.ontology import get_ontology
+
+        onto = get_ontology()
+    return {
+        "audit_id": audit_id, "run_id": str(audit.run_id), "gold_id": audit.gold_id,
+        "status": audit.status, "estimator": rows[0].estimator if rows else None,
+        "caveat": ("captures correlate positively on hard objects, so the estimated population is biased "
+                   "down: these are a lower bound on what was missed and an upper bound on recall"),
+        "slices": [{
+            "stratum": r.stratum, "class_id": r.class_id,
+            "class_name": onto.by_id(r.class_id).name if (onto and r.class_id is not None) else None,
+            "measured": r.measured, "reason": r.reason,
+            "population": r.population, "lo": r.population_lo, "hi": r.population_hi,
+            "model_recall": r.model_recall, "recall_lo": r.recall_lo, "recall_hi": r.recall_hi,
+            "human_recall": r.human_recall, "gold_recall": r.gold_recall,
+            "overstatement": (round(r.gold_recall - r.model_recall, 6)
+                              if (r.gold_recall is not None and r.model_recall is not None) else None),
+            "n_both": r.n_both, "n_model_only": r.n_model_only, "n_human_only": r.n_human_only,
+        } for r in rows],
+    }

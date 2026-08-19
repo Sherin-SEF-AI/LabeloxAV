@@ -62,7 +62,7 @@ jobs:
         # type regression in this critical code fails the build.
         run: >
           .venv/bin/mypy --strict --ignore-missing-imports
-          core/accel/ap.py core/version.py core/timebase.py
+          core/accel/ap.py core/accel/recapture.py core/version.py core/timebase.py
           services/api/auth_token.py services/review_policy.py
           services/anonymize/coverage.py services/training/lineage.py
 

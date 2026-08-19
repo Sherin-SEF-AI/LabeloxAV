@@ -3298,6 +3298,36 @@ class LabeloxClient:
         return self._call("POST", f"/api/users/{user_id}/token",
                           params=None, json_body=None)
 
+    def post_verdyx_blind_audit_seed(self, body: Any = None) -> Any:
+        """Blind Audit Seed"""
+        return self._call("POST", f"/api/verdyx/blind-audit/seed",
+                          params=None, json_body=body)
+
+    def get_verdyx_blind_audit_by_audit_id(self, audit_id: str) -> Any:
+        """Blind Audit Get"""
+        return self._call("GET", f"/api/verdyx/blind-audit/{audit_id}",
+                          params=None, json_body=None)
+
+    def get_verdyx_blind_audit_by_audit_id_estimate(self, audit_id: str) -> Any:
+        """Blind Audit Estimate"""
+        return self._call("GET", f"/api/verdyx/blind-audit/{audit_id}/estimate",
+                          params=None, json_body=None)
+
+    def post_verdyx_blind_audit_by_audit_id_mark_labeled(self, audit_id: str) -> Any:
+        """Blind Audit Mark Labeled"""
+        return self._call("POST", f"/api/verdyx/blind-audit/{audit_id}/mark-labeled",
+                          params=None, json_body=None)
+
+    def post_verdyx_blind_audit_by_audit_id_score(self, audit_id: str, min_frames: int | None = 1) -> Any:
+        """Blind Audit Score"""
+        return self._call("POST", f"/api/verdyx/blind-audit/{audit_id}/score",
+                          params={"min_frames": min_frames}, json_body=None)
+
+    def get_verdyx_blind_audits(self, run_id: Any | None = None, limit: int | None = 50) -> Any:
+        """Blind Audit List"""
+        return self._call("GET", f"/api/verdyx/blind-audits",
+                          params={"run_id": run_id, "limit": limit}, json_body=None)
+
     def post_verdyx_evaluate(self, body: Any = None) -> Any:
         """Evaluate"""
         return self._call("POST", f"/api/verdyx/evaluate",
@@ -3396,4 +3426,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 662 routes generated from the server schema.
+# 668 routes generated from the server schema.

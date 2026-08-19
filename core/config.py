@@ -649,6 +649,20 @@ class GovernSettings(BaseModel):
     # eval_strata.protected_slices"; set it to override per deployment. (Adds the field verdyx/run.py already
     # reads via getattr, so the pack default now flows through instead of a hardcoded fallback.)
     protected_slices: list[str] = Field(default_factory=list)
+    # Blind-audit capture-recapture (see services/verdyx/blind_audit.py).
+    #
+    # `blind_audit_required` refuses a promotion whose challenger run has no scored blind audit. It is OFF
+    # by default and that is deliberate rather than timid: there are no blind audits yet, one cannot exist
+    # until a person labels two hundred frames, and a gate that starts red on every promotion gets switched
+    # off permanently within a week. Until it is flipped, the gate says `unchecked` in its reasons on every
+    # promotion, so the gap is stated rather than silently passed. Flip it once the first audit is scored.
+    blind_audit_required: bool = False
+    # How far gold recall may exceed the recapture-estimated recall before the gold metrics are treated as
+    # untrustworthy. This one is ON by default because it can only fire when an audit actually exists, so it
+    # never blocks a deployment that has not opted in. It is the substantive check: every other floor in
+    # this gate is computed against the gold denominator, so if that denominator is inflated by more than
+    # this, the floors are measuring something that is not recall and the comparison should not be made.
+    recapture_max_overstatement: float = 0.15
 
 
 class RecallSettings(BaseModel):

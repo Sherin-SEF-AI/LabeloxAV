@@ -259,6 +259,20 @@ async def submit_job(db: AsyncSession, job_id: str, *, expected_version: int | N
         job.state = "completed" if job.stage == "acceptance" else "new"
     job.version += 1
     await db.commit()
+
+    # A submitted blind-audit job means the auditor is done looking at those frames. Until that is on
+    # record the audit cannot be scored, because a frame with no boxes is otherwise indistinguishable
+    # from a frame nobody opened, and scoring the second as "the human found nothing" would report the
+    # model's recall as perfect precisely where it was being tested. Only on the way forward: a rejected
+    # job comes back to its author and is not finished with.
+    if not failed:
+        from services.verdyx.blind_audit import audit_for_job, mark_frames_labeled
+
+        audit = await audit_for_job(db, job.job_id)
+        if audit is not None:
+            n = await mark_frames_labeled(db, audit.audit_id,
+                                          [UUID(str(f)) for f in (job.frame_ids or [])])
+            log.info("labelops.audit_frames_marked", job=job_id, audit=str(audit.audit_id), frames=n)
     log.info("labelops.job_submitted", job=job_id, stage=job.stage, state=job.state,
              honeypot_accuracy=job.honeypot_accuracy, failed=failed)
     # Let external pipelines react without polling. Fire and forget: a slow receiver must not hold up the

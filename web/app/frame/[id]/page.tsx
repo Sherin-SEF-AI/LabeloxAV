@@ -1281,6 +1281,21 @@ export default function FrameEditor() {
             <ObjectSourceBadge source={meta.annotation_source} importFormat={meta.import_format} />
           </span>
         ) : null}
+        {/* Somebody who does not know they are in an audit works it like ordinary review: skims the frames
+            that look already-done, trusts the empty ones. That is the confirmation bias the audit exists to
+            measure, so the pass has to announce itself. The hiding is already done server-side; this only
+            explains it, and saying so is what stops the emptiness reading as a bug. */}
+        {meta.blind_audit_id ? (
+          <span
+            title={"Blind audit " + meta.blind_audit_id.slice(0, 8)
+              + ". Every prediction and existing label on this frame is withheld by the server, not by this "
+              + "editor. Label it from scratch: what you draw is one of two independent observations, and "
+              + "the gap between them is what says how much the model actually misses."}
+            className="font-mono text-[10px] uppercase tracking-wide px-1.5 py-0.5 border border-accent text-accent whitespace-nowrap"
+          >
+            blind audit · label from scratch
+          </span>
+        ) : null}
         <button onClick={() => router.push(`/search?frame=${id}`)} title="find visually similar frames (DINOv3)"
           className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="search" size={16} /></button>
         {meta.has_mcap && (

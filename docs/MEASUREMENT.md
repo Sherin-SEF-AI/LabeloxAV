@@ -66,6 +66,52 @@ prediction-plane AP50 differ by more than `govern.harness_reconcile_epsilon`, th
 `harness_divergent` and the promotion gate refuses to promote. Two harnesses that disagree is a signal, not
 noise.
 
+## The denominator, and why gold recall is an overestimate
+
+Everything above makes the **numerator** honest: predictions live in their own append-only plane, so a
+detection a human confirmed is no longer erased from the population it was scored in.
+
+None of it touches the **denominator**. Recall is measured against the sealed gold set, and that set was
+built by people reviewing machine proposals. Confirming a machine box costs one click; drawing a box the
+machine missed costs half a minute of looking at apparently empty road. The two are not equally likely, so
+the gold set leans toward what the model already sees, and gold recall is an overestimate by an amount
+nothing in the two harnesses above can detect. Both harnesses share the bias, so their agreement is not
+evidence against it.
+
+A **blind audit** (`services/verdyx/blind_audit.py`, `core/accel/recapture.py`) is the fix. A sample of
+frames is served to an annotator with every prediction and every existing label withheld, and they label
+from scratch. The model and that annotator are then two observers of one population, and Lincoln-Petersen
+with Chapman's small-sample correction estimates, in closed form, how many objects **neither** found:
+
+    N_hat = (n1 + 1)(n2 + 1) / (m2 + 1) - 1
+    var   = (n1 + 1)(n2 + 1)(n1 - m2)(n2 - m2) / [(m2 + 1)^2 (m2 + 2)]
+
+Four things about it are load-bearing:
+
+- **The blindness is server-side.** `services/api/routers/objects.py` withholds the boxes in the fetch
+  handler, and scopes `n_objects` on the frame route to the auditor's own work. Hiding in the editor would
+  still ship the predictions to the browser, and an object count is nearly as informative as the objects.
+  The same rule (`blind_audit.active_audit_id`) decides both what the auditor may see and what their new
+  boxes are stamped with, because if the two ever disagreed the audit would silently collect nothing and
+  report the model's recall as perfect.
+- **Frames are stratified by prediction density** and sampled evenly across strata, not proportionally.
+  Capture probability is not constant: an empty highway and a crowded junction do not share a detection
+  rate. Pooling is a sum of per-stratum populations with summed variance, never an estimate over collapsed
+  counts.
+- **The pooled row is class-agnostic and the per-class rows are class-aware**, so they deliberately do not
+  sum to each other. The first asks how many objects exist; the second asks how many of class *c* each
+  observer correctly identified, which is what compares to per-class gold recall.
+- **Independence is assumed and is not fully met.** A small, occluded, badly lit object is harder for both
+  observers, so the captures correlate positively, `m2` runs high, and `N_hat` is biased **down**. Every
+  number is a lower bound on what was missed and an upper bound on recall. It is reported that way and must
+  never be presented as exact.
+
+Nothing is stored in a log line: `blind_audit`, `blind_audit_frame` and `recapture_estimate` (migration
+0095) hold the counts per frame and the estimate per stratum and per class, keyed on `run_id` and
+`gold_id`, and it renders in the Analytics page under the gold comparison. A slice that could not be
+estimated is stored as a row with `measured = false` and a reason rather than omitted, because a missing
+row reads as "not computed" and this needs to say "computed, and the answer is that we cannot tell".
+
 ## What the promotion gate reads
 
 `services/govern/champion.py::champion_gate` is a pure decision over a metrics dict. It fails closed:
@@ -74,7 +120,19 @@ noise.
   no PR curve, no AP, cannot gate a promotion;
 - a `harness_divergent` flag is refused outright;
 - otherwise the usual floors apply: beat champion mAP, no Safe-mIoU regression, safety-class AP and recall
-  floors (VRU and animal held tighter than the default).
+  floors (VRU and animal held tighter than the default);
+- and the recapture condition, which asks whether the denominator the floors above are computed against has
+  been checked at all. Three outcomes, and the middle one is the point of storing unmeasurable slices:
+  - **measured**: if gold recall exceeds the audit estimate by more than `govern.recapture_max_overstatement`
+    (0.15), promotion is refused. At that gap the gold denominator is missing enough that none of the floors
+    above means what its name says. On by default, because it can only fire once an audit exists.
+  - **unmeasured**: an audit ran and could not conclude (no object found by both observers, so the
+    population is unbounded above). Always refused. "We looked and cannot tell" is not "we looked and it
+    was fine".
+  - **unchecked**: no audit for this run. Stated in the gate's reasons on every promotion, and refused only
+    when `govern.blind_audit_required` is set. It ships **off**, deliberately: no blind audit exists yet,
+    one cannot exist until somebody labels a couple of hundred frames, and a gate that starts red on every
+    promotion gets switched off within a week. Flip it once the first audit is scored.
 
 ## Reconstructed runs
 

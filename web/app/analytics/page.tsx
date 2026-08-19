@@ -19,6 +19,7 @@ import {
 import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
 import EvalDrilldown from "@/components/explore/EvalDrilldown";
+import RecallHonesty from "@/components/explore/RecallHonesty";
 import ScoreBar from "@/components/shell/ScoreBar";
 import { api } from "@/lib/api";
 import type { ProductivityReport } from "@/lib/types";
@@ -394,6 +395,14 @@ export default function AnalyticsPage() {
             <EvalDrilldown />
           </Section>
         </div>
+
+        {/* Whether the gold recall above can be trusted, which nothing else on this page can tell you: the
+            sealed set was built by people confirming machine boxes, so it leans toward what the model
+            already sees. This is the only panel measured against a denominator the model did not help
+            build, which is why it sits directly under the gold comparison rather than in a corner. */}
+        <Section title="is the recall above real? (blind audit, capture-recapture)">
+          <RecallHonesty />
+        </Section>
 
         {/* DPDPA / PII anonymization evidence (Gate A) */}
         <Section title="PII anonymization (DPDPA gate A)">
