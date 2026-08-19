@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -185,6 +186,7 @@ class SafetyPolicy(Protocol):
     def is_safety_class(self, class_name: str) -> bool: ...
     def affinity_cost(self, a_id: int, b_id: int) -> float: ...
     def critical_class_names(self) -> frozenset[str]: ...
+    def accept_far_bound(self, class_name: str) -> float: ...
 
 
 @runtime_checkable
@@ -382,20 +384,35 @@ def superclass_affinity_cost(onto: Ontology, a_id: int, b_id: int, safety_l1: fr
     return cost
 
 
+#: Fallback auto-accept false-accept bounds, used by any pack that does not state its own. Deliberately
+#: strict: a pack that has not thought about what a wrong auto-accept costs it should get the cautious
+#: answer, because the failure mode of the loose one is a wrong label entering the corpus unseen.
+DEFAULT_FAR_BOUNDS: Mapping[str, float] = MappingProxyType({
+    "critical": 0.01,   # the classes whose confusion the safety gate already refuses to automate
+    "safety": 0.02,     # the rest of the safety superclasses
+    "default": 0.05,    # everything else
+})
+
+
 def make_safety_policy(onto: Ontology, safety_l1: frozenset[str], critical_names: frozenset[str],
-                       affinity: Callable[[Ontology, int, int], float] | None = None) -> SafetyPolicy:
+                       affinity: Callable[[Ontology, int, int], float] | None = None,
+                       far_bounds: Mapping[str, float] | None = None) -> SafetyPolicy:
     """Build the standard ontology-backed SafetyPolicy. Kept in the contract module (not a specific pack) so
     every pack that defines safety by an l1 superclass set gets the identical, tested implementation.
 
     `affinity` computes the safety cost of confusing two class ids. It defaults to the AV safe-mIoU cost, so
     the AV number is byte-identical to today's governance; a non-AV pack passes its own (e.g. a partial of
     superclass_affinity_cost bound to its safety_l1), since the AV cost hardcodes the VRU/animal semantics.
+
+    `far_bounds` are the auto-accept false-accept bounds by tier (critical / safety / default). Missing
+    keys fall back to DEFAULT_FAR_BOUNDS, so a pack states only what it disagrees with.
     """
     if affinity is None:
         from services.training.safe_miou import affinity_cost
         affinity_fn: Callable[[Ontology, int, int], float] = affinity_cost
     else:
         affinity_fn = affinity
+    bounds = {**DEFAULT_FAR_BOUNDS, **(far_bounds or {})}
 
     class _OntologySafetyPolicy:
         def is_safety_class(self, class_name: str) -> bool:
@@ -409,5 +426,25 @@ def make_safety_policy(onto: Ontology, safety_l1: frozenset[str], critical_names
 
         def critical_class_names(self) -> frozenset[str]:
             return critical_names
+
+        def accept_far_bound(self, class_name: str) -> float:
+            """How often an auto-accepted box of this class may be wrong, in [0, 1].
+
+            The alpha that core/accel/np_threshold.py fits an operating point against. It belongs to the
+            pack because the cost of a wrong auto-accept is a domain judgement and not a model property: a
+            mislabelled pedestrian and a mislabelled bollard are not equally expensive, and one bound
+            across the ontology is wrong for at least one of them.
+
+            The tiering is generic (critical, then safety, then everything else) and the numbers come from
+            the pack, so a domain that defines safety differently gets a correct policy without new code
+            here.
+            """
+            if class_name in critical_names:
+                return bounds["critical"]
+            try:
+                safety = onto.by_name(class_name).l1 in safety_l1
+            except Exception:  # noqa: BLE001 - an unknown name gets the cautious bound, not the loose one
+                return bounds["critical"]
+            return bounds["safety"] if safety else bounds["default"]
 
     return _OntologySafetyPolicy()

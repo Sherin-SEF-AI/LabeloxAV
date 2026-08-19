@@ -88,3 +88,63 @@ def test_no_engine_module_imports_a_concrete_pack():
                 line = path.read_text(encoding="utf-8", errors="replace")[:m.start()].count("\n") + 1
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{line} -> packs.{m.group(1)}")
     assert not offenders, "engine code must reach packs through packs.registry:\n  " + "\n  ".join(offenders)
+
+
+# The auto-accept false-accept bound: how often an auto-accepted box of a class may be wrong.
+#
+# It lives on SafetyPolicy rather than in config because the cost of a wrong auto-accept is a domain
+# judgement, not a model property. It is built by the shared make_safety_policy factory, so a pack gets a
+# correct policy without writing any code for it, which is the property the first two tests pin.
+
+
+def test_every_pack_answers_the_accept_bound_without_pack_specific_code():
+    """SEC supplies no bounds of its own and must still get a usable, cautious policy.
+
+    A surface only AV implements is not a contract, it is AV code behind an interface. The registry's
+    isinstance check would not catch a missing method either, because DomainPack is attribute-only.
+    """
+    from packs.registry import get_pack
+
+    for pack_id in ("av", "sec"):
+        pack = get_pack(pack_id)
+        assert hasattr(pack.safety_policy, "accept_far_bound")
+        v = pack.safety_policy.accept_far_bound("pedestrian")
+        assert 0.0 < v < 1.0
+
+
+def test_the_bound_tightens_with_how_much_the_class_costs_to_get_wrong():
+    """A mislabelled pedestrian and a mislabelled sedan are not equally expensive.
+
+    One bound across the ontology is wrong for at least one class, which is the whole reason this is not a
+    single config constant. The ordering, not the exact numbers, is what must hold.
+    """
+    from packs.registry import get_pack
+
+    sp = get_pack("av").safety_policy
+    assert sp.accept_far_bound("pedestrian") < sp.accept_far_bound("sedan")
+    assert sp.accept_far_bound("cattle") == sp.accept_far_bound("pedestrian")
+    # Safety classes outside the critical list still beat the ordinary default.
+    assert sp.accept_far_bound("cycle") <= sp.accept_far_bound("bus")
+
+
+def test_a_name_the_pack_does_not_know_gets_the_cautious_bound():
+    """The failure mode of guessing loose here is a wrong label entering the corpus unseen.
+
+    An unknown name reaching this is a bug somewhere upstream, and the safe reading of a bug is that the
+    class might be the expensive kind.
+    """
+    from packs.base import DEFAULT_FAR_BOUNDS
+    from packs.registry import get_pack
+
+    sp = get_pack("av").safety_policy
+    assert sp.accept_far_bound("not_a_class_in_any_ontology") == DEFAULT_FAR_BOUNDS["critical"]
+
+
+def test_a_pack_states_only_the_tiers_it_disagrees_with():
+    from packs.base import DEFAULT_FAR_BOUNDS, make_safety_policy
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology("av")
+    sp = make_safety_policy(onto, frozenset({"vru"}), frozenset(), far_bounds={"default": 0.25})
+    assert sp.accept_far_bound("sedan") == 0.25
+    assert sp.accept_far_bound("pedestrian") == DEFAULT_FAR_BOUNDS["safety"]

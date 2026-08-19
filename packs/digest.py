@@ -58,6 +58,12 @@ def pack_digest(pack_id: str = "av") -> dict:
             "safety_l1": sorted(p.autolabel_profile.gate_policy.safety_l1),
             "safety_class_names": safety_class_names,
             "critical_class_names": sorted(p.safety_policy.critical_class_names()),
+            # The auto-accept false-accept bounds, snapshotted per governed class rather than as the tier
+            # table they come from. The tiers are an implementation of the policy; what a reader needs
+            # pinned is the bound each class actually gets, because that is what a fitted threshold is
+            # solved against and a retiering that silently moved a class would not show up otherwise.
+            "accept_far_bounds": {c.name: p.safety_policy.accept_far_bound(c.name)
+                                  for c in sorted(onto.classes, key=lambda c: c.name) if c.id < base},
         },
         "autolabel": {
             "vlm_prompt_template": p.autolabel_profile.vlm_prompt_template,
