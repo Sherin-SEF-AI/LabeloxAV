@@ -14,6 +14,7 @@ M-Q.4 hardening:
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Any
 
 from core.config import GateSettings
 from core.logging import get_logger
@@ -70,8 +71,22 @@ def vlm_confirmed(prov: Provenance) -> bool:
 
 def gate_object(obj: UnifiedObject, onto: Ontology, cfg: GateSettings,
                 auto_accept_enabled: bool = True, quality_ok: bool = True,
-                fitted: Mapping[int, float] | None = None) -> GateState:
+                fitted: Mapping[int, float] | None = None,
+                joint: Any = None, tube: float | None = None) -> GateState:
+    """Route one object to auto_accept, review or annotate.
+
+    `joint` is a fitted services/oraclyx/joint_calibration.py surface and `tube` this object's temporal
+    coherence. When both are present the threshold is applied to P(correct | conf, tube) rather than to
+    the raw confidence, which is the point of fitting the surface: a 0.55 detection that is the twentieth
+    frame of a stable track and a 0.55 detection that appears once are not equally likely to be right, and
+    a threshold on confidence alone cannot separate them.
+
+    Absent either, the score stays the confidence. Substituting the surface's no-tube fallback silently
+    would change what every existing caller gates on, so the joint path is opt-in at the call site.
+    """
     conf = obj.conf
+    if joint is not None and tube is not None:
+        conf = float(joint(obj.conf, tube))
     prov = obj.provenance
     rare = is_rare(obj.class_id, onto)
 
