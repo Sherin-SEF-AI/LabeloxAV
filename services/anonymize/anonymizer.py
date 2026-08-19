@@ -27,6 +27,12 @@ class PiiResult:
     n_plates: int = 0
     regions: list[dict] = field(default_factory=list)
     method_version: str = ""
+    n_text: int = 0
+    # False when text was still detectable after two blur passes. Such a frame must not be stored or
+    # served: it is not a frame with a caveat, it is a frame that leaks, and the release attestation would
+    # otherwise assert it passed the PII gate.
+    released: bool = True
+    redaction_reason: str | None = None
 
 
 class PiiAnonymizer:
@@ -93,7 +99,13 @@ class PiiAnonymizer:
         detectors: dict[str, FaceDetector | PlateDetector] = {"face": self.face, "plate": self.plate}
         regions: list[dict] = []
         counts: dict[str, int] = {"face": 0, "plate": 0}
+        # Vehicle boxes for the text pass, collected from the plate detections themselves: a plate sits on
+        # a vehicle, so a plate box is a lower bound on where vehicle text can be. The pass runs after the
+        # loop so it can use them.
+        plate_boxes: list[tuple[float, float, float, float]] = []
         for target in redaction_targets():
+            if target.detector == "text":
+                continue  # handled after the loop, where the vehicle prior exists
             det = detectors.get(target.detector)
             if det is None:
                 if target.detector == "speech":
@@ -109,8 +121,38 @@ class PiiAnonymizer:
                 regions.append({"type": target.name,
                                 "bbox": [round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1)],
                                 "score": round(s, 3)})
+                if target.detector == "plate":
+                    plate_boxes.append((x1, y1, x2, y2))
+
+        # Redact-then-verify. Blurring a region and calling the frame clean assumes the blur worked, and a
+        # kernel sized for a large plate leaves a small one legible. This looks again at what it blurred.
+        released, text_reason, n_text = True, None, 0
+        if any(t.detector == "text" for t in redaction_targets()):
+            from services.anonymize.text_regions import redact_and_verify
+
+            # Widened plate boxes as the vehicle prior: a plate box is where a plate already was, and the
+            # text this pass is for is the plate that detector MISSED, which is nearby rather than on it.
+            prior = [(x1 - (x2 - x1), y1 - 2 * (y2 - y1), x2 + (x2 - x1), y2 + (y2 - y1))
+                     for x1, y1, x2, y2 in plate_boxes]
+            out = redact_and_verify(image_bgr, prior, detector=self._text_detector(),
+                                    min_score=self.cfg.text_min_score)
+            released, text_reason, n_text = out.released, out.reason, out.n_redacted
+            for r in out.detected:
+                if r.in_vehicle:
+                    regions.append({"type": "text", "bbox": [round(v, 1) for v in r.bbox],
+                                    "score": r.score})
+
         return PiiResult(n_faces=counts.get("face", 0), n_plates=counts.get("plate", 0),
-                         regions=regions, method_version=self.method_version)
+                         regions=regions, method_version=self.method_version,
+                         released=released, redaction_reason=text_reason, n_text=n_text)
+
+    def _text_detector(self):
+        """Built once. An absent weights file is a refusal at redact time, not a silent pass."""
+        if getattr(self, "_text_det", None) is None:
+            from services.anonymize.text_regions import TextDetector
+
+            self._text_det = TextDetector(self.cfg.text_weights)
+        return self._text_det
 
 
 @lru_cache(maxsize=1)

@@ -45,7 +45,10 @@ def _img():
 # ---- pack-supplied targets + regime ---------------------------------------------------------------------
 
 def test_av_and_sec_targets_and_regime():
-    assert tuple(t.name for t in domain.redaction_targets("av")) == ("face", "plate")
+    # AV gained "text": the plate the plate detector missed is still a plate and still legible, and the
+    # release attestation says the frame was redacted. Sec keeps face+plate, since a fixed camera watching
+    # a doorway has no vehicle prior to constrain a text pass and would redact every sign in view.
+    assert tuple(t.name for t in domain.redaction_targets("av")) == ("face", "plate", "text")
     assert tuple(t.name for t in domain.redaction_targets("sec")) == ("face", "plate")
     assert domain.legal_regime("av") == "DPDPA"
     assert domain.legal_regime("sec") == "DPDPA"

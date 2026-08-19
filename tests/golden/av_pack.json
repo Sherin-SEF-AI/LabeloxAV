@@ -258,6 +258,10 @@
       {
         "detector": "plate",
         "name": "plate"
+      },
+      {
+        "detector": "text",
+        "name": "text"
       }
     ]
   },

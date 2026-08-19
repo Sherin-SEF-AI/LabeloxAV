@@ -299,6 +299,11 @@ def _build() -> Pack:
         redaction_targets=(
             RedactionTarget(name="face", detector="face"),
             RedactionTarget(name="plate", detector="plate"),
+            # Text within a vehicle: the plate the plate detector missed. It is still a plate, it is
+            # still legible, and the release attestation says the frame was redacted. Constrained by a
+            # vehicle prior in services/anonymize/text_regions.py, because redacting every shop sign and
+            # hoarding in an Indian street scene destroys the frame and protects nobody.
+            RedactionTarget(name="text", detector="text"),
         ),
         legal_regime="DPDPA",
     )

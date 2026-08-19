@@ -426,6 +426,13 @@ class PiiSettings(BaseModel):
     # fails loud rather than silently passing un-blurred plates into the object store. Set false only for
     # face-only corpora where plates are provably absent.
     plate_mandatory: bool = True
+    # The DB text detector that backs the "text" redaction target: the plate the plate detector missed.
+    # Empty means not installed, and the anonymizer then refuses the frame rather than passing it, because
+    # a privacy detector that quietly does nothing is worse than one that is absent.
+    text_weights: str = ""
+    text_url: str = ("https://github.com/opencv/opencv_extra/raw/master/testdata/dnn/"
+                     "onnx/models/DB_TD500_resnet50.onnx")
+    text_min_score: float = 0.3
     # Source for `make pii-models` to fetch a license-plate detector to plate_weights. Override with
     # LBX_PII__PLATE_URL if this mirror moves; an Ultralytics-loadable .pt is expected. Hugging Face now
     # requires a token even for public files, so run `HF_TOKEN=... make pii-models`.
@@ -1095,6 +1102,18 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"legacy tokens accepted on a non-local deployment (env={self.env!r}); "
                 "set LBX_AUTH__ACCEPT_LEGACY_TOKENS=false (legacy tokens cannot expire or be revoked)")
+
+        # Plate redaction on a real deployment. `plate_mandatory` defaults True and could be turned off by
+        # an environment variable with nothing to stop it, which is a one-line change that makes every
+        # release attestation false: the proof says the frame passed the PII gate, and with this off the
+        # gate passes a frame it never redacted. Checked here rather than at the call site for the same
+        # reason the auth flags are: a control that only fails when somebody exercises the path is not a
+        # control on a deployment where nobody has exercised it yet.
+        if non_local and not self.pii.plate_mandatory:
+            raise ValueError(
+                f"plate redaction is not mandatory on a non-local deployment (env={self.env!r}); "
+                "set LBX_PII__PLATE_MANDATORY=true. A DPDPA release attestation asserts every frame "
+                "passed the PII gate, and with this off the gate passes frames it never redacted")
 
         weak = []
         if self.postgres.password == "labelox":

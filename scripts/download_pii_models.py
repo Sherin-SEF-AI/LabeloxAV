@@ -122,7 +122,26 @@ def main() -> None:
     else:
         log.error("pii.plate_absent", path=str(plate), hint="no plate_url configured; gate will fail loud")
 
-    log.info("pii.done", face_ok=face_ok, plate_ok=plate_ok)
+    # The DB text detector behind the "text" redaction target: the plate the plate detector missed. Not
+    # mandatory to fetch, because a deployment whose pack omits the target does not need it; but the
+    # anonymizer refuses any frame when the target IS declared and the weights are absent, so a missing
+    # one here is loud rather than silent.
+    text_ok = False
+    text_path = Path(cfg.text_weights) if cfg.text_weights else None
+    if text_path is None:
+        log.info("pii.text_not_configured",
+                 hint="set LBX_PII__TEXT_WEIGHTS to enable the text redaction target")
+    elif text_path.exists() and text_path.stat().st_size > 0:
+        text_ok = True
+        log.info("pii.text_present", path=str(text_path))
+    elif cfg.text_url:
+        text_ok = _download(cfg.text_url, text_path)
+        if not text_ok:
+            log.error("pii.text_download_failed", url=cfg.text_url,
+                      hint=(f"drop an OpenCV DB text-detection ONNX at {text_path}; with the text target "
+                            "declared and no weights, every frame is refused rather than passed"))
+
+    log.info("pii.done", face_ok=face_ok, plate_ok=plate_ok, text_ok=text_ok)
 
     # Exit status mirrors exactly the condition under which the anonymizer refuses to construct
     # (services/anonymize/anonymizer.py), so a green step here means ingest will not fail on weights.

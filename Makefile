@@ -96,7 +96,7 @@ models: ## Pre-fetch perception model weights (needs ml extra)
 	$(RUN) python scripts/download_models.py
 
 .PHONY: pii-models
-pii-models: ## Fetch/verify Gate A PII detector weights (YuNet face; plate optional)
+pii-models: ## Fetch/verify Gate A PII detector weights (YuNet face; plate; DB text for redact-then-verify)
 	$(RUN) python scripts/download_pii_models.py
 
 .PHONY: minio-cors
