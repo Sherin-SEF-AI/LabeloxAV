@@ -167,6 +167,32 @@ class ForgeTarget:
 
 
 @dataclass(frozen=True)
+class MotionModelSpec:
+    """How each class moves relative to the camera, which decides whether geometry can propagate its box.
+
+    Three answers, and the middle one is the reason this exists rather than a boolean:
+
+      static_ground     on the ground plane and not moving. A ground homography moves its box exactly.
+      static_elevated   not moving, and NOT on the ground plane: a gantry, an overhead sign, a traffic
+                        light on a mast. The ground homography moves these confidently in the wrong
+                        direction, which is worse than not moving them at all.
+      moving            its displacement is not a function of the ego motion, so nothing here helps.
+
+    A class with no entry is "moving", because that is the answer that refuses to propagate. Guessing
+    static for an unlisted class would silently place boxes.
+    """
+    static_ground: frozenset[str]
+    static_elevated: frozenset[str]
+
+    def model_for(self, class_name: str) -> str:
+        if class_name in self.static_ground:
+            return "static_ground"
+        if class_name in self.static_elevated:
+            return "static_elevated"
+        return "moving"
+
+
+@dataclass(frozen=True)
 class ClassTree:
     """The levels a class can be scored at, coarsest last.
 
@@ -444,6 +470,7 @@ class DomainPack(Protocol):
     relations: RelationSpec | None
     cliques: CliqueSpec | None
     class_tree: ClassTree | None
+    motion_models: MotionModelSpec | None
     scene_model: SceneModelFactory | None
     ingestion_adapters: Sequence[IngestionAdapter]
     # Optional because they are genuinely domain-specific rather than merely unfinished: an AV pack has no
@@ -475,6 +502,8 @@ class Pack:
     cliques: CliqueSpec | None = None
     # Optional: a flat ontology has one level and hierarchical AP would report the leaf number three times.
     class_tree: ClassTree | None = None
+    # Optional: a static-camera domain has no ego motion, so nothing propagates by geometry there.
+    motion_models: MotionModelSpec | None = None
     scene_model: SceneModelFactory | None = None            # SEC-M2
     ingestion_adapters: tuple[IngestionAdapter, ...] = ()   # SEC-M2
     zone_policy: ZonePolicy | None = None                   # static-camera domains only

@@ -21,6 +21,7 @@ from packs.base import (
     EvalStrataSpec,
     ForgeTarget,
     GatePolicy,
+    MotionModelSpec,
     OntologySpec,
     Pack,
     PackManifest,
@@ -157,6 +158,32 @@ def _quality_profile() -> QualityProfile:
     )
 
 
+def _motion_models() -> MotionModelSpec:
+    """Which infrastructure sits on the road surface and which is above it.
+
+    The split matters because the ground homography is exact for the first group and confidently wrong for
+    the second. A gantry warped by the ground plane moves in the opposite direction to the truth, and a
+    propagated box that is wrong in a plausible-looking way costs an annotator more than no box at all.
+
+    Everything not named here is "moving", which refuses to propagate. That is the safe default: a vehicle
+    or a person mistakenly treated as static would have its box placed by ego motion alone.
+    """
+    return MotionModelSpec(
+        static_ground=frozenset({
+            "cone", "barrier", "barricade_line", "construction_barrier", "crash_barrier",
+            "median_barrier", "temp_barricade", "guardrail", "fence", "sandbag", "tar_drum",
+            "hume_pipe", "debris", "garbage_pile", "excavation_pit", "waterlogging", "fallen_tree",
+            "electric_pole", "light_pole", "traffic_pole", "signal_pole", "cctv_pole", "pole",
+            "metro_pillar", "flyover_pillar", "transformer", "postbox", "milestone", "km_stone",
+            "tree", "vegetation", "shrine", "telephone_booth",
+        }),
+        static_elevated=frozenset({
+            "traffic_signal", "pedestrian_signal", "traffic_sign", "chevron_sign", "street_light",
+            "overhead_water_tank", "hoarding", "foot_overbridge", "speed_camera",
+        }),
+    )
+
+
 def _cliques() -> CliqueSpec:
     """The confusions an Indian-road detector actually makes, and what each costs.
 
@@ -290,6 +317,7 @@ def _build() -> Pack:
         # leaf -> l1 -> l0 -> root. The two governed levels made explicit, plus the root, so the gap
         # between "found a two-wheeler" and "named the right two-wheeler" is readable.
         class_tree=ClassTree(level_names=("leaf", "l1", "l0", "root")),
+        motion_models=_motion_models(),
         scene_model=MovingCameraSceneModelFactory(),
         # The MCAP/CAN ingestion already lives in services/ingest (it fills vehicle_id + ego_speed); the AV
         # pack does not re-wrap it as an adapter yet. Sec ships the first IngestionAdapter (packs/sec).

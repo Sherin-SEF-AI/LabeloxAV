@@ -744,6 +744,43 @@ class Prediction(Base):
     )
 
 
+class PropagationConflict(Base):
+    """Two ways of propagating one box disagreed by more than tolerance, so neither was written.
+
+    A label can be carried to the next frame by ego geometry (the ground homography) or by the tracker.
+    When they agree, the box is trustworthy and cheap. When they disagree the honest move is to write
+    NEITHER and record why: picking one silently would propagate the wrong box, and picking the average
+    would propagate a box neither method proposed.
+
+    This is a queue of the frames where geometry and tracking see different worlds, which is a more useful
+    artifact than a propagated label, because it is where the calibration or the ego pose is wrong.
+    """
+
+    __tablename__ = "propagation_conflict"
+
+    conflict_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    from_frame_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("frame.frame_id", ondelete="CASCADE"), nullable=False)
+    to_frame_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("frame.frame_id", ondelete="CASCADE"), nullable=False)
+    object_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("object.object_id", ondelete="SET NULL"))
+    class_id: Mapped[int | None] = mapped_column(Integer)
+    motion_model: Mapped[str | None] = mapped_column(String(24))
+    geometry_box: Mapped[list | None] = mapped_column(JSONB)
+    tracker_box: Mapped[list | None] = mapped_column(JSONB)
+    iou: Mapped[float | None] = mapped_column(Float)
+    tolerance: Mapped[float | None] = mapped_column(Float)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_propagation_conflict_frames", "from_frame_id", "to_frame_id"),
+        Index("ix_propagation_conflict_session", "session_id"),
+    )
+
+
 class ThresholdFit(Base):
     """A per-class auto-accept threshold fitted from measured outcomes, rather than picked.
 
