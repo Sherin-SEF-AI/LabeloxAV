@@ -76,7 +76,7 @@ ESTIMATOR = "chapman-lp-v1"
 # ordinary traffic, thirty and up is a crowded junction. On the champion's gold run that splits 157 frames
 # 13/82/62, which is a real three-way split; boundaries an order of magnitude lower (the natural choice for
 # a sparse highway corpus) put 138 of those frames in one bucket and stratify nothing.
-_DENSITY_BOUNDS: tuple[tuple[str, int, int], ...] = (
+DENSITY_BOUNDS: tuple[tuple[str, int, int], ...] = (
     ("sparse", 0, 10),        # under 10 predictions
     ("moderate", 10, 30),     # 10 to 29
     ("dense", 30, 10**9),     # 30 and up
@@ -88,10 +88,13 @@ _DENSITY_BOUNDS: tuple[tuple[str, int, int], ...] = (
 MIN_STRATUM_FRAMES = 10
 
 
-def _stratum_of(n_pred: int, stratify_by: str) -> str:
+def density_stratum(n_pred: int, stratify_by: str = "density") -> str:
+    """Which density bucket a frame falls in. Public because the calibration conditions on the same
+    buckets: "dense" has to mean one thing across the engine, or a calibration cell and an audit stratum
+    named alike would describe different frames."""
     if stratify_by != "density":
         return "all"
-    for name, lo, hi in _DENSITY_BOUNDS:
+    for name, lo, hi in DENSITY_BOUNDS:
         if lo <= n_pred < hi:
             return name
     return "dense"
@@ -141,7 +144,7 @@ async def seed_audit(db: AsyncSession, *, run_id: str, n_frames: int = 200,
 
     by_stratum: dict[str, list] = {}
     for fid, n in counted.items():
-        by_stratum.setdefault(_stratum_of(n, stratify_by), []).append(fid)
+        by_stratum.setdefault(density_stratum(n, stratify_by), []).append(fid)
     # Deterministic order, so re-seeding the same run with the same size picks the same frames and two
     # audits of one run can be compared rather than merely both existing.
     for v in by_stratum.values():
@@ -542,5 +545,5 @@ async def audit_frame_ids(db: AsyncSession, audit_id: UUID) -> list[UUID]:
         BlindAuditFrame.audit_id == audit_id))).scalars().all())
 
 
-__all__ = ["seed_audit", "score_audit", "audit_progress", "pooled_estimate", "list_audits",
+__all__ = ["DENSITY_BOUNDS", "density_stratum", "seed_audit", "score_audit", "audit_progress", "pooled_estimate", "list_audits",
            "mark_frames_labeled", "audit_for_job", "active_audit_id", "audit_frame_ids", "ESTIMATOR"]
