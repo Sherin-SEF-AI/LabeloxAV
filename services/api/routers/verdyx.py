@@ -361,3 +361,15 @@ async def thresholds_detail(fit_id: str, db: AsyncSession = Depends(db_session))
             "n_positive": r.n_positive, "n_accept": r.n_accept, "n_boot_fit": r.n_boot_fit,
         } for r in rows],
     }
+
+
+@router.get("/sanyx/compat-matrix")
+async def compat_matrix_view(top: int = 25, db: AsyncSession = Depends(db_session)):
+    """The learned class-compatibility matrix, with the support each cell rests on.
+
+    Cells are ordered by support rather than by probability: a cell at 1.0 on one observation is not a
+    finding, and ordering by probability would put exactly those at the top.
+    """
+    from services.autolabel.compat_matrix import matrix_report
+
+    return await matrix_report(db, top=top)

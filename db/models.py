@@ -273,6 +273,10 @@ class ObjectRelationship(Base):
     status: Mapped[str] = mapped_column(String(16), default="confirmed")  # M-F.5 proposed | confirmed
     source: Mapped[str] = mapped_column(String(16), default="human")      # M-F.5 human | geometry | vlm
     evidence: Mapped[dict | None] = mapped_column(JSONB)                  # M-F.5 why it was proposed
+    # How strongly the proposer believes it, in [0, 1]. Numeric strength lived untyped inside `evidence`,
+    # where every writer chose its own key and no query could rank or threshold a proposal. Null for a
+    # human-drawn edge, which is not a belief.
+    conf: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_object_relationship_from", "from_object_id"),

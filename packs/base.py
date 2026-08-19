@@ -167,6 +167,34 @@ class ForgeTarget:
 
 
 @dataclass(frozen=True)
+class RelationSpec:
+    """The relationship vocabulary, and which ordered class pairs can stand in which relation.
+
+    Two disjoint vocabularies are live in the engine today and neither knows about the other:
+    services/api/routers/objects.py validates {rider_of, towed_by, part_of, member_of, occludes} on the
+    editor path, while services/intelligence/scene_graph.py inserts {occluded_by, following,
+    crossing_in_front_of, parked_near} directly and never passes that validation. `occludes` and
+    `occluded_by` are the same fact in opposite directions and both are stored, so a query for one silently
+    misses half the corpus.
+
+    `kinds` is the union any writer may use. `overlap_pairs` maps an ordered (subject l1, object l1) pair
+    to the relation an overlapping pair of those superclasses probably stands in, which is what lets
+    relationship-aware NMS keep a rider and their motorcycle apart and say why. `inverse` records the pairs
+    that are one fact in two directions, so a reader can normalise rather than guess.
+    """
+    kinds: frozenset[str]
+    overlap_pairs: Mapping[tuple[str, str], str]
+    inverse: Mapping[str, str] = field(default_factory=dict)
+
+    def relation_for_l1(self, subject_l1: str, object_l1: str) -> str | None:
+        return self.overlap_pairs.get((subject_l1, object_l1))
+
+    def canonical(self, kind: str) -> str:
+        """The direction this engine stores. An inverse maps to its canonical form; anything else is itself."""
+        return self.inverse.get(kind, kind)
+
+
+@dataclass(frozen=True)
 class PrivacyPlaneSpec:
     """The redaction targets + legal regime for a pack. The behavioural PrivacyPlane gates (ingest/export)
     already exist as the engine anonymize organ; SEC-M6 binds them to these targets. AV is never None here
@@ -326,6 +354,7 @@ class DomainPack(Protocol):
     quality_profile: QualityProfile
     forge_targets: Sequence[ForgeTarget]
     privacy: PrivacyPlaneSpec
+    relations: RelationSpec | None
     scene_model: SceneModelFactory | None
     ingestion_adapters: Sequence[IngestionAdapter]
     # Optional because they are genuinely domain-specific rather than merely unfinished: an AV pack has no
@@ -349,6 +378,9 @@ class Pack:
     quality_profile: QualityProfile
     forge_targets: tuple[ForgeTarget, ...]
     privacy: PrivacyPlaneSpec
+    # Optional: a domain with no meaningful object-to-object relations (a static camera counting entries)
+    # is complete without one, and the engine proposes no edges rather than inventing a vocabulary for it.
+    relations: RelationSpec | None = None
     scene_model: SceneModelFactory | None = None            # SEC-M2
     ingestion_adapters: tuple[IngestionAdapter, ...] = ()   # SEC-M2
     zone_policy: ZonePolicy | None = None                   # static-camera domains only

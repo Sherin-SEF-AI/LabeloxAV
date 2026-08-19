@@ -2763,6 +2763,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/sanyx/board",
                           params={"limit": limit}, json_body=None)
 
+    def get_sanyx_compat_matrix(self, top: int | None = 25) -> Any:
+        """Compat Matrix View"""
+        return self._call("GET", f"/api/sanyx/compat-matrix",
+                          params={"top": top}, json_body=None)
+
     def get_sanyx_gate_by_session_id(self, session_id: str) -> Any:
         """Gate"""
         return self._call("GET", f"/api/sanyx/gate/{session_id}",
@@ -3446,4 +3451,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 672 routes generated from the server schema.
+# 673 routes generated from the server schema.

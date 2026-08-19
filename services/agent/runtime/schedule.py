@@ -32,6 +32,21 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
     except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
         log.error("schedule.embed_daemon_failed", error=str(exc))
 
+    # nightly rebuild of the class-compatibility matrix. It is a corpus-wide aggregate over
+    # human-confirmed co-occurrence, so it moves only when somebody labels, and reading it per frame would
+    # be a full-corpus scan on the labelling hot path. Off-hours because it walks every human object.
+    if offhours:
+        try:
+            from services.autolabel.compat_matrix import maybe_rebuild_matrix
+
+            c = await maybe_rebuild_matrix(db)
+            if c.get("ran"):
+                actions.append({"action": "compat_matrix", "cells": c.get("n_cells_observed"),
+                                "observations": c.get("n_observations"),
+                                "objects": c.get("n_objects"), "learned": c.get("learned")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.compat_matrix_failed", error=str(exc))
+
     # nightly patrol of the day's auto-accepts
     if offhours:
         try:

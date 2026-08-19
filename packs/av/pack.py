@@ -24,6 +24,7 @@ from packs.base import (
     PrivacyPlaneSpec,
     QualityProfile,
     RedactionTarget,
+    RelationSpec,
     RootCauseSignature,
     SensorCheck,
     StratumDimension,
@@ -153,6 +154,41 @@ def _quality_profile() -> QualityProfile:
     )
 
 
+def _relations() -> RelationSpec:
+    """The AV relationship vocabulary, unified across the two that were live and disjoint.
+
+    The editor validated {rider_of, towed_by, part_of, member_of, occludes}; the scene-graph proposer wrote
+    {occluded_by, following, crossing_in_front_of, parked_near} straight past that validation. `kinds` is
+    the union, so a writer on either path is checkable against one list.
+
+    `occludes` and `occluded_by` are the same fact in opposite directions and both were being stored, which
+    means a query for either silently missed half the corpus. `occludes` is kept as canonical because it is
+    the one the editor offers and the one a person draws.
+
+    `overlap_pairs` is keyed on l1 superclasses rather than leaf classes, because the relation is a property
+    of the kind of thing: every VRU heavily overlapping a two-wheeler is a rider on it, whatever the leaf
+    class of either. This is what lets relationship-aware NMS keep a rider and their motorcycle as two
+    objects instead of merging them, and say which relation justified it.
+    """
+    return RelationSpec(
+        kinds=frozenset({"rider_of", "towed_by", "part_of", "member_of", "occludes",
+                         "occluded_by", "following", "crossing_in_front_of", "parked_near"}),
+        overlap_pairs={
+            # A person on a two-wheeler or three-wheeler. The India case the editor was built around.
+            ("vru", "two_wheeler"): "rider_of",
+            ("vru", "three_wheeler"): "rider_of",
+            # An animal drawing a cart, and a person pushing one: both are a VRU or animal in contact with
+            # a vehicle that is not carrying them.
+            ("animal", "cart"): "towed_by",
+            ("vru", "cart"): "towed_by",
+            # A person inside a four-wheeler, which overlaps heavily and is emphatically not one object.
+            ("vru", "four_wheeler"): "part_of",
+            ("vru", "heavy_vehicle"): "part_of",
+        },
+        inverse={"occluded_by": "occludes"},
+    )
+
+
 def _build() -> Pack:
     settings = get_settings()
     onto = get_ontology("av")
@@ -213,6 +249,7 @@ def _build() -> Pack:
         quality_profile=_quality_profile(),
         forge_targets=_forge_targets(),
         privacy=privacy,
+        relations=_relations(),
         scene_model=MovingCameraSceneModelFactory(),
         # The MCAP/CAN ingestion already lives in services/ingest (it fills vehicle_id + ego_speed); the AV
         # pack does not re-wrap it as an adapter yet. Sec ships the first IngestionAdapter (packs/sec).

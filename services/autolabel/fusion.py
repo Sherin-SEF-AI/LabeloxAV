@@ -90,10 +90,21 @@ def _centroid_dist(a: tuple, b: tuple) -> float:
 
 
 class FusionEngine:
-    def __init__(self, settings: Settings | None = None, ontology: Ontology | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, ontology: Ontology | None = None,
+                 compat=None, relations=None, distinct_floor: float = 0.5) -> None:
         self.settings = settings or get_settings()
         self.onto = ontology or get_ontology()
         self.cfg = self.settings.fusion
+        # Both resolved once per run and passed in: the matrix is a corpus-wide aggregate and the relation
+        # spec belongs to the pack, and fusion runs per frame. None on either keeps the previous l1
+        # behaviour, which is what every existing caller gets until the runner supplies them.
+        self.compat = compat
+        self.relations = relations
+        self.distinct_floor = distinct_floor
+        # Pairs the matrix declined to merge, with what justified it. Consumed by the runner to write
+        # provisional edges: the overlap that proved two boxes were two objects is the same evidence a
+        # scene-graph proposer would use, and computing it twice invites the two to disagree.
+        self.kept_apart: list[dict] = []
 
     def _matches(self, da: RawDetection, db: RawDetection) -> bool:
         iou = _iou(da.bbox, db.bbox)
@@ -227,12 +238,39 @@ class FusionEngine:
         return self._suppress_duplicates(out)
 
     def _same_object(self, a_class: int, b_class: int) -> bool:
-        """Two fused boxes could be the same physical object: same class, same l1 superclass, or one is a
-        fallback catch-all. A rider (vru) over a two_wheeler is NOT the same object, so it is never merged."""
+        """Two fused boxes could be the same physical object.
+
+        Same class, or one is a fallback catch-all, and otherwise it asks the compatibility matrix.
+
+        The l1 clause this replaces was a proxy for a question it could not answer. A pedestrian and a
+        rider are both l1 "vru", so a pedestrian standing in front of a motorcyclist was merged into one
+        box and one of them stopped existing; the same clause merged a cyclist and the pedestrian they
+        were passing, and a cow and the person leading it. Whether two boxes can be one object is a
+        property of the class pair, not of whether the two classes share a superclass.
+
+        Without a matrix (none built, or a pack with no relations) this falls back to the old l1 rule
+        rather than to no suppression at all, because suppressing nothing floods the corpus with
+        duplicates. The fallback is recorded on the run so the two behaviours are never confused.
+        """
         if a_class == b_class:
             return True
         if self.onto.is_fallback(a_class) or self.onto.is_fallback(b_class):
             return True
+        if self.compat is not None:
+            p, _support = self.compat.distinct_prob(a_class, b_class)
+            # A pair the humans have shown to co-occur as two things is not one thing. The relation
+            # vocabulary is a second, independent reason to keep them: a pair that stands in a known
+            # relation is by construction two objects.
+            if self.relations is not None:
+                try:
+                    if self.relations.relation_for_l1(self.onto.by_id(a_class).l1,
+                                                      self.onto.by_id(b_class).l1) or \
+                       self.relations.relation_for_l1(self.onto.by_id(b_class).l1,
+                                                      self.onto.by_id(a_class).l1):
+                        return False
+                except Exception:  # noqa: BLE001
+                    pass
+            return p < self.distinct_floor
         return self.onto.by_id(a_class).l1 == self.onto.by_id(b_class).l1
 
     def _suppress_duplicates(self, out: list[FusedObject]) -> list[FusedObject]:
@@ -253,6 +291,27 @@ class FusionEngine:
                     break
             if dup_of is None:
                 kept.append(fo)
+                # Record the near-misses: an overlapping pair that survived is a relationship candidate.
+                if self.relations is not None:
+                    for k in kept[:-1]:
+                        kbox = tuple(k.obj.bbox.as_list())
+                        ov = _iou(box, kbox)
+                        if ov < 0.3:
+                            continue
+                        try:
+                            a_l1 = self.onto.by_id(fo.obj.class_id).l1
+                            b_l1 = self.onto.by_id(k.obj.class_id).l1
+                        except Exception:  # noqa: BLE001
+                            continue
+                        kind = self.relations.relation_for_l1(a_l1, b_l1)
+                        if kind:
+                            self.kept_apart.append({"from": fo.obj, "to": k.obj, "kind": kind,
+                                                    "iou": round(float(ov), 4)})
+                        else:
+                            kind = self.relations.relation_for_l1(b_l1, a_l1)
+                            if kind:
+                                self.kept_apart.append({"from": k.obj, "to": fo.obj, "kind": kind,
+                                                        "iou": round(float(ov), 4)})
             else:
                 merged = list(getattr(dup_of.obj.provenance, "merged_duplicates", []) or [])
                 merged.append({"class": fo.obj.class_name, "conf": round(float(fo.obj.conf), 3)})
