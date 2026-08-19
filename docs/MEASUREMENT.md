@@ -149,3 +149,30 @@ recall 0.146; safety-class recall pedestrian 0.083, rider 0.545, motorcycle 0.63
 the 400 gold objects, 351 were reviewed before provenance capture and their origin is unrecoverable. These are
 weak and reported unrounded, because a number you trust is worth more than a good number you do not. See the
 README honest-status section for the correction of the previously-published 0.034 / 0.018.
+
+## The ten algorithms, and what each one measured
+
+Added 2026-08-19/20. Each is a `core/accel` primitive with a NumPy reference and a torch path, a service
+that consumes it, and a fixture test whose expected value was derived by hand. The numbers below are from
+the champion (`mr-idd-yolo11l-local-aa408c72b0`) on its gold run, and several are worse than the ones they
+replace, which is the point.
+
+| # | What it measures | Result on this corpus |
+| --- | --- | --- |
+| 1 | Capture-recapture recall (`core/accel/recapture.py`) | Audit `445bdc59` seeded, 60 frames, **pending a human** |
+| 2 | Neyman-Pearson thresholds (`core/accel/np_threshold.py`) | 5 of 12 classes fitted, all **0.42-0.49 above** the configured 0.45; 7 including every VRU admit no threshold |
+| 3 | Relationship-aware NMS (`core/accel/rel_nms.py`) | Matrix over 170 frames, 347 human objects, 203 cells; motorcycle-rider 0.700 (kept apart) vs motorcycle-scooter 0.256 (merged) |
+| 4 | Confusion-clique AL (`core/accel/clique_margin.py`) | Built; posteriors all at Beta(1,1), so allocation is uniform and says so |
+| 5 | Ego propagation (`core/accel/ego_homography.py`) | **Refuses on every session**: GNSS on 3 frames of 41,752, no attitude, no pose table |
+| 6 | Tube consistency (`core/accel/tube_score.py`) | Built; needs a tracker run with `track_id` to fit against |
+| 7 | Density calibration (`services/oraclyx/density_calibration.py`) | Worst-bucket ECE 0.00277 -> 0.00241; **33,600 predictions got `conf_calibrated`**, first ever written |
+| 8 | Reflection twins (`core/accel/reflection_twin.py`) | Built; hood-mask estimator rewritten to streaming Welford |
+| 9 | Hierarchical AP (`core/accel/hier_ap.py`) | leaf AP50 **0.072**, l1 **0.143**: half the apparent failure is naming, not finding |
+| 10 | Redact-then-verify text (`services/anonymize/text_regions.py`) | Built; needs `LBX_PII__TEXT_WEIGHTS` set and `make pii-models` |
+
+Three of these interlock and must be read together. Item 2 says most classes cannot be auto-accepted at
+any threshold; item 9 says half the model's apparent failure is naming rather than finding; item 1 has not
+run. All three are computed against a gold denominator of 302 objects on 157 frames, while the model
+emits 26 detections per frame. Until audit `445bdc59` is labelled, "the model is bad" and "the gold set
+never recorded most of what is there" fit the evidence equally well, and the audit is the only thing that
+separates them.
