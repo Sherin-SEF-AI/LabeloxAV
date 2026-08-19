@@ -3063,6 +3063,21 @@ class LabeloxClient:
         return self._call("GET", f"/api/sessions/{session_id}/timeline",
                           params=None, json_body=None)
 
+    def get_sievyx_cliques(self) -> Any:
+        """Cliques Report"""
+        return self._call("GET", f"/api/sievyx/cliques",
+                          params=None, json_body=None)
+
+    def post_sievyx_cliques_reward(self, body: Any = None) -> Any:
+        """Cliques Reward"""
+        return self._call("POST", f"/api/sievyx/cliques/reward",
+                          params=None, json_body=body)
+
+    def post_sievyx_cliques_select(self, run_id: str, budget: int | None = 200, seed: Any | None = None) -> Any:
+        """Cliques Select"""
+        return self._call("POST", f"/api/sievyx/cliques/select",
+                          params={"run_id": run_id, "budget": budget, "seed": seed}, json_body=None)
+
     def get_sievyx_composition(self, session_id: Any | None = None, top_n: int | None = 500) -> Any:
         """Composition"""
         return self._call("GET", f"/api/sievyx/composition",
@@ -3451,4 +3466,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 673 routes generated from the server schema.
+# 676 routes generated from the server schema.

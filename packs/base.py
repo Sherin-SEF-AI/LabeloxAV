@@ -167,6 +167,58 @@ class ForgeTarget:
 
 
 @dataclass(frozen=True)
+class ConfusionClique:
+    """A set of classes a model genuinely confuses, and what confusing them costs.
+
+    A clique is not "classes that look alike": it is a set where the model's probability mass moves
+    between the members, so a labelling budget spent inside it buys a decision boundary rather than more
+    examples of one class. `cost` is the price of confusing two members, in [0, 1], and it is what makes
+    a scooter called a motorcycle cheap and a pedestrian called a bollard expensive.
+
+    `crosses_safety` records that at least one member is a safety class and at least one is not, which is
+    the case where a confusion inside an apparently tidy clique is the most expensive kind of error.
+    """
+    name: str
+    class_names: tuple[str, ...]
+    cost: float
+    crosses_safety: bool = False
+
+
+@dataclass(frozen=True)
+class CliqueSpec:
+    """The confusion cliques of a domain, and the cost of confusing classes across them.
+
+    Held by the pack because which classes a model confuses is a fact about the world it works in: a
+    scooter and a motorcycle are one decision on an Indian road and two unrelated objects in a warehouse.
+    """
+    cliques: tuple[ConfusionClique, ...]
+    # Cost of confusing two classes that are not in a clique together. Higher than any within-clique cost
+    # by construction: a confusion the ontology did not anticipate is worse than one it did.
+    cross_clique_cost: float = 1.0
+
+    def by_name(self, name: str) -> ConfusionClique | None:
+        for c in self.cliques:
+            if c.name == name:
+                return c
+        return None
+
+    def clique_of(self, class_name: str) -> ConfusionClique | None:
+        for c in self.cliques:
+            if class_name in c.class_names:
+                return c
+        return None
+
+    def pair_cost(self, a: str, b: str) -> float:
+        """Cost of confusing a for b. Zero for a class with itself, the clique cost within one, else cross."""
+        if a == b:
+            return 0.0
+        ca, cb = self.clique_of(a), self.clique_of(b)
+        if ca is not None and ca is cb:
+            return ca.cost
+        return self.cross_clique_cost
+
+
+@dataclass(frozen=True)
 class RelationSpec:
     """The relationship vocabulary, and which ordered class pairs can stand in which relation.
 
@@ -355,6 +407,7 @@ class DomainPack(Protocol):
     forge_targets: Sequence[ForgeTarget]
     privacy: PrivacyPlaneSpec
     relations: RelationSpec | None
+    cliques: CliqueSpec | None
     scene_model: SceneModelFactory | None
     ingestion_adapters: Sequence[IngestionAdapter]
     # Optional because they are genuinely domain-specific rather than merely unfinished: an AV pack has no
@@ -381,6 +434,9 @@ class Pack:
     # Optional: a domain with no meaningful object-to-object relations (a static camera counting entries)
     # is complete without one, and the engine proposes no edges rather than inventing a vocabulary for it.
     relations: RelationSpec | None = None
+    # Optional: a domain whose classes are not confusable in structured groups gets uniform sampling
+    # rather than an invented grouping.
+    cliques: CliqueSpec | None = None
     scene_model: SceneModelFactory | None = None            # SEC-M2
     ingestion_adapters: tuple[IngestionAdapter, ...] = ()   # SEC-M2
     zone_policy: ZonePolicy | None = None                   # static-camera domains only

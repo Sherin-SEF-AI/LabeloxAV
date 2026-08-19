@@ -373,3 +373,44 @@ async def compat_matrix_view(top: int = 25, db: AsyncSession = Depends(db_sessio
     from services.autolabel.compat_matrix import matrix_report
 
     return await matrix_report(db, top=top)
+
+
+# Confusion-clique active learning (SIEVYX): which frames to label next, and how the budget is split.
+
+
+@router.post("/sievyx/cliques/select")
+async def cliques_select(run_id: str, budget: int = 200, seed: int | None = None,
+                         db: AsyncSession = Depends(db_session),
+                         _user=Depends(require_role("reviewer"))):
+    """Select frames to label next, split across confusion cliques and ranked within each."""
+    from services.sievyx.clique_sampler import _SEED, select_frames
+
+    res = await select_frames(db, run_id=run_id, budget=budget, seed=seed or _SEED)
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
+
+
+class CliqueRewardIn(BaseModel):
+    clique: str
+    allocated: int
+    recall_before: float | None = None
+    recall_after: float | None = None
+
+
+@router.post("/sievyx/cliques/reward")
+async def cliques_reward(payload: CliqueRewardIn, db: AsyncSession = Depends(db_session),
+                         _user=Depends(require_role("reviewer"))):
+    """Report what a labelled batch bought, so the posterior for that clique can move."""
+    from services.sievyx.clique_sampler import record_reward
+
+    return await record_reward(db, clique=payload.clique, allocated=payload.allocated,
+                               recall_before=payload.recall_before, recall_after=payload.recall_after)
+
+
+@router.get("/sievyx/cliques")
+async def cliques_report(db: AsyncSession = Depends(db_session)):
+    """The posteriors, and whether any of them has ever been moved by a labelling cycle."""
+    from services.sievyx.clique_sampler import bandit_report
+
+    return await bandit_report(db)

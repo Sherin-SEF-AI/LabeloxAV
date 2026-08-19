@@ -15,6 +15,8 @@ from core.config import get_settings
 from packs.av.scene_model import MovingCameraSceneModelFactory
 from packs.base import (
     AutoLabelProfile,
+    CliqueSpec,
+    ConfusionClique,
     EvalStrataSpec,
     ForgeTarget,
     GatePolicy,
@@ -154,6 +156,39 @@ def _quality_profile() -> QualityProfile:
     )
 
 
+def _cliques() -> CliqueSpec:
+    """The confusions an Indian-road detector actually makes, and what each costs.
+
+    Grouped by what a label buys rather than by what looks alike. Inside a clique the model's probability
+    mass moves between the members, so a labelled example draws a boundary; across cliques it does not,
+    so a label mostly adds one more example of something already learned.
+
+    Costs are the safe-mIoU affinity semantics reused: 0.2 within a superclass, 1.0 across a safety
+    boundary. pedestrians_vs_riders is the expensive one and it is expensive for a specific reason: a
+    person on a motorcycle and a person walking need different predictions from a planner, and the
+    classes are visually nearly identical from behind.
+    """
+    return CliqueSpec(
+        cliques=(
+            ConfusionClique("two_wheelers", ("motorcycle", "scooter", "moped", "cycle"), cost=0.2),
+            ConfusionClique("three_wheelers", ("autorickshaw", "e_rickshaw", "cycle_rickshaw"), cost=0.2),
+            ConfusionClique("livestock", ("cattle", "buffalo", "goat", "dog", "pig"), cost=0.2),
+            # Every member is a person; what differs is what they are doing, which is exactly what a
+            # planner needs and what a detector gets wrong from behind.
+            ConfusionClique("pedestrians_vs_riders",
+                            ("pedestrian", "rider", "scooter_with_rider", "delivery_rider_bike",
+                             "child", "person_carrying_load"),
+                            cost=1.0, crosses_safety=True),
+            ConfusionClique("heavy_vehicles",
+                            ("bus", "truck", "tractor", "water_tanker", "petrol_tanker",
+                             "container_truck", "multi_axle_trailer"), cost=0.2),
+            ConfusionClique("carts", ("bullock_cart", "push_cart", "vendor_handcart", "cargo_bike"),
+                            cost=0.2),
+        ),
+        cross_clique_cost=1.0,
+    )
+
+
 def _relations() -> RelationSpec:
     """The AV relationship vocabulary, unified across the two that were live and disjoint.
 
@@ -250,6 +285,7 @@ def _build() -> Pack:
         forge_targets=_forge_targets(),
         privacy=privacy,
         relations=_relations(),
+        cliques=_cliques(),
         scene_model=MovingCameraSceneModelFactory(),
         # The MCAP/CAN ingestion already lives in services/ingest (it fills vehicle_id + ego_speed); the AV
         # pack does not re-wrap it as an adapter yet. Sec ships the first IngestionAdapter (packs/sec).

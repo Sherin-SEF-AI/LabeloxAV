@@ -725,6 +725,15 @@ class Prediction(Base):
     # a detection run, and that nullness is what tells the tracking evaluator there is nothing to associate,
     # rather than it scoring a detector as a tracker with an identity switch on every frame.
     track_id: Mapped[str | None] = mapped_column(String(64))
+    # The top-k class distribution behind the argmax, as {class_id: prob}. class_id + conf is a hard
+    # argmax and throws away the only signal that distinguishes "confidently a scooter" from "torn
+    # between scooter and motorcycle at the same confidence". Those two need completely different things
+    # from a labelling budget, and nothing downstream could tell them apart.
+    #
+    # Nullable, and null for every prediction written before this existed. Top-5 rather than the full
+    # distribution: over a 192-class ontology the tail is numerically zero and storing it would multiply
+    # the table's size for no signal.
+    class_probs: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -797,6 +806,38 @@ class ThresholdFit(Base):
         Index("ix_threshold_fit_run", "run_id"),
         Index("ix_threshold_fit_fit", "fit_id"),
     )
+
+
+class CliqueBandit(Base):
+    """The posterior for one confusion clique: how much labelling it has earned.
+
+    Active learning has to divide a fixed labelling budget across the ways a model is confused, and the
+    right split is not knowable in advance: it depends on which confusions labelling actually fixes. A
+    Thompson-sampled Beta posterior per clique makes that a measurement rather than a constant, and it
+    explores on its own without an epsilon anybody has to tune.
+
+    `alpha`/`beta` are the Beta parameters. A reward is "labelling this clique moved gold recall for its
+    classes"; there is no labelling history yet, so every clique starts at the prior and this table is
+    honest about having learned nothing. `n_pulls` and `n_rewards` are carried so a posterior can be told
+    from a prior at a glance, which the parameters alone do not do.
+    """
+
+    __tablename__ = "clique_bandit"
+
+    clique: Mapped[str] = mapped_column(String(64), primary_key=True)
+    pack_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    alpha: Mapped[float] = mapped_column(Float, nullable=False, default=1.0, server_default="1")
+    beta: Mapped[float] = mapped_column(Float, nullable=False, default=1.0, server_default="1")
+    n_pulls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    n_rewards: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # What the last cycle actually allocated and what it measured afterwards, so a posterior that moved
+    # can be traced to the batch that moved it.
+    last_allocated: Mapped[int | None] = mapped_column(Integer)
+    last_reward: Mapped[float | None] = mapped_column(Float)
+    last_recall_before: Mapped[float | None] = mapped_column(Float)
+    last_recall_after: Mapped[float | None] = mapped_column(Float)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class BlindAudit(Base):

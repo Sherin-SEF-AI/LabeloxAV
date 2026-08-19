@@ -53,8 +53,17 @@ def _load_weights_and_names(weights_uri: str, local_path: str) -> tuple[str, lis
 
 
 def _infer(local_weights: str, images: list[np.ndarray], imgsz: int, conf_floor: float, device) -> list[list]:
-    """Predict on a batch of decoded BGR frames. Blocking GPU work (worker thread). Returns, per frame, a list
-    of (model_class_idx, conf, [x1,y1,x2,y2]) at the low conf floor so the full distribution is captured."""
+    """Predict on a batch of decoded BGR frames. Blocking GPU work (worker thread). Returns, per frame, a
+    list of (model_class_idx, conf, [x1,y1,x2,y2], top_k) at the low conf floor.
+
+    `top_k` is the top-5 class distribution as [(model_class_idx, prob), ...]. The argmax alone cannot
+    distinguish a detection the model is simply unsure about from one it is torn evenly between two
+    classes, and those want completely different things from a labelling budget.
+
+    Ultralytics does not expose per-detection logits on a Results object, so the distribution is
+    reconstructed from what it does expose. Where it cannot be, `top_k` is empty rather than a fabricated
+    one-hot: a distribution invented from the argmax would look like evidence and carry none.
+    """
     from ultralytics import YOLO
 
     model = YOLO(local_weights)
@@ -62,8 +71,19 @@ def _infer(local_weights: str, images: list[np.ndarray], imgsz: int, conf_floor:
     out: list[list] = []
     for r in res:
         dets = []
-        for b in r.boxes:
-            dets.append((int(b.cls[0]), float(b.conf[0]), [float(v) for v in b.xyxy[0].tolist()]))
+        # Newer ultralytics exposes the raw per-class scores; older builds do not. Read it once per
+        # result rather than per box, and fall back to nothing rather than to a guess.
+        raw = getattr(r.boxes, "cls_conf", None)
+        for i, b in enumerate(r.boxes):
+            top_k: list[tuple[int, float]] = []
+            if raw is not None:
+                try:
+                    row = np.asarray(raw[i]).reshape(-1)
+                    order = np.argsort(-row)[:5]
+                    top_k = [(int(j), round(float(row[j]), 6)) for j in order if float(row[j]) > 0.0]
+                except Exception:  # noqa: BLE001 - an unexpected shape means no distribution, not a wrong one
+                    top_k = []
+            dets.append((int(b.cls[0]), float(b.conf[0]), [float(v) for v in b.xyxy[0].tolist()], top_k))
         out.append(dets)
     return out
 
@@ -139,11 +159,17 @@ async def run_inference(db: AsyncSession, *, model_version: str, frame_ids: list
                 continue
             dets_per_frame = await loop.run_in_executor(None, _infer, local, images, imgsz, conf_floor, device)
             for fid, dets in zip(fids, dets_per_frame, strict=False):
-                for cls_idx, conf, box in dets:
+                for cls_idx, conf, box, top_k in dets:
                     onto_id = idx_to_onto[cls_idx] if cls_idx < len(idx_to_onto) else None
                     if onto_id is None:
                         continue  # the model emitted a class the ontology does not have; not comparable
-                    db.add(Prediction(run_id=run_id, frame_id=fid, class_id=onto_id, bbox=box, conf=conf))
+                    # Mapped into ontology ids so a consumer never has to know the model's class order,
+                    # which is a property of the checkpoint and not of the corpus. Entries the ontology
+                    # does not carry are dropped for the same reason the argmax would have been.
+                    probs = {str(idx_to_onto[j]): p for j, p in (top_k or [])
+                             if j < len(idx_to_onto) and idx_to_onto[j] is not None} or None
+                    db.add(Prediction(run_id=run_id, frame_id=fid, class_id=onto_id, bbox=box, conf=conf,
+                                      class_probs=probs))
                     total += 1
             await db.commit()
 
