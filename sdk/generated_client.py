@@ -3373,6 +3373,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/verdyx/evaluate",
                           params=None, json_body=body)
 
+    def get_verdyx_hierarchical(self, run_id: str, gold_id: Any | None = None, score_thr: float | None = 0.0) -> Any:
+        """Hierarchical Eval"""
+        return self._call("GET", f"/api/verdyx/hierarchical",
+                          params={"run_id": run_id, "gold_id": gold_id, "score_thr": score_thr}, json_body=None)
+
     def get_verdyx_matrix(self, champion: str, challenger: str, slice_metric: str | None = 'map') -> Any:
         """Slice Matrix View"""
         return self._call("GET", f"/api/verdyx/matrix",
@@ -3466,4 +3471,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 676 routes generated from the server schema.
+# 677 routes generated from the server schema.

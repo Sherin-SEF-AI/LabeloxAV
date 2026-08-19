@@ -15,6 +15,7 @@ from core.config import get_settings
 from packs.av.scene_model import MovingCameraSceneModelFactory
 from packs.base import (
     AutoLabelProfile,
+    ClassTree,
     CliqueSpec,
     ConfusionClique,
     EvalStrataSpec,
@@ -286,6 +287,9 @@ def _build() -> Pack:
         privacy=privacy,
         relations=_relations(),
         cliques=_cliques(),
+        # leaf -> l1 -> l0 -> root. The two governed levels made explicit, plus the root, so the gap
+        # between "found a two-wheeler" and "named the right two-wheeler" is readable.
+        class_tree=ClassTree(level_names=("leaf", "l1", "l0", "root")),
         scene_model=MovingCameraSceneModelFactory(),
         # The MCAP/CAN ingestion already lives in services/ingest (it fills vehicle_id + ego_speed); the AV
         # pack does not re-wrap it as an adapter yet. Sec ships the first IngestionAdapter (packs/sec).

@@ -35,6 +35,19 @@ def _is_safety_class(name: str, onto) -> bool:
 
 
 def _map(m: dict) -> float:
+    """The AP the gate compares. Hierarchical when it is present, flat otherwise.
+
+    `hier_ap50` is AP at the pack's chosen comparison level (l1 for AV), where a scooter called a
+    motorcycle is correct and a scooter called a truck is not. That is the number worth comparing two
+    models on: flat AP charges both the same, so it cannot separate two candidates that differ mainly in
+    which mistakes they make, which is what a champion and a challenger usually differ in.
+
+    The leaf-level safety floors below are untouched and stay hard. Nothing here lets a model regress a
+    safety class by being right about its superclass.
+    """
+    h = m.get("hier_ap50")
+    if h is not None:
+        return float(h)
     return float(m.get("map", m.get("map50", 0.0)) or 0.0)
 
 

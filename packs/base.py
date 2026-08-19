@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     # Engine types used only for annotating the behavioural protocols. Under TYPE_CHECKING so importing the
@@ -164,6 +164,41 @@ class ForgeTarget:
     power_ceiling_w: float
     latency_budget_ms: float
     export_format: str
+
+
+@dataclass(frozen=True)
+class ClassTree:
+    """The levels a class can be scored at, coarsest last.
+
+    Flat AP treats a scooter called a motorcycle and a scooter called a truck as the same event, and they
+    are not: one is a naming difference between two things that behave identically on a road, the other is
+    a planner braking for the wrong reason. Scoring at several levels separates them, and the gap between
+    levels says whether a model's loss is naming or finding.
+
+    `levels` is ordered fine-to-coarse and maps a level name to a function of the ontology class. Held by
+    the pack because the grouping is a domain judgement: l1 groups an AV ontology usefully and would group
+    a warehouse ontology into nonsense.
+    """
+    level_names: tuple[str, ...]
+
+    def levels_for(self, onto: Any) -> dict[str, dict[int, str]]:
+        """{level name: {leaf class id: label at that level}} for a concrete ontology.
+
+        Built from the ontology rather than stored, so a class added to the governed vocabulary is
+        automatically placed rather than silently missing from every level above the leaf.
+        """
+        out: dict[str, dict[int, str]] = {}
+        for name in self.level_names:
+            mapping: dict[int, str] = {}
+            for c in onto.classes:
+                if name == "leaf":
+                    mapping[c.id] = c.name
+                elif name == "root":
+                    mapping[c.id] = "object"
+                else:
+                    mapping[c.id] = str(getattr(c, name, None) or c.name)
+            out[name] = mapping
+        return out
 
 
 @dataclass(frozen=True)
@@ -408,6 +443,7 @@ class DomainPack(Protocol):
     privacy: PrivacyPlaneSpec
     relations: RelationSpec | None
     cliques: CliqueSpec | None
+    class_tree: ClassTree | None
     scene_model: SceneModelFactory | None
     ingestion_adapters: Sequence[IngestionAdapter]
     # Optional because they are genuinely domain-specific rather than merely unfinished: an AV pack has no
@@ -437,6 +473,8 @@ class Pack:
     # Optional: a domain whose classes are not confusable in structured groups gets uniform sampling
     # rather than an invented grouping.
     cliques: CliqueSpec | None = None
+    # Optional: a flat ontology has one level and hierarchical AP would report the leaf number three times.
+    class_tree: ClassTree | None = None
     scene_model: SceneModelFactory | None = None            # SEC-M2
     ingestion_adapters: tuple[IngestionAdapter, ...] = ()   # SEC-M2
     zone_policy: ZonePolicy | None = None                   # static-camera domains only

@@ -414,3 +414,19 @@ async def cliques_report(db: AsyncSession = Depends(db_session)):
     from services.sievyx.clique_sampler import bandit_report
 
     return await bandit_report(db)
+
+
+@router.get("/verdyx/hierarchical")
+async def hierarchical_eval(run_id: str, gold_id: str | None = None, score_thr: float = 0.0,
+                            db: AsyncSession = Depends(db_session)):
+    """AP at every level of the class tree, and what the gap between levels says to work on.
+
+    A large leaf-to-l1 gap means the detector finds objects and names them wrong, so labelling class
+    boundaries buys AP. A small one means it is not finding them, and more class labels will not help.
+    """
+    from services.verdyx.hier_eval import evaluate_hierarchical
+
+    res = await evaluate_hierarchical(db, run_id=run_id, gold_id=gold_id, score_thr=score_thr)
+    if not res.get("measured"):
+        raise HTTPException(400, res.get("reason", "not measurable"))
+    return res
