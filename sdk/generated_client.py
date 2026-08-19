@@ -2553,6 +2553,26 @@ class LabeloxClient:
         return self._call("POST", f"/api/oraclyx/radar/fuse",
                           params=None, json_body=body)
 
+    def get_oraclyx_thresholds(self, model_version: str) -> Any:
+        """Thresholds Active"""
+        return self._call("GET", f"/api/oraclyx/thresholds",
+                          params={"model_version": model_version}, json_body=None)
+
+    def post_oraclyx_thresholds_fit(self, body: Any = None) -> Any:
+        """Thresholds Fit"""
+        return self._call("POST", f"/api/oraclyx/thresholds/fit",
+                          params=None, json_body=body)
+
+    def get_oraclyx_thresholds_by_fit_id(self, fit_id: str) -> Any:
+        """Thresholds Detail"""
+        return self._call("GET", f"/api/oraclyx/thresholds/{fit_id}",
+                          params=None, json_body=None)
+
+    def post_oraclyx_thresholds_by_fit_id_activate(self, fit_id: str) -> Any:
+        """Thresholds Activate"""
+        return self._call("POST", f"/api/oraclyx/thresholds/{fit_id}/activate",
+                          params=None, json_body=None)
+
     def post_oraclyx_tracks4d_stitch(self, body: Any = None) -> Any:
         """Tracks4D Stitch"""
         return self._call("POST", f"/api/oraclyx/tracks4d/stitch",
@@ -3426,4 +3446,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 668 routes generated from the server schema.
+# 672 routes generated from the server schema.

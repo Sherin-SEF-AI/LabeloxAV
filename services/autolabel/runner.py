@@ -341,6 +341,31 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
         if champion_weights:
             log.info("autolabel.champion_serving", weights=champion_weights)
 
+        # The measured auto-accept thresholds for the model actually serving, resolved once here and passed
+        # down. The gate is a pure function on a hot path and must not reach the database per object, and
+        # the fit is a property of the run rather than of any one detection.
+        #
+        # Empty is the ordinary case today: no fit has been activated, so every class falls back to the
+        # configured constant and the gate says so once per class. Fitting is deliberately not activating
+        # (services/oraclyx/threshold_fit.py), so this only becomes non-empty when a person switches a fit on.
+        fitted_thresholds: dict[int, float] = {}
+        try:
+            from services.govern.registry import get_champion
+            from services.oraclyx.threshold_fit import active_thresholds
+
+            champ = await get_champion(db, "detection")
+            if champ is not None:
+                act = await active_thresholds(db, champ.model_version)
+                fitted_thresholds = act["by_class"]
+                if fitted_thresholds:
+                    log.info("autolabel.thresholds_fitted", model=champ.model_version,
+                             fit=act["fit_id"], classes=len(fitted_thresholds),
+                             score_field=act["score_field"])
+        except Exception as exc:  # noqa: BLE001
+            # Fail to the constants rather than to no gate at all, and say so: silently gating on config
+            # while believing the thresholds were measured is the exact confusion this work removes.
+            log.warning("autolabel.threshold_fit_unavailable", error=str(exc))
+
         # Per-track observations from the frames just seen, for the reasoner's temporal check. Held here
         # rather than queried per object: the check needs the immediate neighbours, and a database round
         # trip per detection would cost more than the whole reasoning pass.
@@ -423,14 +448,17 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
                 # thresholds already allow, so a 0.3 detection cannot be talked into being a label.
                 qok = quality_ok[id(fo.obj)] and reasoner_ok.get(id(fo.obj), True)
                 fo.obj.state = gate_object(fo.obj, onto, settings.gate,
-                                           auto_accept_enabled=auto_accept_enabled, quality_ok=qok)
-                if verifier and needs_vlm(fo.obj, onto, settings.gate, quality_ok=qok):
+                                           auto_accept_enabled=auto_accept_enabled, quality_ok=qok,
+                                           fitted=fitted_thresholds)
+                if verifier and needs_vlm(fo.obj, onto, settings.gate, quality_ok=qok,
+                                          fitted=fitted_thresholds):
                     totals["vlm_eligible"] += 1
                     if totals["vlm_calls"] < budget and frame_vlm < per_frame_cap:
                         res = verifier.verify_object(fd.image_bgr, tuple(fo.obj.bbox.as_list()), fo.obj.class_id)
                         apply_vlm(fo.obj, res, onto, settings.models.vlm.ollama_tag)
                         fo.obj.state = gate_object(fo.obj, onto, settings.gate,
-                                                   auto_accept_enabled=auto_accept_enabled, quality_ok=qok)  # re-gate
+                                                   auto_accept_enabled=auto_accept_enabled, quality_ok=qok,
+                                                   fitted=fitted_thresholds)  # re-gate
                         totals["vlm_calls"] += 1
                         frame_vlm += 1
 

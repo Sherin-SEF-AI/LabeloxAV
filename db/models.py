@@ -731,6 +731,70 @@ class Prediction(Base):
     )
 
 
+class ThresholdFit(Base):
+    """A per-class auto-accept threshold fitted from measured outcomes, rather than picked.
+
+    The gate ships 0.95 for benign classes and 0.99 for safety ones and calls them calibrated precision
+    floors. A threshold is only a precision floor if somebody measured the precision at that score, and
+    nobody did: two classes at the same nominal 0.95 can sit at very different real precisions, and a
+    recalibration moves both without moving either constant.
+
+    One row per (fit, class). `fit_id` groups the classes fitted together from one run, so a fit is
+    replaced wholesale rather than per class: a threshold set where half the classes came from one
+    evaluation and half from another is not an operating point, it is two.
+
+    A class that could not be fitted gets a row with `measured = false` and a reason, never no row. The
+    gate has to be able to tell "this class earned no threshold" from "nobody looked at this class", and
+    fall back loudly in the first case rather than silently in both.
+
+    `score_field` records whether the fit read calibrated or raw confidence. A threshold fitted on one and
+    applied to the other is not conservative, it is arbitrary, and the two are only equal for a model that
+    was never calibrated.
+    """
+
+    __tablename__ = "threshold_fit"
+
+    row_id: Mapped[uuid.UUID] = _uuid_pk()
+    fit_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("inference_run.run_id", ondelete="CASCADE"), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    gold_id: Mapped[str | None] = mapped_column(String(128))
+    class_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    class_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    # conf_calibrated | conf. Which column the (score, outcome) pairs were read from.
+    score_field: Mapped[str] = mapped_column(String(24), nullable=False, default="conf")
+    alpha: Mapped[float] = mapped_column(Float, nullable=False)
+
+    measured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    threshold: Mapped[float | None] = mapped_column(Float)
+    threshold_lo: Mapped[float | None] = mapped_column(Float)
+    threshold_hi: Mapped[float | None] = mapped_column(Float)
+    far_at: Mapped[float | None] = mapped_column(Float)
+    accept_rate: Mapped[float | None] = mapped_column(Float)
+    n_accept: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    n_pairs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    n_positive: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    n_boot_fit: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # The threshold the gate would have used without this fit, so the delta is readable in one row rather
+    # than reconstructed from config at the time the fit was made.
+    config_threshold: Mapped[float | None] = mapped_column(Float)
+    # Fitted and stored is not the same as in force. gold_calibrate sets the precedent: fit, report
+    # whether it is trustworthy, and leave activating it to a human.
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("fit_id", "class_id", name="uq_threshold_fit_class"),
+        # Partial: all but one fit per model is inactive, and the gate only ever asks for the active one.
+        Index("ix_threshold_fit_model", "model_version", "active",
+              postgresql_where=sql_text("active")),
+        Index("ix_threshold_fit_run", "run_id"),
+        Index("ix_threshold_fit_fit", "fit_id"),
+    )
+
+
 class BlindAudit(Base):
     """A second, independent observation of a set of frames, for estimating what BOTH observers missed.
 

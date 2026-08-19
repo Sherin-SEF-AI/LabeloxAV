@@ -278,3 +278,86 @@ async def blind_audit_estimate(audit_id: str, db: AsyncSession = Depends(db_sess
             "n_both": r.n_both, "n_model_only": r.n_model_only, "n_human_only": r.n_human_only,
         } for r in rows],
     }
+
+
+# Fitted auto-accept thresholds (ORACLYX). Fitting is a measurement; activating changes what the engine
+# accepts without a human looking, so it is a separate call behind an admin floor.
+
+
+class FitThresholdsIn(BaseModel):
+    run_id: str
+    min_support: int | None = None
+    n_boot: int | None = None
+    activate: bool = False
+
+
+@router.post("/oraclyx/thresholds/fit")
+async def thresholds_fit(payload: FitThresholdsIn, db: AsyncSession = Depends(db_session),
+                         _user=Depends(require_role("reviewer"))):
+    """Fit a per-class operating point from a run's recorded outcomes. Stored inactive unless asked."""
+    from core.accel.np_threshold import MIN_SUPPORT, N_BOOTSTRAP
+    from services.oraclyx.threshold_fit import fit_thresholds
+
+    res = await fit_thresholds(db, run_id=payload.run_id,
+                               min_support=payload.min_support or MIN_SUPPORT,
+                               n_boot=payload.n_boot or N_BOOTSTRAP, activate=payload.activate)
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@router.post("/oraclyx/thresholds/{fit_id}/activate")
+async def thresholds_activate(fit_id: str, db: AsyncSession = Depends(db_session),
+                              _user=Depends(require_role("admin"))):
+    """Put a fit into force, retiring whichever fit for the same model was in force before.
+
+    Admin rather than reviewer: this changes what the engine will accept into the corpus without anybody
+    looking at it, across every class at once.
+    """
+    from services.oraclyx.threshold_fit import activate_fit
+
+    res = await activate_fit(db, fit_id)
+    if "error" in res:
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@router.get("/oraclyx/thresholds")
+async def thresholds_active(model_version: str, db: AsyncSession = Depends(db_session)):
+    """What is actually in force for a model, and how much of the ontology it covers.
+
+    A class absent from `by_class` is falling back to the configured constant. That is the normal case and
+    it is reported rather than hidden, because a constant nobody measured is not a precision floor.
+    """
+    from services.oraclyx.threshold_fit import active_thresholds
+
+    act = await active_thresholds(db, model_version)
+    return {"model_version": model_version, **act,
+            "note": ("classes absent from by_class fall back to the configured constant, which was never "
+                     "measured at the precision it claims")}
+
+
+@router.get("/oraclyx/thresholds/{fit_id}")
+async def thresholds_detail(fit_id: str, db: AsyncSession = Depends(db_session)):
+    from db.models import ThresholdFit
+
+    rows = (await db.execute(select(ThresholdFit).where(ThresholdFit.fit_id == UUID(fit_id))
+                             .order_by(ThresholdFit.class_name))).scalars().all()
+    if not rows:
+        raise HTTPException(404, "fit not found")
+    return {
+        "fit_id": fit_id, "model_version": rows[0].model_version, "run_id": str(rows[0].run_id),
+        "gold_id": rows[0].gold_id, "score_field": rows[0].score_field,
+        "active": bool(rows[0].active), "n_classes": len(rows),
+        "n_fitted": sum(1 for r in rows if r.measured),
+        "classes": [{
+            "class_id": r.class_id, "class_name": r.class_name, "alpha": r.alpha,
+            "measured": r.measured, "reason": r.reason,
+            "threshold": r.threshold, "lo": r.threshold_lo, "hi": r.threshold_hi,
+            "config_threshold": r.config_threshold,
+            "delta": (round(r.threshold - r.config_threshold, 4)
+                      if r.threshold is not None and r.config_threshold is not None else None),
+            "far_at": r.far_at, "accept_rate": r.accept_rate, "n_pairs": r.n_pairs,
+            "n_positive": r.n_positive, "n_accept": r.n_accept, "n_boot_fit": r.n_boot_fit,
+        } for r in rows],
+    }
