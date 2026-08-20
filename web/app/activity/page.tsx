@@ -73,7 +73,7 @@ export default function ActivityPage() {
               </button>
             ))}
           </div>
-          <span className="text-ink-4">|</span>
+          <span className="text-ink-3">|</span>
           <div className="flex items-center gap-1">
             {WINDOWS.map(([label, h]) => (
               <button key={h} onClick={() => setHours(h)}
@@ -132,7 +132,7 @@ export default function ActivityPage() {
             <ul className="divide-y divide-line/40">
               {events.map((e) => (
                 <li key={e.event_id} className="px-3 py-2 flex items-start gap-3">
-                  <span className="font-mono text-[10px] text-ink-4 w-20 shrink-0 pt-0.5">
+                  <span className="font-mono text-[10px] text-ink-3 w-20 shrink-0 pt-0.5">
                     {mounted ? ago(e.created_at) : (e.created_at?.slice(11, 16) ?? "")}
                   </span>
                   <div className="min-w-0 flex-1">
@@ -141,7 +141,7 @@ export default function ActivityPage() {
                       {e.summary || e.label}
                     </div>
                     {e.subject_type && (
-                      <div className="font-mono text-[9.5px] text-ink-4">
+                      <div className="font-mono text-[9.5px] text-ink-3">
                         {e.subject_type}
                         {e.subject_id ? ` ${String(e.subject_id).slice(0, 8)}` : ""}
                       </div>

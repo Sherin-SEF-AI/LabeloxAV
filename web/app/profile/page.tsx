@@ -23,7 +23,7 @@ function Section({ title, children, hint }: {
     <section className="panel">
       <div className="border-b hairline px-3 py-2">
         <div className="font-mono text-[11px] uppercase text-ink-3">{title}</div>
-        {hint && <div className="font-mono text-[10px] text-ink-4">{hint}</div>}
+        {hint && <div className="font-mono text-[10px] text-ink-3">{hint}</div>}
       </div>
       <div className="p-3 space-y-2">{children}</div>
     </section>
@@ -142,7 +142,7 @@ export default function ProfilePage() {
               </div>
             </div>
             <div className="ml-auto flex gap-2 font-mono text-[10px]">
-              <span className={profile.has_password ? "text-pass" : "text-ink-4"}>
+              <span className={profile.has_password ? "text-pass" : "text-ink-3"}>
                 {profile.has_password ? "password set" : "no password"}
               </span>
               <span className={profile.mfa_enabled ? "text-pass" : "text-warn"}>
@@ -204,7 +204,7 @@ export default function ProfilePage() {
               <div className="font-mono text-[12px] text-ink border border-line px-2 py-1 max-w-sm break-all select-all">
                 {mfaSecret}
               </div>
-              <div className="font-mono text-[9px] text-ink-4 break-all max-w-lg">{mfaUri}</div>
+              <div className="font-mono text-[9px] text-ink-3 break-all max-w-lg">{mfaUri}</div>
               <Field label="code" value={mfaCode} inputMode="numeric" autoComplete="one-time-code"
                 onChange={(e) => setMfaCode(e.target.value)} />
               <button onClick={confirmMfa} disabled={busy || mfaCode.trim().length < 6}

@@ -24,7 +24,7 @@ const STATUS_TONE: Record<string, string> = {
   blocked: "text-block",
   succeeded: "text-pass",
   exhausted: "text-warn",
-  stopped: "text-ink-4",
+  stopped: "text-ink-3",
 };
 
 function Bar({ value, target }: { value: number | null; target: number }) {
@@ -205,7 +205,7 @@ export default function CampaignsPage() {
             <div className="flex items-center gap-2 font-mono text-[11px] uppercase text-ink-3
                             border-b hairline px-3 py-2">
               <span>{detail.name}</span>
-              <span className="normal-case text-ink-4">
+              <span className="normal-case text-ink-3">
                 next: {detail.next_stage}
                 {detail.halt_reason ? ` · ${detail.halt_reason}` : ""}
               </span>
@@ -217,7 +217,7 @@ export default function CampaignsPage() {
                   const steps = detail.steps.filter(
                     (s) => s.iteration === Math.max(1, detail.iteration) && s.stage === stage);
                   const last = steps[steps.length - 1];
-                  const tone = !last ? "border-line text-ink-4"
+                  const tone = !last ? "border-line text-ink-3"
                     : last.status === "done" ? "border-pass text-pass"
                     : last.status === "waiting" ? "border-warn text-warn"
                     : last.status === "failed" ? "border-block text-block"

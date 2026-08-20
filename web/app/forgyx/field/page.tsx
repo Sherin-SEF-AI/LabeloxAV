@@ -139,7 +139,7 @@ export default function FieldPage() {
               </span>
               {/* Advisory, and it says so. Telemetry comes from devices, which are outside the trust
                   boundary, so a single misconfigured unit must not be able to demote a champion. */}
-              <span className="ml-auto normal-case text-ink-4">advisory: a device cannot demote</span>
+              <span className="ml-auto normal-case text-ink-3">advisory: a device cannot demote</span>
             </div>
             <div className="p-3 space-y-2">
               <div className="font-mono text-[11px] text-ink-2">{report.detail}</div>

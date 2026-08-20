@@ -109,7 +109,7 @@ function LineageBody() {
           <div className="panel p-4 font-mono text-[11px] text-ink-3 max-w-3xl space-y-2">
             <div>Trace a model backwards to the footage it is made of, or a session forwards to
               everything it ended up in.</div>
-            <div className="text-ink-4">
+            <div className="text-ink-3">
               The forward direction is what an erasure request asks: if a subject withdraws consent for a
               session, this is what has to be re-examined. Answering it by hand meant reading every dataset
               commit&apos;s slice spec.

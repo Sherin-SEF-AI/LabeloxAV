@@ -134,7 +134,7 @@ export default function NotificationBell() {
                       <div className="min-w-0 flex-1">
                         <div className="font-mono text-[11.5px] text-ink truncate">{n.title}</div>
                         {n.body && <div className="font-mono text-[10.5px] text-ink-3 line-clamp-2">{n.body}</div>}
-                        <div className="font-mono text-[9.5px] text-ink-4">
+                        <div className="font-mono text-[9.5px] text-ink-3">
                           {n.kind.replace(/_/g, " ")} · {mounted ? ago(n.created_at) : ""}
                         </div>
                       </div>

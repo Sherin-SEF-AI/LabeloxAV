@@ -252,7 +252,7 @@ function RapidBody() {
               <Key k="U" label={t("action.undo", "undo")} tone="text-ink-3" onClick={undo} />
               <Key k="O" label="open the frame" tone="text-ink-3"
                 onClick={() => router.push(`/frame/${current.frame_id}`)} />
-              <span className="ml-auto text-ink-4">
+              <span className="ml-auto text-ink-3">
                 {inFlight.current > 0 ? t("editor.unsaved", "saving...") : t("editor.saved", "saved")}
               </span>
             </div>

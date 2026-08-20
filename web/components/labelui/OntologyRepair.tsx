@@ -130,7 +130,7 @@ export default function OntologyRepair() {
     <section className="panel">
       <div className="flex items-center gap-2 font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
         <span>repair the vocabulary</span>
-        <span className="ml-auto normal-case text-ink-4">admin only</span>
+        <span className="ml-auto normal-case text-ink-3">admin only</span>
       </div>
       <div className="p-3 space-y-4">
         {err != null ? (
@@ -159,9 +159,9 @@ export default function OntologyRepair() {
                   className="border border-line px-2 py-0.5 hover:border-accent disabled:opacity-40">
                   merge
                 </button>
-                {lastMerge && <span className="text-ink-4">last run {lastMerge.slice(0, 8)}</span>}
+                {lastMerge && <span className="text-ink-3">last run {lastMerge.slice(0, 8)}</span>}
               </div>
-              <div className="font-mono text-[10px] text-ink-4">
+              <div className="font-mono text-[10px] text-ink-3">
                 rewrites every object and track carrying the class; refused across an l0 boundary
               </div>
             </div>
@@ -183,7 +183,7 @@ export default function OntologyRepair() {
                   rename
                 </button>
               </div>
-              <div className="font-mono text-[10px] text-ink-4">
+              <div className="font-mono text-[10px] text-ink-3">
                 custom classes only; the governed vocabulary is versioned in its file, not edited here
               </div>
             </div>
@@ -202,7 +202,7 @@ export default function OntologyRepair() {
                   ))}
                 </div>
               )}
-              <div className="font-mono text-[10px] text-ink-4">
+              <div className="font-mono text-[10px] text-ink-3">
                 stops it being offered; deletes nothing, because prediction history still points at it
               </div>
             </div>

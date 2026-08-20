@@ -127,7 +127,7 @@ export default function RecallHonesty() {
           prediction withheld, and the two independent observations give recall against a denominator the
           model did not help build.
         </p>
-        <div className="text-ink-4">POST /api/verdyx/blind-audit/seed with a run_id to start one.</div>
+        <div className="text-ink-3">POST /api/verdyx/blind-audit/seed with a run_id to start one.</div>
       </div>
     );
   }
@@ -146,7 +146,7 @@ export default function RecallHonesty() {
             className={`border px-2 py-0.5 ${a.audit_id === selected ? "border-accent text-ink" : "border-line text-ink-3 hover:border-accent"}`}
           >
             {a.audit_id.slice(0, 8)}
-            <span className="text-ink-4 ml-1.5">
+            <span className="text-ink-3 ml-1.5">
               {a.status === "scored" ? "scored" : `${a.n_labeled}/${a.n_frames} labelled`}
             </span>
           </button>
@@ -164,7 +164,7 @@ export default function RecallHonesty() {
         <div className="space-y-1.5 font-mono text-[11px]">
           <div className="text-warn">the audit ran and could not conclude</div>
           <div className="text-ink-3 leading-relaxed">{pooled.reason}</div>
-          <div className="text-ink-4">
+          <div className="text-ink-3">
             Found by both {pooled.n_both}, by the model alone {pooled.n_model_only}, by the auditor alone{" "}
             {pooled.n_human_only}. With no overlap the population is unbounded above, so no number is
             reported rather than a number that would mean nothing.
@@ -178,7 +178,7 @@ export default function RecallHonesty() {
           </div>
 
           {pooled.overstatement != null && (
-            <div className={`font-mono text-[11px] px-2 py-1.5 border hairline ${pooled.overstatement > 0.15 ? "text-fail" : "text-ink"}`}>
+            <div className={`font-mono text-[11px] px-2 py-1.5 border hairline ${pooled.overstatement > 0.15 ? "text-block" : "text-ink"}`}>
               gold recall overstates measured recall by {(pooled.overstatement * 100).toFixed(1)} points
               {pooled.overstatement > 0.15 && " - past the promotion tolerance, so the gate refuses on it"}
             </div>
@@ -186,22 +186,22 @@ export default function RecallHonesty() {
 
           <div className="font-mono text-[11px] text-ink-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div>
-              <div className="text-ink-4 uppercase text-[10px]">estimated population</div>
+              <div className="text-ink-3 uppercase text-[10px]">estimated population</div>
               <div className="text-ink tabular-nums">{pooled.population?.toFixed(1)}</div>
-              <div className="text-ink-4 tabular-nums">
+              <div className="text-ink-3 tabular-nums">
                 {pooled.lo?.toFixed(0)} to {pooled.hi?.toFixed(0)} at 95%
               </div>
             </div>
             <div>
-              <div className="text-ink-4 uppercase text-[10px]">found by both</div>
+              <div className="text-ink-3 uppercase text-[10px]">found by both</div>
               <div className="text-ink tabular-nums">{pooled.n_both}</div>
             </div>
             <div>
-              <div className="text-ink-4 uppercase text-[10px]">model only</div>
+              <div className="text-ink-3 uppercase text-[10px]">model only</div>
               <div className="text-ink tabular-nums">{pooled.n_model_only}</div>
             </div>
             <div>
-              <div className="text-ink-4 uppercase text-[10px]">auditor only</div>
+              <div className="text-ink-3 uppercase text-[10px]">auditor only</div>
               <div className="text-ink tabular-nums">{pooled.n_human_only}</div>
             </div>
           </div>
@@ -211,7 +211,7 @@ export default function RecallHonesty() {
               <div className="font-mono text-[10px] uppercase text-ink-3">by scene density</div>
               <div className="overflow-x-auto">
                 <table className="w-full font-mono text-[11px]">
-                  <thead className="text-ink-4">
+                  <thead className="text-ink-3">
                     <tr className="text-left">
                       <th className="py-1 pr-3 font-normal">stratum</th>
                       <th className="py-1 pr-3 font-normal">recall</th>
@@ -250,13 +250,13 @@ export default function RecallHonesty() {
                     title={s.measured
                       ? `${s.n_both} found by both, ${s.n_model_only} model only, ${s.n_human_only} auditor only`
                       : (s.reason ?? "not measurable")}
-                    className={`border hairline px-1.5 py-0.5 font-mono text-[10px] ${s.measured ? "text-ink" : "text-ink-4"}`}
+                    className={`border hairline px-1.5 py-0.5 font-mono text-[10px] ${s.measured ? "text-ink" : "text-ink-3"}`}
                   >
                     {s.class_name ?? s.class_id} {s.measured ? pct(s.model_recall) : "n/a"}
                   </span>
                 ))}
               </div>
-              <div className="font-mono text-[10px] text-ink-4">
+              <div className="font-mono text-[10px] text-ink-3">
                 class rows are class-aware (a box found under the wrong name is a miss for that class), so
                 they deliberately do not sum to the pooled figure above
               </div>
@@ -266,7 +266,7 @@ export default function RecallHonesty() {
       )}
 
       {est?.caveat && (
-        <div className="font-mono text-[10px] text-ink-4 leading-relaxed border-t hairline pt-2">
+        <div className="font-mono text-[10px] text-ink-3 leading-relaxed border-t hairline pt-2">
           {est.caveat}
         </div>
       )}

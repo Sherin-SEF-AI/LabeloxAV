@@ -39,7 +39,7 @@ function Field({ label, ...rest }: { label: string } & React.InputHTMLAttributes
 
 function Divider({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2 font-mono text-[10px] text-ink-4">
+    <div className="flex items-center gap-2 font-mono text-[10px] text-ink-3">
       <h1 className="sr-only">Sign in to LabeloxAV</h1>
       <div className="h-px bg-line flex-1" />{children}<div className="h-px bg-line flex-1" />
     </div>
@@ -330,7 +330,7 @@ function LoginBody() {
               <div className="font-mono text-[11px] text-ink border border-line px-2 py-1 break-all select-all">
                 {enrolSecret}
               </div>
-              <div className="font-mono text-[9px] text-ink-4 break-all">{enrolUri}</div>
+              <div className="font-mono text-[9px] text-ink-3 break-all">{enrolUri}</div>
               <Field label="code" value={code} inputMode="numeric" autoComplete="one-time-code"
                 onChange={(e) => setCode(e.target.value)} onKeyDown={onEnter(confirmEnrol)} />
               <button onClick={confirmEnrol} disabled={busy || code.trim().length < 6}

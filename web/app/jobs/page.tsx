@@ -133,7 +133,7 @@ export default function JobsPage() {
                 {canCancel(j) && (
                   <button onClick={() => cancel(j)} disabled={busy === j.job_id}
                     title="stop this job"
-                    className="border border-line px-1.5 py-0.5 text-ink-3 hover:border-fail hover:text-fail disabled:opacity-40">
+                    className="border border-line px-1.5 py-0.5 text-ink-3 hover:border-block hover:text-block disabled:opacity-40">
                     {busy === j.job_id ? "..." : "stop"}
                   </button>
                 )}

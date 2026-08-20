@@ -175,7 +175,7 @@ export default function ReasonerPage() {
                       <td className="text-ink-3 tabular-nums">{c.fired_against}</td>
                       <td className="text-ink-3 tabular-nums">{c.correct_against}</td>
                       <td className={`tabular-nums ${
-                        !c.measured ? "text-ink-4"
+                        !c.measured ? "text-ink-3"
                           : (c.precision_against ?? 0) > 0.7 ? "text-pass" : "text-warn"}`}>
                         {c.precision_against == null ? "-"
                           : `${(c.precision_against * 100).toFixed(0)}%`}

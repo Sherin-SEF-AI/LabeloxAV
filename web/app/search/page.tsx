@@ -170,7 +170,7 @@ function SearchBody() {
           <div className="panel p-3">
             <div className="font-mono text-[11px] text-ink-3 mb-2 flex items-center gap-3">
               <span>{results.length} {res!.kind}s</span>
-              <span className="text-ink-4">{res!.mode} · DINOv3/SigLIP2</span>
+              <span className="text-ink-3">{res!.mode} · DINOv3/SigLIP2</span>
               {diversity && <span className="text-info">deduped</span>}
               {minSim > 0 && <span className="text-info">≥ {minSim.toFixed(2)}</span>}
             </div>
