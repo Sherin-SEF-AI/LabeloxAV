@@ -15,15 +15,20 @@ from core.config import get_settings
 from packs.av.scene_model import MovingCameraSceneModelFactory
 from packs.base import (
     AutoLabelProfile,
+    ClassTree,
+    CliqueSpec,
+    ConfusionClique,
     EvalStrataSpec,
     ForgeTarget,
     GatePolicy,
+    MotionModelSpec,
     OntologySpec,
     Pack,
     PackManifest,
     PrivacyPlaneSpec,
     QualityProfile,
     RedactionTarget,
+    RelationSpec,
     RootCauseSignature,
     SensorCheck,
     StratumDimension,
@@ -153,6 +158,100 @@ def _quality_profile() -> QualityProfile:
     )
 
 
+def _motion_models() -> MotionModelSpec:
+    """Which infrastructure sits on the road surface and which is above it.
+
+    The split matters because the ground homography is exact for the first group and confidently wrong for
+    the second. A gantry warped by the ground plane moves in the opposite direction to the truth, and a
+    propagated box that is wrong in a plausible-looking way costs an annotator more than no box at all.
+
+    Everything not named here is "moving", which refuses to propagate. That is the safe default: a vehicle
+    or a person mistakenly treated as static would have its box placed by ego motion alone.
+    """
+    return MotionModelSpec(
+        static_ground=frozenset({
+            "cone", "barrier", "barricade_line", "construction_barrier", "crash_barrier",
+            "median_barrier", "temp_barricade", "guardrail", "fence", "sandbag", "tar_drum",
+            "hume_pipe", "debris", "garbage_pile", "excavation_pit", "waterlogging", "fallen_tree",
+            "electric_pole", "light_pole", "traffic_pole", "signal_pole", "cctv_pole", "pole",
+            "metro_pillar", "flyover_pillar", "transformer", "postbox", "milestone", "km_stone",
+            "tree", "vegetation", "shrine", "telephone_booth",
+        }),
+        static_elevated=frozenset({
+            "traffic_signal", "pedestrian_signal", "traffic_sign", "chevron_sign", "street_light",
+            "overhead_water_tank", "hoarding", "foot_overbridge", "speed_camera",
+        }),
+    )
+
+
+def _cliques() -> CliqueSpec:
+    """The confusions an Indian-road detector actually makes, and what each costs.
+
+    Grouped by what a label buys rather than by what looks alike. Inside a clique the model's probability
+    mass moves between the members, so a labelled example draws a boundary; across cliques it does not,
+    so a label mostly adds one more example of something already learned.
+
+    Costs are the safe-mIoU affinity semantics reused: 0.2 within a superclass, 1.0 across a safety
+    boundary. pedestrians_vs_riders is the expensive one and it is expensive for a specific reason: a
+    person on a motorcycle and a person walking need different predictions from a planner, and the
+    classes are visually nearly identical from behind.
+    """
+    return CliqueSpec(
+        cliques=(
+            ConfusionClique("two_wheelers", ("motorcycle", "scooter", "moped", "cycle"), cost=0.2),
+            ConfusionClique("three_wheelers", ("autorickshaw", "e_rickshaw", "cycle_rickshaw"), cost=0.2),
+            ConfusionClique("livestock", ("cattle", "buffalo", "goat", "dog", "pig"), cost=0.2),
+            # Every member is a person; what differs is what they are doing, which is exactly what a
+            # planner needs and what a detector gets wrong from behind.
+            ConfusionClique("pedestrians_vs_riders",
+                            ("pedestrian", "rider", "scooter_with_rider", "delivery_rider_bike",
+                             "child", "person_carrying_load"),
+                            cost=1.0, crosses_safety=True),
+            ConfusionClique("heavy_vehicles",
+                            ("bus", "truck", "tractor", "water_tanker", "petrol_tanker",
+                             "container_truck", "multi_axle_trailer"), cost=0.2),
+            ConfusionClique("carts", ("bullock_cart", "push_cart", "vendor_handcart", "cargo_bike"),
+                            cost=0.2),
+        ),
+        cross_clique_cost=1.0,
+    )
+
+
+def _relations() -> RelationSpec:
+    """The AV relationship vocabulary, unified across the two that were live and disjoint.
+
+    The editor validated {rider_of, towed_by, part_of, member_of, occludes}; the scene-graph proposer wrote
+    {occluded_by, following, crossing_in_front_of, parked_near} straight past that validation. `kinds` is
+    the union, so a writer on either path is checkable against one list.
+
+    `occludes` and `occluded_by` are the same fact in opposite directions and both were being stored, which
+    means a query for either silently missed half the corpus. `occludes` is kept as canonical because it is
+    the one the editor offers and the one a person draws.
+
+    `overlap_pairs` is keyed on l1 superclasses rather than leaf classes, because the relation is a property
+    of the kind of thing: every VRU heavily overlapping a two-wheeler is a rider on it, whatever the leaf
+    class of either. This is what lets relationship-aware NMS keep a rider and their motorcycle as two
+    objects instead of merging them, and say which relation justified it.
+    """
+    return RelationSpec(
+        kinds=frozenset({"rider_of", "towed_by", "part_of", "member_of", "occludes",
+                         "occluded_by", "following", "crossing_in_front_of", "parked_near"}),
+        overlap_pairs={
+            # A person on a two-wheeler or three-wheeler. The India case the editor was built around.
+            ("vru", "two_wheeler"): "rider_of",
+            ("vru", "three_wheeler"): "rider_of",
+            # An animal drawing a cart, and a person pushing one: both are a VRU or animal in contact with
+            # a vehicle that is not carrying them.
+            ("animal", "cart"): "towed_by",
+            ("vru", "cart"): "towed_by",
+            # A person inside a four-wheeler, which overlaps heavily and is emphatically not one object.
+            ("vru", "four_wheeler"): "part_of",
+            ("vru", "heavy_vehicle"): "part_of",
+        },
+        inverse={"occluded_by": "occludes"},
+    )
+
+
 def _build() -> Pack:
     settings = get_settings()
     onto = get_ontology("av")
@@ -200,6 +299,11 @@ def _build() -> Pack:
         redaction_targets=(
             RedactionTarget(name="face", detector="face"),
             RedactionTarget(name="plate", detector="plate"),
+            # Text within a vehicle: the plate the plate detector missed. It is still a plate, it is
+            # still legible, and the release attestation says the frame was redacted. Constrained by a
+            # vehicle prior in services/anonymize/text_regions.py, because redacting every shop sign and
+            # hoarding in an Indian street scene destroys the frame and protects nobody.
+            RedactionTarget(name="text", detector="text"),
         ),
         legal_regime="DPDPA",
     )
@@ -213,6 +317,12 @@ def _build() -> Pack:
         quality_profile=_quality_profile(),
         forge_targets=_forge_targets(),
         privacy=privacy,
+        relations=_relations(),
+        cliques=_cliques(),
+        # leaf -> l1 -> l0 -> root. The two governed levels made explicit, plus the root, so the gap
+        # between "found a two-wheeler" and "named the right two-wheeler" is readable.
+        class_tree=ClassTree(level_names=("leaf", "l1", "l0", "root")),
+        motion_models=_motion_models(),
         scene_model=MovingCameraSceneModelFactory(),
         # The MCAP/CAN ingestion already lives in services/ingest (it fills vehicle_id + ego_speed); the AV
         # pack does not re-wrap it as an adapter yet. Sec ships the first IngestionAdapter (packs/sec).

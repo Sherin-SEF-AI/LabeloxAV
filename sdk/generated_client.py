@@ -163,6 +163,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/agent/contamination",
                           params={"min_count": min_count, "refused_only": refused_only}, json_body=None)
 
+    def get_agent_contamination_objects(self, from_name: str, to_name: str, limit: int | None = 60, offset: int | None = 0) -> Any:
+        """Contamination Objects"""
+        return self._call("GET", f"/api/agent/contamination/objects",
+                          params={"from_name": from_name, "to_name": to_name, "limit": limit, "offset": offset}, json_body=None)
+
     def post_agent_contamination_revert(self, body: Any = None) -> Any:
         """Contamination Revert"""
         return self._call("POST", f"/api/agent/contamination/revert",
@@ -273,6 +278,16 @@ class LabeloxClient:
         return self._call("POST", f"/api/agent/frames/{frame_id}/plan",
                           params=None, json_body=body)
 
+    def post_agent_frames_by_frame_id_reanalyze(self, frame_id: str) -> Any:
+        """Reanalyze"""
+        return self._call("POST", f"/api/agent/frames/{frame_id}/reanalyze",
+                          params=None, json_body=None)
+
+    def post_agent_frames_by_frame_id_reanalyze_plan(self, frame_id: str) -> Any:
+        """Reanalyze Plan"""
+        return self._call("POST", f"/api/agent/frames/{frame_id}/reanalyze/plan",
+                          params=None, json_body=None)
+
     def post_agent_frames_by_frame_id_reconcile(self, frame_id: str, body: Any = None) -> Any:
         """Reconcile"""
         return self._call("POST", f"/api/agent/frames/{frame_id}/reconcile",
@@ -356,6 +371,11 @@ class LabeloxClient:
     def post_agent_ops_ask(self, body: Any = None) -> Any:
         """Ops Ask"""
         return self._call("POST", f"/api/agent/ops/ask",
+                          params=None, json_body=body)
+
+    def post_agent_reanalyze_all(self, body: Any = None) -> Any:
+        """Reanalyze All"""
+        return self._call("POST", f"/api/agent/reanalyze/all",
                           params=None, json_body=body)
 
     def post_agent_relabel_all(self, body: Any = None) -> Any:
@@ -1433,10 +1453,10 @@ class LabeloxClient:
         return self._call("GET", f"/api/frames/{frame_id}/lift_ground",
                           params={"u": u, "v": v}, json_body=None)
 
-    def get_frames_by_frame_id_objects(self, frame_id: str, job_id: Any | None = None) -> Any:
+    def get_frames_by_frame_id_objects(self, frame_id: str, job_id: Any | None = None, limit: int | None = 2000) -> Any:
         """Frame Objects"""
         return self._call("GET", f"/api/frames/{frame_id}/objects",
-                          params={"job_id": job_id}, json_body=None)
+                          params={"job_id": job_id, "limit": limit}, json_body=None)
 
     def post_frames_by_frame_id_objects(self, frame_id: str, body: Any = None) -> Any:
         """Create Object"""
@@ -1853,10 +1873,10 @@ class LabeloxClient:
         return self._call("POST", f"/api/jobs/{kind}/{job_id}/cancel",
                           params=None, json_body=None)
 
-    def get_labelops_issues(self, frame_id: Any | None = None, job_id: Any | None = None, object_id: Any | None = None, status: Any | None = None) -> Any:
+    def get_labelops_issues(self, frame_id: Any | None = None, job_id: Any | None = None, object_id: Any | None = None, status: Any | None = None, mine: bool | None = False) -> Any:
         """List Issues"""
         return self._call("GET", f"/api/labelops/issues",
-                          params={"frame_id": frame_id, "job_id": job_id, "object_id": object_id, "status": status}, json_body=None)
+                          params={"frame_id": frame_id, "job_id": job_id, "object_id": object_id, "status": status, "mine": mine}, json_body=None)
 
     def post_labelops_issues(self, body: Any = None) -> Any:
         """Create Issue"""
@@ -2538,6 +2558,26 @@ class LabeloxClient:
         return self._call("POST", f"/api/oraclyx/radar/fuse",
                           params=None, json_body=body)
 
+    def get_oraclyx_thresholds(self, model_version: str) -> Any:
+        """Thresholds Active"""
+        return self._call("GET", f"/api/oraclyx/thresholds",
+                          params={"model_version": model_version}, json_body=None)
+
+    def post_oraclyx_thresholds_fit(self, body: Any = None) -> Any:
+        """Thresholds Fit"""
+        return self._call("POST", f"/api/oraclyx/thresholds/fit",
+                          params=None, json_body=body)
+
+    def get_oraclyx_thresholds_by_fit_id(self, fit_id: str) -> Any:
+        """Thresholds Detail"""
+        return self._call("GET", f"/api/oraclyx/thresholds/{fit_id}",
+                          params=None, json_body=None)
+
+    def post_oraclyx_thresholds_by_fit_id_activate(self, fit_id: str) -> Any:
+        """Thresholds Activate"""
+        return self._call("POST", f"/api/oraclyx/thresholds/{fit_id}/activate",
+                          params=None, json_body=None)
+
     def post_oraclyx_tracks4d_stitch(self, body: Any = None) -> Any:
         """Tracks4D Stitch"""
         return self._call("POST", f"/api/oraclyx/tracks4d/stitch",
@@ -2727,6 +2767,11 @@ class LabeloxClient:
         """Board"""
         return self._call("GET", f"/api/sanyx/board",
                           params={"limit": limit}, json_body=None)
+
+    def get_sanyx_compat_matrix(self, top: int | None = 25) -> Any:
+        """Compat Matrix View"""
+        return self._call("GET", f"/api/sanyx/compat-matrix",
+                          params={"top": top}, json_body=None)
 
     def get_sanyx_gate_by_session_id(self, session_id: str) -> Any:
         """Gate"""
@@ -3023,6 +3068,21 @@ class LabeloxClient:
         return self._call("GET", f"/api/sessions/{session_id}/timeline",
                           params=None, json_body=None)
 
+    def get_sievyx_cliques(self) -> Any:
+        """Cliques Report"""
+        return self._call("GET", f"/api/sievyx/cliques",
+                          params=None, json_body=None)
+
+    def post_sievyx_cliques_reward(self, body: Any = None) -> Any:
+        """Cliques Reward"""
+        return self._call("POST", f"/api/sievyx/cliques/reward",
+                          params=None, json_body=body)
+
+    def post_sievyx_cliques_select(self, run_id: str, budget: int | None = 200, seed: Any | None = None) -> Any:
+        """Cliques Select"""
+        return self._call("POST", f"/api/sievyx/cliques/select",
+                          params={"run_id": run_id, "budget": budget, "seed": seed}, json_body=None)
+
     def get_sievyx_composition(self, session_id: Any | None = None, top_n: int | None = 500) -> Any:
         """Composition"""
         return self._call("GET", f"/api/sievyx/composition",
@@ -3283,10 +3343,45 @@ class LabeloxClient:
         return self._call("POST", f"/api/users/{user_id}/token",
                           params=None, json_body=None)
 
+    def post_verdyx_blind_audit_seed(self, body: Any = None) -> Any:
+        """Blind Audit Seed"""
+        return self._call("POST", f"/api/verdyx/blind-audit/seed",
+                          params=None, json_body=body)
+
+    def get_verdyx_blind_audit_by_audit_id(self, audit_id: str) -> Any:
+        """Blind Audit Get"""
+        return self._call("GET", f"/api/verdyx/blind-audit/{audit_id}",
+                          params=None, json_body=None)
+
+    def get_verdyx_blind_audit_by_audit_id_estimate(self, audit_id: str) -> Any:
+        """Blind Audit Estimate"""
+        return self._call("GET", f"/api/verdyx/blind-audit/{audit_id}/estimate",
+                          params=None, json_body=None)
+
+    def post_verdyx_blind_audit_by_audit_id_mark_labeled(self, audit_id: str) -> Any:
+        """Blind Audit Mark Labeled"""
+        return self._call("POST", f"/api/verdyx/blind-audit/{audit_id}/mark-labeled",
+                          params=None, json_body=None)
+
+    def post_verdyx_blind_audit_by_audit_id_score(self, audit_id: str, min_frames: int | None = 1) -> Any:
+        """Blind Audit Score"""
+        return self._call("POST", f"/api/verdyx/blind-audit/{audit_id}/score",
+                          params={"min_frames": min_frames}, json_body=None)
+
+    def get_verdyx_blind_audits(self, run_id: Any | None = None, limit: int | None = 50) -> Any:
+        """Blind Audit List"""
+        return self._call("GET", f"/api/verdyx/blind-audits",
+                          params={"run_id": run_id, "limit": limit}, json_body=None)
+
     def post_verdyx_evaluate(self, body: Any = None) -> Any:
         """Evaluate"""
         return self._call("POST", f"/api/verdyx/evaluate",
                           params=None, json_body=body)
+
+    def get_verdyx_hierarchical(self, run_id: str, gold_id: Any | None = None, score_thr: float | None = 0.0) -> Any:
+        """Hierarchical Eval"""
+        return self._call("GET", f"/api/verdyx/hierarchical",
+                          params={"run_id": run_id, "gold_id": gold_id, "score_thr": score_thr}, json_body=None)
 
     def get_verdyx_matrix(self, champion: str, challenger: str, slice_metric: str | None = 'map') -> Any:
         """Slice Matrix View"""
@@ -3381,4 +3476,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 659 routes generated from the server schema.
+# 678 routes generated from the server schema.

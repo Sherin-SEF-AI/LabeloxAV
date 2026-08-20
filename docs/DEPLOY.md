@@ -121,18 +121,52 @@ on every request, so an unencrypted hop is an exposed credential. If the proxy i
 
 ---
 
-## GPU
+## Serving behind a hostname
 
-The installer builds the CPU serving image. The paths that need CUDA (auto-labeling, embeddings, training,
-LiDAR inference) live in a second image built from the same tree:
+`LBX_CORS__ORIGINS` is a comma-separated list of the browser origins allowed to call the API, defaulting to
+the two localhost dev origins. This was hardcoded in `services/api/main.py`, so a deployment behind any
+other hostname had every browser call blocked until somebody edited that line on the host.
 
 ```bash
-docker build -t labeloxav/gpu --target gpu .
+LBX_CORS__ORIGINS=https://labelox.example.com
 ```
 
-Run it on a machine with the NVIDIA container toolkit and point it at the same Postgres and MinIO. The
-scheduling model assumes one GPU: the training worker takes a Postgres advisory lock as a global mutex, so a
-second worker refuses to start rather than two runs contending for the same device.
+`*` is accepted and is deliberately not the default. This API is credentialed, and an allow-all origin on a
+credentialed API is how a browser gets talked into making authenticated requests on somebody else's behalf;
+setting it turns credentialed CORS off rather than combining the two, which no browser would honour anyway.
+
+Note that the web app proxies `/api` server-side, so a standard deployment where the browser only ever
+talks to the Next.js origin needs no CORS entry at all.
+
+## What a default `up` starts
+
+The overlay brings up five things, in order: `migrate` (schema + ontology, one-shot), `pii-models` (fetches
+the face and plate detector weights, one-shot), then `api`, `web` and `govern-daemon`.
+
+The two one-shots are ordering, not decoration. `api` waits for both to complete, because an API that
+starts before the schema is migrated crash-loops, and an API that starts before the PII weights exist is an
+API that accepts an ingest it cannot redact - the anonymizer refuses to construct without them by design,
+so the first ingest on a fresh box used to fail until someone ran `make pii-models` by hand.
+
+`govern-daemon` is the loop's driver: it ticks the controller, which scans drift, gates a registered
+challenger and schedules an off-hours retrain. It holds a Postgres advisory lock, so a second copy exits
+cleanly instead of double-ticking, which is what makes `restart: unless-stopped` safe on it.
+
+## Workers and GPU
+
+Two workers are defined but profiled off, so a CPU-only host is never asked to pull the CUDA image:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.app.yml --profile workers up -d   # embed-worker
+docker compose -f docker-compose.yml -f docker-compose.app.yml --profile gpu     up -d   # train-worker
+```
+
+`embed-worker` consumes `frame.ready` from Redpanda and embeds new frames, which is what keeps search,
+dedup and active-learning diversity current. `train-worker` builds from the `gpu` target and drains local
+training jobs; it needs the NVIDIA container toolkit on the host.
+
+The scheduling model assumes one GPU: the training worker takes a Postgres advisory lock as a global mutex,
+so a second worker refuses to start rather than two runs contending for the same device.
 
 ---
 
@@ -150,17 +184,23 @@ misbehaves. Take a backup first regardless.
 
 ## Backups
 
-`make backup` dumps Postgres. **It does not back up the object store**, which holds every frame, mask, point
-cloud, and export, so a Postgres-only restore gives you a corpus of dangling references. Mirror the MinIO
-volume as well:
-
 ```bash
-docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip > backup-db.sql.gz
-docker run --rm -v labeloxav_miniodata:/data -v "$PWD:/out" alpine \
-  tar czf /out/backup-blobs.tar.gz -C /data .
+make backup                                    # -> .scratch/backups/<timestamp>/
+make restore DIR=.scratch/backups/<timestamp>  # destructive; asks for confirmation
 ```
 
-Store both off the machine. Restoring one without the other is not a restore.
+Both halves, together, because they are one unit: Postgres holds the labels and the object store holds
+every frame, mask, point cloud and export. Restoring one without the other is not a restore - the app comes
+up, the counts look right, and every image 404s. `restore.sh` refuses a directory missing either half for
+exactly that reason, and warns if it ends up with frames in the database and no blobs behind them.
+
+This replaces a `make backup` that had three faults, all silent. It piped `pg_dump` into `gzip`, so the
+recipe's exit status was gzip's: a dump that failed on a wrong password or a stopped container produced a
+small, valid `.gz` and a green target, and you found out at restore time. It hardcoded the database name
+`labeloxav`, ignoring `POSTGRES_DB`. And it *printed* the MinIO mirror command rather than running it, so
+the half the warning above is about was the half nobody took.
+
+Store the whole timestamped directory off the machine. `MANIFEST` inside it records what was taken.
 
 ---
 

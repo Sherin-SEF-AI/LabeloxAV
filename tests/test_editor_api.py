@@ -15,6 +15,8 @@ from core.config import get_settings
 from core.storage import get_object_store
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -74,10 +76,10 @@ async def _seed_two_frames():
 
 
 def _client():
+    from _authutil import auth_headers
     from fastapi.testclient import TestClient
 
     from services.api.main import app
-    from _authutil import auth_headers
 
     _clear_db_cache()
     c = TestClient(app)

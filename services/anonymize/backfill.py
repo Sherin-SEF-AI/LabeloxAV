@@ -15,7 +15,7 @@ import uuid
 
 import cv2
 from botocore.exceptions import ClientError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
@@ -42,6 +42,12 @@ _WRITE_PRESSURE_CODES = frozenset({
 # A store that refuses this many frames in a row is down or full, and the remaining frames will not fare
 # better. Stopping says so; grinding through 10,000 more failures buries it.
 _CONSECUTIVE_FAILURE_LIMIT = 20
+
+# The marker `services.anonymize.recheck` appends to a method version once it has also looked inside the
+# annotated people and vehicles on a frame. It lives here rather than there because the stale-method query
+# below has to know to ignore it: `base+roi` is the current method plus a second look, not a superseded one,
+# and without this the backfill would re-process every rechecked frame forever.
+ROI_SUFFIX = "+roi"
 
 
 class StoreRefused(RuntimeError):
@@ -148,7 +154,7 @@ async def backfill_unaudited(limit: int = 500, session_id: str | None = None,
     async with maker() as db:
         if stale_method:
             q = (select(Frame).join(PiiAudit, PiiAudit.frame_id == Frame.frame_id)
-                 .where(PiiAudit.method_version != anonymizer.method_version))
+                 .where(func.replace(PiiAudit.method_version, ROI_SUFFIX, "") != anonymizer.method_version))
         else:
             q = (select(Frame).outerjoin(PiiAudit, PiiAudit.frame_id == Frame.frame_id)
                  .where(PiiAudit.frame_id.is_(None)))

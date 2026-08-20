@@ -57,6 +57,29 @@ services:
       /bin/sh -c "alembic upgrade head && python scripts/seed_ontology.py && echo 'schema ready'"
     restart: "no"
 
+  # One-shot: fetch the PII detector weights before anything can ingest.
+  #
+  # A fresh deploy had none. The weights live in a named volume, .dockerignore correctly keeps the local
+  # copies out of the image, and the anonymizer refuses to construct without them by design - so the first
+  # ingest on a new install failed with "the face detector is unavailable" and the operator had to know to
+  # run `make pii-models` by hand. That is the one control keeping unredacted faces out of the object
+  # store, so needing a manual step to arm it is the wrong way round. The script is idempotent (it skips
+  # files already present) and exits non-zero if a required weight is missing, so this fails the deploy
+  # rather than starting an API that cannot ingest.
+  pii-models:
+    build:
+      context: .
+      target: api
+    image: labeloxav/api:${LBX_VERSION:-latest}
+    environment:
+      <<: *app_env
+      # Optional: the plate mirror is on Hugging Face, which now wants a token even for public files.
+      HF_TOKEN: ${HF_TOKEN:-}
+    command: ["python", "scripts/download_pii_models.py"]
+    volumes:
+      - apiscratch:/app/.scratch
+    restart: "no"
+
   api:
     build:
       context: .
@@ -70,6 +93,8 @@ services:
       redis:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      pii-models:
         condition: service_completed_successfully
     environment: *app_env
     ports:
@@ -101,6 +126,73 @@ services:
       - "${WEB_PORT:-3000}:3000"
     restart: unless-stopped
     mem_limit: 1g
+
+  # The loop's driver. controller.tick is real logic that scans drift, gates a registered challenger and
+  # schedules an off-hours retrain - and until now its only callers were a manual HTTP endpoint and a
+  # Makefile target nothing supervised, so "the engine improves its own models in a closed loop" required
+  # someone to remember to start a process and notice when it died. It holds a Postgres advisory lock, so
+  # a second copy exits cleanly rather than double-ticking; that also makes `restart: unless-stopped` safe.
+  govern-daemon:
+    build:
+      context: .
+      target: api
+    image: labeloxav/api:${LBX_VERSION:-latest}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment: *app_env
+    command: ["python", "-m", "services.govern.daemon"]
+    volumes:
+      - apimodels:/app/models
+      - apiscratch:/app/.scratch
+    restart: unless-stopped
+    mem_limit: 2g
+
+  # Embeds new frames as they land, which is what keeps search, dedup and active-learning diversity current.
+  # Behind a profile because it consumes from Redpanda and is the one worker with a hard dependency on the
+  # bus being healthy: `docker compose --profile workers up -d`.
+  embed-worker:
+    profiles: ["workers"]
+    build:
+      context: .
+      target: api
+    image: labeloxav/api:${LBX_VERSION:-latest}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment: *app_env
+    command: ["python", "-m", "services.intelligence.embed.consumer"]
+    volumes:
+      - apimodels:/app/models
+      - apiscratch:/app/.scratch
+    restart: unless-stopped
+    mem_limit: 4g
+
+  # Drains local training jobs serially on the GPU. Profiled and built from the `gpu` target, because the
+  # CUDA image is large and a CPU-only host must not be asked to pull it: `docker compose --profile gpu up -d`.
+  # The worker takes a Postgres advisory lock as a global GPU mutex, so one replica is the design.
+  train-worker:
+    profiles: ["gpu"]
+    build:
+      context: .
+      target: gpu
+    image: labeloxav/gpu:${LBX_VERSION:-latest}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment: *app_env
+    command: ["python", "-m", "services.training.worker"]
+    volumes:
+      - apimodels:/app/models
+      - apiscratch:/app/.scratch
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
 volumes:
   apimodels:

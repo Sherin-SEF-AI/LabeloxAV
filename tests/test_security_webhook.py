@@ -8,12 +8,16 @@ The webhook URL is intentionally unroutable so delivery never blocks or raises (
 
 from __future__ import annotations
 
+import pytest
+
 from db.session import get_sessionmaker
 from services.anpr.events import emit_anpr_read, process_security_reads
 from services.anpr.india_format import parse_plate
 from services.anpr.recognize import PlateRead
 from services.anpr.watchlist import match, normalize_watchlist
 from services.integrations.webhooks import EVENTS, create_webhook, delete_webhook
+
+pytestmark = pytest.mark.db
 
 
 def _read(text: str = "KA01AB1234") -> PlateRead:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from sqlalchemy import delete, select
 
 from db.models import Session as DbSession
@@ -17,6 +18,8 @@ from services.intelligence.timeline_events import (
     persist_auto_inertial_events,
     update_event,
 )
+
+pytestmark = pytest.mark.db
 
 
 def test_events_overlap_ranges_and_points():

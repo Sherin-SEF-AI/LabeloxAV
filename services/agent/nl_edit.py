@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from db.models import AgentRun, Frame, Object
+from services.agent.class_move import refuse_reason
 from services.agent.nl import _resolve_classes
 from services.autolabel.ontology import get_ontology
 
@@ -163,7 +164,23 @@ async def apply_edit(db: AsyncSession, plan: dict, object_ids: list[UUID], *, cr
     run_id = uuid.uuid4()
     objs = (await db.execute(select(Object).where(Object.object_id.in_(object_ids)))).scalars().all()
     changes: dict = {}
+    skipped: dict[str, int] = {}
     for obj in objs:
+        # A language command must not overwrite a human's label. Every other bulk write path excludes
+        # source == "human"; this one did not, so one sentence could undo a person's work.
+        if obj.source == "human":
+            skipped["human_label"] = skipped.get("human_label", 0) + 1
+            continue
+        # And it may sharpen a class, not change what kind of thing it is - the same l0 boundary the
+        # relabel and contamination paths already refuse to cross. A typed sentence is if anything a
+        # looser filter than a detector's confidence, so it needs the guard more, not less.
+        if op == "reclassify":
+            refusal = refuse_reason(onto, int(obj.class_id), int(plan["to_class_id"]))
+            if refusal:
+                skipped["category_change"] = skipped.get("category_change", 0) + 1
+                log.warning("agent.nl_edit.refused_category_change", object_id=str(obj.object_id),
+                            reason=refusal, command=plan["raw"])
+                continue
         changes[str(obj.object_id)] = {"from_class": int(obj.class_id), "from_state": obj.state,
                                        "from_source": obj.source}
         if op == "reclassify":
@@ -187,4 +204,9 @@ async def apply_edit(db: AsyncSession, plan: dict, object_ids: list[UUID], *, cr
                  commit=False)
     await db.commit()
     log.info("nl_edit.applied", run_id=str(run_id), op=op, edited=len(changes))
-    return {"run_id": str(run_id), "operation": op, "edited": len(changes), "routed_to": "review"}
+    if skipped:
+        # Reported rather than silent: a command that matched fifty objects and edited thirty has to say
+        # what happened to the other twenty, or the preview count and the result disagree with no reason.
+        log.info("nl_edit.skipped", run_id=str(run_id), **skipped)
+    return {"run_id": str(run_id), "operation": op, "edited": len(changes), "routed_to": "review",
+            "skipped": skipped}

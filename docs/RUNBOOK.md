@@ -62,6 +62,33 @@ on them. Never promote on a reconstructed run.
 - **Re-detect the corpus**: `POST /api/autolabel/redetect-all`. This clears machine-source objects on each
   frame and re-runs; human-source objects are never touched.
 
+### Turning the DPDPA blur-coverage gate on
+
+`LBX_PII__COVERAGE_GATE` is `off | advisory | enforcing`, and ships as **advisory**.
+
+The pre-v2 gate checked that every exported frame carried a `PiiAudit` row. That catches "the anonymizer
+never ran" and nothing else: a row saying `n_faces=0, regions=[]` passed identically to one recording a real
+blur, and 82.4% of frames holding an annotated person have exactly that row. The coverage check asks the
+other question - does the audit evidence a redaction covering each annotated person or vehicle on the frame?
+It is annotation-relative rather than a count, so a genuinely empty highway frame is exempt by construction
+rather than by threshold.
+
+It ships advisory because switching it straight to enforcing would refuse most of the corpus, including
+exports that are legitimate today. The sequence is:
+
+1. Leave it on `advisory` and export as normal. Every gate call logs `coverage_gaps=<n>` alongside
+   `passed=`, so the size of the backlog is visible without blocking anyone.
+2. Run the re-check over the corpus: `POST /api/agent/reanalyze/all`. This is the crop-and-upscale pass that
+   finds the PII the whole-frame pass missed, and it only ever adds blur.
+3. Watch `coverage_gaps` fall. A frame reported with `"examined": false` has never had a re-check run over
+   it; `"examined": true` means a detector did look inside the annotation and found nothing, which is a
+   different and much smaller population.
+4. When it reaches zero for the slices you sell, set `LBX_PII__COVERAGE_GATE=enforcing`. The whole test
+   suite passes under enforcing today, so the flip itself is not expected to surprise anything.
+
+Going straight to `enforcing` is safe in the sense that it cannot leak - it fails closed - but it will
+return 422 on exports of un-swept data until step 2 has run.
+
 ## Tests
 
 ```

@@ -8,9 +8,13 @@ YOLO/YOLO-World detectors, so its read on the crop is a real second opinion, not
               caller opts in, an agent-applied correction).
   - unsure  : it is not confident enough to adjudicate -> stays for a human.
 
-This is read-only: it returns opinions and suggestions, it never mutates labels. The structure (a verdict
-plus alternatives per object) is model-agnostic, so a heavier VLM reasoner can replace classify_crop for
-the hardest cases without changing callers.
+By default this is read-only: it returns opinions and suggestions. Only when the caller passes apply=True
+does it write, and then it routes every change to `review` for a human rather than accepting it - see
+reconcile_frame. (This paragraph used to claim it never mutates labels at all, which stopped being true
+once the apply path landed and was worth correcting: a docstring that understates what a function writes
+is how a guard gets left off it.) The structure (a verdict plus alternatives per object) is
+model-agnostic, so a heavier VLM reasoner can replace classify_crop for the hardest cases without
+changing callers.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from db.models import Frame, Object
+from services.agent.class_move import refuse_reason
 
 log = get_logger("agent.reconcile")
 
@@ -88,7 +93,18 @@ async def reconcile_frame(db: AsyncSession, frame_id: uuid.UUID, object_ids: lis
         except Exception:  # noqa: BLE001
             cur = str(o.class_id)
         applied = False
-        if apply and r["verdict"] == "correct" and float(r["conf"]) >= apply_min_conf:
+        # A reconcile may sharpen a class and may not change what kind of thing it is. SigLIP zero-shot is
+        # the same open-vocabulary family that once moved 1,047 buses into a bus shelter at 0.989, and
+        # apply_min_conf is 0.55 - far below the confidence that move carried, so confidence cannot catch
+        # it. The ontology can. Guard applied at the other two write paths and missing here.
+        refusal = None
+        if apply and r["verdict"] == "correct" and r.get("suggested_class_id") is not None:
+            refusal = refuse_reason(onto, int(o.class_id), int(r["suggested_class_id"]))
+            if refusal:
+                tally["refused_category_change"] = tally.get("refused_category_change", 0) + 1
+                log.warning("agent.reconcile.refused_category_change", object_id=str(o.object_id),
+                            move=f"{cur} -> {r.get('suggested_class_name')}", reason=refusal)
+        if apply and not refusal and r["verdict"] == "correct" and float(r["conf"]) >= apply_min_conf:
             changes[str(o.object_id)] = {"from_class": int(o.class_id), "to_class": int(r["suggested_class_id"]),
                                          "from_state": o.state, "to_state": "review",
                                          "from_source": o.source, "to_source": o.source}

@@ -34,6 +34,8 @@ from services.api.tenancy import (
 )
 from services.autolabel.ontology import get_ontology
 
+pytestmark = pytest.mark.db
+
 
 async def _tenant(db, name: str) -> LabelProject:
     p = LabelProject(name=f"{name}-{uuid.uuid4().hex[:8]}")

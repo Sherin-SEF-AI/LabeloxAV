@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import PageShell from "@/components/shell/PageShell";
+import OntologyRepair from "@/components/labelui/OntologyRepair";
 import { Panel, KV, Verdict, RunButton, useRun, ErrLine, NumField } from "@/components/engine/prim";
 import { runJSON } from "@/lib/engine";
 
@@ -38,6 +39,12 @@ export default function QualityPage() {
   return (
     <PageShell active="Labelox" title="Label quality and 4D propagation"
       subtitle="gold audit, the learned-reconciler parity gate, and single-identity propagation">
+      <div className="p-4 space-y-4 max-w-6xl">
+        {/* The vocabulary could be added to and never repaired: merge, rename and retire existed on the
+            server and the interface offered only "add a class". A mistake in the ontology is a label
+            quality problem, which is why it belongs on this page. */}
+        <OntologyRepair />
+      </div>
       <div className="p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 max-w-6xl">
         {/* gold audit */}
         <Panel title="gold-set audit" hint="catches bad labels">

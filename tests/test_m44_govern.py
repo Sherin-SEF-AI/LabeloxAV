@@ -15,6 +15,8 @@ from core.config import get_settings
 from services.autolabel.ontology import get_ontology
 from services.govern.champion import champion_gate
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -52,7 +54,7 @@ def test_champion_gate_blocks_safety_regression():
 
 @requires_infra
 def test_governance_end_to_end():
-    from db.models import AuditDecision, ControlSample, DriftMetric, GovernanceState, ModelRegistry
+    from db.models import ControlSample, DriftMetric, ModelRegistry
     from db.session import get_sessionmaker
     from services.govern import killswitch as K
     from services.govern.champion import evaluate_and_promote
@@ -97,10 +99,32 @@ def test_governance_end_to_end():
             assert r2["promoted"] is True and r2["promoted_from"] == v_champ
 
             # control sample: 5 auto-accepted controls (real object FKs), 2 judged incorrect -> precision 0.6
-            from sqlalchemy import select
-            from db.models import Object
+            # Five objects of this test's own. Taking the first five rows of `object` made the assertion
+            # below depend on some other test having seeded the corpus first: it passed in a full run and
+            # reported zero reviewed under any filter that did not happen to include the seeding test.
+            from core.timebase import now_ns
+            from db.models import Frame, Object
+            from db.models import Session as DbSession
+            from services.autolabel.ontology import get_ontology
+
+            onto = get_ontology()
+            sess = DbSession(session_id=uuid.uuid4(), vehicle_id=f"CTRL-{tag}", start_ts_ns=0,
+                             end_ts_ns=1, ontology_version=onto.version)
+            db.add(sess)
+            await db.flush()
+            frame = Frame(frame_id=uuid.uuid4(), session_id=sess.session_id, ts_ns=now_ns(),
+                          cam_id="front", width=1920, height=1080, img_uri="s3://x/ctrl.jpg")
+            db.add(frame)
+            await db.flush()
+            obj_ids = []
+            for _ in range(5):
+                o = Object(frame_id=frame.frame_id, class_id=onto.by_name("pedestrian").id,
+                           bbox=[0.0, 0.0, 10.0, 10.0], conf=0.9, source="fused", state="accepted")
+                db.add(o)
+                await db.flush()
+                obj_ids.append(o.object_id)
+            await db.commit()
             sids = []
-            obj_ids = (await db.execute(select(Object.object_id).limit(5))).scalars().all()
             for oid in obj_ids:
                 cs = ControlSample(object_id=oid, was_auto_accepted=True)
                 db.add(cs)

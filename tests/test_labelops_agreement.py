@@ -35,13 +35,15 @@ from db.models import (
     Object,
     OntologyClass,
     OntologyVersion,
+    User,
 )
 from db.models import Session as DbSession
-from db.models import User
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
 from services.labelops import agreement as ag
 from services.labelops.jobs import JobError, assign_job, create_task
+
+pytestmark = pytest.mark.db
 
 
 async def _project_with_frames(db, n_frames: int = 3):

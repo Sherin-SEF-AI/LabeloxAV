@@ -68,7 +68,7 @@ export default function Breadcrumbs({ items, fallback = "/" }: { items?: Crumb[]
       <ol className="flex items-center gap-1.5 min-w-0 overflow-hidden">
         {crumbs.map((c, i) => (
           <li key={i} className="flex items-center gap-1.5 min-w-0">
-            {i > 0 && <span className="text-ink-4" aria-hidden>/</span>}
+            {i > 0 && <span className="text-ink-3" aria-hidden>/</span>}
             {c.href ? (
               <Link href={c.href} className="text-ink-3 hover:text-accent truncate">{c.label}</Link>
             ) : (

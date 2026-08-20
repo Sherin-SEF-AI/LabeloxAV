@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
+import MyIssues from "@/components/labelops/MyIssues";
+import LocalePicker from "@/components/shell/LocalePicker";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "@/lib/toast";
 import { getUser, setUser } from "@/lib/user";
@@ -21,7 +23,7 @@ function Section({ title, children, hint }: {
     <section className="panel">
       <div className="border-b hairline px-3 py-2">
         <div className="font-mono text-[11px] uppercase text-ink-3">{title}</div>
-        {hint && <div className="font-mono text-[10px] text-ink-4">{hint}</div>}
+        {hint && <div className="font-mono text-[10px] text-ink-3">{hint}</div>}
       </div>
       <div className="p-3 space-y-2">{children}</div>
     </section>
@@ -118,8 +120,19 @@ export default function ProfilePage() {
 
   return (
     <PageShell active="PROFILE" title="Your account"
-      subtitle="password, second factor, and sessions">
+      subtitle="feedback on your work, password, second factor, and sessions">
       <div className="p-4 space-y-4 max-w-3xl">
+        {/* Feedback on your own labels. Issues were creatable in the editor and readable nowhere, and the
+            notification they raise is addressed to the reviewer rota rather than to the person who drew
+            the label - so this is where an annotator can actually go and look. */}
+        <MyIssues />
+
+        {/* Four locales were implemented and reachable only from inside the onboarding tour, which a user
+            sees once. A setting you can only get to from a thing you have already dismissed is not a
+            setting. */}
+        <section className="panel p-3">
+          <LocalePicker />
+        </section>
         {profile && (
           <section className="panel p-3 flex items-center gap-4 flex-wrap">
             <div>
@@ -129,7 +142,7 @@ export default function ProfilePage() {
               </div>
             </div>
             <div className="ml-auto flex gap-2 font-mono text-[10px]">
-              <span className={profile.has_password ? "text-pass" : "text-ink-4"}>
+              <span className={profile.has_password ? "text-pass" : "text-ink-3"}>
                 {profile.has_password ? "password set" : "no password"}
               </span>
               <span className={profile.mfa_enabled ? "text-pass" : "text-warn"}>
@@ -191,7 +204,7 @@ export default function ProfilePage() {
               <div className="font-mono text-[12px] text-ink border border-line px-2 py-1 max-w-sm break-all select-all">
                 {mfaSecret}
               </div>
-              <div className="font-mono text-[9px] text-ink-4 break-all max-w-lg">{mfaUri}</div>
+              <div className="font-mono text-[9px] text-ink-3 break-all max-w-lg">{mfaUri}</div>
               <Field label="code" value={mfaCode} inputMode="numeric" autoComplete="one-time-code"
                 onChange={(e) => setMfaCode(e.target.value)} />
               <button onClick={confirmMfa} disabled={busy || mfaCode.trim().length < 6}

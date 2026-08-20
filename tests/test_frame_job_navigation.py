@@ -24,6 +24,8 @@ from db.session import get_sessionmaker
 from services.api.routers.objects import get_frame
 from services.autolabel.ontology import get_ontology
 
+pytestmark = pytest.mark.db
+
 
 async def _session_of_frames(db, n: int):
     onto = get_ontology()
@@ -74,7 +76,7 @@ class TestNavigatingInsideAJob:
             _sid, fids = await _session_of_frames(db, 6)
             job = await _job_over(db, [fids[0], fids[2], fids[4]])
 
-            meta = await get_frame(str(fids[0]), job_id=str(job.job_id), db=db)
+            meta = await get_frame(str(fids[0]), job_id=str(job.job_id), db=db, user=None)
 
         assert meta["next_frame_id"] == str(fids[2])
         assert meta["prev_frame_id"] is None, "the first frame of a job has nothing before it"
@@ -86,7 +88,7 @@ class TestNavigatingInsideAJob:
             _sid, fids = await _session_of_frames(db, 6)
             job = await _job_over(db, [fids[0], fids[2], fids[4]])
 
-            meta = await get_frame(str(fids[4]), job_id=str(job.job_id), db=db)
+            meta = await get_frame(str(fids[4]), job_id=str(job.job_id), db=db, user=None)
 
         assert meta["next_frame_id"] is None
         assert meta["prev_frame_id"] == str(fids[2])
@@ -98,7 +100,7 @@ class TestNavigatingInsideAJob:
             _sid, fids = await _session_of_frames(db, 6)
             job = await _job_over(db, [fids[4], fids[1], fids[3]])
 
-            meta = await get_frame(str(fids[4]), job_id=str(job.job_id), db=db)
+            meta = await get_frame(str(fids[4]), job_id=str(job.job_id), db=db, user=None)
 
         assert meta["next_frame_id"] == str(fids[1]), "it followed capture time instead of the job"
 
@@ -108,7 +110,7 @@ class TestWithoutAJob:
         """Reviewing a drive is the other half of this, and it must behave exactly as it always did."""
         async with get_sessionmaker()() as db:
             _sid, fids = await _session_of_frames(db, 4)
-            meta = await get_frame(str(fids[1]), db=db)
+            meta = await get_frame(str(fids[1]), db=db, user=None)
 
         assert meta["prev_frame_id"] == str(fids[0])
         assert meta["next_frame_id"] == str(fids[2])
@@ -120,14 +122,14 @@ class TestWithoutAJob:
             _sid, fids = await _session_of_frames(db, 4)
             job = await _job_over(db, [fids[0]])
 
-            meta = await get_frame(str(fids[2]), job_id=str(job.job_id), db=db)
+            meta = await get_frame(str(fids[2]), job_id=str(job.job_id), db=db, user=None)
 
         assert meta["next_frame_id"] == str(fids[3])
 
     async def test_an_unknown_job_does_not_break_the_frame(self):
         async with get_sessionmaker()() as db:
             _sid, fids = await _session_of_frames(db, 3)
-            meta = await get_frame(str(fids[0]), job_id=str(uuid.uuid4()), db=db)
+            meta = await get_frame(str(fids[0]), job_id=str(uuid.uuid4()), db=db, user=None)
         assert meta["next_frame_id"] == str(fids[1])
 
     async def test_a_missing_frame_is_still_a_404(self):
@@ -135,5 +137,5 @@ class TestWithoutAJob:
 
         async with get_sessionmaker()() as db:
             with pytest.raises(HTTPException) as exc:
-                await get_frame(str(uuid.uuid4()), db=db)
+                await get_frame(str(uuid.uuid4()), db=db, user=None)
         assert exc.value.status_code == 404

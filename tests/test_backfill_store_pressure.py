@@ -30,6 +30,8 @@ from db.models import Session as DbSession
 from db.session import get_sessionmaker
 from services.anonymize import backfill as bf
 
+pytestmark = pytest.mark.db
+
 OLD, NEW = "test-pressure-v1", "test-pressure-v2"
 
 

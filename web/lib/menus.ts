@@ -185,6 +185,14 @@ export const MENUS: Menu[] = [
       { key: "map", label: "HD map", icon: "route", href: "/map", hint: "fused map and provenance" },
       { key: "inertial", label: "Inertial", icon: "activity", href: "/inertial",
         hint: "ego state, events, maneuvers" },
+      // Both pages existed and worked, and neither was reachable from here. They were listed only in
+      // lib/editor/registry.ts's APP_GROUPS - a second, drifted navigation registry with no consumers -
+      // so /events had one inbound link from inside the frame editor and /events/search had none at all.
+      // Deleting the dead registry without linking these would have deleted the only record they exist.
+      { key: "events", label: "Driving events", icon: "activity", href: "/events", separatorBefore: true,
+        hint: "cut-ins, hard brakes and near-misses mined from the corpus" },
+      { key: "events-search", label: "Event search", icon: "search", href: "/events/search",
+        hint: "find a manoeuvre across every drive" },
     ],
   },
   {

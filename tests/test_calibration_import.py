@@ -4,8 +4,10 @@ focal and principal point in place of the nominal lens."""
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 
 from db.models import CameraCalibration
 from db.models import Session as DbSession
@@ -19,6 +21,8 @@ from services.calibration.import_calib import (
 from services.calibration.resolve import resolve_calibration
 from services.calibration.store import upsert_calibration
 
+pytestmark = pytest.mark.db
+
 _CAM = "cam_import_mcal3"
 
 _KITTI = """P0: 7.2e+02 0 6.0e+02 0 0 7.2e+02 1.7e+02 0 0 0 1 0
@@ -26,6 +30,23 @@ P2: 721.5 0.0 609.6 44.9 0.0 721.5 172.9 0.2 0.0 0.0 1.0 0.003
 Tr_velo_to_cam: 0 -1 0 0 0 0 -1 0 1 0 0 0
 """
 
+
+async def _a_session(db) -> uuid.UUID:
+    """A session of this test's own, rather than whichever one another test left behind.
+
+    These two tests took the first row of `session` and asserted it existed. Under the isolated test
+    database that row exists only when some earlier test happened to seed one, so the assertion passed in a
+    full run and failed under any filter that did not happen to include the seeding test. An order
+    dependency that only shows up under filtering is worse than a plain failure: it makes the suite pass
+    for reasons nobody chose.
+    """
+    from services.autolabel.ontology import get_ontology
+
+    sid = uuid.uuid4()
+    db.add(DbSession(session_id=sid, vehicle_id="CALIB-FIXTURE", start_ts_ns=0, end_ts_ns=1,
+                     ontology_version=get_ontology().version))
+    await db.commit()
+    return sid
 
 def test_intrinsics_from_K():
     f = intrinsics_from_K([[1000.0, 0, 640.0], [0, 1000.0, 360.0], [0, 0, 1]])
@@ -52,8 +73,7 @@ def test_parse_nuscenes_with_translation():
 
 async def test_import_then_resolve_reads_dataset_intrinsics():
     async with get_sessionmaker()() as db:
-        sid = (await db.execute(select(DbSession.session_id).limit(1))).scalar()
-    assert sid is not None
+        sid = await _a_session(db)
     try:
         intr = parse_kitti_calib(_KITTI)
         res = await import_calibration(sid, _CAM, intr, ref_width=1242)

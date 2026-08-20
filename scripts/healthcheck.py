@@ -71,8 +71,12 @@ async def check_redpanda() -> bool:
 
 
 def check_pii_gate() -> bool:
-    # When the DPDPA gate is enabled, the face detector weights must exist or ingestion would store
-    # un-anonymized frames. Fail loud (run `make pii-models`). Plate model is optional.
+    # When the DPDPA gate is enabled, the detector weights must exist or ingestion would store
+    # un-anonymized frames. Fail loud (run `make pii-models`).
+    #
+    # The plate weight is checked whenever plate_mandatory is set, which is the default: the anonymizer
+    # refuses to construct without it for exactly the reason the config comment gives (no silent plate
+    # leak), so a health check that only looked at faces reported a gate that could not start.
     from pathlib import Path
 
     cfg = get_settings().pii
@@ -81,6 +85,9 @@ def check_pii_gate() -> bool:
     ok = Path(cfg.face_weights).exists()
     if not ok:
         log.error("pii_gate.face_weights_missing", path=cfg.face_weights, hint="run make pii-models")
+    if cfg.plate_mandatory and not Path(cfg.plate_weights).exists():
+        log.error("pii_gate.plate_weights_missing", path=cfg.plate_weights, hint="run make pii-models")
+        ok = False
     return ok
 
 

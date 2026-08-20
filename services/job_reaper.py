@@ -103,9 +103,11 @@ def is_stale(row, *, now: datetime | None = None) -> bool:
 async def reap_stale_jobs(db: AsyncSession, *, now: datetime | None = None) -> dict[str, list[str]]:
     """Fail every job row whose process is gone. Returns the reaped ids per kind.
 
-    Run at API startup, which is the one moment the previous process's tasks are known to be dead. The
-    staleness window still applies, because a second API replica may be running jobs of its own and a sweep
-    that ignored the window would kill them.
+    Run at API startup, which is the one moment the previous process's tasks are known to be dead, and
+    then on the governance daemon's cadence - a long-lived API whose in-process task dies without writing a
+    terminal status otherwise leaves a row reading `running` forever, and autolabel refuses to start while
+    one does. The staleness window still applies, because a second API replica may be running jobs of its
+    own and a sweep that ignored the window would kill them.
     """
     at = now or _now()
     reaped: dict[str, list[str]] = {}

@@ -193,8 +193,17 @@ async def check_health(db: AsyncSession, session_id: uuid.UUID) -> dict:
 
 
 async def latest_verdict(db: AsyncSession, session_id: uuid.UUID) -> str | None:
-    """The most recent health verdict for a session, or None if never checked. Used to gate auto-labeling."""
-    row = (await db.execute(select(SessionHealth).where(SessionHealth.session_id == session_id)
+    """The most recent inspector health verdict for a session, or None if never checked. Gates auto-labeling.
+
+    Scoped to this indexer's own rows. session_health is shared: SANYX writes `sanyx-1` and `sanyx-stream`
+    rows to the same table, and this query took the newest row from any writer - so a SANYX pass recorded
+    after an inspector fail silently un-gated auto-labeling for that session. A gate that another
+    subsystem can lift by writing an unrelated row is not a gate.
+    """
+    cfg = get_settings().inspector
+    row = (await db.execute(select(SessionHealth)
+                            .where(SessionHealth.session_id == session_id,
+                                   SessionHealth.indexer_version == cfg.indexer_version)
                             .order_by(SessionHealth.created_at.desc()).limit(1))).scalar_one_or_none()
     return row.verdict if row else None
 

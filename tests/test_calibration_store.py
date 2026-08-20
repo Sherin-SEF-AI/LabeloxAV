@@ -5,8 +5,10 @@ image, instead of the nominal default."""
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 
 from db.models import CameraCalibration
 from db.models import Session as DbSession
@@ -14,8 +16,27 @@ from db.session import get_sessionmaker
 from services.calibration.resolve import resolve_calibration
 from services.calibration.store import spec_to_fields, upsert_calibration
 
+pytestmark = pytest.mark.db
+
 _CAM = "cam_test_mcal3"
 
+
+async def _a_session(db) -> uuid.UUID:
+    """A session of this test's own, rather than whichever one another test left behind.
+
+    These two tests took the first row of `session` and asserted it existed. Under the isolated test
+    database that row exists only when some earlier test happened to seed one, so the assertion passed in a
+    full run and failed under any filter that did not happen to include the seeding test. An order
+    dependency that only shows up under filtering is worse than a plain failure: it makes the suite pass
+    for reasons nobody chose.
+    """
+    from services.autolabel.ontology import get_ontology
+
+    sid = uuid.uuid4()
+    db.add(DbSession(session_id=sid, vehicle_id="CALIB-FIXTURE", start_ts_ns=0, end_ts_ns=1,
+                     ontology_version=get_ontology().version))
+    await db.commit()
+    return sid
 
 def test_spec_fov_to_focal():
     f = spec_to_fields(1920, 1080, {"hfov_deg": 37.0, "height_m": 1.6, "pitch_deg": -2.0})
@@ -39,8 +60,7 @@ def test_spec_requires_a_focal_source():
 
 async def test_upsert_precedence_then_resolve_reads_measured():
     async with get_sessionmaker()() as db:
-        sid = (await db.execute(select(DbSession.session_id).limit(1))).scalar()
-    assert sid is not None, "need at least one session in the corpus"
+        sid = await _a_session(db)
     try:
         est = await upsert_calibration(sid, _CAM, spec_to_fields(1920, 1080, {"fx": 2000.0, "height_m": 1.4}),
                                        "estimated")

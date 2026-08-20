@@ -93,7 +93,10 @@ async def measure(gold_id: str, db: AsyncSession = Depends(db_session)):
     return {"started": True, "gold_id": gold_id, "n_alive": row["n_alive"]}
 
 
-@router.post("/quality/gold/seal")
+# Sealing the gold set fixes the ground truth every evaluation, every promotion gate and every export
+# certificate is scored against. Its sibling /quality/gold/{id}/measure was already reviewer-gated;
+# this was not, so the annotator floor applied and anyone signed in could reseal it.
+@router.post("/quality/gold/seal", dependencies=[Depends(require_role("reviewer"))])
 async def seal(payload: GoldSealIn):
     spec = GoldSpec(name=payload.name, cities=payload.cities, session_id=payload.session_id,
                     class_names=payload.class_names, limit=payload.limit)
@@ -103,7 +106,9 @@ async def seal(payload: GoldSealIn):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.post("/quality/calibrate/fit")
+# Fitting the isotonic curve changes what every confidence in the system means, and the auto-accept
+# threshold is read against it.
+@router.post("/quality/calibrate/fit", dependencies=[Depends(require_role("reviewer"))])
 async def calibrate_fit(payload: CalibrateFitIn):
     try:
         return await fit_isotonic(payload.gold_id, payload.session_id)

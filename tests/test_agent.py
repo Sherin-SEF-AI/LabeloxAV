@@ -16,6 +16,8 @@ from core.config import get_settings
 from core.storage import get_object_store
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -319,10 +321,10 @@ async def _obj_state(oid):
 
 @requires_infra
 def test_plan_commit_revert_cycle():
+    from db.session import get_sessionmaker
     from services.agent.frame_agent import commit_frame, plan_frame
     from services.agent.policy import PolicyThresholds
     from services.agent.runs import revert_run
-    from db.session import get_sessionmaker
 
     # two confident, agreeing machine objects
     prov = {"agreement": True, "quality_flags": []}
@@ -352,9 +354,9 @@ def test_plan_commit_revert_cycle():
 
 @requires_infra
 def test_agent_never_touches_human():
+    from db.session import get_sessionmaker
     from services.agent.frame_agent import commit_frame
     from services.agent.policy import PolicyThresholds
-    from db.session import get_sessionmaker
 
     _sid, fid, oids = run_async(_seed_frame_with_objects([
         {"class_id": _vehicle_ids(1)[0], "conf": 0.99, "state": "accepted", "source": "human",

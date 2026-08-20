@@ -244,16 +244,25 @@ critical-class list + TTC, the FORGYX target registries, the gold-set selection 
 
 ## 8. Latent bugs the audit surfaced (fix during the refactor, not before)
 
-1. **`CLASS_HEIGHT_M` ids don't match the ontology** - `services/oraclyx/mono_depth.py:15` (0:pedestrian vs
-   YAML 1:motorcycle). Wrong for AV today.
-2. **`CRITICAL_CLASSES = {0,1,2,3,8}` is 0-based** and disagrees with the YAML's 1-based ids
-   `services/verdyx/safety_recall.py:10`.
-3. **`GovernSettings.protected_slices` doesn't exist**, so the hardcoded AV fallback always wins
-   `services/verdyx/run.py:20`.
-4. **`{"vru","animal"}` is triplicated+** across six files - a consistency hazard, not just AV coupling.
+All four are now **resolved**. They are kept here with their fixes rather than deleted, because the list was
+the record of what the audit found and a reader who arrives at it deserves to see how each one ended.
 
-These are documented here per the SEC-M0 rule; they get resolved when the relevant surface moves behind the
-pack interface (§ PACK_INTERFACE), not as a separate change.
+1. ~~**`CLASS_HEIGHT_M` ids don't match the ontology**~~ - **Fixed 2026-08-18.** The table is keyed by name
+   (`CLASS_HEIGHT_M_BY_NAME`) and resolved through the ontology at call time. The damage was worse than the
+   entry recorded: id 0 was dead, `pedestrian`/`rider`/`cattle` fell outside the table and silently returned
+   `None` so the size prior was off for every VRU, and id 5 - commented "truck", 3.2 m - is actually
+   `delivery_rider_bike`. Four tests in `test_oraclyx_m14.py`, including one that pins every name resolving.
+   This one outlived #2-#4 specifically because its test asserted the table against itself.
+2. ~~**`CRITICAL_CLASSES = {0,1,2,3,8}` is 0-based**~~ - Fixed; resolved by name via
+   `services/domain.py:critical_class_ids`.
+3. ~~**`GovernSettings.protected_slices` doesn't exist**~~ - Fixed; `core/config.py` carries it and
+   `services/verdyx/run.py` reads it.
+4. ~~**`{"vru","animal"}` is triplicated+**~~ - Fixed; `services/domain.py` is the single seam.
+
+The SEC-M0 rule said these get resolved when the relevant surface moves behind the pack interface. #2-#4
+went that way. #1 did not need to: keying the table by name fixes the ontology mismatch without adding a
+pack surface, and adding one would have changed the frozen pack digest for a table no other domain has a
+use for yet. If a second domain ever needs metric size priors, this is the natural thing to move.
 
 ---
 

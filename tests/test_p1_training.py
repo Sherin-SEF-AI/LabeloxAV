@@ -14,6 +14,8 @@ from core.storage import get_object_store
 from core.timebase import now_ns, seconds_to_ns
 from services.training.eval import regression_gate
 
+pytestmark = pytest.mark.db
+
 
 def test_regression_gate_promotes_on_improvement():
     base = {"map50": 0.40, "per_class": {"autorickshaw": 0.3, "sedan": 0.5}}

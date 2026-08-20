@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api , humanizeError } from "@/lib/api";
 import type { AssetRow, BoardCell, LabelJobRow, LabelProjectRow, ScorecardRow, UserRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
+import LoadState from "@/components/shell/LoadState";
 import { useQueryFlag } from "@/lib/useQueryParam";
 import { getUser } from "@/lib/user";
 import { honeypotVerdict, nextAction } from "@/lib/labelJobActions";
@@ -70,6 +71,7 @@ function ProjectsBody() {
   const [newBody, setNewBody] = useState("");
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 5000); };
+  const [bootErr, setBootErr] = useState<unknown>(null);
 
   // Take a job, and hand it back. `set_state` and `submit_job` are the two calls that make a label job
   // finishable at all: submit is the only writer of `honeypot_accuracy` and the only thing that advances
@@ -109,12 +111,18 @@ function ProjectsBody() {
   }, [mineOnly]);
 
   useEffect(() => {
+    // The project list is this page's primary data. Swallowed, a failed fetch left `projects` empty and the
+    // board rendered as though a manager had no projects at all - the same shape as the triage page telling
+    // an annotator their queue was clear because a request dropped.
     api.lopProjects().then((r) => {
+      setBootErr(null);
       setProjects(r.projects);
       if (r.projects.length && !projectId) setProjectId(r.projects[0].project_id);
-    }).catch(() => {});
-    api.users().then(setUsers).catch(() => {});
-    api.goldSets().then((g) => setGolds(g)).catch(() => {});
+    }).catch(setBootErr);
+    // These two fill controls rather than the board: an empty assignee dropdown or gold-set picker is
+    // survivable, but it must say why rather than looking like an installation with no users in it.
+    api.users().then(setUsers).catch(() => flash("could not load the user list; assignment is unavailable"));
+    api.goldSets().then((g) => setGolds(g)).catch(() => flash("could not load gold sets"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -191,6 +199,8 @@ function ProjectsBody() {
       right={msg ? <span className="font-mono text-[11px] text-accent">{msg}</span> : null}
     >
       <div className="p-4 space-y-4">
+        {/* Ahead of the selector, because an empty project list and an unreachable one look identical in it. */}
+        {bootErr != null && <LoadState error={bootErr} onRetry={() => window.location.reload()} />}
         <div className="flex items-center gap-2 font-mono text-[11px] flex-wrap">
           <span className="text-ink-3">project</span>
           <select value={projectId} onChange={(e) => setProjectId(e.target.value)}

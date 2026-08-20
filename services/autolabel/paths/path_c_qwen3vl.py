@@ -172,9 +172,6 @@ def apply_vlm(obj, res: VlmResult, onto: Ontology, vlm_tag: str):
     adjustment, and a path_c provenance proposal. Returns the mutated object."""
     from core.schemas import PathProposal
 
-    if res.attrs:
-        obj.attrs.update(res.attrs)
-
     verdict = "unsure"
     if res.class_name:
         if res.class_name == obj.class_name:
@@ -200,6 +197,17 @@ def apply_vlm(obj, res: VlmResult, onto: Ontology, vlm_tag: str):
                 obj.conf = max(obj.conf, 0.75)
             else:
                 verdict = "unsure"
+
+    # Attributes merge last, after any reclassification, because the class the object ENDS UP with is the
+    # one that decides which attributes belong on it. Merging first filtered a review-band sedan's reply
+    # against `four_wheeler` and then moved the object to `autorickshaw`, dropping the very attributes that
+    # class does carry. This is the last gate before they land, and it is what stops a signal state, a
+    # helmet array and a marking state arriving on a three-wheeler: 7,500 objects that are not signals
+    # carry a `signal_state` because nothing on this path had ever checked applicability against a class.
+    if res.attrs:
+        allowed = onto.attrs_for_class(obj.class_id)
+        obj.attrs.update({k: v for k, v in res.attrs.items()
+                          if allowed is None or k in allowed})
 
     # Record which provider served the verdict alongside the model tag, so a gate decision is traceable to
     # ollama vs groq (vs the escalate provider) and the two can be compared on the gold set.
@@ -246,11 +254,55 @@ class VlmVerifier:
         names = list(dict.fromkeys(ordered))  # dedup, preserve order
         return names[: self.settings.models.vlm.shortlist_size]
 
-    def _attr_schema(self) -> dict:
+    def _attr_schema(self, shortlist: list[str] | None = None) -> dict:
+        """The attributes to ask about, restricted to the ones the candidate classes can actually carry.
+
+        This used to hand the model every attribute in the ontology on every crop, which meant asking it for
+        a traffic signal's state, mounting and arrow, a truck's articulation and a rider's helmet while
+        looking at an autorickshaw. A model asked for a fact that cannot apply does not answer "not
+        applicable", it answers: 7,500 objects in this corpus that are not signals carry a `signal_state`,
+        and one autorickshaw carries signal_state, signal_kind, signal_mount, signal_arrow, marking_state,
+        articulated and helmet at once. None of those are observations, and all of them export.
+
+        Scoped to the union over the shortlist rather than to the current class alone, because the verdict is
+        allowed to reclassify and the attributes of the class it might move to are legitimately in question.
+        That union is wide for a class whose shortlist crosses superclasses, so this narrows the invitation
+        rather than closing it: for a three-wheeler it drops signal_state, signal_kind, signal_mount,
+        signal_arrow and marking_state, which is the set that produced the bad rows. `apply_vlm` filters
+        exactly, against the class the object actually ends up with, and is the guarantee.
+        """
+        # No shortlist means no basis to narrow, so every attribute is offered. An empty scope would ask the
+        # model about nothing at all, which is a silent way to stop filling attributes entirely.
+        if not shortlist:
+            return {name: {"type": a.type, **({"values": a.values} if a.values else {})}
+                    for name, a in self.onto.attributes.items()}
+        allowed: set[str] | None = set()
+        for name in shortlist:
+            if not self.onto.has_name(name):
+                continue
+            scope = self.onto.attrs_for_class(self.onto.by_name(name).id)
+            if scope is None:
+                allowed = None       # a class with no declared scope takes every attribute
+                break
+            allowed.update(scope)
         return {
             name: {"type": a.type, **({"values": a.values} if a.values else {})}
             for name, a in self.onto.attributes.items()
+            if allowed is None or name in allowed
         }
+
+    def _in_scope(self, attrs: dict, class_name: str | None) -> dict:
+        """Attributes that survive validation against the class the verdict settled on.
+
+        `validate_attrs` only applies its applicability check when it is given a class id, and every call on
+        this path omitted one. So a value was checked against its enum and never against whether the
+        attribute belongs on the object at all, which is the check that matters here.
+        """
+        if not attrs:
+            return {}
+        class_id = self.onto.by_name(class_name).id if class_name and self.onto.has_name(class_name) else None
+        return {k: v for k, v in attrs.items()
+                if k in self.onto.attributes and not self.onto.validate_attrs({k: v}, class_id)}
 
     def _validate(self, res: VlmResult) -> VlmResult:
         if res.class_name and not self.onto.has_name(res.class_name):
@@ -260,11 +312,8 @@ class VlmVerifier:
             # constrained backend cannot reach this line at all.
             log.warning("vlm.class_out_of_ontology", emitted=res.class_name[:64], provider=res.provider)
             res.class_name = None
-        if res.attrs:
-            res.attrs = {
-                k: v for k, v in res.attrs.items()
-                if k in self.onto.attributes and not self.onto.validate_attrs({k: v})
-            }
+        # Scoped to the class this verdict claims, not to no class at all.
+        res.attrs = self._in_scope(res.attrs, res.class_name)
         return res
 
     def _vote_plans(self, votes: int) -> list[tuple[float, float]]:
@@ -283,7 +332,7 @@ class VlmVerifier:
         votes = votes if votes is not None else self.settings.models.vlm.vote_count
         votes = max(1, votes)
         shortlist = self._shortlist(class_id)
-        schema = self._attr_schema()
+        schema = self._attr_schema(shortlist)
 
         results: list[VlmResult] = []
         for margin, temp in self._vote_plans(votes):
@@ -300,6 +349,9 @@ class VlmVerifier:
         for r in winners:
             for k, v in r.attrs.items():
                 merged_attrs.setdefault(k, v)
+        # Filtered again against the majority class: a vote that reclassified carries the attributes it
+        # answered for its own guess, and the merge above is across votes that may not agree on the class.
+        merged_attrs = self._in_scope(merged_attrs, majority)
         caption = next((r.caption for r in winners if r.caption), "")
         return VlmResult(
             class_name=majority, attrs=merged_attrs, caption=caption,

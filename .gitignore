@@ -8,6 +8,10 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 web/node_modules/
+# Bare rule too: vitest resolves its cache to the nearest node_modules from the cwd, so running it from the
+# repo root (rather than web/) created a root node_modules holding one results.json - which was committed
+# and then re-dirtied by every test run.
+node_modules/
 web/.next/
 *.pt
 # Released checkpoints are the exception, tracked through git-lfs so the repo stays small. Everything else

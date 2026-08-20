@@ -426,6 +426,13 @@ class PiiSettings(BaseModel):
     # fails loud rather than silently passing un-blurred plates into the object store. Set false only for
     # face-only corpora where plates are provably absent.
     plate_mandatory: bool = True
+    # The DB text detector that backs the "text" redaction target: the plate the plate detector missed.
+    # Empty means not installed, and the anonymizer then refuses the frame rather than passing it, because
+    # a privacy detector that quietly does nothing is worse than one that is absent.
+    text_weights: str = ""
+    text_url: str = ("https://github.com/opencv/opencv_extra/raw/master/testdata/dnn/"
+                     "onnx/models/DB_TD500_resnet50.onnx")
+    text_min_score: float = 0.3
     # Source for `make pii-models` to fetch a license-plate detector to plate_weights. Override with
     # LBX_PII__PLATE_URL if this mirror moves; an Ultralytics-loadable .pt is expected. Hugging Face now
     # requires a token even for public files, so run `HF_TOKEN=... make pii-models`.
@@ -433,6 +440,19 @@ class PiiSettings(BaseModel):
         "https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/main/"
         "license-plate-finetune-v1n.pt"
     )
+    # DPDPA gate v2: whether the export gate checks that a blur COVERED an annotated person or vehicle, as
+    # opposed to only checking that the frame carries an anonymization audit row at all.
+    #
+    #   off       - the pre-v2 verdict, audit-row existence only.
+    #   advisory  - the coverage gaps are computed and returned as warnings; `pass` is unchanged.
+    #   enforcing - they are a blocker.
+    #
+    # Ships as "advisory" deliberately. 82.4% of frames holding an annotated person have zero faces
+    # redacted, so flipping straight to enforcing would refuse most of the corpus, including exports that
+    # are legitimate today. The route to enforcing is to run the re-check over the corpus
+    # (POST /api/agent/reanalyze/all), watch the advisory count fall to zero, and then turn it on - which
+    # makes this a measurement first and a gate second, in that order.
+    coverage_gate: str = "advisory"      # off | advisory | enforcing
 
 
 class M9Settings(BaseModel):
@@ -636,6 +656,20 @@ class GovernSettings(BaseModel):
     # eval_strata.protected_slices"; set it to override per deployment. (Adds the field verdyx/run.py already
     # reads via getattr, so the pack default now flows through instead of a hardcoded fallback.)
     protected_slices: list[str] = Field(default_factory=list)
+    # Blind-audit capture-recapture (see services/verdyx/blind_audit.py).
+    #
+    # `blind_audit_required` refuses a promotion whose challenger run has no scored blind audit. It is OFF
+    # by default and that is deliberate rather than timid: there are no blind audits yet, one cannot exist
+    # until a person labels two hundred frames, and a gate that starts red on every promotion gets switched
+    # off permanently within a week. Until it is flipped, the gate says `unchecked` in its reasons on every
+    # promotion, so the gap is stated rather than silently passed. Flip it once the first audit is scored.
+    blind_audit_required: bool = False
+    # How far gold recall may exceed the recapture-estimated recall before the gold metrics are treated as
+    # untrustworthy. This one is ON by default because it can only fire when an audit actually exists, so it
+    # never blocks a deployment that has not opted in. It is the substantive check: every other floor in
+    # this gate is computed against the gold denominator, so if that denominator is inflated by more than
+    # this, the floors are measuring something that is not recall and the comparison should not be made.
+    recapture_max_overstatement: float = 0.15
 
 
 class RecallSettings(BaseModel):
@@ -681,6 +715,29 @@ class RateLimitSettings(BaseModel):
     """
 
     enabled: bool = True
+
+
+class CorsSettings(BaseModel):
+    """Which browser origins may call this API.
+
+    Was a hardcoded ["http://localhost:3000", "http://127.0.0.1:3000"] in services/api/main.py, so a real
+    deployment either had every browser call blocked or had the list patched in place on the host - which
+    is a source edit that no longer matches the repo and is invisible to anyone reading it.
+
+    The default keeps the two dev origins, so a laptop is unchanged. Set LBX_CORS__ORIGINS to a
+    comma-separated list for a deployment. `*` is accepted and deliberately not the default: this API is
+    credentialed, and an allow-all origin on a credentialed API is how a browser gets talked into making
+    authenticated requests on someone else's behalf.
+    """
+
+    # A comma-separated string rather than a list[str]: pydantic-settings JSON-decodes complex fields
+    # coming from the environment, so a list here would require LBX_CORS__ORIGINS to be valid JSON
+    # (["https://a"]) - a format nobody types correctly under a shell, and one that fails at boot with a
+    # JSONDecodeError rather than saying what it wanted.
+    origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    def origin_list(self) -> list[str]:
+        return [o.strip() for o in self.origins.split(",") if o.strip()]
 
 
 class AuthSettings(BaseModel):
@@ -973,6 +1030,7 @@ class Settings(BaseSettings):
     paths: PathsSettings = PathsSettings()
     phase4: Phase4Settings = Phase4Settings()  # Phase 4 closed loop + governance
     auth: AuthSettings = AuthSettings()        # deny-by-default API auth
+    cors: CorsSettings = CorsSettings()        # browser origins allowed to call this API
     ratelimit: RateLimitSettings = RateLimitSettings()   # per-caller budgets on the API
     integrations: IntegrationsSettings = IntegrationsSettings()   # outbound webhook safety
     lidar: LidarSettings = LidarSettings()     # 3D LiDAR module (ingestion, clean, viewer)
@@ -1044,6 +1102,18 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"legacy tokens accepted on a non-local deployment (env={self.env!r}); "
                 "set LBX_AUTH__ACCEPT_LEGACY_TOKENS=false (legacy tokens cannot expire or be revoked)")
+
+        # Plate redaction on a real deployment. `plate_mandatory` defaults True and could be turned off by
+        # an environment variable with nothing to stop it, which is a one-line change that makes every
+        # release attestation false: the proof says the frame passed the PII gate, and with this off the
+        # gate passes a frame it never redacted. Checked here rather than at the call site for the same
+        # reason the auth flags are: a control that only fails when somebody exercises the path is not a
+        # control on a deployment where nobody has exercised it yet.
+        if non_local and not self.pii.plate_mandatory:
+            raise ValueError(
+                f"plate redaction is not mandatory on a non-local deployment (env={self.env!r}); "
+                "set LBX_PII__PLATE_MANDATORY=true. A DPDPA release attestation asserts every frame "
+                "passed the PII gate, and with this off the gate passes frames it never redacted")
 
         weak = []
         if self.postgres.password == "labelox":

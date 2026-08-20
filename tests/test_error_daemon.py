@@ -13,6 +13,8 @@ from core.config import get_settings
 from core.storage import get_object_store
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -76,11 +78,12 @@ async def _seed_above_horizon_vehicle():
 
 @requires_infra
 def test_critic_detector_feeds_fix_queue():
+    from sqlalchemy import select
+
     from db.models import ErrorCandidate
     from db.session import get_sessionmaker
     from services.errordetect.critic_detector import detect_critic
     from services.errordetect.queue import run_detection
-    from sqlalchemy import select
 
     sid, oid = run_async(_seed_above_horizon_vehicle())
 

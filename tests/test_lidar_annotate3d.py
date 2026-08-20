@@ -14,6 +14,8 @@ import pytest
 from core.config import get_settings
 from services.lidar.boxes import cuboid_corners, iou_3d, project_cuboid, snap_to_ground
 
+pytestmark = pytest.mark.db
+
 W, H = 1280, 960
 
 
@@ -94,12 +96,11 @@ async def _seed_cloud() -> tuple[uuid.UUID, int]:
 
 @requires_infra
 def test_cuboid_crud_ground_snap_and_locking():
+    from _authutil import auth_headers
     from fastapi.testclient import TestClient
 
     from services.api.main import app
     from services.autolabel.ontology import get_ontology
-
-    from _authutil import auth_headers
 
     _clear()
     cloud_id, _ = asyncio.run(_seed_cloud())

@@ -60,7 +60,7 @@ export default function PiiAccessPage() {
               </button>
             ))}
           </div>
-          <span className="text-ink-4">|</span>
+          <span className="text-ink-3">|</span>
           {["", "view", "read_plate", "download", "export"].map((a) => (
             <button key={a || "all"} onClick={() => setAction(a)}
               className={`px-2 py-0.5 border ${

@@ -45,10 +45,17 @@ def change_record(obj: Object) -> dict:
 
 
 async def record_batch(db: AsyncSession, changes: dict[str, dict], *, policy: dict | None = None,
-                       created_by: str | None = None) -> str | None:
+                       created_by: str | None = None, commit: bool = True) -> str | None:
     """Tie an applied batch together so it can be taken back. Returns the run id, or None for an empty batch.
 
     Stamps each object with the run id, which is what the revert checks ownership against.
+
+    `commit=False` lets the caller land the stamp in the same transaction as the edit it describes. That is
+    the correct way to use this: the review router used to commit the edits and only then call this, on the
+    reasoning that a failed edit must not leave a run claiming objects it never changed - true, but it
+    bought that by opening a window where the process could die between the two and leave the batch
+    permanently un-revertible, because revert_batch keys ownership on precisely this stamp. One transaction
+    satisfies both: a failed edit rolls the stamp back with it, and a committed edit is always revertible.
     """
     if not changes:
         return None
@@ -64,7 +71,8 @@ async def record_batch(db: AsyncSession, changes: dict[str, dict], *, policy: di
     db.add(AgentRun(run_id=run_id, kind=KIND, scope={}, status="committed",
                     policy=policy or {}, counts={"objects": len(changes)},
                     changes=changes, critic={}, created_by=created_by or "review"))
-    await db.commit()
+    if commit:
+        await db.commit()
     log.info("review_batch.recorded", run_id=str(run_id), objects=len(changes))
     return str(run_id)
 

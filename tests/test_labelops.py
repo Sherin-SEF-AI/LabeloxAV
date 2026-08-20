@@ -13,6 +13,8 @@ import pytest
 from core.config import get_settings
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -288,3 +290,103 @@ def test_scorecards_report_throughput_and_quality():
             await _teardown(sid)
 
     run_async(run())
+
+
+@pytest.mark.db
+async def test_an_annotator_can_find_the_issues_raised_about_their_own_work():
+    """The dimension issues could not be queried on.
+
+    Every filter was a way of asking what is wrong with a given frame, job or object. None of them let the
+    person who drew the label ask what had been said about it, which is why issues read as write-only from
+    the side they are addressed to: a reviewer files one, the reviewer rota is notified, and the annotator
+    finds out when the job comes back, if at all.
+    """
+    import uuid as _uuid
+
+    from db.models import Frame, Object, User
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.labelops import issues as issue_svc
+
+    maker = get_sessionmaker()
+    mine, theirs = _uuid.uuid4(), _uuid.uuid4()
+    async with maker() as db:
+        for uid, name in ((mine, "mine"), (theirs, "theirs")):
+            db.add(User(user_id=uid, name=f"issue-{name}-{uid.hex[:6]}", role="annotator"))
+        sess = DbSession(session_id=_uuid.uuid4(), vehicle_id="ISS-01", start_ts_ns=0, end_ts_ns=1,
+                         ontology_version="test")
+        db.add(sess)
+        fid = _uuid.uuid4()
+        db.add(Frame(frame_id=fid, session_id=sess.session_id, ts_ns=1, cam_id="cam_f",
+                     img_uri="s3://x/y.jpg", width=640, height=480))
+        await db.flush()
+        my_obj, their_obj = _uuid.uuid4(), _uuid.uuid4()
+        db.add(Object(object_id=my_obj, frame_id=fid, class_id=1, bbox=[1, 1, 9, 9], conf=0.5,
+                      source="human", state="accepted", annotator_id=mine))
+        db.add(Object(object_id=their_obj, frame_id=fid, class_id=1, bbox=[2, 2, 8, 8], conf=0.5,
+                      source="human", state="accepted", annotator_id=theirs))
+        await db.commit()
+
+        await issue_svc.create_issue(db, kind="wrong_class", body="this one is mine",
+                                     object_id=str(my_obj), frame_id=str(fid))
+        await issue_svc.create_issue(db, kind="wrong_class", body="this one is not",
+                                     object_id=str(their_obj), frame_id=str(fid))
+
+        for_me = {i["object_id"] for i in await issue_svc.list_issues(db, about_user=str(mine))}
+        assert str(my_obj) in for_me
+        assert str(their_obj) not in for_me, (
+            "the filter returned somebody else's feedback, which is worse than returning none")
+
+        # Unfiltered still returns both, so the filter narrows rather than replacing the existing queries.
+        both = {i["object_id"] for i in await issue_svc.list_issues(db, frame_id=str(fid))}
+        assert {str(my_obj), str(their_obj)} <= both
+
+
+@pytest.mark.db
+async def test_the_annotator_whose_label_it_is_gets_told():
+    """The rota notification does not reach the person the feedback is about.
+
+    issue_opened is addressed to the reviewer ROLE, for a stated and good reason: who picks an issue up is
+    a duty rota, not a property of the issue. The consequence was that the annotator who drew the label -
+    the one participant the feedback is actually for - was the only one never told, and found out when the
+    job came back, if at all. That is the slowest possible correction loop.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from db.models import Frame, Notification, Object, User
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.labelops import issues as issue_svc
+
+    maker = get_sessionmaker()
+    drew_it, reviewer = _uuid.uuid4(), _uuid.uuid4()
+    async with maker() as db:
+        db.add(User(user_id=drew_it, name=f"drew-{drew_it.hex[:6]}", role="annotator"))
+        db.add(User(user_id=reviewer, name=f"rev-{reviewer.hex[:6]}", role="reviewer"))
+        sess = DbSession(session_id=_uuid.uuid4(), vehicle_id="ISS-02", start_ts_ns=0, end_ts_ns=1,
+                         ontology_version="test")
+        db.add(sess)
+        fid, oid = _uuid.uuid4(), _uuid.uuid4()
+        db.add(Frame(frame_id=fid, session_id=sess.session_id, ts_ns=1, cam_id="cam_f",
+                     img_uri="s3://x/y.jpg", width=640, height=480))
+        await db.flush()
+        db.add(Object(object_id=oid, frame_id=fid, class_id=1, bbox=[1, 1, 9, 9], conf=0.5,
+                      source="human", state="accepted", annotator_id=drew_it))
+        await db.commit()
+
+        await issue_svc.create_issue(db, kind="wrong_class", body="that is a scooter",
+                                     object_id=str(oid), frame_id=str(fid),
+                                     created_by=str(reviewer))
+
+        addressed = (await db.execute(
+            select(Notification).where(Notification.user_id == drew_it))).scalars().all()
+        assert addressed, "the annotator whose label it is was not told"
+        assert any(n.kind == "issue_opened" for n in addressed)
+
+        # The rota notification is still emitted; this adds a recipient rather than redirecting the issue.
+        to_role = (await db.execute(
+            select(Notification).where(Notification.kind == "issue_opened",
+                                       Notification.role == "reviewer"))).scalars().all()
+        assert to_role, "the reviewer rota stopped being notified"

@@ -3,6 +3,7 @@ active-learning training signal) and updates the object with source=human."""
 
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -119,13 +120,18 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
                       before=before, after={"class_id": obj.class_id, "bbox": list(obj.bbox), "attrs": dict(obj.attrs or {}), "state": obj.state},
                       time_spent_ms=per_item_ms, ts_ns=now_ns()))
         n += 1
-    await db.commit()
-
-    # One reversible unit for the whole batch. Recorded after the commit so a failed edit cannot leave a run
-    # claiming objects it never changed.
-    run_id = await record_batch(db, batch_changes, created_by=reviewer,
+    # One reversible unit for the whole batch, stamped in the SAME transaction as the edits it describes.
+    #
+    # This used to commit the edits first and stamp afterwards, so that a failed edit could not leave a run
+    # claiming objects it never changed. That reasoning is right and the ordering was the wrong way to get
+    # it: dying between the two commits left sixty objects changed and no run id on them, and revert_batch
+    # keys ownership on that stamp - so the batch was silently un-revertible, which is the one thing this
+    # machinery exists to prevent. In one transaction a failed edit takes the stamp down with it, and
+    # anything that commits is always revertible.
+    run_id = await record_batch(db, batch_changes, created_by=reviewer, commit=False,
                                 policy={"action": payload.action, "class_name": payload.class_name,
                                         "attrs": payload.attrs or {}}) if batch_changes else None
+    await db.commit()
 
     # One activity entry for the batch, not one per object: the feed is a human timeline and sixty identical
     # rows is not a record of what somebody did, it is noise that buries everything either side of it.
@@ -203,11 +209,21 @@ async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = D
     if payload.cuboid_3d is not None:
         obj.cuboid_3d = payload.cuboid_3d
     if payload.mask_polygons is not None:
-        # Write the mask blob in the same request so geometry + mask persist atomically (one transaction),
-        # instead of a separate updateMask call that can leave them out of sync on a partial failure.
+        # Geometry and mask are written in one request rather than through a separate updateMask call, so
+        # a client cannot leave them out of sync by making only one of two calls.
+        #
+        # Not a transaction, and the comment here used to say it was. Object storage does not enlist in the
+        # database's transaction and cannot be made to, so if the commit below fails the blob has already
+        # been written. What makes that harmless is the key: it is deterministic in (session, frame,
+        # object), so nothing references the orphan - obj.mask_uri was rolled back with everything else -
+        # and the next successful save of this object overwrites it in place. The failure mode is a stale
+        # blob at a key that will be reused, not a mask attached to the wrong object.
         frame = await db.get(Frame, obj.frame_id)
-        obj.mask_uri = _write_mask(get_object_store(), frame.session_id, frame.frame_id, obj.object_id,
-                                   payload.mask_polygons, frame.width, frame.height)
+        # The PUT is a network round trip; it was running on the event loop.
+        mask_uri = await asyncio.to_thread(
+            _write_mask, get_object_store(), frame.session_id, frame.frame_id, obj.object_id,
+            payload.mask_polygons, frame.width, frame.height)
+        obj.mask_uri = mask_uri
         obj.mask_encoding = "polygon"
 
     # The state depends on the caller's role, not only on the verb. An annotator's accept is a submission,

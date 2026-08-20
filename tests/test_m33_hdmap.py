@@ -17,6 +17,8 @@ from services.hdmap.elevation import elevation_at, ransac_ground_plane
 from services.hdmap.export import parse_wkt, seal_map_commit_id, to_lanelet2_osm, to_opendrive
 from services.hdmap.georef import ipm_pixel_to_vehicle, vehicle_to_world
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:

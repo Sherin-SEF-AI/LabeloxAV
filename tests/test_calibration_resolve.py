@@ -8,6 +8,7 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
+import pytest
 
 from services.calibration.resolve import (
     SOURCE_QUALITY,
@@ -16,6 +17,8 @@ from services.calibration.resolve import (
     nominal_calibration,
     resolve_calibration,
 )
+
+pytestmark = pytest.mark.db
 
 W, H = 1920, 1080
 

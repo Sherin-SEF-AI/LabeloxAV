@@ -14,6 +14,8 @@ from core.config import get_settings
 from core.storage import get_object_store
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -89,11 +91,12 @@ async def _seed_two_cam():
 
 @requires_infra
 def test_crosscam_commit_and_revert():
+    from sqlalchemy import select
+
     from db.models import Object
     from db.session import get_sessionmaker
     from services.agent.crosscam_agent import commit_cross_camera, plan_cross_camera
     from services.agent.runs import revert_run
-    from sqlalchemy import select
 
     oid, cam_rt_frame = run_async(_seed_two_cam())
 

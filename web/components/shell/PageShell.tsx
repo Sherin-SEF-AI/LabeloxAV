@@ -29,6 +29,10 @@ export default function PageShell({ active, title, subtitle, right, primaryActio
     <div className="h-[100dvh] flex flex-col min-h-0">
       {/* The header crumb only appears when the page has no title bar of its own, so the location is never
           spelled out twice in two different styles directly above itself. */}
+            {/* First in the tab order, hidden until focused. Every page here puts a menu bar, a
+          header and often a filter band before the content, and a keyboard user should not have
+          to walk all of it to reach what they came for. */}
+      <a href="#content" className="skip-link">skip to content</a>
       <TopNav active={active} right={right} showCrumb={!showBar} />
       {/* The breadcrumb trail: history-aware back + the path to here, on every wrapped page. */}
       <div className="flex items-center px-4 py-1.5 border-b hairline shrink-0 overflow-x-auto no-scrollbar">
@@ -40,7 +44,7 @@ export default function PageShell({ active, title, subtitle, right, primaryActio
           {filters}
         </div>
       )}
-      <main className="flex-1 min-h-0 overflow-auto">{children}</main>
+      <main id="content" className="flex-1 min-h-0 overflow-auto">{children}</main>
     </div>
   );
 }

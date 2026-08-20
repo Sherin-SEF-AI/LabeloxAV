@@ -26,6 +26,10 @@ log = get_logger("activity")
 # so keeping the list explicit is what stops the feed becoming a wall of raw identifiers.
 VERBS = {
     "signed_in": "signed in",
+    # Credential events. These name an admin acting on someone else's account, which is why they read as
+    # "for <name>" in the summary rather than as something the subject did.
+    "reissued_token": "re-issued a token",
+    "revoked_tokens": "revoked tokens",
     "reviewed": "reviewed an object",
     "confirmed": "confirmed an object",
     "rejected": "rejected an object",

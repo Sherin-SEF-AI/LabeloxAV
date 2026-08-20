@@ -8,6 +8,10 @@ import ActivityLog from "@/components/agent/ActivityLog";
 import InterruptedRuns from "@/components/agent/InterruptedRuns";
 import JobWatcher from "@/components/agent/JobWatcher";
 import ContaminationPanel from "@/components/agent/ContaminationPanel";
+import Inspector from "@/components/shell/Inspector";
+import EvidencePanel, { type EvidenceSubject } from "@/components/inspect/EvidencePanel";
+import LineageObjects from "@/components/inspect/LineageObjects";
+import ActionResultPanel, { type ActionResult } from "@/components/inspect/ActionResultPanel";
 import { describeFailure } from "@/lib/actionError";
 import { type ActivityLog as Log, emptyLog, record } from "@/lib/activityLog";
 import { Spinner } from "@/components/Spinner";
@@ -22,12 +26,39 @@ const KIND_LABEL: Record<string, string> = {
   critic_flag: "consistency", near_dup_inconsistent: "near-dup", policy_violation: "policy",
   track_inconsistent: "track flip", cross_cam_inconsistent: "cross-cam", embedding_outlier: "outlier",
   confident_learning: "confident-wrong",
+  // Was missing, so every one of these rendered as the raw slug. It is also the kind that dominates the
+  // queue, because the error sweep never clears it (services/errordetect/queue.py scopes its delete by
+  // the kinds it was asked to run, and this is not one of them).
+  vlm_confusion: "vlm disagrees",
+  // The bulk of this queue and it rendered as a raw slug. Its claim ("another box covers the same object
+  // with higher confidence") is the reason the panel draws the frame's other boxes: one box cannot show
+  // a duplicate.
+  reanalyze: "re-check",
 };
 
 export default function AgentConsole() {
   const router = useRouter();
   const [queue, setQueue] = useState<Cand[]>([]);
   const [summary, setSummary] = useState<Record<string, number>>({});
+  // Which row the evidence panel is showing, and which row the keyboard is on. One index rather than an
+  // id: the queue is ordered worst-first and acting on a row removes it, so the cursor has to be able to
+  // stay put and pick up whatever moved into that position.
+  const [cursor, setCursor] = useState(-1);
+  const [subject, setSubject] = useState<EvidenceSubject | null>(null);
+  // The rail serves two tables. A lineage is a set rather than one object, so it shows the set first and
+  // the evidence for whichever member is picked; a fix-queue row goes straight to the evidence.
+  const [lineage, setLineage] = useState<{ from_name: string; to_name: string } | null>(null);
+  // The last action's full payload. Every handler used to report through setMsg alone, which is a summary
+  // written into a transcript at the bottom of a long page: out of sight from the button, and lossy at the
+  // point of rendering. The transcript stays, because a running record of what was done is worth having;
+  // this is the result itself, beside the button that asked for it.
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const showResult = useCallback((kind: string, label: string, data: unknown,
+                                  destination?: { href: string; label: string }) => {
+    setResult({ kind, label, data, at: Date.now(), destination });
+    setSubject(null);
+    setLineage(null);
+  }, []);
   const [busy, setBusy] = useState<string | null>(null);
   // The transcript replaces a single shared message string. `setMsg` is kept as the name every call site
   // already uses and now appends an entry instead of overwriting one, so a background result landing minutes
@@ -59,6 +90,7 @@ export default function AgentConsole() {
     setBusy("audit"); setMsg(null);
     try {
       const r = await api.agentAuditRun({ sample_size: 200, vlm_calls: 60 });
+      showResult("audit", "overnight audit", r);
       setMsg("overnight audit running in the background - sampling auto-accepts, VLM + critic spot-checks");
       const poll = async (n: number) => {
         const a = await api.agentAuditLatest(); setAudit(a);
@@ -74,6 +106,7 @@ export default function AgentConsole() {
     setBusy("sweep"); setMsg(null);
     try {
       const r = await api.agentErrorSweep(8);
+      showResult("sweep", "error sweep", r);
       setMsg("error sweep running in the background: the fix queue refreshes as sessions complete");
       // poll a couple of times for results
       setTimeout(load, 6000); setTimeout(load, 15000);
@@ -88,6 +121,7 @@ export default function AgentConsole() {
     setBusy("relabel"); setMsg(null); setRelabel(null); setRelabelDone(false);
     try {
       const r = await api.agentRelabelAll({ max_frames: 300 });
+      showResult("relabel", "relabel the corpus", r);
       setMsg("relabel running across the corpus: an independent model is re-reading every box");
       // poll progress until the background run reports committed
       const poll = async (n: number) => {
@@ -108,13 +142,17 @@ export default function AgentConsole() {
     try {
       const r = await api.estimateEgoMasks();
       setMsg(`ego-hood masks: ${r.with_hood}/${r.cameras} cameras have a detected hood${r.no_hood.length ? ` (no hood: ${r.no_hood.slice(0, 4).join(", ")})` : ""}`);
+      // The line truncates no_hood at four cameras. Which cameras have no detected hood is the actionable
+      // part, so the panel gets all of them.
+      showResult("ego", "estimate ego-hood masks", r);
     } catch (e) { failed("ego-mask estimation", e); }
     finally { setBusy(null); }
   };
   const backfillPii = async () => {
     setBusy("pii"); setMsg(null);
     try {
-      await api.piiBackfill(2000);
+      const r = await api.piiBackfill(2000);
+      showResult("pii", "PII backfill", r);
       setMsg("PII backfill running in the background: blurring faces/plates on pre-gate frames, overwriting the stored image in place");
     } catch (e) { failed("PII backfill", e); }
     finally { setBusy(null); }
@@ -123,6 +161,7 @@ export default function AgentConsole() {
     setBusy("redetect"); setMsg(null);
     try {
       const r = await api.redetectAll(true);
+      showResult("redetect", "full re-detection", r);
       setMsg(`full re-detection started (run ${r.run_id.slice(0, 8)}): PII backfill, then re-run every session with thing/stuff + ego-hood + de-dup + oversize gates, one at a time on the GPU`);
     } catch (e) { failed("re-detection", e); }
     finally { setBusy(null); }
@@ -132,6 +171,7 @@ export default function AgentConsole() {
     setBusy("repair"); setMsg(null);
     try {
       const p = await api.agentTemporalRepairPlan();
+      showResult("repair", "temporal repair plan", p);
       if (!p.counts.relabels) { setMsg(`no safe track-flip relabels (scanned ${p.counts.tracks} tracks, ${p.counts.flipped_tracks} flipped, ${p.counts.skipped_static ?? 0} corrupt)`); return; }
       const r = await api.agentTemporalRepair();
       setMsg(`temporal auto-repair: relabeled ${r.relabeled} outliers to their track majority (reversible, run ${r.run_id.slice(0, 8)})`);
@@ -160,21 +200,40 @@ export default function AgentConsole() {
   const mine = async (what: "scenarios" | "disagreements") => {
     setBusy(what); setMsg(null);
     try {
-      if (what === "scenarios") { const r = await api.agentMineScenarios(); setMsg(`mined ${r.persisted} safety scenarios (${Object.entries(r.by_kind).map(([k, n]) => `${k}:${n}`).join(", ") || "none"}) ,  see Scenarios`); }
-      else { const r = await api.agentMineDisagreements(); setMsg(`mined ${r.persisted} model-disagreement frames${r.top[0] ? ` (top: ${r.top[0].tag})` : ""} ,  see Scenarios`); }
+      if (what === "scenarios") {
+        const r = await api.agentMineScenarios();
+        setMsg(`mined ${r.persisted} safety scenarios (${Object.entries(r.by_kind).map(([k, n]) => `${k}:${n}`).join(", ") || "none"})`);
+        showResult("scenarios", "mine safety scenarios", r,
+          { href: "/scenarios", label: `open the ${r.persisted} scenarios` });
+      } else {
+        const r = await api.agentMineDisagreements();
+        setMsg(`mined ${r.persisted} model-disagreement frames${r.top[0] ? ` (top: ${r.top[0].tag})` : ""}`);
+        showResult("disagreements", "mine disagreements", r,
+          { href: "/scenarios", label: `open the ${r.persisted} disagreement frames` });
+      }
     } catch (e) { failed("mine", e); }
     finally { setBusy(null); }
   };
   const coverage = async () => {
     setBusy("coverage"); setMsg(null);
-    try { const r = await api.agentCoverage(); setGaps(r.gaps); }
+    try {
+      const r = await api.agentCoverage();
+      setGaps(r.gaps);
+      // The card keeps its ten-gap preview; the panel gets class balance, per-axis scene coverage and the
+      // geo histogram, which the page returned and never drew.
+      showResult("coverage", "coverage report", r);
+    }
     catch (e) { failed("coverage", e); }
     finally { setBusy(null); }
   };
 
   const cycle = async () => {
     setBusy("cycle"); setMsg(null);
-    try { const r = await api.agentTrainingCycle(true); setMsg(`flywheel cycle (dry-run): would auto-accept ${r.tick.auto_accept}, review ${r.tick.review}, annotate ${r.tick.annotate} across ${r.tick.frames} top-value frames`); }
+    try {
+      const r = await api.agentTrainingCycle(true);
+      setMsg(`flywheel cycle (dry-run): would auto-accept ${r.tick.auto_accept}, review ${r.tick.review}, annotate ${r.tick.annotate} across ${r.tick.frames} top-value frames`);
+      showResult("cycle", "flywheel cycle (dry-run)", r);
+    }
     catch (e) { failed("cycle", e); }
     finally { setBusy(null); }
   };
@@ -182,6 +241,7 @@ export default function AgentConsole() {
     setBusy("drift"); setMsg(null);
     try {
       const r = await api.agentGoldDrift();
+      showResult("drift", "gold-drift check", r);
       setMsg(r.status === "rolled_back" ? `GOLD DRIFT: champion regressed ${r.baseline_map}→${r.current_map}, rolled back + paused loop`
         : r.status === "healthy" ? `champion healthy on gold (${r.current_map} vs baseline ${r.baseline_map})`
         : r.status === "cannot_evaluate" ? `champion ${r.champion} (baseline mAP ${r.baseline_map}), gold set not materialized here`
@@ -190,10 +250,65 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
-  const act = async (c: Cand, kind: "confirm" | "dismiss") => {
+  // Memoised because the keyboard effect depends on it: recreated every render, the listener would be
+  // torn down and rebound on every keystroke that changed any state on this page.
+  const act = useCallback(async (c: Cand, kind: "confirm" | "dismiss") => {
     try { await (kind === "confirm" ? api.errorConfirm(c.candidate_id) : api.errorDismiss(c.candidate_id)); load(); }
     catch (e) { failed(kind === "confirm" ? "confirm" : "dismiss", e); }
-  };
+  }, [load, failed]);
+
+  // Declared before `open`, which reads it: a const arrow is in the temporal dead zone until its line
+  // runs, and a useCallback dependency array is evaluated during render.
+  const reason = useCallback((c: Cand) => (c.detail?.reason as string) || (c.detail?.reasons ? (c.detail.reasons as string[]).join("; ") : (c.detail?.note as string) || JSON.stringify(c.detail).slice(0, 80)), []);
+
+  // A row and the panel are the same selection; opening one sets the other. The reason text is the row's
+  // own words, so the panel shows exactly what the table was showing plus the thing it was not: the object.
+  const open = useCallback((c: Cand, i: number) => {
+    setCursor(i);
+    setLineage(null);
+    setSubject({
+      objectId: c.object_id,
+      suggestion: c.proposed_label?.class_name
+        ? { class_id: 0, class_name: c.proposed_label.class_name } : null,
+      text: reason(c), kind: KIND_LABEL[c.kind] || c.kind, score: c.score, detail: c.detail,
+    });
+  }, [reason]);
+
+  // j/k rather than arrows, matching the triage page: arrows scroll the panel, and this list is long
+  // enough that a reviewer wants both. e.repeat is refused because a held key would otherwise stack
+  // verdicts on rows nobody looked at, which is the failure the review grid already guards against.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!queue.length) return;
+      if (e.key === "j" || e.key === "k") {
+        e.preventDefault();
+        const next = e.key === "j"
+          ? Math.min(cursor + 1, queue.length - 1)
+          : Math.max(cursor - 1, 0);
+        open(queue[next], next);
+      } else if (e.key === "Escape") {
+        setSubject(null); setCursor(-1);
+      } else if ((e.key === "c" || e.key === "d") && cursor >= 0 && queue[cursor]) {
+        e.preventDefault();
+        void act(queue[cursor], e.key === "c" ? "confirm" : "dismiss");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [queue, cursor, open, act]);
+
+  // After a row leaves the queue, hold the position rather than the row: the next-worst candidate slides
+  // into it and that is the one a reviewer wants next. Clamped, so acting on the last row lands on the
+  // new last row instead of nothing.
+  useEffect(() => {
+    if (cursor < 0) return;
+    if (!queue.length) { setSubject(null); setCursor(-1); return; }
+    const at = Math.min(cursor, queue.length - 1);
+    if (!subject || queue[at]?.object_id !== subject.objectId) open(queue[at], at);
+  }, [queue]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const [driftDiag, setDriftDiag] = useState<{ report: { hypothesis: string; proposed_action: { kind: string } } | null } | null>(null);
   useEffect(() => { api.agentDriftLatest().then(setDriftDiag).catch(() => {}); }, []);
@@ -201,9 +316,15 @@ export default function AgentConsole() {
     setBusy("driftinv"); setMsg(null);
     try {
       const r = await api.agentDriftInvestigate();
+      showResult("driftinv", "drift investigation", r);
       if (!r.breached.length) { setMsg("no drift breach right now - governance is holding within tolerance"); return; }
       setMsg(`drift breach (${r.breached.join(", ")}) - investigating root cause in the background`);
-      setTimeout(() => api.agentDriftLatest().then(setDriftDiag).catch(() => {}), 4000);
+      // The diagnosis arrives after the investigation runs, so replace the panel with it rather than
+      // leaving the panel showing the request that started it.
+      setTimeout(() => api.agentDriftLatest().then((d) => {
+        setDriftDiag(d);
+        showResult("driftinv", "drift diagnosis", d);
+      }).catch(() => {}), 4000);
     } catch (e) { failed("drift investigation", e); }
     finally { setBusy(null); }
   };
@@ -224,7 +345,12 @@ export default function AgentConsole() {
   useEffect(() => { loadProps(); }, [loadProps]);
   const scanOntology = async () => {
     setBusy("ontscan"); setMsg(null);
-    try { const r = await api.agentOntologyScan(40); setMsg(`scanned ${r.scanned} fallbacks -> ${r.proposals} promotion proposals`); await loadProps(); }
+    try {
+      const r = await api.agentOntologyScan(40);
+      showResult("ontscan", "scan for ontology gaps", r);
+      setMsg(`scanned ${r.scanned} fallbacks -> ${r.proposals} promotion proposals`);
+      await loadProps();
+    }
     catch (e) { failed("ontology scan", e); }
     finally { setBusy(null); }
   };
@@ -234,7 +360,9 @@ export default function AgentConsole() {
       if (action === "approve") {
         const nm = (names[id] || props.find((p) => p.proposal_id === id)?.suggested_name || "").trim();
         if (!nm) { setMsg("give the new class a name first"); return; }
-        const r = await api.agentOntologyApprove(id, nm); setMsg(`minted ${r.name} (#${r.class_id}), relabeled ${r.relabeled} - reversible run ${r.run_id.slice(0, 8)}`);
+        const r = await api.agentOntologyApprove(id, nm);
+        showResult("ontology", `mint ${nm}`, r);
+        setMsg(`minted ${r.name} (#${r.class_id}), relabeled ${r.relabeled} - reversible run ${r.run_id.slice(0, 8)}`);
       } else { await api.agentOntologyReject(id); setMsg("proposal rejected"); }
       await loadProps();
     } catch (e) { failed("decision", e); }
@@ -246,7 +374,12 @@ export default function AgentConsole() {
   useEffect(() => { loadOrders(); }, [loadOrders]);
   const planFleet = async () => {
     setBusy("fleet"); setMsg(null);
-    try { const r = await api.agentFleetPlan(); setMsg(`fused ${r.gaps} gaps + ${r.vehicles} vehicles -> ${r.orders} collection orders`); await loadOrders(); }
+    try {
+      const r = await api.agentFleetPlan();
+      showResult("fleet", "plan fleet collection", r);
+      setMsg(`fused ${r.gaps} gaps + ${r.vehicles} vehicles -> ${r.orders} collection orders`);
+      await loadOrders();
+    }
     catch (e) { failed("fleet plan", e); }
     finally { setBusy(null); }
   };
@@ -277,11 +410,10 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
-  const reason = (c: Cand) => (c.detail?.reason as string) || (c.detail?.reasons ? (c.detail.reasons as string[]).join("; ") : (c.detail?.note as string) || JSON.stringify(c.detail).slice(0, 80));
-
   return (
     <PageShell active="AGENT" subtitle="CONSOLE" right={loading ? <Spinner label="loading" /> : <span className="font-mono text-xs text-ink-3">{queue.length} in fix queue</span>}>
-      <div className="h-full overflow-auto">
+      <div className="flex h-full min-h-0">
+        <div className="flex-1 min-w-0 overflow-auto">
         <div className="max-w-5xl mx-auto p-6 space-y-5">
           <div>
             <h1 className="text-xl text-ink font-semibold">Agent Console</h1>
@@ -552,7 +684,9 @@ export default function AgentConsole() {
 
           {/* What a past relabel run did, grouped by the decision rather than by the object. Fifty
               thousand individual rewrites are not reviewable; the hundred decisions behind them are. */}
-          <ContaminationPanel />
+          <ContaminationPanel
+            onInspect={(l) => { setLineage(l); setSubject(null); setCursor(-1); }}
+            inspecting={lineage ? `${lineage.from_name}->${lineage.to_name}` : null} />
 
           {/* Fix queue */}
           <div className="panel">
@@ -567,22 +701,78 @@ export default function AgentConsole() {
                   <tr><th className="text-left font-normal px-3 py-2 w-28">kind</th><th className="text-left font-normal px-3 py-2 w-16">score</th><th className="text-left font-normal px-3 py-2">why</th><th className="px-3 py-2 w-40"></th></tr>
                 </thead>
                 <tbody>
-                  {queue.map((c) => (
-                    <tr key={c.candidate_id} className="border-b hairline hover:bg-bg-2">
+                  {queue.map((c, i) => (
+                    <tr key={c.candidate_id} onClick={() => open(c, i)}
+                      title="show the object this is about"
+                      className={`border-b hairline cursor-pointer ${i === cursor ? "bg-accent/10" : "hover:bg-bg-2"}`}>
                       <td className="px-3 py-2"><span className="font-mono text-[10px] border border-line px-1.5 py-0.5 rounded text-ink-2">{KIND_LABEL[c.kind] || c.kind}</span></td>
                       <td className="px-3 py-2 font-mono text-ink-3">{c.score.toFixed(2)}</td>
                       <td className="px-3 py-2 text-ink-2 text-xs">{reason(c)}{c.proposed_label?.class_name ? <span className="text-pass"> → {c.proposed_label.class_name}</span> : null}</td>
                       <td className="px-3 py-2 text-right font-mono text-[10px]">
-                        <button onClick={() => act(c, "confirm")} className="border border-pass text-pass px-1.5 py-0.5 rounded mr-1">confirm</button>
-                        <button onClick={() => act(c, "dismiss")} className="border border-line text-ink-3 px-1.5 py-0.5 rounded hover:text-ink">dismiss</button>
+                        {/* stopPropagation: acting on a row must not also re-open it, which would refetch
+                            the object that just left the queue. */}
+                        <button onClick={(e) => { e.stopPropagation(); act(c, "confirm"); }} className="border border-pass text-pass px-1.5 py-0.5 rounded mr-1">confirm</button>
+                        <button onClick={(e) => { e.stopPropagation(); act(c, "dismiss"); }} className="border border-line text-ink-3 px-1.5 py-0.5 rounded hover:text-ink">dismiss</button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             ) : <div className="px-4 py-10 text-center text-ink-3 text-sm">Fix queue is empty. Run an error sweep to scan the corpus.</div>}
+            {queue.length > 0 && (
+              <div className="border-t hairline px-4 py-1.5 font-mono text-[10px] text-ink-3">
+                <span className="text-ink-2">j</span>/<span className="text-ink-2">k</span> move
+                <span className="mx-2">·</span>
+                <span className="text-pass">c</span> confirm
+                <span className="mx-2">·</span>
+                <span className="text-block">d</span> dismiss
+                <span className="mx-2">·</span>
+                <span className="text-ink-2">esc</span> close
+              </div>
+            )}
           </div>
         </div>
+        </div>
+        {/* One rail, three things it can be showing: the result of the last action, the objects behind a
+            lineage, or the evidence for one object. They are exclusive because they answer the same
+            question - "what is this about" - and stacking them would bury whichever you asked for last. */}
+        <Inspector title={result ? "result" : lineage ? "lineage" : "evidence"} side="right" width="w-[26rem]"
+          meta={result ? undefined : lineage ? undefined
+            : (cursor >= 0 && queue.length ? `${cursor + 1}/${queue.length}` : undefined)}>
+          {result ? (
+            <ActionResultPanel result={result}
+              onOpenObject={(id) => { setResult(null); setSubject({ objectId: id }); }}
+              onOpenFrame={(id) => router.push(`/frame/${id}`)} />
+          ) : (<>
+          {lineage && (
+            <div className="border-b hairline">
+              <LineageObjects fromName={lineage.from_name} toName={lineage.to_name}
+                selectedId={subject?.objectId ?? null}
+                onPick={(objectId) => setSubject({
+                  objectId,
+                  text: `Moved by a past relabel run: ${lineage.from_name} -> ${lineage.to_name}.`,
+                  kind: "relabel lineage",
+                  // No suggestion button here. Reverting the whole lineage is the row's own action and
+                  // is a bulk decision; offering a per-object relabel beside it would be two ways to
+                  // undo the same thing that do not agree on scope.
+                  suggestion: null,
+                })} />
+            </div>
+          )}
+          <EvidencePanel
+            subject={subject}
+            onResolved={() => load()}
+            actions={cursor >= 0 && queue[cursor] ? [
+              { key: "confirm", label: "confirm", tone: "accept" as const,
+                hint: "the label is wrong; apply the proposed class and mark it reviewed",
+                run: async () => { await api.errorConfirm(queue[cursor].candidate_id); load(); } },
+              { key: "dismiss", label: "dismiss", tone: "reject" as const,
+                hint: "the label is fine; this candidate was a false alarm",
+                run: async () => { await api.errorDismiss(queue[cursor].candidate_id); load(); } },
+            ] : []}
+          />
+          </>)}
+        </Inspector>
       </div>
     </PageShell>
   );

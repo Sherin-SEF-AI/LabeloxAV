@@ -18,13 +18,19 @@ immediately, which turns a limit into a busy loop.
 
 from __future__ import annotations
 
-import time
+import inspect
 
 from fastapi.responses import JSONResponse
 
 from core.config import get_settings
 from core.logging import get_logger
-from services.api.ratelimit import ANONYMOUS, MemoryLimiter, classify, retry_after_seconds
+from services.api.ratelimit import (
+    ANONYMOUS,
+    MemoryLimiter,
+    RedisLimiter,
+    classify,
+    retry_after_seconds,
+)
 
 log = get_logger("api.ratelimit")
 
@@ -34,10 +40,39 @@ EXEMPT_PREFIXES = ("/api/health", "/api/readyz", "/metrics", "/api/openapi.json"
 
 
 class RateLimitMiddleware:
-    """One shared limiter per process, keyed by caller and route class."""
+    """A limiter keyed by caller and route class, shared across workers when Redis is reachable.
 
-    def __init__(self, limiter: MemoryLimiter | None = None) -> None:
-        self.limiter = limiter or MemoryLimiter()
+    It was memory-only despite the module docstring promising otherwise, which meant N workers enforced N
+    times the advertised rate - and the header said nothing about it, so the limit looked like it held.
+    The backend is now reported in X-RateLimit-Backend, so a deployment that has fallen back to
+    per-process buckets is visible rather than assumed.
+    """
+
+    def __init__(self, limiter=None) -> None:
+        # Built lazily on first use: the limiter is constructed at import time, before settings or the
+        # event loop exist, and a Redis client made here would bind to the wrong loop under uvicorn.
+        self._explicit = limiter
+        self._limiter = limiter
+        self._tried_redis = False
+
+    def _get_limiter(self):
+        if self._limiter is not None:
+            return self._limiter
+        if not self._tried_redis:
+            self._tried_redis = True
+            try:
+                import redis.asyncio as aioredis
+
+                from core.config import get_settings as _s
+                cfg = _s().redis
+                self._limiter = RedisLimiter(
+                    aioredis.Redis(host=cfg.host, port=cfg.port, db=getattr(cfg, "db", 0),
+                                   socket_timeout=0.25, socket_connect_timeout=0.25))
+                log.info("api.ratelimit.backend", backend="redis")
+            except Exception as exc:  # noqa: BLE001
+                log.warning("api.ratelimit.redis_unavailable", error=str(exc), backend="memory")
+                self._limiter = MemoryLimiter()
+        return self._limiter or MemoryLimiter()
 
     async def __call__(self, request, call_next):
         settings = get_settings()
@@ -61,14 +96,18 @@ class RateLimitMiddleware:
         if not principal and budget.rate_per_s > ANONYMOUS.rate_per_s:
             budget = ANONYMOUS
 
-        allowed, wait = self.limiter.check(key, klass, budget, cost, now=time.monotonic())
+        limiter = self._get_limiter()
+        result = limiter.check(key, klass, budget, cost)
+        allowed, wait = await result if inspect.isawaitable(result) else result
+        backend = "memory" if isinstance(limiter, MemoryLimiter) else (
+            "memory-degraded" if getattr(limiter, "degraded", False) else "redis")
         if not allowed:
             retry = retry_after_seconds(wait)
             log.warning("api.rate_limited", path=path, klass=klass, keyed_by=keyed_by, retry_after=retry)
             return JSONResponse(
                 status_code=429,
                 headers={"Retry-After": str(retry), "X-RateLimit-Class": klass,
-                         "X-RateLimit-Keyed-By": keyed_by},
+                         "X-RateLimit-Keyed-By": keyed_by, "X-RateLimit-Backend": backend},
                 content={"detail": f"rate limit exceeded for {klass} requests; retry in {retry}s",
                          "klass": klass, "retry_after": retry},
             )
@@ -76,4 +115,5 @@ class RateLimitMiddleware:
         response = await call_next(request)
         response.headers["X-RateLimit-Class"] = klass
         response.headers["X-RateLimit-Keyed-By"] = keyed_by
+        response.headers["X-RateLimit-Backend"] = backend
         return response

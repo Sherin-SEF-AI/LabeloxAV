@@ -127,7 +127,12 @@ button:not(:disabled) {
 [data-tip] {
   position: relative;
 }
-[data-tip]:hover::after {
+/* Keyboard users get the tooltip too.
+   This was :hover only, so every control whose explanation lives in a data-tip was explained to a mouse
+   and to nobody else - on an app whose own README says every control carries a tooltip so the UI explains
+   itself. :focus-visible rather than :focus, so a mouse click does not leave a tooltip stuck open. */
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
   content: attr(data-tip);
   position: absolute;
   left: 50%;
@@ -298,4 +303,37 @@ button:not(:disabled) {
   .reveal, .reveal-pop, .skeleton, .running-dot, .running, .lbx-progress-bar, .fade-up { animation: none; }
   .reveal, .reveal-pop, .fade-up { opacity: 1; transform: none; }
   .lift, .sheen::after, .rail::before { transition: none; }
+}
+
+
+/* A visible focus ring, everywhere, once.
+   There was no focus system at all: the default outline is removed by the Tailwind preflight and nothing
+   put one back, so tabbing through the app moved an invisible cursor. That makes the keyboard-driven
+   workflow this tool is built around - j/k through a queue, a/x to rule on an object, tool letters in the
+   editor - unusable by anyone who cannot see where they are.
+
+   focus-visible, so it appears for keyboard navigation and not on every mouse click. The accent is the
+   same one the active control uses, so focus reads as "this is live" rather than as a new visual language. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent, #2f7ad6);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Skip link: the editor and the queues put a lot of chrome before the content, and a keyboard user should
+   not have to tab through a menu bar and a tool strip to reach the thing they came for. Hidden until
+   focused, which is the one time it is useful. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+}
+.skip-link:focus-visible {
+  left: 8px;
+  top: 8px;
+  padding: 8px 12px;
+  background: var(--bg, #1c1c1c);
+  border: 1px solid var(--accent, #2f7ad6);
+  color: inherit;
 }

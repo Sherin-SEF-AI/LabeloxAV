@@ -13,6 +13,8 @@ import pytest
 
 from core.config import get_settings
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -29,6 +31,7 @@ requires_infra = pytest.mark.skipif(not _infra_up(), reason="infra not up (make 
 @requires_infra
 def test_rig_identity_link_vote_conflict_and_unlink():
     from sqlalchemy import delete, select
+
     from db.models import Frame, FrameGroup, Object, ObjectEmbedding, RigObject
     from db.models import Session as DbSession
     from db.session import get_sessionmaker

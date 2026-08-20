@@ -232,7 +232,11 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
       // The primary selection stays whatever it was if it survived the filter, so the properties panel does
       // not jump to a different object underneath the annotator's hands.
       const keepPrimary = s.selectedId && ids.includes(s.selectedId) ? s.selectedId : (ids[0] ?? null);
-      return { ...s, selectedIds: ids, selectedId: keepPrimary };
+      // Selecting by a rule marks the objects touched, exactly as clicking them one at a time does.
+      // Without this, "select all low-confidence" followed by Confirm frame accepted nothing at all:
+      // acceptAll only touches ids in `touched`, and this was the one selection path that never added any.
+      return { ...s, selectedIds: ids, selectedId: keepPrimary,
+               touched: Array.from(new Set([...s.touched, ...ids])) };
     }
     case "setVisible":
       // Visibility is a view concern, not an edit: it must not mark the object dirty or enter undo history,
@@ -338,6 +342,10 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
         // first autosave.
         past: s.past.map((sn) => ({ ...sn, objects: sn.objects.map(remap), deleted: [] })),
         future: s.future.map((sn) => ({ ...sn, objects: sn.objects.map(remap), deleted: [] })),
+        // `touched` holds ids too, and a new object's id changes here. Left unremapped it kept the old
+        // tmp- id, so an object the annotator had drawn and edited stopped counting as reviewed the moment
+        // the first autosave landed - and Confirm frame quietly skipped it.
+        touched: s.touched.map((id) => a.remap[id] ?? id),
       };
     }
     default:

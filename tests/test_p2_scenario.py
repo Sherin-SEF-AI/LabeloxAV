@@ -14,6 +14,8 @@ from services.intelligence.nlsearch import parse_query
 from services.intelligence.tracking import Det, track_camera
 from services.intelligence.trajectory import FrameCtx, build_trajectory
 
+pytestmark = pytest.mark.db
+
 NS = 1_000_000_000
 
 
@@ -153,11 +155,12 @@ pytestmark_async = pytest.mark.asyncio
 @requires_infra
 @pytest.mark.asyncio
 async def test_mine_session_persists_tracks_and_scenarios():
+    from sqlalchemy import func, select
+
     from core.timebase import seconds_to_ns
     from db.models import Frame, Object, Scenario, Track
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
-    from sqlalchemy import func, select
     from services.intelligence.run import mine_session
 
     maker = get_sessionmaker()

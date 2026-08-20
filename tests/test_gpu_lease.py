@@ -12,6 +12,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+pytestmark = pytest.mark.db
+
 
 async def _job(db, *, status: str, age: timedelta, purpose: str):
     from db.models import TrainingJob

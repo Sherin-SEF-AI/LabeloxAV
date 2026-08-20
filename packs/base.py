@@ -19,7 +19,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     # Engine types used only for annotating the behavioural protocols. Under TYPE_CHECKING so importing the
@@ -166,6 +167,147 @@ class ForgeTarget:
 
 
 @dataclass(frozen=True)
+class MotionModelSpec:
+    """How each class moves relative to the camera, which decides whether geometry can propagate its box.
+
+    Three answers, and the middle one is the reason this exists rather than a boolean:
+
+      static_ground     on the ground plane and not moving. A ground homography moves its box exactly.
+      static_elevated   not moving, and NOT on the ground plane: a gantry, an overhead sign, a traffic
+                        light on a mast. The ground homography moves these confidently in the wrong
+                        direction, which is worse than not moving them at all.
+      moving            its displacement is not a function of the ego motion, so nothing here helps.
+
+    A class with no entry is "moving", because that is the answer that refuses to propagate. Guessing
+    static for an unlisted class would silently place boxes.
+    """
+    static_ground: frozenset[str]
+    static_elevated: frozenset[str]
+
+    def model_for(self, class_name: str) -> str:
+        if class_name in self.static_ground:
+            return "static_ground"
+        if class_name in self.static_elevated:
+            return "static_elevated"
+        return "moving"
+
+
+@dataclass(frozen=True)
+class ClassTree:
+    """The levels a class can be scored at, coarsest last.
+
+    Flat AP treats a scooter called a motorcycle and a scooter called a truck as the same event, and they
+    are not: one is a naming difference between two things that behave identically on a road, the other is
+    a planner braking for the wrong reason. Scoring at several levels separates them, and the gap between
+    levels says whether a model's loss is naming or finding.
+
+    `levels` is ordered fine-to-coarse and maps a level name to a function of the ontology class. Held by
+    the pack because the grouping is a domain judgement: l1 groups an AV ontology usefully and would group
+    a warehouse ontology into nonsense.
+    """
+    level_names: tuple[str, ...]
+
+    def levels_for(self, onto: Any) -> dict[str, dict[int, str]]:
+        """{level name: {leaf class id: label at that level}} for a concrete ontology.
+
+        Built from the ontology rather than stored, so a class added to the governed vocabulary is
+        automatically placed rather than silently missing from every level above the leaf.
+        """
+        out: dict[str, dict[int, str]] = {}
+        for name in self.level_names:
+            mapping: dict[int, str] = {}
+            for c in onto.classes:
+                if name == "leaf":
+                    mapping[c.id] = c.name
+                elif name == "root":
+                    mapping[c.id] = "object"
+                else:
+                    mapping[c.id] = str(getattr(c, name, None) or c.name)
+            out[name] = mapping
+        return out
+
+
+@dataclass(frozen=True)
+class ConfusionClique:
+    """A set of classes a model genuinely confuses, and what confusing them costs.
+
+    A clique is not "classes that look alike": it is a set where the model's probability mass moves
+    between the members, so a labelling budget spent inside it buys a decision boundary rather than more
+    examples of one class. `cost` is the price of confusing two members, in [0, 1], and it is what makes
+    a scooter called a motorcycle cheap and a pedestrian called a bollard expensive.
+
+    `crosses_safety` records that at least one member is a safety class and at least one is not, which is
+    the case where a confusion inside an apparently tidy clique is the most expensive kind of error.
+    """
+    name: str
+    class_names: tuple[str, ...]
+    cost: float
+    crosses_safety: bool = False
+
+
+@dataclass(frozen=True)
+class CliqueSpec:
+    """The confusion cliques of a domain, and the cost of confusing classes across them.
+
+    Held by the pack because which classes a model confuses is a fact about the world it works in: a
+    scooter and a motorcycle are one decision on an Indian road and two unrelated objects in a warehouse.
+    """
+    cliques: tuple[ConfusionClique, ...]
+    # Cost of confusing two classes that are not in a clique together. Higher than any within-clique cost
+    # by construction: a confusion the ontology did not anticipate is worse than one it did.
+    cross_clique_cost: float = 1.0
+
+    def by_name(self, name: str) -> ConfusionClique | None:
+        for c in self.cliques:
+            if c.name == name:
+                return c
+        return None
+
+    def clique_of(self, class_name: str) -> ConfusionClique | None:
+        for c in self.cliques:
+            if class_name in c.class_names:
+                return c
+        return None
+
+    def pair_cost(self, a: str, b: str) -> float:
+        """Cost of confusing a for b. Zero for a class with itself, the clique cost within one, else cross."""
+        if a == b:
+            return 0.0
+        ca, cb = self.clique_of(a), self.clique_of(b)
+        if ca is not None and ca is cb:
+            return ca.cost
+        return self.cross_clique_cost
+
+
+@dataclass(frozen=True)
+class RelationSpec:
+    """The relationship vocabulary, and which ordered class pairs can stand in which relation.
+
+    Two disjoint vocabularies are live in the engine today and neither knows about the other:
+    services/api/routers/objects.py validates {rider_of, towed_by, part_of, member_of, occludes} on the
+    editor path, while services/intelligence/scene_graph.py inserts {occluded_by, following,
+    crossing_in_front_of, parked_near} directly and never passes that validation. `occludes` and
+    `occluded_by` are the same fact in opposite directions and both are stored, so a query for one silently
+    misses half the corpus.
+
+    `kinds` is the union any writer may use. `overlap_pairs` maps an ordered (subject l1, object l1) pair
+    to the relation an overlapping pair of those superclasses probably stands in, which is what lets
+    relationship-aware NMS keep a rider and their motorcycle apart and say why. `inverse` records the pairs
+    that are one fact in two directions, so a reader can normalise rather than guess.
+    """
+    kinds: frozenset[str]
+    overlap_pairs: Mapping[tuple[str, str], str]
+    inverse: Mapping[str, str] = field(default_factory=dict)
+
+    def relation_for_l1(self, subject_l1: str, object_l1: str) -> str | None:
+        return self.overlap_pairs.get((subject_l1, object_l1))
+
+    def canonical(self, kind: str) -> str:
+        """The direction this engine stores. An inverse maps to its canonical form; anything else is itself."""
+        return self.inverse.get(kind, kind)
+
+
+@dataclass(frozen=True)
 class PrivacyPlaneSpec:
     """The redaction targets + legal regime for a pack. The behavioural PrivacyPlane gates (ingest/export)
     already exist as the engine anonymize organ; SEC-M6 binds them to these targets. AV is never None here
@@ -185,6 +327,7 @@ class SafetyPolicy(Protocol):
     def is_safety_class(self, class_name: str) -> bool: ...
     def affinity_cost(self, a_id: int, b_id: int) -> float: ...
     def critical_class_names(self) -> frozenset[str]: ...
+    def accept_far_bound(self, class_name: str) -> float: ...
 
 
 @runtime_checkable
@@ -324,6 +467,10 @@ class DomainPack(Protocol):
     quality_profile: QualityProfile
     forge_targets: Sequence[ForgeTarget]
     privacy: PrivacyPlaneSpec
+    relations: RelationSpec | None
+    cliques: CliqueSpec | None
+    class_tree: ClassTree | None
+    motion_models: MotionModelSpec | None
     scene_model: SceneModelFactory | None
     ingestion_adapters: Sequence[IngestionAdapter]
     # Optional because they are genuinely domain-specific rather than merely unfinished: an AV pack has no
@@ -347,6 +494,16 @@ class Pack:
     quality_profile: QualityProfile
     forge_targets: tuple[ForgeTarget, ...]
     privacy: PrivacyPlaneSpec
+    # Optional: a domain with no meaningful object-to-object relations (a static camera counting entries)
+    # is complete without one, and the engine proposes no edges rather than inventing a vocabulary for it.
+    relations: RelationSpec | None = None
+    # Optional: a domain whose classes are not confusable in structured groups gets uniform sampling
+    # rather than an invented grouping.
+    cliques: CliqueSpec | None = None
+    # Optional: a flat ontology has one level and hierarchical AP would report the leaf number three times.
+    class_tree: ClassTree | None = None
+    # Optional: a static-camera domain has no ego motion, so nothing propagates by geometry there.
+    motion_models: MotionModelSpec | None = None
     scene_model: SceneModelFactory | None = None            # SEC-M2
     ingestion_adapters: tuple[IngestionAdapter, ...] = ()   # SEC-M2
     zone_policy: ZonePolicy | None = None                   # static-camera domains only
@@ -382,20 +539,35 @@ def superclass_affinity_cost(onto: Ontology, a_id: int, b_id: int, safety_l1: fr
     return cost
 
 
+#: Fallback auto-accept false-accept bounds, used by any pack that does not state its own. Deliberately
+#: strict: a pack that has not thought about what a wrong auto-accept costs it should get the cautious
+#: answer, because the failure mode of the loose one is a wrong label entering the corpus unseen.
+DEFAULT_FAR_BOUNDS: Mapping[str, float] = MappingProxyType({
+    "critical": 0.01,   # the classes whose confusion the safety gate already refuses to automate
+    "safety": 0.02,     # the rest of the safety superclasses
+    "default": 0.05,    # everything else
+})
+
+
 def make_safety_policy(onto: Ontology, safety_l1: frozenset[str], critical_names: frozenset[str],
-                       affinity: Callable[[Ontology, int, int], float] | None = None) -> SafetyPolicy:
+                       affinity: Callable[[Ontology, int, int], float] | None = None,
+                       far_bounds: Mapping[str, float] | None = None) -> SafetyPolicy:
     """Build the standard ontology-backed SafetyPolicy. Kept in the contract module (not a specific pack) so
     every pack that defines safety by an l1 superclass set gets the identical, tested implementation.
 
     `affinity` computes the safety cost of confusing two class ids. It defaults to the AV safe-mIoU cost, so
     the AV number is byte-identical to today's governance; a non-AV pack passes its own (e.g. a partial of
     superclass_affinity_cost bound to its safety_l1), since the AV cost hardcodes the VRU/animal semantics.
+
+    `far_bounds` are the auto-accept false-accept bounds by tier (critical / safety / default). Missing
+    keys fall back to DEFAULT_FAR_BOUNDS, so a pack states only what it disagrees with.
     """
     if affinity is None:
         from services.training.safe_miou import affinity_cost
         affinity_fn: Callable[[Ontology, int, int], float] = affinity_cost
     else:
         affinity_fn = affinity
+    bounds = {**DEFAULT_FAR_BOUNDS, **(far_bounds or {})}
 
     class _OntologySafetyPolicy:
         def is_safety_class(self, class_name: str) -> bool:
@@ -409,5 +581,25 @@ def make_safety_policy(onto: Ontology, safety_l1: frozenset[str], critical_names
 
         def critical_class_names(self) -> frozenset[str]:
             return critical_names
+
+        def accept_far_bound(self, class_name: str) -> float:
+            """How often an auto-accepted box of this class may be wrong, in [0, 1].
+
+            The alpha that core/accel/np_threshold.py fits an operating point against. It belongs to the
+            pack because the cost of a wrong auto-accept is a domain judgement and not a model property: a
+            mislabelled pedestrian and a mislabelled bollard are not equally expensive, and one bound
+            across the ontology is wrong for at least one of them.
+
+            The tiering is generic (critical, then safety, then everything else) and the numbers come from
+            the pack, so a domain that defines safety differently gets a correct policy without new code
+            here.
+            """
+            if class_name in critical_names:
+                return bounds["critical"]
+            try:
+                safety = onto.by_name(class_name).l1 in safety_l1
+            except Exception:  # noqa: BLE001 - an unknown name gets the cautious bound, not the loose one
+                return bounds["critical"]
+            return bounds["safety"] if safety else bounds["default"]
 
     return _OntologySafetyPolicy()

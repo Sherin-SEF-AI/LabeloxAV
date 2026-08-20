@@ -22,9 +22,15 @@ log = get_logger("lidar_lift")
 
 
 def frustum_indices(cloud_xyz: np.ndarray, bbox: list[float], cam_id: str,
-                    img_w: int, img_h: int, pad: float = 0.0) -> np.ndarray:
-    """Indices of cloud points that project inside the 2D box and lie in front of the camera."""
-    proj = project_to_camera(cloud_xyz, cam_id, img_w, img_h)
+                    img_w: int, img_h: int, pad: float = 0.0, calib=None) -> np.ndarray:
+    """Indices of cloud points that project inside the 2D box and lie in front of the camera.
+
+    calib is a resolved Calibration (M-CAL.1); None uses the nominal rig calibration. This parameter did not
+    exist, which mattered more here than anywhere: this is the frustum every lifted cuboid is built from, so
+    a session with real extrinsics was still having its 3D boxes cut out of the config-declared rig. Every
+    metric downstream - dimensions, yaw, the ground snap - inherits whatever error that leaves behind.
+    """
+    proj = project_to_camera(cloud_xyz, cam_id, img_w, img_h, calib)
     uv, in_front = proj["uv"], proj["in_front"]
     x1, y1, x2, y2 = bbox
     if pad:
@@ -128,10 +134,12 @@ def fit_cuboid(points_ego: np.ndarray, ground_plane: list[float] | None = None,
 
 
 def lift_box(cloud_xyz: np.ndarray, bbox: list[float], cam_id: str, img_w: int, img_h: int,
-             ground_plane: list[float] | None = None, mask_indices: np.ndarray | None = None) -> dict | None:
+             ground_plane: list[float] | None = None, mask_indices: np.ndarray | None = None,
+             calib=None) -> dict | None:
     """Lift one 2D box to an oriented, ground-snapped cuboid. mask_indices (cloud points inside the 2D mask)
-    tighten the frustum when available; otherwise the box frustum is used."""
-    idx = frustum_indices(cloud_xyz, bbox, cam_id, img_w, img_h)
+    tighten the frustum when available; otherwise the box frustum is used. calib is a resolved Calibration;
+    None uses the nominal rig, as before."""
+    idx = frustum_indices(cloud_xyz, bbox, cam_id, img_w, img_h, calib=calib)
     if mask_indices is not None and len(mask_indices):
         idx = np.intersect1d(idx, mask_indices, assume_unique=False)
     if len(idx) == 0:

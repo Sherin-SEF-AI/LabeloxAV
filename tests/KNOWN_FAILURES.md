@@ -7,12 +7,18 @@ call: a run that fails only tests listed here is at baseline, and anything else 
 Every entry states why it fails and what would fix it. An entry with no route to a fix does not belong here;
 it belongs in the code as an xfail or in the backlog as work.
 
-The suite currently has no failures outside the strict xfails below: 1704 pass, 2 skip, 4 xfail, measured
-2026-08-06 against full infra (`make up`) on `labeloxav_test`, and repeated identically across runs.
+The suite currently has no failures outside the strict xfails below: 2488 pass, 3 skip, 4 xfail, measured
+2026-08-18 against full infra (`make up`) on `labeloxav_test`. (The two GPU tests below also failed in that
+run, on a card already holding 8.7 GB of 16.3 GB — see that section; both pass in isolation.)
 
-Run it with infra down and 206 of those tests skip rather than fail, because `_infra_up()` pings Redis. A run
+Run it with infra down and ~206 of those tests skip rather than fail, because `_infra_up()` pings Redis. A run
 reporting "1495 passed, 215 skipped" is not a smaller green, it is most of the suite never executing, and the
 pass count is the only thing that distinguishes the two.
+
+That is no longer only a note. `make test` now sets `LBX_MIN_PASSED` / `LBX_MAX_SKIPPED`, and
+`pytest_sessionfinish` in `tests/conftest.py` fails a run that passed everything it ran but ran too little of
+the suite. `make up` likewise exits non-zero when the core services never become healthy, instead of falling
+through to a `docker compose ps` that exits 0 regardless.
 
 Two categories were removed rather than fixed in place, because the diagnosis recorded here was wrong in a
 way worth keeping a note of. Both had been filed under a plausible cause that no amount of work on that

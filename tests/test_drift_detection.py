@@ -12,6 +12,7 @@ Pure unit tests: the statistics are computed on synthetic matrices, so no databa
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from services.govern.drift import (
     _quantile_bins,
@@ -107,3 +108,77 @@ def test_label_histogram_covers_the_whole_ontology():
 def test_psi_is_zero_for_identical_distributions_and_positive_otherwise():
     assert psi([10, 10, 10], [10, 10, 10]) < 1e-9
     assert psi([90, 5, 5], [5, 5, 90]) > 1.0
+
+
+@pytest.mark.db
+async def test_an_unmeasured_gate_is_not_reported_as_a_perfect_one():
+    """The absence of evidence was being recorded as the strongest possible evidence.
+
+    control_precision_drift substituted 1.0 when no control sample carried a human verdict, and
+    run_drift_scan persisted it. Measured on this corpus: 601 samples waiting, none judged, and the drift
+    ledger recording the gate's realized precision as 100% - a flat line at perfect for a number that had
+    never been taken. This is the one figure a buyer is meant to be able to trust over a self-reported one.
+    """
+    from sqlalchemy import delete, func, select
+
+    from db.models import ControlSample, DriftMetric
+    from db.session import get_sessionmaker
+    from services.govern.drift import control_precision_drift, run_drift_scan
+
+    async with get_sessionmaker()() as db:
+        # No verdicts anywhere: the starved state.
+        await db.execute(delete(ControlSample))
+        await db.commit()
+
+        r = await control_precision_drift(db)
+        assert r["unmeasured"] is True
+        assert r["value"] is None, "an unmeasured precision must not carry a number at all"
+        assert r["breach"] is False, (
+            "starvation is not a breach: it is not the same as being measured below the floor, and turning "
+            "it into one would pause every promotion for a reason nobody can fix in the moment")
+
+        before = (await db.execute(select(func.count()).select_from(DriftMetric)
+                                   .where(DriftMetric.metric == "control_precision"))).scalar_one()
+        await run_drift_scan(db)
+        after = (await db.execute(select(func.count()).select_from(DriftMetric)
+                                  .where(DriftMetric.metric == "control_precision"))).scalar_one()
+        assert after == before, (
+            "an unmeasured metric was persisted; a gap in the series is honest, a substituted value is a "
+            "reading that was never taken")
+
+
+@pytest.mark.db
+async def test_a_measured_gate_still_reports_and_breaches():
+    """The other half: once verdicts exist the metric behaves exactly as before."""
+    import uuid as _uuid
+
+    from sqlalchemy import delete
+
+    from db.models import ControlSample, Frame, Object
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.govern.drift import control_precision_drift
+
+    async with get_sessionmaker()() as db:
+        await db.execute(delete(ControlSample))
+        sess = DbSession(session_id=_uuid.uuid4(), vehicle_id="CTL-01", start_ts_ns=0, end_ts_ns=1,
+                         ontology_version="test")
+        db.add(sess)
+        fid = _uuid.uuid4()
+        db.add(Frame(frame_id=fid, session_id=sess.session_id, ts_ns=1, cam_id="cam_f",
+                     img_uri="s3://x/y.jpg", width=64, height=64))
+        await db.flush()
+        # Four judged auto-accepts, one of them wrong -> 0.75, well under the 0.97 floor.
+        for i in range(4):
+            oid = _uuid.uuid4()
+            db.add(Object(object_id=oid, frame_id=fid, class_id=1, bbox=[1, 1, 9, 9], conf=0.9,
+                          source="auto_accept", state="auto_accept"))
+            await db.flush()
+            db.add(ControlSample(object_id=oid, was_auto_accepted=True,
+                                 human_verdict="incorrect" if i == 0 else "correct"))
+        await db.commit()
+
+        r = await control_precision_drift(db)
+        assert r["unmeasured"] is False
+        assert r["value"] == 0.75
+        assert r["breach"] is True and r["reviewed"] == 4

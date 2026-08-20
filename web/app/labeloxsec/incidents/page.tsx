@@ -83,7 +83,7 @@ export default function IncidentsPage() {
               {label}
             </button>
           ))}
-          <span className="text-ink-4">|</span>
+          <span className="text-ink-3">|</span>
           {["open", "ack", "closed", ""].map((s) => (
             <button key={s || "all"} onClick={() => setStatus(s)}
               className={`px-2 py-0.5 border ${
@@ -137,11 +137,11 @@ export default function IncidentsPage() {
                           {Number(i.evidence?.events ?? 1) > 1 && (
                             // Folded, not repeated: a van sitting across a tripwire is one incident that
                             // grows rather than one per frame.
-                            <span className="text-ink-4"> ×{String(i.evidence.events)}</span>
+                            <span className="text-ink-3"> ×{String(i.evidence.events)}</span>
                           )}
                         </td>
                         <td className="text-ink-3">{i.camera_id ?? "-"}</td>
-                        <td className={i.plate ? "text-warn" : "text-ink-4"}>{i.plate ?? "-"}</td>
+                        <td className={i.plate ? "text-warn" : "text-ink-3"}>{i.plate ?? "-"}</td>
                         <td className="text-ink-3 tabular-nums">{i.duration_s}s</td>
                         <td className="text-right space-x-2">
                           {i.status === "open" && (

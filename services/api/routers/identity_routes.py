@@ -30,6 +30,7 @@ from db.models import User, UserCredential
 from services.api import identity as ident
 from services.api.auth_token import mint_token
 from services.api.deps import db_session, require_user
+from services.api.ephemeral import EphemeralStore
 
 router = APIRouter()
 log = get_logger("identity_api")
@@ -41,27 +42,24 @@ _DUMMY_HASH = ident.hash_password("a-password-that-is-never-anyone-s-actual-pass
 # Half-finished sign-ins: first factor accepted, second factor outstanding. Held server-side with a short
 # life so the handle can do nothing but finish this one login.
 _MFA_TTL_SECONDS = 300
-_mfa_pending: dict[str, tuple[str, float]] = {}
+# Shared across workers when Redis answers. This was a module-level dict, so under more than one uvicorn
+# worker the second-factor request landed on a process that had never seen the handle and (N-1)/N of MFA
+# sign-ins failed with the message below - indistinguishable from a genuinely expired handle, so it read
+# as flakiness rather than as a deployment that cannot run two workers.
+_mfa_pending = EphemeralStore("mfa", _MFA_TTL_SECONDS)
 
 
-def _mfa_begin(user_id: uuid.UUID) -> str:
-    now = datetime.now(UTC).timestamp()
-    for k, (_, at) in list(_mfa_pending.items()):
-        if now - at > _MFA_TTL_SECONDS:
-            _mfa_pending.pop(k, None)
+async def _mfa_begin(user_id: uuid.UUID) -> str:
     handle = secrets.token_urlsafe(24)
-    _mfa_pending[handle] = (str(user_id), now)
+    await _mfa_pending.put(handle, {"user_id": str(user_id)})
     return handle
 
 
-def _mfa_take(handle: str) -> str:
-    entry = _mfa_pending.pop(handle or "", None)   # one handle, one attempt
+async def _mfa_take(handle: str) -> str:
+    entry = await _mfa_pending.take(handle)   # one handle, one attempt; read and delete are atomic
     if entry is None:
         raise HTTPException(400, "this sign-in has expired; start again")
-    uid, at = entry
-    if datetime.now(UTC).timestamp() - at > _MFA_TTL_SECONDS:
-        raise HTTPException(400, "this sign-in has expired; start again")
-    return uid
+    return entry["user_id"]
 
 
 def _mfa_required(role: str) -> bool:
@@ -136,12 +134,12 @@ async def login(payload: LoginIn, db: AsyncSession = Depends(db_session)) -> dic
     await ident.record_success(db, cred)
 
     if cred.totp_confirmed_at:
-        return {"mfa_required": True, "mfa_handle": _mfa_begin(user.user_id),
+        return {"mfa_required": True, "mfa_handle": await _mfa_begin(user.user_id),
                 "methods": ["totp", "recovery"] if cred.recovery_hashes else ["totp"]}
     if _mfa_required(user.role):
         # Enrolment is compelled at the door rather than granting a token first: a role that requires a
         # second factor must not be usable before one exists.
-        return {"mfa_required": True, "mfa_enrol": True, "mfa_handle": _mfa_begin(user.user_id),
+        return {"mfa_required": True, "mfa_enrol": True, "mfa_handle": await _mfa_begin(user.user_id),
                 "detail": f"the {user.role} role requires a second factor; set one up to continue"}
     return await _issue(db, user)
 
@@ -154,7 +152,7 @@ class MfaIn(BaseModel):
 @router.post("/auth/login/mfa")
 async def login_mfa(payload: MfaIn, db: AsyncSession = Depends(db_session)) -> dict:
     """Finish a sign-in with the second factor. Accepts a TOTP code or a single-use recovery code."""
-    uid = _mfa_take(payload.mfa_handle)
+    uid = await _mfa_take(payload.mfa_handle)
     user = await db.get(User, uuid.UUID(uid))
     cred = await db.get(UserCredential, uuid.UUID(uid))
     if user is None or cred is None or not cred.totp_secret:
@@ -225,7 +223,7 @@ async def signup(payload: SignupIn, db: AsyncSession = Depends(db_session)) -> d
     log.info("identity.signup", user=str(user.user_id), bootstrap=bootstrap, role=user.role)
 
     if not bootstrap and _mfa_required(user.role):
-        return {"mfa_required": True, "mfa_enrol": True, "mfa_handle": _mfa_begin(user.user_id)}
+        return {"mfa_required": True, "mfa_enrol": True, "mfa_handle": await _mfa_begin(user.user_id)}
     return await _issue(db, user)
 
 
@@ -328,7 +326,7 @@ async def mfa_setup_pending(payload: PendingSetupIn, db: AsyncSession = Depends(
     here is that the first factor alone must not grant one. The challenge handle is the authority, it is
     re-issued so the flow can continue, and it can still do nothing but finish this one sign-in.
     """
-    uid = _mfa_take(payload.mfa_handle)
+    uid = await _mfa_take(payload.mfa_handle)
     user = await db.get(User, uuid.UUID(uid))
     if user is None:
         raise HTTPException(400, "this sign-in has expired; start again")
@@ -338,7 +336,7 @@ async def mfa_setup_pending(payload: PendingSetupIn, db: AsyncSession = Depends(
     cred.totp_secret = ident.new_totp_secret()
     await db.commit()
     return {"secret": cred.totp_secret, "otpauth_uri": ident.totp_uri(cred.totp_secret, user.name),
-            "mfa_handle": _mfa_begin(user.user_id)}
+            "mfa_handle": await _mfa_begin(user.user_id)}
 
 
 class CodeIn(BaseModel):
@@ -356,7 +354,7 @@ async def mfa_confirm(payload: CodeIn, db: AsyncSession = Depends(db_session),
     that sign-in, so enrolment finishes the login it interrupted.
     """
     if payload.mfa_handle:
-        uid = _mfa_take(payload.mfa_handle)
+        uid = await _mfa_take(payload.mfa_handle)
         user = await db.get(User, uuid.UUID(uid))
         if user is None:
             raise HTTPException(400, "this sign-in has expired; start again")
@@ -433,7 +431,7 @@ async def oidc_start(next: str = "/", db: AsyncSession = Depends(db_session)):  
         raise HTTPException(404, "single sign-on is not configured on this deployment")
     try:
         doc = await oidc.discover(s.oidc_issuer)
-        url, handle = oidc.begin(doc, client_id=s.oidc_client_id, redirect_uri=s.oidc_redirect_uri,
+        url, handle = await oidc.begin(doc, client_id=s.oidc_client_id, redirect_uri=s.oidc_redirect_uri,
                                  scopes=s.oidc_scopes, next_url=_safe_next(next))
     except oidc.OidcError as exc:
         raise HTTPException(502, str(exc)) from exc
@@ -463,7 +461,7 @@ async def oidc_callback(request: Request, code: str | None = None, state: str | 
         raise HTTPException(400, "the identity provider returned no authorization code")
 
     try:
-        pending = oidc.take_pending(request.cookies.get(_OIDC_COOKIE))
+        pending = await oidc.take_pending(request.cookies.get(_OIDC_COOKIE))
         if not state or not secrets.compare_digest(state, pending.state):
             # Without this a code from another session could be injected into this browser's login.
             raise oidc.OidcError("this sign-in did not originate here")

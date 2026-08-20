@@ -65,3 +65,87 @@ def test_role_floors_are_sane():
     assert _required_role("/api/objects/x/bulk-review") == "reviewer"
     assert _required_role("/api/users/me") == "annotator"  # self-service, not the admin floor of its prefix
     assert _required_role("/api/segment") == "annotator"   # unclassified: authenticated, never anonymous
+
+
+# ---------------------------------------------------------------------------------------------------
+# The mutating half of the route table.
+#
+# Everything above enumerates GET/HEAD only. No mutating route was ever inspected, which is how a
+# query-string credential exception scoped to the /api/events/ prefix - covering PATCH and DELETE
+# /api/events/{id} - stayed invisible until somebody read the middleware by hand. The startup backstop
+# declines to check writes too, on the reasoning that a write cannot reach a route without clearing the
+# token gate. True, and it says nothing about WHICH role, which is the part that was wrong.
+# ---------------------------------------------------------------------------------------------------
+
+_WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _api_write_routes() -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for route in app.routes:
+        methods = (getattr(route, "methods", None) or set()) & _WRITE_METHODS
+        path = getattr(route, "path", "")
+        if path.startswith("/api/") and methods:
+            out.extend((m, path) for m in sorted(methods))
+    return out
+
+
+# Writes that must sit above the annotator floor, by what they do rather than by which router they landed
+# in. Each of these changes something every other user's work is measured against, so an annotator holding
+# a token should not be able to reach them.
+_MUST_BE_PRIVILEGED = (
+    "/api/quality/gold/seal",          # fixes the ground truth every eval and export certificate scores on
+    "/api/quality/calibrate/fit",      # changes what every confidence in the system means
+    "/api/activelearn/loop/retrain",   # queues GPU training; force=true bypasses the signal threshold
+    "/api/hardening/slo",              # the SLO ledger the operations board reads
+    "/api/govern/promote",             # which model serves
+    "/api/users",                      # account administration
+)
+
+
+def test_the_write_scan_is_not_trivially_green():
+    # The non-triviality floor, as above: a matrix over an empty route list asserts nothing.
+    writes = _api_write_routes()
+    assert len(writes) > 200, f"only {len(writes)} mutating /api routes found; the enumerator has broken"
+
+
+def test_no_write_route_is_reachable_without_a_role():
+    # _required_role never returns an anonymous floor, so a write always needs a token. Asserted rather
+    # than assumed, because the whole matrix rests on it.
+    anonymous = [(m, p) for m, p in _api_write_routes()
+                 if _required_role(p) not in ("annotator", "reviewer", "admin")]
+    assert anonymous == [], f"write routes with no role floor: {anonymous}"
+
+
+def test_no_write_route_is_a_public_read():
+    # A path that is both a public read and a write would be reachable unauthenticated for the write, since
+    # the public-read short circuit is checked before the role floor.
+    leaked = [(m, p) for m, p in _api_write_routes() if _is_public_read(p)]
+    assert leaked == [], f"write routes under a public-read prefix: {leaked}"
+
+
+def test_the_privileged_writes_are_above_the_annotator_floor():
+    """The specific routes that were not, and the reason this matrix exists.
+
+    Gold sealing, calibration fitting, forced retrain and the SLO ledger all sat at the annotator floor -
+    /api/quality, /api/activelearn and /api/hardening are none of them reviewer prefixes - so any signed-in
+    user could reseal the ground truth, refit the confidence curve, occupy the GPU, or write the
+    observability board. They carry their own require_role now; adding the prefixes instead would have
+    gated the READS as well, because the floor applies to any request that is not a public read.
+    """
+    from services.api.deps import (
+        require_role,  # noqa: F401  (imported to assert the mechanism exists)
+    )
+
+    offenders = []
+    for path in _MUST_BE_PRIVILEGED:
+        routes = [r for r in app.routes if getattr(r, "path", "") == path
+                  and (getattr(r, "methods", None) or set()) & _WRITE_METHODS]
+        assert routes, f"{path} is not mounted as a write route; this table has gone stale"
+        floor_ok = _required_role(path) in ("reviewer", "admin")
+        dep_ok = any("require_role" in repr(getattr(d, "call", None))
+                     for r in routes for d in (getattr(getattr(r, "dependant", None), "dependencies", []) or []))
+        if not (floor_ok or dep_ok):
+            offenders.append(path)
+    assert offenders == [], (
+        f"these writes are reachable by any signed-in annotator: {offenders}")

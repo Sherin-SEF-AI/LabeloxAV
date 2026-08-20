@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { type Placeholder, placeholder, statValue, titleCount } from "@/lib/emptyState";
 import { useRouter } from "next/navigation";
@@ -17,7 +17,9 @@ import {
   type ScenarioCoverage,
 } from "@/lib/analytics-api";
 import PageShell from "@/components/shell/PageShell";
+import LoadState from "@/components/shell/LoadState";
 import EvalDrilldown from "@/components/explore/EvalDrilldown";
+import RecallHonesty from "@/components/explore/RecallHonesty";
 import ScoreBar from "@/components/shell/ScoreBar";
 import { api } from "@/lib/api";
 import type { ProductivityReport } from "@/lib/types";
@@ -63,6 +65,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export default function AnalyticsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<unknown>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [classes, setClasses] = useState<ClassRow[]>([]);
   const [scenarios, setScenarios] = useState<ScenarioCoverage[]>([]);
@@ -100,29 +103,35 @@ export default function AnalyticsPage() {
     URL.revokeObjectURL(url);
   };
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const [ov, cls, scn, agr, gp, pi] = await Promise.all([
-          analyticsApi.overview(),
-          analyticsApi.classes(),
-          analyticsApi.scenarios(),
-          analyticsApi.reviewAgreement(),
-          analyticsApi.geo(),
-          analyticsApi.pii().catch(() => null),
-        ]);
-        setOverview(ov);
-        setClasses(cls);
-        setScenarios(scn);
-        setAgreement(agr);
-        setGeo(gp);
-        setPii(pi);
-      } finally {
-        setLoading(false);
-      }
-    })();
+  const load = useCallback(async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const [ov, cls, scn, agr, gp, pi] = await Promise.all([
+        analyticsApi.overview(),
+        analyticsApi.classes(),
+        analyticsApi.scenarios(),
+        analyticsApi.reviewAgreement(),
+        analyticsApi.geo(),
+        analyticsApi.pii().catch(() => null),
+      ]);
+      setOverview(ov);
+      setClasses(cls);
+      setScenarios(scn);
+      setAgreement(agr);
+      setGeo(gp);
+      setPii(pi);
+    } catch (e) {
+      // Without this the page had no error state at all: if any of the five required calls rejected, none
+      // of the setters ran, loading went false, and every panel flipped from "loading" to its empty copy.
+      // A dead backend rendered "no objects yet" over a 570k-object corpus, indefinitely.
+      setErr(e);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { void load(); }, [load]);
 
   const present = classes.filter((c) => c.count > 0);
   const maxCount = present.reduce((m, c) => Math.max(m, c.count), 1);
@@ -143,6 +152,10 @@ export default function AnalyticsPage() {
       }
     >
       <div className="p-4 space-y-4">
+        {/* A failure says so and offers a retry. Every panel below renders its empty copy when a fetch
+            fails, so without this banner a dead backend is indistinguishable from an empty corpus. */}
+        {err != null && <LoadState error={err} onRetry={() => void load()} />}
+
         {/* Top stat cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <Stat label="frames" value={statValue(loading, overview?.frames)} />
@@ -382,6 +395,14 @@ export default function AnalyticsPage() {
             <EvalDrilldown />
           </Section>
         </div>
+
+        {/* Whether the gold recall above can be trusted, which nothing else on this page can tell you: the
+            sealed set was built by people confirming machine boxes, so it leans toward what the model
+            already sees. This is the only panel measured against a denominator the model did not help
+            build, which is why it sits directly under the gold comparison rather than in a corner. */}
+        <Section title="is the recall above real? (blind audit, capture-recapture)">
+          <RecallHonesty />
+        </Section>
 
         {/* DPDPA / PII anonymization evidence (Gate A) */}
         <Section title="PII anonymization (DPDPA gate A)">

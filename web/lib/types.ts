@@ -480,6 +480,10 @@ export type FrameMeta = {
   is_lidar?: boolean;
   lidar_points?: number | null;
   lidar_res?: number | null;
+  // Set when this frame is being served under a blind audit for the current user. The server has already
+  // withheld every prediction and existing label, and scoped n_objects to the auditor's own work; this is
+  // only so the editor can say what the pass is for.
+  blind_audit_id?: string | null;
 };
 
 export type Relationship = { relationship_id: string; from_object_id: string; to_object_id: string; kind: string };
@@ -1173,6 +1177,41 @@ export type InterruptedRun = {
 
 // One unit of autonomous agent work. `fraction` comes from the job's own cursor and is null when the job
 // never recorded a total, which is a different statement from no progress.
+// One press of "reanalyse" on a frame: what the redaction re-check found, and what it wants a human to
+// rule on. The two halves are asymmetric on purpose. `redaction` is applied (a face nobody blurred is a live
+// exposure, and over-blurring is the fail-safe direction); `findings` are only ever proposed, because
+// auto-applying a class change is what put 1,047 buses inside a bus shelter.
+export type ReanalyzeFinding = {
+  object_id: string;
+  kind: string;
+  score: number;
+  proposed_label: { class_name?: string } | null;
+  detail: { rule: string; reason: string };
+};
+
+export type ReanalyzeResult = {
+  frame_id: string;
+  applied: boolean;
+  redaction: {
+    status: string;
+    faces_added: number;
+    plates_added: number;
+    already_covered: number;
+    windows: number;
+    method_version?: string;
+    regions_added: { type: string; bbox: number[]; score: number; where: string }[];
+  };
+  findings: ReanalyzeFinding[];
+  /** Findings beyond the per-frame cap. Reported rather than hidden: a queue that silently drops most of
+   *  what it found reads as a clean frame. */
+  findings_dropped: number;
+  /** Rules that objected to the whole frame, with how many objects each hit. A rule firing on every object
+   *  is describing the pipeline rather than the objects, so it is counted here instead of queued: a reviewer
+   *  cannot fix "the attribute writer disagrees with the ontology" one box at a time. */
+  systemic: Record<string, number>;
+  persisted: number;
+};
+
 export type AgentRunRow = {
   run_id: string;
   kind: string;

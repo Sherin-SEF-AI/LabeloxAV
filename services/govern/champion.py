@@ -35,7 +35,73 @@ def _is_safety_class(name: str, onto) -> bool:
 
 
 def _map(m: dict) -> float:
+    """The AP the gate compares. Hierarchical when it is present, flat otherwise.
+
+    `hier_ap50` is AP at the pack's chosen comparison level (l1 for AV), where a scooter called a
+    motorcycle is correct and a scooter called a truck is not. That is the number worth comparing two
+    models on: flat AP charges both the same, so it cannot separate two candidates that differ mainly in
+    which mistakes they make, which is what a champion and a challenger usually differ in.
+
+    The leaf-level safety floors below are untouched and stay hard. Nothing here lets a model regress a
+    safety class by being right about its superclass.
+    """
+    h = m.get("hier_ap50")
+    if h is not None:
+        return float(h)
     return float(m.get("map", m.get("map50", 0.0)) or 0.0)
+
+
+def _recapture(challenger: dict, cfg) -> dict:
+    """Whether the gold denominator this gate rests on has been checked against an independent observer.
+
+    Every other floor here (mAP uplift, safety-class AP, safety recall) is computed against the sealed gold
+    set, and the gold set was built by people confirming machine boxes far more readily than drawing new
+    ones. If that denominator is inflated, the floors are not measuring what their names say, and a
+    challenger can clear all of them while being worse at the thing the floors exist to protect.
+
+    A blind audit (services/verdyx/blind_audit.py) estimates the true population by capture-recapture and
+    so yields recall against a denominator the model did not help build. Three outcomes:
+
+      unchecked   no scored audit for this run. Advisory unless cfg.blind_audit_required, for the reason
+                  given on that setting: a gate that starts red on every promotion gets switched off.
+      unmeasured  an audit exists and could not conclude (nothing found by both observers). Never a pass:
+                  somebody looked and the answer was that we cannot tell.
+      measured    compare gold recall against the estimate. Beyond the tolerance, refuse: at that point the
+                  gold metrics are the wrong instrument and the comparison should not be made at all.
+
+    Note which direction the caveat runs. The estimator assumes the two observers are independent, and on
+    hard objects they are not, so the estimated population is biased down and the estimated recall up. The
+    measured overstatement is therefore itself a LOWER bound on the real one, and refusing on it is the
+    conservative call rather than a harsh one.
+    """
+    est = challenger.get("recapture")
+    tol = float(getattr(cfg, "recapture_max_overstatement", 0.15))
+    required = bool(getattr(cfg, "blind_audit_required", False))
+    if not est:
+        return {"ok": not required, "status": "unchecked", "overstatement": None,
+                "reasons": ["no blind audit has been scored for this run, so gold recall is unverified "
+                            "against an independent observer"
+                            + ("; refused (blind_audit_required)" if required
+                               else " (advisory: set govern.blind_audit_required to enforce)")]}
+    if not est.get("measured"):
+        return {"ok": False, "status": "unmeasured", "overstatement": None,
+                "reasons": [f"a blind audit was scored and could not conclude: "
+                            f"{est.get('reason') or 'no reason recorded'}"]}
+    gold_r, model_r = est.get("gold_recall"), est.get("model_recall")
+    if gold_r is None or model_r is None:
+        return {"ok": False, "status": "unmeasured", "overstatement": None,
+                "reasons": ["the blind audit produced no comparable recall pair"]}
+    over = round(float(gold_r) - float(model_r), 6)
+    if over > tol:
+        return {"ok": False, "status": "measured", "overstatement": over,
+                "reasons": [f"gold recall overstates measured recall by {over:.3f} (tolerance {tol:.3f}); "
+                            f"gold {gold_r:.3f} against {model_r:.3f} estimated from "
+                            f"{est.get('n_both')} shared, {est.get('n_model_only')} model-only and "
+                            f"{est.get('n_human_only')} human-only objects. Every floor in this gate is "
+                            "computed on the gold denominator, so none of them means what it says"]}
+    return {"ok": True, "status": "measured", "overstatement": over,
+            "reasons": [f"gold recall is within {tol:.3f} of the blind-audit estimate "
+                        f"(overstated by {over:.3f})"]}
 
 
 def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None) -> dict:
@@ -52,11 +118,11 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
     # the same gold set beyond tolerance) is a measurement fault, not a result; fail closed on it.
     if challenger.get("reconstructed"):
         return {"promote": False, "beats_map": False, "map_delta": 0.0, "safe_ok": False, "safety_ok": False,
-                "regressed_safety": [], "recall_ok": False,
+                "regressed_safety": [], "recall_ok": False, "recapture_ok": False,
                 "reasons": ["challenger metrics are from a reconstructed run (no real inference); refused"]}
     if challenger.get("harness_divergent"):
         return {"promote": False, "beats_map": False, "map_delta": 0.0, "safe_ok": False, "safety_ok": False,
-                "regressed_safety": [], "recall_ok": False,
+                "regressed_safety": [], "recall_ok": False, "recapture_ok": False,
                 "reasons": ["the val-pass and prediction-plane harnesses diverge beyond tolerance; refused"]}
 
     map_c, map_ch = _map(challenger), _map(champion or {})
@@ -95,17 +161,24 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
     rec_reg = safety_recall_no_regress(challenger, champion, onto, rcfg)
     recall_ok = rec_floor["ok"] and rec_reg["ok"]
 
+    # Whether the denominator every floor above is computed against has been checked at all.
+    recap = _recapture(challenger, cfg)
+
     if champion is None:
-        # First champion still must clear the safety floor: a present Safe-mIoU and the recall floor.
-        promote = bool(sm_c is not None and rec_floor["ok"])
+        # First champion still must clear the safety floor: a present Safe-mIoU and the recall floor. The
+        # recapture condition applies here too. A first champion is the model every later comparison is
+        # measured against, so letting it in on an unverified denominator would put the bias in the
+        # baseline, where nothing downstream could ever detect it.
+        promote = bool(sm_c is not None and rec_floor["ok"] and recap["ok"])
         reasons = (["no incumbent; first champion (Safe-mIoU present)"] if sm_c is not None
                    else ["no incumbent but challenger lacks Safe-mIoU; refused (fail-closed)"])
-        reasons += rec_floor["reasons"]
+        reasons += rec_floor["reasons"] + recap["reasons"]
         return {"promote": promote, "beats_map": True, "map_delta": round(map_c, 4),
                 "safe_ok": sm_c is not None, "safety_ok": True, "regressed_safety": [],
-                "recall_ok": rec_floor["ok"], "reasons": reasons}
+                "recall_ok": rec_floor["ok"], "recapture_ok": recap["ok"],
+                "recapture": recap, "reasons": reasons}
 
-    promote = bool(beats_map and safe_ok and safety_ok and recall_ok)
+    promote = bool(beats_map and safe_ok and safety_ok and recall_ok and recap["ok"])
     reasons: list[str] = []
     if not beats_map:
         reasons.append(f"does not beat champion mAP ({map_c:.3f} vs {map_ch:.3f})")
@@ -116,12 +189,13 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
                        else f"Safe-mIoU regressed ({sm_c} vs {sm_ch})")
     if not safety_ok:
         reasons.append(f"safety-class regression: {regressed}")
-    reasons += rec_floor["reasons"] + rec_reg["reasons"]
+    reasons += rec_floor["reasons"] + rec_reg["reasons"] + recap["reasons"]
     if promote:
         reasons.append("beats champion without any safety regression")
     return {"promote": promote, "beats_map": beats_map, "map_delta": round(map_c - map_ch, 4),
             "safe_ok": safe_ok, "safety_ok": safety_ok, "regressed_safety": regressed,
-            "recall_ok": recall_ok, "reasons": reasons, "evidence": evidence}
+            "recall_ok": recall_ok, "recapture_ok": recap["ok"], "recapture": recap,
+            "reasons": reasons, "evidence": evidence}
 
 
 async def _common_gold_metrics(db, reg, champ, task):
@@ -141,7 +215,27 @@ async def _common_gold_metrics(db, reg, champ, task):
         # weights missing for one side: cannot form a fair common comparison, keep stored metrics but flag it
         return (reg.gold_metrics or {}, (champ.gold_metrics if champ else None),
                 f"stored_own_split (weights unavailable for common eval on {gold_id})")
+    # The blind-audit estimate for the run these metrics came from. champion_gate is pure, so this has to be
+    # attached here or the recapture condition would see nothing on every real promotion and fail closed
+    # against a check that had in fact been performed.
+    chal_m = await _attach_recapture(db, chal_m, gold_id)
     return chal_m, champ_m, f"common_gold:{gold_id}"
+
+
+async def _attach_recapture(db, metrics: dict, gold_id: str | None) -> dict:
+    """Put the scored blind audit for this run onto the metric dict, under "recapture". Absent stays absent.
+
+    Keyed on the prediction-plane run id that produced these metrics, not on the model version: two runs of
+    one model at different operating points are different observers, and an audit of one says nothing about
+    the other.
+    """
+    run_id = metrics.get("prediction_plane_run_id")
+    if not run_id:
+        return metrics
+    from services.verdyx.blind_audit import pooled_estimate
+
+    est = await pooled_estimate(db, run_id=str(run_id), gold_id=gold_id)
+    return {**metrics, "recapture": est} if est is not None else metrics
 
 
 async def evaluate_and_promote(db: AsyncSession, challenger_version: str, task: str = "detection") -> dict:

@@ -20,6 +20,8 @@ from services.assets.labelconfig import (
     validate_payload,
 )
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:

@@ -18,6 +18,8 @@ import pytest
 
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 async def _object_with_embedding(db, onto, *, dino: bool, siglip: bool):
     """One object, optionally carrying each vector. Returns its id."""

@@ -23,6 +23,7 @@ from db.models import ModelRun, TrainingJob
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
 from services.training.finetune import _run_id
+from services.training.lineage import dataset_fingerprint, record_dataset_commit
 from services.training.tasks import get_task
 
 log = get_logger("training_jobs")
@@ -198,6 +199,13 @@ async def run_job(job_id) -> dict:
         ds = await task.build_dataset({"name": name, "dataset_spec": spec.dataset_spec}, progress)
         if ds["n_train_images"] < 4 or ds["n_val_images"] < 1:
             raise RuntimeError(f"not enough data: {ds['n_train_images']} train / {ds['n_val_images']} val")
+
+        # What this model is actually trained on, as a content hash rather than a name. `dataset_commit`
+        # used to carry the build name, so two "loop-v1" builds a week apart were different data with the
+        # same label and a promoted champion could not be traced to the corpus behind it.
+        fingerprint = dataset_fingerprint(ds["dir"], str(ds.get("ontology_version") or ""),
+                                          spec.dataset_spec)
+        dataset_commit = f"{name}+{fingerprint}" if fingerprint else name
         await _bump(job_id, stage="evaluate", progress=0.10,
                     counts={"n_train": ds["n_train_images"], "n_val": ds["n_val_images"], "classes": ds["classes"]})
 
@@ -251,7 +259,10 @@ async def run_job(job_id) -> dict:
             try:
                 from services.govern.registry import register
 
-                await register(db, run_id, spec.task_type, candidate or {}, dataset_commit=name,
+                await record_dataset_commit(db, dataset_commit, build=ds, spec=spec.dataset_spec,
+                                            fingerprint=fingerprint)
+                await register(db, run_id, spec.task_type, candidate or {},
+                               dataset_commit=dataset_commit,
                                weights_uri=weights_uri, notes=f"auto-registered from job {job_id}")
             except Exception as exc:  # noqa: BLE001
                 log.warning("registry.auto_register_failed", job_id=str(job_id), run_id=run_id, error=str(exc))

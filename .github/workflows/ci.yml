@@ -62,7 +62,9 @@ jobs:
         # type regression in this critical code fails the build.
         run: >
           .venv/bin/mypy --strict --ignore-missing-imports
-          core/accel/ap.py core/version.py services/api/auth_token.py
+          core/accel/ap.py core/accel/recapture.py core/version.py core/timebase.py
+          services/api/auth_token.py services/review_policy.py
+          services/anonymize/coverage.py services/training/lineage.py
 
       - name: Dependency audit (pip-audit)
         # Informational: a new advisory should not block an unrelated PR, but it must be visible in the log.
@@ -108,12 +110,23 @@ jobs:
         # each one needs reading rather than a bulk edit, and a gate that starts red is a gate nobody turns on.
         run: npx next lint
 
-      - name: Unit floor (vitest, blocking)
-        # Pure-logic unit tests (token-expiry decoding, nav menu wiring). Fast, no DOM.
-        run: npm test
+      - name: Unit floor + component render tests (vitest, blocking)
+        # Two tiers: pure logic in node, components in jsdom. There was no render tier at all - the config
+        # was environment "node" with an include of *.test.ts, so a .test.tsx was never collected and 79
+        # components had zero coverage that nobody could see was missing.
+        #
+        # Run with coverage so the ratchet in vitest.config.ts gates: it is set just under the measured
+        # numbers, so a drop fails the build rather than a gap sitting red until somebody deletes it.
+        run: npm run test:coverage
 
       - name: Production build (next build, blocking)
         run: npm run build
+
+      # The e2e smoke needs the API, a migrated database and the web server all up. Standing that whole
+      # stack up here would roughly double this job and gate every frontend PR on infra it does not
+      # otherwise need, so it is not run in CI today. It runs locally with `make e2e` and skips cleanly
+      # when nothing is serving. Stated rather than left as a silent omission: a suite nobody runs is the
+      # same as no suite, and pretending otherwise is how the last one ended up installed and uninvoked.
 
   test:
     needs: lint
@@ -139,6 +152,13 @@ jobs:
         run: |
           uv pip install --python .venv/bin/python torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cpu
           uv pip install --python .venv/bin/python imagehash==4.3.1
+          # ultralytics lives in the `ml` extra, which CI does not install, so the plate weight fetched
+          # below landed in an environment that could not load it: every run logged
+          # `pii.plate_detector_load_failed: No module named 'ultralytics'` and the plate half of the DPDPA
+          # gate went unexercised on the machine that gates merges - the same hole the comment below is
+          # about, one detector over. Installed after CPU torch so it resolves against that rather than
+          # dragging in the CUDA wheel the ml extra pins.
+          uv pip install --python .venv/bin/python ultralytics==8.3.0
 
       # The PII weights are 5.5 MB total (a 228 KB YuNet face model and a 5.3 MB plate model) and they are
       # what makes the DPDPA gate testable. Without them the anonymizer refuses to construct, by design, and

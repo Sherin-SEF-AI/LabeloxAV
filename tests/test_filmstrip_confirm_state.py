@@ -17,6 +17,8 @@ import pytest
 
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 async def _session_with_frames(db, onto, *, states: list[list[str]]) -> list[str]:
     """One frame per entry in `states`, each carrying objects in the states named."""

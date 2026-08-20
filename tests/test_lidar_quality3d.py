@@ -24,6 +24,8 @@ from services.lidar.quality3d import (
 )
 from services.lidar.segment3d.semantic import road_class_id
 
+pytestmark = pytest.mark.db
+
 PLANE = [0.0, 0.0, 1.0, 0.0]
 
 

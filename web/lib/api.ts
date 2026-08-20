@@ -1,5 +1,6 @@
 import type {
   AgentRunRow,
+  ReanalyzeResult,
   InterruptedRun,
   AlItem,
   AssignmentRow,
@@ -120,6 +121,10 @@ import type {
   PlateReadRow,
 } from "./types";
 
+// Re-exported so a component can name the shape without reaching past this module, which is the
+// convention the agent types here already follow.
+export type { ReanalyzeResult, ReanalyzeFinding } from "./types";
+
 // Same-origin: next.config rewrites /api/* to the FastAPI backend. Every request carries the current
 // user (X-Lbx-User-Id) for attribution.
 import { userHeaders, refreshTokenIfNeeded } from "./user";
@@ -186,6 +191,23 @@ async function fail(r: Response, method: string, path: string): Promise<never> {
 export function humanizeError(e: unknown): string {
   if (e instanceof ApiError) return e.message;
   if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  // A plain object reached String() and came out as "[object Object]", which is the same non-message this
+  // codebase has already had to fix once on the console. It happens for real: FastAPI returns
+  // {"detail": ...} and a `throw {detail}` or a rejected non-Error lands here unchanged. Pull the field
+  // the API actually uses, then fall back to JSON, which is at least readable and reportable.
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    for (const key of ["detail", "message", "error"]) {
+      const v = o[key];
+      if (typeof v === "string" && v.trim()) return v;
+    }
+    try {
+      return JSON.stringify(e);
+    } catch {
+      return "an unknown error occurred";
+    }
+  }
   return String(e);
 }
 
@@ -482,6 +504,19 @@ export const api = {
       { object_3d_ids: ids, class_id: classId ?? null, dims: dims ?? null }),
   ontology: () => get<Ontology>("/api/ontology"),
   addClass: (name: string) => post<OntologyClass & { existed: boolean }>("/api/ontology/classes", { name }),
+  // Repair, not just growth. merge/rename/retire have existed server-side and been reachable from nothing,
+  // so the vocabulary could be added to and never fixed - which is exactly the asymmetry the commit that
+  // wrote them set out to close. Admin-gated; the API refuses a merge that crosses an l0 boundary.
+  ontologyMerge: (from_id: number, to_id: number) =>
+    post<{ run_id: string; moved: number; from: string; to: string }>(
+      "/api/ontology/classes/merge", { from_id, to_id }),
+  ontologyRevertMerge: (runId: string) =>
+    post<{ run_id: string; reverted: number; skipped: number }>(
+      `/api/ontology/merges/${runId}/revert`, {}),
+  ontologyRename: (class_id: number, new_name: string) =>
+    post<{ class_id: number; name: string }>("/api/ontology/classes/rename", { class_id, new_name }),
+  ontologyRetire: (classIds: number[]) =>
+    post<{ retired: number[]; skipped: number[] }>("/api/ontology/classes/retire", classIds),
   sessions: () => get<SessionRow[]>("/api/sessions"),
   sessionsPage: (opts: { limit?: number; offset?: number; vehicle_id?: string } = {}) => {
     const p = new URLSearchParams();
@@ -617,6 +652,16 @@ export const api = {
     post<{ understood: string; count: number; frames: { frame_id: string; session_id: string }[] }>(`/api/agent/ask`, { text }),
   // Class moves a past relabel run made, grouped by the mistake rather than by the object. `refused_now`
   // marks the lineages the ontology guard would reject today.
+  // The objects one class move produced. The grouped view carries eight examples per lineage, which is
+  // enough to know a lineage exists and not enough to judge one whose only other action is reverting a
+  // thousand labels.
+  agentLineageObjects: (from_name: string, to_name: string, limit = 60, offset = 0) =>
+    get<{
+      from_name: string; to_name: string; from_class_id: number; to_class_id: number;
+      reason: string | null; total: number; offset: number; limit: number;
+      objects: { object_id: string; frame_id: string; class_id: number; conf: number; state: string }[];
+    }>(`/api/agent/contamination/objects?` + new URLSearchParams({
+      from_name, to_name, limit: String(limit), offset: String(offset) }).toString()),
   agentContamination: (minCount = 25, refusedOnly = false) =>
     get<{
       summary: {
@@ -624,6 +669,13 @@ export const api = {
         // What is still wrong, as opposed to what once happened. This is the number that can reach zero.
         outstanding: number; refused_outstanding: number;
       };
+      // The same shape over the filtered view. `summary` is corpus-wide; previously one number served
+      // both, so with the refused-only filter on the header said "N moved in all" about the subset.
+      shown?: {
+        lineages: number; objects: number; refused_lineages: number; refused_objects: number;
+        outstanding: number; refused_outstanding: number;
+      };
+      filtered?: boolean;
       lineages: {
         from_name: string; to_name: string; count: number; outstanding: number;
         refused_now: boolean; reason: string | null;
@@ -686,7 +738,16 @@ export const api = {
     post<{ run_id: string; kind: string; restarted: boolean; detail?: string }>(
       `/api/agent/runs/${run_id}/resume`, {}),
   agentRunStatus: (run_id: string) =>
-    get<{ run_id: string; kind: string; status: string; counts: Record<string, number>; changed: number }>(`/api/agent/runs/${run_id}`),
+    get<{ run_id: string; kind: string; status: string; counts: Record<string, number>; changed: number;
+         fraction: number | null }>(`/api/agent/runs/${run_id}`),
+  // Reanalyse: one press re-checks a frame's redaction against its own annotations and re-runs every
+  // per-frame label check. The plan form writes nothing, which matters because the blur cannot be undone.
+  agentReanalyzePlan: (frame_id: string) =>
+    post<ReanalyzeResult>(`/api/agent/frames/${frame_id}/reanalyze/plan`, {}),
+  agentReanalyze: (frame_id: string) =>
+    post<ReanalyzeResult>(`/api/agent/frames/${frame_id}/reanalyze`, {}),
+  agentReanalyzeAll: (opts: { session_id?: string; max_frames?: number } = {}) =>
+    post<{ run_id: string; status: string }>(`/api/agent/reanalyze/all`, opts),
   // Overnight Auditor: run the nightly patrol, read the morning report
   agentAuditRun: (opts: { sample_size?: number; vlm_calls?: number; since_hours?: number } = {}) =>
     post<{ run_id: string; status: string }>(`/api/agent/audit/run`, opts),
@@ -1022,7 +1083,10 @@ export const api = {
   lopSubmit: (jobId: string, expected_version?: number) =>
     post<LabelJobRow & { honeypot_failed: boolean; min_honeypot_accuracy: number }>(
       `/api/labelops/jobs/${jobId}/submit`, { expected_version }),
-  lopIssues: (q: { frame_id?: string; job_id?: string; object_id?: string; status?: string } = {}) => {
+  // `mine` returns the issues raised about the caller's own work - the one thing this could not be asked
+  // for. Every other filter narrows by what the issue is attached to, not by whose label it is about.
+  lopIssues: (q: { frame_id?: string; job_id?: string; object_id?: string; status?: string;
+                   mine?: boolean } = {}) => {
     const p = new URLSearchParams();
     Object.entries(q).forEach(([k, v]) => { if (v) p.set(k, String(v)); });
     return get<{ issues: IssueRow[] }>(`/api/labelops/issues?${p.toString()}`);

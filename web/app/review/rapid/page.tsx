@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import PageShell from "@/components/shell/PageShell";
 import { api, humanizeError } from "@/lib/api";
+import { t } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 import { undoPayload, verdictPayload } from "@/lib/reviewVerdict";
 import { describeScope, triageQuery } from "@/lib/triageScope";
@@ -239,15 +240,20 @@ function RapidBody() {
             </div>
 
             <div className="shrink-0 border-t hairline px-4 py-2 flex items-center gap-4 font-mono text-[11px]">
-              <Key k="A" label="accept" tone="text-pass" onClick={() => decide("accept")} />
-              <Key k="R" label="reject" tone="text-block" onClick={() => decide("reject")} />
-              <Key k="C" label="reclassify" tone="text-warn" onClick={() => setReclassOpen(true)} />
-              <Key k="S" label="skip" tone="text-ink-3" onClick={() => decide("skip")} />
-              <Key k="U" label="undo" tone="text-ink-3" onClick={undo} />
+              {/* The verdict row, in the reviewer's own language. i18n shipped with four locales and one
+                  consumer (the onboarding tour), so the surface an annotator spends a whole shift on -
+                  this one - was English-only in a product built for Indian roads. The hotkeys stay Latin
+                  because they are physical keys, and the class name below is never translated: renaming a
+                  class in the interface would make it impossible to talk about with the ontology. */}
+              <Key k="A" label={t("action.accept", "accept")} tone="text-pass" onClick={() => decide("accept")} />
+              <Key k="R" label={t("action.reject", "reject")} tone="text-block" onClick={() => decide("reject")} />
+              <Key k="C" label={t("action.reclassify", "reclassify")} tone="text-warn" onClick={() => setReclassOpen(true)} />
+              <Key k="S" label={t("action.skip", "skip")} tone="text-ink-3" onClick={() => decide("skip")} />
+              <Key k="U" label={t("action.undo", "undo")} tone="text-ink-3" onClick={undo} />
               <Key k="O" label="open the frame" tone="text-ink-3"
                 onClick={() => router.push(`/frame/${current.frame_id}`)} />
-              <span className="ml-auto text-ink-4">
-                {inFlight.current > 0 ? "saving..." : "saved"}
+              <span className="ml-auto text-ink-3">
+                {inFlight.current > 0 ? t("editor.unsaved", "saving...") : t("editor.saved", "saved")}
               </span>
             </div>
           </>

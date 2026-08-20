@@ -2,7 +2,8 @@
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, humanizeError } from "@/lib/api";
+import { toastError } from "@/lib/toast";
 import type { AlItem, ErrorCandidateRow } from "@/lib/types";
 import dynamic from "next/dynamic";
 import PageShell from "@/components/shell/PageShell";
@@ -66,21 +67,39 @@ export default function ReviewQueuePage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const confirm = async (id: string) => { await api.errorConfirm(id); setMsg("confirmed as error (fed to retrain)"); await load(); };
-  const dismiss = async (id: string) => { await api.errorDismiss(id); await load(); };
-  const runDetect = async () => { const r = await api.errorRun(); setMsg(`detected ${r.persisted}`); await load(); };
-  const ruleControl = async (id: string, verdict: "correct" | "incorrect") => {
-    await api.controlVerdict(id, verdict);
-    setMsg(verdict === "correct" ? "the gate was right here" : "recorded as a gate error");
+  // Every verdict below goes through this. The read path already surfaces its failures; these five did
+  // not, so a rejected verdict was an unhandled promise: the row stayed exactly where it was, nothing
+  // said why, and the reviewer clicked it again. A verdict that did not take has to say so.
+  const act = useCallback(async (what: string, run: () => Promise<string | null>) => {
+    try {
+      const note = await run();
+      if (note) setMsg(note);
+    } catch (e) {
+      setMsg(null);
+      toastError(`${what} failed: ${humanizeError(e)}`);
+      return;
+    }
     await load();
-  };
-  const ruleRecall = async (id: string, verdict: "confirmed" | "rejected") => {
-    const r = await api.recallRule(id, verdict);
-    setMsg(verdict === "confirmed"
-      ? (r.object_routed_to_review ? "confirmed; the object is in the review queue" : "confirmed")
-      : "rejected; the object was left alone");
-    await load();
-  };
+  }, [load]);
+
+  const confirm = (id: string) =>
+    act("confirm", async () => { await api.errorConfirm(id); return "confirmed as error (fed to retrain)"; });
+  const dismiss = (id: string) =>
+    act("dismiss", async () => { await api.errorDismiss(id); return "dismissed"; });
+  const runDetect = () =>
+    act("detection run", async () => { const r = await api.errorRun(); return `detected ${r.persisted}`; });
+  const ruleControl = (id: string, verdict: "correct" | "incorrect") =>
+    act("verdict", async () => {
+      await api.controlVerdict(id, verdict);
+      return verdict === "correct" ? "the gate was right here" : "recorded as a gate error";
+    });
+  const ruleRecall = (id: string, verdict: "confirmed" | "rejected") =>
+    act("verdict", async () => {
+      const r = await api.recallRule(id, verdict);
+      return verdict === "confirmed"
+        ? (r.object_routed_to_review ? "confirmed; the object is in the review queue" : "confirmed")
+        : "rejected; the object was left alone";
+    });
 
   return (
     <PageShell active="REVIEW" title="Review Queue"

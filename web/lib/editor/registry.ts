@@ -1,74 +1,10 @@
-// The single source of truth for the redesigned interface. The UI grows by organization, not addition:
-// a new destination is one entry in APP_GROUPS, a new editor tool is one entry in a group's tools, and a
-// new mode is one entry in MODES. Nothing here widens a toolbar or a nav row; the chrome reads this data
-// and renders groups (not flat lists), so the layout absorbs new features with zero structural change.
-
-export type NavItem = { href: string; label: string; hint?: string };
-export type NavGroup = { key: string; label: string; items: NavItem[] };
-
-// Grouped application navigation. Replaces the flat TopNav scroll; drives the AppSwitcher and the command
-// palette. Add a destination by adding one item to a group (or a new group), never a peer in a flat row.
-export const APP_GROUPS: NavGroup[] = [
-  {
-    key: "work",
-    label: "Work",
-    items: [
-      { href: "/platforms", label: "Platforms", hint: "the seven planes of the data engine" },
-      { href: "/", label: "Triage", hint: "object queue ranked by value" },
-      { href: "/agent", label: "Agent Console", hint: "autonomous QA: error sweep, temporal repair, fix queue" },
-      { href: "/projects", label: "Projects", hint: "assign jobs, track stages, annotator scorecards" },
-      { href: "/review/queue", label: "Review queue", hint: "active learning + error candidates" },
-      { href: "/annotations", label: "Annotations", hint: "browse and resume sessions" },
-      { href: "/jobs", label: "Jobs", hint: "import, training, autolabel runs" },
-    ],
-  },
-  {
-    key: "discover",
-    label: "Discover",
-    items: [
-      { href: "/explore", label: "Explore", hint: "embeddings map, facets, tags, saved views" },
-      { href: "/search", label: "Search", hint: "visual and semantic similarity" },
-      { href: "/scenarios", label: "Scenarios", hint: "behavioral scenario mining" },
-      { href: "/discovery", label: "Discovery", hint: "rare-scenario novelty queue" },
-      { href: "/curation", label: "Curation", hint: "frame-level active learning" },
-    ],
-  },
-  {
-    key: "data",
-    label: "Data",
-    items: [
-      { href: "/annotate/new", label: "New", hint: "start an annotation from upload" },
-      { href: "/import", label: "Import", hint: "ingest an external dataset" },
-      { href: "/datasets", label: "Datasets", hint: "sealed dataset delivery" },
-    ],
-  },
-  {
-    key: "quality",
-    label: "Quality and models",
-    items: [
-      { href: "/quality", label: "Quality", hint: "gold set, gate B metrics" },
-      { href: "/analytics", label: "Analytics", hint: "corpus health and loop signal" },
-      { href: "/calibration", label: "Calibration", hint: "camera validation" },
-      { href: "/training", label: "Training", hint: "training jobs and registry" },
-      { href: "/govern", label: "Govern", hint: "loop control and championship" },
-      { href: "/collaborate", label: "Collaborate", hint: "branches and merge requests" },
-    ],
-  },
-  {
-    key: "spatial",
-    label: "Spatial",
-    items: [
-      { href: "/lidar", label: "LiDAR", hint: "point cloud explorer" },
-      { href: "/map", label: "HD map", hint: "fused map and provenance" },
-      { href: "/inertial", label: "Inertial", hint: "ego-state timeline, events, maneuvers" },
-      { href: "/events", label: "Driving events", hint: "lane changes, signal phases, violations" },
-      { href: "/events/search", label: "Behaviour search", hint: "query the corpus: a crossing while a signal was red" },
-      { href: "/inspect", label: "Inspector", hint: "Foxglove-class MCAP session inspection" },
-    ],
-  },
-];
-
-export const ALL_DESTINATIONS: NavItem[] = APP_GROUPS.flatMap((g) => g.items);
+// The editor's mode and tool registry.
+//
+// This file also held APP_GROUPS/ALL_DESTINATIONS: a complete second navigation registry, 33 destinations,
+// with no consumers anywhere. It had drifted from lib/menus.ts - the one the menu bar and the command
+// palette both read - and the drift had a cost: /events and /events/search were listed only here, so they
+// were unreachable from the actual navigation. They are in menus.ts now, and the dead half is gone rather
+// than left as a second source of truth for anyone to update by mistake.
 
 // ---- Editor modes (used by the moded EditorShell from Phase 2 on) -------------------------------------
 // A mode is a mutually exclusive toolset on the canvas. Its groups collapse to one tool-strip button each

@@ -773,7 +773,16 @@ async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
 
 # Kinds with a relauncher that honours their cursor. A kind absent here can still be re-run from the start;
 # what it cannot do is continue, and the resume route refuses rather than pretending.
-_RESUMABLE_KINDS = frozenset({"error_sweep", "relabel_all"})
+#
+# `reanalyze_all` was missing from this set while its runner had implemented resume all along
+# (services/agent/reanalyze.py rebuilds the done set from the prior cursor and skips those frames). A real
+# run got 152 frames into a 500-frame sweep, recorded 1,672 findings, added 15 faces and 118 plates, and
+# was then told by this route that its kind "has no resume path yet". The refusal was a statement about
+# this table rather than about the runner, and it cost the operator every frame of that work.
+#
+# tests/test_job_resume.py checks the set against the runners rather than against itself: a kind here whose
+# runner never reads a cursor would restart from zero under a button labelled "resume".
+_RESUMABLE_KINDS = frozenset({"error_sweep", "relabel_all", "reanalyze_all"})
 
 
 @router.get("/agent/runs/interrupted", dependencies=[Depends(require_role("annotator"))])
@@ -796,7 +805,7 @@ async def resume_run(run_id: str, db: AsyncSession = Depends(db_session)):
     resumable rather than being restarted under a name that implies they will not repeat themselves.
     """
     from services.agent.error_daemon import run_error_sweep
-    from services.agent.resume import claim_for_resume
+    from services.agent.resume import claim_for_resume, release_claim
 
     try:
         rid = uuid.UUID(run_id)
@@ -822,15 +831,29 @@ async def resume_run(run_id: str, db: AsyncSession = Depends(db_session)):
         # which is a fact about the world the caller should be told rather than a mistake they made.
         raise HTTPException(409, claimed["error"])
 
+    # Explicit per kind, with no `else` fallthrough. The previous shape defaulted anything that was not an
+    # error_sweep to the relabel relauncher, so adding a kind to the set above without a branch here would
+    # have launched the wrong job against its cursor: a reanalyze run continued as a relabel sweep, writing
+    # labels under a run whose scope and counts describe a redaction pass, with nothing raising.
     scope = claimed.get("scope") or {}
     if run.kind == "error_sweep":
         spawn(run_error_sweep(
             rid, max_sessions=int(scope.get("max_sessions") or 10), kinds=scope.get("kinds")), name="run_error_sweep")
-    else:
+    elif run.kind == "relabel_all":
         from services.agent.relabel_agent import run_relabel_all
 
         spawn(run_relabel_all(
             rid, max_frames=int(scope.get("max_frames") or 200), session_id=scope.get("session_id")), name="run_relabel_all")
+    elif run.kind == "reanalyze_all":
+        from services.agent.reanalyze import run_reanalyze_all
+
+        spawn(run_reanalyze_all(
+            rid, max_frames=int(scope.get("max_frames") or 500), session_id=scope.get("session_id")), name="run_reanalyze_all")
+    else:  # pragma: no cover - unreachable while the set and this dispatch agree, which a test enforces
+        # The run has already been claimed and flipped to running at this point, so leaving it here would
+        # strand it exactly as an interrupted process does. Put it back before refusing.
+        await release_claim(db, rid, "no relauncher is wired for this kind")
+        raise HTTPException(500, f"{run.kind} is marked resumable but has no relauncher wired")
     return {**claimed, "restarted": True}
 
 
@@ -862,7 +885,33 @@ async def contamination(min_count: int = 25, refused_only: bool = False,
     from services.agent.contamination import agent_relabel_lineages, summarize
 
     rows = await agent_relabel_lineages(db, min_count=min_count, refused_only=refused_only)
-    return {"summary": summarize(rows), "lineages": rows}
+    # `summary` is the corpus-wide total and `shown` describes the filtered view. Previously one number
+    # served both: summarize() ran on the already-filtered list, so with refused_only set the header read
+    # "N moved in all" while describing the refused subset. The words "in all" were false exactly when the
+    # filter was on, which is the state the panel opens in.
+    everything = rows if not refused_only else await agent_relabel_lineages(db, min_count=min_count)
+    return {"summary": summarize(everything), "shown": summarize(rows),
+            "filtered": refused_only, "lineages": rows}
+
+
+@router.get("/agent/contamination/objects", dependencies=[Depends(require_role("annotator"))])
+async def contamination_objects(from_name: str, to_name: str, limit: int = 60, offset: int = 0,
+                                db: AsyncSession = Depends(db_session)):
+    """The objects one class move actually produced, so a lineage can be looked at rather than counted.
+
+    The grouped view carries eight examples per lineage, capped where the aggregate is built. A move that
+    touched a thousand objects could therefore be inspected eight deep, which is enough to know it exists
+    and not enough to judge it - and the only other action available is reverting the whole thousand.
+
+    Uses the same predicate as the revert, deliberately: a list showing a different set from the one the
+    revert would touch is worse than no list, because it invites somebody to check these and change those.
+    """
+    from services.agent.contamination import lineage_objects
+
+    res = await lineage_objects(db, from_name, to_name, limit=limit, offset=offset)
+    if "error" in res:
+        raise HTTPException(404, res["error"])
+    return res
 
 
 class LineageRevertIn(BaseModel):
@@ -886,3 +935,60 @@ async def contamination_revert(body: LineageRevertIn, db: AsyncSession = Depends
                                     created_by=getattr(user, "name", None))
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+class ReanalyzeAllIn(BaseModel):
+    session_id: str | None = None    # scope to one session, or None for the whole corpus
+    max_frames: int = 500
+
+
+@router.post("/agent/frames/{frame_id}/reanalyze/plan", dependencies=[Depends(require_role("annotator"))])
+async def reanalyze_plan(frame_id: str, db: AsyncSession = Depends(db_session)):
+    """Dry-run the re-check on this frame: what it would blur, and what it would put on the review queue.
+
+    Writes nothing. The plan form exists because the redaction half is one-way: the unredacted original is
+    deliberately never stored, so a blur cannot be taken back and has to be inspectable first.
+    """
+    from services.agent.reanalyze import reanalyze_frame
+
+    try:
+        return await reanalyze_frame(db, uuid.UUID(frame_id), apply=False)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/agent/frames/{frame_id}/reanalyze", dependencies=[Depends(require_role("reviewer"))])
+async def reanalyze(frame_id: str, db: AsyncSession = Depends(db_session)):
+    """Re-check this frame: blur the PII the first pass missed, and queue what looks wrong with the labels.
+
+    Reviewer-gated because it writes to the stored image. It never changes a label: the annotation findings
+    become review-queue candidates for a human to rule on.
+    """
+    from services.agent.reanalyze import reanalyze_frame
+
+    try:
+        return await reanalyze_frame(db, uuid.UUID(frame_id), apply=True)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/agent/reanalyze/all", dependencies=[Depends(require_role("reviewer"))])
+async def reanalyze_all(body: ReanalyzeAllIn | None = None, db: AsyncSession = Depends(db_session),
+                        user=Depends(current_user)):
+    """Re-check every frame in one session, or across the corpus, in the background.
+
+    Poll GET /agent/runs/{run_id} for progress; the console's Background panel shows it without being told
+    about this kind, because it renders whatever the run list returns.
+    """
+    from services.agent.reanalyze import run_reanalyze_all
+
+    body = body or ReanalyzeAllIn()
+    run_id = uuid.uuid4()
+    db.add(AgentRun(run_id=run_id, kind="reanalyze_all", status="running",
+                    scope={"session_id": body.session_id, "max_frames": body.max_frames},
+                    policy={}, counts={}, changes={}, critic={},
+                    created_by=str(user.user_id) if user else "daemon"))
+    await db.commit()
+    spawn(run_reanalyze_all(run_id, session_id=body.session_id, max_frames=max(1, body.max_frames),
+                            created_by=str(user.user_id) if user else None), name="run_reanalyze_all")
+    return {"run_id": str(run_id), "status": "running"}

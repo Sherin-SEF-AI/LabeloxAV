@@ -21,6 +21,8 @@ from services.lidar.clean import (
 )
 from services.lidar.ingest import Cloud
 
+pytestmark = pytest.mark.db
+
 
 def _o3d_ok() -> bool:
     try:

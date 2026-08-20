@@ -137,3 +137,41 @@ describe("visibility", () => {
     expect(s.objects.map((o) => o.visible)).toEqual([false, true, false]);
   });
 });
+
+describe("touched: what 'Confirm frame' will actually accept", () => {
+  // acceptAll confirms only objects in `touched`, which is right - it is what stops Confirm rubber-stamping
+  // auto-labels nobody looked at. But two paths never added to it, so the guard quietly ate real work.
+
+  it("a rule-based selection marks its objects touched", () => {
+    // "select all low-confidence" then Confirm used to accept nothing at all: selectBy was the one
+    // selection path that never touched anything, so acceptAll had an empty set to work from.
+    const s = run(
+      state([obj("a", { conf: 0.2 }), obj("b", { conf: 0.9 })]),
+      { t: "selectBy", how: "lowConf", value: 0.5 },
+    );
+    expect(s.selectedIds).toEqual(["a"]);
+    expect(s.touched).toContain("a");
+
+    const confirmed = editorReducer(s, { t: "acceptAll" });
+    expect(confirmed.objects.find((o) => o.id === "a")?.state).toBe("accepted");
+    expect(confirmed.objects.find((o) => o.id === "b")?.state).toBe("review");
+  });
+
+  it("keeps an object touched across the autosave that renames it", () => {
+    // A new object's id changes on save. `touched` held the old tmp- id and was not remapped, so an object
+    // the annotator had drawn and edited stopped counting as reviewed the moment autosave landed.
+    const drawn = obj("tmp-1", { isNew: true });
+    const s = run(
+      state([drawn], { touched: ["tmp-1"] }),
+      { t: "saved", remap: { "tmp-1": "real-1" }, versions: { "tmp-1": 1 } },
+    );
+    expect(s.objects[0].id).toBe("real-1");
+    expect(s.touched).toEqual(["real-1"]);
+  });
+
+  it("leaves an untouched auto-label alone", () => {
+    // The property that makes the gate worth having in the first place.
+    const s = editorReducer(state([obj("a"), obj("b")]), { t: "acceptAll" });
+    expect(s.objects.every((o) => o.state === "review")).toBe(true);
+  });
+});

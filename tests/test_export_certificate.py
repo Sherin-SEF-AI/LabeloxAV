@@ -22,6 +22,8 @@ from services.export.certificate import (
     verify_certificate,
 )
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:

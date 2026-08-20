@@ -13,6 +13,8 @@ import pytest
 
 from core.config import get_settings
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:

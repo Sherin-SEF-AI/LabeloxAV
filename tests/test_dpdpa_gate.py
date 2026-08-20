@@ -4,7 +4,11 @@ un-redacted (fail-closed), and confirmed non-personal speech does not block."""
 
 from __future__ import annotations
 
+import pytest
+
 from services.anonymize.compliance import evaluate_dpdpa
+
+pytestmark = pytest.mark.db
 
 
 def test_passes_when_all_clear():
@@ -87,3 +91,164 @@ async def test_export_gate_on_real_data():
         async with get_sessionmaker()() as db:
             await db.execute(delete(SpeechSegment).where(SpeechSegment.segment_id == seg_id))
             await db.commit()
+
+
+def test_all_four_conditions_block_as_one_gate():
+    """The coverage gap is a blocker like any other when the gate is enforcing.
+
+    The three-condition test above keeps its `==` deliberately: adding a blocker kind has to be a decision
+    someone makes here, and it also pins that the coverage gate stays out of a verdict that did not ask for
+    it. That test needed no edit when this landed, which is the evidence that mode="off" is inert.
+    """
+    v = evaluate_dpdpa({"f1", "f2"}, {"f1"}, [{"is_personal": True, "redacted": False}],
+                       coverage_gaps=[{"frame_id": "f1", "missing": {"face": 1},
+                                       "classes": ["pedestrian"], "examined": True}],
+                       mode="enforcing")
+    assert not v["pass"]
+    assert {b["kind"] for b in v["blockers"]} == {"unredacted_visual_pii", "unredacted_speech",
+                                                  "unverified_blur_coverage"}
+
+
+def test_advisory_measures_without_refusing():
+    v = evaluate_dpdpa({"f1"}, {"f1"}, [],
+                       coverage_gaps=[{"frame_id": "f1", "missing": {"face": 1},
+                                       "classes": ["pedestrian"], "examined": False}],
+                       mode="advisory")
+    assert v["pass"], "advisory must not refuse; it is a measurement while the corpus is swept"
+    assert [w["kind"] for w in v["warnings"]] == ["unverified_blur_coverage"]
+    assert v["blockers"] == []
+
+
+def test_the_blocker_frame_list_is_capped_but_the_count_is_not():
+    # A whole-slice refusal must not put 40,000 frame records into a 422 body.
+    gaps = [{"frame_id": f"f{i}", "missing": {"face": 1}, "classes": ["pedestrian"], "examined": False}
+            for i in range(200)]
+    v = evaluate_dpdpa({"f1"}, {"f1"}, [], coverage_gaps=gaps, mode="enforcing")
+    blocker = next(b for b in v["blockers"] if b["kind"] == "unverified_blur_coverage")
+    assert blocker["count"] == 200
+    assert len(blocker["frames"]) == 25 and blocker["truncated"] is True
+
+
+async def test_coverage_gate_on_real_frames():
+    """Three frames that separate the ways this predicate can be wrong.
+
+    A - a pedestrian with a face region actually covering them: passes.
+    B - the same pedestrian, an audit row with no regions at all: refuses. This is the 82.4% population,
+        and under the old row-existence gate it passed identically to A.
+    C - no annotations and a zero-count audit: passes. recheck.py writes exactly this row for "looked,
+        found nothing", so a gate keyed on n_faces > 0 would refuse every clean highway frame in the
+        corpus. This is the assertion that matters most.
+    """
+    import uuid
+
+    from core.timebase import now_ns, seconds_to_ns
+    from db.models import Frame, Object, PiiAudit
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.anonymize.compliance import blur_coverage_gaps
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
+    ped = onto.by_name("pedestrian").id
+    person = [600.0, 300.0, 760.0, 900.0]
+    face_on_person = [650.0, 330.0, 720.0, 410.0]
+
+    sid, ts = uuid.uuid4(), now_ns()
+    fa, fb, fc = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async with get_sessionmaker()() as db:
+        db.add(DbSession(session_id=sid, vehicle_id="COV-01", start_ts_ns=ts,
+                         end_ts_ns=ts + seconds_to_ns(1), city="BLR", sensors={},
+                         ontology_version=onto.version))
+        for fid in (fa, fb, fc):
+            db.add(Frame(frame_id=fid, session_id=sid, ts_ns=ts, cam_id="cam_f", img_uri="s3://x/f.jpg",
+                         width=1920, height=1080, quality=0.9, scene={}))
+        await db.flush()
+        for fid in (fa, fb):
+            db.add(Object(object_id=uuid.uuid4(), frame_id=fid, class_id=ped, bbox=person,
+                          conf=0.9, source="human", state="accepted"))
+        db.add(PiiAudit(frame_id=fa, session_id=sid, n_faces=1, n_plates=0,
+                        regions=[{"type": "face", "bbox": face_on_person, "score": 0.9}],
+                        method_version="test", ts_ns=ts))
+        db.add(PiiAudit(frame_id=fb, session_id=sid, n_faces=0, n_plates=0, regions=[],
+                        method_version="test", ts_ns=ts))
+        db.add(PiiAudit(frame_id=fc, session_id=sid, n_faces=0, n_plates=0, regions=[],
+                        method_version="test", ts_ns=ts))
+        await db.commit()
+
+        gaps = await blur_coverage_gaps(db, [fa, fb, fc])
+
+    by_frame = {g["frame_id"]: g for g in gaps}
+    assert str(fa) not in by_frame, "a covering face region must satisfy the person it covers"
+    assert str(fc) not in by_frame, "a frame with no annotated people cannot be short a redaction"
+    assert str(fb) in by_frame, "an annotated pedestrian with no region at all must be reported"
+    assert by_frame[str(fb)]["missing"] == {"face": 1}
+    assert by_frame[str(fb)]["classes"] == ["pedestrian"]
+    assert by_frame[str(fb)]["examined"] is False
+
+
+async def test_the_coverage_query_does_not_scale_with_frames():
+    """One query pair for the whole export, not one per frame.
+
+    export_dataset hands this whole slices, so an N+1 here would be an N+1 inside the gate that blocks
+    delivery. Counting statements rather than timing, so it fails for the right reason.
+    """
+    import uuid
+
+    from sqlalchemy import event
+
+    from core.timebase import now_ns, seconds_to_ns
+    from db.models import Frame, Object, PiiAudit
+    from db.models import Session as DbSession
+    from db.session import get_engine, get_sessionmaker
+    from services.anonymize.compliance import blur_coverage_gaps
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
+    ped = onto.by_name("pedestrian").id
+    sid, ts = uuid.uuid4(), now_ns()
+
+    async with get_sessionmaker()() as db:
+        db.add(DbSession(session_id=sid, vehicle_id="COV-N", start_ts_ns=ts,
+                         end_ts_ns=ts + seconds_to_ns(1), city="BLR", sensors={},
+                         ontology_version=onto.version))
+        await db.commit()
+
+    async def seed(n):
+        fids = []
+        async with get_sessionmaker()() as db:
+            for _ in range(n):
+                fid = uuid.uuid4()
+                db.add(Frame(frame_id=fid, session_id=sid, ts_ns=ts, cam_id="cam_f",
+                             img_uri="s3://x/f.jpg", width=1920, height=1080, quality=0.9, scene={}))
+                await db.flush()
+                db.add(Object(object_id=uuid.uuid4(), frame_id=fid, class_id=ped,
+                              bbox=[600.0, 300.0, 760.0, 900.0], conf=0.9, source="human",
+                              state="accepted"))
+                db.add(PiiAudit(frame_id=fid, session_id=sid, n_faces=0, n_plates=0, regions=[],
+                                method_version="test", ts_ns=ts))
+                fids.append(fid)
+            await db.commit()
+        return fids
+
+    few, many = await seed(3), await seed(40)
+
+    counts = []
+    for batch in (few, many):
+        n = 0
+
+        def _count(*_a, **_k):
+            nonlocal n
+            n += 1
+
+        engine = get_engine().sync_engine
+        event.listen(engine, "before_cursor_execute", _count)
+        try:
+            async with get_sessionmaker()() as db:
+                await blur_coverage_gaps(db, batch)
+        finally:
+            event.remove(engine, "before_cursor_execute", _count)
+        counts.append(n)
+
+    assert counts[0] == counts[1], (
+        f"statement count grew with the slice ({counts[0]} for 3 frames, {counts[1]} for 40); "
+        "the coverage gate has become an N+1")

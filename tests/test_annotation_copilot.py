@@ -12,6 +12,8 @@ import pytest
 from core.config import get_settings
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -47,11 +49,12 @@ def _unit(rng):
 
 async def _seed_pattern():
     """A reviewer corrected e_auto -> autorickshaw several times; there are more e_auto that look the same."""
+    from sqlalchemy import delete
+
     from db.models import Frame, Object, ObjectEmbedding, OntologyClass, OntologyVersion, Review
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
     from services.autolabel.ontology import get_ontology
-    from sqlalchemy import delete
 
     onto = get_ontology()
     e_auto = next(c.id for c in onto.classes if c.name == "e_auto")

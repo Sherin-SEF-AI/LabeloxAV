@@ -133,7 +133,7 @@ def _infra_up() -> bool:
 
 
 requires_infra = pytest.mark.skipif(not _infra_up(), reason="infra not up (make up)")
-pytestmark = []
+pytestmark = [pytest.mark.db]
 
 
 @pytest.mark.xfail(strict=True, reason="encode gate: synthetic frames are rejected by the quality gate, so no "

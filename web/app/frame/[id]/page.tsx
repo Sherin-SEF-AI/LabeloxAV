@@ -32,6 +32,8 @@ import Icon, { MODE_ICON } from "@/components/shell/Icon";
 import ShortcutOverlay from "@/components/shell/ShortcutOverlay";
 import IssuePanel from "@/components/labelops/IssuePanel";
 import CloudControl from "@/components/shell/CloudControl";
+import NotificationBell from "@/components/shell/NotificationBell";
+import CommandPalette from "@/components/shell/CommandPalette";
 import { MODES, type ToolGroup } from "@/lib/editor/registry";
 import type { SelectHow } from "@/components/editor/useEditor";
 import Filmstrip from "@/components/editor/Filmstrip";
@@ -777,8 +779,15 @@ export default function FrameEditor() {
   const advanceReview = (currentObjId: string) => {
     const rest = alItems.filter((it) => it.object_id !== currentObjId);
     const onFrame = rest.find((it) => it.frame_id === id);
-    if (onFrame) doSelect(onFrame.object_id);
-    else { const off = rest.find((it) => it.frame_id !== id); if (off) gotoFrame(off.frame_id); }
+    if (onFrame) { doSelect(onFrame.object_id); return; }
+    const off = rest.find((it) => it.frame_id !== id);
+    if (off) { gotoFrame(off.frame_id); return; }
+    // The queue is finished. This branch used to fall off the end: no navigation, no message, nothing -
+    // which on the last item looked exactly like a broken build. Say so, and offer the way out.
+    toast("review queue complete - nothing left in this queue", "success", 8000, {
+      label: "back to queue",
+      run: () => router.push("/review/queue"),
+    });
   };
 
   // each new selection starts with the compact chip (class name + edit), not the open picker
@@ -994,6 +1003,16 @@ export default function FrameEditor() {
   }, [autosave, dirty, saving, st.objects, st.deleted]);
   // flush a still-pending edit when leaving the editor (back button / route change)
   useEffect(() => () => { if (isDirty(stRef.current)) saveRef.current(); }, []);
+  // A closing tab does not unmount, so the flush above never runs for it and the work is simply gone.
+  // Autosave is a user-facing toggle and the save path can also give up on a set that keeps failing, so
+  // "there are unsaved edits" is a real state the editor can sit in indefinitely. The upload manager
+  // already guards its own in-flight work this way; the editor guarded nothing.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   // ---- viewport helpers ----
   const fit = useCallback(() => dispatch({ t: "viewport", viewport: { scale: 0, ox: 0, oy: 0 } }), [dispatch]);
@@ -1007,6 +1026,24 @@ export default function FrameEditor() {
     // had stopped working and said nothing.
     router.push(jobParam ? `/frame/${fid}?job=${jobParam}` : `/frame/${fid}`);
   }, [router, st, save, jobParam]);
+
+  // Confirm every object the annotator actually looked at, then move on.
+  //
+  // Two things were wrong. The button was gated on st.objects.length while the reducer acts on st.touched,
+  // so pressing it having reviewed nothing was a silent no-op that still burned an undo slot and cleared
+  // the redo stack - no state change, no message, button still enabled. And it never advanced: on a
+  // 200-frame job that is 200 extra keystrokes and 200 chances to forget. The A shortcut needs the same
+  // treatment or it is simply a way around the gate.
+  const confirmFrame = useCallback((advance: boolean) => {
+    const n = st.objects.filter((o) => !o.isNew && st.touched.includes(o.id)).length;
+    if (!st.touched.length) {
+      toast("nothing to confirm yet - select or edit the objects you have checked first", "warn");
+      return;
+    }
+    dispatch({ t: "acceptAll" });
+    if (advance && meta?.next_frame_id) gotoFrame(meta.next_frame_id);
+    else toast(n === 1 ? "1 object confirmed" : `${n} objects confirmed`, "success");
+  }, [st.objects, st.touched, dispatch, meta, gotoFrame]);
 
   // ---- keypoint pose tool + object clipboard ----
   const [kpDraft, setKpDraft] = useState<number[][] | null>(null);
@@ -1103,7 +1140,7 @@ export default function FrameEditor() {
         if (k === "a") { reviewObject("accept"); return; }
         if (k === "x") { reviewObject("reject"); return; }
       }
-      if (k === "a") dispatch({ t: "acceptAll" });
+      if (k === "a") confirmFrame(false);
       else if (k === "v") dispatch({ t: "tool", tool: "select" });
       else if (k === "b") dispatch({ t: "tool", tool: "box" });
       else if (k === "g") dispatch({ t: "tool", tool: "polygon" });
@@ -1143,7 +1180,7 @@ export default function FrameEditor() {
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onUp); };
-  }, [st.selectedId, selected, onto, meta, dispatch, save, fit, zoomBy, acceptCandidate, gotoFrame, relabelSelected, finishKeypoints, mode, alItems]);
+  }, [st.selectedId, selected, onto, meta, dispatch, save, fit, zoomBy, acceptCandidate, gotoFrame, confirmFrame, relabelSelected, finishKeypoints, mode, alItems]);
 
   const filteredClasses = useMemo(
     () => (onto ? onto.classes.filter((c) => c.name.includes(search.toLowerCase().replace(/\s/g, "_"))) : []),
@@ -1244,6 +1281,21 @@ export default function FrameEditor() {
             <ObjectSourceBadge source={meta.annotation_source} importFormat={meta.import_format} />
           </span>
         ) : null}
+        {/* Somebody who does not know they are in an audit works it like ordinary review: skims the frames
+            that look already-done, trusts the empty ones. That is the confirmation bias the audit exists to
+            measure, so the pass has to announce itself. The hiding is already done server-side; this only
+            explains it, and saying so is what stops the emptiness reading as a bug. */}
+        {meta.blind_audit_id ? (
+          <span
+            title={"Blind audit " + meta.blind_audit_id.slice(0, 8)
+              + ". Every prediction and existing label on this frame is withheld by the server, not by this "
+              + "editor. Label it from scratch: what you draw is one of two independent observations, and "
+              + "the gap between them is what says how much the model actually misses."}
+            className="font-mono text-[10px] uppercase tracking-wide px-1.5 py-0.5 border border-accent text-accent whitespace-nowrap"
+          >
+            blind audit · label from scratch
+          </span>
+        ) : null}
         <button onClick={() => router.push(`/search?frame=${id}`)} title="find visually similar frames (DINOv3)"
           className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="search" size={16} /></button>
         {meta.has_mcap && (
@@ -1282,8 +1334,17 @@ export default function FrameEditor() {
           )}
           <button onClick={() => window.dispatchEvent(new Event("lbx:shortcuts"))} title="keyboard shortcuts ( ? )"
             className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink"><Icon name="keyboard" size={17} /></button>
-          <button onClick={() => dispatch({ t: "acceptAll" })} disabled={!st.objects.length} title="confirm every object as human-verified gold (A)"
-            className="flex items-center gap-1.5 h-[30px] px-3.5 rounded-md bg-accent text-bg font-display font-semibold text-[12.5px] hover:bg-accent/90 disabled:opacity-40"><Icon name="confirm" size={15} /><span>Confirm frame</span></button>
+          {/* The editor has its own header and does not mount TopNav, which is where these normally live -
+              so an annotator spent an entire shift in the one screen that could not show them a
+              notification or open the command palette. An issue filed against their work reached them
+              nowhere. Both are prop-less and the palette opens on a global event, so this is the same
+              cherry-pick the shortcut overlay and CloudControl above already are. */}
+          <button onClick={() => window.dispatchEvent(new Event("lbx:palette"))} title="jump to anything (Cmd+K)"
+            className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink"><Icon name="search" size={17} /></button>
+          <NotificationBell />
+          <button onClick={() => confirmFrame(true)} disabled={!st.touched.length}
+            title="confirm the objects you have reviewed and go to the next frame (A confirms without advancing)"
+            className="flex items-center gap-1.5 h-[30px] px-3.5 rounded-md bg-accent text-bg font-display font-semibold text-[12.5px] hover:bg-accent/90 disabled:opacity-40"><Icon name="confirm" size={15} /><span>Confirm &amp; next</span></button>
         </div>
       </header>
 
@@ -2028,7 +2089,8 @@ export default function FrameEditor() {
           </PanelSection>
 
           <PanelSection title="agent · auto-label" defaultOpen>
-            <AgentPanel frameId={id} selectedId={st.selectedId} onApplied={loadLayers} embedded />
+            <AgentPanel frameId={id} sessionId={meta?.session_id ?? null} selectedId={st.selectedId}
+              onApplied={loadLayers} embedded />
           </PanelSection>
 
           <PanelSection title="natural-language bulk edit" defaultOpen>
@@ -2216,6 +2278,7 @@ export default function FrameEditor() {
         </div>
       )}
       <ShortcutOverlay />
+      <CommandPalette />
 
       {activeCorr && (
         <CorrectionModal

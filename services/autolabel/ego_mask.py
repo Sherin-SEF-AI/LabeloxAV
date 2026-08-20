@@ -50,17 +50,81 @@ class EgoMask:
         return cells > 0 and (ego / cells) >= frac
 
 
+class WelfordStd:
+    """Streaming mean and variance over frames, so the estimator never holds the stack.
+
+    The array form materialises (T, H, W): at 1080p and 200 frames that is 1.7 GB of float32 before the
+    std is taken, which is why the stack size was in practice capped low enough to make the estimate noisy.
+    Welford's recurrence gets the same variance in one pass with two (H, W) accumulators, so the frame
+    budget stops being a memory question.
+
+    Numerically it is also the better answer: the sum-of-squares shortcut subtracts two large nearly-equal
+    numbers and loses precision exactly where the variance is small, which is the hood.
+    """
+
+    def __init__(self, shape: tuple[int, int]):
+        self.n = 0
+        self._mean = np.zeros(shape, dtype=np.float64)
+        self._m2 = np.zeros(shape, dtype=np.float64)
+
+    def update(self, frame: np.ndarray) -> None:
+        x = np.asarray(frame, dtype=np.float64)
+        if x.shape != self._mean.shape:
+            raise ValueError(f"frame is {x.shape}, expected {self._mean.shape}")
+        self.n += 1
+        delta = x - self._mean
+        self._mean += delta / self.n
+        self._m2 += delta * (x - self._mean)
+
+    @property
+    def std(self) -> np.ndarray:
+        if self.n < 2:
+            return np.zeros_like(self._mean)
+        # Population std, matching np.std's default, so the streaming path and the array path agree.
+        return np.sqrt(self._m2 / self.n)
+
+
+def estimate_from_gray_frames(frames, *, var_thresh: float = 6.0, top_limit_frac: float = 0.45,
+                              min_area_frac: float = 0.01) -> EgoMask | None:
+    """The streaming form: an iterable of (H, W) grayscale frames rather than a stack.
+
+    Identical result to estimate_from_gray_stack, which is what tests/test_ego_mask.py pins, and it never
+    holds more than two (H, W) accumulators regardless of how many frames it is given.
+    """
+    acc: WelfordStd | None = None
+    for f in frames:
+        arr = np.asarray(f)
+        if arr.ndim != 2:
+            return None
+        if acc is None:
+            acc = WelfordStd(arr.shape)
+        acc.update(arr)
+    if acc is None or acc.n < 4:
+        return None
+    return _mask_from_std(acc.std, var_thresh=var_thresh, top_limit_frac=top_limit_frac,
+                          min_area_frac=min_area_frac)
+
+
 def estimate_from_gray_stack(stack: np.ndarray, *, var_thresh: float = 6.0, top_limit_frac: float = 0.45,
                              min_area_frac: float = 0.01) -> EgoMask | None:
     """Pure core: given a (T,H,W) stack of grayscale frames from one camera, return the hood mask or None.
 
     A pixel is hood if it is temporally static (low std) AND lies in the bottom band AND is connected to the
     bottom edge (flood from the bottom row). This rejects the equally-static sky, which is not bottom-anchored.
+
+    Kept as the array entry point because four existing tests exercise it; both forms now share
+    `_mask_from_std`, so the streaming path cannot drift from the one the tests pin.
     """
     if stack.ndim != 3 or stack.shape[0] < 4:
         return None
-    h, w = stack.shape[1:]
     std = stack.astype(np.float32).std(axis=0)
+    return _mask_from_std(std, var_thresh=var_thresh, top_limit_frac=top_limit_frac,
+                          min_area_frac=min_area_frac)
+
+
+def _mask_from_std(std: np.ndarray, *, var_thresh: float, top_limit_frac: float,
+                   min_area_frac: float) -> EgoMask | None:
+    h, w = std.shape
     static = std < var_thresh
     top_cut = int((1.0 - top_limit_frac) * h)   # only the bottom top_limit_frac of rows may be hood
     static[:top_cut, :] = False

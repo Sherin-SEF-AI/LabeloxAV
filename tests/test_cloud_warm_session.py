@@ -16,6 +16,8 @@ from compute.runpod.session import WarmSessionManager
 from db.models import CloudSession
 from db.session import get_sessionmaker
 
+pytestmark = pytest.mark.db
+
 T0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 RATE = 1.89
 

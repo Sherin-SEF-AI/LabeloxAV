@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.logging import get_logger
 from core.storage import get_object_store
 from core.timebase import now_ns
 from db.models import Frame, Object, ObjectRelationship, Review
@@ -30,8 +31,29 @@ from services.api.deps import (
 )
 from services.autolabel.ontology import get_ontology
 from services.govern.audit import record as audit_record
+from services.review_policy import ReviewStateError, state_for
+
+
+class RelationshipOut(BaseModel):
+    """One directed relationship on a frame (the India case is rider_of on a two-wheeler)."""
+
+    relationship_id: str
+    from_object_id: str
+    to_object_id: str
+    kind: str
+
+
+class CuboidProjectionOut(BaseModel):
+    """A cuboid's eight corners projected onto the camera image, so it can be drawn over the 2D frame."""
+
+    object_id: str
+    corners_uv: list[list[float]]
+    edges: list[list[int]]
+    any_in_image: bool
+
 
 router = APIRouter()
+log = get_logger("api.objects")
 
 # Directed relationship kinds the editor offers (the India case is rider_of on a two-wheeler).
 _RELATION_KINDS = {"rider_of", "towed_by", "part_of", "member_of", "occludes"}
@@ -65,7 +87,7 @@ async def delete_relationship(relationship_id: str, db: AsyncSession = Depends(d
     return {"deleted": relationship_id}
 
 
-@router.get("/frames/{frame_id}/relationships")
+@router.get("/frames/{frame_id}/relationships", response_model=list[RelationshipOut])
 async def frame_relationships(frame_id: str, db: AsyncSession = Depends(db_session)):
     rows = (await db.execute(select(ObjectRelationship)
             .where(ObjectRelationship.frame_id == UUID(frame_id)))).scalars().all()
@@ -73,7 +95,7 @@ async def frame_relationships(frame_id: str, db: AsyncSession = Depends(db_sessi
              "to_object_id": str(r.to_object_id), "kind": r.kind} for r in rows]
 
 
-@router.get("/frames/{frame_id}/cuboids")
+@router.get("/frames/{frame_id}/cuboids", response_model=list[CuboidProjectionOut])
 async def frame_cuboids(frame_id: str, db: AsyncSession = Depends(db_session)):
     """Project every cuboid_3d on the frame onto the camera image, so the 3D box is visible (and editable)
     in the 2D editor. Uses the configured rig + nominal intrinsics, so it works without LiDAR calibration."""
@@ -126,6 +148,34 @@ def _mask_polygons(mask_uri: str | None) -> list[list[float]]:
         return json.loads(store.get_bytes(mask_uri)).get("polygons", [])
     except Exception:
         return []
+
+
+# How many mask blobs to fetch at once. The object store is a network hop, so the useful number is bounded
+# by concurrency rather than CPU; 16 keeps a busy frame fast without turning one editor open into a burst
+# the store has to queue.
+_MASK_FETCH_CONCURRENCY = 16
+
+
+async def _mask_polygons_bulk(uris: list[str | None]) -> dict[str, list[list[float]]]:
+    """Fetch many masks at once, off the event loop.
+
+    The per-object version below is a synchronous S3 GET. Calling it in a list comprehension over a frame's
+    objects meant N sequential network round trips inside an async handler, with the loop blocked for all
+    of them - on the editor's hot path, which runs on every frame open. Sixteen objects on a frame is
+    ordinary here and each one was a separate serial fetch.
+    """
+    import asyncio
+
+    wanted = sorted({u for u in uris if u})
+    if not wanted:
+        return {}
+    sem = asyncio.Semaphore(_MASK_FETCH_CONCURRENCY)
+
+    async def one(uri: str) -> tuple[str, list[list[float]]]:
+        async with sem:
+            return uri, await asyncio.to_thread(_mask_polygons, uri)
+
+    return dict(await asyncio.gather(*(one(u) for u in wanted)))
 
 
 def _mask_key(session_id, frame_id, object_id) -> str:
@@ -293,31 +343,52 @@ async def vlm_dataset_export(session_id: str | None = None):
 
 
 @router.get("/frames/{frame_id}/objects")
-async def frame_objects(frame_id: str, job_id: str | None = None,
-                        db: AsyncSession = Depends(db_session)):
-    """Every object on a frame, or only this job's when the job is a blind replica.
+async def frame_objects(frame_id: str, job_id: str | None = None, limit: int = 2000,
+                        db: AsyncSession = Depends(db_session),
+                        user=Depends(current_user)):
+    """Every object on a frame, or only this job's when the job is blind.
 
-    A replica job exists to be compared against another annotator's independent answer. If the editor
+    Two kinds of blindness, for two different measurements:
+
+    A REPLICA job exists to be compared against another annotator's independent answer. If the editor
     handed it the machine pre-labels, both annotators would be correcting the same proposals and the
     agreement between them would measure how well two people agree with a third party neither of them can
     see. 82.6% of frames here are pre-labelled, so this is the normal case.
 
+    A BLIND AUDIT job is stricter still: it hides everything, including this job's own earlier work from
+    other sources, because the audit's whole purpose is a human observation that is statistically
+    independent of the model. An auditor who has seen one prediction is no longer a second observer, and
+    the capture-recapture estimate built on them is not conservative, it is arbitrary.
+
     The filter is server-side deliberately: hiding the pre-labels in the browser still ships them to the
-    browser, and a hidden label is one keystroke away from being an unhidden one.
+    browser, and a hidden label is one keystroke away from being an unhidden one. For the same reason the
+    audit filter also applies when no job_id is passed at all, provided the caller is the auditor: dropping
+    the query parameter must not be a way to see the answers.
     """
     from sqlalchemy import select
 
     from db.models import LabelJob
+    from services.verdyx.blind_audit import active_audit_id
 
     onto = get_ontology()
     q = select(Object).where(Object.frame_id == UUID(frame_id))
+    job = None
     if job_id:
         job = await db.get(LabelJob, UUID(job_id))
         if job is None:
             raise HTTPException(404, "job not found")
-        if job.replica_group is not None:
-            q = q.where(Object.job_id == job.job_id)
-    rows = (await db.execute(q)).scalars().all()
+    audit_id = await active_audit_id(db, frame_id=UUID(frame_id),
+                                     job_id=job.job_id if job is not None else None,
+                                     user_id=user.user_id if user is not None else None)
+    if audit_id is not None:
+        q = q.where(Object.blind_audit_id == audit_id)
+    elif job is not None and job.replica_group is not None:
+        q = q.where(Object.job_id == job.job_id)
+    # Bounded. This was unbounded, and it is the editor's hot path: a frame with a pathological object
+    # count would materialise all of them and fetch a mask blob for each. The cap is far above any real
+    # frame in this corpus (the busiest is ~60 objects) so it never truncates ordinary work.
+    rows = (await db.execute(q.limit(max(1, min(limit, 2000))))).scalars().all()
+    masks = await _mask_polygons_bulk([o.mask_uri for o in rows])
     return [
         {
             "object_id": str(o.object_id),
@@ -328,7 +399,7 @@ async def frame_objects(frame_id: str, job_id: str | None = None,
             "conf": o.conf,
             "quality_score": o.quality_score,
             "state": o.state,
-            "mask_polygons": _mask_polygons(o.mask_uri),
+            "mask_polygons": masks.get(o.mask_uri or "", []),
             "version": o.version,
             "rot_deg": o.rot_deg or 0.0,
             "keypoints": o.keypoints,
@@ -401,7 +472,8 @@ async def frame_filmstrip(frame_id: str, span: int = 12, db: AsyncSession = Depe
 
 @router.get("/frames/{frame_id}")
 async def get_frame(frame_id: str, job_id: str | None = None,
-                    db: AsyncSession = Depends(db_session)):
+                    db: AsyncSession = Depends(db_session),
+                    user=Depends(current_user)):
     """Frame meta for the editor: dimensions, image url, object count, and prev/next for keyboard
     navigation.
 
@@ -409,6 +481,11 @@ async def get_frame(frame_id: str, job_id: str | None = None,
     which is the right answer for somebody reviewing a drive and the wrong one for somebody working an
     assignment: session order walks straight out of the job at its first or last frame, and on a replica
     job that means leaving blind mode and drawing boxes the agreement pass will never see.
+
+    Under a blind audit this route is a leak if it is not scoped, and a worse one than it looks. The boxes
+    are withheld by the objects route, but `n_objects` is a count of them: an auditor shown an empty canvas
+    beside "14 objects" has been told exactly how many things they missed and roughly how hard to look. So
+    the count is scoped to their own work, and `annotation_source` is dropped for the same reason.
     """
     frame = await db.get(Frame, UUID(frame_id))
     if frame is None:
@@ -435,18 +512,30 @@ async def get_frame(frame_id: str, job_id: str | None = None,
         nxt = (await db.execute(
             select(Frame.frame_id).where(Frame.session_id == frame.session_id, Frame.ts_ns > frame.ts_ns)
             .order_by(Frame.ts_ns.asc()).limit(1))).scalar_one_or_none()
-    n = (await db.execute(select(func.count()).select_from(Object).where(Object.frame_id == frame.frame_id))).scalar_one()
+    from services.verdyx.blind_audit import active_audit_id
+
+    audit_id = await active_audit_id(db, frame_id=frame.frame_id,
+                                     job_id=UUID(job_id) if job_id else None,
+                                     user_id=user.user_id if user is not None else None)
+
+    count_q = select(func.count()).select_from(Object).where(Object.frame_id == frame.frame_id)
+    if audit_id is not None:
+        count_q = count_q.where(Object.blind_audit_id == audit_id)
+    n = (await db.execute(count_q)).scalar_one()
+
     # The dominant annotation source on this frame, so the editor can say plainly whether these labels are
-    # imported from a public dataset (Mapillary / IDD / BDD) or produced in-app.
-    src_rows = (await db.execute(
-        select(Object.source, func.count()).where(Object.frame_id == frame.frame_id)
-        .group_by(Object.source).order_by(func.count().desc()))).all()
-    annotation_source = src_rows[0][0] if src_rows else None
-    import_format = None
-    if annotation_source == "imported":
-        prov = (await db.execute(select(Object.provenance).where(
-            Object.frame_id == frame.frame_id, Object.source == "imported").limit(1))).scalar()
-        import_format = (prov or {}).get("import_format")
+    # imported from a public dataset (Mapillary / IDD / BDD) or produced in-app. Withheld under an audit:
+    # "this frame is mostly machine labels" is a statement about labels the auditor is not being shown.
+    annotation_source = import_format = None
+    if audit_id is None:
+        src_rows = (await db.execute(
+            select(Object.source, func.count()).where(Object.frame_id == frame.frame_id)
+            .group_by(Object.source).order_by(func.count().desc()))).all()
+        annotation_source = src_rows[0][0] if src_rows else None
+        if annotation_source == "imported":
+            prov = (await db.execute(select(Object.provenance).where(
+                Object.frame_id == frame.frame_id, Object.source == "imported").limit(1))).scalar()
+            import_format = (prov or {}).get("import_format")
     # whether this session has an MCAP recording, so the editor only offers the Session Inspector when there is
     # a timeline to inspect (image/video/imagery sessions have no MCAP and the Inspector would 409).
     from db.models import Session as DbSession
@@ -461,12 +550,23 @@ async def get_frame(frame_id: str, job_id: str | None = None,
         "prev_frame_id": str(prev) if prev else None, "next_frame_id": str(nxt) if nxt else None,
         "is_lidar": bool(frame.lidar), "lidar_points": (frame.lidar or {}).get("n_points"),
         "lidar_res": ((frame.lidar or {}).get("bev") or {}).get("res"),  # metres per pixel, for the ruler
+        # Told to the editor so it can say what this pass is for. Somebody who does not know they are in an
+        # audit works it like ordinary review, skims the frames that look already-done, and produces the
+        # confirmation bias the audit exists to measure.
+        "blind_audit_id": str(audit_id) if audit_id else None,
     }
 
 
 @router.post("/frames/{frame_id}/objects", response_model=ObjectDetail)
 async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
-    """Create a human-drawn object on a frame (source=human, state=accepted). Optional mask."""
+    """Create a human-drawn object on a frame (source=human). Optional mask.
+
+    The requested state is clamped by role, exactly as a review verdict is. This path used to write
+    payload.state verbatim, and it defaulted to "accepted": an annotator could POST ground-truth-grade
+    rows straight past the validation stage the two-stage workflow exists to enforce. review_policy
+    exists for precisely this and was only ever called from /api/review, which sits behind a reviewer
+    floor - so the clamp could never fire on the one path that could reach it from below.
+    """
     frame = await db.get(Frame, UUID(frame_id))
     if frame is None:
         raise HTTPException(404, "frame not found")
@@ -475,6 +575,12 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         raise HTTPException(400, f"unknown class '{payload.class_name}'")
     if len(payload.bbox) != 4:
         raise HTTPException(400, "bbox must be [x1,y1,x2,y2]")
+    try:
+        # An unlisted state used to reach the DB and trip ck_object_state as a 500; state_for raises
+        # ReviewStateError on the same input, which is a 400 with the vocabulary in the message.
+        state = state_for(None, payload.state, getattr(user, "role", None), None) or "submitted"
+    except ReviewStateError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if payload.attrs:
         errors = onto.validate_attrs(payload.attrs, onto.by_name(payload.class_name).id)
         if errors:
@@ -503,6 +609,15 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         if str(frame.frame_id) not in {str(f) for f in (job.frame_ids or [])}:
             raise HTTPException(400, f"frame {frame.frame_id} is not part of job {payload.job_id}")
 
+    # Derived server-side, by the same rule that decided what this annotator was allowed to see. Never
+    # taken from the payload: a client that omitted it would produce an audit box counted as an ordinary
+    # label, and the audit would then measure a human who apparently found nothing.
+    from services.verdyx.blind_audit import active_audit_id
+
+    audit_id = await active_audit_id(db, frame_id=frame.frame_id,
+                                     job_id=job.job_id if job is not None else None,
+                                     user_id=user.user_id if user is not None else None)
+
     oid = uuid.uuid4()
     mask_uri = mask_encoding = None
     if payload.mask_polygons:
@@ -512,12 +627,13 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
     obj = Object(
         object_id=oid, frame_id=frame.frame_id, class_id=onto.by_name(payload.class_name).id,
         bbox=payload.bbox, mask_uri=mask_uri, mask_encoding=mask_encoding, attrs=payload.attrs or {},
-        conf=1.0, source="human", state=payload.state, rot_deg=payload.rot_deg, keypoints=payload.keypoints,
+        conf=1.0, source="human", state=state, rot_deg=payload.rot_deg, keypoints=payload.keypoints,
         polyline=payload.polyline, cuboid_3d=payload.cuboid_3d,
         # Who drew it and under which job. Both null for a label drawn outside a job, which is every
         # existing flow and stays exactly as it was.
         job_id=job.job_id if job is not None else None,
         annotator_id=user.user_id if user else None,
+        blind_audit_id=audit_id,
         provenance={"created_by": "human-annotation", "idem_key": payload.idem_key},
     )
     db.add(obj)
@@ -619,12 +735,23 @@ async def frame_image(frame_id: str, db: AsyncSession = Depends(db_session),
     if frame is None:
         raise HTTPException(404, "frame not found")
     try:
-        data = get_object_store().get_bytes(frame.img_uri)
+        # Off the event loop: this is a network read of a whole JPEG, and it was blocking the loop for
+        # every frame open, every filmstrip thumbnail and every prefetch.
+        import asyncio
+
+        data = await asyncio.to_thread(get_object_store().get_bytes, frame.img_uri)
     except Exception as exc:  # noqa: BLE001  (missing/unreadable blob -> 404, never a 500 that breaks the editor)
         raise HTTPException(404, "frame image unavailable") from exc
 
     await _log_frame_view(db, frame, user)
-    return Response(content=data, media_type="image/jpeg")
+    # A frame's pixels are immutable once ingested - the redaction happens before the blob is written, and
+    # an edit makes a new object rather than rewriting this one - so the browser should not re-fetch it on
+    # every navigation. There were no cache headers at all, which is why stepping back one frame in the
+    # editor re-downloaded an image the browser had just displayed. `private` because these are DPDPA
+    # frames: they may sit in the user's own cache and must not sit in a shared proxy's.
+    etag = f'W/"{frame.frame_id}"'
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=3600", "ETag": etag})
 
 
 async def _log_frame_view(db: AsyncSession, frame, user) -> None:
@@ -750,23 +877,39 @@ async def object_crop(object_id: str, pad: float = 0.15, db: AsyncSession = Depe
     if obj is None:
         raise HTTPException(404, "object not found")
     frame = await db.get(Frame, obj.frame_id)
+
+    def _render() -> bytes | None:
+        # Fetch, decode and encode together in one worker thread. Every part of this is blocking - a
+        # network read, then a full-frame JPEG decode to produce one small tile - and it all used to run
+        # on the event loop, so a timeline of forty thumbnails stalled every other request in flight.
+        raw = get_object_store().get_bytes(frame.img_uri)
+        img = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+        h, w = img.shape[:2]
+        x1, y1, x2, y2 = obj.bbox
+        px, py = (x2 - x1) * pad, (y2 - y1) * pad
+        cx1, cy1 = max(0, int(x1 - px)), max(0, int(y1 - py))
+        cx2, cy2 = min(w, int(x2 + px)), min(h, int(y2 + py))
+        crop = img[cy1:cy2, cx1:cx2]
+        if crop.size == 0:
+            crop = img
+        ok, out = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return out.tobytes() if ok else None
+
+    import asyncio
+
     try:
-        buf = np.frombuffer(get_object_store().get_bytes(frame.img_uri), dtype=np.uint8)
+        rendered = await asyncio.to_thread(_render)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "frame image unavailable") from exc
-    img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-    if img is None:
+    if rendered is None:
         raise HTTPException(404, "failed to decode frame image")
-    h, w = img.shape[:2]
-    x1, y1, x2, y2 = obj.bbox
-    px, py = (x2 - x1) * pad, (y2 - y1) * pad
-    cx1, cy1 = max(0, int(x1 - px)), max(0, int(y1 - py))
-    cx2, cy2 = min(w, int(x2 + px)), min(h, int(y2 + py))
-    crop = img[cy1:cy2, cx1:cx2]
-    if crop.size == 0:
-        crop = img
-    ok, out = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 80])
-    return Response(content=out.tobytes(), media_type="image/jpeg")
+    # A crop is a pure function of an immutable frame and a bbox, and the object's version changes when
+    # the bbox does - so the tile can be cached and correctly invalidated by that version.
+    return Response(content=rendered, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=3600",
+                             "ETag": f'W/"{obj.object_id}-{obj.version or 0}"'})
 
 
 @router.post("/segment")
@@ -785,6 +928,16 @@ async def segment(payload: SegmentIn, db: AsyncSession = Depends(db_session)):
     if busy:
         raise HTTPException(503, busy)
 
+    # Shape-checked here rather than left to the model. A box of the wrong length reached SAM and came back
+    # as an unhandled 500, which reads to a caller as the segmentation service being broken rather than as
+    # their own request being malformed. `/objects/classify` beside this has always checked its box.
+    if payload.box is not None and len(payload.box) != 4:
+        raise HTTPException(400, "box must be [x1,y1,x2,y2]")
+    if payload.points and payload.labels and len(payload.labels) != len(payload.points):
+        raise HTTPException(400, "labels must have one entry per point")
+    if not payload.points and payload.box is None:
+        raise HTTPException(400, "a point or a box is required")
+
     frame = await db.get(Frame, UUID(payload.frame_id))
     if frame is None:
         raise HTTPException(404, "frame not found")
@@ -795,14 +948,34 @@ async def segment(payload: SegmentIn, db: AsyncSession = Depends(db_session)):
     try:
         return run_segment(img, points=payload.points, labels=payload.labels, box=payload.box, precise=payload.precise)
     except Exception as exc:  # noqa: BLE001
-        # On a single GPU, a running training job can consume all VRAM. Surface that cleanly (503)
-        # instead of an unhandled 500 so the UI can show a friendly "GPU busy" notice. Box-level
-        # review (accept/reject/reclassify) does not need the GPU and still works.
-        name = type(exc).__name__
-        if "OutOfMemory" in name or "GpuCapacity" in name or "CUDA" in str(exc):
-            raise HTTPException(503, "GPU busy (a training job is using the GPU). Interactive "
-                                     "segmentation is unavailable until it finishes; box review still works.")
-        raise
+        # Log first, always. This branch used to swallow the exception and answer with a sentence naming a
+        # cause it had never checked: any error whose text merely contained "CUDA" was reported to the user
+        # as "a training job is using the GPU", and nothing was written down. On a box with a free card and
+        # no training job that is a dead end, because the one fact that would explain it is gone.
+        log.exception("segment.failed", frame_id=payload.frame_id, error_type=type(exc).__name__)
+        detail = segment_failure_detail(exc, gpu_busy=bool(await gpu_busy_detail(db)))
+        if detail is None:
+            raise
+        raise HTTPException(503, detail) from exc
+
+
+def segment_failure_detail(exc: BaseException, *, gpu_busy: bool) -> str | None:
+    """What to tell a caller when interactive segmentation fails, or None to let the error through as a 500.
+
+    This used to answer every GPU-shaped failure with "a training job is using the GPU", a sentence it had
+    never checked. On a machine with an idle card and no training job that is worse than no message: it names
+    a cause, so the person reading it goes and looks for a job that does not exist, and the branch logged
+    nothing on the way past. The two cases need opposite responses (wait for the job, versus go and look at
+    the card), so the caller passes in which one is true rather than the message assuming.
+    """
+    name = type(exc).__name__
+    if not ("OutOfMemory" in name or "GpuCapacity" in name or "CUDA" in str(exc)):
+        return None
+    if gpu_busy:
+        return ("GPU busy (a training job is using the GPU). Interactive segmentation is unavailable until "
+                "it finishes; box review still works.")
+    return (f"the GPU is free, but segmentation could not use it ({name}: {str(exc)[:200]}). "
+            f"Box review still works.")
 
 
 class ClassifyIn(BaseModel):

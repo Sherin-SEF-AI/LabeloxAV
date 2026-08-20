@@ -15,6 +15,8 @@ import pytest
 from core.config import get_settings
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -355,3 +357,75 @@ def test_export_spec_carries_tag_and_scene_clauses():
     # an unknown clause must be reported, not ignored
     row2 = SimpleNamespace(name="x", predicate={"some_future_clause": ["v"]})
     assert slice_to_export_spec(row2)["unsupported"] == ["some_future_clause"]
+
+
+# ---- the parameter ceiling the projection map ran into ---------------------------------------------
+#
+# `projection_points` looked its metadata up with `object_id IN (<every ref_id>)`, which expands to one
+# bind parameter per element. The Postgres wire protocol counts parameters in an int16, so the driver
+# refuses at 32,768. MAX_POINTS is 50,000 and is the endpoint's default limit, so the map failed at
+# exactly the size it advertises: the projection that surfaced this has precisely 50,000 points and the
+# request 500ed every time.
+
+
+def test_the_metadata_lookup_uses_one_parameter_however_many_ids():
+    """The regression is a count, so the test counts.
+
+    Compiling the query is enough and is instant; building 33,000 rows to reproduce it through the
+    database would be a slow test of the same single fact.
+    """
+    import uuid as uuidlib
+
+    from sqlalchemy import any_, select
+    from sqlalchemy.dialects import postgresql
+
+    from db.models import Object
+    from services.curation.projection import MAX_POINTS, _uuid_array
+
+    ids = [uuidlib.uuid4() for _ in range(MAX_POINTS)]
+    assert len(ids) > 32767, "the fixture must exceed the wire-protocol ceiling to mean anything"
+
+    stmt = select(Object.object_id).where(Object.object_id == any_(_uuid_array(ids)))
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    # One parameter for the array, plus whatever the rest of the statement needs. The failing form had
+    # one per id, so this number tracked len(ids).
+    assert len(compiled.params) <= 8, (
+        f"{len(compiled.params)} bind parameters for {len(ids)} ids; the array is being expanded again")
+
+    # And the SQL says ANY, not a list of placeholders.
+    sql = str(compiled)
+    assert "ANY" in sql.upper()
+    assert "$32768" not in sql and sql.count("%(") <= 8
+
+
+def test_the_lookup_call_sites_use_the_array_and_not_an_in_list():
+    """The helper being correct is not the same as it being used.
+
+    Checked separately because the first version of this test only compiled a statement of its own: it
+    proved the array form takes one parameter and would have passed unchanged with the call sites still
+    on `in_(ref_ids)`, which is the actual defect.
+    """
+    import inspect
+
+    from services.curation import projection
+
+    src = inspect.getsource(projection.projection_points)
+    assert "_uuid_array(ref_ids)" in src
+    assert ".in_(ref_ids)" not in src, (
+        "a lookup is back on IN, which expands to one bind parameter per id and fails past 32,767")
+
+
+def test_the_point_query_is_ordered_so_a_truncated_map_is_stable():
+    """An unordered LIMIT returns whatever Postgres felt like.
+
+    At 50,000 points against a larger projection, two requests could show different halves and a point
+    would appear and vanish between refreshes with nothing having changed.
+    """
+    import inspect
+
+    from services.curation import projection
+
+    src = inspect.getsource(projection.projection_points)
+    order = src.index("order_by")
+    limit = src.index(".limit(limit)")
+    assert order < limit, "the limit must be applied to an ordered query, not an arbitrary one"

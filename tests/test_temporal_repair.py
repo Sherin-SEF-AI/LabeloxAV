@@ -13,6 +13,8 @@ from core.config import get_settings
 from core.storage import get_object_store
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -97,8 +99,8 @@ async def _seed_tracks():
 def test_temporal_repair_fixes_flip_skips_corrupt():
     from db.models import Object
     from db.session import get_sessionmaker
-    from services.agent.temporal_repair import commit_temporal_repair, plan_temporal_repair
     from services.agent.runs import revert_run
+    from services.agent.temporal_repair import commit_temporal_repair, plan_temporal_repair
 
     sid, outlier_oid, sedan = run_async(_seed_tracks())
 

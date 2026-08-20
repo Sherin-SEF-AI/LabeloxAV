@@ -18,6 +18,8 @@ from services.lidar.track3d import (
     interpolate_cuboids,
 )
 
+pytestmark = pytest.mark.db
+
 DIMS = [4.0, 1.8, 1.5]
 
 

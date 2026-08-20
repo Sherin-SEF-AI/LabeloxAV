@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
@@ -119,6 +119,56 @@ def summarize(lineages: list[dict]) -> dict:
     }
 
 
+def _lineage_predicate(from_name: str, to_name: str, to_id: int):
+    """The three conditions that identify the objects one class move actually produced.
+
+    Extracted from revert_lineage so a read can use the same predicate as the write. They had to agree
+    anyway, and a list that showed a different set from the one revert would touch is worse than no list:
+    it would invite somebody to check eight objects and then revert a thousand others.
+
+      the object still carries the class the move produced, so anything corrected since is left alone
+      its source is not `human`, so nobody's decision is overwritten
+      its provenance names this exact move, so a class reached by another route is not swept up
+    """
+    return (Object.class_id == to_id, Object.source != "human",
+            Object.provenance["agent_relabel"].astext.like(f'%"{from_name} -> {to_name} (%'))
+
+
+async def lineage_objects(db: AsyncSession, from_name: str, to_name: str, *,
+                          limit: int = 60, offset: int = 0) -> dict:
+    """The objects behind one lineage row, so a person can look at what a bulk move did.
+
+    The panel that lists these rows carries eight examples per lineage, capped when the aggregate is
+    built, so a move that touched 1,047 objects could be inspected eight objects deep. That is enough to
+    know a lineage exists and not enough to judge it, which is the wrong side of the line for a decision
+    whose only other option is reverting a thousand labels.
+
+    Read-only and annotator-gated: it names what a reviewer-gated revert would touch, without touching it.
+    """
+    onto = get_ontology()
+    try:
+        from_id, to_id = onto.by_name(from_name).id, onto.by_name(to_name).id
+    except KeyError:
+        return {"error": f"unknown class in '{from_name} -> {to_name}'"}
+
+    where = _lineage_predicate(from_name, to_name, to_id)
+    total = int((await db.execute(
+        select(func.count()).select_from(Object).where(*where))).scalar_one())
+    rows = (await db.execute(
+        select(Object.object_id, Object.frame_id, Object.class_id, Object.conf, Object.state)
+        .where(*where).order_by(Object.object_id)
+        .limit(max(1, min(limit, 200))).offset(max(0, offset)))).all()
+
+    return {
+        "from_name": from_name, "to_name": to_name,
+        "from_class_id": from_id, "to_class_id": to_id,
+        "reason": refuse_reason(onto, from_id, to_id),
+        "total": total, "offset": offset, "limit": limit,
+        "objects": [{"object_id": str(o), "frame_id": str(f), "class_id": int(c),
+                     "conf": float(cf or 0.0), "state": st} for o, f, c, cf, st in rows],
+    }
+
+
 async def revert_lineage(db: AsyncSession, from_name: str, to_name: str, *,
                          limit: int | None = None, created_by: str | None = None) -> dict:
     """Put one class move back, as a single reversible action.
@@ -147,9 +197,7 @@ async def revert_lineage(db: AsyncSession, from_name: str, to_name: str, *,
             "reverting it in bulk would replace one bulk opinion with another")
 
     from_id, to_id = onto.by_name(from_name).id, onto.by_name(to_name).id
-    stmt = (select(Object)
-            .where(Object.class_id == to_id, Object.source != "human",
-                   Object.provenance["agent_relabel"].astext.like(f'%"{from_name} -> {to_name} (%'))
+    stmt = (select(Object).where(*_lineage_predicate(from_name, to_name, to_id))
             .order_by(Object.object_id))
     if limit:
         stmt = stmt.limit(limit)

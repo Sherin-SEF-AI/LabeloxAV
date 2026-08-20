@@ -21,6 +21,8 @@ from services.labelops.workforce import (
     _dispatch_payload,
 )
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:

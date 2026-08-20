@@ -14,6 +14,8 @@ from core.storage import get_object_store
 from core.timebase import now_ns, seconds_to_ns
 from services.intelligence.embeddings import cosine_topk
 
+pytestmark = pytest.mark.db
+
 
 def test_cosine_topk_orders_by_similarity():
     q = np.array([1.0, 0.0], dtype=np.float32)
@@ -27,9 +29,8 @@ def test_cosine_topk_orders_by_similarity():
 
 def _cuda_infra() -> bool:
     try:
-        import torch
-
         import redis as redis_lib
+        import torch
 
         return torch.cuda.is_available() and bool(redis_lib.Redis.from_url(get_settings().redis.url).ping())
     except Exception:
@@ -74,9 +75,10 @@ async def _seed_with_images(n=4) -> uuid.UUID:
 @requires_gpu
 @pytest.mark.asyncio
 async def test_embeddings_compute_text_search_and_similar():
+    from sqlalchemy import func, select
+
     from db.models import ObjectEmbedding
     from db.session import get_sessionmaker
-    from sqlalchemy import func, select
     from services.intelligence.embed.service import embed_objects
     from services.intelligence.embeddings import search_objects_by_text, similar_objects
 

@@ -11,6 +11,8 @@ import pytest
 from core.config import get_settings
 from core.timebase import now_ns, seconds_to_ns
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -52,10 +54,11 @@ def test_synthesize_names_the_driving_class_and_proposes_relabel():
 
 
 async def _seed_incorrect_controls(class_name: str, n: int = 6):
+    from sqlalchemy import delete
+
     from db.models import ControlSample, Frame, Object, OntologyClass, OntologyVersion
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
-    from sqlalchemy import delete
     from services.autolabel.ontology import get_ontology
 
     onto = get_ontology()

@@ -104,7 +104,12 @@ def parse(root: Path) -> list[ImportFrame]:
             if bb is None:
                 continue
             name = MAPILLARY_TO_ONTOLOGY.get(label, label.split("--")[-1])
-            objs.append(ImportObject(name=name, bbox=bb, attrs={"mapillary_label": label}))
+            # The source's own class name is provenance, not an annotation attribute. In `attrs` it is an
+            # attribute the ontology has never heard of, so every imported object fails attribute validation
+            # forever: 59,520 of them in this corpus, which is 90% of every invalid-attribute finding and
+            # enough to drown the real ones. `run.py` merges this dict into the object's provenance beside
+            # import_format and original_name, which is where it belonged.
+            objs.append(ImportObject(name=name, bbox=bb, provenance={"mapillary_label": label}))
         frames.append(ImportFrame(image_ref=str(img), width=doc.get("width"), height=doc.get("height"), objects=objs))
     log.info("import_mapillary.parsed", frames=len(frames))
     return frames

@@ -123,6 +123,78 @@ class MemoryLimiter:
                 del self.buckets[k]
 
 
+# The same token bucket, in one round trip and atomically.
+#
+# Read-modify-write from Python would be a race: two workers reading 1 token both see 1 and both allow, so
+# the limit leaks by exactly the number of workers under the load it is meant to stop. Lua runs server-side
+# on one thread, so the read, the refill and the take are indivisible.
+#
+# Keys expire after the time it takes an empty bucket to refill completely. A bucket at full is
+# indistinguishable from one that never existed, so letting it lapse costs nothing and bounds the keyspace
+# without an eviction pass.
+_TOKEN_BUCKET_LUA = """
+local key   = KEYS[1]
+local rate  = tonumber(ARGV[1])
+local burst = tonumber(ARGV[2])
+local cost  = tonumber(ARGV[3])
+local now   = tonumber(ARGV[4])
+
+local b = redis.call('HMGET', key, 'tokens', 'ts')
+local tokens = tonumber(b[1])
+local ts     = tonumber(b[2])
+if tokens == nil then tokens = burst; ts = now end
+
+tokens = math.min(burst, tokens + (now - ts) * rate)
+
+local allowed = 0
+local retry = 0
+if tokens >= cost then
+  tokens = tokens - cost
+  allowed = 1
+else
+  retry = (cost - tokens) / rate
+end
+
+redis.call('HSET', key, 'tokens', tokens, 'ts', now)
+redis.call('EXPIRE', key, math.ceil(burst / rate) + 1)
+return {allowed, tostring(retry)}
+"""
+
+
+class RedisLimiter:
+    """Buckets shared across every worker, which is the only way a limit means what it advertises.
+
+    Fails OPEN. A limiter is a guard rail, not the service: if Redis is unreachable the right behaviour is
+    to serve the request and say so in the logs, not to take the API down defending it against a load that
+    may not even be arriving. The middleware reports which backend answered, so a deployment that has
+    quietly fallen back to per-process buckets is visible rather than assumed.
+    """
+
+    def __init__(self, client, prefix: str = "lbx:rl:") -> None:
+        self._redis = client
+        self._prefix = prefix
+        self._sha: str | None = None
+        self._fallback = MemoryLimiter()
+        self.degraded = False
+
+    async def check(self, key: str, klass: str, budget: Budget, cost: float,
+                    now: float | None = None) -> tuple[bool, float]:
+        at = time.time() if now is None else now
+        try:
+            if self._sha is None:
+                self._sha = await self._redis.script_load(_TOKEN_BUCKET_LUA)
+            allowed, retry = await self._redis.evalsha(
+                self._sha, 1, f"{self._prefix}{klass}:{key}",
+                budget.rate_per_s, budget.burst, cost, at)
+            self.degraded = False
+            return bool(int(allowed)), float(retry)
+        except Exception:  # noqa: BLE001
+            # NOSCRIPT after a Redis restart lands here too; the next call reloads the script.
+            self._sha = None
+            self.degraded = True
+            return self._fallback.check(key, klass, budget, cost)
+
+
 def classify(path: str, method: str) -> tuple[str, Budget, float]:
     """Which budget a request draws on, and what it costs. Returns (class, budget, cost).
 

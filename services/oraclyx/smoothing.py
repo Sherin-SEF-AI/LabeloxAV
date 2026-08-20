@@ -31,6 +31,7 @@ assumed uniform.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -288,8 +289,11 @@ def smooth_track(observations: list[tuple[int, list[float]]], *,
         Pf.append(P.copy())
 
     # ---- backward (RTS) pass: every state revisited with everything learned afterwards
-    xs = [None] * n
-    Ps = [None] * n
+    # Pre-allocated and filled backwards, so every slot is written before the read loop below. Annotated
+    # because `[None] * n` types as list[None] and the smoother then reads as a sequence of None operations
+    # that the RTS recursion has in fact already replaced.
+    xs: list[Any] = [None] * n
+    Ps: list[Any] = [None] * n
     xs[-1], Ps[-1] = xf[-1], Pf[-1]
     for k in range(n - 2, -1, -1):
         F = Fs[k + 1]

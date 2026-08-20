@@ -185,9 +185,17 @@ async def create_issue(payload: IssueIn, user=Depends(require_role("annotator"))
 @router.get("/labelops/issues")
 async def list_issues(frame_id: str | None = None, job_id: str | None = None,
                       object_id: str | None = None, status: str | None = None,
-                      db: AsyncSession = Depends(db_session)):
+                      mine: bool = False,
+                      db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """List issues. `mine=true` returns the ones raised about the caller's own work.
+
+    That dimension did not exist: every filter here was a way of asking what is wrong with a given frame,
+    job or object, and none of them a way for an annotator to find what has been said about their labels.
+    """
+    about = str(user.user_id) if (mine and user is not None) else None
     return {"issues": await issue_svc.list_issues(db, frame_id=frame_id, job_id=job_id,
-                                                  object_id=object_id, status=status)}
+                                                  object_id=object_id, status=status,
+                                                  about_user=about)}
 
 
 @router.get("/labelops/issues/{issue_id}")

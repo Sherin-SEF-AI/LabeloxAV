@@ -9,6 +9,8 @@ import pytest
 from core.timebase import now_ns, seconds_to_ns
 from services.agent.fleet_dispatch import _classify_cell, list_orders, plan_from_flywheel
 
+pytestmark = pytest.mark.db
+
 
 def test_classify_cell_scene_vs_class():
     assert _classify_cell("night_rain") == ("scene", "night", "rain")

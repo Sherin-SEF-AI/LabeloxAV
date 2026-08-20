@@ -147,6 +147,27 @@ async def claim_for_resume(db: AsyncSession, run_id: uuid.UUID) -> dict | None:
             "progress": dict(run.progress or {}), "counts": dict(run.counts or {}), "resumed": True}
 
 
+async def release_claim(db: AsyncSession, run_id: uuid.UUID, reason: str) -> bool:
+    """Put a claimed run back to interrupted, for a caller that claimed it and then could not proceed.
+
+    `claim_for_resume` flips the row to running before the job is launched, so a caller that discovers
+    afterwards that it cannot launch one must undo that. Leaving it running strands the run in exactly the
+    state this whole feature exists to clear: a row that looks like work in flight with no process behind
+    it, waiting for the reaper to notice it hours later.
+
+    The cursor and counts are untouched, so the run remains resumable once the reason is fixed.
+    """
+    run = await db.get(AgentRun, run_id)
+    if run is None or run.status != RUNNING:
+        return False
+    run.status = INTERRUPTED
+    run.error = f"interrupted: {reason}"
+    run.heartbeat_at = _now()
+    await db.commit()
+    log.warning("agent.resume_released", run_id=str(run_id), kind=run.kind, reason=reason)
+    return True
+
+
 def fraction_done(progress: dict) -> float | None:
     """How far a cursor says a run got, in [0, 1], or None when it cannot say.
 

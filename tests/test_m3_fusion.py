@@ -15,6 +15,8 @@ from services.autolabel.gate import gate_object, needs_vlm
 from services.autolabel.ontology import get_ontology
 from services.autolabel.paths.base import RawDetection
 
+pytestmark = pytest.mark.db
+
 
 def _mask(h, w, x1, y1, x2, y2) -> np.ndarray:
     m = np.zeros((h, w), dtype=bool)
@@ -172,6 +174,7 @@ requires_gpu = pytest.mark.skipif(not (_cuda_ready() and _infra_up()), reason="n
 @requires_gpu
 async def test_autolabel_pipeline_writes_gated_objects():
     import cv2
+    from sqlalchemy import func, select
 
     from core.storage import get_object_store
     from core.timebase import now_ns, seconds_to_ns
@@ -179,7 +182,6 @@ async def test_autolabel_pipeline_writes_gated_objects():
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
     from services.autolabel.runner import autolabel_session
-    from sqlalchemy import func, select
 
     store = get_object_store()
     store.ensure_bucket()

@@ -15,6 +15,8 @@ import pytest
 
 from core.config import get_settings
 
+pytestmark = pytest.mark.db
+
 
 def _infra_up() -> bool:
     try:
@@ -44,6 +46,7 @@ def _seed_rig(db, sid, calibrated: bool):
 @requires_infra
 def test_propagate_projects_and_gates():
     from sqlalchemy import delete, select
+
     from db.models import CalibrationValidation, CameraCalibration, Frame, FrameGroup, Object
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
