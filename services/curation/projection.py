@@ -19,7 +19,9 @@ import uuid as uuidlib
 from uuid import UUID
 
 import numpy as np
-from sqlalchemy import delete, select
+from sqlalchemy import any_, delete, literal, select
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
@@ -176,6 +178,20 @@ async def list_projections(db: AsyncSession, limit: int = 50) -> list[dict]:
             for p in rows]
 
 
+def _uuid_array(ids: list[uuidlib.UUID]):
+    """One bind parameter holding every id, rather than one parameter per id.
+
+    `IN (...)` expands to a placeholder per element, and the Postgres wire protocol counts parameters in an
+    int16: at 32,768 the driver refuses the statement outright. This endpoint's own MAX_POINTS is 50,000,
+    so the default request was above the ceiling and the map failed at exactly the size it advertises -
+    the projection that surfaced this has precisely 50,000 points.
+
+    `= ANY($1)` sends the array as a single parameter, so the count stops mattering. It is also the faster
+    plan on a large list: Postgres hashes the array once instead of building a large IN list.
+    """
+    return literal([str(i) for i in ids], ARRAY(PgUUID(as_uuid=True)))
+
+
 async def projection_points(db: AsyncSession, projection_id: str, limit: int = MAX_POINTS) -> dict:
     """The 2D points plus the per-point attributes the explorer colours by, in one payload so the map renders
     from a single request."""
@@ -183,10 +199,14 @@ async def projection_points(db: AsyncSession, projection_id: str, limit: int = M
     if proj is None:
         return {"error": "projection not found", "projection_id": projection_id}
 
+    # Ordered, because the limit below is a truncation and an unordered one returns whatever Postgres
+    # felt like: two requests for the same projection could show different halves of it, and a point
+    # would appear and vanish between refreshes with nothing having changed.
     pts = (await db.execute(
         select(EmbeddingProjectionPoint.ref_id, EmbeddingProjectionPoint.x, EmbeddingProjectionPoint.y,
                EmbeddingProjectionPoint.cluster)
-        .where(EmbeddingProjectionPoint.projection_id == proj.projection_id).limit(limit)
+        .where(EmbeddingProjectionPoint.projection_id == proj.projection_id)
+        .order_by(EmbeddingProjectionPoint.ref_id).limit(limit)
     )).all()
     if not pts:
         return {"projection_id": projection_id, "kind": proj.kind, "method": proj.method, "points": []}
@@ -197,7 +217,7 @@ async def projection_points(db: AsyncSession, projection_id: str, limit: int = M
         rows = (await db.execute(
             select(Object.object_id, Object.class_id, Object.state, Object.source, Object.conf,
                    Object.tags, Object.frame_id)
-            .where(Object.object_id.in_(ref_ids))
+            .where(Object.object_id == any_(_uuid_array(ref_ids)))
         )).all()
         for oid, class_id, state, source, conf, tags, frame_id in rows:
             meta[oid] = {"class_id": class_id, "state": state, "source": source,
@@ -206,7 +226,7 @@ async def projection_points(db: AsyncSession, projection_id: str, limit: int = M
     else:
         rows = (await db.execute(
             select(Frame.frame_id, Frame.session_id, Frame.scene, Frame.quality, Frame.tags)
-            .where(Frame.frame_id.in_(ref_ids))
+            .where(Frame.frame_id == any_(_uuid_array(ref_ids)))
         )).all()
         for fid, sid, scene, quality, tags in rows:
             meta[fid] = {"session_id": str(sid), "scene": scene or {},
