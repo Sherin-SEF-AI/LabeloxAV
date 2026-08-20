@@ -213,8 +213,18 @@ class LaneSettings(BaseModel):
 
 
 class DrivableSettings(BaseModel):
-    backend: str = "local"         # local (sam_b click + grounding) | pod (SAM 3.1 PCS concept prompts)
-    concepts: list[str] = ["drivable road", "non-drivable area", "unpaved or unmarked road"]
+    # local runs services/autolabel/drivable.py here. "pod" RAISES: the pod path is reached through
+    # services/perception/cloud.py, which never reads this setting, so the better-looking value is the
+    # one that breaks the route. Left as a value rather than removed because it is what the raise names.
+    backend: str = "local"
+    # Segment the drivable surface during autolabel, per frame. Off, this ran only when somebody opened a
+    # frame and clicked, which is why 96% of the corpus had no mask and the lane plausibility gate - which
+    # treats an absent mask as "plausible" - was inactive on almost every frame it was meant to filter.
+    # Measured at ~0.05 s and 1.5 GB on a 1920x1080 frame, behind the same VRAM guard as every other model.
+    autolabel: bool = True
+    # Frames whose drivable pass may be skipped because another model already holds the card. The guard
+    # yields rather than failing the frame, so a busy tick loses drivable, not the whole frame.
+    skip_when_busy: bool = True
 
 
 class SignSettings(BaseModel):

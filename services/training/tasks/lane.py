@@ -20,6 +20,7 @@ Two sources, combined or separate:
 from __future__ import annotations
 
 import dataclasses
+import json
 import random
 import shutil
 from dataclasses import dataclass, field
@@ -247,29 +248,49 @@ async def build_lane_dataset(spec: LaneBuildSpec) -> dict:
 
 
 def _drivable_lines(store, uri: str, w: int, h: int, idx_of: dict[str, int]) -> list[str]:
-    """Turn a stored ternary surface mask into polygon label lines, one per class region."""
+    """Turn a stored ternary surface mask into polygon label lines, one per class region.
+
+    This read the blob as an image: `cv2.imdecode` on the bytes, `return []` when it came back None. Every
+    writer stores JSON polygons - services/api/routers/drivable.py and services/perception/cloud.py both
+    put `application/json` at `masks/drivable/{session}/{frame}.json`, and all 1,644 stored blobs end in
+    `.json` - so imdecode returned None every time and the drivable source contributed exactly zero labels
+    to every dataset ever built from it. It failed quietly, because returning no labels for a frame is
+    indistinguishable from a frame with no road in it, and `data.yaml` went on declaring three surface
+    classes with no instances behind them.
+
+    The payload is `{"classes": {name: [flat xy polygon, ...]}, "width", "height"}`. Polygons are already
+    in pixel coordinates, so the only work is scaling when the stored frame size differs from the export
+    size and normalising to the 0-1 range YOLO segmentation labels use.
+    """
     try:
-        buf = np.frombuffer(store.get_bytes(uri), dtype=np.uint8)
-        mask = cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE)
-    except Exception:  # noqa: BLE001
+        blob = json.loads(store.get_bytes(uri).decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - a malformed blob is one frame, not the dataset
+        log.warning("laneset.drivable_unreadable", uri=uri, error=str(exc))
         return []
-    if mask is None:
+    classes = blob.get("classes")
+    if not isinstance(classes, dict):
         return []
-    if mask.shape[:2] != (h, w):
-        mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+    # Stored dimensions, so a mask written at capture resolution still lands correctly in an export
+    # resized to something else. Falling back to the target size means no scaling, which is right when
+    # the blob predates the field.
+    sw = float(blob.get("width") or w) or float(w)
+    sh = float(blob.get("height") or h) or float(h)
+    sx, sy = 1.0 / sw, 1.0 / sh
 
     lines: list[str] = []
-    # The stored mask is ternary by value: 0 non-drivable, 1 drivable, 2 fallback, matching the writer in
-    # services/perception. Compared exactly rather than thresholded, because a threshold would merge the
-    # fallback class into whichever neighbour it sits closer to.
-    for value, cls in ((1, "surface_drivable"), (0, "surface_non_drivable"), (2, "surface_fallback")):
+    for surface, cls in (("drivable", "surface_drivable"), ("non_drivable", "surface_non_drivable"),
+                         ("fallback", "surface_fallback")):
         if cls not in idx_of:
             continue
-        binary = (mask == value).astype(np.uint8) * 255
-        if not binary.any():
-            continue
-        for poly in mask_to_polygons(binary, w, h, min_area_px=200):
-            lines.append(f"{idx_of[cls]} " + " ".join(f"{v:.6f}" for v in poly))
+        for poly in classes.get(surface) or []:
+            pts = [float(v) for v in poly]
+            if len(pts) < 6:          # fewer than three points is not a polygon
+                continue
+            norm = []
+            for i in range(0, len(pts) - 1, 2):
+                norm.append(min(max(pts[i] * sx, 0.0), 1.0))
+                norm.append(min(max(pts[i + 1] * sy, 0.0), 1.0))
+            lines.append(f"{idx_of[cls]} " + " ".join(f"{v:.6f}" for v in norm))
     return lines
 
 

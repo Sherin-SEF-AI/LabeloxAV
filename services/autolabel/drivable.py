@@ -1,16 +1,32 @@
-"""Drivable-surface segmentation (M2.2).
+"""Drivable-surface segmentation (M2.2): the road pixels, as a ternary surface mask.
 
-  pod path:   SAM 3.1 PCS concept prompts (drivable / non-drivable / fallback) -> a ternary surface mask.
-  local path: SAM (sam_b) seeded at the road region -> the drivable mask; non-drivable is the coarse
-              complement of the lower frame; fallback (unpaved/unmarked, the IDD drivable-fallback case)
-              is the pod-only concept.
+A semantic segmenter produces drivable / non_drivable / fallback, and the polygons per class are stored as
+JSON in MinIO (never Postgres) with per-class pixel-coverage fractions on a `drivable_mask` row. Surface
+classes map to the ontology surface entries (road, sidewalk, drivable_fallback, ...) and are refinable with
+the editor's SAM click.
 
-Stores polygons-per-surface-class as JSON in MinIO (never Postgres), plus per-class pixel-coverage
-fractions on a drivable_mask row. Surface classes map to the ontology surface entries (road, sidewalk,
-drivable_fallback, ...). Refinable with the existing SAM click from the editor.
+MEASURED, on a 1920x1080 frame with an RTX 5080:
+
+    mask2former-swin-large-mapillary   215M params   1,532 MiB peak   0.05 s/frame
+    segformer-b4-cityscapes             64M params     849 MiB peak   0.04 s/frame
+
+Mask2Former stays the default. It is 1.8x the memory and a quarter slower, which is a small price against
+Mapillary being globally diverse where Cityscapes is not: Cityscapes under-segments Indian roads, and this
+corpus is Indian roads. It is also what produced 1,606 of the existing masks, so the corpus stays
+consistent. Set LBX_DRIVABLE_LOCAL_MODEL to a SegFormer-Cityscapes tag for the lighter option.
+
+THE FALLBACK IS NOT A FALLBACK ANY MORE. `_segment_local` draws a perspective trapezoid: a fixed shape
+that carries no appearance information and cannot match a road. It used to be returned whenever the model
+raised for any reason, including out-of-memory, with one warning line - so a GPU-starved run produced
+plausible-looking masks that were geometry, tagged `trapezoid:local`, and nothing downstream distinguished
+them from segmentation. Over a corpus backfill that is a mechanism for manufacturing tens of thousands of
+fake masks. It is now opt-in: `segment_drivable` raises, and a caller that genuinely wants a placeholder
+asks for one.
 """
 
 from __future__ import annotations
+
+import os
 
 import cv2
 import numpy as np
@@ -22,13 +38,11 @@ log = get_logger("drivable")
 
 SURFACE_CLASSES = ("drivable", "non_drivable", "fallback")
 
-# The real local model. Default is Mask2Former fine-tuned on Mapillary Vistas: Mapillary is globally diverse
-# (developing-country roads included), so it segments Indian dashcam roads far better than Cityscapes, which
-# under-segments them. Set LBX_DRIVABLE_LOCAL_MODEL to a SegFormer-Cityscapes tag for a lighter/faster (but
-# lower-quality on Indian roads) option. This mirrors the pod's model choice (cloud/perception_pod.py).
-import os
-
 _SEG_MODEL = os.environ.get("LBX_DRIVABLE_LOCAL_MODEL", "facebook/mask2former-swin-large-mapillary-vistas-semantic")
+# Measured resident peak per model (see the module docstring), used by the VRAM guard before the load.
+# Advisory: the guard also reads real free memory, so this only has to be close enough to refuse a load
+# that obviously will not fit.
+_EST_MB = {"mask2former": 1700.0, "segformer": 950.0}
 # Substring rules over the model's own id2label -> ternary surface (identical to the pod's mapping).
 _DRIVE = ("road", "driveway", "crosswalk", "bike lane", "bike-lane", "service lane", "service-lane", "parking")
 _NONDR = ("sidewalk", "curb", "pedestrian")
@@ -53,11 +67,32 @@ def _build_surface_map(id2label: dict) -> dict:
     return out
 
 
+class DrivableUnavailable(RuntimeError):
+    """The surface could not be segmented. Raised rather than degraded to a trapezoid.
+
+    A caller deciding what to do about this is the point: a backfill records the refusal and moves on, and
+    the editor can offer the geometric placeholder explicitly. Neither is served by being handed a shape
+    that looks like a measurement.
+    """
+
+
 def _seg_model():
     if "model" not in _seg_state:
         import torch
 
         dev = get_settings().gpu.device if torch.cuda.is_available() else "cpu"
+        # Guarded like every other model in the autolabel plane. This one loaded straight onto the card
+        # with no check, so on a busy GPU it raised OOM into the silent-trapezoid path below.
+        if dev != "cpu":
+            from services.autolabel.runner import GpuCapacityError, VramGuard
+
+            kind = "mask2former" if "mask2former" in _SEG_MODEL else "segformer"
+            try:
+                VramGuard().require(_EST_MB[kind], f"drivable/{kind}")
+            except GpuCapacityError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - a guard that cannot run must not block the load
+                log.warning("drivable.vram_guard_unavailable", error=str(exc))
         if "mask2former" in _SEG_MODEL:
             from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation
 
@@ -157,16 +192,26 @@ def _segment_local(image_bgr: np.ndarray) -> dict:
     }
 
 
-def segment_drivable(image_bgr: np.ndarray) -> dict:
+def segment_drivable(image_bgr: np.ndarray, *, allow_trapezoid: bool = False) -> dict:
+    """Segment the ternary drivable surface, or raise DrivableUnavailable.
+
+    `allow_trapezoid` opts into the geometric placeholder. It is off by default because the placeholder is
+    indistinguishable from a real mask to every consumer except `model_version`, and the previous behaviour
+    - returning it on any exception, including OOM - meant a run that could not reach the GPU produced
+    confident-looking masks and one warning line.
+    """
     cfg = get_settings().models.drivable
     if cfg.backend == "pod":
+        # Note the setting's better-looking value is the one that breaks: the pod path is reached through
+        # services/perception/cloud.py, which never reads this.
         raise NotImplementedError(
-            "SAM 3.1 PCS concept-prompt drivable segmentation runs on the RunPod pod via "
-            "cloud/perception_pod.py. Set models.drivable.backend=pod, or use the local fallback.")
-    # Prefer the real SegFormer-Cityscapes road segmentation; the geometric trapezoid is only a safety net
-    # when the model cannot run (no GPU / weights unavailable), never the default -- it can't match a road.
+            "the pod path runs through cloud/perception_pod.py via `make cloud-perception`, not through "
+            "this function; leave models.drivable.backend at 'local'")
     try:
         return _segment_seg(image_bgr)
     except Exception as exc:  # noqa: BLE001
+        if allow_trapezoid:
+            log.warning("drivable.seg_unavailable_using_trapezoid", error=str(exc))
+            return _segment_local(image_bgr)
         log.warning("drivable.seg_unavailable", error=str(exc))
-        return _segment_local(image_bgr)
+        raise DrivableUnavailable(str(exc)) from exc

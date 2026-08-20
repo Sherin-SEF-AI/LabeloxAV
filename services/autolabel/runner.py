@@ -48,6 +48,47 @@ class FrameDetections:
     dets_b: list[RawDetection] = field(default_factory=list)
 
 
+async def _segment_frame_drivable(db, store, fd, totals: dict) -> None:
+    """Segment and store this frame's drivable surface, counting what it could not do.
+
+    An empty result is written like any other: a frame with no road has been checked, and recording that
+    is what lets coverage reach 100% without claiming more than was found. A frame the model could not
+    reach gets NO row, so it stays visible as work rather than being buried under a zero.
+    """
+    import json as _json
+
+    from db.models import DrivableMask
+    from services.autolabel.drivable import DrivableUnavailable, segment_drivable
+
+    try:
+        res = segment_drivable(fd.image_bgr)
+    except DrivableUnavailable as exc:
+        # Usually the guard refusing because another model holds the card. The frame keeps its objects.
+        totals["drivable_skipped"] = totals.get("drivable_skipped", 0) + 1
+        log.info("autolabel.drivable_skipped", frame=str(fd.frame.frame_id), reason=str(exc))
+        return
+    except Exception as exc:  # noqa: BLE001
+        totals["drivable_failed"] = totals.get("drivable_failed", 0) + 1
+        log.warning("autolabel.drivable_failed", frame=str(fd.frame.frame_id), error=str(exc))
+        return
+
+    key = f"masks/drivable/{fd.frame.session_id}/{fd.frame.frame_id}.json"
+    uri = store.put_bytes(key, _json.dumps(
+        {"classes": res["classes"], "width": res["width"], "height": res["height"]}).encode(),
+        "application/json")
+    existing = await db.get(DrivableMask, fd.frame.frame_id)
+    if existing is None:
+        db.add(DrivableMask(frame_id=fd.frame.frame_id, mask_uri=uri, coverage=res["coverage"],
+                            source="proposed", model_version=res["model"]))
+    elif existing.source != "human":
+        # A human refinement is never overwritten by a machine pass.
+        existing.mask_uri = uri
+        existing.coverage = res["coverage"]
+        existing.model_version = res["model"]
+    await db.commit()
+    totals["drivable"] = totals.get("drivable", 0) + 1
+
+
 class VramGuard:
     """Reads real free/total VRAM from the driver and refuses loads that would breach headroom."""
 
@@ -476,6 +517,15 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
             totals["objects"] += len(fused)
             for k, v in by_state.items():
                 totals["by_state"][k] = totals["by_state"].get(k, 0) + v
+
+            # Drivable surface, per frame. This is why the gap existed: segment_drivable had exactly one
+            # caller in the tree, the editor's button, so a mask existed only where somebody had opened a
+            # frame and clicked. The lane plausibility gate reads this mask and treats an ABSENT one as
+            # "plausible", so on a frame without it the gate is wired up and does nothing.
+            #
+            # Failure costs this frame its mask, never the frame: the objects are already persisted above.
+            if settings.models.drivable.autolabel:
+                await _segment_frame_drivable(db, store, fd, totals)
 
         try:
             summary = await process_session(session_id, limit, on_frame, yolo_weights=champion_weights,

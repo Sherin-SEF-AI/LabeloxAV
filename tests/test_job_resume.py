@@ -212,6 +212,7 @@ def test_every_resumable_kind_has_a_runner_that_honours_a_cursor():
         "error_sweep": "services.agent.error_daemon.run_error_sweep",
         "relabel_all": "services.agent.relabel_agent.run_relabel_all",
         "reanalyze_all": "services.agent.reanalyze.run_reanalyze_all",
+        "drivable_backfill": "services.perception.backfill.run_drivable_backfill",
     }
     for kind in _RESUMABLE_KINDS:
         assert kind in runners, f"{kind} is allowlisted but this test does not know its runner"
