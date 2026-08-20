@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
+import Inspector from "@/components/shell/Inspector";
+import EvidencePanel, { type EvidenceSubject } from "@/components/inspect/EvidencePanel";
 import { toast } from "@/lib/toast";
 import type { ReasonerAttribution, ReasonerRerun, ReasoningTrace } from "@/lib/types";
 
@@ -46,6 +48,9 @@ function Stat({ label, value, hint, tone }: {
 }
 
 export default function ReasonerPage() {
+  // The rerun table says the reasoner disagreed with a label and names what it would suggest instead.
+  // Without the object that is a claim you can only agree with.
+  const [subject, setSubject] = useState<EvidenceSubject | null>(null);
   const [attribution, setAttribution] = useState<ReasonerAttribution | null>(null);
   const [outcomes, setOutcomes] = useState<Awaited<ReturnType<typeof api.reasonerOutcomes>> | null>(null);
   const [coverage, setCoverage] = useState<Awaited<ReturnType<typeof api.reasonerCoverage>> | null>(null);
@@ -103,6 +108,8 @@ export default function ReasonerPage() {
   return (
     <PageShell active="REASONER" title="Reasoning layer"
       subtitle="what ran before each label, and whether it was right">
+      <div className="flex h-full min-h-0">
+      <div className="flex-1 min-w-0 overflow-auto">
       <div className="p-4 space-y-4 max-w-6xl">
         <div className="flex gap-2 flex-wrap">
           <Stat label="corpus reasoned" value={`${((coverage?.fraction ?? 0) * 100).toFixed(1)}%`}
@@ -325,7 +332,17 @@ export default function ReasonerPage() {
                     </thead>
                     <tbody>
                       {rerun.examples.map((e) => (
-                        <tr key={e.object_id} className="border-b hairline">
+                        <tr key={e.object_id}
+                          onClick={() => setSubject({
+                            objectId: e.object_id,
+                            suggestion: e.suggested_class
+                              ? { class_id: 0, class_name: e.suggested_class } : null,
+                            text: e.reasons.join(" · "),
+                            kind: `reasoner: ${e.decision}`,
+                          })}
+                          title="show the object this verdict is about"
+                          className={`border-b hairline cursor-pointer ${
+                            subject?.objectId === e.object_id ? "bg-accent/10" : "hover:bg-bg-2"}`}>
                           <td className="py-1 text-ink">{e.class_name}</td>
                           <td className="text-ink-3">{e.state}</td>
                           <td className={DECISION_TONE[e.decision] ?? "text-ink-2"}>{e.decision}</td>
@@ -340,6 +357,11 @@ export default function ReasonerPage() {
             )}
           </div>
         </section>
+      </div>
+      </div>
+      <Inspector title="evidence" side="right" width="w-[26rem]">
+        <EvidencePanel subject={subject} />
+      </Inspector>
       </div>
     </PageShell>
   );
