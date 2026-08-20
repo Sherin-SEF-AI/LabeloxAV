@@ -222,9 +222,6 @@ class DrivableSettings(BaseModel):
     # treats an absent mask as "plausible" - was inactive on almost every frame it was meant to filter.
     # Measured at ~0.05 s and 1.5 GB on a 1920x1080 frame, behind the same VRAM guard as every other model.
     autolabel: bool = True
-    # Frames whose drivable pass may be skipped because another model already holds the card. The guard
-    # yields rather than failing the frame, so a busy tick loses drivable, not the whole frame.
-    skip_when_busy: bool = True
 
 
 class SignSettings(BaseModel):

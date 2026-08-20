@@ -1013,6 +1013,16 @@ class LabeloxClient:
         return self._call("POST", f"/api/discovery/{candidate_id}/state",
                           params=None, json_body=body)
 
+    def post_drivable_backfill(self, session_id: Any | None = None, max_frames: int | None = 50000, redo: bool | None = False) -> Any:
+        """Drivable Backfill"""
+        return self._call("POST", f"/api/drivable/backfill",
+                          params={"session_id": session_id, "max_frames": max_frames, "redo": redo}, json_body=None)
+
+    def get_drivable_coverage(self) -> Any:
+        """Drivable Coverage"""
+        return self._call("GET", f"/api/drivable/coverage",
+                          params=None, json_body=None)
+
     def post_driving_events_by_event_id_confirm(self, event_id: str, body: Any = None) -> Any:
         """Confirm"""
         return self._call("POST", f"/api/driving-events/{event_id}/confirm",
@@ -3476,4 +3486,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 678 routes generated from the server schema.
+# 680 routes generated from the server schema.
