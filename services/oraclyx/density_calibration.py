@@ -215,16 +215,31 @@ async def fit_density_calibration(db: AsyncSession, *, run_id: str, score_thr: f
         kx, ky = _fit_isotonic(x, y)
         per_class[cid] = Curve(tuple(kx), tuple(ky), len(obs), f"class:{cid}", fallback=False)
 
+    # The cell inventory is taken over ALL pairs, not just the training split. A cell whose every
+    # observation landed in validation appears in neither `by_cell` nor the fitted set, so it used to be
+    # counted in no total at all and the coverage note undercounted its own denominator - which is the
+    # exact dishonesty this module says it is avoiding.
+    all_cells: dict[str, int] = {}
+    for cid, bucket, _conf, _ok, _fid in pairs:
+        all_cells[DensityCalibration.key(cid, bucket)] = all_cells.get(
+            DensityCalibration.key(cid, bucket), 0) + 1
+
     cells: dict[str, Curve] = {}
     thin: list[dict[str, Any]] = []
-    for key, obs in by_cell.items():
+    for key in sorted(all_cells):
+        obs = by_cell.get(key, [])
         cid = int(key.split("|")[0])
         bucket = key.split("|")[1]
         if len(obs) < min_cell:
             # Recorded, not silently dropped: this is the cell where the table is not density-aware, and
             # a reader has to be able to see that rather than infer it from an absence.
-            thin.append({"class_id": cid, "bucket": bucket, "n": len(obs), "min": min_cell,
-                         "fell_back_to": "class" if cid in per_class else "uncalibrated"})
+            thin.append({"class_id": cid, "bucket": bucket, "n": len(obs),
+                         "n_all": all_cells[key], "min": min_cell,
+                         "fell_back_to": "class" if cid in per_class else "uncalibrated",
+                         # Distinguishes "too few to fit" from "the split put all of them in validation",
+                         # which want different answers: more labels versus a different split.
+                         "reason": ("none of this cell's observations landed in the training split"
+                                    if not obs else "below the cell minimum")})
             continue
         x = np.array([o[0] for o in obs])
         y = np.array([float(o[1]) for o in obs])
@@ -288,9 +303,9 @@ async def fit_density_calibration(db: AsyncSession, *, run_id: str, score_thr: f
         "trustworthy": bool(improves and cells),
         "calibration": cal,
         # Said on the result: a partly-conditioned table read as fully conditioned is the failure mode.
-        "coverage_note": (f"{len(cells)} of {len(cells) + len(thin)} (class, density) cells had at least "
-                          f"{min_cell} observations; the rest serve the per-class curve and are marked "
-                          "as fallbacks in every served value"),
+        "coverage_note": (f"{len(cells)} of {len(all_cells)} (class, density) cells had at least "
+                          f"{min_cell} training observations; the rest serve the per-class curve and are "
+                          "marked as fallbacks in every served value"),
     }
     log.info("density_calibration.fit", run=run_id, cells=len(cells), thin=len(thin),
              raw_ece=out["raw_val_ece"], class_ece=out["per_class_val_ece"],

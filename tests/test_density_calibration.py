@@ -154,9 +154,10 @@ class TestFitting:
         async with get_sessionmaker()() as db:
             run, _cid = await _corpus(db)
             out = await fit_density_calibration(db, run_id=str(run.run_id))
-            # The aggregate flatters the per-class curve, which is exactly why it is not the criterion.
-            assert out["per_class_val_ece"] < out["density_val_ece"]
-            # And per bucket the ordering reverses, which is the true comparison.
+            # Per bucket the conditioned curve wins, which is the comparison the verdict is made on and
+            # the only one that cannot cancel. The aggregate is deliberately NOT asserted in either
+            # direction: whether it flatters the per-class curve depends on how the split falls, and that
+            # it can flatter it at all is the reason it is not the criterion.
             assert out["worst_bucket_density_ece"] < out["worst_bucket_per_class_ece"], out["per_bucket"]
             assert out["beats_per_class"] is True
             assert out["trustworthy"] is True
@@ -178,14 +179,37 @@ class TestFitting:
         appear in thin_cells with its count and what it fell back to.
         """
         async with get_sessionmaker()() as db:
-            run, _cid = await _corpus(db, n_dense=1, dense_per_frame=35)
+            # Three frames at 30 predictions each: 30 is the dense boundary, so the cell really is the
+            # dense one, and 90 observations is under the 100-observation minimum however the split falls.
+            # (Five per frame would have put these in the SPARSE bucket, since the bucket is decided by
+            # the prediction count, which is what made the first version of this test assert nothing.)
+            run, _cid = await _corpus(db, n_dense=3, dense_per_frame=30)
             out = await fit_density_calibration(db, run_id=str(run.run_id))
             assert out["measured"] is True
             thin = {t["bucket"]: t for t in out["thin_cells"]}
             assert "dense" in thin, out["thin_cells"]
-            assert thin["dense"]["n"] < out["thin_cells"][0]["min"]
+            assert thin["dense"]["n"] < thin["dense"]["min"]
             assert thin["dense"]["fell_back_to"] in ("class", "uncalibrated")
             assert "cells had at least" in out["coverage_note"]
+
+    async def test_every_cell_in_the_data_is_accounted_for_however_the_split_falls(self):
+        """A cell is fitted or thin. It used to be possible to be neither.
+
+        The inventory was taken over the training half, so a cell whose every observation landed in
+        validation appeared in no total at all and the coverage note undercounted its own denominator -
+        the exact dishonesty this module says it is avoiding. Asserted as an invariant rather than by
+        engineering a particular split, because which cell lands where is not the property under test.
+        """
+        async with get_sessionmaker()() as db:
+            run, cid = await _corpus(db, n_sparse=40, n_dense=3, dense_per_frame=30)
+            out = await fit_density_calibration(db, run_id=str(run.run_id))
+            # One class, two populated buckets: sparse (3 per frame) and dense (30 per frame).
+            assert out["n_cells"] + out["n_thin_cells"] == 2, out["thin_cells"]
+            assert f"of {out['n_cells'] + out['n_thin_cells']}" in out["coverage_note"]
+            for t in out["thin_cells"]:
+                assert t["reason"] in ("below the cell minimum",
+                                       "none of this cell's observations landed in the training split")
+                assert t["n_all"] >= t["n"], "the all-pairs count cannot be under the training count"
 
     async def test_a_reconstructed_run_is_refused(self):
         async with get_sessionmaker()() as db:
