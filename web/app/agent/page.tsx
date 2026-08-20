@@ -11,6 +11,7 @@ import ContaminationPanel from "@/components/agent/ContaminationPanel";
 import Inspector from "@/components/shell/Inspector";
 import EvidencePanel, { type EvidenceSubject } from "@/components/inspect/EvidencePanel";
 import LineageObjects from "@/components/inspect/LineageObjects";
+import ActionResultPanel, { type ActionResult } from "@/components/inspect/ActionResultPanel";
 import { describeFailure } from "@/lib/actionError";
 import { type ActivityLog as Log, emptyLog, record } from "@/lib/activityLog";
 import { Spinner } from "@/components/Spinner";
@@ -47,6 +48,17 @@ export default function AgentConsole() {
   // The rail serves two tables. A lineage is a set rather than one object, so it shows the set first and
   // the evidence for whichever member is picked; a fix-queue row goes straight to the evidence.
   const [lineage, setLineage] = useState<{ from_name: string; to_name: string } | null>(null);
+  // The last action's full payload. Every handler used to report through setMsg alone, which is a summary
+  // written into a transcript at the bottom of a long page: out of sight from the button, and lossy at the
+  // point of rendering. The transcript stays, because a running record of what was done is worth having;
+  // this is the result itself, beside the button that asked for it.
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const showResult = useCallback((kind: string, label: string, data: unknown,
+                                  destination?: { href: string; label: string }) => {
+    setResult({ kind, label, data, at: Date.now(), destination });
+    setSubject(null);
+    setLineage(null);
+  }, []);
   const [busy, setBusy] = useState<string | null>(null);
   // The transcript replaces a single shared message string. `setMsg` is kept as the name every call site
   // already uses and now appends an entry instead of overwriting one, so a background result landing minutes
@@ -78,6 +90,7 @@ export default function AgentConsole() {
     setBusy("audit"); setMsg(null);
     try {
       const r = await api.agentAuditRun({ sample_size: 200, vlm_calls: 60 });
+      showResult("audit", "overnight audit", r);
       setMsg("overnight audit running in the background - sampling auto-accepts, VLM + critic spot-checks");
       const poll = async (n: number) => {
         const a = await api.agentAuditLatest(); setAudit(a);
@@ -93,6 +106,7 @@ export default function AgentConsole() {
     setBusy("sweep"); setMsg(null);
     try {
       const r = await api.agentErrorSweep(8);
+      showResult("sweep", "error sweep", r);
       setMsg("error sweep running in the background: the fix queue refreshes as sessions complete");
       // poll a couple of times for results
       setTimeout(load, 6000); setTimeout(load, 15000);
@@ -107,6 +121,7 @@ export default function AgentConsole() {
     setBusy("relabel"); setMsg(null); setRelabel(null); setRelabelDone(false);
     try {
       const r = await api.agentRelabelAll({ max_frames: 300 });
+      showResult("relabel", "relabel the corpus", r);
       setMsg("relabel running across the corpus: an independent model is re-reading every box");
       // poll progress until the background run reports committed
       const poll = async (n: number) => {
@@ -127,13 +142,17 @@ export default function AgentConsole() {
     try {
       const r = await api.estimateEgoMasks();
       setMsg(`ego-hood masks: ${r.with_hood}/${r.cameras} cameras have a detected hood${r.no_hood.length ? ` (no hood: ${r.no_hood.slice(0, 4).join(", ")})` : ""}`);
+      // The line truncates no_hood at four cameras. Which cameras have no detected hood is the actionable
+      // part, so the panel gets all of them.
+      showResult("ego", "estimate ego-hood masks", r);
     } catch (e) { failed("ego-mask estimation", e); }
     finally { setBusy(null); }
   };
   const backfillPii = async () => {
     setBusy("pii"); setMsg(null);
     try {
-      await api.piiBackfill(2000);
+      const r = await api.piiBackfill(2000);
+      showResult("pii", "PII backfill", r);
       setMsg("PII backfill running in the background: blurring faces/plates on pre-gate frames, overwriting the stored image in place");
     } catch (e) { failed("PII backfill", e); }
     finally { setBusy(null); }
@@ -142,6 +161,7 @@ export default function AgentConsole() {
     setBusy("redetect"); setMsg(null);
     try {
       const r = await api.redetectAll(true);
+      showResult("redetect", "full re-detection", r);
       setMsg(`full re-detection started (run ${r.run_id.slice(0, 8)}): PII backfill, then re-run every session with thing/stuff + ego-hood + de-dup + oversize gates, one at a time on the GPU`);
     } catch (e) { failed("re-detection", e); }
     finally { setBusy(null); }
@@ -151,6 +171,7 @@ export default function AgentConsole() {
     setBusy("repair"); setMsg(null);
     try {
       const p = await api.agentTemporalRepairPlan();
+      showResult("repair", "temporal repair plan", p);
       if (!p.counts.relabels) { setMsg(`no safe track-flip relabels (scanned ${p.counts.tracks} tracks, ${p.counts.flipped_tracks} flipped, ${p.counts.skipped_static ?? 0} corrupt)`); return; }
       const r = await api.agentTemporalRepair();
       setMsg(`temporal auto-repair: relabeled ${r.relabeled} outliers to their track majority (reversible, run ${r.run_id.slice(0, 8)})`);
@@ -179,21 +200,40 @@ export default function AgentConsole() {
   const mine = async (what: "scenarios" | "disagreements") => {
     setBusy(what); setMsg(null);
     try {
-      if (what === "scenarios") { const r = await api.agentMineScenarios(); setMsg(`mined ${r.persisted} safety scenarios (${Object.entries(r.by_kind).map(([k, n]) => `${k}:${n}`).join(", ") || "none"}) ,  see Scenarios`); }
-      else { const r = await api.agentMineDisagreements(); setMsg(`mined ${r.persisted} model-disagreement frames${r.top[0] ? ` (top: ${r.top[0].tag})` : ""} ,  see Scenarios`); }
+      if (what === "scenarios") {
+        const r = await api.agentMineScenarios();
+        setMsg(`mined ${r.persisted} safety scenarios (${Object.entries(r.by_kind).map(([k, n]) => `${k}:${n}`).join(", ") || "none"})`);
+        showResult("scenarios", "mine safety scenarios", r,
+          { href: "/scenarios", label: `open the ${r.persisted} scenarios` });
+      } else {
+        const r = await api.agentMineDisagreements();
+        setMsg(`mined ${r.persisted} model-disagreement frames${r.top[0] ? ` (top: ${r.top[0].tag})` : ""}`);
+        showResult("disagreements", "mine disagreements", r,
+          { href: "/scenarios", label: `open the ${r.persisted} disagreement frames` });
+      }
     } catch (e) { failed("mine", e); }
     finally { setBusy(null); }
   };
   const coverage = async () => {
     setBusy("coverage"); setMsg(null);
-    try { const r = await api.agentCoverage(); setGaps(r.gaps); }
+    try {
+      const r = await api.agentCoverage();
+      setGaps(r.gaps);
+      // The card keeps its ten-gap preview; the panel gets class balance, per-axis scene coverage and the
+      // geo histogram, which the page returned and never drew.
+      showResult("coverage", "coverage report", r);
+    }
     catch (e) { failed("coverage", e); }
     finally { setBusy(null); }
   };
 
   const cycle = async () => {
     setBusy("cycle"); setMsg(null);
-    try { const r = await api.agentTrainingCycle(true); setMsg(`flywheel cycle (dry-run): would auto-accept ${r.tick.auto_accept}, review ${r.tick.review}, annotate ${r.tick.annotate} across ${r.tick.frames} top-value frames`); }
+    try {
+      const r = await api.agentTrainingCycle(true);
+      setMsg(`flywheel cycle (dry-run): would auto-accept ${r.tick.auto_accept}, review ${r.tick.review}, annotate ${r.tick.annotate} across ${r.tick.frames} top-value frames`);
+      showResult("cycle", "flywheel cycle (dry-run)", r);
+    }
     catch (e) { failed("cycle", e); }
     finally { setBusy(null); }
   };
@@ -201,6 +241,7 @@ export default function AgentConsole() {
     setBusy("drift"); setMsg(null);
     try {
       const r = await api.agentGoldDrift();
+      showResult("drift", "gold-drift check", r);
       setMsg(r.status === "rolled_back" ? `GOLD DRIFT: champion regressed ${r.baseline_map}→${r.current_map}, rolled back + paused loop`
         : r.status === "healthy" ? `champion healthy on gold (${r.current_map} vs baseline ${r.baseline_map})`
         : r.status === "cannot_evaluate" ? `champion ${r.champion} (baseline mAP ${r.baseline_map}), gold set not materialized here`
@@ -275,9 +316,15 @@ export default function AgentConsole() {
     setBusy("driftinv"); setMsg(null);
     try {
       const r = await api.agentDriftInvestigate();
+      showResult("driftinv", "drift investigation", r);
       if (!r.breached.length) { setMsg("no drift breach right now - governance is holding within tolerance"); return; }
       setMsg(`drift breach (${r.breached.join(", ")}) - investigating root cause in the background`);
-      setTimeout(() => api.agentDriftLatest().then(setDriftDiag).catch(() => {}), 4000);
+      // The diagnosis arrives after the investigation runs, so replace the panel with it rather than
+      // leaving the panel showing the request that started it.
+      setTimeout(() => api.agentDriftLatest().then((d) => {
+        setDriftDiag(d);
+        showResult("driftinv", "drift diagnosis", d);
+      }).catch(() => {}), 4000);
     } catch (e) { failed("drift investigation", e); }
     finally { setBusy(null); }
   };
@@ -298,7 +345,12 @@ export default function AgentConsole() {
   useEffect(() => { loadProps(); }, [loadProps]);
   const scanOntology = async () => {
     setBusy("ontscan"); setMsg(null);
-    try { const r = await api.agentOntologyScan(40); setMsg(`scanned ${r.scanned} fallbacks -> ${r.proposals} promotion proposals`); await loadProps(); }
+    try {
+      const r = await api.agentOntologyScan(40);
+      showResult("ontscan", "scan for ontology gaps", r);
+      setMsg(`scanned ${r.scanned} fallbacks -> ${r.proposals} promotion proposals`);
+      await loadProps();
+    }
     catch (e) { failed("ontology scan", e); }
     finally { setBusy(null); }
   };
@@ -308,7 +360,9 @@ export default function AgentConsole() {
       if (action === "approve") {
         const nm = (names[id] || props.find((p) => p.proposal_id === id)?.suggested_name || "").trim();
         if (!nm) { setMsg("give the new class a name first"); return; }
-        const r = await api.agentOntologyApprove(id, nm); setMsg(`minted ${r.name} (#${r.class_id}), relabeled ${r.relabeled} - reversible run ${r.run_id.slice(0, 8)}`);
+        const r = await api.agentOntologyApprove(id, nm);
+        showResult("ontology", `mint ${nm}`, r);
+        setMsg(`minted ${r.name} (#${r.class_id}), relabeled ${r.relabeled} - reversible run ${r.run_id.slice(0, 8)}`);
       } else { await api.agentOntologyReject(id); setMsg("proposal rejected"); }
       await loadProps();
     } catch (e) { failed("decision", e); }
@@ -320,7 +374,12 @@ export default function AgentConsole() {
   useEffect(() => { loadOrders(); }, [loadOrders]);
   const planFleet = async () => {
     setBusy("fleet"); setMsg(null);
-    try { const r = await api.agentFleetPlan(); setMsg(`fused ${r.gaps} gaps + ${r.vehicles} vehicles -> ${r.orders} collection orders`); await loadOrders(); }
+    try {
+      const r = await api.agentFleetPlan();
+      showResult("fleet", "plan fleet collection", r);
+      setMsg(`fused ${r.gaps} gaps + ${r.vehicles} vehicles -> ${r.orders} collection orders`);
+      await loadOrders();
+    }
     catch (e) { failed("fleet plan", e); }
     finally { setBusy(null); }
   };
@@ -674,8 +733,17 @@ export default function AgentConsole() {
           </div>
         </div>
         </div>
-        <Inspector title={lineage ? "lineage" : "evidence"} side="right" width="w-[26rem]"
-          meta={lineage ? undefined : (cursor >= 0 && queue.length ? `${cursor + 1}/${queue.length}` : undefined)}>
+        {/* One rail, three things it can be showing: the result of the last action, the objects behind a
+            lineage, or the evidence for one object. They are exclusive because they answer the same
+            question - "what is this about" - and stacking them would bury whichever you asked for last. */}
+        <Inspector title={result ? "result" : lineage ? "lineage" : "evidence"} side="right" width="w-[26rem]"
+          meta={result ? undefined : lineage ? undefined
+            : (cursor >= 0 && queue.length ? `${cursor + 1}/${queue.length}` : undefined)}>
+          {result ? (
+            <ActionResultPanel result={result}
+              onOpenObject={(id) => { setResult(null); setSubject({ objectId: id }); }}
+              onOpenFrame={(id) => router.push(`/frame/${id}`)} />
+          ) : (<>
           {lineage && (
             <div className="border-b hairline">
               <LineageObjects fromName={lineage.from_name} toName={lineage.to_name}
@@ -703,6 +771,7 @@ export default function AgentConsole() {
                 run: async () => { await api.errorDismiss(queue[cursor].candidate_id); load(); } },
             ] : []}
           />
+          </>)}
         </Inspector>
       </div>
     </PageShell>
