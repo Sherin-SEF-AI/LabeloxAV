@@ -8,6 +8,9 @@ import ActivityLog from "@/components/agent/ActivityLog";
 import InterruptedRuns from "@/components/agent/InterruptedRuns";
 import JobWatcher from "@/components/agent/JobWatcher";
 import ContaminationPanel from "@/components/agent/ContaminationPanel";
+import Inspector from "@/components/shell/Inspector";
+import EvidencePanel, { type EvidenceSubject } from "@/components/inspect/EvidencePanel";
+import LineageObjects from "@/components/inspect/LineageObjects";
 import { describeFailure } from "@/lib/actionError";
 import { type ActivityLog as Log, emptyLog, record } from "@/lib/activityLog";
 import { Spinner } from "@/components/Spinner";
@@ -22,12 +25,28 @@ const KIND_LABEL: Record<string, string> = {
   critic_flag: "consistency", near_dup_inconsistent: "near-dup", policy_violation: "policy",
   track_inconsistent: "track flip", cross_cam_inconsistent: "cross-cam", embedding_outlier: "outlier",
   confident_learning: "confident-wrong",
+  // Was missing, so every one of these rendered as the raw slug. It is also the kind that dominates the
+  // queue, because the error sweep never clears it (services/errordetect/queue.py scopes its delete by
+  // the kinds it was asked to run, and this is not one of them).
+  vlm_confusion: "vlm disagrees",
+  // The bulk of this queue and it rendered as a raw slug. Its claim ("another box covers the same object
+  // with higher confidence") is the reason the panel draws the frame's other boxes: one box cannot show
+  // a duplicate.
+  reanalyze: "re-check",
 };
 
 export default function AgentConsole() {
   const router = useRouter();
   const [queue, setQueue] = useState<Cand[]>([]);
   const [summary, setSummary] = useState<Record<string, number>>({});
+  // Which row the evidence panel is showing, and which row the keyboard is on. One index rather than an
+  // id: the queue is ordered worst-first and acting on a row removes it, so the cursor has to be able to
+  // stay put and pick up whatever moved into that position.
+  const [cursor, setCursor] = useState(-1);
+  const [subject, setSubject] = useState<EvidenceSubject | null>(null);
+  // The rail serves two tables. A lineage is a set rather than one object, so it shows the set first and
+  // the evidence for whichever member is picked; a fix-queue row goes straight to the evidence.
+  const [lineage, setLineage] = useState<{ from_name: string; to_name: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   // The transcript replaces a single shared message string. `setMsg` is kept as the name every call site
   // already uses and now appends an entry instead of overwriting one, so a background result landing minutes
@@ -190,10 +209,65 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
-  const act = async (c: Cand, kind: "confirm" | "dismiss") => {
+  // Memoised because the keyboard effect depends on it: recreated every render, the listener would be
+  // torn down and rebound on every keystroke that changed any state on this page.
+  const act = useCallback(async (c: Cand, kind: "confirm" | "dismiss") => {
     try { await (kind === "confirm" ? api.errorConfirm(c.candidate_id) : api.errorDismiss(c.candidate_id)); load(); }
     catch (e) { failed(kind === "confirm" ? "confirm" : "dismiss", e); }
-  };
+  }, [load, failed]);
+
+  // Declared before `open`, which reads it: a const arrow is in the temporal dead zone until its line
+  // runs, and a useCallback dependency array is evaluated during render.
+  const reason = useCallback((c: Cand) => (c.detail?.reason as string) || (c.detail?.reasons ? (c.detail.reasons as string[]).join("; ") : (c.detail?.note as string) || JSON.stringify(c.detail).slice(0, 80)), []);
+
+  // A row and the panel are the same selection; opening one sets the other. The reason text is the row's
+  // own words, so the panel shows exactly what the table was showing plus the thing it was not: the object.
+  const open = useCallback((c: Cand, i: number) => {
+    setCursor(i);
+    setLineage(null);
+    setSubject({
+      objectId: c.object_id,
+      suggestion: c.proposed_label?.class_name
+        ? { class_id: 0, class_name: c.proposed_label.class_name } : null,
+      text: reason(c), kind: KIND_LABEL[c.kind] || c.kind, score: c.score, detail: c.detail,
+    });
+  }, [reason]);
+
+  // j/k rather than arrows, matching the triage page: arrows scroll the panel, and this list is long
+  // enough that a reviewer wants both. e.repeat is refused because a held key would otherwise stack
+  // verdicts on rows nobody looked at, which is the failure the review grid already guards against.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!queue.length) return;
+      if (e.key === "j" || e.key === "k") {
+        e.preventDefault();
+        const next = e.key === "j"
+          ? Math.min(cursor + 1, queue.length - 1)
+          : Math.max(cursor - 1, 0);
+        open(queue[next], next);
+      } else if (e.key === "Escape") {
+        setSubject(null); setCursor(-1);
+      } else if ((e.key === "c" || e.key === "d") && cursor >= 0 && queue[cursor]) {
+        e.preventDefault();
+        void act(queue[cursor], e.key === "c" ? "confirm" : "dismiss");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [queue, cursor, open, act]);
+
+  // After a row leaves the queue, hold the position rather than the row: the next-worst candidate slides
+  // into it and that is the one a reviewer wants next. Clamped, so acting on the last row lands on the
+  // new last row instead of nothing.
+  useEffect(() => {
+    if (cursor < 0) return;
+    if (!queue.length) { setSubject(null); setCursor(-1); return; }
+    const at = Math.min(cursor, queue.length - 1);
+    if (!subject || queue[at]?.object_id !== subject.objectId) open(queue[at], at);
+  }, [queue]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const [driftDiag, setDriftDiag] = useState<{ report: { hypothesis: string; proposed_action: { kind: string } } | null } | null>(null);
   useEffect(() => { api.agentDriftLatest().then(setDriftDiag).catch(() => {}); }, []);
@@ -277,11 +351,10 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
-  const reason = (c: Cand) => (c.detail?.reason as string) || (c.detail?.reasons ? (c.detail.reasons as string[]).join("; ") : (c.detail?.note as string) || JSON.stringify(c.detail).slice(0, 80));
-
   return (
     <PageShell active="AGENT" subtitle="CONSOLE" right={loading ? <Spinner label="loading" /> : <span className="font-mono text-xs text-ink-3">{queue.length} in fix queue</span>}>
-      <div className="h-full overflow-auto">
+      <div className="flex h-full min-h-0">
+        <div className="flex-1 min-w-0 overflow-auto">
         <div className="max-w-5xl mx-auto p-6 space-y-5">
           <div>
             <h1 className="text-xl text-ink font-semibold">Agent Console</h1>
@@ -552,7 +625,9 @@ export default function AgentConsole() {
 
           {/* What a past relabel run did, grouped by the decision rather than by the object. Fifty
               thousand individual rewrites are not reviewable; the hundred decisions behind them are. */}
-          <ContaminationPanel />
+          <ContaminationPanel
+            onInspect={(l) => { setLineage(l); setSubject(null); setCursor(-1); }}
+            inspecting={lineage ? `${lineage.from_name}->${lineage.to_name}` : null} />
 
           {/* Fix queue */}
           <div className="panel">
@@ -567,22 +642,68 @@ export default function AgentConsole() {
                   <tr><th className="text-left font-normal px-3 py-2 w-28">kind</th><th className="text-left font-normal px-3 py-2 w-16">score</th><th className="text-left font-normal px-3 py-2">why</th><th className="px-3 py-2 w-40"></th></tr>
                 </thead>
                 <tbody>
-                  {queue.map((c) => (
-                    <tr key={c.candidate_id} className="border-b hairline hover:bg-bg-2">
+                  {queue.map((c, i) => (
+                    <tr key={c.candidate_id} onClick={() => open(c, i)}
+                      title="show the object this is about"
+                      className={`border-b hairline cursor-pointer ${i === cursor ? "bg-accent/10" : "hover:bg-bg-2"}`}>
                       <td className="px-3 py-2"><span className="font-mono text-[10px] border border-line px-1.5 py-0.5 rounded text-ink-2">{KIND_LABEL[c.kind] || c.kind}</span></td>
                       <td className="px-3 py-2 font-mono text-ink-3">{c.score.toFixed(2)}</td>
                       <td className="px-3 py-2 text-ink-2 text-xs">{reason(c)}{c.proposed_label?.class_name ? <span className="text-pass"> → {c.proposed_label.class_name}</span> : null}</td>
                       <td className="px-3 py-2 text-right font-mono text-[10px]">
-                        <button onClick={() => act(c, "confirm")} className="border border-pass text-pass px-1.5 py-0.5 rounded mr-1">confirm</button>
-                        <button onClick={() => act(c, "dismiss")} className="border border-line text-ink-3 px-1.5 py-0.5 rounded hover:text-ink">dismiss</button>
+                        {/* stopPropagation: acting on a row must not also re-open it, which would refetch
+                            the object that just left the queue. */}
+                        <button onClick={(e) => { e.stopPropagation(); act(c, "confirm"); }} className="border border-pass text-pass px-1.5 py-0.5 rounded mr-1">confirm</button>
+                        <button onClick={(e) => { e.stopPropagation(); act(c, "dismiss"); }} className="border border-line text-ink-3 px-1.5 py-0.5 rounded hover:text-ink">dismiss</button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             ) : <div className="px-4 py-10 text-center text-ink-3 text-sm">Fix queue is empty. Run an error sweep to scan the corpus.</div>}
+            {queue.length > 0 && (
+              <div className="border-t hairline px-4 py-1.5 font-mono text-[10px] text-ink-3">
+                <span className="text-ink-2">j</span>/<span className="text-ink-2">k</span> move
+                <span className="mx-2">·</span>
+                <span className="text-pass">c</span> confirm
+                <span className="mx-2">·</span>
+                <span className="text-block">d</span> dismiss
+                <span className="mx-2">·</span>
+                <span className="text-ink-2">esc</span> close
+              </div>
+            )}
           </div>
         </div>
+        </div>
+        <Inspector title={lineage ? "lineage" : "evidence"} side="right" width="w-[26rem]"
+          meta={lineage ? undefined : (cursor >= 0 && queue.length ? `${cursor + 1}/${queue.length}` : undefined)}>
+          {lineage && (
+            <div className="border-b hairline">
+              <LineageObjects fromName={lineage.from_name} toName={lineage.to_name}
+                selectedId={subject?.objectId ?? null}
+                onPick={(objectId) => setSubject({
+                  objectId,
+                  text: `Moved by a past relabel run: ${lineage.from_name} -> ${lineage.to_name}.`,
+                  kind: "relabel lineage",
+                  // No suggestion button here. Reverting the whole lineage is the row's own action and
+                  // is a bulk decision; offering a per-object relabel beside it would be two ways to
+                  // undo the same thing that do not agree on scope.
+                  suggestion: null,
+                })} />
+            </div>
+          )}
+          <EvidencePanel
+            subject={subject}
+            onResolved={() => load()}
+            actions={cursor >= 0 && queue[cursor] ? [
+              { key: "confirm", label: "confirm", tone: "accept" as const,
+                hint: "the label is wrong; apply the proposed class and mark it reviewed",
+                run: async () => { await api.errorConfirm(queue[cursor].candidate_id); load(); } },
+              { key: "dismiss", label: "dismiss", tone: "reject" as const,
+                hint: "the label is fine; this candidate was a false alarm",
+                run: async () => { await api.errorDismiss(queue[cursor].candidate_id); load(); } },
+            ] : []}
+          />
+        </Inspector>
       </div>
     </PageShell>
   );

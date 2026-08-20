@@ -26,12 +26,18 @@ type Lineage = {
   examples: { object_id: string; frame_id: string }[];
 };
 
-export default function ContaminationPanel() {
+export default function ContaminationPanel({ onInspect, inspecting }: {
+  /** Show this lineage's objects in the page's evidence rail. Absent, rows keep the old open-an-example
+      behaviour, so the component still works standalone. */
+  onInspect?: (l: { from_name: string; to_name: string }) => void;
+  inspecting?: string | null;
+} = {}) {
   const router = useRouter();
   const [rows, setRows] = useState<Lineage[]>([]);
-  const [summary, setSummary] = useState<{ lineages: number; objects: number;
-    refused_lineages: number; refused_objects: number;
-    outstanding: number; refused_outstanding: number } | null>(null);
+  type Sum = { lineages: number; objects: number; refused_lineages: number; refused_objects: number;
+    outstanding: number; refused_outstanding: number };
+  const [summary, setSummary] = useState<Sum | null>(null);
+  const [shown, setShown] = useState<Sum | null>(null);
   const [refusedOnly, setRefusedOnly] = useState(true);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -40,7 +46,7 @@ export default function ContaminationPanel() {
   const load = () => {
     setLoading(true);
     api.agentContamination(25, refusedOnly)
-      .then((r) => { setRows(r.lineages); setSummary(r.summary); setErr(null); })
+      .then((r) => { setRows(r.lineages); setSummary(r.summary); setShown(r.shown ?? null); setErr(null); })
       .catch((e) => setErr(humanizeError(e)))
       .finally(() => setLoading(false));
   };
@@ -106,6 +112,14 @@ export default function ContaminationPanel() {
           <span className="text-ink-3">
             {" "}· {summary.objects.toLocaleString()} moved in all, across {summary.lineages} lineages
           </span>
+          {/* When the filter is on, the table below is a subset and the sentence above is about the whole
+              corpus. Saying both is the only way "in all" stays true: it used to be computed on the
+              filtered list, so it described the subset while claiming to describe everything. */}
+          {refusedOnly && shown && shown.lineages !== summary.lineages && (
+            <span className="text-ink-3">
+              {" "}· showing {shown.lineages} refused ({shown.objects.toLocaleString()} objects)
+            </span>
+          )}
         </div>
       )}
 
@@ -123,7 +137,11 @@ export default function ContaminationPanel() {
             </thead>
             <tbody>
               {rows.map((l) => (
-                <tr key={`${l.from_name}->${l.to_name}`} className="border-b hairline hover:bg-bg-2">
+                <tr key={`${l.from_name}->${l.to_name}`}
+                  onClick={onInspect ? () => onInspect(l) : undefined}
+                  title={onInspect ? "show the objects this move produced" : undefined}
+                  className={`border-b hairline ${onInspect ? "cursor-pointer" : ""} ${
+                    inspecting === `${l.from_name}->${l.to_name}` ? "bg-accent/10" : "hover:bg-bg-2"}`}>
                   <td className="px-3 py-2 font-mono">
                     <span className={l.outstanding ? "text-ink-2" : "text-pass"}>
                       {l.outstanding.toLocaleString()}
@@ -138,14 +156,14 @@ export default function ContaminationPanel() {
                   <td className="px-3 py-2 text-ink-3 text-xs">{l.reason ?? "-"}</td>
                   <td className="px-3 py-2 text-right font-mono text-[10px] whitespace-nowrap">
                     {l.examples[0] && (
-                      <button onClick={() => open(l)}
+                      <button onClick={(e) => { e.stopPropagation(); open(l); }}
                         title="open an example, where one correction can be applied to the rest"
                         className="border border-line px-1.5 py-0.5 rounded text-ink-3 hover:border-accent">
                         open
                       </button>
                     )}
                     {l.refused_now && l.outstanding > 0 && (
-                      <button onClick={() => revert(l)} disabled={busy !== null}
+                      <button onClick={(e) => { e.stopPropagation(); revert(l); }} disabled={busy !== null}
                         title={`put the remaining ${l.outstanding} back to ${l.from_name} and route them to review`}
                         className="ml-1 border border-line px-1.5 py-0.5 rounded text-ink-3 hover:border-block hover:text-block disabled:opacity-40">
                         {busy === `${l.from_name}->${l.to_name}` ? "..." : "revert"}

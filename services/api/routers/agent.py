@@ -885,7 +885,33 @@ async def contamination(min_count: int = 25, refused_only: bool = False,
     from services.agent.contamination import agent_relabel_lineages, summarize
 
     rows = await agent_relabel_lineages(db, min_count=min_count, refused_only=refused_only)
-    return {"summary": summarize(rows), "lineages": rows}
+    # `summary` is the corpus-wide total and `shown` describes the filtered view. Previously one number
+    # served both: summarize() ran on the already-filtered list, so with refused_only set the header read
+    # "N moved in all" while describing the refused subset. The words "in all" were false exactly when the
+    # filter was on, which is the state the panel opens in.
+    everything = rows if not refused_only else await agent_relabel_lineages(db, min_count=min_count)
+    return {"summary": summarize(everything), "shown": summarize(rows),
+            "filtered": refused_only, "lineages": rows}
+
+
+@router.get("/agent/contamination/objects", dependencies=[Depends(require_role("annotator"))])
+async def contamination_objects(from_name: str, to_name: str, limit: int = 60, offset: int = 0,
+                                db: AsyncSession = Depends(db_session)):
+    """The objects one class move actually produced, so a lineage can be looked at rather than counted.
+
+    The grouped view carries eight examples per lineage, capped where the aggregate is built. A move that
+    touched a thousand objects could therefore be inspected eight deep, which is enough to know it exists
+    and not enough to judge it - and the only other action available is reverting the whole thousand.
+
+    Uses the same predicate as the revert, deliberately: a list showing a different set from the one the
+    revert would touch is worse than no list, because it invites somebody to check these and change those.
+    """
+    from services.agent.contamination import lineage_objects
+
+    res = await lineage_objects(db, from_name, to_name, limit=limit, offset=offset)
+    if "error" in res:
+        raise HTTPException(404, res["error"])
+    return res
 
 
 class LineageRevertIn(BaseModel):

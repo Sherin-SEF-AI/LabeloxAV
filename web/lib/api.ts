@@ -652,6 +652,16 @@ export const api = {
     post<{ understood: string; count: number; frames: { frame_id: string; session_id: string }[] }>(`/api/agent/ask`, { text }),
   // Class moves a past relabel run made, grouped by the mistake rather than by the object. `refused_now`
   // marks the lineages the ontology guard would reject today.
+  // The objects one class move produced. The grouped view carries eight examples per lineage, which is
+  // enough to know a lineage exists and not enough to judge one whose only other action is reverting a
+  // thousand labels.
+  agentLineageObjects: (from_name: string, to_name: string, limit = 60, offset = 0) =>
+    get<{
+      from_name: string; to_name: string; from_class_id: number; to_class_id: number;
+      reason: string | null; total: number; offset: number; limit: number;
+      objects: { object_id: string; frame_id: string; class_id: number; conf: number; state: string }[];
+    }>(`/api/agent/contamination/objects?` + new URLSearchParams({
+      from_name, to_name, limit: String(limit), offset: String(offset) }).toString()),
   agentContamination: (minCount = 25, refusedOnly = false) =>
     get<{
       summary: {
@@ -659,6 +669,13 @@ export const api = {
         // What is still wrong, as opposed to what once happened. This is the number that can reach zero.
         outstanding: number; refused_outstanding: number;
       };
+      // The same shape over the filtered view. `summary` is corpus-wide; previously one number served
+      // both, so with the refused-only filter on the header said "N moved in all" about the subset.
+      shown?: {
+        lineages: number; objects: number; refused_lineages: number; refused_objects: number;
+        outstanding: number; refused_outstanding: number;
+      };
+      filtered?: boolean;
       lineages: {
         from_name: string; to_name: string; count: number; outstanding: number;
         refused_now: boolean; reason: string | null;

@@ -276,3 +276,89 @@ class TestTheBoardCanReachZero:
             s = summarize(rows)
         assert "outstanding" in s and "refused_outstanding" in s
         assert s["outstanding"] <= s["objects"]
+
+
+# ---- listing what a lineage actually did ----------------------------------------------------------
+#
+# The grouped view caps its examples at eight where the aggregate is built, so a move that touched
+# thousands of objects could be inspected eight deep. On this corpus `sedan -> mpv` has 8,364 outstanding.
+# Eight is enough to know a lineage exists and not enough to judge one whose only other action reverts
+# every object in it.
+
+
+class TestLineageObjects:
+    async def test_it_lists_past_the_eight_the_grouped_view_carries(self):
+        from services.agent.contamination import lineage_objects
+
+        async with get_sessionmaker()() as db:
+            await _stamped(db, [("bus", "bmtc_bus_shelter", 25)])
+            row = _find(await agent_relabel_lineages(db, min_count=5), "bus", "bmtc_bus_shelter")
+            assert len(row["examples"]) == 8, "the grouped view is still capped, which is why this exists"
+
+            out = await lineage_objects(db, "bus", "bmtc_bus_shelter", limit=60)
+            assert out["total"] == 25
+            assert len(out["objects"]) == 25
+            assert out["reason"], "a refused move must still say why it was refused"
+
+    async def test_it_pages_rather_than_returning_a_corpus(self):
+        # Its own class pair: the suite truncates once per session (conftest says why), so two tests
+        # stamping the same lineage would count each other's objects.
+        from services.agent.contamination import lineage_objects
+
+        async with get_sessionmaker()() as db:
+            await _stamped(db, [("traffic_sign", "bmtc_bus_shelter", 30)])
+            first = await lineage_objects(db, "traffic_sign", "bmtc_bus_shelter", limit=10)
+            second = await lineage_objects(db, "traffic_sign", "bmtc_bus_shelter", limit=10, offset=10)
+            assert first["total"] == second["total"] == 30
+            assert len(first["objects"]) == len(second["objects"]) == 10
+            # Ordered by object_id, so paging cannot show the same row twice or skip one.
+            assert {o["object_id"] for o in first["objects"]}.isdisjoint(
+                {o["object_id"] for o in second["objects"]})
+
+    async def test_it_shows_exactly_what_the_revert_would_touch(self):
+        """A list that disagreed with the revert would invite somebody to check these and change those.
+
+        Both go through the same predicate, so this pins that they stay together: an object corrected
+        since the move, and one a human has ruled on, are excluded from both.
+        """
+        from services.agent.contamination import lineage_objects, revert_lineage
+
+        async with get_sessionmaker()() as db:
+            await _stamped(db, [("hoarding", "bmtc_bus_shelter", 12)])
+            # One already corrected, one ruled on by a person. Neither is the move's doing any more.
+            rows = (await db.execute(select(Object).where(
+                Object.provenance["agent_relabel"].astext.like(
+                    '%hoarding -> bmtc_bus_shelter%')))).scalars().all()
+            rows[0].class_id = _onto().by_name("hoarding").id
+            rows[1].source = "human"
+            await db.commit()
+
+            listed = await lineage_objects(db, "hoarding", "bmtc_bus_shelter", limit=60)
+            assert listed["total"] == 10
+
+            reverted = await revert_lineage(db, "hoarding", "bmtc_bus_shelter")
+            assert reverted["reverted"] == listed["total"]
+
+    async def test_a_class_the_ontology_does_not_know_is_an_error_not_a_crash(self):
+        from services.agent.contamination import lineage_objects
+
+        async with get_sessionmaker()() as db:
+            out = await lineage_objects(db, "bus", "not_a_real_class_anywhere")
+            assert "error" in out
+
+
+class TestTheSummaryDescribesWhatItClaimsTo:
+    async def test_filtering_the_view_does_not_change_what_in_all_means(self):
+        """The header read "N moved in all" from a summary computed on the filtered list.
+
+        With the refused-only box ticked - which is how the panel opens - it described the subset while
+        saying "in all". On the real corpus that was 3,057 objects across 17 lineages standing in for
+        48,665 across 107.
+        """
+        async with get_sessionmaker()() as db:
+            await _stamped(db, [("pole", "flyover_pillar", 20),   # refused: thing -> stuff
+                                ("sedan", "hatchback", 20)])      # a refinement, not refused
+            everything = summarize(await agent_relabel_lineages(db, min_count=5))
+            refused = summarize(await agent_relabel_lineages(db, min_count=5, refused_only=True))
+            assert everything["lineages"] > refused["lineages"]
+            assert everything["objects"] > refused["objects"]

@@ -163,6 +163,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/agent/contamination",
                           params={"min_count": min_count, "refused_only": refused_only}, json_body=None)
 
+    def get_agent_contamination_objects(self, from_name: str, to_name: str, limit: int | None = 60, offset: int | None = 0) -> Any:
+        """Contamination Objects"""
+        return self._call("GET", f"/api/agent/contamination/objects",
+                          params={"from_name": from_name, "to_name": to_name, "limit": limit, "offset": offset}, json_body=None)
+
     def post_agent_contamination_revert(self, body: Any = None) -> Any:
         """Contamination Revert"""
         return self._call("POST", f"/api/agent/contamination/revert",
@@ -3471,4 +3476,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 677 routes generated from the server schema.
+# 678 routes generated from the server schema.

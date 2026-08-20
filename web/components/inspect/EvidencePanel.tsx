@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { api, humanizeError } from "@/lib/api";
-import type { ObjectDetail } from "@/lib/types";
+import type { FrameObject, ObjectDetail } from "@/lib/types";
 import LoadState from "@/components/shell/LoadState";
 import { toast, toastError, toastSuccess } from "@/lib/toast";
 
@@ -72,6 +72,11 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [cropFailed, setCropFailed] = useState(false);
   const [frameFailed, setFrameFailed] = useState(false);
+  // Every other box on the frame, drawn dim behind the subject. The largest kind in this queue claims
+  // "another box on this frame covers the same object with higher confidence", and that claim is not
+  // checkable against one box: the reader has to see the other one. Best-effort, because a frame whose
+  // siblings fail to load is still worth showing on its own.
+  const [siblings, setSiblings] = useState<FrameObject[]>([]);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<number[] | null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
@@ -88,8 +93,15 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
     if (!objectId) return;
     let live = true;
     setLoading(true);
+    setSiblings([]);
     api.object(objectId)
-      .then((o) => { if (live) setObj(o); })
+      .then((o) => {
+        if (!live) return;
+        setObj(o);
+        api.frameObjects(o.frame_id)
+          .then((all) => live && setSiblings(all.filter((x) => x.object_id !== o.object_id)))
+          .catch(() => undefined);
+      })
       .catch((e) => { if (live) setErr(e); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
@@ -230,7 +242,9 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
             </div>
           </Tile>
 
-          <Tile label={editing ? "drag on the frame to redraw the box" : "in its frame"}>
+          <Tile label={editing ? "drag on the frame to redraw the box"
+            : siblings.length ? `in its frame (${siblings.length} other box${siblings.length === 1 ? "" : "es"} shown dim)`
+              : "in its frame"}>
             <div className="relative w-full bg-bg-2 border hairline">
               {frameFailed ? (
                 <div className="h-40 grid place-items-center font-mono text-[10px] text-ink-3">
@@ -259,6 +273,13 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
                     }}
                     onPointerUp={() => { drag.current = null; }}
                     className={`absolute inset-0 h-full w-full ${editing ? "cursor-crosshair" : "pointer-events-none"}`}>
+                    {/* Siblings first so the subject draws over them. */}
+                    {siblings.map((sv) => (
+                      <rect key={sv.object_id} x={sv.bbox[0]} y={sv.bbox[1]}
+                        width={Math.max(0, sv.bbox[2] - sv.bbox[0])} height={Math.max(0, sv.bbox[3] - sv.bbox[1])}
+                        fill="none" stroke="#8a8a8a"
+                        strokeWidth={Math.max(obj.width, obj.height) / 500} opacity={0.55} />
+                    ))}
                     {box && (
                       <rect x={box[0]} y={box[1]} width={Math.max(0, box[2] - box[0])} height={Math.max(0, box[3] - box[1])}
                         fill="none" stroke={editing ? "#5b86c7" : "#e0a63f"}
