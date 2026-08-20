@@ -35,15 +35,21 @@ export default defineConfig({
       // logic floor plus a handful of render tests produces a number nobody can act on, and a threshold
       // set against it would either be 3% (meaningless) or permanently red (ignored).
       include: ["lib/**/*.ts", "components/shell/LoadState.tsx", "components/Toaster.tsx",
-                "components/editor/useEditor.ts"],
+                "components/editor/useEditor.ts", "components/editor/properties/**/*.{ts,tsx}"],
       exclude: ["**/*.test.ts", "**/*.test.tsx", "lib/types.ts", "lib/analytics-api.ts"],
       // A ratchet, not an aspiration: set just under what the suite achieves today so it fails when
       // coverage drops rather than sitting red until somebody turns it off. Raise it as tests land.
-      // Measured 2026-08-18: 60.2% lines/statements, 88.0% branches, 23.8% functions. Functions is much
-      // lower than lines because lib/api.ts is ~300 thin request wrappers that no unit test calls; the
-      // logic in that file that matters (humanizeError, the 401 path, token refresh) is covered. Set just
-      // under each measured value so a drop fails rather than a gap sitting red until somebody removes it.
-      thresholds: { lines: 55, functions: 20, statements: 55, branches: 80 },
+      // Measured 2026-08-20, after the properties panel came out of app/frame/[id]/page.tsx with tests:
+      // 66.58% lines/statements, 87.19% branches, 29.81% functions. Functions is much lower than lines
+      // because lib/api.ts is ~300 thin request wrappers that no unit test calls; the logic in that file
+      // that matters (humanizeError, the 401 path, token refresh) is covered. Set just under each measured
+      // value so a drop fails rather than a gap sitting red until somebody removes it.
+      //
+      // Branches went DOWN, 88.0 to 87.19, while the other three rose several points. That is the panel's
+      // conditional rendering: the selected-object band, the LiDAR section and the empty states are
+      // branches, and the suite exercises most but not all of them. Recorded rather than smoothed over,
+      // because a ratchet whose history is edited is not evidence of anything.
+      thresholds: { lines: 65, functions: 28, statements: 65, branches: 85 },
     },
   },
 });
