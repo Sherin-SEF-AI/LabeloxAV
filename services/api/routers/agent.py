@@ -773,7 +773,16 @@ async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
 
 # Kinds with a relauncher that honours their cursor. A kind absent here can still be re-run from the start;
 # what it cannot do is continue, and the resume route refuses rather than pretending.
-_RESUMABLE_KINDS = frozenset({"error_sweep", "relabel_all"})
+#
+# `reanalyze_all` was missing from this set while its runner had implemented resume all along
+# (services/agent/reanalyze.py rebuilds the done set from the prior cursor and skips those frames). A real
+# run got 152 frames into a 500-frame sweep, recorded 1,672 findings, added 15 faces and 118 plates, and
+# was then told by this route that its kind "has no resume path yet". The refusal was a statement about
+# this table rather than about the runner, and it cost the operator every frame of that work.
+#
+# tests/test_job_resume.py checks the set against the runners rather than against itself: a kind here whose
+# runner never reads a cursor would restart from zero under a button labelled "resume".
+_RESUMABLE_KINDS = frozenset({"error_sweep", "relabel_all", "reanalyze_all"})
 
 
 @router.get("/agent/runs/interrupted", dependencies=[Depends(require_role("annotator"))])
@@ -796,7 +805,7 @@ async def resume_run(run_id: str, db: AsyncSession = Depends(db_session)):
     resumable rather than being restarted under a name that implies they will not repeat themselves.
     """
     from services.agent.error_daemon import run_error_sweep
-    from services.agent.resume import claim_for_resume
+    from services.agent.resume import claim_for_resume, release_claim
 
     try:
         rid = uuid.UUID(run_id)
@@ -822,15 +831,29 @@ async def resume_run(run_id: str, db: AsyncSession = Depends(db_session)):
         # which is a fact about the world the caller should be told rather than a mistake they made.
         raise HTTPException(409, claimed["error"])
 
+    # Explicit per kind, with no `else` fallthrough. The previous shape defaulted anything that was not an
+    # error_sweep to the relabel relauncher, so adding a kind to the set above without a branch here would
+    # have launched the wrong job against its cursor: a reanalyze run continued as a relabel sweep, writing
+    # labels under a run whose scope and counts describe a redaction pass, with nothing raising.
     scope = claimed.get("scope") or {}
     if run.kind == "error_sweep":
         spawn(run_error_sweep(
             rid, max_sessions=int(scope.get("max_sessions") or 10), kinds=scope.get("kinds")), name="run_error_sweep")
-    else:
+    elif run.kind == "relabel_all":
         from services.agent.relabel_agent import run_relabel_all
 
         spawn(run_relabel_all(
             rid, max_frames=int(scope.get("max_frames") or 200), session_id=scope.get("session_id")), name="run_relabel_all")
+    elif run.kind == "reanalyze_all":
+        from services.agent.reanalyze import run_reanalyze_all
+
+        spawn(run_reanalyze_all(
+            rid, max_frames=int(scope.get("max_frames") or 500), session_id=scope.get("session_id")), name="run_reanalyze_all")
+    else:  # pragma: no cover - unreachable while the set and this dispatch agree, which a test enforces
+        # The run has already been claimed and flipped to running at this point, so leaving it here would
+        # strand it exactly as an interrupted process does. Put it back before refusing.
+        await release_claim(db, rid, "no relauncher is wired for this kind")
+        raise HTTPException(500, f"{run.kind} is marked resumable but has no relauncher wired")
     return {**claimed, "restarted": True}
 
 

@@ -187,3 +187,100 @@ def test_done_set_tolerates_a_cursor_of_the_wrong_shape():
 
 def test_done_set_normalises_to_strings():
     assert done_set({"done": [uuid.UUID(int=1)]}) == {str(uuid.UUID(int=1))}
+
+
+# ---- the route's allowlist, and the dispatch that must not drift from it -------------------------------
+#
+# A real run in the corpus (71cad603, kind reanalyze_all) got 152 frames into a 500-frame sweep, recorded
+# 1,672 findings, added 15 faces and 118 plates, then had its process stop. Pressing resume returned 409
+# saying the kind "has no resume path yet". It has one: services/agent/reanalyze.py::run_reanalyze_all
+# reads the prior cursor, rebuilds the done set and skips the finished frames, exactly as the two
+# allowlisted kinds do. The claim in the refusal was about the route's own table, not about the runner.
+
+
+def test_every_resumable_kind_has_a_runner_that_honours_a_cursor():
+    """The allowlist is a claim about the runners, so it is checked against them.
+
+    A kind in the set whose runner ignores the cursor would restart from zero under a button labelled
+    "resume", silently redoing work the run had already committed.
+    """
+    import inspect
+
+    from services.api.routers.agent import _RESUMABLE_KINDS
+
+    runners = {
+        "error_sweep": "services.agent.error_daemon.run_error_sweep",
+        "relabel_all": "services.agent.relabel_agent.run_relabel_all",
+        "reanalyze_all": "services.agent.reanalyze.run_reanalyze_all",
+    }
+    for kind in _RESUMABLE_KINDS:
+        assert kind in runners, f"{kind} is allowlisted but this test does not know its runner"
+        mod_path, fn_name = runners[kind].rsplit(".", 1)
+        mod = __import__(mod_path, fromlist=[fn_name])
+        src = inspect.getsource(getattr(mod, fn_name))
+        assert "done_set" in src, f"{kind} is allowlisted but its runner never reads a cursor"
+
+
+def test_a_kind_whose_runner_can_resume_is_not_refused_by_the_route():
+    """reanalyze_all records a cursor and its runner consumes it, so the route must not refuse it.
+
+    This is the bug the console surfaced: the 409 named a cause the route had never checked against the
+    runner, and 152 frames of committed work were reported as uncontinuable.
+    """
+    from services.api.routers.agent import _RESUMABLE_KINDS
+
+    assert "reanalyze_all" in _RESUMABLE_KINDS
+
+
+def test_the_dispatch_covers_every_allowlisted_kind_explicitly():
+    """No `else` fallthrough: adding a kind without a branch would launch the wrong relauncher.
+
+    That failure is silent and expensive. A reanalyze run resumed as a relabel sweep would write labels
+    under a run whose scope and counts describe a redaction pass, and nothing would raise.
+    """
+    import inspect
+
+    from services.api.routers import agent as agent_routes
+
+    src = inspect.getsource(agent_routes.resume_run)
+    for kind in agent_routes._RESUMABLE_KINDS:
+        assert f'"{kind}"' in src, f"{kind} is allowlisted but resume_run never dispatches on it"
+    assert "unreachable" in src or "no relauncher" in src, (
+        "resume_run should refuse an unhandled kind loudly rather than falling through to a default")
+
+
+async def test_releasing_a_claim_puts_the_run_back_rather_than_stranding_it():
+    """A caller that claims and then cannot launch must undo the claim.
+
+    `claim_for_resume` flips the row to running before the job starts, so a caller that bails afterwards
+    leaves a row that looks like work in flight with no process behind it. That is precisely the state
+    this feature exists to clear, recreated by the code meant to clear it, and the reaper would not notice
+    it for hours.
+    """
+    from services.agent.resume import release_claim
+
+    async with get_sessionmaker()() as db:
+        rid = await _run(db, status=INTERRUPTED, progress={"done": ["a", "b"], "total": 10},
+                         counts={"frames": 2})
+        claimed = await claim_for_resume(db, rid)
+        assert claimed["resumed"] is True
+        assert (await db.get(AgentRun, rid)).status == "running"
+
+        assert await release_claim(db, rid, "no relauncher is wired for this kind") is True
+        run = await db.get(AgentRun, rid)
+        assert run.status == INTERRUPTED
+        assert "no relauncher" in run.error
+        # The cursor and counts survive, so it is still resumable once the reason is fixed.
+        assert done_set(run.progress) == {"a", "b"}
+        assert run.counts["frames"] == 2
+
+
+async def test_releasing_a_run_that_is_not_running_changes_nothing():
+    """Idempotent, and it must not drag a committed run backwards into interrupted."""
+    from services.agent.resume import release_claim
+
+    async with get_sessionmaker()() as db:
+        rid = await _run(db, status="committed")
+        assert await release_claim(db, rid, "whatever") is False
+        assert (await db.get(AgentRun, rid)).status == "committed"
+        assert await release_claim(db, uuid.uuid4(), "unknown run") is False
