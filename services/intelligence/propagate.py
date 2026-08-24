@@ -25,7 +25,7 @@ from sqlalchemy import select
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
 from core.storage import get_object_store
-from db.models import Frame, Object, Track
+from db.models import AgentRun, Frame, Object, Track
 from db.session import get_sessionmaker
 
 log = get_logger("propagate")
@@ -119,8 +119,21 @@ async def propagate_forward(object_id: UUID, n_frames: int = 12) -> dict:
     return {"created": len(created), "track_id": str(track_id), "object_ids": created}
 
 
-async def interpolate_track(track_id: UUID) -> dict:
-    """Fill gaps between a track's keyframes with linearly-interpolated boxes (never drifts)."""
+async def interpolate_track(track_id: UUID, *, run_id: UUID | None = None,
+                            max_gap: int | None = None) -> dict:
+    """Fill gaps between a track's keyframes with linearly-interpolated boxes (never drifts).
+
+    `max_gap` refuses a hole longer than N frames rather than drawing a straight line through it. A short
+    gap is the tracker losing a box to an occlusion and the object is very nearly where the line says; a
+    long one means it genuinely left, or the tracker joined two different objects, and a linear box then
+    walks through whatever the object actually did. Skipped holes are counted and returned, not hidden.
+
+    `run_id` makes the fill revertible. Objects created this way carry the run id in provenance and are
+    recorded in the run's `changes` as `created`, which is the shape services/agent/runs.py revert_run
+    already deletes and already checks ownership for, so undo needs no new code. Without it this function
+    creates objects with no record at all, which is fine for one track behind a button and is not something
+    to run across nine thousand of them.
+    """
     maker = get_sessionmaker()
     async with maker() as db:
         tr = await db.get(Track, track_id)
@@ -151,30 +164,58 @@ async def interpolate_track(track_id: UUID) -> dict:
             )
         ).scalars().all() if len(keys) >= 2 else []
 
-        created = 0
+        # Grouped by the pair of keyframes that brackets them, which is what makes a hole a hole: every
+        # frame in one group is spanned by the same straight line, so the group's size is the length of
+        # the gap and the whole group stands or falls together.
+        holes: dict[tuple[int, int], list] = {}
         for f in gap_frames:
             if f.ts_ns in have_ts:
                 continue
-            # bracketing keyframes
             lo = max((k for k in keys if k[0] <= f.ts_ns), key=lambda k: k[0])
             hi = min((k for k in keys if k[0] >= f.ts_ns), key=lambda k: k[0])
             if hi[0] == lo[0]:
                 continue
-            a = (f.ts_ns - lo[0]) / (hi[0] - lo[0])
-            box = [lo[1][i] + a * (hi[1][i] - lo[1][i]) for i in range(4)]
-            # `source="interp"` is not in ck_object_source (fused, auto_accept, human, imported, relabel,
-            # interpolated, propagated, recall, vlm_review), so every call to this raised a check violation
-            # and the "interpolate gaps" button on the track page has never worked: zero objects in the
-            # corpus carry it. The class comes from the bracketing keyframes rather than from tr.class_id
-            # for the same reason services/temporal/interpolate.py reads its anchors, and because a stale
-            # track class would re-inject the pre-relabel label into every box this creates.
-            db.add(Object(frame_id=f.frame_id, track_id=track_id, class_id=gap_class,
-                          bbox=[float(v) for v in box], conf=0.5, source="interpolated", state="annotate",
-                          provenance={"method": "interpolate"}))
-            created += 1
+            holes.setdefault((lo[0], hi[0]), []).append(f)
+
+        created = 0
+        skipped_long = 0
+        made: list[Object] = []
+        for (lo_ts, hi_ts), frames_in_hole in holes.items():
+            if max_gap is not None and len(frames_in_hole) > max_gap:
+                skipped_long += len(frames_in_hole)
+                continue
+            lo = next(k for k in keys if k[0] == lo_ts)
+            hi = next(k for k in keys if k[0] == hi_ts)
+            for f in frames_in_hole:
+                a = (f.ts_ns - lo[0]) / (hi[0] - lo[0])
+                box = [lo[1][i] + a * (hi[1][i] - lo[1][i]) for i in range(4)]
+                # `source="interp"` is not in ck_object_source (fused, auto_accept, human, imported,
+                # relabel, interpolated, propagated, recall, vlm_review), so every call to this raised a
+                # check violation and the "interpolate gaps" button on the track page has never worked:
+                # zero objects in the corpus carry it. The class comes from the objects on the track
+                # rather than from tr.class_id, because a stale track class would re-inject the
+                # pre-relabel label into every box this creates.
+                prov: dict = {"method": "interpolate"}
+                if run_id is not None:
+                    prov["agent_run_id"] = str(run_id)
+                obj = Object(frame_id=f.frame_id, track_id=track_id, class_id=gap_class,
+                             bbox=[float(v) for v in box], conf=0.5, source="interpolated",
+                             state="annotate", provenance=prov)
+                db.add(obj)
+                made.append(obj)
+                created += 1
+
+        if run_id is not None and made:
+            # Flushed first so every object has an id to record. The run is updated in the SAME
+            # transaction, so there is never a window where boxes exist and nothing owns them.
+            await db.flush()
+            run = await db.get(AgentRun, run_id)
+            if run is not None:
+                run.changes = {**(run.changes or {}),
+                               **{str(o.object_id): {"created": True} for o in made}}
         await db.commit()
-    log.info("interpolate.done", created=created, track_id=str(track_id))
-    return {"created": created, "track_id": str(track_id)}
+    log.info("interpolate.done", created=created, skipped_long=skipped_long, track_id=str(track_id))
+    return {"created": created, "skipped_long_gaps": skipped_long, "track_id": str(track_id)}
 
 
 @click.command()

@@ -139,3 +139,23 @@ async def track_relabel_backfill(max_tracks: int = 5000, db: AsyncSession = Depe
     res = await start_backfill(db, created_by=str(user.user_id) if user else None)
     spawn(run_backfill(UUID(res["run_id"]), max_tracks=max_tracks), name="track_relabel_backfill")
     return res
+
+
+# Filling the frames where a tracked object blinks out and comes back. 9,460 of 11,287 tracks have gaps,
+# 137,960 frames, in holes that average under two frames. Admin, because it creates objects corpus-wide.
+@router.get("/quality/track-gap-fill/plan", dependencies=[Depends(require_role("admin"))])
+async def track_gap_plan(db: AsyncSession = Depends(db_session)):
+    from services.quality.track_gap_backfill import plan_gap_fill
+
+    return await plan_gap_fill(db)
+
+
+@router.post("/quality/track-gap-fill", dependencies=[Depends(require_role("admin"))])
+async def track_gap_fill(max_tracks: int = 20_000, db: AsyncSession = Depends(db_session),
+                         user=Depends(current_user)):
+    from core.observability import spawn
+    from services.quality.track_gap_backfill import run_gap_fill, start_gap_fill
+
+    res = await start_gap_fill(db, created_by=str(user.user_id) if user else None)
+    spawn(run_gap_fill(UUID(res["run_id"]), max_tracks=max_tracks), name="track_gap_fill")
+    return res
