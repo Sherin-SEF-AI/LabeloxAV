@@ -259,3 +259,74 @@ async def _cleanup(db, tid, run_id):
     if run is not None:
         await db.delete(run)
     await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_every_tracks_prior_class_is_recorded_not_just_the_last():
+    """Two tracks, because one track cannot catch this.
+
+    `policy` is JSONB. `dict(run.policy)` copies the outer mapping and leaves `track_class_from` as the
+    same object, so setdefault mutates it in place, the reassigned value compares equal to the stored one,
+    and SQLAlchemy writes nothing. Measured on the first live run: 1 of 300 prior track classes recorded,
+    which would have made the revert restore almost no track at all.
+    """
+    from db.models import AgentRun, Track
+    from db.session import get_sessionmaker
+    from services.autolabel.ontology import get_ontology
+    from services.quality.track_relabel_backfill import run_backfill, start_backfill
+    from services.review_batch import revert_batch
+
+    onto = get_ontology()
+    before = onto.by_name("sedan").id
+    async with get_sessionmaker()() as db:
+        t1, _ = await _seed(db, onto, human_classes=["minivan"], n=3)
+        t2, _ = await _seed(db, onto, human_classes=["minivan"], n=3)
+        res = await start_backfill(db, created_by="test")
+        await db.commit()
+    run_id = uuid.UUID(res["run_id"])
+
+    try:
+        await run_backfill(run_id)
+        async with get_sessionmaker()() as db:
+            run = await db.get(AgentRun, run_id)
+            recorded = (run.policy or {}).get("track_class_from") or {}
+            assert str(t1) in recorded and str(t2) in recorded, \
+                f"both tracks must be recorded, got {sorted(recorded)}"
+            await revert_batch(db, run)
+            for tid in (t1, t2):
+                track = await db.get(Track, tid)
+                assert track.class_id == before, f"track {tid} kept the reverted class"
+    finally:
+        async with get_sessionmaker()() as db:
+            await _cleanup(db, t1, run_id)
+        async with get_sessionmaker()() as db:
+            await _cleanup(db, t2, run_id)
+
+
+@pytest.mark.asyncio
+async def test_a_track_whose_objects_were_all_refused_keeps_its_own_class():
+    """Moving the track alone leaves it claiming a class none of its objects carry, which is the drift this
+    sweep exists to reduce. Measured on the first live run: 104 tracks moved with zero object writes, and
+    the drift count went up rather than down."""
+    from db.models import Track
+    from db.session import get_sessionmaker
+    from services.autolabel.ontology import get_ontology
+    from services.quality.track_relabel_backfill import run_backfill, start_backfill
+
+    onto = get_ontology()
+    # sedan is an object, road is stuff: every move on this track is refused by the ontology guard.
+    start = onto.by_name("sedan").id
+    async with get_sessionmaker()() as db:
+        tid, _ = await _seed(db, onto, human_classes=["road"], n=3, start="sedan")
+        res = await start_backfill(db, created_by="test")
+        await db.commit()
+    run_id = uuid.UUID(res["run_id"])
+
+    try:
+        await run_backfill(run_id)
+        async with get_sessionmaker()() as db:
+            track = await db.get(Track, tid)
+            assert track.class_id == start, "the track moved while none of its objects did"
+    finally:
+        async with get_sessionmaker()() as db:
+            await _cleanup(db, tid, run_id)

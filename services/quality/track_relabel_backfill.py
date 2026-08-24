@@ -22,6 +22,7 @@ a split, not a relabel that would make one of them permanently wrong.
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 
@@ -195,21 +196,28 @@ async def run_backfill(run_id: uuid.UUID, *, max_tracks: int = 5000) -> None:
                                       ts_ns=int(datetime.now(UTC).timestamp() * 1_000_000_000)))
 
                     track = await db.get(Track, uuid.UUID(tid))
-                    track_from = int(track.class_id) if track is not None else None
-                    if track is not None:
-                        track.class_id = cid
-
+                    run = await db.get(AgentRun, run_id)
                     # Merged into the one run in the SAME transaction that stamps the objects, so there is
                     # never a window where rows are changed and unowned. Reassigned rather than mutated:
-                    # `changes` is JSONB and SQLAlchemy will not flag an in-place mutation as dirty, which
-                    # would land tens of thousands of rows with no undo.
-                    run = await db.get(AgentRun, run_id)
+                    # these are JSONB and SQLAlchemy will not flag an in-place mutation as dirty, which
+                    # would land tens of thousands of rows with no undo. `policy` needs a deep copy for
+                    # the same reason and one level further down: dict(run.policy) copies the outer mapping
+                    # while `track_class_from` stays the same object, so setdefault mutates in place, the
+                    # reassigned value compares equal to the stored one and nothing is written. Measured
+                    # the first time this ran: 1 of 300 prior track classes recorded.
                     if run is not None and changes:
                         run.changes = {**(run.changes or {}), **changes}
-                        pol = dict(run.policy or {})
-                        pol.setdefault("track_class_from", {})[tid] = track_from
+                        pol = json.loads(json.dumps(run.policy or {}))
+                        pol.setdefault("track_class_from", {})[tid] = (
+                            int(track.class_id) if track is not None else None)
                         pol.setdefault("track_class_to", {})[tid] = cid
                         run.policy = pol
+                        # Only once something was actually written. A track whose every object the ontology
+                        # guard refused keeps its own class: moving it alone would leave the track claiming
+                        # a class none of its objects carry, which is the drift this sweep exists to
+                        # reduce, and with nothing recorded it would not come back on revert.
+                        if track is not None:
+                            track.class_id = cid
                     await db.commit()
 
                 totals["tracks"] += 1
