@@ -12,6 +12,7 @@ import { acceptState, getUser, setUser } from "@/lib/user";
 import { beginOp, endOp, resetOps, trackOp } from "@/lib/canvasOps";
 import { openConsole } from "@/components/console/ConsoleModal";
 import { simplifyMask, simplifyPolygon } from "@/lib/simplify";
+import { UNTRACKED_NOTE, propagationMessage, shouldPropagate } from "@/lib/trackPropagate";
 import CanvasConsole from "@/components/editor/CanvasConsole";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
 import { PERSON_17 } from "@/lib/skeleton";
@@ -38,6 +39,7 @@ import { MODES, type ToolGroup } from "@/lib/editor/registry";
 import type { SelectHow } from "@/components/editor/useEditor";
 import Filmstrip from "@/components/editor/Filmstrip";
 import HistoryPanel from "@/components/editor/HistoryPanel";
+import PropertiesPanel from "@/components/editor/properties/PropertiesPanel";
 import CursorReadout from "@/components/editor/CursorReadout";
 import { camLabel } from "@/lib/editor/camLabel";
 import { IS_DEMO_BUILD } from "@/lib/demoFlag";
@@ -114,20 +116,6 @@ const MODE_GROUPS: Record<string, ToolGroup[]> = {
 const MODE_TOOLS: Record<string, string[]> = Object.fromEntries(
   Object.entries(MODE_GROUPS).map(([m, gs]) => [m, gs.flatMap((g) => g.tools.map((t) => t.key))]));
 
-// Ways to pick a set that are not "drag a box round them". A dense frame holds forty vehicles and the
-// useful selections are almost never contiguous: every autorickshaw, everything the model was unsure
-// about, everything nobody has looked at yet.
-const SELECTIONS: { how: SelectHow; label: string; value?: string | number; hint: string; key?: string }[] = [
-  { how: "all", label: "all", hint: "every visible, unlocked object", key: "⌘A" },
-  { how: "none", label: "none", hint: "clear the selection", key: "Esc" },
-  { how: "invert", label: "invert", hint: "everything not currently selected", key: "⌘I" },
-  { how: "sameClass", label: "same class", hint: "everything of the selected object's class", key: "⌘⇧A" },
-  { how: "unreviewed", label: "unreviewed", hint: "still in review: the queue you are working" },
-  { how: "new", label: "new", hint: "drawn here and not yet saved" },
-  { how: "lowConf", label: "conf < 0.5", value: 0.5, hint: "the model was unsure about these" },
-  { how: "state", label: "rejected", value: "rejected", hint: "already rejected" },
-];
-
 // The three surface classes the ternary drivable mask carries. Fallback is the unpaved shoulder India
 // actually drives on, which is why it is a first-class surface rather than a kind of non-drivable.
 const SURFACE_CLASSES = [
@@ -136,8 +124,6 @@ const SURFACE_CLASSES = [
   { key: "non_drivable", label: "non-drv", tone: "border-block text-block" },
 ];
 
-// directed object-relationship kinds offered in the editor (rider_of is the India two-wheeler case)
-const RELATION_KINDS = ["rider_of", "towed_by", "part_of", "member_of", "occludes"];
 
 // ray-casting point-in-polygon for a flattened [x,y,x,y,...] polygon, used to pick a clicked superpixel
 function pointInPoly(pt: number[], poly: number[]): boolean {
@@ -201,7 +187,6 @@ export default function FrameEditor() {
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [autosave, setAutosave] = useState(true);
-  const [search, setSearch] = useState("");
   const loadedRef = useRef(false);
   // inline class-edit popup anchored on the clicked box (quick relabel of a wrong annotation)
   const [editOpen, setEditOpen] = useState(false);
@@ -246,8 +231,6 @@ export default function FrameEditor() {
   // provenance of the machine-produced overlays (drivable/seg), so the layers panel can show who made each
   const [drivableMeta, setDrivableMeta] = useState<{ source: string; model?: string | null } | null>(null);
   const [segMeta, setSegMeta] = useState<{ source: string; model?: string | null } | null>(null);
-  const [objSearch, setObjSearch] = useState("");
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState("objects");
   // M-MC.1 rig view: a canvas view state (not a mode). rigGroup is the synchronized frame group this frame
   // belongs to; rigView toggles the multi-camera layout with the current camera focused.
@@ -255,13 +238,11 @@ export default function FrameEditor() {
   const [rigLayout, setRigLayout] = useState<import("@/components/editor/RigView").RigLayout>("focus");
   const [rigGroup, setRigGroup] = useState<{ groupId: string; cameras: string[]; frameIds: Record<string, string>; missingCams: string[]; confirmed: boolean } | null>(null);
   const [rigPanel, setRigPanel] = useState(false);   // M-MC.2 rig-identity panel visibility
-  const [explainOpen, setExplainOpen] = useState(false);  // M-F.0 "why this label" rationale
   const [rigCalibrated, setRigCalibrated] = useState<boolean | null>(null);  // M-MC.3 Tier 2 eligibility
   const [rigRefresh, setRigRefresh] = useState(0);   // bump to refetch the identity panel after a propagate
   const [rigTracks, setRigTracks] = useState(false);  // M-MC.4 rig-track timeline panel visibility
   const [scaleNoteOpen, setScaleNoteOpen] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
-  const [rightTab, setRightTab] = useState<"objects" | "tools">("objects");  // right panel: annotation vs AI tools
   // Responsive: on a narrow screen the properties panel collapses first (the design's degradation order),
   // giving the canvas and tool strip room. One-time on mount; the user can expand it manually after.
   useEffect(() => { if (typeof window !== "undefined" && window.innerWidth < 1100) setRightCollapsed(true); }, []);
@@ -819,7 +800,12 @@ export default function FrameEditor() {
       if (!selected) return;
       const old = selected.class_name;
       dispatch({ t: "update", id: selected.id, patch: { class_id: c.id, class_name: c.name } });
-      if (!selected.isNew && c.name !== old) recordCorrection(selected.id, "class", old, c.name);
+      // Remembered here and acted on in save(), not here: this runs on every keystroke through the class
+      // picker, and the 700ms autosave debounce is what collapses a burst of them into one decision.
+      if (!selected.isNew && c.name !== old) {
+        classChangedRef.current.set(selected.id, old);
+        recordCorrection(selected.id, "class", old, c.name);
+      }
     },
     [selected, dispatch, recordCorrection],
   );
@@ -833,7 +819,7 @@ export default function FrameEditor() {
         setOnto(o);
         const full = o.classes.find((c) => c.id === cls.id) || cls;
         relabelSelected(full as OntologyClass);
-        setEditOpen(false); setEditSearch(""); setSearch("");
+        setEditOpen(false); setEditSearch("");
         flash(cls.existed ? `class "${cls.name}" already existed, applied` : `added custom class "${cls.name}"`);
       } catch (e) {
         flash("could not add class: " + humanizeError(e));
@@ -909,12 +895,66 @@ export default function FrameEditor() {
   // isNew flags, creating the same object twice on the server. The idem_key is belt-and-suspenders: the
   // server de-dupes a create that still slips through (network retry, multi-tab).
   const savingRef = useRef(false);
+  // objectId -> the class it had before the edit, so save() can tell a real reclassification from a
+  // geometry drag. The save payload carries class_name on every dirty object, so the payload alone cannot
+  // answer that.
+  const classChangedRef = useRef<Map<string, string>>(new Map());
+  // The track a correction was just fanned across, so the similarity dialog can stop offering the frames
+  // that are already fixed.
+  const propagatedTrackRef = useRef<string | null>(null);
   // Signature of the pending (deleted + new/dirty) set that last failed to save. Autosave will not retry the
   // exact same set, so a persistent per-object error (a malformed object, a stale id) cannot become an
   // infinite 700ms retry storm; any real edit changes the signature and resumes autosave.
   const lastFailRef = useRef("");
   const pendingSig = () => JSON.stringify([st.deleted,
     st.objects.filter((o) => o.isNew || o.dirty).map((o) => `${o.id}:${o.version ?? 0}`)]);
+  // Carry a class correction across the rest of its track.
+  //
+  // Renaming an object used to fix the frame in front of you and nothing else. Measured: 413 tracks had an
+  // unambiguous human class and only 5,798 of the 44,097 objects on them carried it, because the median
+  // track is 93 frames and the median number of frames a person touches is one. The endpoint that fixes a
+  // whole track already existed and was reachable from a page linked by two ten-pixel links.
+  const propagateClassChanges = useCallback(async () => {
+    const pending = classChangedRef.current;
+    if (!pending.size) return;
+    const objs = stRef.current.objects;
+    for (const [oid, wasClass] of [...pending]) {
+      pending.delete(oid);
+      const o = objs.find((x) => x.id === oid);
+      if (!o) continue;
+      if (!shouldPropagate(o, wasClass, o.class_name)) {
+        // Silence is what the original complaint was, so an untracked object says why nothing travelled
+        // rather than looking identical to a working propagation.
+        if (!o.track_id && !o.isNew && !o.id.startsWith("tmp-")) toast(UNTRACKED_NOTE, "info");
+        continue;
+      }
+      try {
+        const r = await api.relabelTrack(o.track_id as string, o.class_name, { origin_object_id: o.id });
+        propagatedTrackRef.current = o.track_id as string;
+        if (!r.relabeled) continue;
+        const runId = r.run_id;
+        toast(propagationMessage(r), "success", 12000, runId ? {
+          label: "undo",
+          run: async () => {
+            try {
+              const u = await api.agentRevert(runId);
+              toast(`undone: ${u.reverted} restored`
+                    + (u.skipped ? `, ${u.skipped} left alone (edited since)` : ""), "info");
+              propagatedTrackRef.current = null;
+              await loadLayers();
+            } catch (e) {
+              toast(`could not undo: ${humanizeError(e)}`, "error");
+            }
+          },
+        } : undefined);
+      } catch (e) {
+        // The frame is already saved. A failure here loses the fan-out, not the edit, so it is reported
+        // as its own thing rather than as a failed save.
+        toast(`the class change did not reach the rest of the track: ${humanizeError(e)}`, "error");
+      }
+    }
+  }, [loadLayers]);
+
   const save = useCallback(async () => {
     if (!dirty || savingRef.current) return;
     savingRef.current = true;
@@ -963,6 +1003,10 @@ export default function FrameEditor() {
       flash("saved");
       setCuboids(await api.frameCuboids(id).catch(() => [])); // refresh projected cuboid wireframes
       endOp(opId, "ok", pending === 1 ? "1 object" : `${pending} objects`);
+      // The correction travels here, after the per-object save landed and returned a fresh version, so it
+      // cannot race the lock this editor is holding. Its own failure cannot fail the save, which has
+      // already committed.
+      await propagateClassChanges();
     } catch (e) {
       const msg = humanizeError(e);
       lastFailRef.current = pendingSig();         // do not auto-retry this exact set until something changes
@@ -972,7 +1016,7 @@ export default function FrameEditor() {
       savingRef.current = false;
       setSaving(false);
     }
-  }, [dirty, st.deleted, st.objects, id, meta, dispatch]);
+  }, [dirty, st.deleted, st.objects, id, meta, dispatch, propagateClassChanges]);
 
   // ---- autosave: persist edits ~700ms after the last change settles (covers move/resize/relabel/
   // attribute/mask/delete). The debounce waits out an active drag, so we never save mid-gesture. ----
@@ -1181,11 +1225,6 @@ export default function FrameEditor() {
     window.addEventListener("keyup", onUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onUp); };
   }, [st.selectedId, selected, onto, meta, dispatch, save, fit, zoomBy, acceptCandidate, gotoFrame, confirmFrame, relabelSelected, finishKeypoints, mode, alItems]);
-
-  const filteredClasses = useMemo(
-    () => (onto ? onto.classes.filter((c) => c.name.includes(search.toLowerCase().replace(/\s/g, "_"))) : []),
-    [onto, search],
-  );
 
   if (loadError && (!meta || !onto)) return (
     <div className="min-h-screen flex items-center justify-center">
@@ -1663,14 +1702,21 @@ export default function FrameEditor() {
           <aside className="w-[340px] shrink-0 border-l hairline flex flex-col min-h-0
                           max-lg:absolute max-lg:right-0 max-lg:top-0 max-lg:bottom-0 max-lg:z-30
                           max-lg:bg-panel max-lg:shadow-xl">
-          <div className="h-[38px] shrink-0 flex items-center gap-2 px-3 border-b hairline">
-            <span className="font-display font-semibold text-[12.5px] text-ink">
-              {selected ? selected.class_name : mode === "review" ? "Review" : mode === "lanes" ? "Lanes" : mode === "lidar3d" ? "Cuboids" : "Properties"}
-            </span>
-            <span className="font-mono text-[10px] text-ink-3">{mode === "lanes" ? `${lanes.length} lanes` : mode === "lidar3d" ? `${cub3d.length} cuboids` : `${st.objects.length} objects`}</span>
-            <button onClick={() => setRightCollapsed(true)} title="collapse panel"
-              className="ml-auto w-6 h-6 flex items-center justify-center rounded text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="chevR" size={14} /></button>
-          </div>
+          {/* Only the three modes that route the panel elsewhere. The object modes get their title, count
+              and collapse button from PropertiesPanel's own header, and rendering both put the word
+              "Properties" on screen twice, eight pixels apart. */}
+          {(mode === "lanes" || mode === "lidar3d" || mode === "review") && (
+            <div className="h-[38px] shrink-0 flex items-center gap-2 px-3 border-b hairline">
+              <span className="font-display font-semibold text-[12.5px] text-ink">
+                {mode === "review" ? "Review" : mode === "lanes" ? "Lanes" : "Cuboids"}
+              </span>
+              <span className="font-mono text-[10px] text-ink-3">
+                {mode === "lanes" ? `${lanes.length} lanes` : mode === "lidar3d" ? `${cub3d.length} cuboids` : `${st.objects.length} objects`}
+              </span>
+              <button onClick={() => setRightCollapsed(true)} title="collapse panel"
+                className="ml-auto w-6 h-6 flex items-center justify-center rounded text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="chevR" size={14} /></button>
+            </div>
+          )}
           {/* Lanes mode: the panel routes to lane content (list + selected lane props) instead of objects */}
           {mode === "lanes" && (
             <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 font-mono text-[11px]">
@@ -1884,316 +1930,33 @@ export default function FrameEditor() {
               )}
             </div>
           )}
-          {mode !== "lanes" && mode !== "lidar3d" && mode !== "review" && (<>
-          {/* right-panel tabs: the object-annotation workflow vs the AI/automation tools, so neither buries the
-              other in one long scroll */}
-          <div className="flex border-b hairline shrink-0 font-mono text-[10px] uppercase tracking-wide">
-            {(["objects", "tools"] as const).map((t) => (
-              <button key={t} onClick={() => setRightTab(t)}
-                className={`flex-1 py-2 ${rightTab === t ? "text-accent border-b-2 border-accent -mb-px" : "text-ink-3 hover:text-ink-2"}`}>{t}</button>
-            ))}
-          </div>
-
-          {/* class palette (objects tab) */}
-          {rightTab === "objects" && (
-          <div className="border-b hairline p-2">
-            <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">class for new / selected</div>
-            <div className="font-mono text-xs text-ink mb-1 flex items-center gap-1.5">
-              <span className="w-3 h-3 inline-block" style={{ background: currentClass ? classColor(currentClass.id) : "#333" }} />
-              {currentClass?.name ?? "-"}
-            </div>
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="search or add class..."
-              onKeyDown={(e) => { if (e.key === "Enter") { const n = normClass(search); const ex = filteredClasses.find((c) => c.name === n); if (ex) relabelSelected(ex); else if (n) addAndRelabel(search); } }}
-              className="w-full bg-panel border border-line px-2 py-1 font-mono text-[11px] text-ink mb-1" />
-            <div className="max-h-32 overflow-auto space-y-0.5">
-              {search.trim() && normClass(search) && !filteredClasses.some((c) => c.name === normClass(search)) && (
-                <button onClick={() => addAndRelabel(search)}
-                  className="w-full flex items-center gap-1.5 px-1 py-0.5 font-mono text-[11px] text-left text-accent hover:text-ink">
-                  <span className="shrink-0">+</span><span className="truncate">add &quot;{normClass(search)}&quot; as custom class</span>
-                </button>
-              )}
-              {filteredClasses.slice(0, 40).map((c, i) => (
-                <button key={c.id} onClick={() => relabelSelected(c)}
-                  className={`w-full flex items-center gap-1.5 px-1 py-0.5 font-mono text-[11px] text-left ${currentClass?.id === c.id ? "text-ink" : "text-ink-3"} hover:text-ink`}>
-                  <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(c.id) }} />
-                  <span className="truncate">{c.name}</span>
-                  {search === "" && i < 9 && <span className="ml-auto text-ink-3">{i + 1}</span>}
-                  {c.india && <span className="text-accent">*</span>}
-                </button>
-              ))}
-            </div>
-          </div>
-          )}
-
-          {/* scroll body: shows the objects-tab content or the tools-tab content depending on the active tab.
-              Keyed by tab so switching fades the new content in. */}
-          <div key={rightTab} className="flex-1 min-h-0 overflow-y-auto reveal">
-
-          {/* attributes of selected (objects tab) */}
-          {rightTab === "objects" && selected && (
-            <div className="border-b hairline p-2">
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-mono text-[10px] uppercase text-ink-3">attributes</span>
-                {selected.track_id && (
-                  <button onClick={() => router.push(`/track/${selected.track_id}`)}
-                    className="font-mono text-[10px] text-info hover:text-accent">view track &rarr;</button>
-                )}
-              </div>
-              {/* the selected object's identity at a glance: class, calibrated confidence, state */}
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(selected.class_id) }} />
-                <span className="font-mono text-[11px] text-ink truncate flex-1">{selected.class_name}</span>
-                {selected.quality_score != null && (
-                  <span title="M-F.1 label quality score (0-1): calibrated correctness, penalised for geometric/consistency defects"
-                    className={`font-mono text-[10px] px-1 rounded border ${selected.quality_score >= 0.4 ? "border-pass/50 text-pass" : selected.quality_score >= 0.25 ? "border-warn/50 text-warn" : "border-block/50 text-block"}`}>
-                    Q {selected.quality_score.toFixed(2)}
-                  </span>
-                )}
-                <ConfBar conf={selected.conf} />
-                <StateBadge state={selected.state} />
-              </div>
-              {/* provenance: real identity, version, and which geometry this object carries (no fabricated detector names) */}
-              <div className="flex flex-col gap-1.5 bg-bg-2 border border-line rounded p-2 mb-1.5 font-mono text-[10px]">
-                <div className="flex items-center"><span className="text-ink-3 w-16 shrink-0">object</span><span className="text-ink-2 truncate">{selected.isNew ? "new (unsaved)" : selected.id.slice(0, 12)}</span></div>
-                <div className="flex items-center"><span className="text-ink-3 w-16 shrink-0">track</span>{selected.track_id
-                  ? <button onClick={() => router.push(`/track/${selected.track_id}`)} className="text-info hover:text-accent truncate">{selected.track_id.slice(0, 12)} &rarr;</button>
-                  : <span className="text-ink-3">none</span>}</div>
-                <div className="flex items-center"><span className="text-ink-3 w-16 shrink-0">version</span><span className="text-ink-2">{selected.version ?? "-"}</span></div>
-                <div className="flex items-start gap-1"><span className="text-ink-3 w-16 shrink-0 pt-0.5">geometry</span>
-                  <div className="flex flex-wrap gap-1">
-                    {([["box", selected.bbox?.length === 4], ["mask", selected.mask.length > 0], ["polyline", !!selected.polyline?.length], ["pose", !!selected.keypoints], ["3D", !!selected.cuboid_3d], ["rotated", !!selected.rot]] as [string, boolean][])
-                      .filter(([, on]) => on).map(([k]) => <span key={k} className="text-ink-2 bg-line/40 border border-line rounded px-1.5 py-0.5">{k}</span>)}
-                  </div>
-                </div>
-              </div>
-              {/* M-F.0: why this label was decided the way it was, from real provenance */}
-              {!selected.isNew && (
-                <div className="mb-1.5">
-                  <button onClick={() => setExplainOpen((v) => !v)}
-                    className="w-full flex items-center justify-between font-mono text-[10px] uppercase text-ink-3 border border-line rounded px-1.5 py-1 hover:border-accent">
-                    <span>why this label</span><span>{explainOpen ? "−" : "+"}</span>
-                  </button>
-                  {explainOpen && (
-                    <div className="mt-1.5 bg-bg-2 border border-line rounded p-2">
-                      <ExplainPanel objectId={selected.id} />
-                    </div>
-                  )}
-                </div>
-              )}
-              <button
-                disabled={selected.isNew}
-                title={selected.isNew ? "save the frame first, then propagate" : "optical-flow propagate this box across the next 12 frames as a track to confirm"}
-                onClick={async () => {
-                  const r = await trackOp("propagate", "propagate object",
-                    () => api.propagateObject(selected.id, 12));
-                  toast(r.created ? `propagated forward ${r.created} frames (track ${r.track_id?.slice(0, 8)}). Open the track to review/confirm.` : `could not propagate: ${r.reason || "no motion"}`);
-                }}
-                className="w-full mb-1 font-mono text-[10px] border border-line text-ink-2 px-1.5 py-1 hover:border-accent disabled:opacity-40">
-                propagate forward 12 frames →
-              </button>
-              {/* relationships / grouping: pick a kind, click "link", then click the target object */}
-              <div className="mb-1 space-y-1">
-                <div className="flex items-center gap-1">
-                  <select value={linkKind} onChange={(e) => setLinkKind(e.target.value)}
-                    className="flex-1 bg-bg border border-line px-1 py-0.5 font-mono text-[10px] text-ink">
-                    {RELATION_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-                  </select>
-                  <button onClick={() => setLinkFrom(linkFrom === selected.id ? null : selected.id)}
-                    className={`font-mono text-[10px] border px-1.5 py-0.5 ${linkFrom === selected.id ? "border-accent text-accent" : "border-line text-ink-2 hover:border-accent"}`}>
-                    {linkFrom === selected.id ? "click target" : "link"}
-                  </button>
-                </div>
-                {relationships.filter((r) => r.from_object_id === selected.id || r.to_object_id === selected.id).map((r) => (
-                  <div key={r.relationship_id} className="flex items-center gap-1 font-mono text-[10px] text-ink-3">
-                    <span className="flex-1 truncate">{r.from_object_id === selected.id ? `${r.kind} ${r.to_object_id.slice(0, 8)}` : `${r.from_object_id.slice(0, 8)} ${r.kind}`}</span>
-                    <button onClick={() => delRelationship(r.relationship_id)} className="hover:text-block" title="remove">x</button>
-                  </div>
-                ))}
-              </div>
-              <div className="space-y-1">
-                {Object.entries(onto.attributes)
-                  .filter(([name]) => {
-                    // show only attributes applicable to the selected object's class (by its l1 subclass);
-                    // a subclass without a scope entry shows all attributes
-                    const l1 = onto.classes.find((c) => c.id === selected.class_id)?.l1;
-                    const allowed = l1 ? onto.attribute_scope?.[l1] : undefined;
-                    return !allowed || allowed.includes(name);
-                  })
-                  .map(([name, spec]) => (
-                    <AttrControl key={name} name={name} spec={spec} value={selected.attrs[name]}
-                      onChange={(val) => setAttrSelected(name, val)} />
-                  ))}
-              </div>
-            </div>
-          )}
-
-          {/* P3 derived dynamics readout for the selected object (planning/prediction signals) */}
-          {rightTab === "objects" && selected && (
-            <PanelSection title="dynamics">
-              <div className="flex justify-end mb-1">
-                <button onClick={recomputeDynamics} title="compute distance/speed/heading/TTC/risk for this session"
-                  className="font-mono text-[10px] text-info hover:text-accent">recompute</button>
-              </div>
-              {(() => {
-                const d = dynamics[selected.id];
-                if (!d) return <div className="font-mono text-[10px] text-ink-3">no dynamics yet (save the object, then recompute)</div>;
-                const rc = d.risk_level === "high" ? "text-block" : d.risk_level === "medium" ? "text-warn" : "text-pass";
-                const row = (label: string, val: string, cls = "text-ink-2") => (
-                  <div className="flex justify-between"><span className="text-ink-3">{label}</span><span className={cls}>{val}</span></div>
-                );
-                return (
-                  <div className="font-mono text-[10px] space-y-0.5">
-                    {row("distance", d.distance_m != null ? `${d.distance_m} m` : "-")}
-                    {row("speed", d.speed_kmh != null ? `${d.speed_kmh} km/h` : "-")}
-                    {row("closing", d.closing_speed_kmh != null ? `${d.closing_speed_kmh} km/h` : "-")}
-                    {row("heading", d.heading_deg != null ? `${d.heading_deg}°` : "-")}
-                    {row("TTC", d.ttc_s != null ? `${d.ttc_s} s` : "-")}
-                    {row("risk", d.risk_level ?? "-", rc)}
-                    {d.track_id && row("track", d.track_id.slice(0, 8))}
-                    <div className="text-ink-3 pt-0.5">estimate · IPM monocular</div>
-                  </div>
-                );
-              })()}
-            </PanelSection>
-          )}
-
-          {/* LiDAR BEV: draw oriented boxes on the bird's-eye view, then lift them to metric 3D cuboids */}
-          {rightTab === "tools" && meta?.is_lidar && (
-            <PanelSection title="lidar bev" badge={`${(meta.lidar_points ?? 0).toLocaleString()} pts`}>
-              <button
-                onClick={async () => {
+          {mode !== "lanes" && mode !== "lidar3d" && mode !== "review" && onto && meta && (
+            <PropertiesPanel
+              frame={{ id, meta, onto, dirty, flash }}
+              editor={{ st, dispatch, selected }}
+              onCollapse={() => setRightCollapsed(true)}
+              klass={{ current: currentClass ?? null, onPick: relabelSelected, onAdd: addAndRelabel }}
+              sel={{
+                relationships, linkKind, linkFrom, dynamics,
+                onSetAttr: setAttrSelected,
+                onLinkKind: setLinkKind,
+                onToggleLink: () => setLinkFrom(linkFrom === selected?.id ? null : (selected?.id ?? null)),
+                onDeleteRelationship: delRelationship,
+                onRecomputeDynamics: recomputeDynamics,
+              }}
+              tools={{
+                lanes, hasDrivable: !!drivable,
+                onSegRoad: segRoad,
+                onProposeLanes: genLanes,
+                onAgentApplied: loadLayers,
+                onHistoryRestored: () => setReloadKey((k) => k + 1),
+                onLiftCuboids: async () => {
                   if (isDirty(st)) await save();
                   const r = await api.computeLidarCuboids(id);
                   flash(`lifted ${r.cuboids} oriented box${r.cuboids === 1 ? "" : "es"} to 3D cuboids`);
-                }}
-                title="draw oriented boxes (select + rotate handle), then lift each to a metric 3D cuboid using the enclosed points"
-                className="w-full font-mono text-[10px] border border-line text-ink-2 px-1.5 py-1 hover:border-accent">
-                compute 3D cuboids from boxes &rarr;
-              </button>
-            </PanelSection>
-          )}
-
-          {/* Tools tab: the AI/automation clusters, each collapsible, in their own tab so they never bury the
-              object list. The AI panels are no longer nested inside road segmentation. */}
-          {rightTab === "tools" && (<>
-          <PanelSection title="history and saves" defaultOpen
-            badge={`${st.past.length} step${st.past.length === 1 ? "" : "s"}`}>
-            <HistoryPanel
-              frameId={id}
-              past={st.past}
-              future={st.future}
-              onJump={(at) => dispatch({ t: "jump", at })}
-              onRestored={() => setReloadKey((k) => k + 1)}
-              flash={flash}
+                },
+              }}
             />
-          </PanelSection>
-
-          <PanelSection title="agent · auto-label" defaultOpen>
-            <AgentPanel frameId={id} sessionId={meta?.session_id ?? null} selectedId={st.selectedId}
-              onApplied={loadLayers} embedded />
-          </PanelSection>
-
-          <PanelSection title="natural-language bulk edit" defaultOpen>
-            <BulkEditBar frameId={id} sessionId={meta.session_id} onApplied={() => flash("bulk edit applied (routed to review)")} embedded />
-          </PanelSection>
-
-          <PanelSection title="scene graph + vlm dataset">
-            <SceneGraphPanel frameId={id} embedded />
-          </PanelSection>
-
-          <PanelSection title="road segmentation" badge={`${lanes.length} lanes${drivable ? " · drivable" : ""}`}>
-            <div className="grid grid-cols-2 gap-1 font-mono text-[10px]">
-              <button onClick={segRoad} className="border border-line text-ink-2 px-1.5 py-1 hover:border-accent">segment road</button>
-              <button onClick={genLanes} className="border border-line text-ink-2 px-1.5 py-1 hover:border-accent">propose lanes</button>
-              <button onClick={() => router.push(`/annotate/lane/${id}`)} className="border border-line text-ink-2 px-1.5 py-1 hover:border-accent col-span-2">edit lanes + drivable &rarr;</button>
-            </div>
-          </PanelSection>
-          </>)}
-
-          {/* object list (objects tab): grouped by class, searchable, collapsible, with a confidence bar per
-              row; selection is bidirectional with the canvas. */}
-          {rightTab === "objects" && (
-          <div className="p-2">
-            <div className="flex items-center justify-between mb-1">
-              <span className="font-mono text-[10px] uppercase text-ink-3">objects ({st.objects.length})</span>
-            </div>
-            <input value={objSearch} onChange={(e) => setObjSearch(e.target.value)} placeholder="search objects..."
-              className="w-full bg-bg border border-line px-1.5 py-1 font-mono text-[11px] text-ink mb-1" />
-            <div className="space-y-1">
-              {(() => {
-                const q = objSearch.toLowerCase();
-                const filtered = st.objects.filter((o) => !q || o.class_name.toLowerCase().includes(q) || o.id.toLowerCase().includes(q));
-                if (!filtered.length) return <div className="text-ink-3 text-center py-4 font-mono text-[11px]">no objects. draw a box (B).</div>;
-                const groups: Record<string, EdObject[]> = {};
-                for (const o of filtered) (groups[o.class_name] ??= []).push(o);
-                return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0])).map(([cls, objs]) => {
-                  const collapsed = collapsedGroups.has(cls);
-                  return (
-                    <div key={cls}>
-                      <button onClick={() => setCollapsedGroups((s) => { const n = new Set(s); if (n.has(cls)) n.delete(cls); else n.add(cls); return n; })}
-                        className="flex items-center gap-1.5 w-full font-mono text-[10px] text-ink-3 hover:text-ink-2 py-0.5">
-                        <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(objs[0].class_id) }} />
-                        <span className="flex-1 text-left truncate uppercase">{cls}</span>
-                        <span>{objs.length}</span>
-                        <span className="w-3 text-right">{collapsed ? "+" : "−"}</span>
-                      </button>
-                      {!collapsed && objs.map((o) => (
-                        <div key={o.id}
-                          onClick={(e) => {
-                            // Ctrl/Cmd or Shift extends the selection, matching every other list in every
-                            // other tool; a plain click still selects exactly one.
-                            if (e.ctrlKey || e.metaKey || e.shiftKey) dispatch({ t: "toggleSelect", id: o.id });
-                            else dispatch({ t: "select", id: o.id });
-                          }}
-                          className={`flex items-center gap-1.5 pl-3 pr-1 py-0.5 cursor-pointer font-mono text-[11px] ${st.selectedIds.includes(o.id) ? "bg-line text-ink" : "text-ink-3 hover:text-ink-2"}`}>
-                          <button title={o.visible ? "hide" : "show"} aria-label={o.visible ? "hide object" : "show object"}
-                            onClick={(e) => { e.stopPropagation(); dispatch({ t: "setVisible", ids: [o.id], visible: !o.visible }); }}
-                            className={o.visible ? "text-ink-2" : "text-ink-3"}>{o.visible ? "●" : "○"}</button>
-                          <button title={o.locked ? "unlock" : "lock"} aria-label={o.locked ? "unlock object" : "lock object"}
-                            onClick={(e) => { e.stopPropagation(); dispatch({ t: "setLocked", ids: [o.id], locked: !o.locked }); }}
-                            className={o.locked ? "text-warn" : "text-ink-3 hover:text-ink-2"}>{o.locked ? "L" : "l"}</button>
-                          <span className="truncate flex-1">{o.id.startsWith("tmp-") ? "new" : o.id.slice(0, 8)}{o.isNew ? " *" : ""}</span>
-                          {o.quality_score != null && <span title={`label quality ${o.quality_score.toFixed(2)}`}
-                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${o.quality_score >= 0.4 ? "bg-pass" : o.quality_score >= 0.25 ? "bg-warn" : "bg-block"}`} />}
-                          <ConfBar conf={o.conf} />
-                          {o.mask.length > 0 && <span className="text-info" title="has mask">&#9670;</span>}
-                          <button onClick={(e) => { e.stopPropagation(); dispatch({ t: "delete", id: o.id }); }}
-                            disabled={o.locked} aria-label="delete object"
-                            className={o.locked ? "text-line cursor-not-allowed" : "text-ink-3 hover:text-block"}>x</button>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-          </div>
-          )}
-          </div>
-          </>)}
-
-          {/* Ways to pick a set, sitting directly above the bulk actions they feed. A dense frame holds
-              forty vehicles and the useful selections are almost never contiguous, so a marquee alone leaves
-              "every autorickshaw" and "everything nobody has reviewed" as manual work. */}
-          {rightTab === "objects" && (
-            <div className="panel px-2 py-1.5">
-              <div className="flex flex-wrap gap-1">
-                {SELECTIONS.map((sel) => (
-                  <button
-                    key={sel.how + String(sel.value ?? "")}
-                    onClick={() => dispatch({ t: "selectBy", how: sel.how, value: sel.value })}
-                    title={sel.hint + (sel.key ? ` (${sel.key})` : "")}
-                    className="border border-line text-ink-3 px-1.5 py-0.5 hover:border-accent font-mono text-[10px]"
-                  >
-                    {sel.label}
-                  </button>
-                ))}
-              </div>
-              <p className="font-mono text-[10px] text-ink-3 mt-1">
-                Locked and hidden objects are never picked: a bulk action must not reach the thing somebody
-                locked to protect it.
-              </p>
-            </div>
           )}
 
           {/* Bulk actions on a multi-selection. Before this, selection was a single id, so every batch
@@ -2287,32 +2050,9 @@ export default function FrameEditor() {
           change={activeCorr.change}
           onClose={() => setActiveCorr(null)}
           onApplied={(n) => flash(`applied "${String(activeCorr.change.new)}" to ${n} similar objects`)}
+          excludeTrackId={propagatedTrackRef.current}
         />
       )}
     </div>
-  );
-}
-
-function AttrControl({ name, spec, value, onChange }: {
-  name: string; spec: { type: string; values: unknown[] | null; range: number[] | null }; value: unknown; onChange: (v: unknown) => void;
-}) {
-  const label = <span className="w-24 shrink-0 font-mono text-[11px] text-ink-3 truncate">{name}</span>;
-  if (spec.type === "enum")
-    return (
-      <label className="flex items-center gap-2">{label}
-        <select value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} className="flex-1 bg-panel border border-line px-1 py-0.5 font-mono text-[11px] text-ink">
-          <option value="">-</option>
-          {(spec.values || []).map((v) => <option key={String(v)} value={String(v)}>{String(v)}</option>)}
-        </select>
-      </label>
-    );
-  if (spec.type === "bool")
-    return <label className="flex items-center gap-2">{label}<input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} /></label>;
-  return (
-    <label className="flex items-center gap-2">{label}
-      <input type="number" step={spec.type === "float" ? 0.01 : 1} value={value == null ? "" : Number(value)}
-        onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-        className="flex-1 bg-panel border border-line px-1 py-0.5 font-mono text-[11px] text-ink" />
-    </label>
   );
 }

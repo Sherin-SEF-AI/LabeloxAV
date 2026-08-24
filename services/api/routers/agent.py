@@ -782,7 +782,7 @@ async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
 #
 # tests/test_job_resume.py checks the set against the runners rather than against itself: a kind here whose
 # runner never reads a cursor would restart from zero under a button labelled "resume".
-_RESUMABLE_KINDS = frozenset({"error_sweep", "relabel_all", "reanalyze_all"})
+_RESUMABLE_KINDS = frozenset({"error_sweep", "relabel_all", "reanalyze_all", "drivable_backfill"})
 
 
 @router.get("/agent/runs/interrupted", dependencies=[Depends(require_role("annotator"))])
@@ -849,6 +849,12 @@ async def resume_run(run_id: str, db: AsyncSession = Depends(db_session)):
 
         spawn(run_reanalyze_all(
             rid, max_frames=int(scope.get("max_frames") or 500), session_id=scope.get("session_id")), name="run_reanalyze_all")
+    elif run.kind == "drivable_backfill":
+        from services.perception.backfill import run_drivable_backfill
+
+        spawn(run_drivable_backfill(
+            rid, max_frames=int(scope.get("max_frames") or 50_000), session_id=scope.get("session_id"),
+            redo=bool(scope.get("redo"))), name="run_drivable_backfill")
     else:  # pragma: no cover - unreachable while the set and this dispatch agree, which a test enforces
         # The run has already been claimed and flipped to running at this point, so leaving it here would
         # strand it exactly as an interrupted process does. Put it back before refusing.

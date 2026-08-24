@@ -1013,6 +1013,16 @@ class LabeloxClient:
         return self._call("POST", f"/api/discovery/{candidate_id}/state",
                           params=None, json_body=body)
 
+    def post_drivable_backfill(self, session_id: Any | None = None, max_frames: int | None = 50000, redo: bool | None = False) -> Any:
+        """Drivable Backfill"""
+        return self._call("POST", f"/api/drivable/backfill",
+                          params={"session_id": session_id, "max_frames": max_frames, "redo": redo}, json_body=None)
+
+    def get_drivable_coverage(self) -> Any:
+        """Drivable Coverage"""
+        return self._call("GET", f"/api/drivable/coverage",
+                          params=None, json_body=None)
+
     def post_driving_events_by_event_id_confirm(self, event_id: str, body: Any = None) -> Any:
         """Confirm"""
         return self._call("POST", f"/api/driving-events/{event_id}/confirm",
@@ -2653,6 +2663,26 @@ class LabeloxClient:
         return self._call("GET", f"/api/quality/sheet",
                           params={"gold_id": gold_id}, json_body=None)
 
+    def post_quality_track_gap_fill(self, max_tracks: int | None = 20000) -> Any:
+        """Track Gap Fill"""
+        return self._call("POST", f"/api/quality/track-gap-fill",
+                          params={"max_tracks": max_tracks}, json_body=None)
+
+    def get_quality_track_gap_fill_plan(self) -> Any:
+        """Track Gap Plan"""
+        return self._call("GET", f"/api/quality/track-gap-fill/plan",
+                          params=None, json_body=None)
+
+    def post_quality_track_relabel_backfill(self, max_tracks: int | None = 5000) -> Any:
+        """Track Relabel Backfill"""
+        return self._call("POST", f"/api/quality/track-relabel-backfill",
+                          params={"max_tracks": max_tracks}, json_body=None)
+
+    def get_quality_track_relabel_backfill_plan(self) -> Any:
+        """Track Relabel Plan"""
+        return self._call("GET", f"/api/quality/track-relabel-backfill/plan",
+                          params=None, json_body=None)
+
     def get_readyz(self) -> Any:
         """Readyz"""
         return self._call("GET", f"/api/readyz",
@@ -3476,4 +3506,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 678 routes generated from the server schema.
+# 684 routes generated from the server schema.

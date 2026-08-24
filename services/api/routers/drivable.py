@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.storage import get_object_store
 from db.models import DrivableMask, Frame
-from services.api.deps import db_session
+from services.api.deps import current_user, db_session, require_role
 from services.autolabel.drivable import segment_drivable
 
 router = APIRouter()
@@ -56,7 +56,10 @@ async def _store_mask(db, frame, classes, width, height, coverage, model, source
     return uri
 
 
-@router.post("/frames/{frame_id}/drivable")
+# Annotator floor, matching POST /frames/{id}/segment (services/api/routers/segmentation.py:31). This was
+# the only GPU-spending POST route in the tree without one: any authenticated caller could trigger a
+# full-resolution 215M-parameter forward pass, one per request, with nothing rate-limiting it.
+@router.post("/frames/{frame_id}/drivable", dependencies=[Depends(require_role("annotator"))])
 async def segment_frame(frame_id: UUID, db: AsyncSession = Depends(db_session)):
     frame = await db.get(Frame, frame_id)
     if frame is None:
@@ -90,3 +93,34 @@ async def refine_drivable(frame_id: UUID, body: DrivableIn, db: AsyncSession = D
     cov = _coverage(body.classes, body.width, body.height)
     uri = await _store_mask(db, frame, body.classes, body.width, body.height, cov, "human", "human")
     return {"frame_id": str(frame_id), "coverage": cov, "mask_uri": uri}
+
+
+# Corpus backfill. The single-frame POST above is how drivable was produced until now, which is why 96%
+# of the corpus has none: it only ran when somebody opened a frame and clicked.
+
+
+@router.get("/drivable/coverage")
+async def drivable_coverage(db: AsyncSession = Depends(db_session)):
+    """How much of the corpus carries a mask, by capture size.
+
+    Broken down because the headline hides the shape: the buckets that look finished are small older
+    imports, and the main dashcam corpus is the empty one.
+    """
+    from services.perception.backfill import coverage
+
+    return await coverage(db)
+
+
+@router.post("/drivable/backfill", dependencies=[Depends(require_role("reviewer"))])
+async def drivable_backfill(session_id: str | None = None, max_frames: int = 50_000,
+                            redo: bool = False, db: AsyncSession = Depends(db_session),
+                            user=Depends(current_user)):
+    """Segment every frame that has no mask. Reviewer floor: it holds the GPU for as long as it runs."""
+    from core.observability import spawn
+    from services.perception.backfill import run_drivable_backfill, start_backfill
+
+    res = await start_backfill(db, session_id=session_id, max_frames=max_frames, redo=redo,
+                               created_by=str(user.user_id) if user else None)
+    spawn(run_drivable_backfill(UUID(res["run_id"]), session_id=session_id,
+                                max_frames=max_frames, redo=redo), name="drivable_backfill")
+    return res

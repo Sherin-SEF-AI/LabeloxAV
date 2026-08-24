@@ -5,6 +5,7 @@ import { api , humanizeError } from "@/lib/api";
 import type { CloudStatus, CloudOrphan } from "@/lib/types";
 import Icon from "@/components/shell/Icon";
 import { isLiveState, pollDelay } from "@/lib/pollDelay";
+import { useAnchoredDropdown } from "@/components/shell/useAnchoredDropdown";
 
 // The cloud GPU control: a compact status pill (always showing state and, when connected, live uptime and
 // accruing cost) that opens a panel with connect/disconnect, the cost breakdown, and the idle / max-session
@@ -28,6 +29,9 @@ export default function CloudControl() {
   const [st, setSt] = useState<CloudStatus | null>(null);
   const [orphans, setOrphans] = useState<CloudOrphan[]>([]);
   const [open, setOpen] = useState(false);
+  // Fixed rather than absolute: the top bar this pill sits in clips its children. See
+  // useAnchoredDropdown.
+  const { anchorRef: btnRef, style, place } = useAnchoredDropdown(open);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState<"connecting" | "disconnecting" | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -125,7 +129,7 @@ export default function CloudControl() {
     <>
       {/* STATUS PILL */}
       <div className="relative">
-        <button onClick={() => setOpen((o) => !o)} title="cloud GPU"
+        <button ref={btnRef} onClick={() => { if (!open) place(); setOpen((o) => !o); }} title="cloud GPU"
           className="flex items-center gap-1.5 h-7 px-2 rounded-md border border-line hover:border-accent">
           <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} />
           <span className="font-mono text-[11px] text-ink-2">{label}</span>
@@ -138,7 +142,7 @@ export default function CloudControl() {
         {open && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-            <div className="absolute right-0 mt-1 z-50 w-[300px] panel p-3 font-mono text-[11px]">
+            <div style={style} className="z-50 w-[300px] panel p-3 font-mono text-[11px]">
               <div className="flex items-center gap-2 mb-2">
                 <span className="flex text-ink-3"><Icon name="cuboid" size={15} /></span>
                 <span className="font-display font-semibold text-[12.5px] text-ink">Cloud GPU</span>

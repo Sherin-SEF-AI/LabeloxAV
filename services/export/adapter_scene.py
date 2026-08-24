@@ -179,11 +179,53 @@ async def write_lanes(frame_ids: list[str], out_dir: Path) -> Path:
     return out_dir
 
 
+def _rasterise_drivable(blob: dict) -> bytes | None:
+    """Stored surface polygons -> a single-channel PNG carrying DRIVABLE_VALUES, or None if unusable.
+
+    The values come from DRIVABLE_VALUES so the raster and the manifest cannot drift: the manifest is
+    written by inverting the same mapping.
+    """
+    import cv2
+    import numpy as np
+
+    classes = blob.get("classes")
+    w, h = int(blob.get("width") or 0), int(blob.get("height") or 0)
+    if not isinstance(classes, dict) or w <= 0 or h <= 0:
+        return None
+
+    # Background is 0, which the manifest calls non_drivable. In BDD terms that is right - the format
+    # asks which pixels are drivable and everything else is 0 - but it does mean the raster's 0 covers
+    # both "segmented as non-drivable" and "not segmented as anything", which the stored per-class
+    # coverage fractions separate. A consumer wanting that distinction should read `per_frame.coverage`
+    # in the manifest rather than counting zero pixels.
+    mask = np.full((h, w), DRIVABLE_VALUES["non_drivable"], dtype=np.uint8)
+    # Least to most permissive, so an overlap resolves toward road rather than away from it.
+    for name in ("non_drivable", "fallback", "drivable"):
+        value = DRIVABLE_VALUES.get(name)
+        if value is None:
+            continue
+        for poly in classes.get(name) or []:
+            pts = np.asarray(poly, dtype=np.float32).reshape(-1, 2)
+            if len(pts) >= 3:
+                cv2.fillPoly(mask, [pts.astype(np.int32)], int(value))
+    ok, buf = cv2.imencode(".png", mask)
+    return buf.tobytes() if ok else None
+
+
 async def write_drivable(frame_ids: list[str], store: ObjectStore, out_dir: Path) -> Path:
     """BDD-style drivable-area masks, one PNG per frame, with the ternary encoding stated.
 
-    Copied through rather than re-rendered. The stored mask is the artifact the annotator corrected, and
-    re-deriving it from coverage fractions would export a different mask from the one that was approved.
+    The mask is RASTERISED here, from the stored polygons. It used to be copied through byte for byte on
+    the reasoning that the stored blob is the artifact the annotator approved - but the stored blob is
+    JSON (`{"classes": {name: [flat polygon, ...]}}`), so the export wrote JSON text into files named
+    `.png` while `drivable.json` declared a ternary pixel encoding that had never been applied to
+    anything. Every consumer of this format got files it could not open, and the test only asserted that
+    the writer was registered.
+
+    Rasterising is still faithful to what was approved: the polygons ARE the artifact, and the annotator
+    edited them as polygons in the editor. Painting order is non_drivable, then fallback, then drivable,
+    so where classes overlap the more permissive label wins - a pixel some class calls road should not be
+    exported as kerb because another polygon happened to cover it.
     """
     import uuid as _uuid
 
@@ -209,11 +251,16 @@ async def write_drivable(frame_ids: list[str], store: ObjectStore, out_dir: Path
     unreadable = 0
     for dm in rows:
         try:
-            data = store.get_bytes(dm.mask_uri)
-        except Exception:  # noqa: BLE001
+            blob = json.loads(store.get_bytes(dm.mask_uri).decode("utf-8"))
+            png = _rasterise_drivable(blob)
+        except Exception as exc:  # noqa: BLE001 - one bad blob is one frame, not the export
+            log.warning("export.drivable_unreadable", frame=str(dm.frame_id), error=str(exc))
             unreadable += 1
             continue
-        (out_dir / "masks" / f"{dm.frame_id}.png").write_bytes(data)
+        if png is None:
+            unreadable += 1
+            continue
+        (out_dir / "masks" / f"{dm.frame_id}.png").write_bytes(png)
         coverage[str(dm.frame_id)] = {"coverage": dm.coverage or {}, "source": dm.source}
         written += 1
 

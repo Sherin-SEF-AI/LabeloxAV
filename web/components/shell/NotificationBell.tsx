@@ -7,6 +7,7 @@ import Icon from "./Icon";
 import { api, humanizeError } from "@/lib/api";
 import { useEventStream } from "@/lib/useEventStream";
 import type { NotificationRow } from "@/lib/types";
+import { useAnchoredDropdown } from "@/components/shell/useAnchoredDropdown";
 
 // The bell.
 //
@@ -44,6 +45,8 @@ export default function NotificationBell() {
   const [unread, setUnread] = useState(0);
   const [mounted, setMounted] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
+  // Fixed rather than absolute: the top bar clips its children. See useAnchoredDropdown.
+  const { anchorRef: btnRef, style, place } = useAnchoredDropdown(open);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -93,7 +96,7 @@ export default function NotificationBell() {
 
   return (
     <div className="relative" ref={boxRef}>
-      <button onClick={() => setOpen((o) => !o)}
+      <button ref={btnRef} onClick={() => { if (!open) place(); setOpen((o) => !o); }}
         data-tip={unread ? `${unread} unread` : "Notifications"}
         aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
         className="relative w-7 h-7 flex items-center justify-center rounded text-ink-3 hover:text-ink hover:bg-panel">
@@ -108,7 +111,7 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-8 z-50 w-[min(26rem,92vw)] panel shadow-lg">
+        <div style={style} className="z-50 w-[min(26rem,92vw)] panel shadow-lg">
           <div className="flex items-center gap-2 px-3 py-2 border-b hairline font-mono text-[11px]">
             <span className="uppercase text-ink-3">notifications</span>
             {unread > 0 && (
