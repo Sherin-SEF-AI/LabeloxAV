@@ -211,7 +211,16 @@ def test_track_view_and_relabel():
         assert r.json()["relabeled"] == 2
         t2 = c.get(f"/api/tracks/{tid}").json()
         assert t2["flips"] is False and t2["dominant"] == "pedestrian"
-        assert all(it["state"] == "accepted" for it in t2["items"])  # confirmed as human gold
+        # Not "accepted". A track relabel fans one decision across every frame of the track, and the other
+        # frames were never looked at, so the default landing state is review. The old default of accepted
+        # is how an annotator could confirm ninety frames and skip QA, because this path wrote the request
+        # body's state straight onto the object without passing it through services/review_policy.py.
+        assert all(it["state"] == "review" for it in t2["items"])
+        # A reviewer asking for accepted still gets it: the rule is a ceiling, not a refusal.
+        r2 = c.post(f"/api/tracks/{tid}/relabel", json={"class_name": "pedestrian", "state": "accepted"})
+        assert r2.json()["clamped"] is False
+        t3 = c.get(f"/api/tracks/{tid}").json()
+        assert all(it["state"] == "accepted" for it in t3["items"])
 
 
 @requires_infra

@@ -1291,8 +1291,15 @@ export const api = {
   setKeyframe: (objectId: string, value = true) => post<{ is_keyframe: boolean; track_id: string | null }>(`/api/objects/${objectId}/keyframe?value=${value}`, {}),
   interpolateKeyframed: (trackId: string, method = "linear") => post<{ created: number; method: string; keyframes: number }>(`/api/tracks/${trackId}/interpolate-keyframed?method=${method}`, {}),
   reinterpolate: (objectId: string, method = "linear") => post<{ created: number }>(`/api/objects/${objectId}/reinterpolate?method=${method}`, {}),
-  relabelTrack: (id: string, class_name: string) =>
-    post<{ relabeled: number }>(`/api/tracks/${id}/relabel`, { class_name }),
+  relabelTrack: (id: string, class_name: string, opts?: {
+    state?: string; origin_object_id?: string; force?: boolean;
+  }) =>
+    post<{
+      relabeled: number; class_name: string; state: string | null; clamped: boolean;
+      run_id: string | null; skipped_human: string[]; skipped_stale: unknown[];
+      refused: { object_id: string; reason: string }[]; attrs_dropped: Record<string, string[]>;
+      id_switch_events: number;
+    }>(`/api/tracks/${id}/relabel`, { class_name, ...(opts ?? {}) }),
   deleteTrack: (id: string) => del<{ n_objects: number }>(`/api/tracks/${id}`),
   review: (
     id: string,

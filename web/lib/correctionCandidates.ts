@@ -20,8 +20,23 @@ import type { CorrectionCandidate, CorrectionSuggestion } from "./types";
  * Everything that is not already at the corrected value and that no human has ruled on. A person can still
  * tick a human-reviewed candidate deliberately; what they cannot do is apply to one without noticing.
  */
-export function defaultSelection(candidates: readonly CorrectionCandidate[]): Set<string> {
-  return new Set(candidates.filter((c) => !c.already && !c.human).map((c) => c.object_id));
+export function defaultSelection(candidates: readonly CorrectionCandidate[],
+                                 excludeTrackId?: string | null): Set<string> {
+  return new Set(candidates.filter((c) => !c.already && !c.human
+                                          && !onExcludedTrack(c, excludeTrackId))
+                           .map((c) => c.object_id));
+}
+
+/**
+ * Whether this candidate is a frame of the track the correction was just fanned across.
+ *
+ * Those frames are already carrying the corrected class, and they arrive here because they are the most
+ * visually similar things in the corpus to the object that was just fixed. Leaving them ticked would apply
+ * a second time through `bulkReview`, which writes `source = "human"`, and 92 frames nobody looked at would
+ * start claiming human authorship.
+ */
+export function onExcludedTrack(c: CorrectionCandidate, excludeTrackId?: string | null): boolean {
+  return !!excludeTrackId && !!c.track_id && String(c.track_id) === String(excludeTrackId);
 }
 
 export type EmptyReason = { headline: string; detail: string | null };
@@ -47,8 +62,9 @@ export function emptyReason(sug: CorrectionSuggestion | null): EmptyReason | nul
 }
 
 /** The count for the header: how many share the mistake, not how many rows came back. */
-export function applicableCount(candidates: readonly CorrectionCandidate[]): number {
-  return candidates.filter((c) => !c.already).length;
+export function applicableCount(candidates: readonly CorrectionCandidate[],
+                                excludeTrackId?: string | null): number {
+  return candidates.filter((c) => !c.already && !onExcludedTrack(c, excludeTrackId)).length;
 }
 
 /**

@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { applicableCount, byCurrentClass, defaultSelection, emptyReason } from "./correctionCandidates";
+import { applicableCount, byCurrentClass, defaultSelection, emptyReason, onExcludedTrack } from "./correctionCandidates";
 import type { CorrectionCandidate, CorrectionSuggestion } from "./types";
 
 const cand = (over: Partial<CorrectionCandidate> = {}): CorrectionCandidate => ({
@@ -96,5 +96,35 @@ describe("grouping by current class", () => {
 
   it("an empty list groups into nothing", () => {
     expect(byCurrentClass([])).toEqual([]);
+  });
+});
+
+describe("the track that was just fixed", () => {
+  // A class correction now fans across its whole track before this dialog opens. Those frames come back
+  // here as the most visually similar things in the corpus to the object that was just corrected, and
+  // ticking them would send them through bulkReview, which writes source=human onto frames nobody looked
+  // at. That is the corpus lie the propagated source exists to avoid, arriving by another door.
+  const on = (id: string, track: string | null, over: Partial<CorrectionCandidate> = {}) =>
+    cand({ object_id: id, track_id: track, ...over });
+
+  it("does not preselect frames of the track the correction already covered", () => {
+    const list = [on("a", "T1"), on("b", "T1"), on("c", "T2")];
+    expect([...defaultSelection(list, "T1")]).toEqual(["c"]);
+  });
+
+  it("preselects everything when no track was propagated", () => {
+    const list = [on("a", "T1"), on("b", "T2")];
+    expect(defaultSelection(list, null).size).toBe(2);
+    expect(defaultSelection(list).size).toBe(2);
+  });
+
+  it("leaves the count honest about how much is left to do", () => {
+    const list = [on("a", "T1"), on("b", "T1"), on("c", "T2")];
+    expect(applicableCount(list, "T1")).toBe(1);
+    expect(applicableCount(list)).toBe(3);
+  });
+
+  it("does not exclude an untracked candidate", () => {
+    expect(onExcludedTrack(on("a", null), "T1")).toBe(false);
   });
 });

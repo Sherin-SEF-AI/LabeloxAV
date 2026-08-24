@@ -12,10 +12,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.timebase import now_ns
-from db.models import Frame, Object, Review, Track
-from services.api.deps import RelabelTrackIn, current_user, db_session
+from db.models import Frame, Object, Track
+from services.api.deps import MAX_TRACK_RELABEL_OBJECTS, RelabelTrackIn, current_user, db_session
 from services.autolabel.ontology import get_ontology
+from services.review_apply import apply_review_batch
+from services.review_batch import record_batch
+from services.review_policy import ReviewStateError
 
 router = APIRouter()
 
@@ -109,8 +111,18 @@ async def intent_set(track_id: UUID, body: IntentSetIn):
 
 @router.post("/tracks/{track_id}/relabel")
 async def relabel_track(track_id: UUID, payload: RelabelTrackIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
-    """Set one class on every object in the track (and confirm them as human). Fixes a class flip in
-    one action instead of N per-frame edits."""
+    """Set one class on every object in the track. Fixes a class flip in one action instead of N per-frame
+    edits.
+
+    This is what a class correction in the frame editor now fans out through, and the reason it had to be
+    hardened first. Measured before the change: 413 tracks carried an unambiguous human class, and of the
+    44,097 objects on them only 5,798 had it. The median track is 93 frames and the median number of frames
+    a person actually touched is 1, so 86.9% of every correction ever made was sitting on one frame.
+
+    The per-object work is services/review_apply.py, shared with bulk review, which is what gives this path
+    the optimistic lock, the role clamp, attribute revalidation and a revertible run it previously had none
+    of.
+    """
     onto = get_ontology()
     if not onto.has_name(payload.class_name):
         raise HTTPException(400, f"unknown class '{payload.class_name}'")
@@ -118,18 +130,66 @@ async def relabel_track(track_id: UUID, payload: RelabelTrackIn, db: AsyncSessio
     rows = (await db.execute(select(Object).where(Object.track_id == track_id))).scalars().all()
     if not rows:
         raise HTTPException(404, "track not found or has no objects")
-    for o in rows:
-        before = {"class_id": o.class_id, "bbox": list(o.bbox), "attrs": dict(o.attrs or {}), "state": o.state,
-                  "source": o.source, "conf": o.conf, "provenance": dict(o.provenance or {})}
-        o.class_id = cid
-        o.source = "human"
-        o.state = payload.state
-        db.add(Review(object_id=o.object_id, reviewer=user.name if user else "annotator",
-                      user_id=user.user_id if user else None, action="reclassify_track",
-                      before=before, after={"class_id": cid, "bbox": list(o.bbox), "attrs": dict(o.attrs or {}), "state": o.state},
-                      time_spent_ms=0, ts_ns=now_ns()))
+    if len(rows) > MAX_TRACK_RELABEL_OBJECTS:
+        raise HTTPException(409, f"track holds {len(rows)} objects, above the {MAX_TRACK_RELABEL_OBJECTS} "
+                                 "limit; it is more likely mis-linked than real, so fix the track first")
+
+    # The frame the human edited is already saved by the editor's own review call, with source=human and
+    # its own state. Touching it again here would bump the version the editor is holding and make its next
+    # save 409 against its own propagation.
+    origin = str(payload.origin_object_id) if payload.origin_object_id else None
+    targets = [o for o in rows if str(o.object_id) != origin]
+
+    reviewer = user.name if user is not None else payload.reviewer
+    uid = user.user_id if user is not None else None
+    try:
+        res = await apply_review_batch(
+            db, targets, action="reclassify_track", onto=onto, class_id=cid,
+            requested_state=payload.state, role=getattr(user, "role", None),
+            # NOT "human". These frames were never looked at; 92 of 93 claiming human authorship would make
+            # every consumer that filters on it read machine output as ground truth, and would make the rows
+            # un-self-healable, since source == "human" is this repo's "an agent must not touch this" flag.
+            source="propagated",
+            reviewer=reviewer, uid=uid, time_spent_ms=payload.time_spent_ms,
+            provenance_extra={"track_relabel": True, "propagated_from": origin} if origin else {"track_relabel": True},
+            skip_human=True, guard_class_move=not payload.force, revalidate_attrs=True)
+    except ReviewStateError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    if res.refused and not res.n:
+        # Nothing was written, so say why rather than reporting a successful relabel of zero objects.
+        raise HTTPException(409, {"refused": res.refused[0]["reason"], "objects": len(res.refused),
+                                  "hint": "a reviewer can override with force"})
+
+    # The track's own class, which nothing kept in sync. services/intelligence/propagate.py fills
+    # interpolated gaps from it, so leaving it stale re-injects the pre-relabel class into new boxes, and
+    # services/temporal/tracklet.py names the class from it while GET /tracks/{id} derives it from the
+    # objects, so the two views disagreed. Measured: 2,019 tracks had already drifted.
+    track = await db.get(Track, track_id)
+    track_class_from = int(track.class_id) if track is not None else None
+    if track is not None:
+        track.class_id = cid
+
+    run_id = await record_batch(
+        db, res.changes, created_by=reviewer, commit=False,
+        policy={"action": "reclassify_track", "class_name": payload.class_name,
+                "track_id": str(track_id), "track_class_from": track_class_from,
+                "track_class_to": cid}) if res.changes else None
     await db.commit()
-    return {"track_id": str(track_id), "relabeled": len(rows), "class_name": payload.class_name}
+
+    # Surfaced, not blocked. 9,139 tracks carry a re-identification event, which is where the tracker lost
+    # the object and picked it up again, and so where a propagated label could have jumped to a different
+    # physical object. The caller is told the count and given an undo rather than being stopped, because
+    # the alternative refuses the fix on most of the corpus.
+    switches = 0
+    if track is not None and isinstance(track.id_switch_flags, dict):
+        switches = len(track.id_switch_flags.get("events") or [])
+
+    return {"track_id": str(track_id), "relabeled": res.n, "class_name": payload.class_name,
+            "state": res.new_state, "clamped": res.clamped, "run_id": run_id,
+            "skipped_stale": res.stale, "skipped_human": res.skipped_human,
+            "refused": res.refused, "attrs_dropped": res.attrs_dropped,
+            "id_switch_events": switches}
 
 
 class MergeTrackIn(BaseModel):

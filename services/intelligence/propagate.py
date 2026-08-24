@@ -14,6 +14,7 @@ need no extra model weights:
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from uuid import UUID
 
 import click
@@ -135,6 +136,11 @@ async def interpolate_track(track_id: UUID) -> dict:
         ).all()
         keys = [(ts, o.bbox) for o, ts, _ in items]
         have_ts = {ts for ts, _ in keys}
+        # The class the gaps inherit comes from the objects on the track, not from Track.class_id. Nothing
+        # kept that column in sync until the relabel path started doing it, and 2,019 tracks had drifted
+        # from their own objects, so reading it here filled every gap with the pre-relabel label. The
+        # majority rather than the first anchor, so a track whose detector flickered still fills sensibly.
+        gap_class = Counter(int(o.class_id) for o, _, _ in items).most_common(1)[0][0] if items else tr.class_id
         # candidate frames between first and last key that have no box on this track
         gap_frames = (
             await db.execute(
@@ -156,8 +162,14 @@ async def interpolate_track(track_id: UUID) -> dict:
                 continue
             a = (f.ts_ns - lo[0]) / (hi[0] - lo[0])
             box = [lo[1][i] + a * (hi[1][i] - lo[1][i]) for i in range(4)]
-            db.add(Object(frame_id=f.frame_id, track_id=track_id, class_id=tr.class_id,
-                          bbox=[float(v) for v in box], conf=0.5, source="interp", state="annotate",
+            # `source="interp"` is not in ck_object_source (fused, auto_accept, human, imported, relabel,
+            # interpolated, propagated, recall, vlm_review), so every call to this raised a check violation
+            # and the "interpolate gaps" button on the track page has never worked: zero objects in the
+            # corpus carry it. The class comes from the bracketing keyframes rather than from tr.class_id
+            # for the same reason services/temporal/interpolate.py reads its anchors, and because a stale
+            # track class would re-inject the pre-relabel label into every box this creates.
+            db.add(Object(frame_id=f.frame_id, track_id=track_id, class_id=gap_class,
+                          bbox=[float(v) for v in box], conf=0.5, source="interpolated", state="annotate",
                           provenance={"method": "interpolate"}))
             created += 1
         await db.commit()

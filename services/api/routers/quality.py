@@ -6,6 +6,8 @@ The sheet is served from cached metrics (no GPU in the request). Measuring is do
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.logging import get_logger
 from core.observability import spawn
 from services.analytics.quality import list_gold_sets, quality_sheet
-from services.api.deps import CalibrateFitIn, GoldSealIn, db_session, require_role
+from services.api.deps import CalibrateFitIn, GoldSealIn, current_user, db_session, require_role
 from services.autolabel.isotonic import fit_isotonic
 from services.training.gold import GoldSpec, seal_gold
 
@@ -114,3 +116,26 @@ async def calibrate_fit(payload: CalibrateFitIn):
         return await fit_isotonic(payload.gold_id, payload.session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+# Carrying every past class correction across the rest of the track it was made on.
+#
+# Admin rather than reviewer: this is a corpus-wide rewrite of tens of thousands of rows, not a decision
+# about one thing. `plan` writes nothing and exists to be reconciled against the measured numbers before
+# `commit` is allowed anywhere near the corpus.
+@router.get("/quality/track-relabel-backfill/plan", dependencies=[Depends(require_role("admin"))])
+async def track_relabel_plan(db: AsyncSession = Depends(db_session)):
+    from services.quality.track_relabel_backfill import plan_backfill
+
+    return await plan_backfill(db)
+
+
+@router.post("/quality/track-relabel-backfill", dependencies=[Depends(require_role("admin"))])
+async def track_relabel_backfill(max_tracks: int = 5000, db: AsyncSession = Depends(db_session),
+                                 user=Depends(current_user)):
+    from core.observability import spawn
+    from services.quality.track_relabel_backfill import run_backfill, start_backfill
+
+    res = await start_backfill(db, created_by=str(user.user_id) if user else None)
+    spawn(run_backfill(UUID(res["run_id"]), max_tracks=max_tracks), name="track_relabel_backfill")
+    return res

@@ -2663,6 +2663,16 @@ class LabeloxClient:
         return self._call("GET", f"/api/quality/sheet",
                           params={"gold_id": gold_id}, json_body=None)
 
+    def post_quality_track_relabel_backfill(self, max_tracks: int | None = 5000) -> Any:
+        """Track Relabel Backfill"""
+        return self._call("POST", f"/api/quality/track-relabel-backfill",
+                          params={"max_tracks": max_tracks}, json_body=None)
+
+    def get_quality_track_relabel_backfill_plan(self) -> Any:
+        """Track Relabel Plan"""
+        return self._call("GET", f"/api/quality/track-relabel-backfill/plan",
+                          params=None, json_body=None)
+
     def get_readyz(self) -> Any:
         """Readyz"""
         return self._call("GET", f"/api/readyz",
@@ -3486,4 +3496,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 680 routes generated from the server schema.
+# 682 routes generated from the server schema.

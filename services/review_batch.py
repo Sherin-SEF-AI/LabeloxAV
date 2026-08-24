@@ -26,7 +26,7 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
-from db.models import AgentRun, Object
+from db.models import AgentRun, Object, Track
 
 log = get_logger("review_batch")
 
@@ -77,6 +77,22 @@ async def record_batch(db: AsyncSession, changes: dict[str, dict], *, policy: di
     return str(run_id)
 
 
+def _track_classes(policy: dict) -> dict[str, int | None]:
+    """The prior class of every track this run moved, from either shape the writers use.
+
+    One relabel names a single track at the top level; the backlog sweep covers thousands and keys them by
+    id. Reading only the first shape is how the sweep's revert put every object back and left every track
+    claiming the class the operator had just taken back, which
+    services/intelligence/propagate.py would then write into every interpolated gap box.
+    """
+    by_track = policy.get("track_class_from")
+    if isinstance(by_track, dict):
+        return {str(k): v for k, v in by_track.items()}
+    if policy.get("track_id") is not None and by_track is not None:
+        return {str(policy["track_id"]): by_track}
+    return {}
+
+
 async def revert_batch(db: AsyncSession, run: AgentRun) -> dict:
     """Put a bulk review back, including the objects it made human-sourced.
 
@@ -107,6 +123,15 @@ async def revert_batch(db: AsyncSession, run: AgentRun) -> dict:
         prov.pop("review_batch", None)
         obj.provenance = prov
         reverted += 1
+    # A track relabel also moved the track's own denormalised class, which is not an object and so has no
+    # entry in `changes`. Left behind, a revert would put every object back and leave the track claiming the
+    # class the operator just took back, which services/intelligence/propagate.py would then write into
+    # every interpolated gap box.
+    for tid, was in _track_classes(run.policy or {}).items():
+        track = await db.get(Track, uuid.UUID(tid))
+        if track is not None and was is not None:
+            track.class_id = int(was)
+
     run.status = "reverted"
     run.reverted_at = datetime.now(UTC)
     await db.commit()

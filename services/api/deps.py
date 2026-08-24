@@ -232,9 +232,28 @@ class RelateIn(BaseModel):
     kind: str                                      # rider_of|towed_by|part_of|member_of|occludes
 
 
+# A track is a server-chosen N, not a caller-chosen one, so the bound is a backstop against a corrupt
+# track rather than a policy on batch size. Measured: the largest real track holds 697 objects, p99 is 213
+# and the median is 24, so this sits about three times above anything the tracker actually produces.
+MAX_TRACK_RELABEL_OBJECTS = 2000
+
+
 class RelabelTrackIn(BaseModel):
     class_name: str
-    state: str = "accepted"
+    # Was "accepted", which is how an annotator could confirm a whole track and skip QA: the value went
+    # straight to obj.state without passing through services/review_policy.py like the other two review
+    # paths. It now goes through the clamp, and the default matches what a propagated frame actually is:
+    # nobody has looked at it.
+    state: str = "review"
+    # The frame the human actually edited. Excluded from the fan-out so its version is not bumped under the
+    # editor that is holding it, which would make the editor's own next save 409 against itself.
+    origin_object_id: str | None = None
+    # Override the ontology guard on a class move that changes what kind of thing something is. The editor
+    # never sends it; the track page offers it to a reviewer, because without an escape the guard turns a
+    # past bad relabel into a permanently unfixable one.
+    force: bool = False
+    reviewer: str = "anon"
+    time_spent_ms: int = 0
 
 
 # The rapid-review grid submits at most a screenful and the largest deliberate sweep in the UI is a

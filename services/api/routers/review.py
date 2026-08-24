@@ -17,7 +17,8 @@ from db.models import Frame, Object, Review
 from services.api.deps import BulkReviewIn, ReviewIn, current_user, db_session
 from services.api.routers.objects import _write_mask
 from services.autolabel.ontology import get_ontology
-from services.review_batch import change_record, record_batch
+from services.review_apply import AttrRejected, apply_review_batch
+from services.review_batch import record_batch
 from services.review_policy import ReviewStateError, state_for
 from services.training.gpu_lease import training_holds_gpu
 
@@ -70,56 +71,32 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
         raise HTTPException(400, str(exc)) from exc
     reviewer, uid = _attrib(user, payload.reviewer)
 
-    n = 0
     missing: list[str] = []
-    stale: list[dict] = []
-    batch_changes: dict[str, dict] = {}
     from uuid import UUID as _UUID
 
-    expected = payload.expected_versions or {}
-    # The batch's time is divided across its members rather than attributed to any one of them, so a grid
-    # that triages sixty crops in a minute reports sixty seconds of work and not sixty minutes or zero.
     ids = payload.object_ids
-    per_item_ms = int(payload.time_spent_ms / len(ids)) if ids and payload.time_spent_ms > 0 else 0
-
+    objects: list[Object] = []
     for oid in ids:
         obj = await db.get(Object, _UUID(oid))
         if obj is None:
             missing.append(oid)
             continue
-        # Optimistic lock, per object. Single review has refused a stale write since it was written; bulk
-        # review did not, so a sweep silently overwrote whatever anybody else had done in the meantime. A
-        # stale member is skipped and named rather than failing the whole batch, because one contended
-        # object should not discard fifty-nine good verdicts.
-        want = expected.get(oid)
-        if want is not None and obj.version != want:
-            stale.append({"object_id": oid, "expected": want, "current": obj.version})
-            continue
-        before = {"class_id": obj.class_id, "bbox": list(obj.bbox), "attrs": dict(obj.attrs or {}), "state": obj.state,
-                  "source": obj.source, "conf": obj.conf, "provenance": dict(obj.provenance or {})}
-        # What the undo needs, captured before the edit. A Review row per object is the audit trail and
-        # answers what changed; it is not an undo, because taking back a fifty-object batch through it means
-        # fifty manual reversals with the operator remembering each prior value.
-        batch_changes[oid] = change_record(obj)
-        if cid is not None:
-            obj.class_id = cid
-        if payload.attrs:
-            errors = onto.validate_attrs(payload.attrs, obj.class_id)   # against the effective (possibly new) class
-            if errors:
-                raise HTTPException(400, {"attr_errors": errors, "object_id": oid})
-            merged = dict(obj.attrs or {})
-            merged.update(payload.attrs)
-            obj.attrs = merged
-        if new_state is not None:
-            obj.state = new_state
-        obj.source = "human"
-        # Advance the lock version, exactly as single review does. Without this a bulk edit was invisible to
-        # every other client's optimistic check, so an editor holding the object would overwrite it back.
-        obj.version = (obj.version or 1) + 1
-        db.add(Review(object_id=obj.object_id, reviewer=reviewer, user_id=uid, action=payload.action,
-                      before=before, after={"class_id": obj.class_id, "bbox": list(obj.bbox), "attrs": dict(obj.attrs or {}), "state": obj.state},
-                      time_spent_ms=per_item_ms, ts_ns=now_ns()))
-        n += 1
+        objects.append(obj)
+
+    # The per-object loop lives in services/review_apply.py so the track relabel path gets the same lock,
+    # the same role clamp and the same undo instead of a fourth copy of them. Bulk keeps its own behaviour
+    # exactly: it does not skip human-sourced rows (the caller ticked them) and it does not guard class
+    # moves (the correction dialog exists to span classes).
+    try:
+        res = await apply_review_batch(
+            db, objects, action=payload.action, onto=onto, class_id=cid, attrs=payload.attrs,
+            requested_state=payload.state, role=getattr(user, "role", None), source="human",
+            reviewer=reviewer, uid=uid, expected_versions=payload.expected_versions,
+            time_spent_ms=payload.time_spent_ms)
+    except AttrRejected as exc:
+        raise HTTPException(400, {"attr_errors": exc.errors, "object_id": exc.object_id}) from exc
+    n, stale, batch_changes = res.n, res.stale, res.changes
+
     # One reversible unit for the whole batch, stamped in the SAME transaction as the edits it describes.
     #
     # This used to commit the edits first and stamp afterwards, so that a failed edit could not leave a run

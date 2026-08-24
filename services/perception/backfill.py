@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
 
 import cv2
 import numpy as np
@@ -188,7 +187,6 @@ async def run_drivable_backfill(run_id: uuid.UUID, *, session_id: str | None = N
             if run:
                 run.status = "committed"
                 run.counts = totals
-                run.finished_at = datetime.now(UTC)
                 await db.commit()
         log.info("drivable_backfill.done", run_id=str(run_id), **totals)
     except Exception as exc:  # noqa: BLE001

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api , humanizeError } from "@/lib/api";
-import { applicableCount, defaultSelection, emptyReason } from "@/lib/correctionCandidates";
+import { applicableCount, defaultSelection, emptyReason, onExcludedTrack } from "@/lib/correctionCandidates";
 import { toast } from "@/lib/toast";
 import type { CorrectionCandidate, CorrectionCoverage, CorrectionSuggestion } from "@/lib/types";
 
@@ -18,12 +18,15 @@ export default function CorrectionModal({
   change,
   onClose,
   onApplied,
+  excludeTrackId,
 }: {
   objectId: string;
   kind: "class" | "attr";
   change: CorrectionChange;
   onClose: () => void;
   onApplied?: (n: number) => void;
+  /** The track the correction was already fanned across, so its frames are not offered again. */
+  excludeTrackId?: string | null;
 }) {
   const [sug, setSug] = useState<CorrectionSuggestion | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -58,13 +61,13 @@ export default function CorrectionModal({
       setSug(r);
       // Anything a person already ruled on stays visible and unticked: a bulk apply that quietly overwrites
       // somebody's decision is worse than one that does nothing.
-      setSel(defaultSelection(r.candidates));
+      setSel(defaultSelection(r.candidates, excludeTrackId));
     } catch (e) {
       setMsg(humanizeError(e));
     } finally {
       setLoading(false);
     }
-  }, [objectId, kind, change, threshold, sameCam, sameClass, camId]);
+  }, [objectId, kind, change, threshold, sameCam, sameClass, camId, excludeTrackId]);
 
   // debounce re-query on threshold / filter change
   useEffect(() => {
@@ -133,8 +136,8 @@ export default function CorrectionModal({
             <span className="text-accent">{title}</span>
             {sug && (
               <span className="text-ink-3">
-                {" "}— {applicableCount(sug.candidates)} to fix
-                {sug.count > applicableCount(sug.candidates)
+                {" "}— {applicableCount(sug.candidates, excludeTrackId)} to fix
+                {sug.count > applicableCount(sug.candidates, excludeTrackId)
                   ? ` of ${sug.count} similar` : " similar"}
                 {/* A count of crops is not a count of objects: one mislabelled billboard appears once per
                     frame of its track. All of them still need fixing, but the operator should know whether
@@ -209,6 +212,13 @@ export default function CorrectionModal({
                       {c.class_name}
                     </span>
                     {c.already && <span className="absolute bottom-0 left-0 bg-bg/80 font-mono text-[9px] px-0.5 text-pass">already</span>}
+                    {!c.already && onExcludedTrack(c, excludeTrackId) && (
+                      // These are the other frames of the object that was just corrected. They already
+                      // carry the new class; ticking them would send them through bulkReview, which writes
+                      // source=human onto frames nobody looked at.
+                      <span className="absolute bottom-0 left-0 bg-bg/80 font-mono text-[9px] px-0.5 text-pass"
+                            title="another frame of the track you just fixed">on this track</span>
+                    )}
                     {c.human && !c.already && (
                       <span className="absolute bottom-0 left-0 bg-bg/80 font-mono text-[9px] px-0.5 text-warn">human</span>
                     )}

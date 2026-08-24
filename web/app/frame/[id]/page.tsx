@@ -12,6 +12,7 @@ import { acceptState, getUser, setUser } from "@/lib/user";
 import { beginOp, endOp, resetOps, trackOp } from "@/lib/canvasOps";
 import { openConsole } from "@/components/console/ConsoleModal";
 import { simplifyMask, simplifyPolygon } from "@/lib/simplify";
+import { UNTRACKED_NOTE, propagationMessage, shouldPropagate } from "@/lib/trackPropagate";
 import CanvasConsole from "@/components/editor/CanvasConsole";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
 import { PERSON_17 } from "@/lib/skeleton";
@@ -799,7 +800,12 @@ export default function FrameEditor() {
       if (!selected) return;
       const old = selected.class_name;
       dispatch({ t: "update", id: selected.id, patch: { class_id: c.id, class_name: c.name } });
-      if (!selected.isNew && c.name !== old) recordCorrection(selected.id, "class", old, c.name);
+      // Remembered here and acted on in save(), not here: this runs on every keystroke through the class
+      // picker, and the 700ms autosave debounce is what collapses a burst of them into one decision.
+      if (!selected.isNew && c.name !== old) {
+        classChangedRef.current.set(selected.id, old);
+        recordCorrection(selected.id, "class", old, c.name);
+      }
     },
     [selected, dispatch, recordCorrection],
   );
@@ -889,12 +895,66 @@ export default function FrameEditor() {
   // isNew flags, creating the same object twice on the server. The idem_key is belt-and-suspenders: the
   // server de-dupes a create that still slips through (network retry, multi-tab).
   const savingRef = useRef(false);
+  // objectId -> the class it had before the edit, so save() can tell a real reclassification from a
+  // geometry drag. The save payload carries class_name on every dirty object, so the payload alone cannot
+  // answer that.
+  const classChangedRef = useRef<Map<string, string>>(new Map());
+  // The track a correction was just fanned across, so the similarity dialog can stop offering the frames
+  // that are already fixed.
+  const propagatedTrackRef = useRef<string | null>(null);
   // Signature of the pending (deleted + new/dirty) set that last failed to save. Autosave will not retry the
   // exact same set, so a persistent per-object error (a malformed object, a stale id) cannot become an
   // infinite 700ms retry storm; any real edit changes the signature and resumes autosave.
   const lastFailRef = useRef("");
   const pendingSig = () => JSON.stringify([st.deleted,
     st.objects.filter((o) => o.isNew || o.dirty).map((o) => `${o.id}:${o.version ?? 0}`)]);
+  // Carry a class correction across the rest of its track.
+  //
+  // Renaming an object used to fix the frame in front of you and nothing else. Measured: 413 tracks had an
+  // unambiguous human class and only 5,798 of the 44,097 objects on them carried it, because the median
+  // track is 93 frames and the median number of frames a person touches is one. The endpoint that fixes a
+  // whole track already existed and was reachable from a page linked by two ten-pixel links.
+  const propagateClassChanges = useCallback(async () => {
+    const pending = classChangedRef.current;
+    if (!pending.size) return;
+    const objs = stRef.current.objects;
+    for (const [oid, wasClass] of [...pending]) {
+      pending.delete(oid);
+      const o = objs.find((x) => x.id === oid);
+      if (!o) continue;
+      if (!shouldPropagate(o, wasClass, o.class_name)) {
+        // Silence is what the original complaint was, so an untracked object says why nothing travelled
+        // rather than looking identical to a working propagation.
+        if (!o.track_id && !o.isNew && !o.id.startsWith("tmp-")) toast(UNTRACKED_NOTE, "info");
+        continue;
+      }
+      try {
+        const r = await api.relabelTrack(o.track_id as string, o.class_name, { origin_object_id: o.id });
+        propagatedTrackRef.current = o.track_id as string;
+        if (!r.relabeled) continue;
+        const runId = r.run_id;
+        toast(propagationMessage(r), "success", 12000, runId ? {
+          label: "undo",
+          run: async () => {
+            try {
+              const u = await api.agentRevert(runId);
+              toast(`undone: ${u.reverted} restored`
+                    + (u.skipped ? `, ${u.skipped} left alone (edited since)` : ""), "info");
+              propagatedTrackRef.current = null;
+              await loadLayers();
+            } catch (e) {
+              toast(`could not undo: ${humanizeError(e)}`, "error");
+            }
+          },
+        } : undefined);
+      } catch (e) {
+        // The frame is already saved. A failure here loses the fan-out, not the edit, so it is reported
+        // as its own thing rather than as a failed save.
+        toast(`the class change did not reach the rest of the track: ${humanizeError(e)}`, "error");
+      }
+    }
+  }, [loadLayers]);
+
   const save = useCallback(async () => {
     if (!dirty || savingRef.current) return;
     savingRef.current = true;
@@ -943,6 +1003,10 @@ export default function FrameEditor() {
       flash("saved");
       setCuboids(await api.frameCuboids(id).catch(() => [])); // refresh projected cuboid wireframes
       endOp(opId, "ok", pending === 1 ? "1 object" : `${pending} objects`);
+      // The correction travels here, after the per-object save landed and returned a fresh version, so it
+      // cannot race the lock this editor is holding. Its own failure cannot fail the save, which has
+      // already committed.
+      await propagateClassChanges();
     } catch (e) {
       const msg = humanizeError(e);
       lastFailRef.current = pendingSig();         // do not auto-retry this exact set until something changes
@@ -952,7 +1016,7 @@ export default function FrameEditor() {
       savingRef.current = false;
       setSaving(false);
     }
-  }, [dirty, st.deleted, st.objects, id, meta, dispatch]);
+  }, [dirty, st.deleted, st.objects, id, meta, dispatch, propagateClassChanges]);
 
   // ---- autosave: persist edits ~700ms after the last change settles (covers move/resize/relabel/
   // attribute/mask/delete). The debounce waits out an active drag, so we never save mid-gesture. ----
@@ -1986,6 +2050,7 @@ export default function FrameEditor() {
           change={activeCorr.change}
           onClose={() => setActiveCorr(null)}
           onApplied={(n) => flash(`applied "${String(activeCorr.change.new)}" to ${n} similar objects`)}
+          excludeTrackId={propagatedTrackRef.current}
         />
       )}
     </div>
