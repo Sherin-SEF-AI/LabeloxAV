@@ -14,6 +14,7 @@ import { openConsole } from "@/components/console/ConsoleModal";
 import { simplifyMask, simplifyPolygon } from "@/lib/simplify";
 import { UNTRACKED_NOTE, propagationMessage, shouldPropagate } from "@/lib/trackPropagate";
 import CanvasConsole from "@/components/editor/CanvasConsole";
+import CanvasMenu from "@/components/editor/CanvasMenu";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
 import { PERSON_17 } from "@/lib/skeleton";
 import BackButton from "@/components/BackButton";
@@ -244,6 +245,9 @@ export default function FrameEditor() {
   const [rigTracks, setRigTracks] = useState(false);  // M-MC.4 rig-track timeline panel visibility
   const [scaleNoteOpen, setScaleNoteOpen] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  // Right-click on the canvas. Held as position plus what was under the pointer, so the menu can act on
+  // the object the renderer decided was on top rather than on whatever happens to be selected.
+  const [canvasMenuAt, setCanvasMenuAt] = useState<{ at: { x: number; y: number }; objectId: string | null } | null>(null);
   // Responsive: on a narrow screen the properties panel collapses first (the design's degradation order),
   // giving the canvas and tool strip room. One-time on mount; the user can expand it manually after.
   useEffect(() => { if (typeof window !== "undefined" && window.innerWidth < 1100) setRightCollapsed(true); }, []);
@@ -736,9 +740,12 @@ export default function FrameEditor() {
   // the work lands in the QA queue the triage page's `submitted` band exists to serve. This file's own
   // `save()` already used `acceptState(role)`; these two paths hardcoded `accepted`, so the same person
   // pressing A skipped the review step that pressing Cmd+S respected. `/review/rapid` was always right.
-  const reviewObject = async (verdict: "accept" | "reject") => {
+  // `target` exists for the canvas menu. Dispatching a select and then calling this would review the
+  // PREVIOUSLY selected object: `selected` is computed at render time and the dispatch has not landed yet,
+  // so right-clicking an unselected box and choosing accept would silently accept a different one.
+  const reviewObject = async (verdict: "accept" | "reject", target?: EdObject) => {
     const newState = verdict === "accept" ? acceptState(getUser()?.role) : "rejected";
-    const o = selected;
+    const o = target ?? selected;
     if (!o) { flash("select an object to review"); return; }
     if (o.isNew) { flash("save the new object first"); return; }
     // api.review carries only the state, not geometry, and the reviewed reducer clears dirty; reviewing on
@@ -1061,6 +1068,92 @@ export default function FrameEditor() {
 
   // ---- viewport helpers ----
   const fit = useCallback(() => dispatch({ t: "viewport", viewport: { scale: 0, ox: 0, oy: 0 } }), [dispatch]);
+
+  // Everything the canvas menu can do. Each of these already existed somewhere else; this routes them to
+  // the pointer instead of to a rail, so the control for the thing you are looking at is on the thing you
+  // are looking at.
+  const onCanvasAction = useCallback(async (key: string, cls?: OntologyClass) => {
+    const oid = canvasMenuAt?.objectId ?? null;
+    const o = oid ? stRef.current.objects.find((x) => x.id === oid) ?? null : null;
+    const many = stRef.current.selectedIds;
+    switch (key) {
+      case "class":
+        if (!cls) return;
+        // A multi-selection had no way to be reclassified at all: relabelSelected acts on the primary
+        // selection and the bulk toolbar offered only hide, show, lock and delete.
+        if (many.length > 1 && oid && many.includes(oid)) {
+          for (const id of many) dispatch({ t: "update", id, patch: { class_id: cls.id, class_name: cls.name } });
+          flash(`reclassified ${many.length} objects as ${cls.name}`);
+        } else if (o) {
+          if (o.id !== stRef.current.selectedId) dispatch({ t: "select", id: o.id });
+          relabelSelected(cls);
+        } else {
+          setCurrentClass(cls);
+        }
+        return;
+      case "accept": case "reject":
+        if (!o) { flash("right-click an object to review it"); return; }
+        if (o.id !== stRef.current.selectedId) dispatch({ t: "select", id: o.id });
+        await reviewObject(key, o);
+        return;
+      case "acceptMany": case "rejectMany": {
+        const verdict = key === "acceptMany" ? "accept" : "reject";
+        const state = verdict === "accept" ? acceptState(getUser()?.role) : "rejected";
+        try {
+          const r = await api.bulkReview(many, verdict, undefined, state);
+          for (const id of many) dispatch({ t: "reviewed", id, state });
+          flash(`${state} ${r.updated} objects`);
+          loadLayers();
+        } catch (e) { flash("review failed: " + humanizeError(e)); }
+        return;
+      }
+      case "lock": if (o) dispatch({ t: "setLocked", ids: [o.id], locked: !o.locked }); return;
+      case "hide": if (o) dispatch({ t: "setVisible", ids: [o.id], visible: !o.visible }); return;
+      case "hideMany": dispatch({ t: "setVisible", ids: many, visible: false }); return;
+      case "showMany": dispatch({ t: "setVisible", ids: many, visible: true }); return;
+      case "lockMany": dispatch({ t: "setLocked", ids: many, locked: true }); return;
+      case "propagate":
+        if (!o) return;
+        try {
+          const r = await trackOp("propagate", "propagate object", () => api.propagateObject(o.id, 12));
+          toast(r.created
+            ? `propagated forward ${r.created} frames (track ${r.track_id?.slice(0, 8)})`
+            : `could not propagate: ${r.reason || "no motion"}`);
+        } catch (e) { flash("propagate failed: " + humanizeError(e)); }
+        return;
+      case "viewTrack": if (o?.track_id) router.push(`/track/${o.track_id}`); return;
+      case "copyId":
+        if (!o) return;
+        try { await navigator.clipboard.writeText(o.id); flash("object id copied"); }
+        catch { flash("could not reach the clipboard"); }
+        return;
+      case "delete":
+        if (!o) return;
+        dispatch({ t: "delete", id: o.id });
+        return;
+      case "deleteMany": {
+        // Confirmed, for the reason the bulk toolbar already confirms: a mis-swept marquee can hold far
+        // more than intended and this is not a single undoable box.
+        if (!(await confirm({ title: `Delete ${many.length} objects?`, danger: true, confirmLabel: "Delete" }))) return;
+        for (const id of many) dispatch({ t: "delete", id });
+        dispatch({ t: "select", id: null });
+        return;
+      }
+      case "selectAll": dispatch({ t: "selectBy", how: "all" }); return;
+      case "selectNone": dispatch({ t: "selectBy", how: "none" }); return;
+      case "invert": dispatch({ t: "selectBy", how: "invert" }); return;
+      case "lowConf": dispatch({ t: "selectBy", how: "lowConf", value: 0.5 }); return;
+      case "fit": fit(); return;
+      case "showPanel": setRightCollapsed(false); return;
+      case "save": await save(); return;
+      case "issue": setRightCollapsed(false); flash("raise it in the Issues panel on the right"); return;
+    }
+    // reviewObject is deliberately not listed. It is recreated every render, so listing it makes this
+    // callback churn and eslint then asks for reviewObject itself to be memoized, which cascades into
+    // flash and advanceReview. The staleness that would have mattered is already handled: the object is
+    // passed to it explicitly rather than read from its closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasMenuAt, dispatch, relabelSelected, fit, save, router, confirm, loadLayers]);
   const zoomBy = useCallback((f: number) => dispatch({ t: "viewport", viewport: { ...st.viewport, scale: Math.max(0.05, Math.min(20, st.viewport.scale * f)) } }), [st.viewport, dispatch]);
   const gotoFrame = useCallback(async (fid: string | null) => {
     if (!fid) return;
@@ -1253,6 +1346,7 @@ export default function FrameEditor() {
       lanes={lanes} drivable={drivable} layers={layers}
       onViewport={(viewport) => dispatch({ t: "viewport", viewport })}
       onSelect={doSelect}
+      onContextMenu={(at, objectId) => setCanvasMenuAt({ at, objectId })}
       selectedIds={st.selectedIds}
       // Marquee selection. The reducer already excluded locked objects and the canvas already knew how to
       // draw a rubber band; what was missing was the gesture on empty canvas that connects the two, so
@@ -1443,6 +1537,25 @@ export default function FrameEditor() {
           {/* What the canvas is doing, in the canvas. Everything here ran fire-and-forget with a one-line
               flash, so a slow call and a call that never went looked the same from the image. */}
           <CanvasConsole />
+          {/* Right-click actions, at the pointer. Rendered here rather than inside EditorCanvas because
+              Konva draws to a canvas element and a menu has to be real DOM to be focusable and readable. */}
+          {canvasMenuAt && onto && (() => {
+            const o = canvasMenuAt.objectId
+              ? st.objects.find((x) => x.id === canvasMenuAt.objectId) ?? null : null;
+            return (
+              <CanvasMenu
+                at={canvasMenuAt.at}
+                classes={onto.classes}
+                target={{
+                  object: o && { id: o.id, class_name: o.class_name, locked: o.locked, visible: o.visible,
+                                 isNew: o.isNew, track_id: o.track_id, state: o.state },
+                  selectedCount: st.selectedIds.length,
+                  targetInSelection: !!o && st.selectedIds.includes(o.id),
+                }}
+                onClose={() => setCanvasMenuAt(null)}
+                onAction={(k, cls) => void onCanvasAction(k, cls)} />
+            );
+          })()}
           {mode === "events" ? (
             // Opaque: this panel replaces the image rather than floating over it, and inheriting the
             // transparent canvas let what is behind print through the controls.

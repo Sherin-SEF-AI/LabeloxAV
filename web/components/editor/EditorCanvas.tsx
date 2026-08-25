@@ -62,6 +62,8 @@ type Props = {
   onSamBox: (box: number[]) => void;
   onUpdateMask: (id: string, polys: number[][]) => void;
   onCursor: (pt: number[] | null) => void;
+  /** Right-click on the canvas: where on screen, and which object was under the pointer (null = empty). */
+  onContextMenu?: (at: { x: number; y: number }, objectId: string | null) => void;
 };
 
 const MIN_SCALE = 0.05;
@@ -308,6 +310,17 @@ export default function EditorCanvas(p: Props) {
         onMouseMove={onMove}
         onMouseUp={onUp}
         onDblClick={onDblClick}
+        // Right-click anywhere on the canvas. The object is resolved from the Konva shape's own name
+        // rather than by hit-testing bboxes in the page, so the menu opens on exactly the shape the
+        // renderer decided was on top, which is the one the user believes they clicked. Order matters in a
+        // dense cluster and the page does not know it.
+        onContextMenu={(e) => {
+          if (!p.onContextMenu) return;
+          e.evt.preventDefault();
+          const nm = typeof e.target?.name === "function" ? e.target.name() : "";
+          const oid = nm && nm.startsWith("obj:") ? nm.slice(4) : null;
+          p.onContextMenu({ x: e.evt.clientX, y: e.evt.clientY }, oid);
+        }}
         onMouseLeave={() => p.onCursor(null)}
         onDragEnd={(e) => {
           if (p.panning) p.onViewport({ ...v, ox: e.target.x(), oy: e.target.y() });
@@ -363,7 +376,7 @@ export default function EditorCanvas(p: Props) {
 
           {/* open polylines (curb/road_edge/barrier): an open line, no fill, no AABB box */}
           {L.boxes && p.objects.filter((o) => o.visible && o.polyline && o.polyline.length >= 2).map((o) => (
-            <Line key={`pl${o.id}`} points={o.polyline!.flat()} listening={p.tool === "select"}
+            <Line key={`pl${o.id}`} name={`obj:${o.id}`} points={o.polyline!.flat()} listening={p.tool === "select"}
               stroke={classColor(o.class_id)} strokeWidth={(o.id === p.selectedId ? 2.5 : 1.5) / s}
               hitStrokeWidth={10 / s}
               onMouseDown={(e) => { if (p.tool === "select") { e.cancelBubble = true; p.onSelect(o.id); } }} />
@@ -383,6 +396,7 @@ export default function EditorCanvas(p: Props) {
             return (
               <Rect
                 key={o.id}
+                name={`obj:${o.id}`}
                 ref={isSel ? selRectRef : undefined}
                 x={cx} y={cy} offsetX={w / 2} offsetY={h / 2} width={w} height={h} rotation={o.rot ?? 0}
                 stroke={classColor(o.class_id)} strokeWidth={(isSel ? 2.5 : 1.5) / s}
