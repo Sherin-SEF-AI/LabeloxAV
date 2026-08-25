@@ -20,6 +20,8 @@ from packs.base import (
     CliqueSpec,
     ConfusionClique,
     ContextSpec,
+    TrackEventSpec,
+    TrackEventType,
     EvalStrataSpec,
     ForgeTarget,
     GatePolicy,
@@ -184,6 +186,78 @@ def _motion_models() -> MotionModelSpec:
             "overhead_water_tank", "hoarding", "foot_overbridge", "speed_camera",
         }),
     )
+
+
+def _track_events() -> TrackEventSpec:
+    """What a track did, and over which frames.
+
+    The vocabulary is the sixteen words already governed in services/intelligence/intent.py, plus seven
+    India spans that vocabulary has no way to say. Reusing the existing spellings is deliberate: `cut_in`
+    means one thing in this system, and a second vocabulary that spelled it `cutting_in` would split every
+    query that ever asks for it. tests/test_track_events.py asserts the superset relation holds, so an edit
+    to either list that breaks it fails rather than quietly forking the two.
+
+    The definitions are the interface. An annotator reads one of these at the moment they are deciding
+    whether a span starts, so each says what must be visible for it to begin and what ends it. A vague
+    definition does not produce fewer labels, it produces labels two people disagree about silently.
+
+    Only two are proposable, and both are marked so here rather than left to be inferred. The rest are
+    human-labeled and stay that way until there is a signal that can see them.
+    """
+    V, R, A = "vehicle", "vru", "any"
+    return TrackEventSpec(types=(
+        # ---- the governed intents, now with extent ----
+        TrackEventType("cut_in", "Starts when the vehicle crosses the lane line into the ego lane with less "
+                       "than about two seconds of gap; ends when it is fully within the lane.", V),
+        TrackEventType("hard_brake", "Starts at the first frame of visible rapid deceleration (brake lights, "
+                       "pitch, closing gap); ends when the speed is steady again.", V, proposable=True),
+        TrackEventType("u_turn", "Starts when the vehicle begins turning back on itself; ends when it is "
+                       "travelling in the opposite direction.", V),
+        TrackEventType("overtaking", "Starts when the vehicle leaves its lane to pass another; ends when it "
+                       "has returned to a lane ahead of the vehicle it passed.", V),
+        TrackEventType("wrong_side", "The whole span during which the vehicle travels against the flow of "
+                       "the carriageway it is on.", V),
+        TrackEventType("parking", "Starts when the vehicle begins its final manoeuvre into a stopped "
+                       "position; ends when it is stationary and no longer manoeuvring.", V),
+        TrackEventType("changing_lane", "Starts when the vehicle begins to cross a lane line; ends when it "
+                       "is fully in the new lane. Use cut_in instead when the target lane is the ego lane.", V),
+        TrackEventType("merging", "Starts when the vehicle begins to join the carriageway from a slip road, "
+                       "service lane or side road; ends when it is in a through lane.", V),
+        TrackEventType("yielding", "Starts when the vehicle slows or stops to let another road user pass; "
+                       "ends when it resumes.", V),
+        TrackEventType("crossing", "Starts when the person or animal enters the carriageway; ends when they "
+                       "leave it. Use this whether or not there is a marked crossing.", A),
+        TrackEventType("waiting", "The span during which the person is stationary at the edge of the "
+                       "carriageway, oriented towards it, before crossing.", R),
+        TrackEventType("running", "The span during which the person moves at a run rather than a walk.", R),
+        TrackEventType("jaywalking", "Crossing away from a marked crossing while one is visible in frame. "
+                       "Use crossing when no crossing is visible.", R),
+        TrackEventType("looking_at_vehicle", "The span during which the person's head is turned towards the "
+                       "ego vehicle. Label only when the face or head orientation is actually visible.", R),
+        TrackEventType("hesitating", "Starts when the person stops or reverses direction part way across; "
+                       "ends when they commit to a direction.", R),
+        TrackEventType("entering_lane", "Starts when the person or animal crosses the lane edge into a "
+                       "running lane; ends when they are clear of it.", A),
+        # ---- India spans the intent vocabulary cannot say ----
+        TrackEventType("lane_splitting", "The span during which a two-wheeler travels along the gap between "
+                       "two lanes of slower or stopped traffic rather than within a lane.", V),
+        TrackEventType("overtaking_on_left", "Overtaking on the near side. Separate from overtaking because "
+                       "traffic keeps left here, so passing on the left is the manoeuvre with no mirror "
+                       "covering it.", V),
+        TrackEventType("stopping_in_live_lane", "Starts when the vehicle comes to a stop in a running lane "
+                       "without pulling off the carriageway; ends when it moves off. This is what a bus or "
+                       "an auto does at a stop, and it is a planning problem rather than a violation.", V,
+                       proposable=True),
+        TrackEventType("blocking_intersection", "Starts when the vehicle enters a junction it cannot clear "
+                       "and stops within it; ends when it leaves the junction.", V),
+        TrackEventType("reversing_on_carriageway", "The span during which the vehicle moves backwards along "
+                       "a running lane, as opposed to reversing into a parking position.", V),
+        TrackEventType("encroaching_opposing_lane", "Starts when the vehicle crosses the centre into "
+                       "oncoming traffic while continuing in its own direction; ends when it returns. Use "
+                       "wrong_side when it stays there.", V),
+        TrackEventType("weaving", "Repeated lateral movement across lane lines without settling, over at "
+                       "least three crossings.", V),
+    ))
 
 
 def _cliques() -> CliqueSpec:
@@ -362,6 +436,7 @@ def _build() -> Pack:
         class_tree=ClassTree(level_names=("leaf", "l1", "l0", "root")),
         motion_models=_motion_models(),
         context=_context(),
+        track_events=_track_events(),
         scene_model=MovingCameraSceneModelFactory(),
         # The MCAP/CAN ingestion already lives in services/ingest (it fills vehicle_id + ego_speed); the AV
         # pack does not re-wrap it as an adapter yet. Sec ships the first IngestionAdapter (packs/sec).

@@ -3168,6 +3168,16 @@ class LabeloxClient:
         return self._call("GET", f"/api/system/resources",
                           params=None, json_body=None)
 
+    def delete_track_events_by_event_id(self, event_id: str) -> Any:
+        """Delete Event"""
+        return self._call("DELETE", f"/api/track-events/{event_id}",
+                          params=None, json_body=None)
+
+    def patch_track_events_by_event_id(self, event_id: str, body: Any = None) -> Any:
+        """Update Event"""
+        return self._call("PATCH", f"/api/track-events/{event_id}",
+                          params=None, json_body=body)
+
     def post_tracklets_objects_by_object_id_keyframe(self, object_id: str, body: Any = None) -> Any:
         """Set Keyframe"""
         return self._call("POST", f"/api/tracklets/objects/{object_id}/keyframe",
@@ -3227,6 +3237,16 @@ class LabeloxClient:
         """Track Events"""
         return self._call("GET", f"/api/tracks/{track_id}/driving-events",
                           params=None, json_body=None)
+
+    def get_tracks_by_track_id_events(self, track_id: str) -> Any:
+        """List Events"""
+        return self._call("GET", f"/api/tracks/{track_id}/events",
+                          params=None, json_body=None)
+
+    def post_tracks_by_track_id_events(self, track_id: str, body: Any = None) -> Any:
+        """Create Event"""
+        return self._call("POST", f"/api/tracks/{track_id}/events",
+                          params=None, json_body=body)
 
     def post_tracks_by_track_id_intent_propose(self, track_id: str) -> Any:
         """Intent Propose"""
@@ -3516,4 +3536,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 686 routes generated from the server schema.
+# 690 routes generated from the server schema.

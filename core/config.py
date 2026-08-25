@@ -205,6 +205,45 @@ class ClipSettings(BaseModel):
 
 
 # ---- Phase 2 Perception Depth ----
+class TrackEventSettings(BaseModel):
+    """Thresholds for the two heuristic track-event proposers.
+
+    Every one of these is a guess about a monocular estimate, which is why the proposals land `proposed` and
+    a person accepts them. They are here rather than inline so the numbers can be moved on the evidence of a
+    review pass without editing the proposer.
+    """
+
+    # hard_brake. These are set against a measured noise floor rather than against what braking looks like,
+    # because the noise is the larger of the two: over 190,033 consecutive dynamics pairs on the same track,
+    # the median frame-to-frame speed change is 9.1 km/h and the 90th percentile is 64.9 km/h. A 12 km/h
+    # drop, which is what a real hard brake looks like, is about one noise sigma, so a bare threshold
+    # detects the estimator and not the vehicle. The first sweep produced 16,436 proposals over 50 sessions.
+    #
+    # What separates a brake from noise is not size but shape: noise is not monotone and does not stay down.
+    brake_drop_kmh: float = 12.0
+    brake_window_s: float = 1.5
+    # The drop must be non-increasing across at least this many samples. Two-sample spans were 5,553 of the
+    # first sweep's 16,436 and are exactly the shape a single bad estimate makes.
+    brake_min_samples: int = 4
+    # ...and the speed must stay down for this long afterwards, within brake_hold_tol_kmh of where it landed.
+    # A vehicle that brakes hard is slow for a moment; an estimator that glitched is back where it was.
+    brake_hold_s: float = 0.6
+    brake_hold_tol_kmh: float = 8.0
+    # A sample above this is not a measurement. 23% of dynamics rows read over 60 km/h and 10% over 100, on
+    # dashcam footage of Bengaluru city traffic, and the column is clipped at 150.
+    max_plausible_kmh: float = 90.0
+    # stopping_in_live_lane: at or under this speed, within this lateral distance of the ego path, for at
+    # least this long. The lateral bound is what separates stopping in the lane from parking at the kerb.
+    stop_speed_kmh: float = 3.0
+    stop_lateral_m: float = 4.0
+    stop_min_s: float = 2.0
+    # Below this many dynamics rows a track cannot show either shape, and firing on two samples produces
+    # proposals a reviewer has to reject one at a time.
+    min_samples: int = 5
+    # Dynamics rows are IPM monocular estimates; anything less confident than this is not worth proposing on.
+    min_dynamics_confidence: float = 0.3
+
+
 class LaneSettings(BaseModel):
     model: str = "clrernet"        # clrernet | ufldv2 (pod) | classical (local fallback)
     backend: str = "local"         # local (classical proposal) | pod (CLRerNet via cloud seam)
@@ -1026,6 +1065,7 @@ class Settings(BaseSettings):
     quality: QualitySettings = QualitySettings()
     intelligence: IntelligenceSettings = IntelligenceSettings()
     intel: IntelSettings = IntelSettings()  # Data Intelligence Layer (Phase 1)
+    track_events: TrackEventSettings = TrackEventSettings()  # heuristic span-proposer thresholds
     rig: RigSettings = RigSettings()        # Phase 3 camera rig layout + nominal intrinsics
     spatial: SpatialSettings = SpatialSettings()  # Phase 3 calibration + map thresholds
     pii: PiiSettings = PiiSettings()

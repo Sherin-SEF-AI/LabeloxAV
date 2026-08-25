@@ -92,6 +92,32 @@ def validate_context(attrs: dict, pack_id: str | None = None) -> list[str]:
     return spec.validate(attrs)
 
 
+def track_event_spec(pack_id: str | None = None):
+    """The pack's track-event vocabulary, or None when the domain has no behaviour worth spanning."""
+    return active_pack(pack_id).track_events
+
+
+def validate_track_event_type(event_type: str, class_l1: str | None, pack_id: str | None = None) -> list[str]:
+    """Empty when this pack admits this event type on a track of this superclass, else the reasons.
+
+    Applicability is checked here and not only in the picker, because the picker is not the only writer: the
+    proposers and any importer come through the same door, and a `lane_splitting` event on a pedestrian
+    track is a wrong statement whichever of them made it.
+    """
+    spec = active_pack(pack_id).track_events
+    if spec is None:
+        return [f"pack '{pack_id or 'default'}' declares no track events"]
+    t = spec.get(event_type)
+    if t is None:
+        return [f"unknown event type '{event_type}'"]
+    if t.applies_to == "any" or class_l1 is None:
+        return []
+    kinds = {"vehicle": {"two_wheeler", "three_wheeler", "four_wheeler", "heavy"}, "vru": {"vru"}}
+    if class_l1 not in kinds.get(t.applies_to, set()):
+        return [f"event '{event_type}' applies to {t.applies_to} tracks, not '{class_l1}'"]
+    return []
+
+
 def class_aliases(class_id: int, pack_id: str | None = None) -> list[str]:
     """Every word that names this class, the display name first. Never empty.
 

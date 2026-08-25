@@ -78,6 +78,7 @@ from services.api.routers import (
     segmentation,
     service_accounts,
     signs,
+    track_events,
     tracks,
     training,
     triage,
@@ -626,3 +627,4 @@ app.include_router(inbox.router, prefix="/api", tags=["inbox"])
 app.include_router(security.router, prefix="/api", tags=["security"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])
+app.include_router(track_events.router, prefix="/api", tags=["tracks"])

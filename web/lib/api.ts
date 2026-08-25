@@ -1,4 +1,6 @@
 import type {
+  TrackEvent,
+  TrackEventsResponse,
   AgentRunRow,
   ReanalyzeResult,
   InterruptedRun,
@@ -1245,6 +1247,14 @@ export const api = {
   recognizeSigns: (session_id: string, limit = 200) =>
     post<{ recognized: number; text_bearing: number }>(`/api/signs/recognize?session_id=${session_id}&limit=${limit}`, {}),
   track: (id: string) => get<Track>(`/api/tracks/${id}`),
+  // Track events: typed spans within a track. The vocabulary rides with the list so the picker never needs
+  // a second request and always shows the definitions from the pack this track's session was captured under.
+  trackEvents: (id: string) => get<TrackEventsResponse>(`/api/tracks/${id}/events`),
+  createTrackEvent: (id: string, body: { event_type: string; start_frame_id: string; end_frame_id: string; notes?: string }) =>
+    post<TrackEvent>(`/api/tracks/${id}/events`, body),
+  updateTrackEvent: (eventId: string, body: { state?: string; notes?: string; start_frame_id?: string; end_frame_id?: string }) =>
+    patch<TrackEvent>(`/api/track-events/${eventId}`, body),
+  deleteTrackEvent: (eventId: string) => del<{ deleted: string }>(`/api/track-events/${eventId}`),
   // M-F.2 behavior/intent annotation
   intentVocab: () => get<IntentVocab>(`/api/intent/vocab`),
   intentPropose: (id: string) => post<{ proposed: string[]; intents: TrackIntent[] }>(`/api/tracks/${id}/intent/propose`, {}),

@@ -163,9 +163,61 @@ class Track(Base):
     trajectory: Mapped[dict | None] = mapped_column(JSONB)  # per-frame centroids (image + ego frame)
     id_switch_flags: Mapped[dict | None] = mapped_column(JSONB)  # M2.0: flagged re-id/occlusion events
     tracker_version: Mapped[str | None] = mapped_column(String(48))  # M2.0: tracker backend + version
-    intents: Mapped[list] = mapped_column(JSONB, default=list)  # M-F.2 track-level typed intents (proposed/confirmed)
+    # M-F.2 track-level typed intents (proposed/confirmed). The same idea as TrackEvent below without a
+    # time extent, and empty: 0 rows across 11,406 tracks. TrackEvent is what an annotator writes; this is
+    # kept because services/intelligence/intent.py and the VLM dataset generator still read it, and its
+    # vocabulary is the base of the event vocabulary so the two cannot diverge.
+    intents: Mapped[list] = mapped_column(JSONB, default=list)
 
     __table_args__ = (Index("ix_track_session", "session_id"),)
+
+
+class TrackEvent(Base):
+    """A typed span within a track: what this object did, and over which frames.
+
+    The extent is the whole point. `Track.intents` can say a track cut in; it cannot say that a 93-frame
+    track cut in over frames 40 to 55, so nothing downstream can crop the clip, count the exposure, or
+    compare two events on the same track. An event is a row rather than another JSONB entry because
+    "every stopping_in_live_lane in the corpus" is a query the export and the datasheet both need, and
+    scanning a JSONB list on 11,406 tracks is not that query.
+
+    The vocabulary is the pack's, through `track_event_schema()`. Validated in the router rather than by a
+    check constraint: the vocabulary belongs to whichever domain pack the session was captured under, and a
+    constraint would freeze the AV one into the schema for every domain.
+    """
+
+    __tablename__ = "track_event"
+
+    event_id: Mapped[uuid.UUID] = _uuid_pk()
+    track_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("track.track_id", ondelete="CASCADE"))
+    event_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    # The span, as frames rather than timestamps. An annotator drags across the crop strip, which is frames,
+    # and resolving to a timestamp here would make the stored value depend on a frame's ts_ns being right.
+    start_frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    end_frame_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("frame.frame_id", ondelete="CASCADE"))
+    # Denormalised from the frames at write time so ordering and overlap are answerable without a join.
+    # Written by the router, never by the client.
+    start_ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    end_ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # human | heuristic | vlm. Same vocabulary as Object.source, minus the ones that cannot produce an event.
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="human")
+    # proposed | accepted | rejected. A proposer writes `proposed` and only a person moves it off that.
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="proposed")
+    confidence: Mapped[float | None] = mapped_column(Float)
+    # What the proposer measured, so a reviewer can see why it fired rather than only that it did.
+    evidence: Mapped[dict] = mapped_column(JSONB, default=dict)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String(128))
+    ontology_version: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_track_event_track", "track_id"),
+        Index("ix_track_event_type_state", "event_type", "state"),
+        CheckConstraint("end_ts_ns >= start_ts_ns", name="ck_track_event_span"),
+        CheckConstraint("state in ('proposed','accepted','rejected')", name="ck_track_event_state"),
+        CheckConstraint("source in ('human','heuristic','vlm')", name="ck_track_event_source"),
+    )
 
 
 class Object(Base):

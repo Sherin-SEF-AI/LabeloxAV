@@ -280,6 +280,40 @@ class CliqueSpec:
 
 
 @dataclass(frozen=True)
+class TrackEventType:
+    """One typed span an annotator may draw on a track.
+
+    `definition` is the whole of the interface. It is what the annotator reads in the type picker at the
+    moment they are deciding, and a vague one produces a vocabulary where two people label the same
+    manoeuvre differently and the disagreement never surfaces as a disagreement. One sentence, stating what
+    must be visible for the span to start and what ends it.
+    """
+
+    name: str
+    definition: str
+    # vehicle | vru | any. Which kind of track may carry it, so the picker does not offer `lane_splitting`
+    # on a pedestrian.
+    applies_to: str = "any"
+    # True when a proposer in services/autolabel/event_proposals.py can suggest it. Everything else is
+    # human-only, and saying so here stops a later session "completing" the proposers by writing eleven
+    # more heuristics for manoeuvres a monocular estimate cannot see.
+    proposable: bool = False
+
+
+@dataclass(frozen=True)
+class TrackEventSpec:
+    """The track-event vocabulary of a domain."""
+
+    types: tuple[TrackEventType, ...]
+
+    def names(self) -> frozenset[str]:
+        return frozenset(t.name for t in self.types)
+
+    def get(self, name: str) -> TrackEventType | None:
+        return next((t for t in self.types if t.name == name), None)
+
+
+@dataclass(frozen=True)
 class RelationSpec:
     """The relationship vocabulary, and which ordered class pairs can stand in which relation.
 
@@ -476,6 +510,7 @@ class DomainPack(Protocol):
     # Optional: the frame-level vocabulary a person may set on Frame.scene. Empty means the domain has
     # nothing to say about the scene as a whole.
     context: ContextSpec | None
+    track_events: TrackEventSpec | None
     # Optional because they are genuinely domain-specific rather than merely unfinished: an AV pack has no
     # fixed zones to police and no camera to open. A pack that does not fill them is complete, and the engine
     # refuses the corresponding route rather than pretending the capability exists.
@@ -553,6 +588,9 @@ class Pack:
     # Optional: the frame-level vocabulary a person may set on Frame.scene. Empty means the domain
     # has nothing to say about the scene as a whole, and the editor offers no context panel.
     context: ContextSpec | None = None
+    # Optional: the track-level span vocabulary. A domain whose objects have no interesting behaviour over
+    # time (a still-life inspection camera) is complete without one, and the track view offers no event lane.
+    track_events: TrackEventSpec | None = None
     zone_policy: ZonePolicy | None = None                   # static-camera domains only
     stream_source: StreamSource | None = None               # static-camera domains only
 
