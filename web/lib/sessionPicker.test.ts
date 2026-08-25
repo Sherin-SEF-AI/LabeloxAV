@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  DRIVE_STATUS, canOpen, driveStatus, matchesSession, orderByVisit, orderSessions,
+  AUTOLABEL_BATCH, DRIVE_STATUS, canAutolabel, canOpen, driveStatus, jobForSession,
+  matchesSession, orderByVisit, orderSessions,
   previousSession, recentSessions, recordVisit, sessionDate, sessionDetail, sessionLabel,
 } from "./sessionPicker";
 import type { SessionState } from "./sessionPicker";
@@ -202,5 +203,42 @@ describe("a missing drive state", () => {
 
   it("renders no label rather than a guessed one", () => {
     expect(DRIVE_STATUS.unknown.label).toBe("");
+  });
+});
+
+describe("running a drive a batch at a time", () => {
+  it("bounds a press to a batch rather than the whole drive", () => {
+    // There is one GPU in this box; the alternative is an unbounded pass over a thousand frames fired
+    // from a menu.
+    expect(AUTOLABEL_BATCH).toBeGreaterThan(0);
+    expect(AUTOLABEL_BATCH).toBeLessThanOrEqual(500);
+  });
+
+  it("finds the job running against this drive", () => {
+    const rows = [
+      { job_id: "j1", label: "aaaaaaaa", status: "running", progress: 0.4 },
+      { job_id: "j2", label: "bbbbbbbb", status: "running", progress: 0.1 },
+    ];
+    expect(jobForSession(rows, "aaaaaaaa-1111")!.job_id).toBe("j1");
+    expect(jobForSession(rows, "cccccccc-9999")).toBeNull();
+  });
+
+  it("counts a pending job as running, so the button does not offer to start a second", () => {
+    const rows = [{ job_id: "j1", label: "aaaaaaaa", status: "pending", progress: null }];
+    expect(jobForSession(rows, "aaaaaaaa-1111")!.status).toBe("pending");
+  });
+
+  it("ignores a finished job, or the drive would look busy for ever", () => {
+    const rows = [{ job_id: "j1", label: "aaaaaaaa", status: "done", progress: 1 }];
+    expect(jobForSession(rows, "aaaaaaaa-1111")).toBeNull();
+  });
+
+  it("offers labelling only where there is something to label", () => {
+    const st = (o: Partial<SessionState>): SessionState =>
+      ({ session_id: "s", frames: 10, objects: 5, reviewed_objects: 0, ...o });
+    expect(canAutolabel(st({ frames: 0 }))).toBe(false);   // no camera frames at all
+    expect(canAutolabel(undefined)).toBe(false);           // unknown: do not offer GPU work on a guess
+    expect(canAutolabel(st({ objects: 0 }))).toBe(true);
+    expect(canAutolabel(st({}))).toBe(true);
   });
 });

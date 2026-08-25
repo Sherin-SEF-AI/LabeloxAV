@@ -19,9 +19,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, humanizeError } from "@/lib/api";
 import {
-  DRIVE_STATUS, canOpen, driveStatus, matchesSession, orderByVisit, previousSession,
-  recentSessions, recordVisit, sessionDetail, sessionLabel,
+  AUTOLABEL_BATCH, DRIVE_STATUS, canAutolabel, canOpen, driveStatus, jobForSession, matchesSession,
+  orderByVisit, previousSession, recentSessions, recordVisit, sessionDetail, sessionLabel,
 } from "@/lib/sessionPicker";
+import { useJobStream } from "@/lib/useEventStream";
+import { toast } from "@/lib/toast";
 import type { SessionState } from "@/lib/sessionPicker";
 import type { SessionRow } from "@/lib/types";
 import Icon from "@/components/shell/Icon";
@@ -71,6 +73,10 @@ export default function SessionPicker({ sessionId, onPick }: {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const { anchorRef, style, place } = useAnchoredDropdown(open);
+  // Live job rows, so a drive being labelled shows it here instead of in the jobs page. One shared
+  // connection: this hook rides the stream every other watcher already uses.
+  const { data: jobs } = useJobStream();
+  const [starting, setStarting] = useState<string | null>(null);
   // Read inside the click handler, which would otherwise close over the empty map from first render.
   const statesRef = useRef<Map<string, SessionState>>(new Map());
   statesRef.current = states;
@@ -120,6 +126,32 @@ export default function SessionPicker({ sessionId, onPick }: {
   }, [open, anchorRef]);
 
   const current = rows?.find((s) => s.session_id === sessionId) ?? null;
+
+  // One bounded batch, never the whole drive. There is one GPU in this box and the server refuses a
+  // second local job while one is running, so the worst a double-click can do is a 409 the user is told
+  // about rather than two passes competing for the card.
+  const startRun = useCallback(async (s: SessionRow) => {
+    setStarting(s.session_id);
+    try {
+      await api.startAutolabel(s.session_id, AUTOLABEL_BATCH, "local", true);
+      toast(`labelling the next ${AUTOLABEL_BATCH} frames of ${sessionLabel(s)}`, "success");
+    } catch (e) {
+      // The refusals are the interesting ones and each says something true: the GPU is held by training,
+      // another drive is already running, or this session failed its health checks.
+      toast(humanizeError(e), "warn");
+    } finally {
+      setStarting(null);
+    }
+  }, []);
+
+  const stopRun = useCallback(async (jobId: string) => {
+    try {
+      const r = await api.cancelJob(`/api/jobs/autolabel/${jobId}/cancel`);
+      toast(r.stopped ? "auto-label stopped" : (r.detail || "cancel requested"), "info");
+    } catch (e) {
+      toast(`could not stop it: ${humanizeError(e)}`, "error");
+    }
+  }, []);
 
   const choose = useCallback(async (s: SessionRow) => {
     if (s.session_id === sessionId) { setOpen(false); return; }
@@ -206,6 +238,37 @@ export default function SessionPicker({ sessionId, onPick }: {
                     </span>
                   )}
                   {busy === s.session_id && <span className="font-mono text-[9px] text-ink-3 shrink-0">opening...</span>}
+                  {(() => {
+                    const job = jobForSession(jobs?.autolabel ?? [], s.session_id);
+                    if (job) {
+                      const pct = Math.round((job.progress ?? 0) * 100);
+                      return (
+                        <span className="flex items-center gap-1.5 shrink-0"
+                              onClick={(e) => e.stopPropagation()}>
+                          {/* The animation is the point: a bar that only moves when a number changes reads
+                              as frozen on a slow frame, so the fill also breathes while it is running. */}
+                          <span className="relative w-12 h-1 rounded-sm bg-line overflow-hidden">
+                            <span className="absolute inset-y-0 left-0 bg-accent progress-live rounded-sm"
+                                  style={{ width: `${Math.max(4, pct)}%` }} />
+                          </span>
+                          <span className="font-mono text-[9px] text-accent tabular-nums w-7 text-right">{pct}%</span>
+                          <button onClick={() => void stopRun(job.job_id)}
+                            title="stop this auto-label run"
+                            className="font-mono text-[9px] uppercase tracking-wide text-block hover:text-block/80">stop</button>
+                        </span>
+                      );
+                    }
+                    if (!canAutolabel(states.get(s.session_id))) return null;
+                    return (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); void startRun(s); }}
+                        disabled={starting != null}
+                        title={`auto-label the next ${AUTOLABEL_BATCH} unlabelled frames of this drive`}
+                        className="font-mono text-[9px] uppercase tracking-wide text-ink-3 hover:text-accent disabled:opacity-40 shrink-0">
+                        {starting === s.session_id ? "starting..." : "label"}
+                      </button>
+                    );
+                  })()}
                 </button>
               );
             })}

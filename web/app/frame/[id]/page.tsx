@@ -32,6 +32,8 @@ import { StateBadge, ConfBar } from "@/components/StateBadge";
 import ScoreBar from "@/components/shell/ScoreBar";
 import Icon, { MODE_ICON } from "@/components/shell/Icon";
 import ShortcutOverlay from "@/components/shell/ShortcutOverlay";
+import MenuBar from "@/components/shell/MenuBar";
+import { EDITOR_EVENT, EDITOR_MENUS } from "@/lib/editorMenus";
 import IssuePanel from "@/components/labelops/IssuePanel";
 import CloudControl from "@/components/shell/CloudControl";
 import NotificationBell from "@/components/shell/NotificationBell";
@@ -1154,6 +1156,56 @@ export default function FrameEditor() {
     // passed to it explicitly rather than read from its closure.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasMenuAt, dispatch, relabelSelected, fit, save, router, confirm, loadLayers]);
+  // The menu bar raises an intent and this decides what it means, which is the pattern CanvasConsole
+  // already uses: the editor owns the keymap and the state, so a menu must not carry either. Registered
+  // once for the whole set rather than one listener per row.
+  useEffect(() => {
+    const on: Record<string, () => void> = {
+      save: () => void save(),
+      saveAs: () => void saveAs(),
+      confirmFrame: () => confirmFrame(true),
+      prevFrame: () => void gotoFrame(meta?.prev_frame_id ?? null),
+      nextFrame: () => void gotoFrame(meta?.next_frame_id ?? null),
+      openDrives: () => document.querySelector<HTMLButtonElement>("header button[aria-haspopup='dialog']")?.click(),
+      inspect: () => meta && router.push(`/inspect/${meta.session_id}?ts=${meta.ts_ns}`),
+      issue: () => { setRightCollapsed(false); flash("raise it in the Issues panel on the right"); },
+      undo: () => dispatch({ t: "undo" }),
+      redo: () => dispatch({ t: "redo" }),
+      changeClass: () => flash("right-click the object, or press 1-9"),
+      accept: () => void reviewObject("accept"),
+      reject: () => void reviewObject("reject"),
+      hide: () => dispatch({ t: "setVisible", ids: stRef.current.selectedIds, visible: false }),
+      show: () => dispatch({ t: "setVisible", ids: stRef.current.selectedIds, visible: true }),
+      lock: () => dispatch({ t: "setLocked", ids: stRef.current.selectedIds, locked: true }),
+      delete: () => { for (const oid of stRef.current.selectedIds) dispatch({ t: "delete", id: oid }); },
+      selectAll: () => dispatch({ t: "selectBy", how: "all" }),
+      selectNone: () => dispatch({ t: "selectBy", how: "none" }),
+      selectInvert: () => dispatch({ t: "selectBy", how: "invert" }),
+      selectSameClass: () => dispatch({ t: "selectBy", how: "sameClass" }),
+      selectUnreviewed: () => dispatch({ t: "selectBy", how: "unreviewed" }),
+      selectNew: () => dispatch({ t: "selectBy", how: "new" }),
+      selectLowConf: () => dispatch({ t: "selectBy", how: "lowConf", value: 0.5 }),
+      selectRejected: () => dispatch({ t: "selectBy", how: "state", value: "rejected" }),
+      fit: () => fit(),
+      zoomIn: () => zoomBy(1.2),
+      zoomOut: () => zoomBy(1 / 1.2),
+      togglePanel: () => setRightCollapsed((v) => !v),
+      segRoad: () => void segRoad(),
+      proposeLanes: () => void genLanes(),
+      dynamics: () => void recomputeDynamics(),
+      reanalyse: () => { setRightCollapsed(false); flash("reanalyse is in the properties panel, agent tab"); },
+      autolabelFrame: () => { setRightCollapsed(false); flash("run it from the agent tab on the right"); },
+      autolabelDrive: () => document.querySelector<HTMLButtonElement>("header button[aria-haspopup='dialog']")?.click(),
+      stopAutolabel: () => document.querySelector<HTMLButtonElement>("header button[aria-haspopup='dialog']")?.click(),
+    };
+    const fns = Object.entries(on).map(([k, fn]) => {
+      const name = `${EDITOR_EVENT}${k}`;
+      window.addEventListener(name, fn);
+      return () => window.removeEventListener(name, fn);
+    });
+    return () => fns.forEach((off) => off());
+  });
+
   const zoomBy = useCallback((f: number) => dispatch({ t: "viewport", viewport: { ...st.viewport, scale: Math.max(0.05, Math.min(20, st.viewport.scale * f)) } }), [st.viewport, dispatch]);
   const gotoFrame = useCallback(async (fid: string | null) => {
     if (!fid) return;
@@ -1403,6 +1455,11 @@ export default function FrameEditor() {
           <span className="font-display font-bold text-[15px] tracking-tight text-ink">Labelox</span>
           <span className="font-mono font-semibold text-[12px] text-accent tracking-tight">AV</span>
         </button>
+        <span className="w-px h-5 bg-line" />
+        {/* The map of what the editor can do. Everything else on this screen is a surface for doing one
+            kind of thing; this is the only one that lists them all, including the ones behind a collapsed
+            panel or a shortcut nobody has been told about. */}
+        <MenuBar menus={EDITOR_MENUS} compact fixed />
         <span className="w-px h-5 bg-line" />
         <div className="flex flex-col leading-tight shrink-0">
           <span className="font-mono text-[11px] text-ink">FRAME {String(id).slice(0, 8)}</span>

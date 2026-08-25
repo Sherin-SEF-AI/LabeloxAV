@@ -192,3 +192,39 @@ export function orderByVisit(sessions: readonly SessionRow[], currentId: string 
     return (b.start_ts_ns || 0) - (a.start_ts_ns || 0);
   });
 }
+
+// ---- running a drive through auto-label, a batch at a time --------------------------------------
+
+/**
+ * How many frames one press covers.
+ *
+ * There is one GPU in this box, and the alternative to a bounded batch is firing an unbounded pass over a
+ * thousand-frame drive from a menu. 200 frames is roughly a minute of work: long enough to be worth
+ * pressing, short enough that a wrong drive costs a minute rather than an afternoon. The server also
+ * refuses to start a second local job while one is running, so this cannot be stacked up by clicking.
+ */
+export const AUTOLABEL_BATCH = 200;
+
+export type RunningJob = { job_id: string; progress: number | null; status: string };
+
+/**
+ * The autolabel job for this drive, if one is running.
+ *
+ * Matched on the session id, which the job row carries as its label truncated to eight characters. Eight
+ * hex characters across 377 drives is not a collision risk, and the alternative is a second request per
+ * row.
+ */
+export function jobForSession(rows: readonly { job_id: string; label?: string; status: string;
+                                               progress?: number | null }[],
+                              sessionId: string): RunningJob | null {
+  const head = sessionId.slice(0, 8);
+  const j = rows.find((r) => (r.label ?? "").startsWith(head)
+                             && (r.status === "running" || r.status === "pending"));
+  return j ? { job_id: j.job_id, progress: j.progress ?? null, status: j.status } : null;
+}
+
+/** Whether it is worth offering to label this drive at all. */
+export function canAutolabel(st: SessionState | undefined): boolean {
+  const s = driveStatus(st);
+  return s === "unlabelled" || s === "ready" || s === "working";
+}

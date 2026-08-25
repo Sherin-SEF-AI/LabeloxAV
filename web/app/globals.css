@@ -254,6 +254,26 @@ button:not(:disabled) {
   50%      { border-color: rgba(91, 135, 201, 0.6); }
 }
 
+/* A progress fill that is visibly alive between updates.
+   A bar that only moves when its number changes reads as frozen on a slow frame, and an auto-label frame
+   can take a second, so the fill carries a travelling highlight as well as a width. `.running` cannot be
+   reused here: it animates border-color and this has no border. */
+.progress-live {
+  position: relative;
+  overflow: hidden;
+}
+.progress-live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  animation: lbx-progress-sheen 1.2s linear infinite;
+}
+@keyframes lbx-progress-sheen {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+
 /* Entrance: a soft fade + rise, staggered via inline --d, for dashboard cards and rows. */
 @keyframes lbx-fade-up {
   from { opacity: 0; transform: translateY(10px); }
@@ -301,6 +321,7 @@ button:not(:disabled) {
 
 @media (prefers-reduced-motion: reduce) {
   .reveal, .reveal-pop, .skeleton, .running-dot, .running, .lbx-progress-bar, .fade-up { animation: none; }
+  .progress-live::after { animation: none; display: none; }
   .reveal, .reveal-pop, .fade-up { opacity: 1; transform: none; }
   .lift, .sheen::after, .rail::before { transition: none; }
 }

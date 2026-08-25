@@ -285,6 +285,11 @@ class AutolabelStartIn(BaseModel):
     session_id: str
     limit: int | None = None
     compute_target: str = "local"  # local (run here now) | cloud (park for the A100 heavy stack)
+    # Cover only frames that carry no objects yet. `limit` alone takes the first N frames by timestamp and
+    # nothing skips ones already labelled, so a drive cannot be worked through in batches: the second batch
+    # redoes the first and looks like it ran. Off by default because a re-detect pass deliberately redoes
+    # frames that already have objects, and would silently become a no-op.
+    only_unlabelled: bool = False
 
 
 class UserCreateIn(BaseModel):

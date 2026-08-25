@@ -1230,8 +1230,10 @@ export const api = {
   correctionCoverage: () => get<CorrectionCoverage>("/api/corrections/coverage"),
   computeObjectEmbeddings: (session_id?: string) =>
     post<{ started: boolean }>("/api/corrections/embed" + (session_id ? `?session_id=${session_id}` : ""), {}),
-  startAutolabel: (session_id: string, limit?: number, compute_target: "local" | "cloud" = "local") =>
-    post<{ job_id: string; status: string }>("/api/autolabel/start", { session_id, limit, compute_target }),
+  startAutolabel: (session_id: string, limit?: number, compute_target: "local" | "cloud" = "local",
+                   only_unlabelled = false) =>
+    post<{ job_id: string; status: string }>("/api/autolabel/start",
+      { session_id, limit, compute_target, only_unlabelled }),
   estimateEgoMasks: (force = false) =>
     post<{ cameras: number; with_hood: number; no_hood: string[] }>(`/api/autolabel/ego-masks/estimate?force=${force}`, {}),
   piiBackfill: (limit = 2000) =>

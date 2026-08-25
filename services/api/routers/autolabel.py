@@ -44,7 +44,7 @@ async def _bump(job_id, **fields) -> None:
             await db.commit()
 
 
-async def _run_guarded(job_id, session_id, limit) -> None:
+async def _run_guarded(job_id, session_id, limit, only_unlabelled: bool = False) -> None:
     from services.autolabel.progress import ProgressBand
     from services.autolabel.runner import autolabel_session
     from services.job_control import JobCanceled, raise_if_canceled
@@ -64,7 +64,8 @@ async def _run_guarded(job_id, session_id, limit) -> None:
             await raise_if_canceled(db, AutolabelJob, uuid.UUID(str(job_id)), progress=f)
 
     try:
-        result = await autolabel_session(session_id, limit, on_progress=report)
+        result = await autolabel_session(session_id, limit, on_progress=report,
+                                         only_unlabelled=only_unlabelled)
         await _bump(job_id, status="done", progress=1.0, counts=result)
         log.info("autolabel.done", job_id=str(job_id), **{k: result[k] for k in result if k in ("n_frames", "n_objects")})
     except JobCanceled:
@@ -109,7 +110,8 @@ async def start(payload: AutolabelStartIn, db: AsyncSession = Depends(db_session
         await mark_queued_for_cloud(job_id, payload.session_id, payload.limit)
         return {"job_id": str(job_id), "status": "queued-cloud"}
 
-    spawn(_run_guarded(job_id, uuid.UUID(payload.session_id), payload.limit), name="_run_guarded")
+    spawn(_run_guarded(job_id, uuid.UUID(payload.session_id), payload.limit,
+                       payload.only_unlabelled), name="_run_guarded")
     return {"job_id": str(job_id), "status": "pending"}
 
 
