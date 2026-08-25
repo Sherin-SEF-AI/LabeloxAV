@@ -39,6 +39,7 @@ import { MODES, type ToolGroup } from "@/lib/editor/registry";
 import type { SelectHow } from "@/components/editor/useEditor";
 import Filmstrip from "@/components/editor/Filmstrip";
 import HistoryPanel from "@/components/editor/HistoryPanel";
+import SessionPicker from "@/components/editor/SessionPicker";
 import PropertiesPanel from "@/components/editor/properties/PropertiesPanel";
 import CursorReadout from "@/components/editor/CursorReadout";
 import { camLabel } from "@/lib/editor/camLabel";
@@ -1309,10 +1310,14 @@ export default function FrameEditor() {
           <span className="font-mono font-semibold text-[12px] text-accent tracking-tight">AV</span>
         </button>
         <span className="w-px h-5 bg-line" />
-        <div className="flex flex-col leading-tight">
+        <div className="flex flex-col leading-tight shrink-0">
           <span className="font-mono text-[11px] text-ink">FRAME {String(id).slice(0, 8)}</span>
           <span className="font-mono text-[9.5px] text-ink-3">{st.objects.length} objects{meta.is_lidar ? " · lidar" : ""}</span>
         </div>
+        {/* The drive this frame belongs to. The bar named the frame and not the session, so on a fleet of
+            377 there was no way to tell which one you were in, or to reach another without going out to
+            triage and back. Routed through gotoFrame so unsaved work is flushed before leaving. */}
+        <SessionPicker sessionId={meta.session_id} onPick={(fid) => void gotoFrame(fid)} />
         {meta.annotation_source ? (
           <span title={meta.annotation_source === "imported"
             ? "these labels were imported from a public dataset, not created in this app"
