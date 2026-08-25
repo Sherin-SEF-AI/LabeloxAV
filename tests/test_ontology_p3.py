@@ -242,3 +242,30 @@ class TestTheParserCatchesWhatValidationCannot:
         from services.autolabel.ontology import load_ontology as _load
 
         _load()  # raises if any mapping repeats a key
+
+
+class TestTheDatabaseKnowsTheOntology:
+    """`object.class_id` is a foreign key into `ontology_class`, and the YAML is the source of truth.
+
+    Editing the YAML without running scripts/seed_ontology.py leaves the two disagreeing, and nothing says
+    so: reads work, the class list renders, the editor offers the new class, and only the save fails - with
+    a foreign-key violation the annotator sees as a 500. That is how the 0.2.0 bump shipped, with twelve
+    classes in the YAML and none in the table.
+    """
+
+    @pytest.mark.db
+    @pytest.mark.asyncio
+    async def test_every_yaml_class_is_seeded(self):
+        from sqlalchemy import select
+
+        from db.models import OntologyClass
+        from db.session import get_sessionmaker
+
+        onto = get_ontology()
+        async with get_sessionmaker()() as db:
+            seeded = set((await db.execute(select(OntologyClass.id))).scalars())
+        missing = sorted({c.id for c in onto.classes} - seeded)
+        assert not missing, (
+            f"{len(missing)} classes are in the ontology YAML but not in ontology_class: {missing[:20]}. "
+            "Any object created on one of them fails a foreign-key check. "
+            "Fix: uv run python -m scripts.seed_ontology")
