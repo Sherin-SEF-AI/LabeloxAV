@@ -175,7 +175,7 @@ async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = D
             raise HTTPException(400, {"attr_errors": errors})
         merged = dict(obj.attrs or {})
         merged.update(payload.attrs)
-        obj.attrs = merged
+        obj.attrs = onto.derive_attrs(merged, obj.class_id)
 
     if payload.rot_deg is not None:
         obj.rot_deg = payload.rot_deg

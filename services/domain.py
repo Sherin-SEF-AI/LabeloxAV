@@ -92,6 +92,18 @@ def validate_context(attrs: dict, pack_id: str | None = None) -> list[str]:
     return spec.validate(attrs)
 
 
+def class_aliases(class_id: int, pack_id: str | None = None) -> list[str]:
+    """Every word that names this class, the display name first. Never empty.
+
+    Declared in the pack's own ontology YAML, which `OntologySpec.yaml_path` is the pack's statement of
+    where its class tree lives, and read back through the loader that already parses it. Not a second
+    mapping on the Pack dataclass: two lists of synonyms for one class tree is how the synonyms drift.
+    """
+    from services.autolabel.ontology import get_ontology
+
+    return get_ontology(pack_id).aliases_for(class_id)
+
+
 def redaction_targets(pack_id: str | None = None):
     """The active pack's privacy redaction targets (AV: face, plate). The anonymizer runs a detector per
     image target; audio targets (speech) are enforced on the export/audio path."""

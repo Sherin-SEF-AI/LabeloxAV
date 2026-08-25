@@ -57,7 +57,21 @@ router = APIRouter()
 log = get_logger("api.objects")
 
 # Directed relationship kinds the editor offers (the India case is rider_of on a two-wheeler).
-_RELATION_KINDS = {"rider_of", "towed_by", "part_of", "member_of", "occludes"}
+# One of three relation vocabularies in the tree, and they do not agree: `SCENE_RELATIONS` in
+# services/intelligence/scene_graph.py is a disjoint set of six, and `RelationSpec.kinds` in the AV pack is
+# a third. Nothing enforces the pack's, so this set is what an annotator can actually create. The three new
+# kinds are added to all three; reconciling the divergence itself is a larger change than this one.
+_RELATION_KINDS = {"rider_of", "towed_by", "part_of", "member_of", "occludes",
+                   # A vehicle under power pulling a disabled one, distinct from `towed_by` which names the
+                   # thing being pulled. Both directions are labelled because either object can be the one
+                   # a detector found first.
+                   "towing",
+                   # An animal or a person drawing a cart. Not `towing`: the puller is not a vehicle and the
+                   # pair moves at walking pace, which is the part a planner needs.
+                   "pulling",
+                   # A person driving livestock along the road. The animals are a group, the person is not
+                   # in contact with any of them, and the whole assembly turns together.
+                   "herding"}
 
 
 @router.post("/objects/{object_id}/relate", dependencies=[Depends(require_role("reviewer"))])
@@ -669,7 +683,8 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         mask_encoding = "polygon"
     obj = Object(
         object_id=oid, frame_id=frame.frame_id, class_id=onto.by_name(payload.class_name).id,
-        bbox=payload.bbox, mask_uri=mask_uri, mask_encoding=mask_encoding, attrs=payload.attrs or {},
+        bbox=payload.bbox, mask_uri=mask_uri, mask_encoding=mask_encoding,
+        attrs=onto.derive_attrs(payload.attrs or {}, onto.by_name(payload.class_name).id),
         conf=1.0, source="human", state=state, rot_deg=payload.rot_deg, keypoints=payload.keypoints,
         polyline=payload.polyline, cuboid_3d=payload.cuboid_3d,
         # Who drew it and under which job. Both null for a label drawn outside a job, which is every

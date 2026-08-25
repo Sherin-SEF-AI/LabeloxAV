@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -56,6 +58,11 @@ class OntologyClassDef:
     l0: str
     l1: str
     india: bool
+    # What else this thing is called. Open-vocabulary detectors are prompted with words, not ids, and a
+    # class named `autorickshaw` is invisible to a prompt that says "tuk-tuk". Aliases also stop the
+    # duplicate-class failure that put 48,322 objects into traffic_sign: `handcart` and `thela` are
+    # `push_cart`, and the answer is a synonym rather than a third class nobody reconciles.
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass
@@ -64,6 +71,20 @@ class AttributeDef:
     type: str
     values: list | None = None
     range: tuple[float, float] | None = None
+    # Computed from another attribute at write time and refused on a direct write. `triple_riding` is not a
+    # second opinion about `occupant_count`, it is a reading of it, and letting both be set independently
+    # produces frames that say three people and not triple riding.
+    derived_from: str | None = None
+
+
+# How each derived attribute is computed from its source. Keyed by the derived attribute's name, matching
+# `derived_from` in the YAML; a name here with no YAML entry is inert, a YAML entry with no deriver raises.
+#
+# Three is the legal threshold for a two-wheeler and the number the traffic code names, so the comparison is
+# `>= 3` rather than "more than the seats".
+_DERIVERS: dict[str, Callable[[Any], Any]] = {
+    "triple_riding": lambda n: bool(isinstance(n, int) and not isinstance(n, bool) and n >= 3),
+}
 
 
 @dataclass
@@ -74,6 +95,14 @@ class Ontology:
     attributes: dict[str, AttributeDef] = field(default_factory=dict)
     # Per-subclass (l1) applicable-attribute allowlist. A subclass absent here means all attributes apply.
     attribute_scope: dict[str, list[str]] = field(default_factory=dict)
+    # Per-class extras, keyed by class NAME, unioned onto whatever the l1 scope allows.
+    #
+    # l1 is too coarse for the attributes that matter here. `heavy` holds bus, school_bus, truck, tractor,
+    # tipper, ambulance, fire_truck, bullock_cart and harvester together, so a footboard-passenger attribute
+    # scoped at l1 is offered on every truck, and an attribute offered is an attribute somebody sets. This
+    # layer is additive: no class changes l1, no existing scope entry moves, and a class absent from it
+    # behaves exactly as before.
+    attribute_scope_class: dict[str, list[str]] = field(default_factory=dict)
 
     _by_id: dict[int, OntologyClassDef] = field(default_factory=dict, repr=False)
     _by_name: dict[str, OntologyClassDef] = field(default_factory=dict, repr=False)
@@ -96,12 +125,54 @@ class Ontology:
         return name in self._by_name
 
     def attrs_for_class(self, class_id: int) -> list[str] | None:
-        """Attribute names applicable to a class (by its l1 subclass). None means all attributes apply."""
+        """Attribute names applicable to a class. None means all attributes apply.
+
+        The l1 scope, plus any per-class extras. Union rather than override: a city_bus is still a heavy
+        vehicle and still wants the heavy attributes, it just also wants two of its own.
+        """
         try:
-            l1 = self.by_id(class_id).l1
+            c = self.by_id(class_id)
         except KeyError:
             return None
-        return self.attribute_scope.get(l1)
+        base = self.attribute_scope.get(c.l1)
+        extra = self.attribute_scope_class.get(c.name)
+        if base is None:
+            # The l1 is unscoped, which already means "everything applies", so extras add nothing.
+            return None
+        return base if not extra else [*base, *(a for a in extra if a not in base)]
+
+    def derive_attrs(self, attrs: dict, class_id: int | None = None) -> dict:
+        """Return `attrs` with every derived attribute recomputed from its source.
+
+        Called after the merge on every write path, so the derived value is a fact about the stored attrs
+        rather than a second thing to keep in step. A derived key whose source is absent or out of scope is
+        removed: leaving a stale `triple_riding: true` behind after somebody corrected the occupant count to
+        one is worse than not having the attribute.
+        """
+        out = dict(attrs)
+        scope = self.attrs_for_class(class_id) if class_id is not None else None
+        for name, spec in self.attributes.items():
+            if not spec.derived_from:
+                continue
+            if scope is not None and name not in scope:
+                out.pop(name, None)
+                continue
+            src = out.get(spec.derived_from)
+            if src is None:
+                out.pop(name, None)
+                continue
+            fn = _DERIVERS.get(name)
+            if fn is None:
+                # Declared in the YAML with no implementation here. Refusing to guess: an attribute that
+                # silently derives nothing is a field consumers will read and trust.
+                raise ValueError(f"attribute '{name}' is declared derived but has no deriver")
+            out[name] = fn(src)
+        return out
+
+    def aliases_for(self, class_id: int) -> list[str]:
+        """What else this class is called, the display name first. Never empty."""
+        c = self.by_id(class_id)
+        return [c.name, *c.aliases]
 
     def concept_phrases(self, india_first: bool = True) -> list[str]:
         """Ontology names as open-vocab prompts for SAM 3.1 PCS. India/rare classes first."""
@@ -137,6 +208,9 @@ class Ontology:
                 errors.append(f"attribute '{key}' not applicable to class {class_id}")
                 continue
             spec = self.attributes[key]
+            if spec.derived_from:
+                errors.append(f"attribute '{key}' is computed from '{spec.derived_from}' and cannot be set")
+                continue
             if spec.type == "enum":
                 if val not in (spec.values or []):
                     errors.append(f"attribute '{key}'={val!r} not in {spec.values}")
@@ -148,6 +222,10 @@ class Ontology:
             elif spec.type == "int":
                 if not isinstance(val, int) or isinstance(val, bool):
                     errors.append(f"attribute '{key}' must be int")
+                elif spec.range and not (spec.range[0] <= val <= spec.range[1]):
+                    # The float branch has always checked this and the int branch never did, so
+                    # `occlusion_pct: 400` and `passenger_load: -3` both validated.
+                    errors.append(f"attribute '{key}'={val} out of range {spec.range}")
             elif spec.type == "bool":
                 if not isinstance(val, bool):
                     errors.append(f"attribute '{key}' must be bool")
@@ -163,7 +241,8 @@ def load_ontology(path: str | Path | None = None) -> Ontology:
         data = yaml.safe_load(fh)
 
     classes = [
-        OntologyClassDef(id=c["id"], name=c["name"], l0=c["l0"], l1=c["l1"], india=bool(c.get("india", False)))
+        OntologyClassDef(id=c["id"], name=c["name"], l0=c["l0"], l1=c["l1"],
+                         india=bool(c.get("india", False)), aliases=tuple(c.get("aliases") or ()))
         for c in data["classes"]
     ]
 
@@ -171,7 +250,8 @@ def load_ontology(path: str | Path | None = None) -> Ontology:
     for name, spec in (data.get("attributes") or {}).items():
         rng = tuple(spec["range"]) if "range" in spec else None
         attributes[name] = AttributeDef(
-            name=name, type=spec["type"], values=spec.get("values"), range=rng  # type: ignore[arg-type]
+            name=name, type=spec["type"], values=spec.get("values"), range=rng,  # type: ignore[arg-type]
+            derived_from=spec.get("derived_from"),
         )
 
     # Integrity checks: unique ids and names in the governed YAML.
@@ -181,6 +261,22 @@ def load_ontology(path: str | Path | None = None) -> Ontology:
         raise ValueError("ontology has duplicate class ids")
     if len(set(names)) != len(names):
         raise ValueError("ontology has duplicate class names")
+
+    # An alias that collides with a real class name, or with another class's alias, is worse than no alias:
+    # a prompt or an importer resolving "handcart" would get whichever class the loader happened to see
+    # first. Checked at load so a bad edit fails on startup rather than in a labelling session.
+    alias_owner: dict[str, str] = {}
+    for c in classes:
+        for a in c.aliases:
+            if a in names:
+                raise ValueError(f"alias '{a}' on '{c.name}' is already a class name")
+            if a in alias_owner:
+                raise ValueError(f"alias '{a}' claimed by both '{alias_owner[a]}' and '{c.name}'")
+            alias_owner[a] = c.name
+
+    for name, spec in attributes.items():
+        if spec.derived_from and spec.derived_from not in attributes:
+            raise ValueError(f"attribute '{name}' derives from unknown attribute '{spec.derived_from}'")
 
     # Merge annotator-added custom classes (defensively skipping any id/name already governed, so a stale
     # sidecar can never break loading).
@@ -194,12 +290,26 @@ def load_ontology(path: str | Path | None = None) -> Ontology:
         seen_names.add(c["name"])
 
     scope = {k: list(v) for k, v in (data.get("attribute_scope") or {}).items()}
+    scope_class = {k: list(v) for k, v in (data.get("attribute_scope_class") or {}).items()}
+    unknown = sorted(set(scope_class) - seen_names)
+    if unknown:
+        raise ValueError(f"attribute_scope_class names unknown classes: {unknown}")
+
+    # A misspelled attribute in a scope list does not fail, it hides: the editor stops offering the
+    # attribute for that class and validate_attrs starts refusing it, and both look like the attribute was
+    # deliberately scoped out.
+    for label, table in (("attribute_scope", scope), ("attribute_scope_class", scope_class)):
+        for key, names_in in table.items():
+            bad = sorted(set(names_in) - set(attributes))
+            if bad:
+                raise ValueError(f"{label}['{key}'] names unknown attributes: {bad}")
     return Ontology(
         version=data["version"],
         hierarchy_levels=int(data["hierarchy_levels"]),
         classes=classes,
         attributes=attributes,
         attribute_scope=scope,
+        attribute_scope_class=scope_class,
     )
 
 

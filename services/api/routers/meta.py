@@ -148,14 +148,23 @@ async def ontology():
         "version": onto.version,
         "hierarchy_levels": onto.hierarchy_levels,
         "attributes": {
-            n: {"type": a.type, "values": a.values, "range": list(a.range) if a.range else None}
+            n: {"type": a.type, "values": a.values, "range": list(a.range) if a.range else None,
+                # The client renders a derived attribute read-only. Without this it draws an editable
+                # control for a field the server refuses on write, which reads to an annotator as a bug in
+                # their own input.
+                "derived_from": a.derived_from}
             for n, a in onto.attributes.items()
         },
-        "classes": [OntologyClassOut(id=c.id, name=c.name, l0=c.l0, l1=c.l1, india=c.india).model_dump()
+        # Aliases ride alongside the class rather than inside OntologyClassOut, which is also the response
+        # model for the class-creation endpoints above and has no business gaining a field they cannot set.
+        "classes": [{**OntologyClassOut(id=c.id, name=c.name, l0=c.l0, l1=c.l1, india=c.india).model_dump(),
+                     "aliases": list(c.aliases)}
                     for c in sorted(onto.classes, key=lambda c: c.id)],
         # Per-subclass (l1) applicable-attribute allowlist, so the editor shows only the relevant attributes
         # for an object's class. A subclass absent here means all attributes apply.
         "attribute_scope": onto.attribute_scope,
+        # Per-class extras unioned onto the l1 allowlist, for the attributes l1 is too coarse to express.
+        "attribute_scope_class": onto.attribute_scope_class,
     }
 
 

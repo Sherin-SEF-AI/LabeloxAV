@@ -77,6 +77,80 @@
     },
     "vlm_prompt_template": "You are labeling an object cropped from an Indian road scene for an autonomous-driving dataset. Identify the object and read its attributes."
   },
+  "cliques": [
+    {
+      "class_names": [
+        "bullock_cart",
+        "push_cart",
+        "vendor_handcart",
+        "cargo_bike"
+      ],
+      "cost": 0.2,
+      "crosses_safety": false,
+      "name": "carts"
+    },
+    {
+      "class_names": [
+        "bus",
+        "truck",
+        "tractor",
+        "water_tanker",
+        "petrol_tanker",
+        "container_truck",
+        "multi_axle_trailer",
+        "tractor_trolley"
+      ],
+      "cost": 0.2,
+      "crosses_safety": false,
+      "name": "heavy_vehicles"
+    },
+    {
+      "class_names": [
+        "cattle",
+        "buffalo",
+        "goat",
+        "dog",
+        "pig"
+      ],
+      "cost": 0.2,
+      "crosses_safety": false,
+      "name": "livestock"
+    },
+    {
+      "class_names": [
+        "pedestrian",
+        "rider",
+        "scooter_with_rider",
+        "delivery_rider_bike",
+        "child",
+        "person_carrying_load"
+      ],
+      "cost": 1.0,
+      "crosses_safety": true,
+      "name": "pedestrians_vs_riders"
+    },
+    {
+      "class_names": [
+        "autorickshaw",
+        "e_rickshaw",
+        "cycle_rickshaw"
+      ],
+      "cost": 0.2,
+      "crosses_safety": false,
+      "name": "three_wheelers"
+    },
+    {
+      "class_names": [
+        "motorcycle",
+        "scooter",
+        "moped",
+        "cycle"
+      ],
+      "cost": 0.2,
+      "crosses_safety": false,
+      "name": "two_wheelers"
+    }
+  ],
   "eval_strata": {
     "critical_class_names": [
       "cattle",
@@ -163,8 +237,8 @@
       44,
       45
     ],
-    "governed_classes_sha256": "ee2e8607bbee11f4573219a87dfdf1cdcd5c8a53be1cac6916f77b099ad89a32",
-    "n_governed_classes": 166,
+    "governed_classes_sha256": "4047e216cef41329e13528c2cdb151f1652d1455ceeb51a2463667f0f3c42249",
+    "n_governed_classes": 168,
     "stuff_l0": [
       "ignore",
       "surface"
@@ -246,7 +320,7 @@
       "truck",
       "water_tanker"
     ],
-    "version": "labelox-in-0.1.0"
+    "version": "labelox-in-0.2.0"
   },
   "privacy": {
     "legal_regime": "DPDPA",
@@ -296,6 +370,34 @@
         }
       }
     ]
+  },
+  "relations": {
+    "inverse": {
+      "occluded_by": "occludes",
+      "towed_by": "towing"
+    },
+    "kinds": [
+      "crossing_in_front_of",
+      "following",
+      "herding",
+      "member_of",
+      "occluded_by",
+      "occludes",
+      "parked_near",
+      "part_of",
+      "pulling",
+      "rider_of",
+      "towed_by",
+      "towing"
+    ],
+    "overlap_pairs": {
+      "animal|cart": "towed_by",
+      "vru|cart": "towed_by",
+      "vru|four_wheeler": "part_of",
+      "vru|heavy_vehicle": "part_of",
+      "vru|three_wheeler": "rider_of",
+      "vru|two_wheeler": "rider_of"
+    }
   },
   "safety": {
     "accept_far_bounds": {
@@ -420,6 +522,7 @@
       "school_bus": 0.05,
       "school_bus_stop": 0.05,
       "school_children_group": 0.02,
+      "school_van": 0.05,
       "scooter": 0.05,
       "sedan": 0.05,
       "service_lane": 0.05,
@@ -446,6 +549,7 @@
       "temp_barricade": 0.05,
       "temp_bus_stop": 0.05,
       "tempo": 0.05,
+      "tempo_traveller": 0.05,
       "tipper": 0.05,
       "toll_booth": 0.05,
       "tractor": 0.05,

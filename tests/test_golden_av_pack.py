@@ -1,8 +1,8 @@
 """The permanent per-pack parity gate.
 
 A frozen JSON snapshot of each pack's every surface. Any change to a pack's behaviour (ontology, safety
-definition, auto-label profile, eval strata, quality profile, forge targets, privacy plane, scene model)
-changes its digest and fails this test. AV metric parity is a hard gate for the multi-domain refactor, so AV
+definition, auto-label profile, eval strata, quality profile, forge targets, privacy plane, scene model,
+relation vocabulary, confusion cliques) changes its digest and fails this test. AV metric parity is a hard gate for the multi-domain refactor, so AV
 behaviour may only move by a deliberate, reviewed golden update; the Sec golden guards Sec the same way.
 
 To update after an intentional change:  LBX_REGEN_GOLDEN=1 pytest tests/test_golden_av_pack.py

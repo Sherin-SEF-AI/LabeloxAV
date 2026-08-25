@@ -12,6 +12,7 @@ import pytest
 from core.config import get_settings
 from core.storage import get_object_store
 from core.timebase import now_ns, seconds_to_ns
+from services.autolabel.ontology import get_ontology
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.db]
 
@@ -86,9 +87,9 @@ async def _seed_objects() -> uuid.UUID:
 
 @requires_infra
 async def test_export_seals_commit_and_passes_reimport():
-    from services.export.dataset import SliceSpec, export_dataset, reimport_sanity
     from db.models import DatasetCommit
     from db.session import get_sessionmaker
+    from services.export.dataset import SliceSpec, export_dataset, reimport_sanity
 
     sid = await _seed_objects()
     spec = SliceSpec(
@@ -130,7 +131,9 @@ async def test_export_seals_commit_and_passes_reimport():
         commit = await db.get(DatasetCommit, result["commit_id"])
         assert commit is not None
         assert commit.object_count == 2
-        assert commit.ontology_version == "labelox-in-0.1.0"
+        # The commit records the ontology it was sealed under, which is the property worth asserting; the
+        # literal version is pinned in tests/test_ontology_p3.py instead.
+        assert commit.ontology_version == get_ontology().version
 
 
 @requires_infra

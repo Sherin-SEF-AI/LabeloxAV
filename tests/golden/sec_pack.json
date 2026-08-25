@@ -68,6 +68,7 @@
     },
     "vlm_prompt_template": "You are labeling an object cropped from an Indian CCTV / security camera scene. Identify the object and read its attributes."
   },
+  "cliques": null,
   "eval_strata": {
     "critical_class_names": [
       "abandoned_object",
@@ -238,6 +239,7 @@
     ],
     "sensor_checks": []
   },
+  "relations": null,
   "safety": {
     "accept_far_bounds": {
       "abandoned_object": 0.01,

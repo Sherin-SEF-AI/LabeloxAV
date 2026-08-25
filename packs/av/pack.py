@@ -211,7 +211,14 @@ def _cliques() -> CliqueSpec:
                             cost=1.0, crosses_safety=True),
             ConfusionClique("heavy_vehicles",
                             ("bus", "truck", "tractor", "water_tanker", "petrol_tanker",
-                             "container_truck", "multi_axle_trailer"), cost=0.2),
+                             "container_truck", "multi_axle_trailer",
+                                              # Two bodies on one chassis, and the
+                                              # failure is a box around one of them. It joins this
+                                              # clique rather than getting an `articulated` one of its
+                                              # own, because the confusion it is actually in is with
+                                              # `tractor`, which is already here, and because a class
+                                              # may belong to at most one clique.
+                                              "tractor_trolley"), cost=0.2),
             ConfusionClique("carts", ("bullock_cart", "push_cart", "vendor_handcart", "cargo_bike"),
                             cost=0.2),
         ),
@@ -262,7 +269,11 @@ def _relations() -> RelationSpec:
     """
     return RelationSpec(
         kinds=frozenset({"rider_of", "towed_by", "part_of", "member_of", "occludes",
-                         "occluded_by", "following", "crossing_in_front_of", "parked_near"}),
+                         "occluded_by", "following", "crossing_in_front_of", "parked_near",
+                         # towing is the active side of towed_by; pulling is an animal or a person drawing
+                         # a cart, which is not a tow and does not move like one; herding is a person
+                         # driving livestock without touching any of it.
+                         "towing", "pulling", "herding"}),
         overlap_pairs={
             # A person on a two-wheeler or three-wheeler. The India case the editor was built around.
             ("vru", "two_wheeler"): "rider_of",
@@ -275,7 +286,7 @@ def _relations() -> RelationSpec:
             ("vru", "four_wheeler"): "part_of",
             ("vru", "heavy_vehicle"): "part_of",
         },
-        inverse={"occluded_by": "occludes"},
+        inverse={"occluded_by": "occludes", "towed_by": "towing"},
     )
 
 
