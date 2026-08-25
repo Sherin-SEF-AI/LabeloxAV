@@ -225,14 +225,31 @@ async def build_datasheet(db: AsyncSession, commit_id: str) -> dict:
         raise ValueError(f"unknown commit {commit_id}")
 
     spec = commit.slice_spec or {}
+    # `session_id` singular is what SliceSpec actually carries; the plural is accepted for callers that
+    # build a spec by hand. Reading only the plural made a single-session release's datasheet describe the
+    # whole corpus, which is a sheet about the wrong data wearing the right commit id.
     session_ids = list(spec.get("session_ids") or [])
+    if not session_ids and spec.get("session_id"):
+        session_ids = [spec["session_id"]]
+    if not session_ids and spec.get("regions"):
+        from services.context.region import city_strings_for
+
+        wanted: set[str] = set()
+        for r in spec["regions"]:
+            wanted |= city_strings_for(r)
+        session_ids = list((await db.execute(
+            select(Session.session_id).where(func.lower(Session.city).in_(sorted(wanted) or ["\x00"]))
+        )).scalars())
+    if not session_ids and spec.get("cities"):
+        session_ids = list((await db.execute(
+            select(Session.session_id).where(Session.city.in_(spec["cities"])))).scalars())
     if not session_ids:
         # A release with no explicit session list covers the corpus it was cut from. Counting over
         # everything is the honest reading, and the sheet says which it did.
         session_ids = list((await db.execute(select(Session.session_id))).scalars())
-        scope = "all sessions (release carries no explicit session list)"
+        scope = "all sessions (the release's slice spec names none, so this describes the whole corpus)"
     else:
-        scope = f"{len(session_ids)} session(s) named in the slice spec"
+        scope = f"{len(session_ids)} session(s) selected by the slice spec"
 
     sessions = list((await db.execute(
         select(Session).where(Session.session_id.in_(session_ids)))).scalars())

@@ -146,6 +146,17 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
                 rel_map.setdefault(str(r.from_object_id), []).append(
                     {"to_object_id": str(r.to_object_id), "kind": r.kind})
 
+        # Accepted track events for the tracks in this slice, indexed by track and matched to each object by
+        # timestamp below. Accepted only: a proposal is a heuristic suggestion awaiting review, and shipping
+        # one inside a dataset is how a threshold becomes a label somebody trains on.
+        ev_by_track: dict = {}
+        tids = sorted({o.track_id for o, _, _ in rows if o.track_id})
+        for i in range(0, len(tids), 10000):
+            for e in (await db.execute(select(TrackEvent).where(
+                    TrackEvent.track_id.in_(tids[i:i + 10000]),
+                    TrackEvent.state.in_(spec.track_event_states)))).scalars():
+                ev_by_track.setdefault(e.track_id, []).append(e)
+
     records: list[ExportRecord] = []
     for obj, frame, sess in rows:
         records.append(
@@ -177,6 +188,17 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
                 keypoints=obj.keypoints,
                 polyline=obj.polyline,
                 relationships=rel_map.get(str(obj.object_id), []),
+                # A property of the frame, carried on every record from it. The writers put it on the image.
+                context=dict(frame.scene or {}),
+                # Only the events actually covering this frame's timestamp. A track-level list would say
+                # this object was braking at some point in its life, which is not what a consumer filtering
+                # for braking frames is asking.
+                track_events=[
+                    {"event_type": e.event_type, "start_ts_ns": e.start_ts_ns, "end_ts_ns": e.end_ts_ns,
+                     "source": e.source, "confidence": e.confidence}
+                    for e in ev_by_track.get(obj.track_id, [])
+                    if e.start_ts_ns <= frame.ts_ns <= e.end_ts_ns
+                ],
                 sign_type=obj.sign_type,
                 sign_category=obj.sign_category,
                 ocr_text=obj.ocr_text,
