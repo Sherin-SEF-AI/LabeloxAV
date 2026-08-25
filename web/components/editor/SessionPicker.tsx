@@ -18,7 +18,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, humanizeError } from "@/lib/api";
-import { matchesSession, orderSessions, sessionDetail, sessionLabel } from "@/lib/sessionPicker";
+import {
+  DRIVE_STATUS, canOpen, driveStatus, matchesSession, orderByVisit, previousSession,
+  recentSessions, recordVisit, sessionDetail, sessionLabel,
+} from "@/lib/sessionPicker";
+import type { SessionState } from "@/lib/sessionPicker";
 import type { SessionRow } from "@/lib/types";
 import Icon from "@/components/shell/Icon";
 import { useAnchoredDropdown } from "@/components/shell/useAnchoredDropdown";
@@ -44,6 +48,11 @@ async function fetchAll(): Promise<SessionRow[]> {
   return out;
 }
 
+let stateCache: Promise<Map<string, SessionState>> | null = null;
+const driveStates = () => (stateCache ??= api.sessionStates()
+  .then((rs) => new Map(rs.map((r) => [r.session_id, r])))
+  .catch((e) => { stateCache = null; throw e; }));
+
 let cache: Promise<SessionRow[]> | null = null;
 const sessions = () => (cache ??= fetchAll().catch((e) => { cache = null; throw e; }));
 
@@ -54,16 +63,35 @@ export default function SessionPicker({ sessionId, onPick }: {
 }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<SessionRow[] | null>(null);
+  const [states, setStates] = useState<Map<string, SessionState>>(new Map());
+  const [recent, setRecent] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const { anchorRef, style, place } = useAnchoredDropdown(open);
+  // Read inside the click handler, which would otherwise close over the empty map from first render.
+  const statesRef = useRef<Map<string, SessionState>>(new Map());
+  statesRef.current = states;
 
   // Fetched on mount rather than on open, because the button's whole job is to NAME the current session
   // and it cannot do that without the list. One request per page load, shared across frame navigation.
   useEffect(() => { sessions().then(setRows).catch((e) => setErr(humanizeError(e))); }, []);
+
+  // Which drives are started, in progress, or cannot be opened at all. A separate request from the list
+  // because it is an aggregate over every frame and object and should not hold up naming the current
+  // drive, which is the button's first job.
+  useEffect(() => {
+    driveStates().then((m) => setStates(m)).catch(() => { /* the picker still lists drives without it */ });
+  }, []);
+
+  // Recorded here rather than in the picker's click handler, so a drive reached any other way (a deep
+  // link, the back button, triage) also counts as somewhere you have been.
+  useEffect(() => {
+    recordVisit(sessionId);
+    setRecent(recentSessions());
+  }, [sessionId]);
 
   useEffect(() => {
     if (!open) return;
@@ -95,6 +123,12 @@ export default function SessionPicker({ sessionId, onPick }: {
 
   const choose = useCallback(async (s: SessionRow) => {
     if (s.session_id === sessionId) { setOpen(false); return; }
+    if (!canOpen(statesRef.current.get(s.session_id))) {
+      // 126 sessions are LiDAR and 3D captures with no camera frames. Letting the click through would
+      // return a 404 from first-frame and read as a broken picker rather than an empty drive.
+      setErr("that drive has no camera frames, so the editor cannot open it");
+      return;
+    }
     setBusy(s.session_id);
     try {
       const { frame_id } = await api.firstFrame(s.session_id);
@@ -109,7 +143,9 @@ export default function SessionPicker({ sessionId, onPick }: {
     }
   }, [sessionId, onPick]);
 
-  const listed = orderSessions((rows ?? []).filter((s) => matchesSession(s, query)), sessionId);
+  const listed = orderByVisit((rows ?? []).filter((s) => matchesSession(s, query)), sessionId, recent);
+  const prevId = previousSession(sessionId);
+  const prev = prevId ? rows?.find((s) => s.session_id === prevId) ?? null : null;
 
   return (
     <div className="relative shrink-0">
@@ -145,8 +181,9 @@ export default function SessionPicker({ sessionId, onPick }: {
             {listed.map((s) => {
               const here = s.session_id === sessionId;
               return (
-                <button key={s.session_id} onClick={() => void choose(s)} disabled={busy != null}
-                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left hover:bg-line/40 disabled:opacity-50 ${here ? "bg-line/25" : ""}`}>
+                <button key={s.session_id} onClick={() => void choose(s)}
+                  disabled={busy != null || !canOpen(states.get(s.session_id))}
+                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left hover:bg-line/40 disabled:opacity-45 disabled:cursor-not-allowed ${here ? "bg-line/25" : ""}`}>
                   <span className="flex flex-col leading-tight min-w-0 flex-1">
                     <span className={`font-mono text-[11.5px] truncate ${here ? "text-ink" : "text-ink-2"}`}>
                       {sessionLabel(s)}
@@ -154,11 +191,32 @@ export default function SessionPicker({ sessionId, onPick }: {
                     <span className="font-mono text-[9.5px] text-ink-3 truncate">{sessionDetail(s)}</span>
                   </span>
                   {here && <span className="font-mono text-[9px] uppercase tracking-wide text-accent shrink-0">here</span>}
+                  {!here && s.session_id === prevId && (
+                    <span className="font-mono text-[9px] uppercase tracking-wide text-info shrink-0"
+                          title="the drive you were in before this one">back</span>
+                  )}
+                  {!here && s.session_id !== prevId && recent.includes(s.session_id) && (
+                    <span className="font-mono text-[9px] uppercase tracking-wide text-ink-3 shrink-0"
+                          title="you have opened this drive before">seen</span>
+                  )}
+                  {DRIVE_STATUS[driveStatus(states.get(s.session_id))].label && (
+                    <span className={`font-mono text-[9px] uppercase tracking-wide shrink-0 ${DRIVE_STATUS[driveStatus(states.get(s.session_id))].tone}`}
+                          title={DRIVE_STATUS[driveStatus(states.get(s.session_id))].tip}>
+                      {DRIVE_STATUS[driveStatus(states.get(s.session_id))].label}
+                    </span>
+                  )}
                   {busy === s.session_id && <span className="font-mono text-[9px] text-ink-3 shrink-0">opening...</span>}
                 </button>
               );
             })}
           </div>
+          {prev && (
+            <button onClick={() => void choose(prev)}
+              className="w-full flex items-center gap-2 px-2 py-1.5 border-t hairline text-left hover:bg-line/40">
+              <span className="font-mono text-[9px] uppercase tracking-wide text-info shrink-0">back to</span>
+              <span className="font-mono text-[11px] text-ink-2 truncate">{sessionLabel(prev)}</span>
+            </button>
+          )}
           {rows && (
             <div className="px-2 py-1.5 border-t hairline font-mono text-[10px] text-ink-3">
               {listed.length} of {rows.length} drives · opens each at its first frame

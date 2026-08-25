@@ -525,6 +525,8 @@ export const api = {
     if (opts.vehicle_id) p.set("vehicle_id", opts.vehicle_id);
     return get<{ total: number; offset: number; limit: number; sessions: SessionRow[] }>(`/api/sessions/page?${p}`);
   },
+  sessionStates: () => get<{ session_id: string; frames: number; objects: number; reviewed_objects: number }[]>(
+    "/api/sessions/states"),
   sessionStats: (id: string) => get<{ session_id: string; frames: number; objects: number; by_state: Record<string, number>; done: number; progress: number }>(`/api/sessions/${id}/stats`),
   firstFrame: (id: string) => get<{ frame_id: string }>(`/api/sessions/${id}/first-frame`),
   // M4.0/M4.1 review queue

@@ -3003,6 +3003,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/sessions/page",
                           params={"limit": limit, "offset": offset, "vehicle_id": vehicle_id}, json_body=None)
 
+    def get_sessions_states(self) -> Any:
+        """Session States"""
+        return self._call("GET", f"/api/sessions/states",
+                          params=None, json_body=None)
+
     def get_sessions_by_session_id_driving_events(self, session_id: str, kind: Any | None = None, state: Any | None = None, severity: Any | None = None, track_id: Any | None = None, limit: int | None = 2000) -> Any:
         """List Driving Events"""
         return self._call("GET", f"/api/sessions/{session_id}/driving-events",
@@ -3506,4 +3511,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 684 routes generated from the server schema.
+# 685 routes generated from the server schema.

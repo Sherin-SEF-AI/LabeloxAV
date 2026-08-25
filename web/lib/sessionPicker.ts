@@ -74,3 +74,121 @@ export function orderSessions(sessions: readonly SessionRow[], currentId: string
     return (b.start_ts_ns || 0) - (a.start_ts_ns || 0);
   });
 }
+
+// ---- what state a drive's work is in -------------------------------------------------------------
+
+/** One row of `GET /api/sessions/states`. */
+export type SessionState = {
+  session_id: string;
+  frames: number;
+  objects: number;
+  /** Objects with a review row written by a person. Machine writers are excluded server-side. */
+  reviewed_objects: number;
+};
+
+/**
+ * Four states, chosen because they are the ones that actually separate drives in this corpus.
+ *
+ * A percentage was the obvious design and does not work: accepted-plus-auto_accept over total has a median
+ * of 0.011 here, so a bar reads about 1% on nearly every drive. Measured instead: 126 sessions have no
+ * camera frames at all (they are LiDAR and 3D captures, and opening one 404s), 42 have frames but no
+ * detections, 125 have been ruled on by a person, and the rest are labelled and waiting.
+ */
+export type DriveStatus = "empty" | "unlabelled" | "ready" | "working";
+
+export type DriveStatusOrUnknown = DriveStatus | "unknown";
+
+/**
+ * `unknown` is its own answer, and it matters more than it looks.
+ *
+ * The first version returned "empty" when the state was missing, and "empty" also means "cannot be
+ * opened". So when the states request failed, every drive in the picker was marked "no frames" and
+ * disabled: one failed aggregate turned the whole picker off, and it said the corpus was empty rather
+ * than saying it did not know. Missing information must never be reported as a fact about the corpus, and
+ * it must never be the thing that blocks the work.
+ */
+export function driveStatus(st: SessionState | undefined): DriveStatusOrUnknown {
+  if (!st) return "unknown";
+  if (st.frames === 0) return "empty";
+  if (st.objects === 0) return "unlabelled";
+  return st.reviewed_objects > 0 ? "working" : "ready";
+}
+
+/** Short label and why, so the mark is readable rather than a colour somebody has to learn. */
+export const DRIVE_STATUS: Record<DriveStatusOrUnknown, { label: string; tip: string; tone: string }> = {
+  unknown: { label: "", tone: "text-ink-3",
+             tip: "the drive states could not be loaded, so this one is unmarked rather than guessed at" },
+  empty: { label: "no frames", tone: "text-ink-3",
+           tip: "this drive has no camera frames, so the editor cannot open it (LiDAR and 3D captures land here)" },
+  unlabelled: { label: "not labelled", tone: "text-warn",
+                tip: "frames are here but nothing has detected anything on them yet" },
+  ready: { label: "ready", tone: "text-ink-2",
+           tip: "labelled by a machine and nobody has reviewed any of it" },
+  working: { label: "in progress", tone: "text-pass",
+             tip: "a person has ruled on some of this drive" },
+};
+
+/**
+ * Whether the editor can open this drive.
+ *
+ * Only a KNOWN zero-frame drive is refused. An unknown state lets the click through and lets the server
+ * answer, because being unable to load an aggregate is not evidence that a drive has no frames.
+ */
+export const canOpen = (st: SessionState | undefined): boolean => driveStatus(st) !== "empty";
+
+// ---- where you have been -------------------------------------------------------------------------
+
+const RECENT_KEY = "lbx.editor.recentSessions";
+const RECENT_MAX = 12;
+
+/**
+ * The drives opened in this browser, newest first.
+ *
+ * Switching drives used to lose the one you came from entirely: the picker showed 377 rows in date order
+ * and nothing said which of them you had just been working in. Stored per browser rather than per account
+ * because it is a navigation convenience, not a fact about the corpus.
+ */
+export function recentSessions(): string[] {
+  try {
+    const raw = globalThis.localStorage?.getItem(RECENT_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter((x) => typeof x === "string").slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function recordVisit(sessionId: string): void {
+  if (!sessionId) return;
+  try {
+    const next = [sessionId, ...recentSessions().filter((s) => s !== sessionId)].slice(0, RECENT_MAX);
+    globalThis.localStorage?.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    /* private mode; the picker still works, it just cannot remember */
+  }
+}
+
+/** The drive you were in before this one, or null on a first visit. */
+export function previousSession(currentId: string): string | null {
+  return recentSessions().find((s) => s !== currentId) ?? null;
+}
+
+/**
+ * The list to show: the drive you are in, then the ones you have been in, then everything else by date.
+ *
+ * Recency before date because the question the picker exists to answer is "where was I", and a drive you
+ * worked yesterday is more findable by having been worked than by when it was filmed.
+ */
+export function orderByVisit(sessions: readonly SessionRow[], currentId: string | null,
+                             recent: readonly string[]): SessionRow[] {
+  const rank = new Map(recent.map((id, i) => [id, i]));
+  return [...sessions].sort((a, b) => {
+    if (a.session_id === currentId) return -1;
+    if (b.session_id === currentId) return 1;
+    const ra = rank.get(a.session_id), rb = rank.get(b.session_id);
+    if (ra != null && rb != null) return ra - rb;
+    if (ra != null) return -1;
+    if (rb != null) return 1;
+    return (b.start_ts_ns || 0) - (a.start_ts_ns || 0);
+  });
+}

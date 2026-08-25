@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Frame, Object, OntologyClass
+from db.models import Frame, Object, OntologyClass, Review
 from db.models import Session as DbSession
 from platforms.registry import as_dicts as platform_dicts
 from services.api.deps import OntologyClassOut, current_user, db_session, require_role
@@ -207,6 +207,47 @@ async def sessions_page(db: AsyncSession = Depends(db_session),
         base.order_by(DbSession.created_at.desc()).offset(offset).limit(limit))).scalars().all()
     return {"total": int(total), "offset": offset, "limit": limit,
             "sessions": [_session_row(s) for s in rows]}
+
+
+@router.get("/sessions/states")
+async def session_states(db: AsyncSession = Depends(db_session)):
+    """One row per session saying what state the work is in, for the editor's drive picker.
+
+    The picker needs to separate a drive nobody has started from one somebody is part way through, and the
+    existing progress fraction cannot: accepted-plus-auto_accept over total has a median of 0.011 across
+    this corpus, so a percentage bar reads about 1% on nearly every drive and tells the annotator nothing.
+    What does separate them is coarser and true: whether the frames carry any detections at all (42
+    sessions have none), and whether a PERSON has ruled on any of it (125 have).
+
+    `user_id IS NOT NULL` is what makes the second half honest. Machine writers put rows in `review` too:
+    27,396 of them here are from the track-relabel backfill alone, against 1,613 written by a human, and
+    counting those would mark almost every drive as reviewed by somebody who never opened it.
+
+    Two queries rather than one join, because the human-review side is small and joining it against 714,415
+    objects to count 1,613 rows is the expensive way to get the same answer.
+    """
+    # Driven from Session, not Frame. Driving it from Frame returned 252 rows against 377 sessions and
+    # silently omitted the 126 that have no camera frames, which are exactly the ones this endpoint exists
+    # to mark: they are LiDAR and 3D captures, and the editor 404s on them.
+    frames_q = (await db.execute(
+        select(DbSession.session_id, func.count(func.distinct(Frame.frame_id)), func.count(Object.object_id))
+        .select_from(DbSession)
+        .outerjoin(Frame, Frame.session_id == DbSession.session_id)
+        .outerjoin(Object, Object.frame_id == Frame.frame_id)
+        .group_by(DbSession.session_id))).all()
+
+    reviewed_q = (await db.execute(
+        select(Frame.session_id, func.count(func.distinct(Review.object_id)))
+        .select_from(Review)
+        .join(Object, Object.object_id == Review.object_id)
+        .join(Frame, Frame.frame_id == Object.frame_id)
+        .where(Review.user_id.is_not(None))
+        .group_by(Frame.session_id))).all()
+    reviewed = {str(sid): int(n) for sid, n in reviewed_q}
+
+    return [{"session_id": str(sid), "frames": int(fr), "objects": int(ob),
+             "reviewed_objects": reviewed.get(str(sid), 0)}
+            for sid, fr, ob in frames_q]
 
 
 @router.get("/sessions/{session_id}/stats")
