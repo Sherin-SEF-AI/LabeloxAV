@@ -249,10 +249,32 @@ class Ontology:
         return errors
 
 
+class _StrictLoader(yaml.SafeLoader):
+    """A YAML loader that refuses duplicate mapping keys.
+
+    `yaml.safe_load` takes the last of a repeated key and says nothing, which is how this file spent a
+    commit with `aliases` written twice on seven class lines. It loaded, it validated, every test passed,
+    and the file was wrong. A class tree edited by hand needs the parser to be the thing that notices.
+    """
+
+
+def _no_duplicate_keys(loader, node, deep=False):
+    seen = set()
+    for key_node, _ in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in seen:
+            raise ValueError(f"duplicate key '{key}' in ontology YAML at line {key_node.start_mark.line + 1}")
+        seen.add(key)
+    return yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
+
+
+_StrictLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_duplicate_keys)
+
+
 def load_ontology(path: str | Path | None = None) -> Ontology:
     p = Path(path) if path else get_settings().ontology_abspath()
     with open(p) as fh:
-        data = yaml.safe_load(fh)
+        data = yaml.load(fh, Loader=_StrictLoader)  # noqa: S506 - _StrictLoader subclasses SafeLoader
 
     classes = [
         OntologyClassDef(id=c["id"], name=c["name"], l0=c["l0"], l1=c["l1"],

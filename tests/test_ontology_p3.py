@@ -225,3 +225,20 @@ class TestInfrastructureAndHazards:
         for word in ("open_drain", "kerb", "footpath", "tree_branch", "police_barricade",
                      "unmarked_speed_breaker", "broken_down_vehicle"):
             assert not o.has_name(word), f"{word} was added as a class"
+
+
+class TestTheParserCatchesWhatValidationCannot:
+    def test_a_duplicate_key_is_refused_rather_than_silently_taking_the_last(self, tmp_path):
+        """`yaml.safe_load` takes the last of a repeated key and says nothing. This file spent a commit with
+        `aliases` written twice on seven class lines: it loaded, it validated, every test passed, and the
+        file was wrong. Nothing downstream of the parser can catch that, so the parser has to."""
+        p = tmp_path / "onto.yaml"
+        p.write_text(textwrap.dedent(BASE).format(
+            extra="", m_alias=", aliases: [bike], aliases: [twowheel]"))
+        with pytest.raises(ValueError, match="duplicate key"):
+            load_ontology(p)
+
+    def test_the_shipped_yaml_has_no_duplicate_keys(self):
+        from services.autolabel.ontology import load_ontology as _load
+
+        _load()  # raises if any mapping repeats a key

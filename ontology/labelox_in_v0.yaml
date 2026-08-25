@@ -166,7 +166,7 @@ classes:
   - { id: 17, name: school_bus,        l0: object,  l1: heavy, india: false }
   - { id: 18, name: lcv,               l0: object,  l1: heavy, india: false }
   - { id: 19, name: truck,             l0: object,  l1: heavy, india: false }
-  - { id: 20, name: water_tanker,      l0: object,  l1: heavy, india: true, aliases: [tanker_lorry, water_lorry, water_truck], aliases: [tanker_lorry, water_lorry, water_truck] }
+  - { id: 20, name: water_tanker,      l0: object,  l1: heavy, india: true, aliases: [tanker_lorry, water_lorry, water_truck] }
   - { id: 21, name: garbage_truck,     l0: object,  l1: heavy, india: true }
   - { id: 22, name: tipper,            l0: object,  l1: heavy, india: false }
   - { id: 23, name: construction_veh,  l0: object,  l1: heavy, india: true }
@@ -179,7 +179,7 @@ classes:
   - { id: 29, name: child,             l0: object,  l1: vru, india: false }
   - { id: 30, name: animal_handler,    l0: object,  l1: vru, india: true }
   # L1 animal
-  - { id: 31, name: cattle,            l0: object,  l1: animal, india: true, aliases: [cow, bovine, bull], aliases: [cow, bovine, bull] }
+  - { id: 31, name: cattle,            l0: object,  l1: animal, india: true, aliases: [cow, bovine, bull] }
   - { id: 32, name: dog,               l0: object,  l1: animal, india: false }
   - { id: 33, name: goat,              l0: object,  l1: animal, india: true }
   # L0 INFRA fixed
@@ -190,7 +190,7 @@ classes:
   # L0 INFRA temporary (the Indian street reality)
   - { id: 38, name: cone,              l0: infra,   l1: temporary, india: false }
   - { id: 39, name: temp_barricade,    l0: infra,   l1: temporary, india: true }
-  - { id: 40, name: push_cart,         l0: infra,   l1: temporary, india: true, aliases: [handcart, thela, pushcart], aliases: [handcart, thela, pushcart] }
+  - { id: 40, name: push_cart,         l0: infra,   l1: temporary, india: true, aliases: [handcart, thela, pushcart] }
   - { id: 41, name: roadside_shop,     l0: infra,   l1: temporary, india: true }
   - { id: 42, name: debris,            l0: infra,   l1: temporary, india: false }
   - { id: 43, name: speed_breaker,     l0: surface, l1: boundary, india: true }
@@ -205,7 +205,7 @@ classes:
   # three_wheeler long tail
   - { id: 49, name: cycle_rickshaw,    l0: object,  l1: three_wheeler, india: true }
   - { id: 50, name: e_loader_3w,       l0: object,  l1: three_wheeler, india: true }
-  - { id: 51, name: shared_auto,       l0: object,  l1: three_wheeler, india: true, aliases: [share_auto, share_rickshaw, seven_seater, passenger_auto], aliases: [share_auto, share_rickshaw, seven_seater, passenger_auto] }
+  - { id: 51, name: shared_auto,       l0: object,  l1: three_wheeler, india: true, aliases: [share_auto, share_rickshaw, seven_seater, passenger_auto] }
   # four_wheeler long tail
   - { id: 52, name: minivan,           l0: object,  l1: four_wheeler, india: false }
   - { id: 53, name: jeep,              l0: object,  l1: four_wheeler, india: false }
@@ -232,7 +232,7 @@ classes:
   - { id: 72, name: sweeper,           l0: object,  l1: vru, india: true }
   - { id: 73, name: wheelchair_user,   l0: object,  l1: vru, india: false }
   - { id: 74, name: person_with_umbrella, l0: object, l1: vru, india: true }
-  - { id: 75, name: person_carrying_load, l0: object, l1: vru, india: true, aliases: [head_load_carrier, headload, porter], aliases: [head_load_carrier, headload, porter] }
+  - { id: 75, name: person_carrying_load, l0: object, l1: vru, india: true, aliases: [head_load_carrier, headload, porter] }
   - { id: 76, name: religious_figure,  l0: object,  l1: vru, india: true }
   - { id: 77, name: school_children_group, l0: object, l1: vru, india: true }
   # animal long tail
@@ -306,11 +306,11 @@ classes:
   - { id: 140, name: vegetation,       l0: infra,   l1: fixed, india: false }
   # final India long-tail
   - { id: 141, name: e_rickshaw_loader, l0: object, l1: three_wheeler, india: true }
-  - { id: 142, name: tractor_trolley,  l0: object,  l1: heavy, india: true, aliases: [trolley, tractor_trailer], aliases: [trolley, tractor_trailer] }
+  - { id: 142, name: tractor_trolley,  l0: object,  l1: heavy, india: true, aliases: [trolley, tractor_trailer] }
   - { id: 143, name: harvester,        l0: object,  l1: heavy, india: true }
   - { id: 144, name: sweeper_machine,  l0: object,  l1: heavy, india: false }
   - { id: 145, name: bullock_cart,     l0: object,  l1: heavy, india: true }
-  - { id: 146, name: vendor_handcart,  l0: infra,   l1: temporary, india: true, aliases: [vendor_cart, hawker_cart, thela_cart], aliases: [vendor_cart, hawker_cart, thela_cart] }
+  - { id: 146, name: vendor_handcart,  l0: infra,   l1: temporary, india: true, aliases: [vendor_cart, hawker_cart, thela_cart] }
   - { id: 147, name: ice_cream_cart,   l0: infra,   l1: temporary, india: true }
   - { id: 148, name: tea_stall_cart,   l0: infra,   l1: temporary, india: true }
   - { id: 149, name: balloon_seller,   l0: object,  l1: vru, india: true }
