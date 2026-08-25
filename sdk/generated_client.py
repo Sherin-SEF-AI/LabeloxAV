@@ -1408,6 +1408,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/frames/{frame_id}/checkpoints",
                           params=None, json_body=body)
 
+    def patch_frames_by_frame_id_context(self, frame_id: str, body: Any = None) -> Any:
+        """Set Frame Context"""
+        return self._call("PATCH", f"/api/frames/{frame_id}/context",
+                          params=None, json_body=body)
+
     def get_frames_by_frame_id_cuboids(self, frame_id: str) -> Any:
         """Frame Cuboids"""
         return self._call("GET", f"/api/frames/{frame_id}/cuboids",
@@ -3511,4 +3516,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 685 routes generated from the server schema.
+# 686 routes generated from the server schema.

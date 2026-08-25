@@ -76,6 +76,22 @@ def strata_dimensions(pack_id: str | None = None) -> tuple[str, ...]:
     return tuple(d.name for d in active_pack(pack_id).eval_strata.dimensions)
 
 
+def context_spec(pack_id: str | None = None):
+    """The active pack's frame-level context vocabulary, or None when the domain has nothing to say about
+    the scene as a whole. A static-camera pack counting entries is complete without one, and the editor
+    offers no context panel rather than the engine inventing weather categories for a warehouse."""
+    return active_pack(pack_id).context
+
+
+def validate_context(attrs: dict, pack_id: str | None = None) -> list[str]:
+    """Errors, empty when valid. A pack with no context spec rejects everything: writing a frame-level fact
+    into a domain that declares none is a caller bug, not an empty vocabulary to be filled in silently."""
+    spec = context_spec(pack_id)
+    if spec is None:
+        return ["this domain declares no frame context vocabulary"]
+    return spec.validate(attrs)
+
+
 def redaction_targets(pack_id: str | None = None):
     """The active pack's privacy redaction targets (AV: face, plate). The anonymizer runs a detector per
     image target; audio targets (speech) are enforced on the export/audio path."""

@@ -473,11 +473,55 @@ class DomainPack(Protocol):
     motion_models: MotionModelSpec | None
     scene_model: SceneModelFactory | None
     ingestion_adapters: Sequence[IngestionAdapter]
+    # Optional: the frame-level vocabulary a person may set on Frame.scene. Empty means the domain has
+    # nothing to say about the scene as a whole.
+    context: ContextSpec | None
     # Optional because they are genuinely domain-specific rather than merely unfinished: an AV pack has no
     # fixed zones to police and no camera to open. A pack that does not fill them is complete, and the engine
     # refuses the corresponding route rather than pretending the capability exists.
     zone_policy: ZonePolicy | None
     stream_source: StreamSource | None
+
+
+@dataclass(frozen=True)
+class ContextSpec:
+    """Frame-level facts a domain wants recorded that are not about any one object.
+
+    Kept separate from the object attribute schema because the question is different: an object attribute
+    says what a thing is, a context attribute says what the whole scene was like, and the same frame carries
+    one of each per axis. The engine already stores this on `Frame.scene`, which the ingest classifier fills
+    with density, weather, road_type and time_of_day; this is the vocabulary a person may add to it.
+
+    A domain with nothing to say about the scene leaves it empty and the editor shows no context panel,
+    rather than the engine inventing weather categories for a warehouse camera.
+    """
+    attributes: Mapping[str, AttributeSpec] = field(default_factory=dict)
+
+    def validate(self, attrs: Mapping[str, object]) -> list[str]:
+        """Errors, empty when valid. Same shape as the ontology's attribute validation so a caller that
+        already handles one handles the other."""
+        errors: list[str] = []
+        for key, val in attrs.items():
+            spec = self.attributes.get(key)
+            if spec is None:
+                errors.append(f"unknown context attribute '{key}'")
+                continue
+            errors.extend(spec.errors_for(key, val))
+        return errors
+
+
+@dataclass(frozen=True)
+class AttributeSpec:
+    """One context attribute. `enum` carries its allowed values, `bool` carries none."""
+    type: str
+    values: tuple[object, ...] = ()
+
+    def errors_for(self, key: str, val: object) -> list[str]:
+        if self.type == "enum":
+            return [] if val in self.values else [f"context '{key}'={val!r} not in {list(self.values)}"]
+        if self.type == "bool":
+            return [] if isinstance(val, bool) else [f"context '{key}' must be bool"]
+        return [f"context '{key}' has unsupported type {self.type!r}"]
 
 
 @dataclass(frozen=True)
@@ -506,6 +550,9 @@ class Pack:
     motion_models: MotionModelSpec | None = None
     scene_model: SceneModelFactory | None = None            # SEC-M2
     ingestion_adapters: tuple[IngestionAdapter, ...] = ()   # SEC-M2
+    # Optional: the frame-level vocabulary a person may set on Frame.scene. Empty means the domain
+    # has nothing to say about the scene as a whole, and the editor offers no context panel.
+    context: ContextSpec | None = None
     zone_policy: ZonePolicy | None = None                   # static-camera domains only
     stream_source: StreamSource | None = None               # static-camera domains only
 

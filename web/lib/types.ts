@@ -484,6 +484,10 @@ export type FrameMeta = {
   // withheld every prediction and existing label, and scoped n_objects to the auditor's own work; this is
   // only so the editor can say what the pass is for.
   blind_audit_id?: string | null;
+  /** What the whole scene was like: the ingest classifier's guess plus any human correction. */
+  context?: Record<string, unknown>;
+  /** Who set each context key. A key absent here was the classifier's, not a person's. */
+  context_provenance?: Record<string, { by: string; ts_ns: number }>;
 };
 
 export type Relationship = { relationship_id: string; from_object_id: string; to_object_id: string; kind: string };

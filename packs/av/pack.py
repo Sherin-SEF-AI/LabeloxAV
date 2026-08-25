@@ -14,10 +14,12 @@ from __future__ import annotations
 from core.config import get_settings
 from packs.av.scene_model import MovingCameraSceneModelFactory
 from packs.base import (
+    AttributeSpec,
     AutoLabelProfile,
     ClassTree,
     CliqueSpec,
     ConfusionClique,
+    ContextSpec,
     EvalStrataSpec,
     ForgeTarget,
     GatePolicy,
@@ -217,6 +219,31 @@ def _cliques() -> CliqueSpec:
     )
 
 
+def _context() -> ContextSpec:
+    """What a person may record about the whole frame, beyond what the ingest classifier already guessed.
+
+    The engine writes density, weather, road_type and time_of_day into `Frame.scene` at ingest with a
+    confidence per axis. These are the axes a machine does not reliably call and that change what the frame
+    is worth: a monsoon downpour and a dust haze both cut visibility but fail differently, an unlit road at
+    night is a different problem from a mixed-lit one, and a market street or a procession is a density the
+    density classifier has no word for.
+
+    Nothing here is about an object. `waterlogging` is the state of the road surface across the frame, not
+    of any one puddle; the `waterlogged` attribute on a pothole is the separate, per-object fact.
+    """
+    enum = lambda *v: AttributeSpec(type="enum", values=tuple(v))   # noqa: E731 - a table reads better
+    return ContextSpec(attributes={
+        "monsoon_intensity": enum("none", "light", "heavy"),
+        "haze": enum("none", "light", "dense"),
+        "dust": AttributeSpec(type="bool"),
+        "glare_oncoming": AttributeSpec(type="bool"),
+        "festival_or_procession": AttributeSpec(type="bool"),
+        "market_street": AttributeSpec(type="bool"),
+        "night_lighting": enum("well_lit", "mixed", "unlit", "na_daytime"),
+        "waterlogging": enum("none", "partial", "flooded"),
+    })
+
+
 def _relations() -> RelationSpec:
     """The AV relationship vocabulary, unified across the two that were live and disjoint.
 
@@ -323,6 +350,7 @@ def _build() -> Pack:
         # between "found a two-wheeler" and "named the right two-wheeler" is readable.
         class_tree=ClassTree(level_names=("leaf", "l1", "l0", "root")),
         motion_models=_motion_models(),
+        context=_context(),
         scene_model=MovingCameraSceneModelFactory(),
         # The MCAP/CAN ingestion already lives in services/ingest (it fills vehicle_id + ego_speed); the AV
         # pack does not re-wrap it as an adapter yet. Sec ships the first IngestionAdapter (packs/sec).

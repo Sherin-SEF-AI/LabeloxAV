@@ -1295,6 +1295,10 @@ export const api = {
   setKeyframe: (objectId: string, value = true) => post<{ is_keyframe: boolean; track_id: string | null }>(`/api/objects/${objectId}/keyframe?value=${value}`, {}),
   interpolateKeyframed: (trackId: string, method = "linear") => post<{ created: number; method: string; keyframes: number }>(`/api/tracks/${trackId}/interpolate-keyframed?method=${method}`, {}),
   reinterpolate: (objectId: string, method = "linear") => post<{ created: number }>(`/api/objects/${objectId}/reinterpolate?method=${method}`, {}),
+  setFrameContext: (frameId: string, attrs: Record<string, unknown>) =>
+    patch<{ frame_id: string; context: Record<string, unknown>;
+            context_provenance: Record<string, { by: string; ts_ns: number }> }>(
+      `/api/frames/${frameId}/context`, { attrs }),
   relabelTrack: (id: string, class_name: string, opts?: {
     state?: string; origin_object_id?: string; force?: boolean;
   }) =>

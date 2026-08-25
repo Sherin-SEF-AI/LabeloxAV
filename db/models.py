@@ -118,6 +118,10 @@ class Frame(Base):
 
     # Data Intelligence Layer (Phase 1), all nullable + additive:
     scene: Mapped[dict | None] = mapped_column(JSONB)  # {weather,time_of_day,road_type,density,confidence_per_axis}
+    # Who set each key in `scene`. The classifier fills scene at ingest with a confidence per axis;
+    # without this a value a person corrected is indistinguishable from one a model guessed, and the
+    # next classifier pass overwrites the correction with no way to know it did.
+    scene_provenance: Mapped[dict | None] = mapped_column(JSONB)
     dup_group_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     is_dup_canonical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     dup_score: Mapped[float | None] = mapped_column(Float)
