@@ -163,3 +163,65 @@ class TestShippedOntology:
         from services.domain import active_pack
 
         assert {"towing", "pulling", "herding"} <= active_pack().relations.kinds
+
+
+class TestInfrastructureAndHazards:
+    """WP3: the surface defects, the writing, and what counts as safety-critical."""
+
+    def test_pothole_and_open_manhole_exist_at_all(self):
+        """A 166-class India road ontology had no pothole in it. That is the single most surprising thing
+        the audit turned up, and this is the assertion that keeps it true that it does now."""
+        o = get_ontology()
+        for name in ("pothole", "manhole", "open_manhole", "road_cut"):
+            assert o.has_name(name), name
+
+    def test_a_hole_in_the_road_is_safety_critical(self):
+        """Every other member of the set is something a vehicle might hit. These two are things a
+        two-wheeler falls into, in a country where two-wheelers are most of the traffic."""
+        from services.domain import critical_class_ids, critical_class_names
+
+        o = get_ontology()
+        assert {"pothole", "open_manhole"} <= critical_class_names()
+        # By id as well: services/verdyx/safety_recall.py once carried a 0-based list that disagreed with
+        # the governed 1-based ids, so name-to-id has to be exercised rather than assumed.
+        assert {o.by_name("pothole").id, o.by_name("open_manhole").id} <= critical_class_ids(o)
+
+    def test_severity_is_an_attribute_and_not_three_classes(self):
+        o = get_ontology()
+        assert "hazard_severity" in o.attrs_for_class(o.by_name("pothole").id)
+        assert not any(n in o._by_name for n in ("severe_pothole", "minor_pothole"))
+
+    def test_road_text_records_the_script_and_never_the_text(self):
+        """No OCR model, no text field, and this is where that stays true. A sign's script is what tells you
+        whether a detector trained on Latin signage can read this corpus, and that needs no transcription.
+        Transcription is also where a road dataset starts collecting shopfronts and number plates."""
+        o = get_ontology()
+        assert o.has_name("road_text")
+        assert "script" in o.attrs_for_class(o.by_name("road_text").id)
+        forbidden = {"text", "text_content", "transcription", "ocr_text", "content", "reads"}
+        assert not (forbidden & set(o.attributes)), forbidden & set(o.attributes)
+
+    def test_script_is_a_set_because_one_board_carries_two(self):
+        o = get_ontology()
+        sign = o.by_name("traffic_sign").id
+        assert o.validate_attrs({"script": ["kannada", "latin"]}, sign) == []
+        assert o.validate_attrs({"script": "latin"}, sign) != []
+        assert o.validate_attrs({"script": ["latin", "latin"]}, sign) != []
+        assert o.validate_attrs({"script": ["klingon"]}, sign) != []
+
+    def test_an_unimplemented_attribute_type_is_refused_rather_than_waved_through(self, tmp_path):
+        """The fall-through used to accept anything, so adding a type to the YAML silently disabled
+        validation for every attribute using it."""
+        p = tmp_path / "onto.yaml"
+        p.write_text(textwrap.dedent(BASE).format(extra="", m_alias="")
+                     .replace("occlusion: { type: enum, values: [0, 50] }", "occlusion: { type: colour }"))
+        o = load_ontology(p)
+        assert o.validate_attrs({"occlusion": "anything at all"}, 1) != []
+
+    def test_what_already_existed_did_not_get_a_second_name(self):
+        """`open_drain` is `drain` 152, `kerb` is `curb` 101, `footpath` is `sidewalk` 102. The surface and
+        infra space already held 75 classes and most of the brief's list was in it."""
+        o = get_ontology()
+        for word in ("open_drain", "kerb", "footpath", "tree_branch", "police_barricade",
+                     "unmarked_speed_breaker", "broken_down_vehicle"):
+            assert not o.has_name(word), f"{word} was added as a class"

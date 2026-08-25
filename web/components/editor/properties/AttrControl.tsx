@@ -78,6 +78,31 @@ export default function AttrControl({ name, spec, value, onChange }: {
     );
   }
 
+  if (spec.type === "multi_select") {
+    // A set, not a choice. A Bengaluru signboard routinely carries Kannada and English together, and a
+    // single-select here would record the wrong half of every one of them.
+    const chosen: string[] = Array.isArray(value) ? value.map(String) : [];
+    const toggle = (v: string) =>
+      onChange(chosen.includes(v) ? chosen.filter((x) => x !== v) : [...chosen, v]);
+    return (
+      <div className="flex items-start gap-2">{label}
+        <div className="flex-1 flex flex-wrap gap-1">
+          {(spec.values || []).map((v) => {
+            const k = String(v);
+            const on = chosen.includes(k);
+            return (
+              <button key={k} type="button" onClick={() => toggle(k)} aria-pressed={on}
+                className={`border px-1.5 py-0.5 font-mono text-[10px] ${
+                  on ? "border-accent text-ink bg-accent/20" : "border-line text-ink-3 hover:text-ink-2"}`}>
+                {k}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   const [lo, hi] = spec.range ?? [];
   const num = value == null ? null : Number(value);
   // Out of range is shown, not silently corrected. Clamping would change what the annotator typed without

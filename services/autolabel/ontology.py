@@ -232,6 +232,20 @@ class Ontology:
             elif spec.type == "bool_array":
                 if not (isinstance(val, list) and all(isinstance(x, bool) for x in val)):
                     errors.append(f"attribute '{key}' must be a bool array")
+            elif spec.type == "multi_select":
+                # A set of values from the vocabulary, not one. `script` is the case it exists for: a
+                # Bengaluru signboard routinely carries Kannada and English together, and forcing one
+                # records the wrong half.
+                if not isinstance(val, list):
+                    errors.append(f"attribute '{key}' must be a list")
+                elif bad := [v for v in val if v not in (spec.values or [])]:
+                    errors.append(f"attribute '{key}' has values not in {spec.values}: {bad}")
+                elif len(set(val)) != len(val):
+                    errors.append(f"attribute '{key}' has duplicate values")
+            else:
+                # An unimplemented type used to fall through here and accept anything at all, so adding a
+                # type to the YAML silently disabled validation for every attribute using it.
+                errors.append(f"attribute '{key}' has unsupported type '{spec.type}'")
         return errors
 
 

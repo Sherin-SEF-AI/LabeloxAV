@@ -61,7 +61,18 @@ AV_SAFETY_L1 = frozenset({"vru", "animal"})
 
 # The safety-critical classes, by NAME. Fixes latent bug #2: services/verdyx/safety_recall.py:10 lists them
 # as 0-based ids {0,1,2,3,8}, which disagree with the governed 1-based YAML ids. Consumed in SEC-M4.
-AV_CRITICAL_CLASSES = frozenset({"pedestrian", "rider", "motorcycle", "cycle", "cattle"})
+#
+# `pothole` and `open_manhole` are here because a hole in the road is a VRU problem. Every other member is
+# something a vehicle might hit; these two are things a two-wheeler falls into, in a country where
+# two-wheelers are most of the traffic and the rider has no cage. A missed pedestrian and a missed open
+# manhole put the same person in hospital.
+#
+# Both join wholesale rather than only when severe. This set is keyed by class name, so "a severe pothole is
+# critical" is not expressible in it, and the two ways to resolve that are to include every pothole or to
+# include none. Recall on a shallow pothole costing a little extra sampling is the cheaper mistake, and
+# severity stays available as the `hazard_severity` attribute for anything that wants to weight by it.
+AV_CRITICAL_CLASSES = frozenset({"pedestrian", "rider", "motorcycle", "cycle", "cattle",
+                                 "pothole", "open_manhole"})
 
 # The domain preamble hardcoded at services/autolabel/paths/path_c_qwen3vl.py:64 (no config seam today). The
 # parity test asserts the live prompt still begins with this; SEC-M5 makes path_c read it from here.

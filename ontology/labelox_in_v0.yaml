@@ -76,6 +76,23 @@ attributes:
   # not stop at all, and a school service stops and unloads children into the road. That is the planning
   # distinction, and it is worth having without splitting a class that already holds 19,948 objects.
   bus_service:    { type: enum, values: [city, intercity, school, staff, tourist, unknown] }
+  # ---- P3 infrastructure and hazard attributes ----
+  #
+  # `script` records WHICH writing systems appear on a sign, board or road marking, and nothing about what
+  # they say. There is no text field here and there is no OCR model behind it, deliberately: a sign's script
+  # is what tells you whether a detector trained on Latin signage will read this corpus at all, and that is
+  # answerable without transcribing a single word. Multi-select because a Bengaluru signboard routinely
+  # carries Kannada and English together, and forcing one would record the wrong half.
+  script:         { type: multi_select, values: [devanagari, kannada, tamil, telugu, malayalam, bengali,
+                                                 gujarati, gurmukhi, odia, urdu, latin, other] }
+  sign_condition: { type: enum, values: [clear, faded, bent, obscured, defaced, missing_face] }
+  # How much of the carriageway the defect takes and how far a wheel drops into it. Severity is an
+  # attribute rather than three classes because a pothole does not become a different kind of thing as it
+  # grows, and because the same hole is `moderate` in the dry and `severe` when the monsoon fills it.
+  hazard_severity: { type: enum, values: [minor, moderate, severe] }
+  # Whether the hole or trench is currently full of water, which is what makes it invisible and is the
+  # single most common way a two-wheeler goes into one.
+  water_filled:   { type: bool }
 
 # Per-subclass (L1) applicable-attribute allowlist. An object's class restricts which global attributes
 # apply, so the editor shows only the relevant ones and validation rejects the rest. A subclass not listed
@@ -108,6 +125,22 @@ attribute_scope_class:
   tractor_trolley:  [passengers_on_load, roof_load]
   goods_3w:         [passengers_on_load]
   bullock_cart:     [passengers_on_load]
+  # Surface defects. Severity and standing water are the two facts that change what a rider does.
+  pothole:          [hazard_severity, water_filled]
+  manhole:          [hazard_severity]
+  open_manhole:     [hazard_severity, water_filled]
+  road_cut:         [hazard_severity, water_filled]
+  excavation_pit:   [hazard_severity, water_filled]
+  waterlogging:     [hazard_severity]
+  # Anything carrying writing. `script` says which writing systems are present and never what they say.
+  road_text:        [script]
+  traffic_sign:     [script, sign_condition]
+  chevron_sign:     [sign_condition]
+  milestone:        [script, sign_condition]
+  km_stone:         [script, sign_condition]
+  hoarding:         [script]
+  flex_banner:      [script]
+  roadside_shop:    [script]
 
 classes:
   # L0 OBJECT / L1 two_wheeler
@@ -331,3 +364,45 @@ classes:
   # a tempo traveller is a twelve-seat passenger van, which is why `tempo` is not an alias here.
   - { id: 167, name: tempo_traveller,  l0: object,  l1: heavy, india: true, aliases: [force_traveller, minibus_van, twelve_seater] }
   - { id: 168, name: school_van,       l0: object,  l1: heavy, india: true, aliases: [school_cab, school_omni] }
+
+  # ---- P3 infrastructure and hazards, ids 169-178 ----
+  #
+  # Ten, and again the count is the finding. The surface and infra space already holds 75 classes, so most
+  # of the brief's list resolved to something present: `open_drain` is `drain` 152, `kerb` is `curb` 101,
+  # `footpath` is `sidewalk` 102, `tree_branch` is `fallen_tree` 115, `police_barricade` is `temp_barricade`
+  # 39, and the whole construction fleet is 59-61 and 112-113.
+  #
+  # Two more were attributes rather than classes. `unmarked_speed_breaker` is `speed_breaker` 43 with
+  # `marking_state: absent`, which the boundary scope has offered since P1 - and an unpainted breaker is
+  # exactly what that attribute was for. `broken_down_vehicle` is a vehicle with `motion: stopped`, not a
+  # new kind of object.
+  #
+  # L0 INFRA / L1 temporary: the surface defects, absent entirely until now. `pothole` was not in a
+  # 166-class India ontology, which is the single most surprising thing the audit turned up.
+  - { id: 169, name: pothole,          l0: infra,   l1: temporary, india: true, aliases: [road_hole, crater] }
+  - { id: 170, name: manhole,          l0: infra,   l1: temporary, india: false, aliases: [manhole_cover, inspection_chamber] }
+  # Separate from `manhole` because the two need opposite responses: a raised cover is a jolt, and an open
+  # one is a wheel-swallowing hole that has killed riders.
+  - { id: 171, name: open_manhole,     l0: infra,   l1: temporary, india: true, aliases: [uncovered_manhole, open_chamber] }
+  # A utility trench cut across the carriageway and backfilled unevenly. Distinct from `excavation_pit` 109,
+  # which is a pit beside the road rather than a ridge across it.
+  - { id: 172, name: road_cut,         l0: infra,   l1: temporary, india: true, aliases: [utility_trench, road_trench] }
+  # Vinyl and cloth banners strung across or beside the road. Not `hoarding` 122, which is a permanent
+  # structure: a flex banner is put up for a week, sags into the carriageway, and blocks sightlines.
+  - { id: 173, name: flex_banner,      l0: infra,   l1: temporary, india: true, aliases: [flex_board, cloth_banner, festival_banner] }
+  # L0 INFRA / L1 fixed
+  #
+  # `road_text` is a region carrying writing, with a `script` attribute and NO text field. There is no OCR
+  # model behind this and there is not going to be one: what a detector needs to know is that this corpus is
+  # full of signage in scripts its training data never contained, and that is answerable without
+  # transcribing a word. Transcription is also the point at which a road dataset starts collecting the
+  # contents of shopfronts and number plates, which is a different thing to be building.
+  - { id: 174, name: road_text,        l0: infra,   l1: fixed, india: true, aliases: [signage_text, painted_text, lettering] }
+  - { id: 175, name: bollard,          l0: infra,   l1: fixed, india: false, aliases: [post_bollard, traffic_bollard] }
+  - { id: 176, name: level_crossing,   l0: infra,   l1: fixed, india: false, aliases: [rail_crossing, railway_gate] }
+  # L0 SURFACE
+  #
+  # The break in a median where traffic turns across the carriageway. A planning feature nothing in the
+  # boundary set covers, and the place where most of an arterial's conflicts happen.
+  - { id: 177, name: median_gap,       l0: surface, l1: boundary, india: true, aliases: [median_opening, u_turn_gap] }
+  - { id: 178, name: traffic_island,   l0: surface, l1: non_drivable, india: false, aliases: [refuge_island, pedestrian_island] }
