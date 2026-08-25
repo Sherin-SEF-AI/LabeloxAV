@@ -16,12 +16,12 @@ from uuid import UUID
 
 import click
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import Float, func, select
 
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
 from core.storage import get_object_store
-from db.models import DatasetCommit, Frame, Object, ObjectRelationship
+from db.models import DatasetCommit, Frame, Object, ObjectRelationship, TrackEvent
 from db.models import Session as DbSession
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
@@ -54,6 +54,20 @@ class SliceSpec(BaseModel):
     states: list[str] | None = None        # e.g. ["accepted", "auto_accept"]
     class_names: list[str] | None = None
     cities: list[str] | None = None
+    # Region, resolved rather than matched. `cities` matches the raw string, so asking for Bengaluru misses
+    # the 372 sessions recorded as `BLR`; this expands through the pack's alias table first. Either a city
+    # name or a state name.
+    regions: list[str] | None = None
+    # Scene context, matched against Frame.scene. {"weather": ["rain"], "night_lighting": ["unlit"]}: a key
+    # matches when the frame's value for it is in the listed set.
+    context: dict[str, list[str]] | None = None
+    # Rarity band on Frame.scene["rarity"], inclusive. None on either end leaves that end open.
+    rarity_min: float | None = None
+    rarity_max: float | None = None
+    # Objects on tracks carrying at least one event of these types. Accepted events only by default: a
+    # proposal is a suggestion, and training on unreviewed heuristics is how a threshold becomes a label.
+    track_event_types: list[str] | None = None
+    track_event_states: list[str] = Field(default_factory=lambda: ["accepted"])
     vehicle_ids: list[str] | None = None  # export a whole fleet (all its sessions) in one commit
     min_conf: float | None = None
     has_mask: bool | None = None
@@ -87,6 +101,28 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
             stmt = stmt.where(Object.mask_uri.isnot(None))
         if spec.cities:
             stmt = stmt.where(DbSession.city.in_(spec.cities))
+        if spec.regions:
+            # Expand through the pack's alias table, so a filter asking for Bengaluru also matches `BLR`.
+            from services.context.region import city_strings_for
+
+            wanted: set[str] = set()
+            for r in spec.regions:
+                wanted |= city_strings_for(r)
+            # Compared lowercase and punctuation-free, the same normalisation the resolver uses; without it
+            # `BLR` in the column never equals `blr` in the alias table.
+            stmt = stmt.where(func.lower(DbSession.city).in_(sorted(wanted) or ["\x00none"]))
+        if spec.context:
+            for key, values in spec.context.items():
+                stmt = stmt.where(Frame.scene[key].astext.in_([str(v) for v in values]))
+        if spec.rarity_min is not None:
+            stmt = stmt.where(Frame.scene["rarity"].astext.cast(Float) >= spec.rarity_min)
+        if spec.rarity_max is not None:
+            stmt = stmt.where(Frame.scene["rarity"].astext.cast(Float) <= spec.rarity_max)
+        if spec.track_event_types:
+            ev = (select(TrackEvent.track_id)
+                  .where(TrackEvent.event_type.in_(spec.track_event_types),
+                         TrackEvent.state.in_(spec.track_event_states)))
+            stmt = stmt.where(Object.track_id.in_(ev))
         if spec.vehicle_ids:
             stmt = stmt.where(DbSession.vehicle_id.in_(spec.vehicle_ids))
         if spec.session_id:
@@ -341,7 +377,6 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
     delivered = ["parquet", *_requested(spec.formats), *_requested_scene(spec.formats)]
 
     prefix = f"datasets/{spec.name}/{commit_id}"
-    export_uris = _upload_dir(store, prefix, out_dir)
 
     maker = get_sessionmaker()
     async with maker() as db:
@@ -356,11 +391,33 @@ async def export_dataset(spec: SliceSpec, out_root: Path | None = None) -> dict:
                     slice_spec=spec.model_dump(),
                     object_count=len(records),
                     ontology_version=onto.version,
-                    export_uris={k: v for k, v in list(export_uris.items())[:50]},
+                    export_uris={},   # filled below, once the datasheet is written and the dir is uploaded
                     content_fingerprint=seal_content_fingerprint(spec, records, onto.version),
                     notes=f"slice '{spec.name}' formats={delivered}",   # what was written, not what was asked for
                 )
             )
+            await db.commit()
+
+        # The coverage datasheet, written before the upload so it ships inside the artifact rather than
+        # beside it. A release whose limitations live somewhere else is a release nobody reads them for.
+        #
+        # Never fatal. The datasheet describes the export; it is not the export, and a counting query that
+        # fails must not lose a dataset somebody already paid to produce.
+        try:
+            from services.export.coverage import write_datasheet
+
+            sheet = await write_datasheet(db, commit_id, out_dir)
+            written.extend([out_dir / "datasheet.json", out_dir / "datasheet.html"])
+            log.info("export.datasheet", commit_id=commit_id, limitations=len(sheet["limitations"]))
+        except Exception as exc:  # noqa: BLE001
+            log.error("export.datasheet_failed", commit_id=commit_id, error=str(exc))
+
+    # After the datasheet, so the uploaded prefix contains it.
+    export_uris = _upload_dir(store, prefix, out_dir)
+    async with maker() as db:
+        row = await db.get(DatasetCommit, commit_id)
+        if row is not None and not row.export_uris:
+            row.export_uris = {k: v for k, v in list(export_uris.items())[:50]}
             await db.commit()
 
     result = {

@@ -280,6 +280,29 @@ class CliqueSpec:
 
 
 @dataclass(frozen=True)
+class RegionSpec:
+    """How a domain turns a recorded place string into a stratum.
+
+    A corpus records places the way the capture rig happened to spell them, and the strings are not a
+    taxonomy: this one says `BLR` on 372 sessions and `Bengaluru` on one, which is a single city that looks
+    like two strata to anything counting coverage.
+
+    `resolve` maps a lowercased, punctuation-free string to (city, state, urban_class), or None when the
+    string names nowhere this domain models. `classes` is the urban_class vocabulary, ordered from largest,
+    so a report can render the strata in a meaningful order rather than alphabetically.
+    """
+
+    resolve: Callable[[str], tuple[str, str, str] | None]
+    classes: tuple[str, ...]
+    # Every string `resolve` accepts. Published so a filter can be built by inverting the same table the
+    # resolver reads, rather than by adding a denormalised region column that could drift from it.
+    keys: Callable[[], frozenset[str]]
+    # Places the domain knows are outside its region model, so a resolver can say "outside India" rather
+    # than "unknown". The difference matters: unknown is a data-quality problem, outside is a fact.
+    outside: Callable[[str], str | None] = lambda _s: None
+
+
+@dataclass(frozen=True)
 class TrackEventType:
     """One typed span an annotator may draw on a track.
 
@@ -591,6 +614,9 @@ class Pack:
     # Optional: the track-level span vocabulary. A domain whose objects have no interesting behaviour over
     # time (a still-life inspection camera) is complete without one, and the track view offers no event lane.
     track_events: TrackEventSpec | None = None
+    # Optional: how this domain turns a recorded place into a stratum. A domain captured in one building
+    # has no regional structure and gets none invented for it.
+    region: RegionSpec | None = None
     zone_policy: ZonePolicy | None = None                   # static-camera domains only
     stream_source: StreamSource | None = None               # static-camera domains only
 

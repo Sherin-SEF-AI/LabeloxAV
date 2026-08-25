@@ -12,6 +12,7 @@ it reaches it only through packs.registry (enforced by .importlinter).
 from __future__ import annotations
 
 from core.config import get_settings
+from packs.av.data.india_cities import ALIASES, CITIES, NON_INDIA
 from packs.av.scene_model import MovingCameraSceneModelFactory
 from packs.base import (
     AttributeSpec,
@@ -20,8 +21,6 @@ from packs.base import (
     CliqueSpec,
     ConfusionClique,
     ContextSpec,
-    TrackEventSpec,
-    TrackEventType,
     EvalStrataSpec,
     ForgeTarget,
     GatePolicy,
@@ -32,10 +31,13 @@ from packs.base import (
     PrivacyPlaneSpec,
     QualityProfile,
     RedactionTarget,
+    RegionSpec,
     RelationSpec,
     RootCauseSignature,
     SensorCheck,
     StratumDimension,
+    TrackEventSpec,
+    TrackEventType,
     make_safety_policy,
 )
 
@@ -197,6 +199,22 @@ def _motion_models() -> MotionModelSpec:
             "overhead_water_tank", "hoarding", "foot_overbridge", "speed_camera",
         }),
     )
+
+
+def _region() -> RegionSpec:
+    """Bengaluru is in this corpus 373 times under two spellings. That is what this exists to fix.
+
+    Ordered from largest so a coverage report renders strata in a meaningful order. The classification is
+    the Census of India 2011 urban-agglomeration one, cited in packs/av/data/india_cities.py.
+    """
+    def resolve(s: str) -> tuple[str, str, str] | None:
+        key = ALIASES.get(s, s)
+        c = CITIES.get(key)
+        return None if c is None else (c.name, c.state, c.urban_class)
+
+    return RegionSpec(resolve=resolve, classes=("megacity", "million_plus", "class_1", "other"),
+                      keys=lambda: frozenset(CITIES) | frozenset(ALIASES),
+                      outside=NON_INDIA.get)
 
 
 def _track_events() -> TrackEventSpec:
@@ -448,6 +466,7 @@ def _build() -> Pack:
         motion_models=_motion_models(),
         context=_context(),
         track_events=_track_events(),
+        region=_region(),
         scene_model=MovingCameraSceneModelFactory(),
         # The MCAP/CAN ingestion already lives in services/ingest (it fills vehicle_id + ego_speed); the AV
         # pack does not re-wrap it as an adapter yet. Sec ships the first IngestionAdapter (packs/sec).
