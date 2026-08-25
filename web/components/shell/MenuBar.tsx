@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Icon from "./Icon";
-import { MENUS, type MenuItem } from "@/lib/menus";
+import { MENUS, type Menu, type MenuItem } from "@/lib/menus";
 
 // The application menu bar, Blender-style.
 //
@@ -18,7 +18,21 @@ import { MENUS, type MenuItem } from "@/lib/menus";
 
 const CLOSE_DELAY_MS = 180;
 
-export default function MenuBar() {
+export default function MenuBar({ menus = MENUS, compact = false, fixed = false }: {
+  /** The menu set to render. Defaults to the app-wide one; the frame editor passes its own. */
+  menus?: Menu[];
+  /** Tighter padding, for the editor's 46px bar where the app header has room and this does not. */
+  compact?: boolean;
+  /**
+   * Position the dropdown `fixed` from the title's own rect instead of `absolute`.
+   *
+   * Needed wherever an ancestor clips. The frame editor's top bar is `overflow-x-auto` so the row of
+   * controls can be scrolled on a narrow viewport, and CSS will not let one axis be visible while the
+   * other is not: overflow-y computes to auto as well and the bar clips its own children to 46 pixels.
+   * Measured there before this existed: a menu item rendered at y=80 and was not clickable at all.
+   */
+  fixed?: boolean;
+} = {}) {
   const router = useRouter();
   const [open, setOpen] = useState<string | null>(null);
   const [sub, setSub] = useState<string | null>(null);
@@ -54,7 +68,7 @@ export default function MenuBar() {
     else if (it.event) window.dispatchEvent(new Event(it.event));
   }, [isEnabled, close, router]);
 
-  const menu = MENUS.find((m) => m.key === open) ?? null;
+  const menu = menus.find((m) => m.key === open) ?? null;
 
   // Keyboard navigation within the open menu.
   useEffect(() => {
@@ -76,15 +90,15 @@ export default function MenuBar() {
         if (it?.items) { e.preventDefault(); setSub(it.key); }
         else {
           e.preventDefault();
-          const idx = MENUS.findIndex((m) => m.key === menu.key);
-          setOpen(MENUS[(idx + 1) % MENUS.length].key); setCursor(0); setSub(null);
+          const idx = menus.findIndex((m) => m.key === menu.key);
+          setOpen(menus[(idx + 1) % menus.length].key); setCursor(0); setSub(null);
         }
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
         if (sub) setSub(null);
         else {
-          const idx = MENUS.findIndex((m) => m.key === menu.key);
-          setOpen(MENUS[(idx - 1 + MENUS.length) % MENUS.length].key); setCursor(0);
+          const idx = menus.findIndex((m) => m.key === menu.key);
+          setOpen(menus[(idx - 1 + menus.length) % menus.length].key); setCursor(0);
         }
       } else if (e.key === "Enter") {
         e.preventDefault();
@@ -94,7 +108,7 @@ export default function MenuBar() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [menu, cursor, sub, isEnabled, run]);
+  }, [menu, cursor, sub, isEnabled, run, menus]);
 
   const scheduleClose = () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -152,20 +166,28 @@ export default function MenuBar() {
 
   return (
     <div ref={barRef} className="flex items-center h-full">
-      {MENUS.map((m) => (
+      {menus.map((m) => (
         <div key={m.key} className="relative h-full">
           <button
             onClick={() => { setOpen(open === m.key ? null : m.key); setCursor(0); setSub(null); }}
             // Menu tracking: with one menu open, hovering a sibling title switches to it.
             onMouseEnter={() => { if (open && open !== m.key) { setOpen(m.key); setCursor(0); setSub(null); } }}
-            className={`h-full px-2.5 text-[12.5px] font-display ${
+            className={`h-full ${compact ? "px-2 text-[11.5px]" : "px-2.5 text-[12.5px]"} font-display ${
               open === m.key ? "bg-panel text-ink" : "text-ink-2 hover:text-ink"}`}
           >
             {m.label}
           </button>
 
           {open === m.key && (
-            <div className="absolute left-0 top-full mt-px min-w-[232px] panel py-1 z-[60] shadow-xl border border-line">
+            <div
+              ref={fixed ? (el) => {
+                if (!el) return;
+                const b = el.parentElement?.querySelector("button")?.getBoundingClientRect();
+                if (!b) return;
+                el.style.left = `${Math.round(b.left)}px`;
+                el.style.top = `${Math.round(b.bottom + 1)}px`;
+              } : undefined}
+              className={`${fixed ? "fixed" : "absolute left-0 top-full mt-px"} min-w-[232px] panel py-1 z-[60] shadow-xl border border-line`}>
               {m.items.map((it, i) => <Row key={it.key} it={it} i={i} />)}
             </div>
           )}

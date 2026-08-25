@@ -525,6 +525,8 @@ export const api = {
     if (opts.vehicle_id) p.set("vehicle_id", opts.vehicle_id);
     return get<{ total: number; offset: number; limit: number; sessions: SessionRow[] }>(`/api/sessions/page?${p}`);
   },
+  sessionStates: () => get<{ session_id: string; frames: number; objects: number; reviewed_objects: number }[]>(
+    "/api/sessions/states"),
   sessionStats: (id: string) => get<{ session_id: string; frames: number; objects: number; by_state: Record<string, number>; done: number; progress: number }>(`/api/sessions/${id}/stats`),
   firstFrame: (id: string) => get<{ frame_id: string }>(`/api/sessions/${id}/first-frame`),
   // M4.0/M4.1 review queue
@@ -1228,8 +1230,10 @@ export const api = {
   correctionCoverage: () => get<CorrectionCoverage>("/api/corrections/coverage"),
   computeObjectEmbeddings: (session_id?: string) =>
     post<{ started: boolean }>("/api/corrections/embed" + (session_id ? `?session_id=${session_id}` : ""), {}),
-  startAutolabel: (session_id: string, limit?: number, compute_target: "local" | "cloud" = "local") =>
-    post<{ job_id: string; status: string }>("/api/autolabel/start", { session_id, limit, compute_target }),
+  startAutolabel: (session_id: string, limit?: number, compute_target: "local" | "cloud" = "local",
+                   only_unlabelled = false) =>
+    post<{ job_id: string; status: string }>("/api/autolabel/start",
+      { session_id, limit, compute_target, only_unlabelled }),
   estimateEgoMasks: (force = false) =>
     post<{ cameras: number; with_hood: number; no_hood: string[] }>(`/api/autolabel/ego-masks/estimate?force=${force}`, {}),
   piiBackfill: (limit = 2000) =>

@@ -106,7 +106,9 @@ class TestFrameLoopReportsProgress:
             def run_stage1_frame(self, img):
                 return [], []
 
-        async def _fetch(session_id, limit):
+        # Mirrors the real signature: fetch_frames grew only_unlabelled so a bounded run can advance
+        # through a drive instead of redoing its first N frames.
+        async def _fetch(session_id, limit, only_unlabelled=False):
             return frames
 
         monkeypatch.setattr(runner, "fetch_frames", _fetch)
@@ -142,7 +144,9 @@ class TestFrameLoopReportsProgress:
             def run_stage1_frame(self, img):
                 return [], []
 
-        async def _fetch(session_id, limit):
+        # Mirrors the real signature: fetch_frames grew only_unlabelled so a bounded run can advance
+        # through a drive instead of redoing its first N frames.
+        async def _fetch(session_id, limit, only_unlabelled=False):
             return [_Frame("f0", "s3://x/0.jpg")]
 
         monkeypatch.setattr(runner, "fetch_frames", _fetch)

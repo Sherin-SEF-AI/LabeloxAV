@@ -27,7 +27,7 @@ from core.config import get_settings
 from core.logging import get_logger, setup_logging
 from core.schemas import FrameMeta
 from core.storage import get_object_store
-from db.models import Frame
+from db.models import Frame, Object
 from db.session import get_sessionmaker
 from services.autolabel.paths.base import RawDetection
 from services.autolabel.paths.path_a_yolo26 import YoloPath
@@ -187,10 +187,25 @@ def load_image(img_uri: str) -> np.ndarray:
     return img
 
 
-async def fetch_frames(session_id: UUID, limit: int | None) -> list[FrameMeta]:
+async def fetch_frames(session_id: UUID, limit: int | None,
+                       only_unlabelled: bool = False) -> list[FrameMeta]:
+    """The frames a run should cover.
+
+    `only_unlabelled` is what makes a bounded run resumable. `limit` alone takes the first N frames by
+    timestamp and nothing skips frames that already carry objects, so asking for 200 frames twice does the
+    same 200 twice and a drive can never be worked through in batches: the second batch looks like it ran
+    and moves nothing. With it, each batch is the next N frames nobody has labelled, which is what
+    "continue this drive" means and is also idempotent if a batch is fired twice by accident.
+
+    Off by default, because a re-detect pass over a session deliberately redoes frames that already have
+    objects and would otherwise silently become a no-op.
+    """
     maker = get_sessionmaker()
     async with maker() as db:
         stmt = select(Frame).where(Frame.session_id == session_id).order_by(Frame.ts_ns)
+        if only_unlabelled:
+            stmt = stmt.where(~select(Object.object_id)
+                              .where(Object.frame_id == Frame.frame_id).exists())
         if limit:
             stmt = stmt.limit(limit)
         rows = (await db.execute(stmt)).scalars().all()
@@ -277,6 +292,7 @@ async def process_session(
     yolo_weights: str | None = None,
     supported_ids: set[int] | None = None,
     on_progress: Callable[[int, int], Awaitable[None]] | None = None,
+    only_unlabelled: bool = False,
 ) -> dict:
     """Stream a session's frames through Stage 1, invoking on_frame per frame. The callback is the
     plug point for fusion + gate + persistence (M3) and the VLM pass (M4).
@@ -285,7 +301,7 @@ async def process_session(
     both numbers, and a job that reports nothing between its first frame and its last leaves every watcher
     guessing whether it is working or wedged.
     """
-    frames = await fetch_frames(session_id, limit)
+    frames = await fetch_frames(session_id, limit, only_unlabelled=only_unlabelled)
     if not frames:
         raise RuntimeError(f"no frames for session {session_id}")
 
@@ -320,7 +336,8 @@ async def process_session(
 
 
 async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None,
-                            on_progress: Callable[[int, int], Awaitable[None]] | None = None) -> dict:
+                            on_progress: Callable[[int, int], Awaitable[None]] | None = None,
+                            only_unlabelled: bool = False) -> dict:
     """Full pipeline: detect + segment -> fuse -> calibrate -> gate -> (Path C VLM on the uncertain
     subset) -> persist objects.
 
@@ -529,7 +546,8 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
 
         try:
             summary = await process_session(session_id, limit, on_frame, yolo_weights=champion_weights,
-                                            supported_ids=supported_ids, on_progress=on_progress)
+                                            supported_ids=supported_ids, on_progress=on_progress,
+                                            only_unlabelled=only_unlabelled)
             await db.commit()
         finally:
             await bus.stop()
