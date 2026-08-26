@@ -81,7 +81,7 @@ async def run_gap_fill(run_id: uuid.UUID, *, max_tracks: int = 20_000) -> None:
     """Fill every gapped track, resumably, as one revertible run."""
     from db.session import get_sessionmaker
     from services.agent.resume import beat, done_set
-    from services.intelligence.propagate import interpolate_track
+    from services.temporal.interpolate import interpolate_track_keyframed
 
     maker = get_sessionmaker()
     async with maker() as db:
@@ -98,10 +98,12 @@ async def run_gap_fill(run_id: uuid.UUID, *, max_tracks: int = 20_000) -> None:
     try:
         for tid in targets:
             try:
-                res = await interpolate_track(uuid.UUID(tid), run_id=run_id,
-                                              max_gap=MAX_GAP_FRAMES)
+                res = await interpolate_track_keyframed(
+                    uuid.UUID(tid), "cubic", anchor_policy="detection", run_id=run_id)
                 totals["created"] += int(res.get("created") or 0)
-                totals["skipped_long_gaps"] += int(res.get("skipped_long_gaps") or 0)
+                totals["refused_frames"] += int(res.get("refused_frames") or 0)
+                for reason, n in (res.get("refused") or {}).items():
+                    totals[f"refused_{reason}"] = totals.get(f"refused_{reason}", 0) + int(n)
                 totals["tracks"] += 1
                 consecutive = 0
             except Exception as exc:  # noqa: BLE001 - one bad track is not the corpus

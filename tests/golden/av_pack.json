@@ -91,6 +91,24 @@
     },
     {
       "class_names": [
+        "sedan",
+        "hatchback",
+        "suv",
+        "mpv",
+        "minivan",
+        "pickup",
+        "jeep",
+        "taxi",
+        "app_cab",
+        "luxury_sedan",
+        "vintage_car"
+      ],
+      "cost": 0.2,
+      "crosses_safety": false,
+      "name": "four_wheelers"
+    },
+    {
+      "class_names": [
         "bus",
         "truck",
         "tractor",

@@ -306,6 +306,15 @@ def _cliques() -> CliqueSpec:
             ConfusionClique("two_wheelers", ("motorcycle", "scooter", "moped", "cycle"), cost=0.2),
             ConfusionClique("three_wheelers", ("autorickshaw", "e_rickshaw", "cycle_rickshaw"), cost=0.2),
             ConfusionClique("livestock", ("cattle", "buffalo", "goat", "dog", "pig"), cost=0.2),
+            # The most common confusion in the corpus, and it had no clique. Judging 80 crops per class
+            # against a VLM: `sedan` confirms at 0.220 and its rejections propose suv 12 times, hatchback 9
+            # and minivan 2; `mpv` at 0.794 proposes suv 9 and hatchback 5; `suv` at 0.742 proposes minivan
+            # 6, app_cab 3 and hatchback 3. Every one of those is a body-style call on a passenger car, and
+            # the YAML already says so - 94.3% of four-wheelers are labelled `sedan`, which is why
+            # `body_style` exists as an attribute. Cheap because a planner treats them identically.
+            ConfusionClique("four_wheelers",
+                            ("sedan", "hatchback", "suv", "mpv", "minivan", "pickup", "jeep",
+                             "taxi", "app_cab", "luxury_sedan", "vintage_car"), cost=0.2),
             # Every member is a person; what differs is what they are doing, which is exactly what a
             # planner needs and what a detector gets wrong from behind.
             ConfusionClique("pedestrians_vs_riders",
