@@ -47,6 +47,20 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
         except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
             log.error("schedule.compat_matrix_failed", error=str(exc))
 
+    # Per-frame rarity onto Frame.scene, so a slice, an export and the coverage datasheet can all select on
+    # how unusual a frame is. Off-hours and bounded: rarity moves as labelling moves, so this is a sweep
+    # that catches up rather than a backfill that finishes.
+    if offhours:
+        try:
+            from services.context.rarity import sweep_rarity
+
+            r = await sweep_rarity(db, limit=4000)
+            if r.get("scored"):
+                actions.append({"action": "rarity_sweep", "scored": r["scored"],
+                                "remaining": r.get("remaining")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.rarity_sweep_failed", error=str(exc))
+
     # nightly patrol of the day's auto-accepts
     if offhours:
         try:

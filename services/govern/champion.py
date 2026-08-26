@@ -208,7 +208,15 @@ async def _common_gold_metrics(db, reg, champ, task):
     onto = get_ontology()
     gold_id = await latest_gold_id(db, onto.version)
     if gold_id is None:
-        return reg.gold_metrics or {}, (champ.gold_metrics if champ else None), "stored_own_split (no gold set sealed)"
+        # Two different situations, and the note used to call both of them "no gold set sealed". An ontology
+        # bump that leaves the sealed sets pinned to the previous version lands here with seven gold sets in
+        # the table, and a note claiming none exist sends whoever reads it looking for the wrong problem.
+        # Migration 0101 is what stops this happening on a bump; the note is what makes it visible if it
+        # ever does.
+        any_gold = await latest_gold_id(db)
+        why = (f"none at ontology {onto.version}; latest sealed is {any_gold}"
+               if any_gold else "no gold set sealed")
+        return reg.gold_metrics or {}, (champ.gold_metrics if champ else None), f"stored_own_split ({why})"
     chal_m = await evaluate_on_gold(db, reg.model_version, gold_id)
     champ_m = await evaluate_on_gold(db, champ.model_version, gold_id) if champ else None
     if chal_m is None or (champ is not None and champ_m is None):

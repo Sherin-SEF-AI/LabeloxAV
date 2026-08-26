@@ -141,7 +141,7 @@ async def apply_review_batch(
                 raise AttrRejected(oid, errors)
             merged = dict(obj.attrs or {})
             merged.update(attrs)
-            obj.attrs = merged
+            obj.attrs = onto.derive_attrs(merged, obj.class_id)
 
         if revalidate_attrs and obj.attrs:
             # A class change can make a previously valid attribute not applicable, which

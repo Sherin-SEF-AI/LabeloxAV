@@ -9,6 +9,7 @@ import type { IntentVocab, Ontology, Track } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import BackButton from "@/components/BackButton";
 import PageHeaderBar from "@/components/shell/PageHeaderBar";
+import EventLane from "@/components/track/EventLane";
 
 // Tracklet editor: scan a track across frames as a strip, spot class flips (the cells that disagree
 // with the dominant class glow red), and fix the whole track in one action. One relabel corrects every
@@ -148,6 +149,8 @@ export default function TrackEditor() {
       <main className="flex-1 overflow-auto p-4 space-y-4">
         {msg && <div className="panel px-3 py-1.5 font-mono text-[11px] text-warn">{msg}</div>}
 
+        {/* The event lane sits directly under the strip and shares its column geometry, so a span reads
+            against the crops it covers rather than against a separate time axis. */}
         {/* timeline strip */}
         <section className="panel">
           <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
@@ -172,6 +175,8 @@ export default function TrackEditor() {
             })}
           </div>
         </section>
+
+        <EventLane trackId={id} items={track.items} />
 
         {/* M-F.2 behavior / intent (track-level, from a closed vocabulary; proposals need human confirmation) */}
         {intentKind && (

@@ -47,9 +47,14 @@ def test_verdyx_protected_uses_the_pack_when_config_empty():
 def test_critical_ids_are_ontology_resolved_not_zero_based():
     onto = get_ontology("av")
     ids = domain.critical_class_ids(onto)
-    # the real ids for the named critical classes; 0 (which the old bug included) is not among them
-    expected = {onto.by_name(n).id for n in ("pedestrian", "rider", "motorcycle", "cycle", "cattle")}
+    # The subject is the resolution, not the membership. Deriving the expectation from the pack's own set
+    # rather than restating it: a literal list here made adding pothole and open_manhole to the safety set
+    # look like a regression in id resolution, which is the one thing this test is not about.
+    expected = {onto.by_name(n).id for n in domain.critical_class_names()}
     assert ids == expected
+    # 0, which the old 0-based bug included, is not among them, and every id resolves to a real class.
+    assert 0 not in ids
+    assert all(onto.by_id(i).name in domain.critical_class_names() for i in ids)
     assert 0 not in ids
 
 

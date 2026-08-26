@@ -13,6 +13,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { api } from "@/lib/api";
+import { attrsForClass } from "@/lib/attrScope";
 import { classColor } from "@/lib/colors";
 import { trackOp } from "@/lib/canvasOps";
 import { toast } from "@/lib/toast";
@@ -59,8 +60,10 @@ export default function SelectedObjectCard({
     ["rotated", !!object.rot],
   ] as [string, boolean][]).filter(([, on]) => on);
 
-  const l1 = onto.classes.find((c) => c.id === object.class_id)?.l1;
-  const allowedAttrs = l1 ? onto.attribute_scope?.[l1] : undefined;
+  // Shared with the server's attrs_for_class rather than reimplemented: l1 alone stopped being the whole
+  // answer once per-class extras existed, and an offered attribute the server rejects is a 400 with no
+  // explanation an annotator can act on.
+  const allowedAttrs = attrsForClass(onto, object.class_id) ?? undefined;
 
   return (
     <div className="p-2">

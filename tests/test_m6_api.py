@@ -18,6 +18,7 @@ import pytest
 from core.config import get_settings
 from core.storage import get_object_store
 from core.timebase import now_ns, seconds_to_ns
+from services.autolabel.ontology import get_ontology
 
 pytestmark = pytest.mark.db
 
@@ -109,7 +110,9 @@ def test_ontology_and_sessions_endpoints():
     sid, _, _ = _seed()
     with _client() as c:
         onto = c.get("/api/ontology").json()
-        assert onto["version"] == "labelox-in-0.1.0"
+        # What matters here is that the endpoint reports the ontology the server actually loaded, not which
+        # version that happens to be. A literal here turns an ontology bump into an API-contract failure.
+        assert onto["version"] == get_ontology().version
         assert len(onto["classes"]) >= 166  # additive ontology (P1 governed floor; customs may add more)
         sessions = c.get("/api/sessions").json()
         assert any(s["session_id"] == str(sid) for s in sessions)

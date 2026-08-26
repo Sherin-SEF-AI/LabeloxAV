@@ -849,6 +849,40 @@ export default function FrameEditor() {
     [selected, dispatch, recordCorrection],
   );
 
+  // The two attributes an annotator sets most often on an Indian road, on the two keys nearest the home
+  // row that were still free. Both are guarded on l1: on a truck `o` would set an attribute the truck's
+  // scope does not admit, and the server would reject the save with no visible cause.
+  //
+  // occupant_count wraps rather than stopping at the ceiling. Overshooting by one on a keyboard gesture is
+  // normal and a wrap costs one more press; a hard stop at six leaves the annotator holding a key that has
+  // silently stopped doing anything.
+  const ridable = useCallback((o: EdObject | null) => {
+    if (!o || !onto) return false;
+    const l1 = onto.classes.find((c) => c.id === o.class_id)?.l1;
+    return l1 === "two_wheeler" || l1 === "three_wheeler";
+  }, [onto]);
+
+  const bumpOccupants = useCallback(() => {
+    if (!selected || !ridable(selected)) return;
+    const n = Number(selected.attrs.occupant_count ?? 0);
+    const next = n >= 6 || n < 1 ? 1 : n + 1;
+    setAttrSelected("occupant_count", next);
+    // toast rather than flash: `flash` is not memoized, so depending on it here makes this callback change
+    // on every render, and memoizing flash turns four lint warnings into eleven.
+    toast(`${next} occupant${next === 1 ? "" : "s"}`);
+  }, [selected, ridable, setAttrSelected]);
+
+  // All on or all off, not one rider at a time. The per-rider checkboxes in the panel exist for the mixed
+  // case; the keyboard is for the two cases that are most of the corpus.
+  const toggleHelmets = useCallback(() => {
+    if (!selected || !ridable(selected)) return;
+    const cur = Array.isArray(selected.attrs.helmet) ? (selected.attrs.helmet as unknown[]).map(Boolean) : [];
+    const n = Math.max(1, Number(selected.attrs.occupant_count ?? 0) || cur.length || 1);
+    const allOn = cur.length === n && cur.every(Boolean);
+    setAttrSelected("helmet", Array.from({ length: n }, () => !allOn));
+    toast(allOn ? "helmets off" : `helmets on (${n})`);
+  }, [selected, ridable, setAttrSelected]);
+
   useEffect(() => {
     if (!pendingCorr) return;
     const t = setTimeout(() => { setActiveCorr(pendingCorr); setPendingCorr(null); }, 800);
@@ -1345,6 +1379,8 @@ export default function FrameEditor() {
       else if (k === "p") dispatch({ t: "tool", tool: "brush" });
       else if (k === "e") dispatch({ t: "tool", tool: "eraser" });
       else if (k === "u") dispatch({ t: "tool", tool: "superpixel" });
+      else if (k === "h" && ridable(selected)) toggleHelmets();
+      else if (k === "o" && ridable(selected)) bumpOccupants();
       else if (k === "f") fit();
       else if (e.key === "=" || e.key === "+") zoomBy(1.2);
       else if (e.key === "-") zoomBy(1 / 1.2);
@@ -1370,7 +1406,8 @@ export default function FrameEditor() {
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onUp); };
-  }, [st.selectedId, selected, onto, meta, dispatch, save, fit, zoomBy, acceptCandidate, gotoFrame, confirmFrame, relabelSelected, finishKeypoints, mode, alItems]);
+  }, [st.selectedId, selected, onto, meta, dispatch, save, fit, zoomBy, acceptCandidate, gotoFrame, confirmFrame,
+      relabelSelected, finishKeypoints, mode, alItems, ridable, toggleHelmets, bumpOccupants]);
 
   if (loadError && (!meta || !onto)) return (
     <div className="min-h-screen flex items-center justify-center">

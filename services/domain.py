@@ -76,6 +76,60 @@ def strata_dimensions(pack_id: str | None = None) -> tuple[str, ...]:
     return tuple(d.name for d in active_pack(pack_id).eval_strata.dimensions)
 
 
+def context_spec(pack_id: str | None = None):
+    """The active pack's frame-level context vocabulary, or None when the domain has nothing to say about
+    the scene as a whole. A static-camera pack counting entries is complete without one, and the editor
+    offers no context panel rather than the engine inventing weather categories for a warehouse."""
+    return active_pack(pack_id).context
+
+
+def validate_context(attrs: dict, pack_id: str | None = None) -> list[str]:
+    """Errors, empty when valid. A pack with no context spec rejects everything: writing a frame-level fact
+    into a domain that declares none is a caller bug, not an empty vocabulary to be filled in silently."""
+    spec = context_spec(pack_id)
+    if spec is None:
+        return ["this domain declares no frame context vocabulary"]
+    return spec.validate(attrs)
+
+
+def track_event_spec(pack_id: str | None = None):
+    """The pack's track-event vocabulary, or None when the domain has no behaviour worth spanning."""
+    return active_pack(pack_id).track_events
+
+
+def validate_track_event_type(event_type: str, class_l1: str | None, pack_id: str | None = None) -> list[str]:
+    """Empty when this pack admits this event type on a track of this superclass, else the reasons.
+
+    Applicability is checked here and not only in the picker, because the picker is not the only writer: the
+    proposers and any importer come through the same door, and a `lane_splitting` event on a pedestrian
+    track is a wrong statement whichever of them made it.
+    """
+    spec = active_pack(pack_id).track_events
+    if spec is None:
+        return [f"pack '{pack_id or 'default'}' declares no track events"]
+    t = spec.get(event_type)
+    if t is None:
+        return [f"unknown event type '{event_type}'"]
+    if t.applies_to == "any" or class_l1 is None:
+        return []
+    kinds = {"vehicle": {"two_wheeler", "three_wheeler", "four_wheeler", "heavy"}, "vru": {"vru"}}
+    if class_l1 not in kinds.get(t.applies_to, set()):
+        return [f"event '{event_type}' applies to {t.applies_to} tracks, not '{class_l1}'"]
+    return []
+
+
+def class_aliases(class_id: int, pack_id: str | None = None) -> list[str]:
+    """Every word that names this class, the display name first. Never empty.
+
+    Declared in the pack's own ontology YAML, which `OntologySpec.yaml_path` is the pack's statement of
+    where its class tree lives, and read back through the loader that already parses it. Not a second
+    mapping on the Pack dataclass: two lists of synonyms for one class tree is how the synonyms drift.
+    """
+    from services.autolabel.ontology import get_ontology
+
+    return get_ontology(pack_id).aliases_for(class_id)
+
+
 def redaction_targets(pack_id: str | None = None):
     """The active pack's privacy redaction targets (AV: face, plate). The anonymizer runs a detector per
     image target; audio targets (speech) are enforced on the export/audio path."""

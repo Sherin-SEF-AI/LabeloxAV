@@ -105,6 +105,20 @@ def pack_digest(pack_id: str = "av") -> dict:
             ],
             "legal_regime": p.privacy.legal_regime,
         },
+        # Two surfaces the digest did not cover, found when three new relation kinds and a change to the
+        # confusion cliques went through the golden gate without moving the digest at all. Both are pack
+        # behaviour: `kinds` is the vocabulary an annotator can create, and the cliques are what the
+        # active-learning cost model treats as an expensive confusion.
+        "relations": None if p.relations is None else {
+            "kinds": sorted(p.relations.kinds),
+            "overlap_pairs": {f"{a}|{b}": k for (a, b), k in sorted(p.relations.overlap_pairs.items())},
+            "inverse": dict(sorted(p.relations.inverse.items())),
+        },
+        "cliques": None if p.cliques is None else [
+            {"name": c.name, "class_names": list(c.class_names), "cost": c.cost,
+             "crosses_safety": c.crosses_safety}
+            for c in sorted(p.cliques.cliques, key=lambda c: c.name)
+        ],
         # SEC-M1: scene_model / ingestion adapters land in SEC-M2. The golden records their absence so the
         # milestone that adds them updates the frozen snapshot deliberately.
         "scene_model_present": p.scene_model is not None,

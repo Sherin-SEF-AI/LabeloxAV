@@ -341,10 +341,17 @@ def test_judging_an_object_in_a_second_batch_does_not_steal_it_from_the_first():
 @requires_infra
 def test_skipping_already_judged_objects_is_scoped_to_the_batch():
     """The mirror of the same mistake. Without the batch filter an object judged elsewhere by the same model
-    reads as already done, and the batch ends up with a hole nothing reports."""
+    reads as already done, and the batch ends up with a hole nothing reports.
+
+    Inspects `judge_objects` rather than `prereview_batch`: the judging loop was lifted out so a per-class
+    sampler could reuse it instead of copying it, and the skip query went with it. The invariant is the
+    same one, checked where it now lives.
+    """
     import inspect
 
     from services.labelops import vlm_review
 
-    src = inspect.getsource(vlm_review.prereview_batch)
+    src = inspect.getsource(vlm_review.judge_objects)
     assert "MachineVerdict.batch_id == batch_id" in src
+    # And prereview_batch must still route through it rather than growing a second loop.
+    assert "judge_objects(" in inspect.getsource(vlm_review.prereview_batch)

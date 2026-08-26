@@ -30,6 +30,7 @@ from services.api.deps import (
     require_role,
 )
 from services.autolabel.ontology import get_ontology
+from services.domain import validate_context
 from services.govern.audit import record as audit_record
 from services.review_policy import ReviewStateError, state_for
 
@@ -56,7 +57,21 @@ router = APIRouter()
 log = get_logger("api.objects")
 
 # Directed relationship kinds the editor offers (the India case is rider_of on a two-wheeler).
-_RELATION_KINDS = {"rider_of", "towed_by", "part_of", "member_of", "occludes"}
+# One of three relation vocabularies in the tree, and they do not agree: `SCENE_RELATIONS` in
+# services/intelligence/scene_graph.py is a disjoint set of six, and `RelationSpec.kinds` in the AV pack is
+# a third. Nothing enforces the pack's, so this set is what an annotator can actually create. The three new
+# kinds are added to all three; reconciling the divergence itself is a larger change than this one.
+_RELATION_KINDS = {"rider_of", "towed_by", "part_of", "member_of", "occludes",
+                   # A vehicle under power pulling a disabled one, distinct from `towed_by` which names the
+                   # thing being pulled. Both directions are labelled because either object can be the one
+                   # a detector found first.
+                   "towing",
+                   # An animal or a person drawing a cart. Not `towing`: the puller is not a vehicle and the
+                   # pair moves at walking pace, which is the part a planner needs.
+                   "pulling",
+                   # A person driving livestock along the road. The animals are a group, the person is not
+                   # in contact with any of them, and the whole assembly turns together.
+                   "herding"}
 
 
 @router.post("/objects/{object_id}/relate", dependencies=[Depends(require_role("reviewer"))])
@@ -554,7 +569,49 @@ async def get_frame(frame_id: str, job_id: str | None = None,
         # audit works it like ordinary review, skims the frames that look already-done, and produces the
         # confirmation bias the audit exists to measure.
         "blind_audit_id": str(audit_id) if audit_id else None,
+        # Frame-level facts: what the whole scene was like, as opposed to what any object in it is. Not
+        # withheld under a blind audit, unlike n_objects and annotation_source above, because none of it is
+        # a statement about the frame's labels: knowing it was raining tells an auditor nothing about what
+        # somebody else boxed. `scene` is the classifier's guess plus any human correction, and
+        # `scene_provenance` is who set which key, so the editor can show the difference.
+        "context": dict(frame.scene or {}),
+        "context_provenance": dict(frame.scene_provenance or {}),
     }
+
+
+class FrameContextIn(BaseModel):
+    """Frame-level facts a person is asserting. Partial: only the keys sent are touched, so setting the
+    weather does not clear somebody else's note about the lighting."""
+    attrs: dict
+
+
+@router.patch("/frames/{frame_id}/context", dependencies=[Depends(require_role("reviewer"))])
+async def set_frame_context(frame_id: str, payload: FrameContextIn,
+                            db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Record what the whole scene was like, over the top of what the ingest classifier guessed.
+
+    Merged rather than replaced, and stamped per key. The classifier fills `scene` at ingest with a
+    confidence per axis and will run again; without a per-key record of who set what, the next pass
+    overwrites a person's correction and nothing afterwards can tell that it did. `scene_provenance` is that
+    record, so a re-classification can leave human-set keys alone.
+    """
+    errors = validate_context(payload.attrs)
+    if errors:
+        # 400, matching the object attribute paths in this same file rather than inventing a third
+        # convention: only the 3D route answers 422 and clients already handle 400 here.
+        raise HTTPException(400, {"context_errors": errors})
+
+    frame = await db.get(Frame, UUID(frame_id))
+    if frame is None:
+        raise HTTPException(404, "frame not found")
+
+    who = user.name if user is not None else "anon"
+    frame.scene = {**(frame.scene or {}), **payload.attrs}
+    frame.scene_provenance = {**(frame.scene_provenance or {}),
+                              **{k: {"by": who, "ts_ns": now_ns()} for k in payload.attrs}}
+    await db.commit()
+    return {"frame_id": frame_id, "context": dict(frame.scene),
+            "context_provenance": dict(frame.scene_provenance)}
 
 
 @router.post("/frames/{frame_id}/objects", response_model=ObjectDetail)
@@ -626,7 +683,8 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         mask_encoding = "polygon"
     obj = Object(
         object_id=oid, frame_id=frame.frame_id, class_id=onto.by_name(payload.class_name).id,
-        bbox=payload.bbox, mask_uri=mask_uri, mask_encoding=mask_encoding, attrs=payload.attrs or {},
+        bbox=payload.bbox, mask_uri=mask_uri, mask_encoding=mask_encoding,
+        attrs=onto.derive_attrs(payload.attrs or {}, onto.by_name(payload.class_name).id),
         conf=1.0, source="human", state=state, rot_deg=payload.rot_deg, keypoints=payload.keypoints,
         polyline=payload.polyline, cuboid_3d=payload.cuboid_3d,
         # Who drew it and under which job. Both null for a label drawn outside a job, which is every

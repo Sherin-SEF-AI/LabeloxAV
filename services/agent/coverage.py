@@ -69,9 +69,26 @@ async def analyze_coverage(db: AsyncSession, *, rare_object_floor: int = 50) -> 
             elif share < _THIN_FRAC:
                 scene_gaps.append(f"{a}={v} thin ({dist[v]} frames, {share * 100:.1f}%)")
 
-    # geography
-    geo = {(city or "unknown"): int(n) for city, n in
-           (await db.execute(select(DbSession.city, func.count()).group_by(DbSession.city))).all()}
+    # Geography, resolved rather than grouped on the raw string.
+    #
+    # Grouping on `Session.city` reports this corpus as covering two places, because 372 sessions say `BLR`
+    # and one says `Bengaluru`. That made the buyer datasheet and the export coverage sheet disagree about
+    # the single most basic fact in either of them. Both go through the same resolver now.
+    from services.context.region import resolve_region
+
+    geo: dict[str, int] = {}
+    geo_raw: dict[str, int] = {}
+    for city, n in (await db.execute(select(DbSession.city, func.count()).group_by(DbSession.city))).all():
+        r = resolve_region(city)
+        geo[r.stratum()] = geo.get(r.stratum(), 0) + int(n)
+        geo_raw[city or "(none recorded)"] = int(n)
+    if len(geo_raw) > len(geo):
+        scene_gaps.append("the same place is recorded under more than one city string; any stratification "
+                          "on the raw column overcounts locations")
+    if geo and max(geo.values()) / sum(geo.values()) >= 0.9:
+        top = max(geo, key=geo.__getitem__)
+        scene_gaps.append(f"{max(geo.values()) / sum(geo.values()):.0%} of sessions are {top}; this is a "
+                          f"single-location corpus")
 
     gaps = []
     if missing:
@@ -82,4 +99,7 @@ async def analyze_coverage(db: AsyncSession, *, rare_object_floor: int = 50) -> 
 
     log.info("agent.coverage", scene_frames=n_scene, missing=len(missing), rare=len(rare), scene_gaps=len(scene_gaps))
     return {"class_balance": {"median": median, "rarest": class_dist[:10], "missing": missing, "rare": rare},
-            "scene_coverage": scene_report, "scene_frames": n_scene, "geo": geo, "gaps": gaps}
+            "scene_coverage": scene_report, "scene_frames": n_scene, "geo": geo,
+            # Kept alongside so a reader can see what the corpus actually recorded, not only what it
+            # resolved to. The difference between the two is itself a finding.
+            "geo_raw": geo_raw, "gaps": gaps}

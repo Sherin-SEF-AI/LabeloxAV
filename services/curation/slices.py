@@ -18,7 +18,11 @@ _SCENE_AXES = ("weather", "time_of_day", "road_type", "density")
 def matches_predicate(record: dict, predicate: dict) -> bool:
     """record: {scene:{weather,time_of_day,road_type,density}, city, classes:[...], states:[...], max_conf}.
     predicate clauses: any of the scene axes (list), cities (list), class_names (list), states (list),
-    min_conf (float). Every clause present must hold (AND); a missing clause is unconstrained."""
+    min_conf (float), regions (list of city or state names), context (dict of pack context axis to values),
+    rarity_min / rarity_max (float), track_event_types (list). Every clause present must hold (AND); a
+    missing clause is unconstrained.
+
+    The record may also carry `track_event_types`, the accepted event types on this frame's tracks."""
     scene = record.get("scene") or {}
     for axis in _SCENE_AXES:
         want = predicate.get(axis)
@@ -33,6 +37,44 @@ def matches_predicate(record: dict, predicate: dict) -> bool:
     min_conf = predicate.get("min_conf")
     if min_conf is not None and (record.get("max_conf") or 0.0) < min_conf:
         return False
+
+    # The clauses below have twins in services/export/dataset.py's SliceSpec, and the two are required to
+    # agree: a cohort that previews as 900 frames and exports as 40,000 is worse than one that cannot be
+    # exported at all. Each is the pure-Python reading of the same SQL clause there.
+
+    # Region, resolved rather than matched. `cities` compares the raw string, so a predicate asking for
+    # Bengaluru misses the 372 sessions recorded as `BLR`; this asks the pack's alias table instead.
+    if predicate.get("regions"):
+        from services.context.region import resolve_region
+
+        r = resolve_region(record.get("city"))
+        wanted = {w.strip().lower() for w in predicate["regions"]}
+        if not ({(r.city or "").lower(), (r.state or "").lower()} & wanted):
+            return False
+
+    # The pack's frame-context axes, beyond the four the ingest classifier writes. Read from the pack rather
+    # than listed here so a domain that declares a new axis becomes filterable without editing this file.
+    for key, want in (predicate.get("context") or {}).items():
+        if want and scene.get(key) not in want:
+            return False
+
+    rarity = scene.get("rarity")
+    lo, hi = predicate.get("rarity_min"), predicate.get("rarity_max")
+    if lo is not None or hi is not None:
+        # An unscored frame is excluded from a rarity band rather than treated as rarity zero. Zero is a
+        # real score meaning "nothing unusual here", and conflating it with "not yet measured" would fill
+        # every low-rarity cohort with frames nobody has scored.
+        if rarity is None:
+            return False
+        if lo is not None and rarity < lo:
+            return False
+        if hi is not None and rarity > hi:
+            return False
+
+    if predicate.get("track_event_types"):
+        have = set(record.get("track_event_types") or [])
+        if not (have & set(predicate["track_event_types"])):
+            return False
     return True
 
 

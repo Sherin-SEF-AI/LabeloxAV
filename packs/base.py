@@ -280,6 +280,63 @@ class CliqueSpec:
 
 
 @dataclass(frozen=True)
+class RegionSpec:
+    """How a domain turns a recorded place string into a stratum.
+
+    A corpus records places the way the capture rig happened to spell them, and the strings are not a
+    taxonomy: this one says `BLR` on 372 sessions and `Bengaluru` on one, which is a single city that looks
+    like two strata to anything counting coverage.
+
+    `resolve` maps a lowercased, punctuation-free string to (city, state, urban_class), or None when the
+    string names nowhere this domain models. `classes` is the urban_class vocabulary, ordered from largest,
+    so a report can render the strata in a meaningful order rather than alphabetically.
+    """
+
+    resolve: Callable[[str], tuple[str, str, str] | None]
+    classes: tuple[str, ...]
+    # Every string `resolve` accepts. Published so a filter can be built by inverting the same table the
+    # resolver reads, rather than by adding a denormalised region column that could drift from it.
+    keys: Callable[[], frozenset[str]]
+    # Places the domain knows are outside its region model, so a resolver can say "outside India" rather
+    # than "unknown". The difference matters: unknown is a data-quality problem, outside is a fact.
+    outside: Callable[[str], str | None] = lambda _s: None
+
+
+@dataclass(frozen=True)
+class TrackEventType:
+    """One typed span an annotator may draw on a track.
+
+    `definition` is the whole of the interface. It is what the annotator reads in the type picker at the
+    moment they are deciding, and a vague one produces a vocabulary where two people label the same
+    manoeuvre differently and the disagreement never surfaces as a disagreement. One sentence, stating what
+    must be visible for the span to start and what ends it.
+    """
+
+    name: str
+    definition: str
+    # vehicle | vru | any. Which kind of track may carry it, so the picker does not offer `lane_splitting`
+    # on a pedestrian.
+    applies_to: str = "any"
+    # True when a proposer in services/autolabel/event_proposals.py can suggest it. Everything else is
+    # human-only, and saying so here stops a later session "completing" the proposers by writing eleven
+    # more heuristics for manoeuvres a monocular estimate cannot see.
+    proposable: bool = False
+
+
+@dataclass(frozen=True)
+class TrackEventSpec:
+    """The track-event vocabulary of a domain."""
+
+    types: tuple[TrackEventType, ...]
+
+    def names(self) -> frozenset[str]:
+        return frozenset(t.name for t in self.types)
+
+    def get(self, name: str) -> TrackEventType | None:
+        return next((t for t in self.types if t.name == name), None)
+
+
+@dataclass(frozen=True)
 class RelationSpec:
     """The relationship vocabulary, and which ordered class pairs can stand in which relation.
 
@@ -473,11 +530,56 @@ class DomainPack(Protocol):
     motion_models: MotionModelSpec | None
     scene_model: SceneModelFactory | None
     ingestion_adapters: Sequence[IngestionAdapter]
+    # Optional: the frame-level vocabulary a person may set on Frame.scene. Empty means the domain has
+    # nothing to say about the scene as a whole.
+    context: ContextSpec | None
+    track_events: TrackEventSpec | None
     # Optional because they are genuinely domain-specific rather than merely unfinished: an AV pack has no
     # fixed zones to police and no camera to open. A pack that does not fill them is complete, and the engine
     # refuses the corresponding route rather than pretending the capability exists.
     zone_policy: ZonePolicy | None
     stream_source: StreamSource | None
+
+
+@dataclass(frozen=True)
+class ContextSpec:
+    """Frame-level facts a domain wants recorded that are not about any one object.
+
+    Kept separate from the object attribute schema because the question is different: an object attribute
+    says what a thing is, a context attribute says what the whole scene was like, and the same frame carries
+    one of each per axis. The engine already stores this on `Frame.scene`, which the ingest classifier fills
+    with density, weather, road_type and time_of_day; this is the vocabulary a person may add to it.
+
+    A domain with nothing to say about the scene leaves it empty and the editor shows no context panel,
+    rather than the engine inventing weather categories for a warehouse camera.
+    """
+    attributes: Mapping[str, AttributeSpec] = field(default_factory=dict)
+
+    def validate(self, attrs: Mapping[str, object]) -> list[str]:
+        """Errors, empty when valid. Same shape as the ontology's attribute validation so a caller that
+        already handles one handles the other."""
+        errors: list[str] = []
+        for key, val in attrs.items():
+            spec = self.attributes.get(key)
+            if spec is None:
+                errors.append(f"unknown context attribute '{key}'")
+                continue
+            errors.extend(spec.errors_for(key, val))
+        return errors
+
+
+@dataclass(frozen=True)
+class AttributeSpec:
+    """One context attribute. `enum` carries its allowed values, `bool` carries none."""
+    type: str
+    values: tuple[object, ...] = ()
+
+    def errors_for(self, key: str, val: object) -> list[str]:
+        if self.type == "enum":
+            return [] if val in self.values else [f"context '{key}'={val!r} not in {list(self.values)}"]
+        if self.type == "bool":
+            return [] if isinstance(val, bool) else [f"context '{key}' must be bool"]
+        return [f"context '{key}' has unsupported type {self.type!r}"]
 
 
 @dataclass(frozen=True)
@@ -506,6 +608,15 @@ class Pack:
     motion_models: MotionModelSpec | None = None
     scene_model: SceneModelFactory | None = None            # SEC-M2
     ingestion_adapters: tuple[IngestionAdapter, ...] = ()   # SEC-M2
+    # Optional: the frame-level vocabulary a person may set on Frame.scene. Empty means the domain
+    # has nothing to say about the scene as a whole, and the editor offers no context panel.
+    context: ContextSpec | None = None
+    # Optional: the track-level span vocabulary. A domain whose objects have no interesting behaviour over
+    # time (a still-life inspection camera) is complete without one, and the track view offers no event lane.
+    track_events: TrackEventSpec | None = None
+    # Optional: how this domain turns a recorded place into a stratum. A domain captured in one building
+    # has no regional structure and gets none invented for it.
+    region: RegionSpec | None = None
     zone_policy: ZonePolicy | None = None                   # static-camera domains only
     stream_source: StreamSource | None = None               # static-camera domains only
 

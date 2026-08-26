@@ -58,14 +58,24 @@ export type ObjectDetail = {
   ocr_conf?: number | null;
 };
 
-export type OntologyClass = { id: number; name: string; l0: string; l1: string; india: boolean };
+export type OntologyClass = {
+  id: number; name: string; l0: string; l1: string; india: boolean;
+  /** other names for this class, for search and for open-vocabulary prompting; absent on older responses */
+  aliases?: string[];
+};
 export type Ontology = {
   version: string;
   hierarchy_levels: number;
-  attributes: Record<string, { type: string; values: unknown[] | null; range: number[] | null }>;
+  attributes: Record<string, {
+    type: string; values: unknown[] | null; range: number[] | null;
+    /** set when this attribute is computed from another; the editor renders it read-only */
+    derived_from?: string | null;
+  }>;
   classes: OntologyClass[];
   // per-subclass (l1) applicable-attribute allowlist; a subclass absent here means all attributes apply
   attribute_scope?: Record<string, string[]>;
+  // per-class extras, unioned onto the l1 list above, for attributes l1 is too coarse to express
+  attribute_scope_class?: Record<string, string[]>;
 };
 
 export type SessionRow = {
@@ -484,6 +494,10 @@ export type FrameMeta = {
   // withheld every prediction and existing label, and scoped n_objects to the auditor's own work; this is
   // only so the editor can say what the pass is for.
   blind_audit_id?: string | null;
+  /** What the whole scene was like: the ingest classifier's guess plus any human correction. */
+  context?: Record<string, unknown>;
+  /** Who set each context key. A key absent here was the classifier's, not a person's. */
+  context_provenance?: Record<string, { by: string; ts_ns: number }>;
 };
 
 export type Relationship = { relationship_id: string; from_object_id: string; to_object_id: string; kind: string };
@@ -532,6 +546,38 @@ export type Track = {
   items: TrackItem[];
   intents: TrackIntent[];
 };
+export type TrackEvent = {
+  event_id: string;
+  track_id: string;
+  event_type: string;
+  start_frame_id: string;
+  end_frame_id: string;
+  start_ts_ns: number;
+  end_ts_ns: number;
+  source: string;
+  /** proposed | accepted | rejected */
+  state: string;
+  confidence?: number | null;
+  evidence?: Record<string, unknown>;
+  notes?: string | null;
+  created_by?: string | null;
+};
+/** One entry of the pack's track-event vocabulary. `definition` is what the annotator reads while deciding. */
+export type TrackEventType = {
+  name: string;
+  definition: string;
+  applies_to: string;
+  proposable: boolean;
+  /** whether this track's class may carry it; resolved server-side so one rule decides offer and accept */
+  applicable: boolean;
+};
+export type TrackEventsResponse = {
+  track_id: string;
+  class_l1: string | null;
+  events: TrackEvent[];
+  event_types: TrackEventType[];
+};
+
 export type IntentVocab = { ontology_version: string; vru: string[]; vehicle: string[]; trajectory_vru: string[]; trajectory_vehicle: string[]; vlm_vru: string[] };
 
 export type Scenario = {

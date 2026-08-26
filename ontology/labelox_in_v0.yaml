@@ -1,11 +1,11 @@
-version: "labelox-in-0.1.0"   # ids 1-45 frozen; 46-150 are the P2 long-tail expansion (additive)
+version: "labelox-in-0.2.0"   # ids 1-45 frozen; 46-150 P2 long-tail; 167-168 P3 India (all additive)
 hierarchy_levels: 4
 attributes:
   occlusion:      { type: enum, values: [0, 25, 50, 75, 100] }
   truncation:     { type: float, range: [0.0, 1.0] }
   direction:      { type: enum, values: [same, cross, wrong_way] }
   helmet:         { type: bool_array }          # per rider
-  passenger_load: { type: int }
+  passenger_load: { type: int, range: [0, 12] }   # measured max in corpus is 4
   overload:       { type: bool }
   on_shoulder:    { type: bool }
   marking_state:  { type: enum, values: [present, faded, absent] }
@@ -23,7 +23,7 @@ attributes:
   brake:          { type: enum, values: ["on", "off"] }
   indicator:      { type: enum, values: ["off", left, right, hazard] }
   lane_position:  { type: enum, values: [ego, left, right, oncoming, opposite] }
-  occlusion_pct:  { type: int }                 # precise 0-100 occlusion when the bucket is not enough
+  occlusion_pct:  { type: int, range: [0, 100] } # precise occlusion when the bucket is not enough
   # Body style, as an attribute rather than as nine classes.
   #
   # The four_wheeler classes claim to separate sedan, hatchback, SUV, MPV, pickup and the rest. The corpus
@@ -43,32 +43,117 @@ attributes:
   signal_kind:    { type: enum, values: [vehicle, pedestrian, cyclist] }
   signal_mount:   { type: enum, values: [pole, gantry, wall, portable] }
   pole_id:        { type: int }                 # id of the pole/structure a signal or sign is mounted on
+  # ---- P3 India attributes: what a vehicle is carrying, who is on it, and how it was modified.
+  #
+  # These are the axes on which Indian road data is distinctive and on which every public AV dataset is
+  # silent. A truck with rebar out the back and a scooter with a family of five are both correctly boxed
+  # and correctly classed today, and nothing in the record distinguishes either from an empty one. ----
+  load_type:      { type: enum, values: ["none", goods, construction_material, agricultural, water, gas_cylinders, livestock, passengers, waste, unknown] }
+  load_overhang:  { type: bool }                # load projects past the body outline: rebar, pipes, poles
+  cargo_secured:  { type: enum, values: [secured, unsecured, not_applicable, unknown] }
+  trailer_attached: { type: bool }
+  # Scoped per class, not per l1: l1 `heavy` collapses bus, truck, tractor, tipper, ambulance, fire_truck,
+  # bullock_cart and harvester, and an attribute offered on a fire truck is an attribute somebody sets.
+  roof_load:          { type: bool }            # goods or people on the roof
+  footboard_passengers: { type: bool }          # riding the step outside the doorway
+  passengers_on_load: { type: bool }            # people riding on top of the cargo itself
+  # Occupancy. The range stops at 6 rather than the 4 the brief proposed: a family of five on a scooter is
+  # a real and photographable thing, and a ceiling that refuses to record it turns the observation this
+  # attribute exists to capture into a validation error.
+  occupant_count: { type: int, range: [0, 6] }
+  # Read from occupant_count, never written. Two independently settable fields produce objects that say
+  # three occupants and not triple riding, and no consumer can tell which one to believe.
+  triple_riding:  { type: bool, derived_from: occupant_count }
+  delivery_box:   { type: bool }                # the brief is right that this is an attribute, not a class
+  rain_gear:      { type: enum, values: ["none", poncho, umbrella, raincoat, unknown] }
+  head_load:      { type: bool }                # carrying on the head, hands free
+  mobility_aid:   { type: enum, values: ["none", crutches, wheelchair, walking_stick, unknown] }
+  animal_control: { type: enum, values: [herded, tethered, stray, unknown] }
+  group_size:     { type: int, range: [1, 50] } # a herd or a crowd boxed as one; 1 means a single animal
+  modified_body:  { type: bool }                # rebuilt or extended beyond the factory body
+  # What the bus is for, as an attribute rather than as three classes, for the reason recorded against the
+  # P3 leaves below. A city bus stops in the running lane every few hundred metres, an intercity coach does
+  # not stop at all, and a school service stops and unloads children into the road. That is the planning
+  # distinction, and it is worth having without splitting a class that already holds 19,948 objects.
+  bus_service:    { type: enum, values: [city, intercity, school, staff, tourist, unknown] }
+  # ---- P3 infrastructure and hazard attributes ----
+  #
+  # `script` records WHICH writing systems appear on a sign, board or road marking, and nothing about what
+  # they say. There is no text field here and there is no OCR model behind it, deliberately: a sign's script
+  # is what tells you whether a detector trained on Latin signage will read this corpus at all, and that is
+  # answerable without transcribing a single word. Multi-select because a Bengaluru signboard routinely
+  # carries Kannada and English together, and forcing one would record the wrong half.
+  script:         { type: multi_select, values: [devanagari, kannada, tamil, telugu, malayalam, bengali,
+                                                 gujarati, gurmukhi, odia, urdu, latin, other] }
+  sign_condition: { type: enum, values: [clear, faded, bent, obscured, defaced, missing_face] }
+  # How much of the carriageway the defect takes and how far a wheel drops into it. Severity is an
+  # attribute rather than three classes because a pothole does not become a different kind of thing as it
+  # grows, and because the same hole is `moderate` in the dry and `severe` when the monsoon fills it.
+  hazard_severity: { type: enum, values: [minor, moderate, severe] }
+  # Whether the hole or trench is currently full of water, which is what makes it invisible and is the
+  # single most common way a two-wheeler goes into one.
+  water_filled:   { type: bool }
 
 # Per-subclass (L1) applicable-attribute allowlist. An object's class restricts which global attributes
 # apply, so the editor shows only the relevant ones and validation rejects the rest. A subclass not listed
 # here means all attributes apply (backward compatible).
 attribute_scope:
-  two_wheeler:   [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, helmet, passenger_load, overload, static]
-  three_wheeler: [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, passenger_load, overload, livery, static]
-  four_wheeler:  [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, livery, static, body_style]
-  heavy:         [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, articulated, overload, livery, static]
-  vru:           [occlusion, occlusion_pct, truncation, direction, motion, lane_position, on_shoulder, helmet]
-  animal:        [occlusion, occlusion_pct, truncation, motion, on_shoulder, static]
+  two_wheeler:   [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, helmet, passenger_load, overload, static, occupant_count, triple_riding, delivery_box, rain_gear, load_overhang, modified_body]
+  three_wheeler: [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, passenger_load, overload, livery, static, occupant_count, triple_riding, load_type, load_overhang, cargo_secured, modified_body]
+  four_wheeler:  [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, livery, static, body_style, load_type, load_overhang, cargo_secured, trailer_attached, modified_body]
+  heavy:         [occlusion, occlusion_pct, truncation, direction, motion, maneuver, brake, indicator, lane_position, articulated, overload, livery, static, load_type, load_overhang, cargo_secured, trailer_attached, modified_body]
+  vru:           [occlusion, occlusion_pct, truncation, direction, motion, lane_position, on_shoulder, helmet, rain_gear, head_load, mobility_aid, group_size]
+  animal:        [occlusion, occlusion_pct, truncation, motion, on_shoulder, static, animal_control, group_size]
   fixed:         [occlusion, truncation, signal_state, signal_arrow, signal_kind, signal_mount, marking_state, blocks_lane, static, pole_id]
   temporary:     [occlusion, truncation, blocks_lane, static, on_shoulder]
   boundary:      [occlusion, truncation, marking_state, blocks_lane]
+
+# Per-CLASS extras, unioned onto whatever the l1 scope above allows. Only for attributes l1 cannot express.
+#
+# `heavy` holds bus, school_bus, truck, tractor, tipper, ambulance, fire_truck, bullock_cart and harvester
+# in one bucket, so "buses" and "things carrying cargo" are not sayable at l1. A class listed here keeps its
+# l1 attributes and gains these; a class absent behaves exactly as it did before this key existed.
+attribute_scope_class:
+  bus:              [footboard_passengers, roof_load, bus_service]
+  school_bus:       [footboard_passengers, bus_service]
+  tempo_traveller:  [footboard_passengers, roof_load, bus_service]
+  school_van:       [footboard_passengers, bus_service]
+  shared_auto:      [footboard_passengers]
+  autorickshaw:     [footboard_passengers]
+  truck:            [roof_load, passengers_on_load]
+  tipper:           [passengers_on_load]
+  tractor_trolley:  [passengers_on_load, roof_load]
+  goods_3w:         [passengers_on_load]
+  bullock_cart:     [passengers_on_load]
+  # Surface defects. Severity and standing water are the two facts that change what a rider does.
+  pothole:          [hazard_severity, water_filled]
+  manhole:          [hazard_severity]
+  open_manhole:     [hazard_severity, water_filled]
+  road_cut:         [hazard_severity, water_filled]
+  excavation_pit:   [hazard_severity, water_filled]
+  waterlogging:     [hazard_severity]
+  # Anything carrying writing. `script` says which writing systems are present and never what they say.
+  road_text:        [script]
+  traffic_sign:     [script, sign_condition]
+  chevron_sign:     [sign_condition]
+  milestone:        [script, sign_condition]
+  km_stone:         [script, sign_condition]
+  hoarding:         [script]
+  flex_banner:      [script]
+  roadside_shop:    [script]
+
 classes:
   # L0 OBJECT / L1 two_wheeler
   - { id: 1,  name: motorcycle,        l0: object,  l1: two_wheeler, india: false }
   - { id: 2,  name: scooter,           l0: object,  l1: two_wheeler, india: false }
   - { id: 3,  name: moped,             l0: object,  l1: two_wheeler, india: false }
   - { id: 4,  name: cycle,             l0: object,  l1: two_wheeler, india: false }
-  - { id: 5,  name: delivery_rider_bike, l0: object, l1: two_wheeler, india: true }
+  - { id: 5,  name: delivery_rider_bike, l0: object, l1: two_wheeler, india: true, aliases: [delivery_two_wheeler, food_delivery_bike, gig_rider] }
   # L1 three_wheeler (the moat primitives)
-  - { id: 6,  name: autorickshaw,      l0: object,  l1: three_wheeler, india: true }
-  - { id: 7,  name: e_auto,            l0: object,  l1: three_wheeler, india: true }
-  - { id: 8,  name: goods_3w,          l0: object,  l1: three_wheeler, india: true }
-  - { id: 9,  name: e_rickshaw,        l0: object,  l1: three_wheeler, india: true }
+  - { id: 6,  name: autorickshaw,      l0: object,  l1: three_wheeler, india: true, aliases: [auto, auto_rickshaw, tuk_tuk, three_wheeler_taxi] }
+  - { id: 7,  name: e_auto,            l0: object,  l1: three_wheeler, india: true, aliases: [electric_auto, e_autorickshaw] }
+  - { id: 8,  name: goods_3w,          l0: object,  l1: three_wheeler, india: true, aliases: [goods_auto, cargo_three_wheeler, loading_auto] }
+  - { id: 9,  name: e_rickshaw,        l0: object,  l1: three_wheeler, india: true, aliases: [toto, battery_rickshaw, e_rick] }
   # L1 four_wheeler
   - { id: 10, name: hatchback,         l0: object,  l1: four_wheeler, india: false }
   - { id: 11, name: sedan,             l0: object,  l1: four_wheeler, india: false }
@@ -81,7 +166,7 @@ classes:
   - { id: 17, name: school_bus,        l0: object,  l1: heavy, india: false }
   - { id: 18, name: lcv,               l0: object,  l1: heavy, india: false }
   - { id: 19, name: truck,             l0: object,  l1: heavy, india: false }
-  - { id: 20, name: water_tanker,      l0: object,  l1: heavy, india: true }
+  - { id: 20, name: water_tanker,      l0: object,  l1: heavy, india: true, aliases: [tanker_lorry, water_lorry, water_truck] }
   - { id: 21, name: garbage_truck,     l0: object,  l1: heavy, india: true }
   - { id: 22, name: tipper,            l0: object,  l1: heavy, india: false }
   - { id: 23, name: construction_veh,  l0: object,  l1: heavy, india: true }
@@ -94,7 +179,7 @@ classes:
   - { id: 29, name: child,             l0: object,  l1: vru, india: false }
   - { id: 30, name: animal_handler,    l0: object,  l1: vru, india: true }
   # L1 animal
-  - { id: 31, name: cattle,            l0: object,  l1: animal, india: true }
+  - { id: 31, name: cattle,            l0: object,  l1: animal, india: true, aliases: [cow, bovine, bull] }
   - { id: 32, name: dog,               l0: object,  l1: animal, india: false }
   - { id: 33, name: goat,              l0: object,  l1: animal, india: true }
   # L0 INFRA fixed
@@ -105,7 +190,7 @@ classes:
   # L0 INFRA temporary (the Indian street reality)
   - { id: 38, name: cone,              l0: infra,   l1: temporary, india: false }
   - { id: 39, name: temp_barricade,    l0: infra,   l1: temporary, india: true }
-  - { id: 40, name: push_cart,         l0: infra,   l1: temporary, india: true }
+  - { id: 40, name: push_cart,         l0: infra,   l1: temporary, india: true, aliases: [handcart, thela, pushcart] }
   - { id: 41, name: roadside_shop,     l0: infra,   l1: temporary, india: true }
   - { id: 42, name: debris,            l0: infra,   l1: temporary, india: false }
   - { id: 43, name: speed_breaker,     l0: surface, l1: boundary, india: true }
@@ -120,7 +205,7 @@ classes:
   # three_wheeler long tail
   - { id: 49, name: cycle_rickshaw,    l0: object,  l1: three_wheeler, india: true }
   - { id: 50, name: e_loader_3w,       l0: object,  l1: three_wheeler, india: true }
-  - { id: 51, name: shared_auto,       l0: object,  l1: three_wheeler, india: true }
+  - { id: 51, name: shared_auto,       l0: object,  l1: three_wheeler, india: true, aliases: [share_auto, share_rickshaw, seven_seater, passenger_auto] }
   # four_wheeler long tail
   - { id: 52, name: minivan,           l0: object,  l1: four_wheeler, india: false }
   - { id: 53, name: jeep,              l0: object,  l1: four_wheeler, india: false }
@@ -147,7 +232,7 @@ classes:
   - { id: 72, name: sweeper,           l0: object,  l1: vru, india: true }
   - { id: 73, name: wheelchair_user,   l0: object,  l1: vru, india: false }
   - { id: 74, name: person_with_umbrella, l0: object, l1: vru, india: true }
-  - { id: 75, name: person_carrying_load, l0: object, l1: vru, india: true }
+  - { id: 75, name: person_carrying_load, l0: object, l1: vru, india: true, aliases: [head_load_carrier, headload, porter] }
   - { id: 76, name: religious_figure,  l0: object,  l1: vru, india: true }
   - { id: 77, name: school_children_group, l0: object, l1: vru, india: true }
   # animal long tail
@@ -190,7 +275,7 @@ classes:
   - { id: 110, name: sandbag,          l0: infra,   l1: temporary, india: false }
   - { id: 111, name: hume_pipe,        l0: infra,   l1: temporary, india: true }
   - { id: 112, name: road_roller,      l0: infra,   l1: temporary, india: false }
-  - { id: 113, name: excavator,        l0: infra,   l1: temporary, india: false }
+  - { id: 113, name: excavator,        l0: infra,   l1: temporary, india: false, aliases: [jcb, backhoe, backhoe_loader] }
   - { id: 114, name: tar_drum,         l0: infra,   l1: temporary, india: true }
   - { id: 115, name: fallen_tree,      l0: infra,   l1: temporary, india: false }
   - { id: 116, name: waterlogging,     l0: infra,   l1: temporary, india: true }
@@ -221,11 +306,11 @@ classes:
   - { id: 140, name: vegetation,       l0: infra,   l1: fixed, india: false }
   # final India long-tail
   - { id: 141, name: e_rickshaw_loader, l0: object, l1: three_wheeler, india: true }
-  - { id: 142, name: tractor_trolley,  l0: object,  l1: heavy, india: true }
+  - { id: 142, name: tractor_trolley,  l0: object,  l1: heavy, india: true, aliases: [trolley, tractor_trailer] }
   - { id: 143, name: harvester,        l0: object,  l1: heavy, india: true }
   - { id: 144, name: sweeper_machine,  l0: object,  l1: heavy, india: false }
   - { id: 145, name: bullock_cart,     l0: object,  l1: heavy, india: true }
-  - { id: 146, name: vendor_handcart,  l0: infra,   l1: temporary, india: true }
+  - { id: 146, name: vendor_handcart,  l0: infra,   l1: temporary, india: true, aliases: [vendor_cart, hawker_cart, thela_cart] }
   - { id: 147, name: ice_cream_cart,   l0: infra,   l1: temporary, india: true }
   - { id: 148, name: tea_stall_cart,   l0: infra,   l1: temporary, india: true }
   - { id: 149, name: balloon_seller,   l0: object,  l1: vru, india: true }
@@ -252,3 +337,72 @@ classes:
   - { id: 164, name: metro_bus_stop,   l0: infra,   l1: fixed, india: true }
   - { id: 165, name: school_bus_stop,  l0: infra,   l1: fixed, india: true }
   - { id: 166, name: temp_bus_stop,    l0: infra,   l1: fixed, india: true }
+
+  # ---- P3 India leaves, ids 167-168 ----
+  #
+  # Two, not the twelve the brief listed, and the difference is the finding.
+  #
+  # Seven already exist under other names: `autorickshaw` is 6, `e_rickshaw` is 9, `share_auto` is
+  # `shared_auto` 51, `tractor_trolley` is 142, `water_tanker` is 20, `handcart`/`vendor_cart` are
+  # `push_cart` 40 and `vendor_handcart` 146, and `head_load_carrier` is `person_carrying_load` 75. Adding
+  # them again is how 48,322 objects ended up in `traffic_sign`: two names for one thing and a corpus split
+  # across both with no way to merge it afterwards. They are aliases below instead.
+  #
+  # `construction_vehicle` would have sat on top of five classes that already exist - `excavator` 113,
+  # `road_roller` 112, `crane_truck` 60, `cement_mixer` 59, `dumper` 61 - which between them hold 76
+  # objects. An umbrella over five starved siblings gives an annotator six defensible answers for one
+  # machine. `jcb` and `backhoe` are aliases of `excavator`.
+  #
+  # `city_bus` and `intercity_bus` are the `sedan` mistake, and this file already documents it forty lines
+  # up: 94.3% of four-wheelers are labelled `sedan` because a plausible superclass absorbs its siblings.
+  # `bus` holds 19,948 objects against `school_bus`'s 1,173. Splitting it leaves 19,948 objects meaning
+  # "some bus" forever and every new label going wherever the annotator leans. The city/intercity
+  # distinction is real and it is planning-relevant, so it is the `bus_service` attribute instead - the
+  # same answer this file already reached for body style.
+  #
+  # L1 heavy. Distinct silhouettes with nothing already covering them. `tempo` 63 is the goods carrier;
+  # a tempo traveller is a twelve-seat passenger van, which is why `tempo` is not an alias here.
+  - { id: 167, name: tempo_traveller,  l0: object,  l1: heavy, india: true, aliases: [force_traveller, minibus_van, twelve_seater] }
+  - { id: 168, name: school_van,       l0: object,  l1: heavy, india: true, aliases: [school_cab, school_omni] }
+
+  # ---- P3 infrastructure and hazards, ids 169-178 ----
+  #
+  # Ten, and again the count is the finding. The surface and infra space already holds 75 classes, so most
+  # of the brief's list resolved to something present: `open_drain` is `drain` 152, `kerb` is `curb` 101,
+  # `footpath` is `sidewalk` 102, `tree_branch` is `fallen_tree` 115, `police_barricade` is `temp_barricade`
+  # 39, and the whole construction fleet is 59-61 and 112-113.
+  #
+  # Two more were attributes rather than classes. `unmarked_speed_breaker` is `speed_breaker` 43 with
+  # `marking_state: absent`, which the boundary scope has offered since P1 - and an unpainted breaker is
+  # exactly what that attribute was for. `broken_down_vehicle` is a vehicle with `motion: stopped`, not a
+  # new kind of object.
+  #
+  # L0 INFRA / L1 temporary: the surface defects, absent entirely until now. `pothole` was not in a
+  # 166-class India ontology, which is the single most surprising thing the audit turned up.
+  - { id: 169, name: pothole,          l0: infra,   l1: temporary, india: true, aliases: [road_hole, crater] }
+  - { id: 170, name: manhole,          l0: infra,   l1: temporary, india: false, aliases: [manhole_cover, inspection_chamber] }
+  # Separate from `manhole` because the two need opposite responses: a raised cover is a jolt, and an open
+  # one is a wheel-swallowing hole that has killed riders.
+  - { id: 171, name: open_manhole,     l0: infra,   l1: temporary, india: true, aliases: [uncovered_manhole, open_chamber] }
+  # A utility trench cut across the carriageway and backfilled unevenly. Distinct from `excavation_pit` 109,
+  # which is a pit beside the road rather than a ridge across it.
+  - { id: 172, name: road_cut,         l0: infra,   l1: temporary, india: true, aliases: [utility_trench, road_trench] }
+  # Vinyl and cloth banners strung across or beside the road. Not `hoarding` 122, which is a permanent
+  # structure: a flex banner is put up for a week, sags into the carriageway, and blocks sightlines.
+  - { id: 173, name: flex_banner,      l0: infra,   l1: temporary, india: true, aliases: [flex_board, cloth_banner, festival_banner] }
+  # L0 INFRA / L1 fixed
+  #
+  # `road_text` is a region carrying writing, with a `script` attribute and NO text field. There is no OCR
+  # model behind this and there is not going to be one: what a detector needs to know is that this corpus is
+  # full of signage in scripts its training data never contained, and that is answerable without
+  # transcribing a word. Transcription is also the point at which a road dataset starts collecting the
+  # contents of shopfronts and number plates, which is a different thing to be building.
+  - { id: 174, name: road_text,        l0: infra,   l1: fixed, india: true, aliases: [signage_text, painted_text, lettering] }
+  - { id: 175, name: bollard,          l0: infra,   l1: fixed, india: false, aliases: [post_bollard, traffic_bollard] }
+  - { id: 176, name: level_crossing,   l0: infra,   l1: fixed, india: false, aliases: [rail_crossing, railway_gate] }
+  # L0 SURFACE
+  #
+  # The break in a median where traffic turns across the carriageway. A planning feature nothing in the
+  # boundary set covers, and the place where most of an arterial's conflicts happen.
+  - { id: 177, name: median_gap,       l0: surface, l1: boundary, india: true, aliases: [median_opening, u_turn_gap] }
+  - { id: 178, name: traffic_island,   l0: surface, l1: non_drivable, india: false, aliases: [refuge_island, pedestrian_island] }

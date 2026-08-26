@@ -36,6 +36,14 @@ class ExportRecord:
     keypoints: dict | None = None  # COCO-style {"skeleton","points":[[x,y,v],...]} pose, when present
     polyline: list | None = None   # open linear feature [[x,y],...] (curb/road_edge/barrier), when present
     relationships: list = field(default_factory=list)  # outgoing [{"to_object_id","kind"},...] groupings
+    # Frame-level scene context from Frame.scene: weather, density, road_type, time_of_day from ingest plus
+    # whatever a person set. A property of the frame, so every record on one frame carries the same dict and
+    # the writers put it on the image rather than on each annotation.
+    context: dict = field(default_factory=dict)
+    # Accepted track events overlapping this object's frame, as [{"event_type","start_ts_ns","end_ts_ns"}].
+    # Per record rather than per track because an event covers part of a track, and a consumer asking "was
+    # this object braking in this frame" cannot answer that from a track-level list.
+    track_events: list = field(default_factory=list)
     sign_type: str | None = None       # Indian RTO taxonomy type, when a sign was typed and not rejected
     sign_category: str | None = None   # mandatory | cautionary | informatory
     ocr_text: str | None = None        # road text read off a sign or board; never a license plate

@@ -7,7 +7,10 @@ import { useEffect, useState } from "react";
 // handler binds them (the tool keys are global: the same letter selects the same tool in every mode, though
 // a tool may be inert on a swapped canvas). Discoverability without cluttering the canvas.
 
-const GLOBAL: { keys: string; label: string }[] = [
+// Exported so the coupling test can read them. This list was hand-maintained against a 2,000-line keyboard
+// handler with nothing checking the two agreed, which is a reference that goes quietly wrong: a rebound key
+// still renders here, and an annotator learns a shortcut that does nothing.
+export const GLOBAL: { keys: string; label: string }[] = [
   { keys: "?", label: "this shortcut help" },
   { keys: "Cmd K", label: "command palette (jump to any screen)" },
   { keys: "Cmd S", label: "save" },
@@ -21,18 +24,21 @@ const GLOBAL: { keys: string; label: string }[] = [
   { keys: "Cmd I", label: "invert the selection" },
   { keys: "Esc", label: "cancel what is in progress, then clear the selection" },
   { keys: "Space", label: "pan the canvas (hold)" },
+  { keys: "F", label: "fit the frame to the window" },
   { keys: "[", label: "previous frame" },
   { keys: "]", label: "next frame" },
   { keys: "1 to 9", label: "relabel selected to class N" },
   { keys: "Shift 1 to 7", label: "switch mode" },
   { keys: "A", label: "accept all (Review mode: accept selected)" },
   { keys: "X", label: "reject selected (Review mode)" },
+  { keys: "H", label: "helmets on or off for every occupant (two/three-wheeler)" },
+  { keys: "O", label: "cycle occupant count 1 to 6 (two/three-wheeler)" },
   { keys: "Enter", label: "finish the AI mask in progress" },
   { keys: "Esc", label: "discard the AI mask / close overlays" },
 ];
 
 // The editor tool keys, exactly as the frame editor's keyboard handler binds them (global across modes).
-const TOOLS: { keys: string; label: string }[] = [
+export const TOOLS: { keys: string; label: string }[] = [
   { keys: "V", label: "select" },
   { keys: "B", label: "box" },
   { keys: "G", label: "polygon" },

@@ -66,6 +66,9 @@ def write_coco(
                 # consumer keying on file_name silently merges them. Kept for COCO compatibility, with the
                 # unambiguous name beside it.
                 "frame_id": str(r.frame_id),
+                # Scene context on the image, for the same reason `split` is: it is a fact about the frame,
+                # and N copies per frame is a file that can contradict itself.
+                "labelox_context": r.context or {},
             }
         x1, y1, x2, y2 = r.bbox
         w, h = max(0.0, x2 - x1), max(0.0, y2 - y1)
@@ -89,6 +92,14 @@ def write_coco(
                     "source": r.source,
                     "attributes": r.attrs,
                     "provenance": r.provenance,
+                    # Relations have been on ExportRecord since they were added and only Parquet ever wrote
+                    # them, so every COCO consumer has been reading a rider and a motorcycle as two
+                    # unrelated boxes. Keyed on the object_id emitted above, so a reader can join them
+                    # without an index of its own.
+                    "relationships": r.relationships or [],
+                    # Accepted track events covering this frame. A span, not a track-level label: the
+                    # timestamps say which part of the track it was.
+                    "track_events": r.track_events or [],
                 },
             }
         )

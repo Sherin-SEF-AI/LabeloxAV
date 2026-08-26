@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
-
 from core.schemas import BBox, GateState, UnifiedObject
-from core.timebase import datetime_to_ns, frame_ts_ns, ns_to_datetime, now_ns
+from core.timebase import datetime_to_ns, frame_ts_ns, now_ns, ns_to_datetime
 from services.autolabel.ontology import load_ontology
 
 
@@ -36,7 +34,10 @@ def test_ontology_loads_governed_classes():
     # The ontology is additive + extensible (P1 added 166 governed classes; annotators can add more
     # customs), so assert the governed floor and that key classes resolve rather than a frozen count.
     onto = load_ontology()
-    assert onto.version == "labelox-in-0.1.0"
+    # The prefix, not the number. This test is about the governed floor and about key classes resolving;
+    # pinning the exact version here made every additive ontology bump look like a foundation failure, and
+    # the literal belongs in the one test whose subject is the version (tests/test_ontology_p3.py).
+    assert onto.version.startswith("labelox-in-")
     assert len(onto.classes) >= 166
     assert onto.hierarchy_levels == 4
     # core + P1 additions resolve

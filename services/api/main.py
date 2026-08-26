@@ -78,6 +78,7 @@ from services.api.routers import (
     segmentation,
     service_accounts,
     signs,
+    track_events,
     tracks,
     training,
     triage,
@@ -193,6 +194,37 @@ async def lifespan(app: FastAPI):
             await reap_stale_jobs(db)
     except Exception as exc:  # noqa: BLE001
         log.warning("api.reap_interrupted_failed", error=str(exc))
+
+    # Does the database know about the ontology this process just loaded?
+    #
+    # `object.class_id` is a foreign key into `ontology_class`, and the YAML is the source of truth for what
+    # classes exist. Editing the YAML without running scripts/seed_ontology.py leaves the two disagreeing,
+    # and nothing says so: reads work, the class list renders, the editor offers the new class, and the save
+    # fails with a foreign-key violation the annotator sees as a 500. That is exactly how the 0.2.0 bump
+    # shipped - twelve classes in the YAML, none in the table.
+    #
+    # Startup is where this belongs rather than a health check: it is one query, it is the moment the
+    # ontology is loaded anyway, and an operator reading the boot log is the person who can fix it.
+    try:
+        from sqlalchemy import select as _select
+
+        from db.models import OntologyClass
+        from db.session import get_sessionmaker
+        from services.autolabel.ontology import get_ontology
+
+        _onto = get_ontology()
+        async with get_sessionmaker()() as db:
+            seeded = {r for r in (await db.execute(_select(OntologyClass.id))).scalars()}
+        unseeded = sorted({c.id for c in _onto.classes} - seeded)
+        if unseeded:
+            log.error("api.ontology_not_seeded", version=_onto.version, missing_class_ids=unseeded[:25],
+                      n_missing=len(unseeded),
+                      fix="uv run python -m scripts.seed_ontology")
+        else:
+            log.info("api.ontology_seeded", version=_onto.version, classes=len(_onto.classes))
+    except Exception as exc:  # noqa: BLE001 - a drift check must never stop the API from starting
+        log.warning("api.ontology_check_failed", error=str(exc))
+
     watchdog = spawn(_cloud_watchdog(), name="_cloud_watchdog")
     try:
         yield
@@ -626,3 +658,4 @@ app.include_router(inbox.router, prefix="/api", tags=["inbox"])
 app.include_router(security.router, prefix="/api", tags=["security"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])
+app.include_router(track_events.router, prefix="/api", tags=["tracks"])

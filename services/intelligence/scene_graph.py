@@ -20,7 +20,8 @@ from services.autolabel.ontology import get_ontology
 log = get_logger("intelligence.scene_graph")
 
 # closed scene-graph relation vocabulary
-SCENE_RELATIONS = ["following", "yielding_to", "occluded_by", "stopping_at", "parked_near", "crossing_in_front_of"]
+SCENE_RELATIONS = ["following", "yielding_to", "occluded_by", "stopping_at", "parked_near",
+                   "crossing_in_front_of", "towing", "pulling", "herding"]
 _GEOMETRIC = {"occluded_by", "following", "parked_near", "crossing_in_front_of"}
 _VEHICLE_L1 = {"two_wheeler", "three_wheeler", "four_wheeler", "heavy"}
 _VRU_L1 = {"vru"}
