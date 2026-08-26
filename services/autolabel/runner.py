@@ -347,7 +347,28 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
     Path C is duty-cycled (Principle 08): the VLM runs only on objects the gate would not
     auto-accept, capped by a per-session budget. The VLM call rate is tracked as a first-class
     metric. vlm_client is injectable for tests; otherwise built from config when the VLM is enabled.
+
+    Holds the GPU slot for the session. It belongs here rather than in the router because the router is one
+    of six callers: `redetect.py`, `ops_agent.py`, `scripts/autolabel_fleet.py`, `scripts/batch_process.py`
+    and this module's own CLI all reach the pipeline directly, and the router's gates - training-holds-GPU
+    and one-running-job - never applied to any of them. Nor did they cover the other things on the card: a
+    corpus relabel, a judge sweep and a forgyx export could each start beside an autolabel pass, and two GPU
+    jobs on one card is not a clean failure but an out-of-memory part way through a batch, which this loop
+    counts as a failed frame.
+
+    Per session rather than per fleet, so a multi-session redetect releases the card between drives and a
+    training job waiting behind it waits one session instead of the whole corpus.
     """
+    from core.gpu_slot import gpu_slot
+
+    async with gpu_slot(f"autolabel:{session_id}", timeout_s=None):
+        return await _autolabel_session_locked(session_id, limit, vlm_client, on_progress, only_unlabelled)
+
+
+async def _autolabel_session_locked(session_id: UUID, limit: int | None, vlm_client=None,
+                                    on_progress: Callable[[int, int], Awaitable[None]] | None = None,
+                                    only_unlabelled: bool = False) -> dict:
+    """The pipeline itself, with the card already held. Never call this directly."""
     from services.autolabel.fusion import FusionEngine
     from services.autolabel.gate import gate_object, needs_vlm
     from services.autolabel.grounding import supported_concept_ids
