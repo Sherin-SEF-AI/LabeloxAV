@@ -39,3 +39,6 @@ demos/
 /site/
 /docs/api/openapi.json
 /docs/api/inventory.md
+/docs/guide/platforms.md
+/docs/guide/editor.md
+/docs/guide/shortcuts.md
