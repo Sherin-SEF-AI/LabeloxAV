@@ -273,3 +273,15 @@ lint-web: ## ESLint the frontend (blocking on errors; hook-dependency findings a
 .PHONY: check-gold
 check-gold: ## Fail if the gold set evaluations score against has lost objects (needs a live corpus, not CI)
 	$(RUN) python -m scripts.check_gold_integrity --active-only
+
+.PHONY: docs
+docs: ## Build the documentation site into ./site (regenerates the API reference from the running app)
+	VIRTUAL_ENV=.venv uv pip install -q -e ".[docs]"
+	$(RUN) python -m scripts.build_docs
+	$(RUN) mkdocs build --strict
+
+.PHONY: docs-serve
+docs-serve: ## Serve the docs at :8001 with live reload
+	VIRTUAL_ENV=.venv uv pip install -q -e ".[docs]"
+	$(RUN) python -m scripts.build_docs
+	$(RUN) mkdocs serve -a 127.0.0.1:8001

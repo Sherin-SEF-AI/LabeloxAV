@@ -2,7 +2,7 @@
 
 This is the long-form record: every feature, measurement, defect, and repair, in the order they happened,
 kept because the failures are as informative as the wins. The one-page summary is the repo
-[README](../README.md).
+[README](index.md).
 
 ---
 
@@ -187,7 +187,7 @@ Every automated decision is in an audit log. A drift breach pauses promotion. On
 
   **Derived** targets are products of the corpus rather than representations of it, and are one-way out: COCO panoptic, CULane-style lanes, BDD drivable masks, HD map GeoJSON, instance masks, and ASAM OpenSCENARIO. Re-importing one is not a round trip, it is a weaker operation that would let somebody believe they had recovered a source they had not.
 
-  The categories live in [`services/formats.py`](services/formats.py) and are enforced in [`tests/test_format_taxonomy.py`](tests/test_format_taxonomy.py) rather than asserted here: every registered format must be classified, every interchange format must exist in both directions, and a migration adapter that grows an exporter fails the build until somebody reclassifies it. A new adapter has to answer which kind it is, which is the question the prose version let people skip. A requested format no adapter implements is a 400, not a silent drop that ships a dataset claiming contents it does not have.
+  The categories live in [`services/formats.py`](https://github.com/Sherin-SEF-AI/LabeloxAV/blob/main/services/formats.py) and are enforced in [`tests/test_format_taxonomy.py`](https://github.com/Sherin-SEF-AI/LabeloxAV/blob/main/tests/test_format_taxonomy.py) rather than asserted here: every registered format must be classified, every interchange format must exist in both directions, and a migration adapter that grows an exporter fails the build until somebody reclassifies it. A new adapter has to answer which kind it is, which is the question the prose version let people skip. A requested format no adapter implements is a 400, not a silent drop that ships a dataset claiming contents it does not have.
 ![Integrations: webhook subscriptions with their event list, and registered storage buckets](screenshots/33-integrations.png)
 
 - **Integrations**: outbound webhooks signed with an HMAC per subscription (an unsigned webhook is an unauthenticated write into whatever it triggers), with a timestamp bound into the signature so a captured delivery cannot be replayed forever, retries on transient failure, and a refusal to deliver to a target that resolves to a private or link-local address, since a subscription URL is attacker-controlled input the server fetches with its own network position. Registered S3/GCS/Azure source locators that deliberately store no credentials, and a thin Python SDK and CLI over the same REST API the web app uses.
@@ -312,7 +312,7 @@ The IDD model reaches 0.44 mAP@50, up from an earlier 0.39 baseline, while the t
 
 ### Trained on our own reviewed corpus
 
-The models above are trained on public data. These are the first trained on labels produced by this engine, on the operational Bangalore dashcam fleet. The weights ship in [`models/`](models/) via git-lfs, with full provenance in [`models/README.md`](models/README.md):
+The models above are trained on public data. These are the first trained on labels produced by this engine, on the operational Bangalore dashcam fleet. The weights ship in [`models/`](https://github.com/Sherin-SEF-AI/LabeloxAV/blob/main/models/) via git-lfs, with full provenance in [`models/README.md`](https://github.com/Sherin-SEF-AI/LabeloxAV/blob/main/models/README.md):
 
 | Model | Backbone | Train | Val | Recall @0.25 | Recall @0.05 |
 | --- | --- | --- | --- | --- | --- |
@@ -350,7 +350,7 @@ This is a from scratch build of the full pipeline, backed by an automated test s
 
 **The test suite.** 2,838 passing, 3 skipped, 4 `xfail`, green across repeated runs under random ordering. It was not green until recently, and the way it got there is worth recording because the diagnosis in this file was wrong twice.
 
-The baseline lives in [`tests/KNOWN_FAILURES.md`](tests/KNOWN_FAILURES.md) so "is the build broken?" has a mechanical answer rather than a judgement call, and a test keeps that file honest: every name it uses must still exist, every `xfail` in the tree must be documented there, and every category must state what would fix it. Two of its categories turned out to be misdiagnosed. "Requires a local Ollama" named two tests that never touch a model server; they hardcoded a confidence of 0.72 as "review band" and calibration had since moved `auto_accept` from 0.95 to 0.45, making 0.72 an auto-accept. Two others filed under "order-dependent" were failing because lakeFS was not running and died on a raw urllib3 traceback instead of a skip that named the service. **A failure filed under a cause nobody has tested is a failure nobody will fix.**
+The baseline lives in [`tests/KNOWN_FAILURES.md`](https://github.com/Sherin-SEF-AI/LabeloxAV/blob/main/tests/KNOWN_FAILURES.md) so "is the build broken?" has a mechanical answer rather than a judgement call, and a test keeps that file honest: every name it uses must still exist, every `xfail` in the tree must be documented there, and every category must state what would fix it. Two of its categories turned out to be misdiagnosed. "Requires a local Ollama" named two tests that never touch a model server; they hardcoded a confidence of 0.72 as "review band" and calibration had since moved `auto_accept` from 0.95 to 0.45, making 0.72 an auto-accept. Two others filed under "order-dependent" were failing because lakeFS was not running and died on a raw urllib3 traceback instead of a skip that named the service. **A failure filed under a cause nobody has tested is a failure nobody will fix.**
 
 The genuinely order-dependent ones had a shared cause: the suite seeds and commits and nothing ever cleaned up, so the test database had reached 6,865 sessions and 12,262 frames, none of it belonging to the run using it. Any assertion touching a corpus-wide quantity was written against a snapshot of that pile and expired later. The corpus is now emptied once per session, which also exposed two things the residue had hidden: roughly half the suite assumes a seeded ontology rather than seeding one, and a fail-closed DPDPA compliance test had been skipping itself for want of a `PiiAudit` row, so a gate that refuses exports had quietly stopped being covered. Before this the suite failed about one run in four, on a different test each time. Only the four `xfail` entries remain, where synthetic random-noise frames are correctly rejected by the ingest quality gate: the test data is wrong, not the gate.
 
@@ -433,7 +433,7 @@ The interpolated boxes are the reason the embedding figure above is no longer 10
 | [`docs/TESTING.md`](TESTING.md) | How the suite is organised, and the two things about it that are not obvious: `pytest.mark.db` is what arms the production-database guard, and nothing rolls back between individual tests. |
 | [`docs/DATA_RETENTION.md`](DATA_RETENTION.md) | Retention windows, subject-rights requests, and erasure. The machinery was tested and undocumented, which is the half a regulator asks for. States plainly what it does not cover. |
 | [`docs/adr/`](adr/) | Decision records. ADR-0001 is the immutable prediction plane and the alternatives rejected. |
-| [`tests/KNOWN_FAILURES.md`](tests/KNOWN_FAILURES.md) | The recorded test baseline, so a red run is interpretable. |
+| [`tests/KNOWN_FAILURES.md`](https://github.com/Sherin-SEF-AI/LabeloxAV/blob/main/tests/KNOWN_FAILURES.md) | The recorded test baseline, so a red run is interpretable. |
 
 ---
 

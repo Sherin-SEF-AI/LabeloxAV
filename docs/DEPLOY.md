@@ -21,7 +21,7 @@ Re-running is safe. It never rotates a secret that already exists and never crea
 - Docker with the Compose v2 plugin, and a running daemon.
 - ~20 GB of disk. Images, model weights, and the corpus add up, and running out during an import corrupts it.
 - ~8 GB of RAM for the services. The GPU paths (auto-labeling, embeddings, training) need more and a CUDA
-  device; see [GPU](#gpu) below.
+  device; see [GPU](#workers-and-gpu) below.
 
 No GPU is required to install. Without one, the annotation, review, governance, export, and search surfaces
 all work; the model paths that need CUDA refuse rather than producing a fabricated result.

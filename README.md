@@ -52,9 +52,13 @@ them where one exists, and the gate logs which it used.
 - A blind capture-recapture audit is seeded and unscored, so recall numbers are against labels somebody
   already found, and the coverage datasheet shipped with every export says so.
 
+## Documentation
+
+**[sherin-sef-ai.github.io/LabeloxAV](https://sherin-sef-ai.github.io/LabeloxAV/)** - full docs, an
+interactive REST reference generated from the running app, and a Python reference for the stable seams.
+
 The full history of what was built, measured, broken, and fixed - including everything that did not work -
-is the [engineering log](docs/ENGINEERING_LOG.md). Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-Measurement methodology: [docs/MEASUREMENT.md](docs/MEASUREMENT.md).
+is the [engineering log](docs/ENGINEERING_LOG.md).
 
 ## Develop
 
