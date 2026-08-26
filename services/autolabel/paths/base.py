@@ -11,6 +11,9 @@ import numpy as np
 
 @dataclass
 class RawDetection:
+    # Frozen wire identity, present in 834k provenance rows and matched by fusion/gate/explain dispatch.
+    # The historical spellings name models that have since been substituted (the files are now
+    # path_a_detect / path_b_openvocab / path_c_vlm); the strings must not follow the files.
     path: str                       # path_a_yolo26 | path_b_sam3 | path_c_qwen3vl
     bbox: tuple[float, float, float, float]  # xyxy pixel
     conf: float

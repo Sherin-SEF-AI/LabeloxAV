@@ -225,7 +225,7 @@ async def propose_vlm(track_id: UUID, max_frames: int = 3) -> dict:
     import numpy as np
 
     from core.storage import get_object_store
-    from services.autolabel.paths.path_c_qwen3vl import OllamaVlmClient, crop_object
+    from services.autolabel.paths.path_c_vlm import OllamaVlmClient, crop_object
 
     maker = get_sessionmaker()
     onto = get_ontology()

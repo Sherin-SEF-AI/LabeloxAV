@@ -10,7 +10,7 @@ import numpy as np
 
 from core.config import get_settings
 from core.logging import get_logger
-from services.autolabel.paths.path_b_sam3 import polygons_from_mask
+from services.autolabel.paths.path_b_openvocab import polygons_from_mask
 
 log = get_logger("sam_service")
 

@@ -76,7 +76,7 @@ AV_SAFETY_L1 = frozenset({"vru", "animal"})
 AV_CRITICAL_CLASSES = frozenset({"pedestrian", "rider", "motorcycle", "cycle", "cattle",
                                  "pothole", "open_manhole"})
 
-# The domain preamble hardcoded at services/autolabel/paths/path_c_qwen3vl.py:64 (no config seam today). The
+# The domain preamble hardcoded at services/autolabel/paths/path_c_vlm.py:64 (no config seam today). The
 # parity test asserts the live prompt still begins with this; SEC-M5 makes path_c read it from here.
 AV_VLM_PROMPT_TEMPLATE = (
     "You are labeling an object cropped from an Indian road scene for an autonomous-driving "

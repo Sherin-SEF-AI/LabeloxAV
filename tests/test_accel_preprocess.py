@@ -18,6 +18,10 @@ def _make_nv12(H, W, rng):
 
 
 def test_nv12_to_rgb_matches_cv2():
+    # This exercises the torch kernel itself (there is no numpy fallback for it), so a box without torch
+    # skips rather than failing. Deliberately importorskip and NOT the `gpu` marker: the kernel runs on CPU
+    # torch, and the marker would deselect it from `make test-unit` on every box that could run it.
+    pytest.importorskip("torch")
     cv2 = pytest.importorskip("cv2")
     rng = np.random.default_rng(0)
     H, W = 480, 640
@@ -52,6 +56,10 @@ def test_letterbox_unmaps_box():
 
 
 def test_fused_undistort_in_preprocess():
+    # This exercises the torch kernel itself (there is no numpy fallback for it), so a box without torch
+    # skips rather than failing. Deliberately importorskip and NOT the `gpu` marker: the kernel runs on CPU
+    # torch, and the marker would deselect it from `make test-unit` on every box that could run it.
+    pytest.importorskip("torch")
     cv2 = pytest.importorskip("cv2")
     rng = np.random.default_rng(5)
     H, W = 240, 320

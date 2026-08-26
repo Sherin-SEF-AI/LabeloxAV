@@ -39,9 +39,9 @@ class OpenVocabAdapter:
 
     def _ensure(self):
         if self._path is None:
-            from services.autolabel.paths.path_b_sam3 import Sam3Path
+            from services.autolabel.paths.path_b_openvocab import OpenVocabSamPath
 
-            self._path = Sam3Path()
+            self._path = OpenVocabSamPath()
             self._path.load()
             # WIRE: to widen the open-vocab phrase set beyond Path B's ontology phrases (e.g. extra
             # long-tail concepts for a recall sweep), call self._path._world.set_classes([...]) here
@@ -111,7 +111,7 @@ class VlmClassifyAdapter:
 
     def _ensure(self):
         if self._verifier is None:
-            from services.autolabel.paths.path_c_qwen3vl import VlmVerifier, make_vlm_client
+            from services.autolabel.paths.path_c_vlm import VlmVerifier, make_vlm_client
 
             self._verifier = VlmVerifier(make_vlm_client(self.settings), self.onto, self.settings)
         return self._verifier
@@ -120,7 +120,7 @@ class VlmClassifyAdapter:
         return [c.name for c in self.onto.classes] + ["background"]
 
     def classify(self, image_bgr, bbox) -> tuple:
-        from services.autolabel.paths.path_c_qwen3vl import crop_object
+        from services.autolabel.paths.path_c_vlm import crop_object
 
         cfg = self.settings.phase4.recall
         verifier = self._ensure()

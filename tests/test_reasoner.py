@@ -394,7 +394,7 @@ def test_a_split_adjudicator_has_not_settled_anything():
 
             @staticmethod
             def verify(crop, shortlist, schema, temperature=0.0):
-                from services.autolabel.paths.path_c_qwen3vl import VlmResult
+                from services.autolabel.paths.path_c_vlm import VlmResult
 
                 _Split.client.calls += 1
                 # Alternates, so no class reaches the agreement floor.
@@ -497,7 +497,7 @@ def test_escalation_orders_by_conflict_not_by_confidence():
         class client:
             @staticmethod
             def verify(crop, shortlist, schema, temperature=0.0):
-                from services.autolabel.paths.path_c_qwen3vl import VlmResult
+                from services.autolabel.paths.path_c_vlm import VlmResult
 
                 calls.append(shortlist[0])
                 return VlmResult(class_name=shortlist[0], agreement=1.0, votes=1)

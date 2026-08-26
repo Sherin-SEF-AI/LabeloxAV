@@ -134,7 +134,7 @@ async def _load_crop(db: AsyncSession, obj: Object, margin: float) -> np.ndarray
 
     from core.storage import get_object_store
     from db.models import Frame
-    from services.autolabel.paths.path_c_qwen3vl import crop_object
+    from services.autolabel.paths.path_c_vlm import crop_object
 
     frame = await db.get(Frame, obj.frame_id)
     if frame is None or not frame.img_uri:

@@ -12,7 +12,7 @@ from core.config import get_settings
 from core.schemas import BBox, GateState, PathProposal, Provenance, UnifiedObject
 from services.autolabel.gate import class_auto_accept, gate_object, needs_vlm
 from services.autolabel.ontology import get_ontology
-from services.autolabel.paths.path_c_qwen3vl import VlmResult, VlmVerifier, apply_vlm
+from services.autolabel.paths.path_c_vlm import VlmResult, VlmVerifier, apply_vlm
 
 
 class FakeVlmClient:
@@ -141,7 +141,7 @@ def _ollama_vision_ready() -> bool:
 
 @pytest.mark.skipif(not _ollama_vision_ready(), reason="ollama vision model not available")
 def test_ollama_backend_returns_structured_result():
-    from services.autolabel.paths.path_c_qwen3vl import OllamaVlmClient
+    from services.autolabel.paths.path_c_vlm import OllamaVlmClient
 
     # A simple synthetic crop; we assert the JSON round-trip works and validates, not the label.
     img = np.full((128, 128, 3), 200, dtype=np.uint8)

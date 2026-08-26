@@ -76,7 +76,7 @@ async def _crop_grid(db: AsyncSession, object_ids: list[str], proposal_id: uuid.
     """Tile up to 16 member crops into one evidence image in the object store."""
     import cv2
 
-    from services.autolabel.paths.path_c_qwen3vl import crop_object
+    from services.autolabel.paths.path_c_vlm import crop_object
     from services.recall.backends import load_image_bgr
 
     store = get_object_store()

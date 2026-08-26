@@ -26,7 +26,7 @@ from core.timebase import now_ns
 from db.models import Object
 from services.autolabel.fusion import FusedObject
 from services.autolabel.ontology import get_ontology
-from services.autolabel.paths.path_b_sam3 import polygons_from_mask
+from services.autolabel.paths.path_b_openvocab import polygons_from_mask
 
 log = get_logger("persist")
 

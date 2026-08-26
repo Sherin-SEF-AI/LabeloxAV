@@ -17,7 +17,7 @@ from core.logging import get_logger
 from core.storage import get_object_store
 from db.models import Frame, FrameEmbedding, Object, ObjectEmbedding
 from db.session import get_sessionmaker
-from services.autolabel.paths.path_c_qwen3vl import crop_object
+from services.autolabel.paths.path_c_vlm import crop_object
 from services.intelligence.embed import dinov3, siglip2
 from services.intelligence.embed.pending import frame_needs_embedding, object_needs_embedding
 from services.intelligence.embed.prep import square_letterbox

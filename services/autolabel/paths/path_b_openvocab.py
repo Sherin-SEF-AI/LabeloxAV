@@ -28,7 +28,10 @@ log = get_logger("path_b")
 # each phrase maps back to its single ontology class.
 
 
-class Sam3Path:
+class OpenVocabSamPath:
+    # Frozen: this string is the path identity in 834k objects' provenance and in the
+    # fusion/gate/explain dispatch. It predates a model substitution, so it no longer names
+    # the model this file runs - the filename now does. Renaming it means migrating history.
     name = "path_b_sam3"
 
     def __init__(self, supported_ids: set[int] | None = None) -> None:
@@ -77,7 +80,7 @@ class Sam3Path:
 
     def infer(self, image_bgr: np.ndarray) -> list[RawDetection]:
         if self._world is None or self._sam is None:
-            raise RuntimeError("Sam3Path not loaded")
+            raise RuntimeError("OpenVocabSamPath not loaded")
         cfg = self.settings.models.openvocab
         dev = self.settings.gpu.device
 

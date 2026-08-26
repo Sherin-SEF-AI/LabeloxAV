@@ -122,7 +122,7 @@ class OntologySpec:
 class AutoLabelProfile:
     """The five swappable auto-label surfaces (docs/AV_ASSUMPTIONS.md section 5), consumed in SEC-M5.
 
-    vlm_prompt_template is the domain preamble hardcoded at path_c_qwen3vl.py:64. cross_anchors,
+    vlm_prompt_template is the domain preamble hardcoded in path_c_vlm.py. cross_anchors,
     coco_map, openvocab_synonyms mirror the path constants. gate_policy is the gate's safety/rare rule.
     disable_ego_hood_mask is True for a static-camera pack (no moving-vehicle bonnet to mask).
     """

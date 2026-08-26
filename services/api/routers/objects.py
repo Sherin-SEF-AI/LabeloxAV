@@ -1055,7 +1055,7 @@ async def classify_object(payload: ClassifyIn, db: AsyncSession = Depends(db_ses
     if img is None:
         raise HTTPException(500, "failed to decode frame image")
     from services.autolabel.classify_crop import classify_crop
-    from services.autolabel.paths.path_c_qwen3vl import crop_object
+    from services.autolabel.paths.path_c_vlm import crop_object
     crop = crop_object(img, tuple(payload.box), 0.08)
     if crop is None or crop.size == 0:
         raise HTTPException(400, "empty crop")

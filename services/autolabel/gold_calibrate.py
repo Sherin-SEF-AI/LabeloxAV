@@ -64,7 +64,7 @@ def _match_frame(dets: list[dict], truth: list[dict], iou_thr: float) -> list[tu
 async def collect_gold_pairs(gold_id: str, iou_thr: float = 0.5, weights: str | None = None) -> dict:
     """Run the serving detector over the gold frames and label every prediction correct or false-positive
     against the human-verified truth. Returns per-frame (conf, correct) pairs plus the detector used."""
-    from services.autolabel.paths.path_a_yolo26 import YoloPath
+    from services.autolabel.paths.path_a_detect import YoloPath
     from services.autolabel.runner import load_image, resolve_detector_weights
 
     maker = get_sessionmaker()
@@ -111,8 +111,8 @@ async def collect_vlm_pairs(n_frames: int = 220, max_dets: int = 320, seed: int 
     detector's class, a few confusable road classes, and a none option); the detection is correct when the VLM
     confidently returns the detector's class. This yields real negatives across the whole confidence range."""
     from services.autolabel.ontology import get_ontology
-    from services.autolabel.paths.path_a_yolo26 import YoloPath
-    from services.autolabel.paths.path_c_qwen3vl import OllamaVlmClient, crop_object
+    from services.autolabel.paths.path_a_detect import YoloPath
+    from services.autolabel.paths.path_c_vlm import OllamaVlmClient, crop_object
     from services.autolabel.runner import load_image, resolve_detector_weights
 
     onto = get_ontology()

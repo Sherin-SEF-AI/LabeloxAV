@@ -163,7 +163,7 @@ Fusion (`fusion.py`) clusters/votes/reconciles/dedupes; gate (`gate.py`) routes 
    `services/autolabel/ontology.py:31` (should live in the YAML); `supported_core` 40-name allow-list
    `core/config.py:396`.
 2. **The VLM prompt.** Hardcoded *"You are labeling an object cropped from an Indian road scene for an
-   autonomous-driving dataset"* `services/autolabel/paths/path_c_qwen3vl.py:64` - no config seam today.
+   autonomous-driving dataset"* `services/autolabel/paths/path_c_vlm.py:64` - no config seam today.
 3. **Anchor/synonym/map constants.** `CROSS_ANCHORS` (23 India road actors) `path_c_qwen3vl.py:186`,
    `COCO_TO_ONTOLOGY` `path_a_yolo26.py:21`, `_OPENVOCAB_SYNONYMS` `path_b_sam3.py:29`.
 4. **Gate policy.** `_SAFETY_L1 = {"vru","animal"}` `gate.py:20`; `is_rare = india or l1=="fallback"` `gate.py:23`.

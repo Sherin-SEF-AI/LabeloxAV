@@ -18,7 +18,7 @@ from core.storage import get_object_store
 from db.models import Frame, Object
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
-from services.autolabel.paths.path_c_qwen3vl import crop_object
+from services.autolabel.paths.path_c_vlm import crop_object
 from services.autolabel.signs.taxonomy import get_sign_taxonomy
 
 log = get_logger("signs")

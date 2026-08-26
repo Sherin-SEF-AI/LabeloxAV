@@ -30,8 +30,8 @@ from core.storage import get_object_store
 from db.models import Frame, Object
 from db.session import get_sessionmaker
 from services.autolabel.paths.base import RawDetection
-from services.autolabel.paths.path_a_yolo26 import YoloPath
-from services.autolabel.paths.path_b_sam3 import Sam3Path
+from services.autolabel.paths.path_a_detect import YoloPath
+from services.autolabel.paths.path_b_openvocab import OpenVocabSamPath
 
 log = get_logger("runner")
 
@@ -144,7 +144,7 @@ class StagedRunner:
         self.settings = get_settings()
         self.guard = VramGuard()
         self.yolo: YoloPath | None = None
-        self.sam: Sam3Path | None = None
+        self.sam: OpenVocabSamPath | None = None
         # When set, Path A loads the governance champion's weights instead of the config default.
         self.yolo_weights = yolo_weights
         # M-Q.0: the grounded supported set restricts Path B's open-vocab concept prompts.
@@ -156,7 +156,7 @@ class StagedRunner:
         self.yolo = YoloPath(self.yolo_weights)
         self.yolo.load()
         self.guard.require(EST_PATHB_MB, "path_b_openvocab")
-        self.sam = Sam3Path(self.supported_ids)
+        self.sam = OpenVocabSamPath(self.supported_ids)
         self.sam.load()
         log.info("stage1.open", free_mb=round(self.guard.free_mb()))
 
@@ -373,7 +373,7 @@ async def _autolabel_session_locked(session_id: UUID, limit: int | None, vlm_cli
     from services.autolabel.gate import gate_object, needs_vlm
     from services.autolabel.grounding import supported_concept_ids
     from services.autolabel.ontology import get_ontology
-    from services.autolabel.paths.path_c_qwen3vl import VlmVerifier, apply_vlm, make_vlm_client
+    from services.autolabel.paths.path_c_vlm import VlmVerifier, apply_vlm, make_vlm_client
     from services.autolabel.persist import persist_frame_objects
     from services.autolabel.quality_reviewer import review_object_quality
 

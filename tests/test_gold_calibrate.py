@@ -5,6 +5,7 @@ not here; this pins the pure logic that decides whether a curve is trustworthy a
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from services.autolabel.gold_calibrate import _ece, _fit_report, _match_frame
 
@@ -29,6 +30,7 @@ def test_ece_zero_on_perfect_and_positive_on_overconfident():
     assert _ece(over, ys) > 0.4                            # all-0.99 on 50% accuracy -> large ECE
 
 
+@pytest.mark.infra  # _fit_report persists the fitted curve through get_object_store(), so it needs MinIO
 def test_fit_report_calibrates_and_flags_trustworthy():
     # a real signal: P(correct) rises with confidence, but the raw score is overconfident (correct only ~half
     # the time at raw 0.9). A good curve pulls that down and lowers held-out ECE.

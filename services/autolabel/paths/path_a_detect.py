@@ -21,6 +21,9 @@ log = get_logger("path_a")
 
 
 class YoloPath:
+    # Frozen: this string is the path identity in 834k objects' provenance and in the
+    # fusion/gate/explain dispatch. It predates a model substitution, so it no longer names
+    # the model this file runs - the filename now does. Renaming it means migrating history.
     name = "path_a_yolo26"
 
     def __init__(self, weights: str | None = None) -> None:
