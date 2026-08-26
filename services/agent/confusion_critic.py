@@ -206,7 +206,7 @@ async def run_confusion_sweep(db: AsyncSession, *, focus: str = "e_auto", limit:
     import cv2
 
     from core.storage import get_object_store
-    from services.autolabel.paths.path_c_qwen3vl import crop_object
+    from services.autolabel.paths.path_c_vlm import crop_object
     from services.llm.router import local_vlm_client
     from services.recall.backends import load_image_bgr
 

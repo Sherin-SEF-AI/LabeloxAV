@@ -16,6 +16,10 @@ from core.accel.maskops import (
 
 
 def test_morphology_matches_cv2_interior():
+    # This exercises the torch kernel itself (there is no numpy fallback for it), so a box without torch
+    # skips rather than failing. Deliberately importorskip and NOT the `gpu` marker: the kernel runs on CPU
+    # torch, and the marker would deselect it from `make test-unit` on every box that could run it.
+    pytest.importorskip("torch")
     cv2 = pytest.importorskip("cv2")
     rng = np.random.default_rng(0)
     mask = (rng.random((80, 100)) > 0.5).astype(np.float32)
@@ -29,6 +33,10 @@ def test_morphology_matches_cv2_interior():
 
 
 def test_open_removes_speckle():
+    # This exercises the torch kernel itself (there is no numpy fallback for it), so a box without torch
+    # skips rather than failing. Deliberately importorskip and NOT the `gpu` marker: the kernel runs on CPU
+    # torch, and the marker would deselect it from `make test-unit` on every box that could run it.
+    pytest.importorskip("torch")
     mask = np.zeros((40, 40), dtype=np.float32)
     mask[10:30, 10:30] = 1.0                               # a solid block
     mask[2, 2] = 1.0                                       # an isolated speckle
@@ -57,6 +65,10 @@ def test_rle_roundtrip():
 
 
 def test_boundary_tightness_ranks_compact_higher():
+    # This exercises the torch kernel itself (there is no numpy fallback for it), so a box without torch
+    # skips rather than failing. Deliberately importorskip and NOT the `gpu` marker: the kernel runs on CPU
+    # torch, and the marker would deselect it from `make test-unit` on every box that could run it.
+    pytest.importorskip("torch")
     compact = np.zeros((40, 40), dtype=np.float32)
     compact[10:30, 10:30] = 1.0                            # solid square: mostly interior
     ragged = np.zeros((40, 40), dtype=np.float32)

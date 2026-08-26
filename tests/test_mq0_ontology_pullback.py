@@ -17,8 +17,8 @@ from services.autolabel.grounding import (
     supported_core_ids,
 )
 from services.autolabel.ontology import get_ontology
-from services.autolabel.paths.path_b_sam3 import Sam3Path
-from services.autolabel.paths.path_c_qwen3vl import VlmResult, VlmVerifier
+from services.autolabel.paths.path_b_openvocab import OpenVocabSamPath
+from services.autolabel.paths.path_c_vlm import VlmResult, VlmVerifier
 
 pytestmark = pytest.mark.db
 
@@ -68,8 +68,8 @@ async def test_supported_concept_ids_drops_the_invented_classes():
 def test_path_b_phrases_restricted_to_grounded_set():
     onto = get_ontology()
     core = supported_core_ids(onto)
-    restricted = Sam3Path(supported_ids=core)
-    unrestricted = Sam3Path(supported_ids=None)
+    restricted = OpenVocabSamPath(supported_ids=core)
+    unrestricted = OpenVocabSamPath(supported_ids=None)
     assert len(restricted._phrases) < len(unrestricted._phrases)
     assert "water bottles" not in restricted._phrases
     assert "bus shelter" not in restricted._phrases

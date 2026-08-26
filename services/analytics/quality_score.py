@@ -152,7 +152,7 @@ async def validate(n_objects: int = 260, seed: int = 5) -> dict:
     import numpy as np
 
     from services.autolabel.ontology import get_ontology
-    from services.autolabel.paths.path_c_qwen3vl import OllamaVlmClient, crop_object
+    from services.autolabel.paths.path_c_vlm import OllamaVlmClient, crop_object
     from services.autolabel.runner import load_image
 
     onto = get_ontology()

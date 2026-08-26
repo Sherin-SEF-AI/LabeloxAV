@@ -17,6 +17,10 @@ def _setup(H=360, W=640):
 
 
 def test_matches_cv2_remap_interior():
+    # This exercises the torch kernel itself (there is no numpy fallback for it), so a box without torch
+    # skips rather than failing. Deliberately importorskip and NOT the `gpu` marker: the kernel runs on CPU
+    # torch, and the marker would deselect it from `make test-unit` on every box that could run it.
+    pytest.importorskip("torch")
     cv2 = pytest.importorskip("cv2")
     rng = np.random.default_rng(0)
     _, _, map_x, map_y, H, W = _setup()

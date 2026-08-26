@@ -136,7 +136,7 @@ def _verify_restricted(verifier, image_bgr: np.ndarray, bbox: tuple, shortlist: 
     """
     from collections import Counter
 
-    from services.autolabel.paths.path_c_qwen3vl import VlmResult, crop_object
+    from services.autolabel.paths.path_c_vlm import VlmResult, crop_object
 
     settings = verifier.settings
     n = max(1, votes if votes is not None else settings.models.vlm.vote_count)

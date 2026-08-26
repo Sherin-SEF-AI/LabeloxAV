@@ -19,7 +19,7 @@ def compose_mask(polygons: list[list[float]], ops: list[dict], width: int, heigh
     import cv2
     import numpy as np
 
-    from services.autolabel.paths.path_b_sam3 import polygons_from_mask
+    from services.autolabel.paths.path_b_openvocab import polygons_from_mask
 
     m = np.zeros((int(height), int(width)), np.uint8)
     for poly in polygons:
@@ -41,7 +41,7 @@ def slic_superpixels(image_bgr, n_segments: int = 300, compactness: float = 12.0
     import numpy as np
     from skimage.segmentation import slic
 
-    from services.autolabel.paths.path_b_sam3 import polygons_from_mask
+    from services.autolabel.paths.path_b_openvocab import polygons_from_mask
 
     rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
     seg = slic(rgb, n_segments=int(n_segments), compactness=float(compactness), start_label=0)

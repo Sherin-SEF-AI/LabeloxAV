@@ -3263,10 +3263,10 @@ class LabeloxClient:
         return self._call("POST", f"/api/tracks/{track_id}/intent/vlm",
                           params=None, json_body=None)
 
-    def post_tracks_by_track_id_interpolate(self, track_id: str) -> Any:
+    def post_tracks_by_track_id_interpolate(self, track_id: str, method: str | None = 'cubic', anchor_policy: str | None = 'detection') -> Any:
         """Interpolate"""
         return self._call("POST", f"/api/tracks/{track_id}/interpolate",
-                          params=None, json_body=None)
+                          params={"method": method, "anchor_policy": anchor_policy}, json_body=None)
 
     def post_tracks_by_track_id_interpolate_keyframed(self, track_id: str, method: str | None = 'linear') -> Any:
         """Interpolate Keyframed"""

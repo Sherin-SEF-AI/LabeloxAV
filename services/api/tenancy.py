@@ -98,6 +98,14 @@ async def unassigned_sessions(db: AsyncSession, limit: int = 100) -> list[str]:
     from, and answering it by assigning everything to the default would hide the ingest path that is not
     setting one.
     """
+    # Ordered, because a LIMIT without one returns an arbitrary window that shifts as rows are inserted:
+    # the same session could appear twice across two pages or never appear at all, and an operator chasing
+    # a misconfigured ingest path would be reading a list that quietly changes under them.
+    #
+    # Newest first, since a session that arrived without a project is a question about the ingest running
+    # now, not about one that ran a year ago.
     rows = (await db.execute(
-        select(DbSession.session_id).where(DbSession.project_id.is_(None)).limit(limit))).scalars().all()
+        select(DbSession.session_id).where(DbSession.project_id.is_(None))
+        .order_by(DbSession.created_at.desc(), DbSession.session_id)
+        .limit(limit))).scalars().all()
     return [str(r) for r in rows]

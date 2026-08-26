@@ -22,6 +22,12 @@ from services.intelligence.trajectory import FrameCtx, build_trajectory
 
 log = get_logger("retrack")
 
+# What counts as an observation for tracking. Detector output only: interpolated and propagated boxes are
+# derived FROM tracks, so feeding them back in lets a tracking error confirm itself - a bad association
+# creates a fill, the fill becomes evidence for the same association on the next retrack, and nothing in the
+# loop can tell the difference.
+_DETECTION_SOURCES = ("fused", "auto_accept", "imported", "human", "relabel", "vlm_review")
+
 
 async def retrack_session(session_id: UUID) -> dict:
     maker = get_sessionmaker()
@@ -37,7 +43,8 @@ async def retrack_session(session_id: UUID) -> dict:
 
         orows = (await db.execute(
             select(Object, Frame.cam_id, Frame.ts_ns).join(Frame, Object.frame_id == Frame.frame_id)
-            .where(Frame.session_id == session_id, Object.state != "rejected"))).all()
+            .where(Frame.session_id == session_id, Object.state != "rejected",
+                   Object.source.in_(_DETECTION_SOURCES)))).all()
         erows = (await db.execute(
             select(ObjectEmbedding.object_id, ObjectEmbedding.dino_vec)
             .join(Object, Object.object_id == ObjectEmbedding.object_id)

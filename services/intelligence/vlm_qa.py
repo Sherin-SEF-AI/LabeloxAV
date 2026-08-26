@@ -34,7 +34,7 @@ _QA_STATES = ("review", "annotate", "accepted", "submitted")
 async def vlm_qa_session(
     session_id: UUID, limit: int = 40, fill_attrs: bool = True, flag_disagreements: bool = True
 ) -> dict:
-    from services.autolabel.paths.path_c_qwen3vl import VlmVerifier, make_vlm_client
+    from services.autolabel.paths.path_c_vlm import VlmVerifier, make_vlm_client
 
     onto = get_ontology()
     verifier = VlmVerifier(make_vlm_client(), onto)

@@ -85,7 +85,7 @@ def test_critical_class_names_are_governed():
 
 def test_vlm_prompt_template_is_the_live_prompt_preamble():
     """The pack's prompt template must still be the preamble path_c actually emits (the SEC-M5 seam)."""
-    from services.autolabel.paths.path_c_qwen3vl import _build_prompt
+    from services.autolabel.paths.path_c_vlm import _build_prompt
 
     live = _build_prompt(["sedan", "pedestrian"], {})
     assert live.startswith(get_pack("av").autolabel_profile.vlm_prompt_template)

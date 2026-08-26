@@ -7,7 +7,7 @@ in the ontology on every crop and then validated the reply without a class id, w
 turns `validate_attrs`' applicability check on. The values were checked against their enums; whether the
 attribute belonged on the object was never checked at all.
 
-`services/autolabel/paths/path_c_qwen3vl.py` now scopes the schema it asks for and filters the reply against
+`services/autolabel/paths/path_c_vlm.py` now scopes the schema it asks for and filters the reply against
 the class the object ends up with, so no new ones are written. This is the 16,223 already stored.
 
 **Moved, not deleted.** They go to `provenance.unscoped_attrs`, so:

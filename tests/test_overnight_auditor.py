@@ -103,7 +103,7 @@ def _stub_vlm(monkeypatch, monkeyfree_to_class: str):
     test asserts on the real class and fails for a reason that has nothing to do with it.
     """
     import services.autolabel.grounding as grounding
-    import services.autolabel.paths.path_c_qwen3vl as pc
+    import services.autolabel.paths.path_c_vlm as pc
 
     async def _supported():
         return None

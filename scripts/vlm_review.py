@@ -29,7 +29,7 @@ from core.storage import get_object_store
 from db.models import Frame, Object
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
-from services.autolabel.paths.path_c_qwen3vl import VlmVerifier, make_vlm_client
+from services.autolabel.paths.path_c_vlm import VlmVerifier, make_vlm_client
 from services.intelligence.embed.service import _decode
 
 log = get_logger("vlm_review")

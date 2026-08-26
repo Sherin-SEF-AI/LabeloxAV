@@ -167,7 +167,7 @@ def _segment_local(image_bgr: np.ndarray) -> dict:
     """Deterministic perspective road-trapezoid proposal (drivable), with the rest of the lower frame as
     non-drivable. A plausible starting region the human refines with the editor's SAM click; the real
     ternary surface (drivable/non-drivable/fallback) is the pod SAM 3.1 PCS path."""
-    from services.autolabel.paths.path_b_sam3 import polygons_from_mask
+    from services.autolabel.paths.path_b_openvocab import polygons_from_mask
 
     h, w = image_bgr.shape[:2]
     horizon = h * 0.52

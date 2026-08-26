@@ -1,10 +1,19 @@
 """The confidence gate: where humans enter (Principle 04). Calibrated confidence routes each object to
 auto_accept, review, or annotate.
 
+What a threshold here means, stated once so this file cannot argue with itself. A threshold is a precision
+floor ONLY for a class with a fitted, measured operating point (ThresholdFit). For every other class the
+gate falls back to the configured constants - `auto_accept: 0.45`, `safety_auto_accept: 0.47` on a
+calibrated scale whose ceiling sits near 0.48 - and those are unmeasured constants, not floors.
+`_threshold_for` logs exactly that on first use per class. An earlier version of this docstring quoted
+0.99/0.95 as the operating point; those numbers never described the running config, and the realized
+precision of the auto-accepted subset has not been measured against human verdicts. (A VLM judge puts the
+pooled auto_accept subset at 0.932 strict on 44 decided crops - evidence, not a measurement against
+humans.)
+
 M-Q.4 hardening:
-  - Per-class calibrated thresholds replace the global constant: safety-critical classes (VRU, animal)
-    must be near-certain (0.99), benign classes use the default (0.95). Confidence is calibrated, so a
-    threshold is a precision floor.
+  - Per-class calibrated thresholds replace the global constant where a fit exists; safety-critical
+    classes (VRU, animal) use the higher safety constant where it does not.
   - A rare/fallback class earns auto-accept only with cross-path agreement AND VLM confirmation, never on
     one model's output. This kills confident-but-wrong rare detections.
   - The quality reviewer's verdict (geometric/contextual nonsense) demotes an object before it can

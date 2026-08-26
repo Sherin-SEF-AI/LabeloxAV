@@ -60,7 +60,7 @@ def segment_frame(image_bgr, frame_id, session_id, store, onto, settings, *, bac
         # tolerance (so a large stuff region is no coarser than a small thing) and keep interior holes, so
         # a stuff region keeps the cut-out where an occluding vehicle sits instead of swallowing it.
         # (Semantic stays raster-only; a coarse boundary is acceptable there.)
-        from services.autolabel.paths.path_b_sam3 import polygons_from_mask
+        from services.autolabel.paths.path_b_openvocab import polygons_from_mask
         for sid, seg in segments.items():
             seg["polygon"] = polygons_from_mask(instance == int(sid), keep_holes=True, epsilon_px=1.5)
 

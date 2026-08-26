@@ -11,6 +11,10 @@ from core.accel.imgqa import gpu_available, image_quality_batch, rig_exposure_co
 
 
 def test_sharpness_matches_cv2():
+    # This exercises the torch kernel itself (there is no numpy fallback for it), so a box without torch
+    # skips rather than failing. Deliberately importorskip and NOT the `gpu` marker: the kernel runs on CPU
+    # torch, and the marker would deselect it from `make test-unit` on every box that could run it.
+    pytest.importorskip("torch")
     cv2 = pytest.importorskip("cv2")
     rng = np.random.default_rng(0)
     N, H, W = 12, 240, 320

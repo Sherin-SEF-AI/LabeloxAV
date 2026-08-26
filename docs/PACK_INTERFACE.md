@@ -138,10 +138,10 @@ Bundles the five swappable auto-label surfaces the audit named, over the reusabl
 ```python
 @dataclass(frozen=True)
 class AutoLabelProfile:
-    vlm_prompt_template: str            # was hardcoded "Indian road scene" path_c_qwen3vl.py:64
-    cross_anchors: list[str]            # was CROSS_ANCHORS path_c_qwen3vl.py:186
-    coco_map: dict[int, str]            # was COCO_TO_ONTOLOGY path_a_yolo26.py:21
-    openvocab_synonyms: dict[str, list[str]]   # was _OPENVOCAB_SYNONYMS path_b_sam3.py:29
+    vlm_prompt_template: str            # was hardcoded "Indian road scene" path_c_vlm.py:64
+    cross_anchors: list[str]            # was CROSS_ANCHORS path_c_vlm.py:186
+    coco_map: dict[int, str]            # was COCO_TO_ONTOLOGY path_a_detect.py:21
+    openvocab_synonyms: dict[str, list[str]]   # was _OPENVOCAB_SYNONYMS path_b_openvocab.py:29
     gate_policy: GatePolicy             # safety_auto_accept + is_rare rules, gate.py:20
     disable_ego_hood_mask: bool         # static packs set True
 ```
@@ -151,8 +151,8 @@ template the pack fills, e.g. AV's "object cropped from an Indian road scene for
 vs Sec's "object cropped from an Indian CCTV/security camera scene". The runner, VRAM guard, fusion voting, and
 calibration/isotonic scaling are engine core and untouched.
 
-**Dissolves:** `path_c_qwen3vl.py:64` prompt, `:186` anchors, `path_a_yolo26.py:21` COCO map,
-`path_b_sam3.py:29` synonyms, `autolabel/gate.py:20` policy.
+**Dissolves:** `path_c_vlm.py:64` prompt, `:186` anchors, `path_a_detect.py:21` COCO map,
+`path_b_openvocab.py:29` synonyms, `autolabel/gate.py:20` policy.
 
 ### `safety_policy: SafetyPolicy`
 

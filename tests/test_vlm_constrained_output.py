@@ -113,7 +113,7 @@ def test_the_prompt_is_identical_for_objects_with_different_shortlists():
     was not, because the shortlist is per object.
     """
     assert static_prompt(ATTRS) == static_prompt(ATTRS)
-    from services.autolabel.paths.path_c_qwen3vl import _build_prompt
+    from services.autolabel.paths.path_c_vlm import _build_prompt
 
     a = _build_prompt(["motorcycle", "scooter"], ATTRS)
     b = _build_prompt(["cattle", "truck"], ATTRS)
@@ -146,7 +146,7 @@ def _fake_ollama_response(content: dict):
 
 def test_ollama_sends_the_schema_rather_than_the_word_json():
     """`format: "json"` shapes the output as JSON and constrains nothing about the class."""
-    from services.autolabel.paths.path_c_qwen3vl import OllamaVlmClient
+    from services.autolabel.paths.path_c_vlm import OllamaVlmClient
 
     seen: dict = {}
 
@@ -154,7 +154,7 @@ def test_ollama_sends_the_schema_rather_than_the_word_json():
         seen.update(json or {})
         return _fake_ollama_response({"class": "scooter", "confident": True})
 
-    with patch("services.autolabel.paths.path_c_qwen3vl.httpx.post", fake_post):
+    with patch("services.autolabel.paths.path_c_vlm.httpx.post", fake_post):
         res = OllamaVlmClient().verify(np.zeros((32, 32, 3), np.uint8), SHORTLIST, ATTRS)
 
     assert isinstance(seen["format"], dict), "format must carry the schema, not the string 'json'"
@@ -163,7 +163,7 @@ def test_ollama_sends_the_schema_rather_than_the_word_json():
 
 
 def test_ollama_no_longer_puts_the_shortlist_in_the_prompt():
-    from services.autolabel.paths.path_c_qwen3vl import OllamaVlmClient
+    from services.autolabel.paths.path_c_vlm import OllamaVlmClient
 
     seen: dict = {}
 
@@ -171,7 +171,7 @@ def test_ollama_no_longer_puts_the_shortlist_in_the_prompt():
         seen.update(json or {})
         return _fake_ollama_response({"class": "scooter", "confident": True})
 
-    with patch("services.autolabel.paths.path_c_qwen3vl.httpx.post", fake_post):
+    with patch("services.autolabel.paths.path_c_vlm.httpx.post", fake_post):
         OllamaVlmClient().verify(np.zeros((32, 32, 3), np.uint8), SHORTLIST, ATTRS)
 
     prompt = seen["messages"][0]["content"]
@@ -180,7 +180,7 @@ def test_ollama_no_longer_puts_the_shortlist_in_the_prompt():
 
 def test_llama_server_asks_for_a_strict_json_schema():
     """`strict` is what makes it a constraint the server compiles to GBNF rather than a hint."""
-    from services.autolabel.paths.path_c_qwen3vl import LlamaServerVlmClient
+    from services.autolabel.paths.path_c_vlm import LlamaServerVlmClient
 
     seen: dict = {}
 
@@ -197,7 +197,7 @@ def test_llama_server_asks_for_a_strict_json_schema():
         seen.update(json or {})
         return R()
 
-    with patch("services.autolabel.paths.path_c_qwen3vl.httpx.post", fake_post):
+    with patch("services.autolabel.paths.path_c_vlm.httpx.post", fake_post):
         res = LlamaServerVlmClient().verify(np.zeros((32, 32, 3), np.uint8), SHORTLIST, ATTRS)
 
     rf = seen["response_format"]
@@ -210,7 +210,7 @@ def test_llama_server_asks_for_a_strict_json_schema():
 
 def test_llama_server_sends_the_image_the_way_its_multimodal_stack_expects():
     """Ollama takes a separate `images` array; llama-server takes OpenAI content parts with a data URL."""
-    from services.autolabel.paths.path_c_qwen3vl import LlamaServerVlmClient
+    from services.autolabel.paths.path_c_vlm import LlamaServerVlmClient
 
     seen: dict = {}
 
@@ -225,7 +225,7 @@ def test_llama_server_sends_the_image_the_way_its_multimodal_stack_expects():
         seen.update(json or {})
         return R()
 
-    with patch("services.autolabel.paths.path_c_qwen3vl.httpx.post", fake_post):
+    with patch("services.autolabel.paths.path_c_vlm.httpx.post", fake_post):
         LlamaServerVlmClient().verify(np.zeros((32, 32, 3), np.uint8), SHORTLIST, ATTRS)
 
     parts = seen["messages"][0]["content"]
@@ -235,12 +235,12 @@ def test_llama_server_sends_the_image_the_way_its_multimodal_stack_expects():
 
 def test_a_dead_llama_server_yields_an_empty_verdict_not_an_exception():
     """Path C is called inside a batch sweep. One unreachable server must not end it."""
-    from services.autolabel.paths.path_c_qwen3vl import LlamaServerVlmClient
+    from services.autolabel.paths.path_c_vlm import LlamaServerVlmClient
 
     def boom(url, json=None, timeout=None):  # noqa: A002
         raise ConnectionError("connection refused")
 
-    with patch("services.autolabel.paths.path_c_qwen3vl.httpx.post", boom):
+    with patch("services.autolabel.paths.path_c_vlm.httpx.post", boom):
         res = LlamaServerVlmClient().verify(np.zeros((32, 32, 3), np.uint8), SHORTLIST, ATTRS)
     assert res.class_name is None
 
@@ -248,7 +248,7 @@ def test_a_dead_llama_server_yields_an_empty_verdict_not_an_exception():
 # ------------------------------------------------------------------------------- selection
 
 def test_the_local_backend_is_chosen_by_configuration():
-    from services.autolabel.paths.path_c_qwen3vl import LlamaServerVlmClient, OllamaVlmClient
+    from services.autolabel.paths.path_c_vlm import LlamaServerVlmClient, OllamaVlmClient
     from services.llm.router import local_vlm_client
 
     s = get_settings().model_copy(deep=True)
@@ -273,7 +273,7 @@ def test_an_out_of_ontology_class_is_logged_before_it_is_discarded(capsys):
     stdout and the stdlib records caplog collects never see it.
     """
     from services.autolabel.ontology import get_ontology
-    from services.autolabel.paths.path_c_qwen3vl import VlmResult, VlmVerifier
+    from services.autolabel.paths.path_c_vlm import VlmResult, VlmVerifier
 
     v = VlmVerifier.__new__(VlmVerifier)
     v.onto = get_ontology()
@@ -287,7 +287,7 @@ def test_an_out_of_ontology_class_is_logged_before_it_is_discarded(capsys):
 
 @pytest.mark.parametrize("name", ["motorcycle", "cattle"])
 def test_a_class_the_ontology_knows_survives_validation(name):
-    from services.autolabel.paths.path_c_qwen3vl import VlmResult, VlmVerifier
+    from services.autolabel.paths.path_c_vlm import VlmResult, VlmVerifier
 
     v = VlmVerifier.__new__(VlmVerifier)
     from services.autolabel.ontology import get_ontology

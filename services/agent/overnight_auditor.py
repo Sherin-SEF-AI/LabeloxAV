@@ -69,7 +69,7 @@ async def run_audit(run_id: uuid.UUID, *, sample_size: int = 200, vlm_calls: int
     try:
         from core.config import get_settings
         from services.autolabel.grounding import supported_concept_ids
-        from services.autolabel.paths.path_c_qwen3vl import VlmVerifier, make_vlm_client
+        from services.autolabel.paths.path_c_vlm import VlmVerifier, make_vlm_client
 
         settings = get_settings()
         if settings.models.vlm.enabled:

@@ -30,7 +30,7 @@ import numpy as np
 
 from core.config import Settings, get_settings
 from core.logging import get_logger
-from services.autolabel.paths.path_c_qwen3vl import (
+from services.autolabel.paths.path_c_vlm import (
     LlamaServerVlmClient,
     OllamaVlmClient,
     VlmClient,

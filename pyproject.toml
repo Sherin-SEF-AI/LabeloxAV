@@ -52,6 +52,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Documentation site. Kept out of the base install because nothing at runtime needs it, and out of `dev`
+# because a contributor running the tests should not pay for a docs toolchain they are not building.
+docs = [
+    "mkdocs-material==9.5.49",
+    "mkdocstrings[python]==0.27.0",
+]
 # GPU/perception. Install with: uv pip install -e ".[ml]" --index-strategy unsafe-best-match
 # torch cu128 wheels are required for RTX 5080 (Blackwell, sm_120).
 ml = [

@@ -301,8 +301,15 @@ async def reinterpolate(object_id: UUID, method: str = "linear", db: AsyncSessio
 
 
 @router.post("/tracks/{track_id}/interpolate")
-async def interpolate(track_id: UUID, db: AsyncSession = Depends(db_session)):
-    """Fill the gaps between this track's keyframes with linearly-interpolated boxes (no drift)."""
-    from services.intelligence.propagate import interpolate_track
+async def interpolate(track_id: UUID, method: str = "cubic", anchor_policy: str = "detection",
+                      db: AsyncSession = Depends(db_session)):
+    """Fill this track's gaps, skipping holes whose bracketing anchors are not plausibly one object.
 
-    return await interpolate_track(track_id)
+    Anchors default to detections rather than human keyframes: only 179 of 11,406 tracks carry two
+    human-verified boxes, so the keyframe policy fills nothing on a machine-labelled track. The response
+    reports refusals by reason, which is the part worth reading - a track that fills nothing because its
+    endpoints teleport is a tracking problem, not an interpolation one.
+    """
+    from services.temporal.interpolate import interpolate_track_keyframed
+
+    return await interpolate_track_keyframed(track_id, method, anchor_policy=anchor_policy)

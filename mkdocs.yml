@@ -1,0 +1,94 @@
+site_name: LabeloxAV
+site_description: A data engine for autonomous driving, built for Indian roads.
+site_url: https://sherin-sef-ai.github.io/LabeloxAV/
+repo_url: https://github.com/Sherin-SEF-AI/LabeloxAV
+repo_name: Sherin-SEF-AI/LabeloxAV
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2026 Sherin Joseph Roy
+
+theme:
+  name: material
+  logo: logo.png
+  favicon: logo.png
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  palette:
+    # The repo's own dark-workstation identity, and the viewer's OS preference decides which way round.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: blue
+      toggle: {icon: material/weather-night, name: Switch to dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: blue
+      toggle: {icon: material/weather-sunny, name: Switch to light mode}
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            heading_level: 3
+            docstring_style: google
+            members_order: source
+            separate_signature: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - footnotes
+  - toc: {permalink: true}
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight: {anchor_linenums: true}
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed: {alternate_style: true}
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Concepts:
+      - Architecture: ARCHITECTURE.md
+      - Domain packs: PACK_INTERFACE.md
+      - Measurement: MEASUREMENT.md
+      - AV assumptions: AV_ASSUMPTIONS.md
+  - API:
+      - REST API: api/rest.md
+      - Route inventory: api/inventory.md
+      - Python reference: api/python.md
+  - Operations:
+      - Deploy: DEPLOY.md
+      - Runbook: RUNBOOK.md
+      - Automation: AUTOMATION.md
+      - Testing: TESTING.md
+      - Data retention: DATA_RETENTION.md
+  - Reference:
+      - Engineering log: ENGINEERING_LOG.md
+      - Remediation status: REMEDIATION_STATUS.md
+      - Canvas rework: CANVAS_REWORK_DISCOVERY.md
+      - ADR 0001 - prediction plane: adr/0001-prediction-plane.md
+      - Data engine M0: data-engine/M0-proposal.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Sherin-SEF-AI/LabeloxAV

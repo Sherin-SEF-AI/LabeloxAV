@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from core.config import get_settings
-from services.autolabel.paths.path_c_qwen3vl import VlmResult
+from services.autolabel.paths.path_c_vlm import VlmResult
 from services.llm.groq_client import GroqError
 from services.llm.router import CircuitBreaker, RoutedVlmClient, make_vlm_client, route_text_json
 
@@ -38,7 +38,7 @@ def test_breaker_opens_after_threshold_and_reopens_after_cooldown():
 def test_no_cloud_config_returns_plain_ollama(vlm_cfg):
     v, _ = vlm_cfg
     v.vision_provider = "ollama"; v.escalate_provider = None
-    from services.autolabel.paths.path_c_qwen3vl import OllamaVlmClient
+    from services.autolabel.paths.path_c_vlm import OllamaVlmClient
     assert isinstance(make_vlm_client(), OllamaVlmClient)
 
 
@@ -50,7 +50,7 @@ def test_groq_success_is_used_and_tagged(vlm_cfg, monkeypatch):
 
     monkeypatch.setattr("services.llm.groq_client.GroqClient.chat_json",
                         lambda self, *a, **k: {"class": "rider", "confident": True, "attributes": {}, "caption": "x"})
-    monkeypatch.setattr("services.autolabel.paths.path_c_qwen3vl.OllamaVlmClient.verify",
+    monkeypatch.setattr("services.autolabel.paths.path_c_vlm.OllamaVlmClient.verify",
                         lambda self, *a, **k: (_ for _ in ()).throw(AssertionError("ollama should not be called")))
 
     r = client.verify(CROP, ["rider", "pedestrian"], {})
@@ -64,7 +64,7 @@ def test_groq_failure_falls_back_to_ollama(vlm_cfg, monkeypatch):
 
     monkeypatch.setattr("services.llm.groq_client.GroqClient.chat_json",
                         lambda self, *a, **k: (_ for _ in ()).throw(GroqError("429 rate limit")))
-    monkeypatch.setattr("services.autolabel.paths.path_c_qwen3vl.OllamaVlmClient.verify",
+    monkeypatch.setattr("services.autolabel.paths.path_c_vlm.OllamaVlmClient.verify",
                         lambda self, *a, **k: VlmResult(class_name="pedestrian", confident=True))
 
     r = client.verify(CROP, ["rider", "pedestrian"], {})
@@ -82,7 +82,7 @@ def test_repeated_groq_failure_opens_circuit_and_stops_calling_it(vlm_cfg, monke
         calls["groq"] += 1
         raise GroqError("down")
     monkeypatch.setattr("services.llm.groq_client.GroqClient.chat_json", boom)
-    monkeypatch.setattr("services.autolabel.paths.path_c_qwen3vl.OllamaVlmClient.verify",
+    monkeypatch.setattr("services.autolabel.paths.path_c_vlm.OllamaVlmClient.verify",
                         lambda self, *a, **k: VlmResult(class_name="bus", confident=True))
 
     for _ in range(5):
@@ -94,7 +94,7 @@ def test_repeated_groq_failure_opens_circuit_and_stops_calling_it(vlm_cfg, monke
 def test_allow_cloud_media_false_keeps_vision_local(vlm_cfg):
     v, g = vlm_cfg
     v.vision_provider = "groq"; v.allow_cloud_media = False; g.api_key = "test-key"
-    from services.autolabel.paths.path_c_qwen3vl import OllamaVlmClient
+    from services.autolabel.paths.path_c_vlm import OllamaVlmClient
     # media not allowed out -> the router is not even built; vision stays fully local
     assert isinstance(make_vlm_client(), OllamaVlmClient)
 
@@ -112,12 +112,12 @@ def test_escalate_only_fires_on_a_not_confident_verdict(vlm_cfg, monkeypatch):
     monkeypatch.setattr("services.llm.groq_client.GroqClient.chat_json", escalate)
 
     # confident primary -> no escalation
-    monkeypatch.setattr("services.autolabel.paths.path_c_qwen3vl.OllamaVlmClient.verify",
+    monkeypatch.setattr("services.autolabel.paths.path_c_vlm.OllamaVlmClient.verify",
                         lambda self, *a, **k: VlmResult(class_name="sedan", confident=True, provider="ollama"))
     client.verify(CROP, ["sedan"], {}); assert esc["n"] == 0
 
     # not-confident primary -> escalate is consulted and its answer wins
-    monkeypatch.setattr("services.autolabel.paths.path_c_qwen3vl.OllamaVlmClient.verify",
+    monkeypatch.setattr("services.autolabel.paths.path_c_vlm.OllamaVlmClient.verify",
                         lambda self, *a, **k: VlmResult(class_name="sedan", confident=False, provider="ollama"))
     r = client.verify(CROP, ["sedan"], {})
     assert esc["n"] == 1 and r.class_name == "autorickshaw" and r.provider == "groq:escalate"
@@ -165,7 +165,7 @@ def test_anthropic_success_is_used_and_tagged(anthropic_cfg, monkeypatch):
     monkeypatch.setattr("services.llm.anthropic_client.AnthropicClient.chat_json",
                         lambda self, *a_, **k: {"class": "autorickshaw", "confident": True,
                                                 "attributes": {}, "caption": "three-wheeler"})
-    monkeypatch.setattr("services.autolabel.paths.path_c_qwen3vl.OllamaVlmClient.verify",
+    monkeypatch.setattr("services.autolabel.paths.path_c_vlm.OllamaVlmClient.verify",
                         lambda self, *a_, **k: (_ for _ in ()).throw(AssertionError("ollama should not be called")))
 
     r = client.verify(CROP, ["autorickshaw", "e_auto"], {})
@@ -182,7 +182,7 @@ def test_anthropic_failure_falls_back_to_ollama(anthropic_cfg, monkeypatch):
 
     monkeypatch.setattr("services.llm.anthropic_client.AnthropicClient.chat_json",
                         lambda self, *a_, **k: (_ for _ in ()).throw(AnthropicError("anthropic http 429")))
-    monkeypatch.setattr("services.autolabel.paths.path_c_qwen3vl.OllamaVlmClient.verify",
+    monkeypatch.setattr("services.autolabel.paths.path_c_vlm.OllamaVlmClient.verify",
                         lambda self, *a_, **k: VlmResult(class_name="rider", confident=True, provider="ollama"))
 
     r = client.verify(CROP, ["rider"], {})
@@ -215,7 +215,7 @@ def test_an_unknown_provider_degrades_to_local_instead_of_crashing(anthropic_cfg
 def test_data_residency_still_wins_over_a_configured_frontier_provider(anthropic_cfg):
     """allow_cloud_media=False is a DPDPA posture, not a preference: no crop leaves the box whatever the
     provider says."""
-    from services.autolabel.paths.path_c_qwen3vl import OllamaVlmClient
+    from services.autolabel.paths.path_c_vlm import OllamaVlmClient
 
     v, a = anthropic_cfg
     v.vision_provider = "anthropic"; v.escalate_provider = None; v.allow_cloud_media = False; a.api_key = "k"

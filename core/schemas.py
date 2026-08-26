@@ -59,7 +59,7 @@ class BBox(BaseModel):
 class Detection(BaseModel):
     """A single path proposal, before fusion."""
 
-    path: str  # path_a_yolo26 | path_b_sam3 | path_c_qwen3vl
+    path: str  # frozen wire ids: path_a_yolo26 | path_b_sam3 | path_c_qwen3vl (files renamed, strings kept)
     class_name: str | None = None
     class_id: int | None = None
     bbox: BBox

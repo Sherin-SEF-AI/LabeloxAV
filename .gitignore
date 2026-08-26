@@ -32,3 +32,10 @@ AUDIT.md
 web/.design-ref/
 .perception_work/
 demos/
+
+# Documentation build output and the API reference generated from the running app. Both are produced by
+# `make docs` and by CI on every publish; committing them would mean a stale schema could be reviewed as
+# if it were current.
+/site/
+/docs/api/openapi.json
+/docs/api/inventory.md
