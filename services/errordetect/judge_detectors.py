@@ -97,7 +97,7 @@ async def judge_detector(db: AsyncSession, kind: str, *, n: int = 50, client=Non
     batch_id = f"{BATCH_PREFIX}:{kind}"
 
     items = await sample_candidates(db, kind, n)
-    confirmed = dismissed = unsure = unreadable = refinements = cross = 0
+    confirmed = dismissed = unsure = unreadable = refinements = cross = failed = 0
 
     for it in items:
         obj = await db.get(Object, _uuid.UUID(it["object_id"]))
@@ -113,8 +113,13 @@ async def judge_detector(db: AsyncSession, kind: str, *, n: int = 50, client=Non
         except Exception:  # noqa: BLE001
             continue
 
-        parsed = parse_judge_reply(
-            _ask(client, crop, given, _alternatives(onto, given_id), model=model_version), onto)
+        reply = _ask(client, crop, given, _alternatives(onto, given_id), model=model_version)
+        if reply is None:
+            # The judge was never reached, so there is no verdict. Skipped rather than recorded as `unsure`:
+            # an outage must not read as this detector's candidates being unjudgeable.
+            failed += 1
+            continue
+        parsed = parse_judge_reply(reply, onto, given_class=given)
 
         if parsed["verdict"] == "unsure":
             unsure += 1
@@ -150,7 +155,7 @@ async def judge_detector(db: AsyncSession, kind: str, *, n: int = 50, client=Non
 
     out = {
         "kind": kind, "sampled": len(items), "judged": decided, "unsure": unsure,
-        "unreadable": unreadable,
+        "unreadable": unreadable, "failed": failed,
         "confirmed": confirmed, "dismissed": dismissed,
         "refinements_within_superclass": refinements, "cross_superclass": cross,
         "precision_strict": strict,

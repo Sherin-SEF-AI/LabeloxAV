@@ -219,7 +219,12 @@ async def calibrate_judge(db: AsyncSession, *, limit: int | None = None, client=
         except Exception:  # noqa: BLE001
             continue
         reply = _ask(client, crop, item.asked_class, _alternatives(onto, asked_id), model=model_version)
-        parsed = parse_judge_reply(reply, onto)
+        if reply is None:
+            # No verdict to calibrate against. Counting a failed call here would be worse than elsewhere:
+            # the calibration is what every corrected precision is divided through, so a run against a dead
+            # judge would push a fabricated sensitivity into every downstream number.
+            continue
+        parsed = parse_judge_reply(reply, onto, given_class=item.asked_class)
         judged += 1
 
         d = per_decision.setdefault(item.decision_key, {

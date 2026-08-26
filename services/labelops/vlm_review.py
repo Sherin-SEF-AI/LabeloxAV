@@ -49,6 +49,10 @@ JUDGE = "vlm"
 # separately, so abstention is visible rather than silently improving the score.
 VERDICTS = ("correct", "incorrect", "unsure")
 
+# Stop rather than walk the rest of the corpus against a judge that is not answering. The same guard the
+# corpus sweeps in services/quality/ use, and for the same reason.
+MAX_CONSECUTIVE_FAILURES = 20
+
 
 def build_judge_prompt(given_class: str, alternatives: list[str]) -> str:
     """Ask whether the existing label is right, rather than asking what the object is.
@@ -76,11 +80,18 @@ def build_judge_prompt(given_class: str, alternatives: list[str]) -> str:
     )
 
 
-def parse_judge_reply(data: dict, onto) -> dict:
+def parse_judge_reply(data: dict, onto, given_class: str | None = None) -> dict:
     """Normalise a judge reply, refusing anything that is not one of the three verdicts.
 
     A reply that does not parse becomes `unsure` rather than being dropped. Dropping it would silently
     shrink the denominator, which biases the rate upward: the crops a judge garbles are not a random subset.
+
+    A rejection that names the asked class as its own correction is not a rejection. It happens most on
+    `object_fallback`, where "is this the right label?" is a confusing question about a class that means
+    none of the above, and the model answers `incorrect` while its stated reason confirms the label
+    ("the object is a fire hydrant, which is not in the provided class list"). Counting that as an error
+    would report the fallback class as broken on exactly the crops it is working. `unsure` is the designed
+    answer for a reply carrying no usable opinion, and this is one.
     """
     verdict = str(data.get("verdict", "")).strip().lower()
     if verdict not in VERDICTS:
@@ -89,7 +100,10 @@ def parse_judge_reply(data: dict, onto) -> dict:
     proposed = data.get("correct_class")
     proposed_id = None
     if verdict == "incorrect" and proposed and onto.has_name(str(proposed)):
-        proposed_id = onto.by_name(str(proposed)).id
+        if given_class and str(proposed).strip() == given_class:
+            verdict, proposed_id = "unsure", None
+        else:
+            proposed_id = onto.by_name(str(proposed)).id
 
     try:
         conf = float(data.get("confidence"))
@@ -149,6 +163,28 @@ async def prereview_batch(db: AsyncSession, batch_id: str, *, limit: int | None 
     its own row so two judges stay comparable on the same crops, and an object appearing in two batches
     keeps a verdict in each. `skip_judged` additionally avoids paying for calls that would only overwrite an
     identical verdict, which matters when the batch is 300 crops and the judge is a metered API.
+
+    The judging itself is `judge_objects`; this function only decides which objects to judge.
+    """
+    q = (select(Object)
+         .where(Object.provenance["flywheel"]["cycle_id"].astext == batch_id)
+         .order_by(Object.object_id))
+    if limit:
+        q = q.limit(limit)
+    objects = list((await db.execute(q)).scalars().all())
+    return await judge_objects(db, objects, batch_id, client=client, model_version=model_version,
+                               skip_judged=skip_judged)
+
+
+async def judge_objects(db: AsyncSession, objects: list[Object], batch_id: str, *,
+                        client=None, model_version: str | None = None,
+                        skip_judged: bool = True) -> dict:
+    """Judge a supplied list of objects and record what the judge said.
+
+    The loop, separated from how the objects were chosen. `prereview_batch` picks a flywheel batch;
+    `services/labelops/class_precision.py` picks a random sample of one class. Both want the same judging,
+    the same idempotent upsert and the same chunked commits, and a second copy of this loop is a second
+    place for the prompt, the abstention handling and the uniqueness key to drift.
     """
     from services.autolabel.ontology import get_ontology
     from services.llm.router import make_vlm_client
@@ -158,13 +194,6 @@ async def prereview_batch(db: AsyncSession, batch_id: str, *, limit: int | None 
     client = client or make_vlm_client(settings)
     provider = getattr(settings.models.vlm, "vision_provider", "ollama")
     model_version = model_version or _model_version_for(settings, provider)
-
-    q = (select(Object)
-         .where(Object.provenance["flywheel"]["cycle_id"].astext == batch_id)
-         .order_by(Object.object_id))
-    if limit:
-        q = q.limit(limit)
-    objects = list((await db.execute(q)).scalars().all())
 
     already: set[_uuid.UUID] = set()
     if skip_judged and objects:
@@ -179,7 +208,8 @@ async def prereview_batch(db: AsyncSession, batch_id: str, *, limit: int | None 
                 MachineVerdict.object_id.in_([o.object_id for o in objects])))).scalars().all())
 
     counts = dict.fromkeys(VERDICTS, 0)
-    judged = skipped = unreadable = 0
+    judged = skipped = unreadable = failed = 0
+    consecutive_failures = 0
     margin = settings.models.vlm.crop_margin
 
     # Committed in chunks rather than once at the end. A 300-crop batch against a local model is tens of
@@ -200,7 +230,19 @@ async def prereview_batch(db: AsyncSession, batch_id: str, *, limit: int | None 
         given = onto.by_id(int(obj.class_id)).name
         alts = _alternatives(onto, int(obj.class_id))
         reply = _ask(client, crop, given, alts, model=model_version)
-        parsed = parse_judge_reply(reply, onto)
+        if reply is None:
+            # Counted and not written, the same as an unreadable crop. Writing it would put a verdict in the
+            # table that the judge never gave.
+            failed += 1
+            consecutive_failures += 1
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                await db.commit()
+                raise RuntimeError(
+                    f"{MAX_CONSECUTIVE_FAILURES} consecutive judge calls failed on batch {batch_id}; "
+                    f"stopping rather than judging the rest of the corpus against a broken judge")
+            continue
+        consecutive_failures = 0
+        parsed = parse_judge_reply(reply, onto, given_class=given)
         counts[parsed["verdict"]] += 1
         judged += 1
 
@@ -225,8 +267,8 @@ async def prereview_batch(db: AsyncSession, batch_id: str, *, limit: int | None 
 
     await db.commit()
     out = {"batch_id": batch_id, "objects": len(objects), "judged": judged, "skipped": skipped,
-           "unreadable": unreadable, "by_verdict": counts, "judge": JUDGE, "provider": provider,
-           "model_version": model_version}
+           "unreadable": unreadable, "failed": failed, "by_verdict": counts, "judge": JUDGE,
+           "provider": provider, "model_version": model_version}
     log.info("vlm_review.prereview", **out)
     return out
 
@@ -267,8 +309,13 @@ def _chat_capable(client):
     return None
 
 
-def _ask(client, crop, given_class: str, alternatives: list[str], model: str | None = None) -> dict:
-    """One judging call.
+def _ask(client, crop, given_class: str, alternatives: list[str],
+         model: str | None = None) -> dict | None:
+    """One judging call. `None` means the call itself failed and there is no verdict to record.
+
+    That return is deliberately distinct from an `unsure` verdict. `unsure` says the judge looked and
+    declined; `None` says the judge was never reached. Collapsing the two lets an outage read as a finding
+    about the labels.
 
     A judging prompt is not what VlmClient.verify was built for: verify() takes a shortlist and an attribute
     schema and answers "what is this?". A model asked that always names something, so the reply carries no
@@ -293,8 +340,13 @@ def _ask(client, crop, given_class: str, alternatives: list[str], model: str | N
                 return chat.chat_json(prompt, model=model or getattr(target, "model", None),
                                       image_jpeg=buf.tobytes(), temperature=0.0)
             except Exception as exc:  # noqa: BLE001
-                log.info("vlm_review.judge_call_failed", error=str(exc)[:160])
-                return {"verdict": "unsure", "reason": "judge call failed"}
+                # None, not an `unsure` verdict. A call that never reached the model is not an abstention:
+                # the judge had no opinion because it was never asked. Recording it as `unsure` made an
+                # outage indistinguishable from the judge declining a hard crop, and a run against a dead
+                # Ollama came back looking like a class nobody could rule on - 80 of 80 "unsure" on `rider`,
+                # which read as a finding about the labels.
+                log.warning("vlm_review.judge_call_failed", error=str(exc)[:160])
+                return None
 
     res = client.verify(crop, [given_class, *alternatives], {})
     if not res.class_name:
