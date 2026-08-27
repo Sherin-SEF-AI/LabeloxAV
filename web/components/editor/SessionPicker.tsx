@@ -213,9 +213,15 @@ export default function SessionPicker({ sessionId, onPick }: {
             {listed.map((s) => {
               const here = s.session_id === sessionId;
               return (
-                <button key={s.session_id} onClick={() => void choose(s)}
-                  disabled={busy != null || !canOpen(states.get(s.session_id))}
-                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left hover:bg-line/40 disabled:opacity-45 disabled:cursor-not-allowed ${here ? "bg-line/25" : ""}`}>
+                // A row, not a button. The row carries two independent actions - open this drive, and
+                // start or stop its auto-label - and nesting those inside one <button> is invalid HTML that
+                // React refuses to hydrate. The open action is the button; the others are its siblings.
+                <div key={s.session_id}
+                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-line/40 ${here ? "bg-line/25" : ""}`}>
+                  <button onClick={() => void choose(s)}
+                    disabled={busy != null || !canOpen(states.get(s.session_id))}
+                    title={sessionLabel(s)}
+                    className="flex items-center gap-2 flex-1 min-w-0 text-left disabled:opacity-45 disabled:cursor-not-allowed">
                   <span className="flex flex-col leading-tight min-w-0 flex-1">
                     <span className={`font-mono text-[11.5px] truncate ${here ? "text-ink" : "text-ink-2"}`}>
                       {sessionLabel(s)}
@@ -238,13 +244,13 @@ export default function SessionPicker({ sessionId, onPick }: {
                     </span>
                   )}
                   {busy === s.session_id && <span className="font-mono text-[9px] text-ink-3 shrink-0">opening...</span>}
+                  </button>
                   {(() => {
                     const job = jobForSession(jobs?.autolabel ?? [], s.session_id);
                     if (job) {
                       const pct = Math.round((job.progress ?? 0) * 100);
                       return (
-                        <span className="flex items-center gap-1.5 shrink-0"
-                              onClick={(e) => e.stopPropagation()}>
+                        <span className="flex items-center gap-1.5 shrink-0">
                           {/* The animation is the point: a bar that only moves when a number changes reads
                               as frozen on a slow frame, so the fill also breathes while it is running. */}
                           <span className="relative w-12 h-1 rounded-sm bg-line overflow-hidden">
@@ -261,7 +267,7 @@ export default function SessionPicker({ sessionId, onPick }: {
                     if (!canAutolabel(states.get(s.session_id))) return null;
                     return (
                       <button
-                        onClick={(e) => { e.stopPropagation(); void startRun(s); }}
+                        onClick={() => void startRun(s)}
                         disabled={starting != null}
                         title={`auto-label the next ${AUTOLABEL_BATCH} unlabelled frames of this drive`}
                         className="font-mono text-[9px] uppercase tracking-wide text-ink-3 hover:text-accent disabled:opacity-40 shrink-0">
@@ -269,7 +275,7 @@ export default function SessionPicker({ sessionId, onPick }: {
                       </button>
                     );
                   })()}
-                </button>
+                </div>
               );
             })}
           </div>
