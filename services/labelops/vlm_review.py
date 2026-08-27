@@ -115,14 +115,40 @@ def parse_judge_reply(data: dict, onto, given_class: str | None = None) -> dict:
             "confidence": conf, "reason": str(data.get("reason", ""))[:400]}
 
 
+# Below this many L1 siblings, the shortlist is topped up from the wider ontology. A judge asked "is this
+# X?" and given a single alternative will name that alternative, and the answer says nothing about the crop.
+_MIN_ALTERNATIVES = 6
+
+
 def _alternatives(onto, class_id: int, limit: int = 12) -> list[str]:
-    """Plausible confusions for this class: its L1 siblings first, then the fallback.
+    """Plausible confusions for this class: its L1 siblings first, then a wider top-up if there are too few.
 
     Siblings rather than the whole ontology because the realistic errors are within-superclass (autorickshaw
     against e_auto against tempo), and a list of 180 classes makes the reply worse, not better.
+
+    The top-up exists because a thin L1 turns the question into a leading one. `object_fallback` has exactly
+    one sibling, `vehicle_fallback`, so the judge was asked whether a crop was `object_fallback` and offered
+    a single alternative - and named it on 39 of 39 crops, scoring the class at 0.000 precision. Looking at
+    those crops settled it: they are signage, poles, traffic signals and billboards, almost none of them
+    vehicles. The judge was not wrong about the pictures, it was answering the only question available.
     """
     c = onto.by_id(int(class_id))
     names = [k.name for k in onto.classes if k.l1 == c.l1 and k.name != c.name]
+    if len(names) < _MIN_ALTERNATIVES:
+        # Spread across the ontology rather than down into this class's own L0. A fallback class means
+        # "none of the above", so what it actually holds is anything; widening within L0 `object` offered
+        # only vehicles while the crops were signage, poles and traffic signals, which is the same leading
+        # question in a longer form.
+        #
+        # One per L1, not two: there are 14 subclasses and the list is capped at 12, so two apiece fills
+        # the cap from the first six and never reaches `fixed` or `temporary` - exactly where those crops
+        # turned out to live.
+        seen_l1: set[str] = set()
+        for k in onto.classes:
+            if k.name == c.name or k.name in names or k.l1 == c.l1 or k.l1 in seen_l1:
+                continue
+            seen_l1.add(k.l1)
+            names.append(k.name)
     names.append("object_fallback")
     return list(dict.fromkeys(names))[:limit]
 

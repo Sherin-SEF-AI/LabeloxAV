@@ -42,15 +42,22 @@ corrected for), then gated: `auto_accept` at 0.45 / safety classes at 0.47 on a 
 **Those thresholds are configured constants, not measured precision floors** - a per-class fit replaces
 them where one exists, and the gate logs which it used.
 
-## Honest numbers (2026-08-26)
+## Honest numbers (2026-08-27)
 
-- 716k objects across 377 sessions; **~1,900 human-verified** - every downstream number inherits that limit.
-- Per-class label precision, measured by a calibrated VLM judge on random 80-crop samples: `pedestrian`
-  0.85, `motorcycle` 0.81 ... `traffic_signal` **0.02**. Full table:
-  [reports/class_precision_2026-08-26.json](reports/class_precision_2026-08-26.json).
+- 578k objects across 377 sessions; **1,577 human-verified (0.27%)** - every downstream number inherits
+  that limit.
+- Per-class label precision, measured by a calibrated VLM judge on hash-stable random 80-crop samples:
+  `motorcycle` 0.87, `pedestrian` 0.87, `traffic_sign` 0.84 ... `traffic_signal` **0.05**,
+  `object_fallback` **0.00**. Full table:
+  [reports/class_precision_2026-08-27.json](reports/class_precision_2026-08-27.json).
 - The pooled auto-accepted subset judges at 0.93 strict - machine-judged, not yet measured against humans.
 - A blind capture-recapture audit is seeded and unscored, so recall numbers are against labels somebody
   already found, and the coverage datasheet shipped with every export says so.
+
+The corpus lost 137,904 objects on 2026-08-27: a gap-filling pass had interpolated between track endpoints
+that were not the same object, and the result judged at 0.209 against 0.603 for real detections. Reverting
+it moved 11 of 13 measured classes up, `traffic_sign` by 0.146. The [engineering
+log](docs/ENGINEERING_LOG.md) has the detail.
 
 ## Documentation
 

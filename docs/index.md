@@ -35,15 +35,20 @@ specificity are measured and corrected for. Calibrated confidence then routes ea
 
 ## Honest numbers
 
-Measured 2026-08-26 against the live corpus.
+Measured 2026-08-27 against the live corpus.
 
 | | |
 | --- | --- |
-| Objects / human-verified | 716,304 / ~1,900 (0.27%) |
+| Objects / human-verified | 578,399 / 1,577 (0.27%) |
 | Sessions | 377, of which 98.9% are one city |
-| Per-class label precision | `pedestrian` 0.85, `motorcycle` 0.81, `sedan` 0.22, `traffic_signal` 0.02 |
+| Per-class label precision | `motorcycle` 0.87, `pedestrian` 0.87, `sedan` 0.24, `traffic_signal` 0.05, `object_fallback` 0.00 |
 | Auto-accepted subset | 0.93 strict, machine-judged, **not** measured against humans |
 | Blind recall audit | seeded, unscored - recall is against labels somebody already found |
+
+!!! note "The corpus shrank by 19% on 2026-08-27, deliberately"
+    A gap-filling pass had interpolated between track endpoints that were not the same object; the 137,904
+    objects it produced judged at 0.209 against 0.603 for real detections. Reverting it moved 11 of 13
+    measured classes up. Every number above is post-revert.
 
 Every number above is produced by a script in this repo and every gap is stated rather than omitted. The
 per-class table comes from `scripts/run_class_precision.py`, which judges a hash-stable random sample per
