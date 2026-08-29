@@ -33,7 +33,7 @@ all work without one; the model paths that need CUDA refuse rather than fabricat
 | Path | Role | Model in this build |
 |---|---|---|
 | `path_a_detect` | Closed-set detector | `yolo11l.pt` (target: YOLO26; weights swap by config) |
-| `path_b_openvocab` | Open-vocabulary + segmentation | YOLO-World + `sam_b.pt` |
+| `path_b_openvocab` | Open-vocabulary + segmentation | YOLO-World + `sam2_b.pt` |
 | `path_c_vlm` | VLM verifier | `qwen2.5vl:7b` via Ollama |
 
 The filenames say what runs today; the identity strings in stored provenance keep their historical

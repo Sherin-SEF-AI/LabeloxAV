@@ -20,7 +20,7 @@ cattle on the carriageway, overloaded two-wheelers, hand carts, potholes.
 | Path | Role | Model in this build |
 | --- | --- | --- |
 | `path_a_detect` | Closed-set detector | `yolo11l.pt` (target YOLO26; weights swap by config) |
-| `path_b_openvocab` | Open-vocabulary + segmentation | YOLO-World + `sam_b.pt` |
+| `path_b_openvocab` | Open-vocabulary + segmentation | YOLO-World + `sam2_b.pt` |
 | `path_c_vlm` | VLM verifier | `qwen2.5vl:7b` via Ollama |
 
 Fused proposals are calibrated with isotonic regression, fit against a judge whose own sensitivity and

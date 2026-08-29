@@ -98,7 +98,10 @@ class OpenVocabSettings(BaseModel):
     # Path B, open-vocab detect + segment. Production target: SAM 3.1 PCS (sam3.pt).
     # Realized today as YOLO-World (text concept -> boxes) + SAM (box -> mask).
     detector_weights: str = "yolov8s-worldv2.pt"
-    seg_weights: str = "sam_b.pt"
+    # SAM 2: same mask coverage as SAM 1 on this corpus, 1.6x faster, half the checkpoint. See
+    # configs/default.yaml for the measurement and for why SAM 3 is not reachable on the pinned
+    # ultralytics.
+    seg_weights: str = "sam2_b.pt"
     half: bool = True
     conf: float = 0.12          # open-vocab floor: low enough for the long tail, high enough that
                                 # most boxes are real (0.05 buried the gate in noise)

@@ -48,10 +48,20 @@ models:
     imgsz: 1280
     half: true
     conf: 0.20
-  # Path B. Production target SAM 3.1 PCS (sam3.pt); realized as YOLO-World (text -> boxes) + SAM.
+  # Path B. YOLO-World turns text into boxes, SAM turns boxes into masks.
+  #
+  # SAM 2 rather than SAM 1: measured on 40 real crops from the classes this corpus struggles with, mask
+  # coverage is a wash (mean fill 0.766 against 0.722) while inference is 1.6x faster (0.078s against
+  # 0.128s) from a checkpoint less than half the size. Visually SAM 2 is tighter on vehicle bodies and
+  # differs on cluttered two-wheelers rather than being clearly better there.
+  #
+  # SAM 3.1 PCS was the design target and is not reachable yet: the code exists in ultralytics main
+  # (build_sam3.py, SAM3Predictor) but no sam3 weights appear in any Ultralytics asset release from v8.1.0
+  # to v8.4.0, and it would need the pinned ultralytics 8.3.0 to move to 8.4.x, which detection, training
+  # and the ONNX export all sit on. sam2.1_b.pt is likewise not in 8.3.0's model map.
   openvocab:
     detector_weights: yolov8s-worldv2.pt
-    seg_weights: sam_b.pt
+    seg_weights: sam2_b.pt
     half: true
     conf: 0.12
     max_boxes: 40
