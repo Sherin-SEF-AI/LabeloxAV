@@ -538,6 +538,21 @@ class LabeloxClient:
         return self._call("POST", f"/api/assets/{asset_id}/state",
                           params={"state": state}, json_body=None)
 
+    def post_attrsweep_apply(self, body: Any = None) -> Any:
+        """Attr Apply"""
+        return self._call("POST", f"/api/attrsweep/apply",
+                          params=None, json_body=body)
+
+    def get_attrsweep_coverage(self, session_id: Any | None = None) -> Any:
+        """Attr Coverage"""
+        return self._call("GET", f"/api/attrsweep/coverage",
+                          params={"session_id": session_id}, json_body=None)
+
+    def get_attrsweep_queue(self, attr: str, class_name: Any | None = None, session_id: Any | None = None, limit: int | None = 60, unit: str | None = 'auto') -> Any:
+        """Attr Queue"""
+        return self._call("GET", f"/api/attrsweep/queue",
+                          params={"attr": attr, "class_name": class_name, "session_id": session_id, "limit": limit, "unit": unit}, json_body=None)
+
     def post_auth_login(self, body: Any = None) -> Any:
         """Login"""
         return self._call("POST", f"/api/auth/login",
@@ -1468,6 +1483,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/frames/{frame_id}/lift_ground",
                           params={"u": u, "v": v}, json_body=None)
 
+    def post_frames_by_frame_id_lint(self, frame_id: str, body: Any = None) -> Any:
+        """Lint Frame Ep"""
+        return self._call("POST", f"/api/frames/{frame_id}/lint",
+                          params=None, json_body=body)
+
     def get_frames_by_frame_id_objects(self, frame_id: str, job_id: Any | None = None, limit: int | None = 2000) -> Any:
         """Frame Objects"""
         return self._call("GET", f"/api/frames/{frame_id}/objects",
@@ -1491,6 +1511,11 @@ class LabeloxClient:
     def get_frames_by_frame_id_relationships(self, frame_id: str) -> Any:
         """Frame Relationships"""
         return self._call("GET", f"/api/frames/{frame_id}/relationships",
+                          params=None, json_body=None)
+
+    def get_frames_by_frame_id_risk(self, frame_id: str) -> Any:
+        """Frame Risk"""
+        return self._call("GET", f"/api/frames/{frame_id}/risk",
                           params=None, json_body=None)
 
     def get_frames_by_frame_id_segment(self, frame_id: str, kind: str | None = 'semantic') -> Any:
@@ -3208,6 +3233,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/tracklets/{track_id}/derive",
                           params={"method": method, "overwrite_human": overwrite_human}, json_body=None)
 
+    def get_tracklets_by_track_id_drift(self, track_id: str, limit: int | None = 120) -> Any:
+        """Track Drift"""
+        return self._call("GET", f"/api/tracklets/{track_id}/drift",
+                          params={"limit": limit}, json_body=None)
+
     def get_tracklets_by_track_id_suggest_keyframes(self, track_id: str, budget: int | None = 8) -> Any:
         """Suggest Keyframes"""
         return self._call("GET", f"/api/tracklets/{track_id}/suggest-keyframes",
@@ -3227,6 +3257,11 @@ class LabeloxClient:
         """Get Track"""
         return self._call("GET", f"/api/tracks/{track_id}",
                           params=None, json_body=None)
+
+    def post_tracks_by_track_id_accept(self, track_id: str, body: Any = None) -> Any:
+        """Accept Track"""
+        return self._call("POST", f"/api/tracks/{track_id}/accept",
+                          params=None, json_body=body)
 
     def get_tracks_by_track_id_attribute_timeline(self, track_id: str, key: str) -> Any:
         """Attribute Timeline"""
@@ -3536,4 +3571,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 690 routes generated from the server schema.
+# 697 routes generated from the server schema.

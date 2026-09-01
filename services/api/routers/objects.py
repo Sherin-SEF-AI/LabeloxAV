@@ -425,6 +425,55 @@ async def frame_objects(frame_id: str, job_id: str | None = None, limit: int = 2
     ]
 
 
+@router.get("/frames/{frame_id}/risk", dependencies=[Depends(current_user)])
+async def frame_risk(frame_id: str, db: AsyncSession = Depends(db_session)):
+    """How likely each object on this frame is to be wrong, and how much of that is actually known.
+
+    A separate call rather than a field on `/objects`, and ranked ids rather than reordered objects.
+    `web/components/editor/properties/objectGroups.ts` records that the order `/objects` returns is
+    drawing order and that re-sorting it silently breaks the correspondence between the list and the
+    canvas; the risk order is a second view over the same rows, not a replacement for the first.
+
+    Every response carries `coverage` and `components_missing`, because the signals are unevenly present
+    (`quality_score` on 11.9% of the corpus, `clique_bandit` empty) and a rank computed from two of eight
+    signals is a weaker claim than one computed from eight.
+    """
+    from services.activelearn.frame_risk import rank_frame_objects
+
+    return await rank_frame_objects(db, UUID(frame_id), get_ontology())
+
+
+class LintIn(BaseModel):
+    # Off by default. A lint that silently opened issue threads every time the editor autosaved would fill
+    # the panel with duplicates of things nobody had asked about yet.
+    open_issues: bool = False
+
+
+@router.post("/frames/{frame_id}/lint")
+async def lint_frame_ep(frame_id: str, payload: LintIn | None = None,
+                        db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Every annotation guideline this frame breaks, plus the rules that could not run and why.
+
+    The rules existed as a corpus sweep with one caller and no way to reach a frame. This runs them where
+    the work happens, and without the sweep's `source != "human"` filter, because a linter that runs on
+    save exists to check the edit that was just made.
+
+    `dormant` is as much of the answer as `findings`. Measured over the corpus, the relation and attribute
+    rules fire on 100% of their scope, because `object_relationship` holds 98 rows and `occupant_count` is
+    set on none. Those rules stay dormant until the counterpart data is being collected on the frame in
+    front of them, and say so, rather than opening 56,410 issues that are all the same fact.
+    """
+    from services.quality.lint import lint_frame, open_issues_for
+
+    res = await lint_frame(db, UUID(frame_id))
+    if payload is not None and payload.open_issues and res.get("findings"):
+        made = await open_issues_for(db, UUID(frame_id), res["findings"],
+                                     user_id=getattr(user, "user_id", None))
+        await db.commit()
+        res["issues"] = made
+    return res
+
+
 # States that mean a person has dealt with the object, which is what "is this frame finished" asks. A
 # rejection is as settled as an acceptance. auto_accept is deliberately not here: it is the machine's
 # opinion, and counting it would draw a strip of finished frames nobody has looked at.

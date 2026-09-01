@@ -78,6 +78,53 @@ export type Ontology = {
   attribute_scope_class?: Record<string, string[]>;
 };
 
+/** One attribute's coverage: how many objects it applies to, carry it, and are missing it. */
+export type AttrCoverage = {
+  attribute: string;
+  type: string;
+  values: unknown[] | null;
+  range: number[] | null;
+  /** true when the attribute describes the object rather than the moment, so one answer covers a track */
+  track_constant: boolean;
+  in_scope: number;
+  set: number;
+  missing: number;
+  classes: { class_id: number; class_name: string; missing: number }[];
+};
+
+export type AttrQueueItem = {
+  object_id: string;
+  frame_id: string;
+  track_id: string | null;
+  class_id: number;
+  class_name: string;
+  bbox: number[];
+  state: string;
+  source: string;
+  conf: number | null;
+  session_id: string;
+  cam_id: string | null;
+  attrs: Record<string, unknown>;
+  /** how many objects this one answer will land on: the track's members, or 1 */
+  covers: number;
+  crop_url: string;
+};
+
+export type AttrQueue = {
+  attribute: string;
+  type: string;
+  values: unknown[] | null;
+  range: number[] | null;
+  track_constant: boolean;
+  unit: "track" | "object";
+  class_name: string | null;
+  remaining: number;
+  /** objects with no track at all, which a track-unit sweep cannot reach */
+  untracked: number;
+  items: AttrQueueItem[];
+  reason?: string;
+};
+
 export type SessionRow = {
   session_id: string;
   vehicle_id: string;

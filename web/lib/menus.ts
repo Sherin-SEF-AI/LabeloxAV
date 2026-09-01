@@ -131,6 +131,8 @@ export const MENUS: Menu[] = [
         hint: "one crop, one keystroke" },
       { key: "grid", label: "Crop grid", icon: "layers", href: "/review/grid",
         hint: "many crops, one keystroke each" },
+      { key: "attrsweep", label: "Attribute sweep", icon: "list", href: "/annotate/attrsweep",
+        hint: "one attribute at a time, track-wide where it applies" },
       { key: "annotations", label: "Annotations", icon: "list", href: "/annotations",
         hint: "browse and resume" },
       { key: "agent", label: "Agent console", icon: "activity", href: "/agent",

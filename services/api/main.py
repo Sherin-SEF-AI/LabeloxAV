@@ -22,6 +22,7 @@ from services.api.routers import (
     agent,
     analytics,
     assets,
+    attrsweep,
     autolabel,
     billing,
     calibration,
@@ -609,6 +610,7 @@ app.include_router(autolabel.router, prefix="/api", tags=["autolabel"])
 app.include_router(jobs.router, prefix="/api", tags=["jobs"])
 app.include_router(events.router, prefix="/api", tags=["events"])
 app.include_router(labelops.router, prefix="/api", tags=["labelops"])
+app.include_router(attrsweep.router, prefix="/api", tags=["attrsweep"])
 app.include_router(assets.router, prefix="/api", tags=["assets"])
 app.include_router(integrations.router, prefix="/api", tags=["integrations"])
 app.include_router(users.router, prefix="/api", tags=["users"])

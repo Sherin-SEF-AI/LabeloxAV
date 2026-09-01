@@ -1,4 +1,6 @@
 import type {
+  AttrCoverage,
+  AttrQueue,
   TrackEvent,
   TrackEventsResponse,
   AgentRunRow,
@@ -504,7 +506,47 @@ export const api = {
   lidarBatchCorrect: (ids: string[], classId?: number, dims?: number[]) =>
     post<{ updated: number }>(`/api/lidar/objects3d/batch_correct`,
       { object_3d_ids: ids, class_id: classId ?? null, dims: dims ?? null }),
+  // Guideline check for one frame, run where the work happens rather than in a corpus sweep. `dormant` is
+  // as much of the answer as `findings`: a rule whose counterpart data nobody is collecting says so.
+  lintFrame: (frame_id: string, open_issues = false) =>
+    post<{
+      frame_id: string; n_objects?: number;
+      findings: { object_id: string; rule: string; label: string; severity: string; score: number; reason: string }[];
+      systemic: Record<string, number>;
+      dormant: { rule: string; label: string; reason: string }[];
+      issues?: { opened: number; issue_ids: string[] };
+      reason?: string;
+    }>(`/api/frames/${frame_id}/lint`, { open_issues }),
+  // Which object on a frame is most likely to be wrong. A separate call rather than a field on
+  // frameObjects, and ranked ids rather than a reordered array: the object list is in drawing order and
+  // objectGroups.ts records that re-sorting it breaks the correspondence with the canvas.
+  frameRisk: (frame_id: string) =>
+    get<{
+      frame_id: string; n?: number; coverage?: number;
+      objects: Record<string, {
+        object_id: string; risk: number; coverage: number; reasons: string[];
+        components: Record<string, { value: number; present: boolean; detail: string }>;
+      }>;
+      ranking: string[];
+      components_available?: string[]; components_missing?: string[]; reason?: string;
+    }>(`/api/frames/${frame_id}/risk`),
   ontology: () => get<Ontology>("/api/ontology"),
+  // Attribute sweep: what is unanswered, a page of crops to answer it on, and the write.
+  attrCoverage: (session_id?: string) =>
+    get<{ session_id: string | null; attributes: AttrCoverage[] }>(
+      `/api/attrsweep/coverage${session_id ? `?session_id=${session_id}` : ""}`),
+  attrQueue: (q: { attr: string; class_name?: string; session_id?: string; limit?: number; unit?: string }) =>
+    get<AttrQueue>(`/api/attrsweep/queue?${new URLSearchParams(
+      Object.entries(q).filter(([, v]) => v !== undefined && v !== "")
+        .map(([k, v]) => [k, String(v)])).toString()}`),
+  attrApply: (body: {
+    attr: string; value: unknown; unit: string; ids: string[];
+    overwrite?: boolean; time_spent_ms?: number;
+  }) =>
+    post<{
+      updated: number; objects: number; run_id: string | null; state: string | null;
+      clamped?: boolean; reason?: string; attrs_dropped?: Record<string, string[]>;
+    }>("/api/attrsweep/apply", body),
   addClass: (name: string) => post<OntologyClass & { existed: boolean }>("/api/ontology/classes", { name }),
   // Repair, not just growth. merge/rename/retire have existed server-side and been reachable from nothing,
   // so the vocabulary could be added to and never fixed - which is exactly the asymmetry the commit that
@@ -920,6 +962,18 @@ export const api = {
       `/api/tracklets/objects/${objectId}/propagate?direction=${direction}&frames=${frames}`, {}),
   setTrackAttributes: (trackId: string, attrs: Record<string, unknown>) =>
     post<{ objects: number }>(`/api/tracklets/${trackId}/attributes`, { attrs }),
+  // Which of a track's machine-filled boxes have slid off the object their anchor was drawn around.
+  // Encoding takes the GPU lease in bounded batches, so this can wait behind a training job.
+  trackDrift: (trackId: string, limit = 120) =>
+    get<{
+      track_id: string; checked: number; anchors?: number; fill?: number; reason?: string;
+      counts?: { drifted: number; ok: number; unknown: number };
+      rows: {
+        object_id: string; frame_id: string; ts_ns: number; source: string;
+        anchor_object_id: string; gap_ns: number; similarity: number | null;
+        size_ok: boolean; verdict: "drifted" | "ok" | "unknown"; why: string;
+      }[];
+    }>(`/api/tracklets/${trackId}/drift?limit=${limit}`),
   suggestKeyframes: (trackId: string, budget = 8) =>
     get<{ suggestions: { object_id: string; frame_id: string; curvature: number }[] }>(
       `/api/tracklets/${trackId}/suggest-keyframes?budget=${budget}`),
@@ -1318,6 +1372,13 @@ export const api = {
       refused: { object_id: string; reason: string }[]; attrs_dropped: Record<string, string[]>;
       id_switch_events: number;
     }>(`/api/tracks/${id}/relabel`, { class_name, ...(opts ?? {}) }),
+  // Confirm a whole track without asserting a class. Distinct from relabelTrack, which requires one and
+  // rewrites every box's source: this only moves state, so an interpolated box stays interpolated.
+  acceptTrack: (id: string, opts?: { state?: string; origin_object_id?: string; time_spent_ms?: number }) =>
+    post<{
+      accepted: number; state: string | null; clamped: boolean; run_id: string | null;
+      skipped_human: string[]; skipped_stale: unknown[]; id_switch_events: number;
+    }>(`/api/tracks/${id}/accept`, { ...(opts ?? {}) }),
   deleteTrack: (id: string) => del<{ n_objects: number }>(`/api/tracks/${id}`),
   review: (
     id: string,

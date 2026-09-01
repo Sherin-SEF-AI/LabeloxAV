@@ -78,7 +78,7 @@ async def apply_review_batch(
     attrs: dict | None = None,
     requested_state: str | None = None,
     role: str | None = None,
-    source: str = "human",
+    source: str | None = "human",
     reviewer: str = "anon",
     uid: Any = None,
     expected_versions: dict[str, int] | None = None,
@@ -156,7 +156,13 @@ async def apply_review_batch(
 
         if res.new_state is not None:
             obj.state = res.new_state
-        obj.source = source
+        if source is not None:
+            # None means leave the object's own source alone, for a verdict that changes the state and
+            # nothing else. Accepting a whole track is the case: the boxes really are interpolated, a
+            # person really did approve them, and the Review row below records who. Writing "human" here
+            # would claim authorship of 92 frames nobody drew and set this repo's "an agent must not touch
+            # this" flag on them; writing "propagated" would claim a propagation that never happened.
+            obj.source = source
         if provenance_extra:
             obj.provenance = {**(obj.provenance or {}), **provenance_extra}
         # Advance the lock version, exactly as single review does. Without this a bulk edit was invisible to

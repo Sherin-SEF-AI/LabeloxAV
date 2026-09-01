@@ -263,6 +263,18 @@ export default function FrameEditor() {
   // Driving events on this frame's session (lane changes, signal phases), shown in the events mode.
   const [frameEvents, setFrameEvents] = useState<DrivingEvent[]>([]);
 
+  // What the guideline check said about this frame, and which rules could not run. Refreshed after every
+  // save, because the point of a linter here is to check the edit that was just made.
+  const [lint, setLint] = useState<Awaited<ReturnType<typeof api.lintFrame>> | null>(null);
+
+  // Risk order for this frame: which object is most likely to be wrong, and how much of that is known.
+  // Held beside the object list rather than folded into it, because the list is in drawing order.
+  const [risk, setRisk] = useState<Awaited<ReturnType<typeof api.frameRisk>> | null>(null);
+  // The throughput this frame is actually running at. The claim the risk order makes is a throughput
+  // claim, so it is measured on screen rather than asserted.
+  const [reviewed, setReviewed] = useState(0);
+  const reviewStart = useRef<number>(Date.now());
+
   const flash = (m: string) => {
     setNotice(m);
     setTimeout(() => setNotice(null), 3500);
@@ -301,6 +313,76 @@ export default function FrameEditor() {
     })();
     return () => { live = false; };
   }, [id, focus, dispatch, reloadKey]);
+
+  // Risk is a second, optional view over the same objects. Fetched separately so a slow or failing rank
+  // cannot stop the frame from opening, and surfaced rather than swallowed when it does fail: a silently
+  // absent risk order looks exactly like a frame where nothing is risky.
+  useEffect(() => {
+    let live = true;
+    setRisk(null);
+    setReviewed(0);
+    reviewStart.current = Date.now();
+    api.frameRisk(id)
+      .then((r) => { if (live) setRisk(r); })
+      .catch((e) => { if (live) flash(`risk order unavailable: ${humanizeError(e)}`); });
+    return () => { live = false; };
+  }, [id, reloadKey]);
+
+  /**
+   * Ask the server which guidelines this frame breaks.
+   *
+   * Read-only. `dormant` matters as much as `findings`: a rule that cannot run because nobody is
+   * collecting the data it needs is a fact about the corpus, and hiding it would make the check look like
+   * it had inspected something it never looked at.
+   */
+  const runLint = useCallback(async () => {
+    try {
+      setLint(await api.lintFrame(id));
+    } catch (e) {
+      // Surfaced, not swallowed. An absent lint result and a clean frame look identical on screen.
+      flash(`guideline check unavailable: ${humanizeError(e)}`);
+    }
+  }, [id]);
+
+  useEffect(() => { setLint(null); void runLint(); }, [runLint, reloadKey]);
+
+  /**
+   * Turn the findings into issue threads, which is the surface that survives leaving this frame.
+   *
+   * A decision, not a side effect of saving: the editor autosaves every 700ms, and a lint that opened a
+   * thread per finding each time would make the Issues panel unusable inside a minute. The server side is
+   * idempotent per object and rule, so pressing it twice does not stack duplicates.
+   */
+  const openLintIssues = useCallback(async () => {
+    try {
+      const r = await api.lintFrame(id, true);
+      setLint(r);
+      toast(r.issues?.opened
+        ? `${r.issues.opened} issue${r.issues.opened === 1 ? "" : "s"} opened, in the panel on the right`
+        : "these findings are already open as issues", r.issues?.opened ? "success" : "info");
+    } catch (e) {
+      toast(humanizeError(e), "error");
+    }
+  }, [id]);
+
+  // The shape the object list wants: position in the risk order by id, plus the score and reasons. Built
+  // here rather than in the panel so the panel never sees the ranked array and cannot be tempted to
+  // render it as the object list.
+  // Objects settled per minute on this frame. Null until there is enough elapsed time for the number to
+  // mean anything: a rate computed over two seconds reads in the thousands and says nothing.
+  const perMinute = useMemo(() => {
+    const mins = (Date.now() - reviewStart.current) / 60000;
+    return mins > 0.05 && reviewed > 0 ? Math.round(reviewed / mins) : null;
+  }, [reviewed]);
+
+  const riskView = useMemo(() => {
+    if (!risk?.ranking?.length) return null;
+    const rank: Record<string, number> = {};
+    risk.ranking.forEach((oid, i) => { rank[oid] = i; });
+    const score: Record<string, { risk: number; reasons: string[] }> = {};
+    for (const [oid, r] of Object.entries(risk.objects ?? {})) score[oid] = { risk: r.risk, reasons: r.reasons };
+    return { rank, score, coverage: risk.coverage ?? 0 };
+  }, [risk]);
 
   // M-MC.1: resolve the synchronized frame group this frame belongs to, so the rig view can show the sibling
   // cameras. Uses the persisted groups; if none exist yet for the session it builds them once on demand.
@@ -760,6 +842,7 @@ export default function FrameEditor() {
       // lock still guards the geometry-edit path (adjust_geometry), where a concurrent box edit does matter.
       const r = await api.review(o.id, { action: verdict, state: newState });
       dispatch({ t: "reviewed", id: o.id, state: newState, version: r.version });
+      setReviewed((n) => n + 1);   // one settled object, for the throughput readout
       setAlItems((s) => s.filter((it) => it.object_id !== o.id)); // drop the handled item so the queue advances
       flash(newState);
       advanceReview(o.id);
@@ -1051,6 +1134,10 @@ export default function FrameEditor() {
       // cannot race the lock this editor is holding. Its own failure cannot fail the save, which has
       // already committed.
       await propagateClassChanges();
+      // The guideline check, after the save committed. Its failure cannot fail the save, and it does not
+      // open issue threads on its own: an autosave every 700ms that opened a thread each time would make
+      // the Issues panel unusable inside a minute. The findings are shown; opening one is a decision.
+      void runLint();
     } catch (e) {
       const msg = humanizeError(e);
       lastFailRef.current = pendingSig();         // do not auto-retry this exact set until something changes
@@ -1198,6 +1285,8 @@ export default function FrameEditor() {
       save: () => void save(),
       saveAs: () => void saveAs(),
       confirmFrame: () => confirmFrame(true),
+      acceptRest: () => acceptRest(),
+      nextRisk: () => nextRisk(),
       prevFrame: () => void gotoFrame(meta?.prev_frame_id ?? null),
       nextFrame: () => void gotoFrame(meta?.next_frame_id ?? null),
       openDrives: () => document.querySelector<HTMLButtonElement>("header button[aria-haspopup='dialog']")?.click(),
@@ -1258,6 +1347,56 @@ export default function FrameEditor() {
   // the redo stack - no state change, no message, button still enabled. And it never advanced: on a
   // 200-frame job that is 200 extra keystrokes and 200 chances to forget. The A shortcut needs the same
   // treatment or it is simply a way around the gate.
+  /**
+   * Accept every object on this frame the annotator did not touch.
+   *
+   * The deliberate counterpart to confirmFrame, which confirms only what was looked at. The mean frame
+   * carries 16.7 objects and the busiest 187, most of them correct, so the value of a risk order is being
+   * able to deal with the few that are wrong and then say "the rest are fine" once. Without this that
+   * sentence costs one click per object and nobody says it.
+   *
+   * The count is stated rather than implied, because this is the one action here that approves things the
+   * person did not individually look at.
+   */
+  const acceptRest = useCallback(() => {
+    const rest = stRef.current.objects.filter(
+      (o) => !o.isNew && !stRef.current.touched.includes(o.id) && o.state !== "accepted");
+    if (!rest.length) {
+      toast("nothing left untouched on this frame", "warn");
+      return;
+    }
+    dispatch({ t: "acceptRest" });
+    setReviewed((n) => n + rest.length);
+    toast(rest.length === 1 ? "accepted the 1 remaining object" : `accepted the remaining ${rest.length} objects`,
+          "success");
+  }, [dispatch]);
+
+  /**
+   * Select the highest-risk object nobody has dealt with yet.
+   *
+   * Walks the server's risk order, not the object list, and skips anything already touched or accepted,
+   * so repeated presses move through the frame worst-first and stop when there is nothing left to look at.
+   */
+  const nextRisk = useCallback(() => {
+    if (!risk?.ranking?.length) {
+      flash("no risk order for this frame");
+      return;
+    }
+    const st2 = stRef.current;
+    const byId = new Map(st2.objects.map((o) => [o.id, o]));
+    const next = risk.ranking.find((oid) => {
+      const o = byId.get(oid);
+      return o && !st2.touched.includes(oid) && o.state !== "accepted" && o.state !== "rejected";
+    });
+    if (!next) {
+      flash("every object on this frame has been dealt with");
+      return;
+    }
+    dispatch({ t: "select", id: next });
+    const r = risk.objects[next];
+    if (r?.reasons?.length) flash(r.reasons.slice(0, 2).join("; "));
+  }, [risk, dispatch]);
+
   const confirmFrame = useCallback((advance: boolean) => {
     const n = st.objects.filter((o) => !o.isNew && st.touched.includes(o.id)).length;
     if (!st.touched.length) {
@@ -1265,6 +1404,7 @@ export default function FrameEditor() {
       return;
     }
     dispatch({ t: "acceptAll" });
+    setReviewed((x) => x + n);
     if (advance && meta?.next_frame_id) gotoFrame(meta.next_frame_id);
     else toast(n === 1 ? "1 object confirmed" : `${n} objects confirmed`, "success");
   }, [st.objects, st.touched, dispatch, meta, gotoFrame]);
@@ -1385,9 +1525,13 @@ export default function FrameEditor() {
       else if (e.key === "=" || e.key === "+") zoomBy(1.2);
       else if (e.key === "-") zoomBy(1 / 1.2);
       else if (e.key === "Enter") {
-        if (stRef.current.tool === "keypoint" && kpDraftRef.current?.length) finishKeypoints(kpDraftRef.current);
+        // Shift is the "and the rest" modifier here, matching the menu. Plain Enter still commits the
+        // in-progress mask or keypoint, which is the more frequent thing by far.
+        if (e.shiftKey) acceptRest();
+        else if (stRef.current.tool === "keypoint" && kpDraftRef.current?.length) finishKeypoints(kpDraftRef.current);
         else acceptCandidate();
       }
+      else if (e.key === "Tab") { e.preventDefault(); nextRisk(); }
       else if (e.key === "Escape") {
         // Escape clears in the order a person means it: the in-progress thing first, then the selection.
         // Dropping both at once loses a selection somebody was still using.
@@ -1530,6 +1674,17 @@ export default function FrameEditor() {
         ) : null}
         <button onClick={() => router.push(`/search?frame=${id}`)} title="find visually similar frames (DINOv3)"
           className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="search" size={16} /></button>
+        {/* Label by example, without having to make a mistake first. The correction modal already does
+            this whole flow and only opens after a correction, so the one way to find every other object
+            that looks like this one was to relabel it wrongly and change your mind. An unsaved box has no
+            server id and no embedding, so it is offered only once the object exists. */}
+        {selected && !selected.id.startsWith("tmp-") && (
+          <button onClick={() => router.push(`/search?object=${selected.id}`)}
+            title="find objects that look like this one, and label them together"
+            className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink font-mono text-[11px]">
+            similar
+          </button>
+        )}
         {meta.has_mcap && (
           <button onClick={() => router.push(`/inspect/${meta.session_id}?ts=${meta.ts_ns}`)} title="inspect this moment in the Session Inspector (MCAP timeline)"
             className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink font-mono text-[11px]">inspect</button>
@@ -1830,6 +1985,15 @@ export default function FrameEditor() {
             <div className="absolute top-3 left-3 z-10 flex flex-col gap-1 pointer-events-none">
               <span className="font-mono text-[11px] text-ink-2 bg-bg/60 px-1.5 py-0.5 rounded w-fit">{new Date(Number(meta.ts_ns) / 1e6).toISOString().replace("T", " ").replace("Z", "")}</span>
               <span className="font-mono text-[11px] text-ink-3 bg-bg/60 px-1.5 py-0.5 rounded w-fit">{camLabel(meta.cam_id)}{meta.is_lidar ? " · lidar" : ""}<CursorReadout /></span>
+              {/* Throughput, measured rather than asserted. The risk order and the accept-the-rest key
+                  are both throughput claims, and the two review grids already show this number; the
+                  editor, where most of the work happens, showed nothing. */}
+              {perMinute != null && (
+                <span className="font-mono text-[11px] text-accent bg-bg/60 px-1.5 py-0.5 rounded w-fit"
+                  title={`${reviewed} objects settled on this frame since it opened`}>
+                  {perMinute}/min
+                </span>
+              )}
             </div>
           )}
 
@@ -2146,6 +2310,9 @@ export default function FrameEditor() {
             <PropertiesPanel
               frame={{ id, meta, onto, dirty, flash }}
               editor={{ st, dispatch, selected }}
+              risk={riskView}
+              lint={lint}
+              onOpenLintIssues={openLintIssues}
               onCollapse={() => setRightCollapsed(true)}
               klass={{ current: currentClass ?? null, onPick: relabelSelected, onAdd: addAndRelabel }}
               sel={{

@@ -1,10 +1,14 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api , humanizeError } from "@/lib/api";
-import type { SimilarResponse } from "@/lib/types";
+import type { Ontology, OntologyClass, SimilarResponse } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
+import ClassPopover from "@/components/editor/properties/ClassPopover";
+import { cursorAfterRemoval, moveCursor, rangeBetween, targetIndices, toggle } from "@/lib/gridSelection";
+import { toast } from "@/lib/toast";
+import { acceptState, useCurrentUser } from "@/lib/user";
 
 // Similarity search. One surface for every query kind: natural-language text (SigLIP 2), an uploaded image,
 // a frame, or an object crop (DINOv3), all reranked for diversity and a similarity floor so the grid shows
@@ -26,9 +30,20 @@ export default function SearchPage() {
   );
 }
 
+// Label by example lives here now as well as in CorrectionModal.
+//
+// The modal is a complete version of this flow - crop grid, similarity slider, same-camera and same-class
+// toggles, bulk apply, twelve-second undo - and it opens only after you have already made a correction.
+// So the way to find every other object that looks like this one was to relabel it wrongly and change
+// your mind. This page had the grid and the rerank controls and no way to act on what it found: clicking
+// a result navigated away one object at a time.
+//
+// Embedding coverage is 567,488 of 578,436 objects, 98.1%, so the neighbours are there to be found.
+
 function SearchBody() {
   const router = useRouter();
   const params = useSearchParams();
+  const me = useCurrentUser();
   const frameParam = params.get("frame");
   const objectParam = params.get("object");
 
@@ -46,6 +61,16 @@ function SearchBody() {
   const [sameClass, setSameClass] = useState(false);
   const [excludeTrack, setExcludeTrack] = useState(true);
   const [city, setCity] = useState("");
+
+  // selection over object results, so a found set can be labelled together rather than one at a time
+  const [selection, setSelection] = useState<ReadonlySet<number>>(new Set());
+  const [cursor, setCursor] = useState(0);
+  const [anchor, setAnchor] = useState<number | null>(null);
+  const [pickOpen, setPickOpen] = useState(false);
+  const [onto, setOnto] = useState<Ontology | null>(null);
+  const [applying, setApplying] = useState(false);
+  const pickAnchor = useRef<HTMLButtonElement | null>(null);
+  const batchStart = useRef<number>(Date.now());
 
   const last = useRef<LastQuery | null>(null);
 
@@ -101,6 +126,94 @@ function SearchBody() {
 
   const kind: QueryKind | null = last.current?.kind ?? null;
   const isObject = res?.kind === "object";
+  const results = useMemo(() => res?.results ?? [], [res]);
+
+  // The ontology is only needed once there is something to relabel, so it is fetched with the first
+  // object result rather than on every visit to a text search.
+  useEffect(() => {
+    if (!isObject || onto) return;
+    api.ontology().then(setOnto).catch((e) => {
+      // Said out loud rather than swallowed. Without the ontology the "set class" button stays disabled,
+      // and a disabled button with no reason reads as "this page cannot relabel", which is a different
+      // and wrong conclusion from "the ontology did not load".
+      toast(`class list unavailable, so relabelling is off: ${humanizeError(e)}`, "error");
+    });
+  }, [isObject, onto]);
+
+  useEffect(() => { setSelection(new Set()); setAnchor(null); setCursor(0); }, [res]);
+
+  /**
+   * Apply one verdict to the selected results, or to the one under the cursor.
+   *
+   * Goes through bulk review, so it inherits the optimistic lock, the role clamp, the attribute
+   * revalidation and the revertible run. The undo is offered for twelve seconds because that is the only
+   * offer of it, and a mislabelled found set is the exact thing this mode can produce quickly.
+   */
+  const applyVerdict = useCallback(async (action: "confirm" | "reject" | "reclassify", className?: string) => {
+    const idx = targetIndices(selection, cursor);
+    const ids = idx.map((i) => results[i]?.object_id).filter((v): v is string => !!v);
+    if (!ids.length) return;
+    const elapsed = Math.max(0, Date.now() - batchStart.current);
+    batchStart.current = Date.now();
+    setApplying(true);
+    try {
+      const r = await api.bulkReview(
+        ids, action, className,
+        action === "reject" ? "rejected" : acceptState(me?.role),
+        undefined, { time_spent_ms: elapsed });
+      const lost = (r.skipped_stale?.length ?? 0) + (r.skipped_missing?.length ?? 0);
+      const what = action === "reclassify" ? `set to ${className}` : action === "reject" ? "rejected" : "accepted";
+      if (r.run_id) {
+        toast(`${r.updated} ${what}${lost ? `, ${lost} skipped` : ""}`, lost ? "error" : "success", 12000,
+              { label: "undo", run: () => api.agentRevert(r.run_id!).then(() => {}) });
+      } else {
+        toast(`nothing changed${lost ? `; ${lost} had moved on since this search ran` : ""}`, "error");
+      }
+      // The results stay on screen. A found set is a set somebody chose, and clearing it after one
+      // verdict would make a second pass over the same neighbours impossible.
+      setSelection(new Set());
+      setAnchor(null);
+    } catch (e) {
+      toast(humanizeError(e), "error");
+    } finally {
+      setApplying(false);
+    }
+  }, [selection, cursor, results, me]);
+
+  useEffect(() => {
+    if (!isObject) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      const n = results.length;
+      if (!n) return;
+      const k2 = e.key.toLowerCase();
+      if (k2 === "arrowleft" || k2 === "h") { e.preventDefault(); step("left", e.shiftKey); }
+      else if (k2 === "arrowright" || k2 === "l") { e.preventDefault(); step("right", e.shiftKey); }
+      else if (k2 === "arrowup") { e.preventDefault(); step("up", e.shiftKey); }
+      else if (k2 === "arrowdown") { e.preventDefault(); step("down", e.shiftKey); }
+      else if (k2 === " ") { e.preventDefault(); setSelection((sel) => toggle(sel, cursor)); setAnchor(cursor); }
+      else if (k2 === "escape") { setSelection(new Set()); setAnchor(null); }
+      else if (k2 === "a") { e.preventDefault(); void applyVerdict("confirm"); }
+      else if (k2 === "r") { e.preventDefault(); void applyVerdict("reject"); }
+      else if (k2 === "c") { e.preventDefault(); setPickOpen(true); }
+      else if (k2 === "o") {
+        const r = results[cursor];
+        if (r?.object_id) router.push(`/object/${r.object_id}`);
+      }
+      function step(dir: "left" | "right" | "up" | "down", extend: boolean) {
+        const next = moveCursor(cursor, dir, n, 8);
+        setCursor(next);
+        if (!extend) { setSelection(new Set()); setAnchor(null); return; }
+        const a = anchor ?? cursor;
+        setAnchor(a);
+        setSelection(new Set(rangeBetween(a, next)));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isObject, results, cursor, anchor, applyVerdict, router]);
 
   const Chip = ({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) => (
     <button onClick={onClick}
@@ -161,28 +274,83 @@ function SearchBody() {
     </div>
   );
 
-  const results = res?.results ?? [];
-
   return (
     <PageShell active="SEARCH" title="Search" filters={filters}>
       <div className="p-4 space-y-4">
         {results.length > 0 ? (
           <div className="panel p-3">
-            <div className="font-mono text-[11px] text-ink-3 mb-2 flex items-center gap-3">
+            <div className="font-mono text-[11px] text-ink-3 mb-2 flex items-center gap-3 flex-wrap">
               <span>{results.length} {res!.kind}s</span>
               <span className="text-ink-3">{res!.mode} · DINOv3/SigLIP2</span>
               {diversity && <span className="text-info">deduped</span>}
               {minSim > 0 && <span className="text-info">≥ {minSim.toFixed(2)}</span>}
+              {isObject && selection.size > 0 && <span className="text-warn">{selection.size} selected</span>}
+              {/* Label the found set. Without this the page could find every object that looks like the
+                  one you are fixing and offer nothing to do about it but visit them one at a time. */}
+              {isObject && (
+                <span className="ml-auto flex items-center gap-1.5 relative">
+                  <span className="text-ink-3">
+                    {selection.size > 0 ? `apply to ${selection.size}` : "apply to the one under the cursor"}
+                  </span>
+                  <button ref={pickAnchor} onClick={() => setPickOpen((o) => !o)} disabled={applying || !onto}
+                    aria-haspopup="dialog" aria-expanded={pickOpen}
+                    title="set a class on the selection (C)"
+                    className="border border-accent text-accent px-2 py-0.5 rounded hover:bg-accent/10 disabled:opacity-40">
+                    <b>C</b> set class
+                  </button>
+                  <button onClick={() => void applyVerdict("confirm")} disabled={applying}
+                    title="confirm the selection as it is (A)"
+                    className="border border-pass/60 text-pass px-2 py-0.5 rounded hover:bg-pass/10 disabled:opacity-40">
+                    <b>A</b> accept
+                  </button>
+                  <button onClick={() => void applyVerdict("reject")} disabled={applying}
+                    title="reject the selection (R)"
+                    className="border border-line text-ink-3 px-2 py-0.5 rounded hover:border-block hover:text-block disabled:opacity-40">
+                    <b>R</b> reject
+                  </button>
+                  {onto && (
+                    <ClassPopover anchorRef={pickAnchor} open={pickOpen} onClose={() => setPickOpen(false)}
+                      classes={onto.classes} currentId={null}
+                      onPick={(c: OntologyClass) => { void applyVerdict("reclassify", c.name); }}
+                      onAdd={(raw: string) => {
+                        void api.addClass(raw)
+                          .then(async (c) => { setOnto(await api.ontology()); await applyVerdict("reclassify", c.name); })
+                          .catch((e) => toast(humanizeError(e), "error"));
+                      }} />
+                  )}
+                </span>
+              )}
             </div>
             <div className="grid grid-cols-3 md:grid-cols-6 lg:grid-cols-8 gap-2">
               {results.map((r, i) => (
                 <button key={i}
-                  onClick={() => {
-                    if (r.object_id) router.push(`/object/${r.object_id}`);
-                    else if (r.frame_id) router.push(`/frame/${r.frame_id}`);
+                  onClick={(e) => {
+                    // Frame results still navigate: there is no bulk verdict for a frame. Object results
+                    // select, because navigating away one crop at a time is what this mode replaces;
+                    // double-click still opens the object.
+                    if (!isObject) {
+                      if (r.frame_id) router.push(`/frame/${r.frame_id}`);
+                      return;
+                    }
+                    if (e.shiftKey) {
+                      const a = anchor ?? cursor;
+                      setAnchor(a);
+                      setSelection(new Set(rangeBetween(a, i)));
+                    } else {
+                      setSelection((sel) => toggle(sel, i));
+                      setAnchor(i);
+                    }
+                    setCursor(i);
                   }}
-                  className="border border-line hover:border-accent text-left group"
-                  title={`${r.class_name ?? r.scene?.weather ?? ""} · sim ${r.score.toFixed(3)}`}>
+                  onDoubleClick={() => { if (r.object_id) router.push(`/object/${r.object_id}`); }}
+                  className={`relative border text-left group ${
+                    isObject && i === cursor ? "border-accent ring-1 ring-accent"
+                      : isObject && selection.has(i) ? "border-warn" : "border-line hover:border-accent"}`}
+                  title={`${r.class_name ?? r.scene?.weather ?? ""} · sim ${r.score.toFixed(3)}${
+                    isObject ? " · click to select, double-click to open" : ""}`}>
+                  {isObject && selection.has(i) && (
+                    <span className="absolute top-0 right-0 z-10 bg-warn text-bg text-[9px] px-1">+</span>
+                  )}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={r.image_url || r.crop_url} alt="" className="w-full h-20 object-cover bg-bg-2" />
                   <div className="flex items-center justify-between px-1 py-0.5">
@@ -192,6 +360,18 @@ function SearchBody() {
                 </button>
               ))}
             </div>
+            {isObject && (
+              <div className="mt-2 font-mono text-[10px] text-ink-3 flex flex-wrap gap-3">
+                <span><b className="text-ink">arrows</b> move</span>
+                <span><b className="text-ink">shift+move</b> range</span>
+                <span><b className="text-ink">space</b> select</span>
+                <span><b className="text-accent">C</b> set class</span>
+                <span><b className="text-pass">A</b> accept</span>
+                <span><b className="text-block">R</b> reject</span>
+                <span><b className="text-ink">O</b> open</span>
+                <span className="text-ink-2">a verdict with nothing selected applies to the tile under the cursor</span>
+              </div>
+            )}
           </div>
         ) : (
           !busy && (
