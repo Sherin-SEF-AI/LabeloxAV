@@ -26,6 +26,13 @@ type Props = {
   selectedId: string | null;
   tool: Tool;
   candidate: number[][] | null;
+  /**
+   * The clicks making up the SAM prompt being refined, so the annotator can see what they have told it.
+   *
+   * Without them a refinement is invisible: the mask changes and there is nothing on screen saying which
+   * clicks produced it or which one to take back.
+   */
+  samPrompt?: { points: number[][]; labels: number[] } | null;
   viewport: Viewport;
   panning: boolean;
   lanes?: LaneOverlay[];
@@ -528,6 +535,14 @@ export default function EditorCanvas(p: Props) {
           {p.candidate?.map((poly, i) => (
             <Line key={`cand${i}`} points={poly} closed listening={false}
               stroke="#56D364" strokeWidth={2 / s} fill="rgba(86,211,100,0.25)" />
+          ))}
+
+          {/* The SAM prompt: green for "this is the object", red for "this part is not".
+              Drawn above the candidate so a point never disappears under the mask it produced. */}
+          {p.samPrompt?.points.map((pt, i) => (
+            <Circle key={`sam${i}`} x={pt[0]} y={pt[1]} radius={5 / s} listening={false}
+              fill={p.samPrompt!.labels[i] === 0 ? "#F85149" : "#56D364"}
+              stroke="#0D1117" strokeWidth={1.5 / s} />
           ))}
 
           {/* superpixels (faint), shown while the superpixel tool is active so the annotator can click one */}

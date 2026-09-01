@@ -48,7 +48,7 @@ export type ObjectDetail = {
   rot_deg?: number;
   keypoints?: Keypoints | null;
   polyline?: number[][] | null;
-  cuboid_3d?: { center: number[]; size: number[]; yaw: number } | null;
+  cuboid_3d?: { center: number[]; size: number[]; yaw: number; yaw_source?: string } | null;
   // Sign typing and road text. Read-only: the classifier decides these and a reviewer corrects them by
   // re-running recognition. Absent until a sign has been typed, and null when it was examined and declined.
   sign_type?: string | null;
@@ -565,7 +565,7 @@ export type FrameObject = {
   rot_deg?: number;
   keypoints?: Keypoints | null;
   polyline?: number[][] | null;
-  cuboid_3d?: { center: number[]; size: number[]; yaw: number } | null;
+  cuboid_3d?: { center: number[]; size: number[]; yaw: number; yaw_source?: string } | null;
 };
 
 export type TrackItem = {

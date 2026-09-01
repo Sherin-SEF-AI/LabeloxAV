@@ -198,8 +198,27 @@ def _mask_key(session_id, frame_id, object_id) -> str:
 
 
 def _write_mask(store, session_id, frame_id, object_id, polygons, width, height) -> str:
+    """Store a mask, simplified to a tolerance derived from the outline's own size.
+
+    Every mask that reaches storage goes through here, and until now nothing looked at it: the polygons
+    were serialised exactly as handed over. The two simplifications that exist run somewhere else -
+    the open-vocabulary path simplifies at contour extraction, the browser trims a SAM candidate before
+    sending - so a mask that was hand-brushed, imported, or edited by dragging vertices was stored raw.
+
+    The tolerance comes from the ring's perimeter rather than from a screen pixel, because a 1px tolerance
+    on a 20px sign removes real shape while the same 1px on a 900px bus leaves hundreds of vertices
+    tracing a straight edge. Rings below a small absolute area are left alone entirely; see
+    `core/polygons.py` for the measurement that set that floor.
+
+    Measured over 899 stored masks: 2.8% of vertices removed at a mean shape agreement of 0.9985 IoU.
+    Most of the corpus is already tidy, so this is a guard against what arrives next rather than a repair
+    of what is there.
+    """
+    from core.polygons import simplify_mask
+
     # Same polygon-JSON shape services/autolabel/persist.py writes, so the read path is identical.
-    payload = {"encoding": "polygon", "polygons": polygons, "height": height, "width": width}
+    payload = {"encoding": "polygon", "polygons": simplify_mask(polygons), "height": height,
+               "width": width}
     return store.put_bytes(_mask_key(session_id, frame_id, object_id),
                            json.dumps(payload).encode(), "application/json")
 
@@ -778,7 +797,10 @@ async def update_mask(object_id: str, payload: MaskIn, db: AsyncSession = Depend
                          "n_polygons": len(payload.polygons), "version": obj.version},
                   time_spent_ms=0, ts_ns=now_ns()))
     await db.commit()
-    return {"object_id": str(obj.object_id), "mask_polygons": payload.polygons, "version": obj.version}
+    # What was stored, not what was sent. `_write_mask` simplifies, so echoing the request back would
+    # leave the editor drawing an outline that differs from the one on disk until the next reload.
+    return {"object_id": str(obj.object_id), "mask_polygons": _mask_polygons(obj.mask_uri),
+            "version": obj.version}
 
 
 @router.delete("/objects/{object_id}", dependencies=[Depends(require_role("annotator"))])

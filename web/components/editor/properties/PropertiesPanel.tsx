@@ -66,6 +66,10 @@ export type PropertiesPanelProps = {
     onToggleLink: () => void;
     onDeleteRelationship: (rid: string) => void;
     onRecomputeDynamics: () => void;
+    /** Lift this object's 2D box to a cuboid with the monocular solve. */
+    onFitCuboid?: () => void;
+    /** Set the cuboid's yaw, in radians. */
+    onSetYaw?: (yaw: number) => void;
   };
   onCollapse: () => void;
   tools: {
@@ -116,7 +120,8 @@ export default function PropertiesPanel({ frame, editor, klass, sel, tools, onCo
               <SelectedObjectCard object={selected} onto={frame.onto}
                 relationships={sel.relationships} linkKind={sel.linkKind} linkFrom={sel.linkFrom}
                 onLinkKind={sel.onLinkKind} onToggleLink={sel.onToggleLink}
-                onDeleteRelationship={sel.onDeleteRelationship} onSetAttr={sel.onSetAttr} />
+                onDeleteRelationship={sel.onDeleteRelationship} onSetAttr={sel.onSetAttr}
+                onFitCuboid={sel.onFitCuboid} onSetYaw={sel.onSetYaw} />
             </div>
             <PanelSection title="dynamics">
               <DynamicsCard row={sel.dynamics[selected.id]} onRecompute={sel.onRecomputeDynamics} />

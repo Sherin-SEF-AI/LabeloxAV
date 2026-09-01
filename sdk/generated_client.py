@@ -258,6 +258,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/agent/frames/{frame_id}/attributes/plan",
                           params=None, json_body=None)
 
+    def post_agent_frames_by_frame_id_cuboid_at(self, frame_id: str, body: Any = None) -> Any:
+        """Cuboid At"""
+        return self._call("POST", f"/api/agent/frames/{frame_id}/cuboid/at",
+                          params=None, json_body=body)
+
     def post_agent_frames_by_frame_id_cuboids(self, frame_id: str, body: Any = None) -> Any:
         """Cuboids Run"""
         return self._call("POST", f"/api/agent/frames/{frame_id}/cuboids",
@@ -336,6 +341,11 @@ class LabeloxClient:
     def post_agent_objects_by_object_id_crosscam_plan(self, object_id: str, body: Any = None) -> Any:
         """Crosscam Plan"""
         return self._call("POST", f"/api/agent/objects/{object_id}/crosscam/plan",
+                          params=None, json_body=body)
+
+    def post_agent_objects_by_object_id_cuboid_fit(self, object_id: str, body: Any = None) -> Any:
+        """Cuboid Fit"""
+        return self._call("POST", f"/api/agent/objects/{object_id}/cuboid/fit",
                           params=None, json_body=body)
 
     def post_agent_objects_by_object_id_propagate(self, object_id: str, body: Any = None) -> Any:
@@ -3571,4 +3581,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 697 routes generated from the server schema.
+# 699 routes generated from the server schema.

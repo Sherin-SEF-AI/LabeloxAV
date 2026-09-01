@@ -29,7 +29,10 @@ export type EdObject = {
   rot?: number; // oriented-box rotation in degrees about the box centre (0 = axis-aligned)
   keypoints?: { skeleton: string; points: number[][] }; // COCO-style pose [[x,y,v],...]
   polyline?: number[][]; // open linear feature (curb/road_edge/barrier) as ordered [[x,y],...]
-  cuboid_3d?: { center: number[]; size: number[]; yaw: number } | null; // ego-frame 3D box (size [w,l,h])
+  // ego-frame 3D box (size [w,l,h]). `yaw_source` records whether the yaw was measured from the road
+  // or inferred from the silhouette, which is a weak signal: a car head-on and one from behind share
+  // nearly the same image box.
+  cuboid_3d?: { center: number[]; size: number[]; yaw: number; yaw_source?: string } | null;
 };
 
 export type Viewport = { scale: number; ox: number; oy: number };

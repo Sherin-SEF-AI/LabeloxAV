@@ -11,7 +11,8 @@ import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
 import { beginOp, endOp, resetOps, trackOp } from "@/lib/canvasOps";
 import { openConsole } from "@/components/console/ConsoleModal";
-import { simplifyMask, simplifyPolygon } from "@/lib/simplify";
+import { simplifyMaskLikeServer, simplifyPolygon } from "@/lib/simplify";
+import { addPoint as addSamClick, describe as describeSamPrompt, undoPoint } from "@/lib/samPrompt";
 import { UNTRACKED_NOTE, propagationMessage, shouldPropagate } from "@/lib/trackPropagate";
 import CanvasConsole from "@/components/editor/CanvasConsole";
 import CanvasMenu from "@/components/editor/CanvasMenu";
@@ -168,7 +169,10 @@ function overlapFrac(box: number[], ref: number[]): number {
 // export, and it is what put a draggable handle every two pixels along the outline. One image pixel of
 // tolerance removes what cannot be seen at 100% zoom and keeps every corner that can.
 const MASK_TOLERANCE_PX = 1;
-const trim = (polys: number[][]) => simplifyMask(polys, MASK_TOLERANCE_PX);
+// Simplified the way the server will when it stores the mask, rather than at a fixed pixel tolerance.
+// _write_mask now simplifies on every write with a tolerance derived from each ring's own perimeter, so
+// a client trimming at a flat 1px would show an outline that differs from the one on disk.
+const trim = (polys: number[][]) => simplifyMaskLikeServer(polys);
 
 export default function FrameEditor() {
   const router = useRouter();
@@ -472,17 +476,46 @@ export default function FrameEditor() {
     setRelationships(await api.frameRelationships(id).catch(() => []));
   };
   // cuboid tool: click the ground in the image, lift to an ego ground point, drop a default 3D box there
+  /**
+   * Place a cuboid on the road, sized for the class and aligned to the lane.
+   *
+   * This used to lift the click and then drop a hardcoded `size: [1.8, 4.2, 1.5], yaw: 0` on it, so a bus
+   * and a scooter came out the same size facing the same way, and every cuboid in a frame pointed along
+   * the x axis regardless of which way the road ran. The solve for both has existed since cuboids were
+   * added, as a frame-wide batch nothing here could reach.
+   */
   const placeCuboid = async (pt: number[]) => {
     if (!currentClass) return;
     try {
-      const { ego, reason } = await api.liftGround(id, pt[0], pt[1]);
-      if (!ego) { flash(reason || "click on the road ahead to place a cuboid"); return; }
-      const cub = { center: [ego[0], ego[1], 0.75], size: [1.8, 4.2, 1.5], yaw: 0 };
+      const r = await api.cuboidAt(id, pt[0], pt[1], currentClass.name);
+      if (!r.cuboid) { flash(r.reason || "click on the road ahead to place a cuboid"); return; }
       dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
-        bbox: [pt[0] - 40, pt[1] - 40, pt[0] + 40, pt[1] + 40], mask: [], cuboid_3d: cub, attrs: {},
+        bbox: [pt[0] - 40, pt[1] - 40, pt[0] + 40, pt[1] + 40], mask: [], cuboid_3d: r.cuboid, attrs: {},
         conf: 1, state: "accepted", visible: true, isNew: true } });
+      flash(r.yaw_source === "lane"
+        ? `${currentClass.name} cuboid, aligned to the lane`
+        : `${currentClass.name} cuboid, axis-aligned (no lane to align to on this frame)`);
     } catch (e) { flash("could not place cuboid: " + humanizeError(e)); }
   };
+
+  /**
+   * Fit a cuboid to the object already selected, from its 2D box.
+   *
+   * The full monocular solve: ground-lift the box's contact point, size from the class prior, yaw by
+   * reprojection and then snapped to the road where a lane agrees.
+   */
+  const fitCuboid = useCallback(async () => {
+    const o = stRef.current.objects.find((x) => x.id === stRef.current.selectedId);
+    if (!o) { flash("select an object to fit a cuboid to"); return; }
+    if (o.id.startsWith("tmp-")) { flash("save the object first (Cmd S), then fit a cuboid"); return; }
+    try {
+      const r = await api.cuboidFit(o.id);
+      if (!r.cuboid) { flash(r.reason || "this object cannot be lifted to a cuboid"); return; }
+      dispatch({ t: "update", id: o.id, patch: { cuboid_3d: r.cuboid } });
+      flash(`${r.class_name} cuboid, reprojection IoU ${r.reproj_iou?.toFixed(2)}`
+            + (r.yaw_source === "lane" ? ", yaw from the lane" : ""));
+    } catch (e) { flash("could not fit a cuboid: " + humanizeError(e)); }
+  }, [dispatch]);
   // Auto-detect the class of a freshly-drawn object from its crop (SigLIP2 zero-shot over the ontology), so
   // a SAM box or wand click picks the class for you. Overrides the palette class; you can still relabel.
   const autoClassify = async (objId: string, box: number[]) => {
@@ -990,11 +1023,25 @@ export default function FrameEditor() {
       if (selected) dispatch({ t: "select", id: null }); // moved off the old object -> keep creating new
     }
     dispatch({ t: "candidate", polys: null });
+    // The clicks belonged to the mask that was just committed. Carrying them into the next object would
+    // refine the new one against the old one's negatives.
+    setSamPrompt(null);
   }, [st.candidate, selected, currentClass, dispatch]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * The clicks making up the mask currently being refined.
+   *
+   * SAM takes a list of points with per-point labels and has done from the start; the server has always
+   * forwarded both, and the canvas has always sent label 0 on shift-click. What was missing was here:
+   * `runSam` opened by committing the pending candidate, so every click ended the previous mask and
+   * started a new one. A shift-click therefore sent a lone negative point with no positive anchor, which
+   * SAM cannot act on, and there was no way to say "this bit, but not that bit".
+   */
+  const [samPrompt, setSamPrompt] = useState<{ points: number[][]; labels: number[] } | null>(null);
+  const clearSam = useCallback(() => setSamPrompt(null), []);
 
   const runSam = useCallback(
     async (prompt: { points?: number[][]; labels?: number[]; box?: number[] }) => {
-      if (st.candidate?.length) acceptCandidate(); // commit the pending mask before starting the next
       try {
         const r = await trackOp("sam", segKind === "panoptic" ? "SAM (precise)" : "SAM segment",
           () => api.segmentPrompt(id, { ...prompt, precise: segKind === "panoptic" }),
@@ -1008,6 +1055,20 @@ export default function FrameEditor() {
     },
     [id, dispatch, st.candidate, acceptCandidate, segKind],
   );
+
+  /**
+   * Add one click to the current SAM prompt and re-run it, rather than starting a new mask.
+   *
+   * This is the whole feature. Every layer below has always supported it: `SegmentIn` takes `points` and
+   * `labels`, `sam_service.segment` forwards both to SAM, the endpoint validates that they are the same
+   * length, and the canvas sends label 0 on shift-click. Only the accumulator was missing.
+   */
+  const addSamPoint = useCallback((pt: number[], label: number) => {
+    const r = addSamClick(samPrompt, pt, label);
+    if (!r.ok) { flash(r.reason); return; }
+    setSamPrompt(r.prompt);
+    void runSam(r.prompt);
+  }, [samPrompt, runSam]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Leaving a SAM tool (or switching away) commits any uncommitted mask instead of dropping it.
   const acceptRef = useRef(acceptCandidate);
@@ -1535,8 +1596,21 @@ export default function FrameEditor() {
       else if (e.key === "Escape") {
         // Escape clears in the order a person means it: the in-progress thing first, then the selection.
         // Dropping both at once loses a selection somebody was still using.
-        if (st.candidate || kpDraft) { dispatch({ t: "candidate", polys: null }); setKpDraft(null); }
+        if (st.candidate || kpDraft || samPrompt) {
+          dispatch({ t: "candidate", polys: null });
+          setKpDraft(null);
+          setSamPrompt(null);
+        }
         else if (st.selectedIds.length) dispatch({ t: "selectBy", how: "none" });
+      }
+      else if (e.key === "Backspace" && samPrompt?.points.length) {
+        // Take back the last click without starting the mask over. Checked before the delete binding
+        // below, because while a SAM prompt is open Backspace can only mean this.
+        e.preventDefault();
+        const back = undoPoint(samPrompt);
+        setSamPrompt(back);
+        if (back) void runSam(back);
+        else dispatch({ t: "candidate", polys: null });
       }
       else if ((e.key === "Delete" || e.key === "Backspace") && st.selectedId) dispatch({ t: "delete", id: st.selectedId });
       else if (e.key === "[") gotoFrame(meta?.prev_frame_id ?? null);
@@ -1611,8 +1685,9 @@ export default function FrameEditor() {
       keypointDraft={kpDraft} skeletonEdges={PERSON_17.edges as unknown as number[][]}
       onPlaceKeypoint={onPlaceKeypoint} onUpdateKeypoints={onUpdateKeypoints}
       mPerPx={meta.lidar_res ?? undefined}
-      onSamPoint={(pt, label) => runSam({ points: [pt], labels: [label] })}
-      onSamBox={(box) => runSam({ box })}
+      samPrompt={samPrompt}
+      onSamPoint={(pt, label) => addSamPoint(pt, label)}
+      onSamBox={(box) => { setSamPrompt(null); void runSam({ box }); }}
       onUpdateMask={(oid, polys) =>
         // Keep the bbox in sync with the edited mask so geometry and segmentation never diverge.
         dispatch({ t: "update", id: oid, patch: polys.length ? { mask: polys, bbox: bboxOfPolys(polys) } : { mask: polys } })}
@@ -1909,9 +1984,18 @@ export default function FrameEditor() {
               <button onClick={() => advanceReview(selected.id)} className="text-ink-3 hover:text-ink">skip</button>
             </div>
           )}
+          {/* Rewritten because the behaviour changed. Clicking again used to commit this mask and start
+              a new one; it now refines this one, which is what makes shift-click mean anything. */}
           {st.candidate?.length ? (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 font-mono text-[11px] text-ink-2">
-              mask ready, click the next object to keep this one &amp; continue, <span className="text-pass">Enter</span> to finish, <span className="text-ink-3">Esc</span> to discard
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 font-mono text-[11px] text-ink-2 flex items-center gap-3">
+              {samPrompt && samPrompt.points.length > 1 && (
+                <span className="text-ink-3">{describeSamPrompt(samPrompt)}</span>
+              )}
+              <span>
+                click to add, <span className="text-block">shift-click</span> to exclude,{" "}
+                <span className="text-warn">Backspace</span> to undo a click,{" "}
+                <span className="text-pass">Enter</span> to keep, <span className="text-ink-3">Esc</span> to discard
+              </span>
             </div>
           ) : null}
 
@@ -2322,6 +2406,14 @@ export default function FrameEditor() {
                 onToggleLink: () => setLinkFrom(linkFrom === selected?.id ? null : (selected?.id ?? null)),
                 onDeleteRelationship: delRelationship,
                 onRecomputeDynamics: recomputeDynamics,
+                onFitCuboid: fitCuboid,
+                onSetYaw: (yaw: number) => {
+                  const o = stRef.current.objects.find((x) => x.id === stRef.current.selectedId);
+                  if (!o?.cuboid_3d) return;
+                  // Hand-set, so the source stops claiming the road agreed with it.
+                  dispatch({ t: "update", id: o.id,
+                             patch: { cuboid_3d: { ...o.cuboid_3d, yaw, yaw_source: "human" } } });
+                },
               }}
               tools={{
                 lanes, hasDrivable: !!drivable,

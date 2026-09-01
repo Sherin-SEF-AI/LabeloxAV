@@ -756,6 +756,19 @@ export const api = {
     post<{ run_id: string; relabeled: number; counts: Record<string, number> }>(`/api/agent/temporal-repair`, session_id ? { session_id } : {}),
   agentCuboidsPlan: (frame_id: string) =>
     post<{ counts: { total: number; auto_accept: number; review: number; skip: number } }>(`/api/agent/frames/${frame_id}/cuboids/plan`, {}),
+  // The monocular cuboid solve, per object and per road click. It has existed since cuboids were added
+  // and was reachable only as a frame-wide batch, so the editor's own cuboid tool used a hardcoded
+  // sedan-sized box at yaw 0 for everything it placed.
+  cuboidFit: (object_id: string, contact?: number[]) =>
+    post<{
+      object_id: string; cuboid: { center: number[]; size: number[]; yaw: number; yaw_source?: string } | null;
+      reproj_iou?: number; class_name?: string; yaw_source?: string; lanes_available?: number; reason?: string;
+    }>(`/api/agent/objects/${object_id}/cuboid/fit`, contact ? { contact } : {}),
+  cuboidAt: (frame_id: string, u: number, v: number, class_name: string) =>
+    post<{
+      cuboid: { center: number[]; size: number[]; yaw: number; yaw_source?: string } | null;
+      class_name?: string; yaw_source?: string; lanes_available?: number; reason?: string;
+    }>(`/api/agent/frames/${frame_id}/cuboid/at`, { u, v, class_name }),
   agentCuboids: (frame_id: string) =>
     post<{ run_id: string; attached: number; counts: { auto_accept: number; review: number; skip: number } }>(`/api/agent/frames/${frame_id}/cuboids`, {}),
   agentCrossCamPlan: (object_id: string) =>
