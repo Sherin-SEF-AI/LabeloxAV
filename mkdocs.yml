@@ -66,6 +66,12 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting started: getting-started.md
+  - Using it:
+      - What it is for: guide/index.md
+      - The seven platforms: guide/platforms.md
+      - Workflows: guide/workflows.md
+      - The frame editor: guide/editor.md
+      - Keyboard shortcuts: guide/shortcuts.md
   - Concepts:
       - Architecture: ARCHITECTURE.md
       - Domain packs: PACK_INTERFACE.md

@@ -269,3 +269,32 @@ class TestTheDatabaseKnowsTheOntology:
             f"{len(missing)} classes are in the ontology YAML but not in ontology_class: {missing[:20]}. "
             "Any object created on one of them fails a foreign-key check. "
             "Fix: uv run python -m scripts.seed_ontology")
+
+
+class TestCustomClassNames:
+    """The sidecar is the vocabulary every later label is drawn from, so what gets into it matters."""
+
+    def test_a_stringified_placeholder_is_refused(self):
+        """The corpus already carries one: a class literally called `undefined` at id 229, with 262 objects
+        labelled into it before anything noticed. It is what a client sends when a variable was empty and
+        got stringified, and it passes every emptiness check because it is not empty."""
+        from services.autolabel.ontology import add_custom_class
+
+        for bad in ("undefined", "NULL", "  none ", "NaN", "true", "[object Object]"):
+            with pytest.raises(ValueError, match="placeholder|letters or digits"):
+                add_custom_class(bad)
+
+    def test_an_empty_name_is_still_refused(self):
+        from services.autolabel.ontology import add_custom_class
+
+        for bad in ("", "   ", "!!!"):
+            with pytest.raises(ValueError, match="letters or digits"):
+                add_custom_class(bad)
+
+    def test_a_real_name_containing_a_reserved_word_is_fine(self):
+        """The check is on the whole normalised name, not a substring: `none` is refused and
+        `none_of_the_above` is not."""
+        from services.autolabel.ontology import _RESERVED_CLASS_NAMES, normalize_class_name
+
+        assert normalize_class_name("none of the above") not in _RESERVED_CLASS_NAMES
+        assert normalize_class_name("undefined") in _RESERVED_CLASS_NAMES

@@ -98,7 +98,18 @@ class OpenVocabSettings(BaseModel):
     # Path B, open-vocab detect + segment. Production target: SAM 3.1 PCS (sam3.pt).
     # Realized today as YOLO-World (text concept -> boxes) + SAM (box -> mask).
     detector_weights: str = "yolov8s-worldv2.pt"
-    seg_weights: str = "sam_b.pt"
+    # SAM 2: same mask coverage as SAM 1 on this corpus, 1.6x faster, half the checkpoint. See
+    # configs/default.yaml for the measurement and for why SAM 3 is not reachable on the pinned
+    # ultralytics.
+    seg_weights: str = "sam2_b.pt"
+    # The second opinion. A different segmenter re-prompted with the same box, so agreement between the two
+    # is a signal about the mask rather than about one model's confidence in itself.
+    seg_verify_weights: str = "sam_b.pt"
+    seg_verify: bool = False
+    # Measured on 70 real objects: median agreement 0.893, and a fifth of masks fall below 0.8 - almost all
+    # of them riders, motorcycles and autorickshaws, where the mask boundary is genuinely ambiguous. This
+    # floor flags that fifth rather than trying to separate the merely imperfect from the wrong.
+    seg_agree_iou: float = 0.80
     half: bool = True
     conf: float = 0.12          # open-vocab floor: low enough for the long tail, high enough that
                                 # most boxes are real (0.05 buried the gate in noise)
@@ -348,6 +359,9 @@ class GateSettings(BaseModel):
     # agreement+VLM rule below; flip on to fully freeze the long tail (e.g. a fresh ontology).
     force_review_on_rare: bool = False
     force_review_on_mask_box_disagree: bool = True
+    # Below this mask-versus-mask agreement, an object goes to review rather than auto-accepting. Measured:
+    # two segmenters agree at a median IoU of 0.893 on this corpus and a fifth of masks fall under 0.8.
+    mask_agree_min: float = 0.80
     # M-Q.4: a rare/fallback class earns auto-accept only with cross-path agreement AND VLM confirmation,
     # never on one model's output. Off -> a rare class auto-accepts on agreement alone like a common class.
     rare_needs_agreement_and_vlm: bool = True

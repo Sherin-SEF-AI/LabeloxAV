@@ -396,12 +396,28 @@ def _get_ontology_cached(pack_id: str) -> Ontology:
 get_ontology.cache_clear = _get_ontology_cached.cache_clear  # type: ignore[attr-defined]
 
 
+# Strings that are always a bug rather than a class. A caller that stringifies an empty variable produces
+# one of these, and they pass every emptiness check because they are not empty.
+_RESERVED_CLASS_NAMES = frozenset({
+    "undefined", "null", "none", "nan", "true", "false", "nil", "unknown_class", "object_object",
+})
+
+
 def add_custom_class(name: str, l0: str = "object", l1: str = "custom", india: bool = True) -> dict:
     """Add an annotator-defined class to the sidecar and make it live (cache cleared). Idempotent: an
     existing name returns the existing class. Names are normalized to the ontology's snake_case style."""
     norm = normalize_class_name(name)
     if not norm:
         raise ValueError("class name must contain letters or digits")
+    if norm in _RESERVED_CLASS_NAMES:
+        # Never a name somebody meant. These are what a client sends when a variable was empty and got
+        # stringified on the way out, and the corpus already carries one: a class literally called
+        # `undefined` at id 229, with 262 objects labelled into it before anything noticed. The client
+        # guards emptiness, but a coerced placeholder is a non-empty string and walks straight through, so
+        # the refusal belongs here - the sidecar is a durable artifact and the vocabulary every later label
+        # is drawn from.
+        raise ValueError(f"'{norm}' is a placeholder, not a class name; it usually means the caller sent an "
+                         f"empty value that was stringified")
     onto = get_ontology()
     if onto.has_name(norm):
         c = onto.by_name(norm)

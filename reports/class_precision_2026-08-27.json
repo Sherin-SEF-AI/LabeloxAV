@@ -1,0 +1,443 @@
+[
+  {
+    "class_name": "object_fallback",
+    "decided": 76,
+    "unsure": 4,
+    "raw": {
+      "p": 0.0,
+      "lo": 0.0,
+      "hi": 0.0481,
+      "n": 76,
+      "half_width": 0.0241
+    },
+    "raw_superclass": {
+      "p": 0.1711,
+      "lo": 0.1028,
+      "hi": 0.271,
+      "n": 76,
+      "half_width": 0.0841
+    },
+    "corrected": {
+      "p": 0.0,
+      "lo": 0.0,
+      "hi": 0.0,
+      "clamped": true,
+      "note": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected"
+    },
+    "caveat": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected",
+    "refinements": 13,
+    "cross_superclass": 54,
+    "top_proposals": [
+      "traffic_signal x29",
+      "vehicle_fallback x13",
+      "road x10"
+    ]
+  },
+  {
+    "class_name": "traffic_signal",
+    "decided": 57,
+    "unsure": 23,
+    "raw": {
+      "p": 0.0526,
+      "lo": 0.0181,
+      "hi": 0.1437,
+      "n": 57,
+      "half_width": 0.0628
+    },
+    "raw_superclass": {
+      "p": 1.0,
+      "lo": 0.9369,
+      "hi": 1.0,
+      "n": 57,
+      "half_width": 0.0316
+    },
+    "corrected": {
+      "p": 0.0,
+      "lo": 0.0,
+      "hi": 0.0201,
+      "clamped": true,
+      "note": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected"
+    },
+    "caveat": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected",
+    "refinements": 54,
+    "cross_superclass": 0,
+    "top_proposals": [
+      "pole x31",
+      "traffic_sign x12",
+      "street_light x8"
+    ]
+  },
+  {
+    "class_name": "sedan",
+    "decided": 38,
+    "unsure": 42,
+    "raw": {
+      "p": 0.2368,
+      "lo": 0.1299,
+      "hi": 0.3921,
+      "n": 38,
+      "half_width": 0.1311
+    },
+    "raw_superclass": {
+      "p": 0.9737,
+      "lo": 0.865,
+      "hi": 0.9953,
+      "n": 38,
+      "half_width": 0.0651
+    },
+    "corrected": {
+      "p": 0.3301,
+      "lo": 0.0069,
+      "hi": 0.3301,
+      "clamped": false,
+      "note": null
+    },
+    "caveat": null,
+    "refinements": 28,
+    "cross_superclass": 1,
+    "top_proposals": [
+      "suv x14",
+      "hatchback x9",
+      "minivan x2"
+    ]
+  },
+  {
+    "class_name": "hoarding",
+    "decided": 47,
+    "unsure": 34,
+    "raw": {
+      "p": 0.4255,
+      "lo": 0.2951,
+      "hi": 0.5672,
+      "n": 47,
+      "half_width": 0.136
+    },
+    "raw_superclass": {
+      "p": 0.9362,
+      "lo": 0.8284,
+      "hi": 0.9781,
+      "n": 47,
+      "half_width": 0.0748
+    },
+    "corrected": {
+      "p": 0.7943,
+      "lo": 0.6462,
+      "hi": 1.0,
+      "clamped": true,
+      "note": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected"
+    },
+    "caveat": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected",
+    "refinements": 24,
+    "cross_superclass": 0,
+    "top_proposals": [
+      "traffic_sign x13",
+      "barrier x5",
+      "milestone x3"
+    ]
+  },
+  {
+    "class_name": "bus",
+    "decided": 54,
+    "unsure": 26,
+    "raw": {
+      "p": 0.5741,
+      "lo": 0.4416,
+      "hi": 0.6967,
+      "n": 54,
+      "half_width": 0.1275
+    },
+    "raw_superclass": {
+      "p": 0.8519,
+      "lo": 0.734,
+      "hi": 0.923,
+      "n": 54,
+      "half_width": 0.0945
+    },
+    "corrected": {
+      "p": 1.0,
+      "lo": 0.8957,
+      "hi": 1.0,
+      "clamped": true,
+      "note": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected"
+    },
+    "caveat": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected",
+    "refinements": 15,
+    "cross_superclass": 0,
+    "top_proposals": [
+      "lcv x11",
+      "truck x3",
+      "garbage_truck x1"
+    ]
+  },
+  {
+    "class_name": "truck",
+    "decided": 47,
+    "unsure": 33,
+    "raw": {
+      "p": 0.5745,
+      "lo": 0.4328,
+      "hi": 0.7049,
+      "n": 47,
+      "half_width": 0.136
+    },
+    "raw_superclass": {
+      "p": 0.7872,
+      "lo": 0.651,
+      "hi": 0.8801,
+      "n": 47,
+      "half_width": 0.1146
+    },
+    "corrected": {
+      "p": 1.0,
+      "lo": 0.8964,
+      "hi": 1.0,
+      "clamped": true,
+      "note": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected"
+    },
+    "caveat": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected",
+    "refinements": 10,
+    "cross_superclass": 0,
+    "top_proposals": [
+      "lcv x7",
+      "bus x1",
+      "cement_mixer x1"
+    ]
+  },
+  {
+    "class_name": "pole",
+    "decided": 56,
+    "unsure": 24,
+    "raw": {
+      "p": 0.6071,
+      "lo": 0.4763,
+      "hi": 0.7242,
+      "n": 56,
+      "half_width": 0.1239
+    },
+    "raw_superclass": {
+      "p": 1.0,
+      "lo": 0.9358,
+      "hi": 1.0,
+      "n": 56,
+      "half_width": 0.0321
+    },
+    "corrected": {
+      "p": 1.0,
+      "lo": 0.9511,
+      "hi": 1.0,
+      "clamped": true,
+      "note": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected"
+    },
+    "caveat": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected",
+    "refinements": 22,
+    "cross_superclass": 0,
+    "top_proposals": [
+      "traffic_signal x11",
+      "street_light x5",
+      "traffic_sign x4"
+    ]
+  },
+  {
+    "class_name": "rider",
+    "decided": 45,
+    "unsure": 35,
+    "raw": {
+      "p": 0.6444,
+      "lo": 0.4984,
+      "hi": 0.7678,
+      "n": 45,
+      "half_width": 0.1347
+    },
+    "raw_superclass": {
+      "p": 0.9778,
+      "lo": 0.8843,
+      "hi": 0.9961,
+      "n": 45,
+      "half_width": 0.0559
+    },
+    "corrected": {
+      "p": 1.0,
+      "lo": 1.0,
+      "hi": 1.0,
+      "clamped": true,
+      "note": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected"
+    },
+    "caveat": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected",
+    "refinements": 15,
+    "cross_superclass": 0,
+    "top_proposals": [
+      "cyclist x7",
+      "pedestrian x5",
+      "person_carrying_load x2"
+    ]
+  },
+  {
+    "class_name": "autorickshaw",
+    "decided": 20,
+    "unsure": 60,
+    "raw": {
+      "p": 0.7,
+      "lo": 0.481,
+      "hi": 0.8545,
+      "n": 20,
+      "half_width": 0.1868
+    },
+    "raw_superclass": {
+      "p": 1.0,
+      "lo": 0.8389,
+      "hi": 1.0,
+      "n": 20,
+      "half_width": 0.0806
+    },
+    "corrected": {
+      "p": 1.0,
+      "lo": 1.0,
+      "hi": 1.0,
+      "clamped": true,
+      "note": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected"
+    },
+    "caveat": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected",
+    "refinements": 6,
+    "cross_superclass": 0,
+    "top_proposals": [
+      "e_rickshaw x4",
+      "e_rickshaw_loader x1",
+      "goods_3w x1"
+    ]
+  },
+  {
+    "class_name": "suv",
+    "decided": 62,
+    "unsure": 18,
+    "raw": {
+      "p": 0.7258,
+      "lo": 0.6041,
+      "hi": 0.8212,
+      "n": 62,
+      "half_width": 0.1086
+    },
+    "raw_superclass": {
+      "p": 0.9839,
+      "lo": 0.9141,
+      "hi": 0.9971,
+      "n": 62,
+      "half_width": 0.0415
+    },
+    "corrected": {
+      "p": 1.0,
+      "lo": 1.0,
+      "hi": 1.0,
+      "clamped": true,
+      "note": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected"
+    },
+    "caveat": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected",
+    "refinements": 16,
+    "cross_superclass": 1,
+    "top_proposals": [
+      "minivan x7",
+      "app_cab x3",
+      "hatchback x3"
+    ]
+  },
+  {
+    "class_name": "traffic_sign",
+    "decided": 50,
+    "unsure": 30,
+    "raw": {
+      "p": 0.84,
+      "lo": 0.7149,
+      "hi": 0.9166,
+      "n": 50,
+      "half_width": 0.1009
+    },
+    "raw_superclass": {
+      "p": 1.0,
+      "lo": 0.9286,
+      "hi": 1.0,
+      "n": 50,
+      "half_width": 0.0357
+    },
+    "corrected": {
+      "p": 1.0,
+      "lo": 1.0,
+      "hi": 1.0,
+      "clamped": true,
+      "note": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected"
+    },
+    "caveat": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected",
+    "refinements": 8,
+    "cross_superclass": 0,
+    "top_proposals": [
+      "hoarding x2",
+      "milestone x2",
+      "traffic_signal x2"
+    ]
+  },
+  {
+    "class_name": "pedestrian",
+    "decided": 45,
+    "unsure": 35,
+    "raw": {
+      "p": 0.8667,
+      "lo": 0.7382,
+      "hi": 0.9374,
+      "n": 45,
+      "half_width": 0.0996
+    },
+    "raw_superclass": {
+      "p": 1.0,
+      "lo": 0.9213,
+      "hi": 1.0,
+      "n": 45,
+      "half_width": 0.0393
+    },
+    "corrected": {
+      "p": 1.0,
+      "lo": 1.0,
+      "hi": 1.0,
+      "clamped": true,
+      "note": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected"
+    },
+    "caveat": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected",
+    "refinements": 6,
+    "cross_superclass": 0,
+    "top_proposals": [
+      "rider x5",
+      "person_carrying_load x1"
+    ]
+  },
+  {
+    "class_name": "motorcycle",
+    "decided": 31,
+    "unsure": 49,
+    "raw": {
+      "p": 0.871,
+      "lo": 0.7115,
+      "hi": 0.9487,
+      "n": 31,
+      "half_width": 0.1186
+    },
+    "raw_superclass": {
+      "p": 0.9677,
+      "lo": 0.8381,
+      "hi": 0.9943,
+      "n": 31,
+      "half_width": 0.0781
+    },
+    "corrected": {
+      "p": 1.0,
+      "lo": 1.0,
+      "hi": 1.0,
+      "clamped": true,
+      "note": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected"
+    },
+    "caveat": "the corrected estimate falls outside [0, 1] before clamping, which means the observed rate is more extreme than this judge's measured error can explain. Treat it as a bound, not a point estimate: either the judge is better than its calibration suggests, or the calibration set is not representative of the batch being corrected",
+    "refinements": 3,
+    "cross_superclass": 1,
+    "top_proposals": [
+      "scooter x2",
+      "cargo_bike x1",
+      "object_fallback x1"
+    ]
+  }
+]
