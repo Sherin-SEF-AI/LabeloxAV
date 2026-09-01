@@ -58,6 +58,43 @@ def ipm_pixel_to_vehicle(u: float, v: float, fx: float, fy: float, cx: float, cy
     return forward, lateral
 
 
+def vehicle_to_ipm_pixel(forward: float, lateral: float, fx: float, fy: float, cx: float, cy: float,
+                         height_m: float, pitch_rad: float = 0.0,
+                         dist: list[float] | None = None, fisheye: bool = False) -> tuple[float, float] | None:
+    """The inverse of `ipm_pixel_to_vehicle`: a ground point back to the pixel that sees it.
+
+    This direction did not exist anywhere in the repo, and without it a bird's-eye view can be looked at
+    and not drawn on. Every lane tool here works in image space for that reason: warping the road flat is
+    one call, and turning a line drawn on the warp back into control points a frame can store is this
+    function.
+
+    None when the point is behind the camera, which has no image. The same flat-road assumption as the
+    forward direction applies, so a point far from the camera projects near the horizon where a pixel is
+    worth many metres; a caller drawing at that range is drawing on sand and `ipm_max_range_m` in
+    `services/dynamics/compute.py` is the bound that says how far is too far.
+    """
+    if forward <= 1e-6:
+        return None
+    # Camera frame: x right, y down, z forward, with the road plane height_m below the camera.
+    x, y, z = float(lateral), float(height_m), float(forward)
+    if pitch_rad:
+        # The forward direction rotates the ray by +pitch, so coming back rotates by -pitch.
+        c, sn = math.cos(-pitch_rad), math.sin(-pitch_rad)
+        y, z = y * c - z * sn, y * sn + z * c
+    if z <= 1e-6:
+        return None
+    if fisheye and dist:
+        import cv2
+        import numpy as np
+
+        km = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float64)
+        d = np.array((list(dist) + [0.0, 0.0, 0.0, 0.0])[:4], dtype=np.float64).reshape(4, 1)
+        pts = np.array([[[x, y, z]]], dtype=np.float64)
+        uv, _ = cv2.fisheye.projectPoints(pts, np.zeros(3), np.zeros(3), km, d)
+        return float(uv[0, 0, 0]), float(uv[0, 0, 1])
+    return fx * x / z + cx, fy * y / z + cy
+
+
 def vehicle_to_world(forward: float, lateral: float, lat: float, lon: float,
                      heading_rad: float, cam_yaw_rad: float = 0.0) -> tuple[float, float]:
     """Vehicle-frame (forward, lateral) to world (lat, lon) given the GNSS pos + heading (rad from north,

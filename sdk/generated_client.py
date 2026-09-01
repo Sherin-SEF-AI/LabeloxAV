@@ -1423,6 +1423,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/frames/{frame_id}/adverse",
                           params=None, json_body=body)
 
+    def get_frames_by_frame_id_bev(self, frame_id: str) -> Any:
+        """Frame Bev"""
+        return self._call("GET", f"/api/frames/{frame_id}/bev",
+                          params=None, json_body=None)
+
     def get_frames_by_frame_id_checkpoints(self, frame_id: str, include_auto: bool | None = True, limit: int | None = 50) -> Any:
         """List For Frame"""
         return self._call("GET", f"/api/frames/{frame_id}/checkpoints",
@@ -1481,6 +1486,16 @@ class LabeloxClient:
     def post_frames_by_frame_id_lanes(self, frame_id: str, body: Any = None) -> Any:
         """Create Lane"""
         return self._call("POST", f"/api/frames/{frame_id}/lanes",
+                          params=None, json_body=body)
+
+    def get_frames_by_frame_id_lanes_bev(self, frame_id: str) -> Any:
+        """Lanes In Bev"""
+        return self._call("GET", f"/api/frames/{frame_id}/lanes/bev",
+                          params=None, json_body=None)
+
+    def post_frames_by_frame_id_lanes_bev(self, frame_id: str, body: Any = None) -> Any:
+        """Create Lane From Bev"""
+        return self._call("POST", f"/api/frames/{frame_id}/lanes/bev",
                           params=None, json_body=body)
 
     def post_frames_by_frame_id_lanes_propagate(self, frame_id: str, frames: int | None = 8) -> Any:
@@ -3591,4 +3606,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 701 routes generated from the server schema.
+# 704 routes generated from the server schema.

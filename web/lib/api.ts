@@ -859,6 +859,24 @@ export const api = {
   getSegment: (frame_id: string, kind = "semantic") =>
     get<{ found: boolean; coverage?: Record<string, number>; has_overlay?: boolean; source?: string; model_version?: string | null }>(`/api/frames/${frame_id}/segment?kind=${kind}`),
   // M2.1 lanes
+  // The road flattened, plus the two-way mapping that makes it drawable. The inverse of the ground lift
+  // did not exist anywhere until now, which is why every lane tool here has been image-space only.
+  frameBev: (frame_id: string) =>
+    get<{
+      frame_id: string;
+      view: { near_m: number; far_m: number; half_width_m: number; px_per_m: number; width: number; height: number };
+      image: string;
+      calibration: { source: string; quality: number; model: string; cam_id: string };
+      caveat: string;
+    }>(`/api/frames/${frame_id}/bev`),
+  lanesInBev: (frame_id: string) =>
+    get<{
+      frame_id: string;
+      view: { near_m: number; far_m: number; half_width_m: number; px_per_m: number; width: number; height: number };
+      lanes: (LaneRow & { bev_points: number[][]; dropped: number })[];
+    }>(`/api/frames/${frame_id}/lanes/bev`),
+  createLaneFromBev: (frame_id: string, body: { points: number[][]; lane_type?: string; is_ego?: boolean }) =>
+    post<LaneRow>(`/api/frames/${frame_id}/lanes/bev`, body),
   framesLanes: (frameId: string) => get<LaneRow[]>(`/api/frames/${frameId}/lanes`),
   proposeLanes: (frameId: string) => post<{ proposed: number; lanes: LaneRow[]; model: string }>(`/api/frames/${frameId}/lanes/propose`, {}),
   createLane: (frameId: string, body: { control_points: number[][]; lane_type: string; is_ego: boolean }) =>

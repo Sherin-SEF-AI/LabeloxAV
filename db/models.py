@@ -371,6 +371,12 @@ class VlmTarget(Base):
 class Lane(Base):
     # M2.1: a lane line per frame (linked across frames by track_ref). Bezier/B-spline control points in
     # image coordinates; never a raster mask. Implicit/fallback lanes are hand-drawn on unmarked roads.
+    #
+    # A `virtual_lane` type was proposed and deliberately not added: `implicit` already means exactly that,
+    # a lane a person drew where there is no paint, and it has an editor tool of its own. Adding a synonym
+    # would split the same concept across two values that every consumer would then have to check for,
+    # which is how 48,322 objects ended up in `traffic_sign`. Nothing uses `implicit` yet - the corpus is
+    # 3,750 machine-proposed lanes and 3 human ones - so the gap is annotation, not vocabulary.
     __tablename__ = "lane"
 
     lane_id: Mapped[uuid.UUID] = _uuid_pk()
