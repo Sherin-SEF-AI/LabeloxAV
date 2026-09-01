@@ -305,6 +305,7 @@ export default function FrameEditor() {
           id: x.object_id, track_id: x.track_id, class_id: x.class_id, class_name: x.class_name, bbox: x.bbox,
           mask: x.mask_polygons || [], attrs: {}, conf: x.conf, quality_score: x.quality_score, state: x.state, visible: true, version: x.version,
           rot: x.rot_deg, keypoints: x.keypoints ?? undefined, polyline: x.polyline ?? undefined,
+          bbox_amodal: x.bbox_amodal ?? null,
           cuboid_3d: x.cuboid_3d ?? undefined,
         }));
         dispatch({ t: "load", objects: eds, viewport: { scale: 0, ox: 0, oy: 0 }, selectedId: focus });
@@ -1172,6 +1173,7 @@ export default function FrameEditor() {
             class_name: o.class_name, bbox: o.bbox, attrs: o.attrs,
             mask_polygons: o.mask.length ? o.mask : undefined, state: tgt, idem_key: o.id, rot_deg: o.rot ?? 0,
             keypoints: o.keypoints ?? null, polyline: o.polyline, cuboid_3d: o.cuboid_3d ?? undefined,
+            bbox_amodal: o.bbox_amodal ?? undefined,
             job_id: jobParam ?? undefined,
           });
           remap[o.id] = created.object_id;
@@ -1182,6 +1184,10 @@ export default function FrameEditor() {
           const r = await api.review(o.id, { action: "adjust_geometry",
             class_name: o.class_name, bbox: o.bbox, attrs: o.attrs, state: tgt, expected_version: o.version,
             rot_deg: o.rot ?? 0, keypoints: o.keypoints ?? null, polyline: o.polyline, cuboid_3d: o.cuboid_3d ?? undefined,
+            // An empty array is how the server is told to clear it, which is why this is `?? []` rather
+            // than `?? undefined`: undefined would mean "leave it alone" and there would be no way to
+            // take back an amodal box once drawn.
+            bbox_amodal: o.bbox_amodal ?? [],
             mask_polygons: o.mask.length ? o.mask : undefined });
           if (r.version != null) versions[o.id] = r.version;
         }
@@ -1579,6 +1585,7 @@ export default function FrameEditor() {
       else if (k === "w") dispatch({ t: "tool", tool: "magic-wand" });
       else if (k === "p") dispatch({ t: "tool", tool: "brush" });
       else if (k === "e") dispatch({ t: "tool", tool: "eraser" });
+      else if (k === "k") dispatch({ t: "tool", tool: "amodal" });
       else if (k === "u") dispatch({ t: "tool", tool: "superpixel" });
       else if (k === "h" && ridable(selected)) toggleHelmets();
       else if (k === "o" && ridable(selected)) bumpOccupants();
@@ -1686,6 +1693,12 @@ export default function FrameEditor() {
       onPlaceKeypoint={onPlaceKeypoint} onUpdateKeypoints={onUpdateKeypoints}
       mPerPx={meta.lidar_res ?? undefined}
       samPrompt={samPrompt}
+      onDrawAmodal={(box) => {
+        const o = stRef.current.objects.find((x) => x.id === stRef.current.selectedId);
+        if (!o) { flash("select the object first, then draw its whole extent"); return; }
+        dispatch({ t: "update", id: o.id, patch: { bbox_amodal: box } });
+        flash(`whole extent set on ${o.class_name}`);
+      }}
       onSamPoint={(pt, label) => addSamPoint(pt, label)}
       onSamBox={(box) => { setSamPrompt(null); void runSam({ box }); }}
       onUpdateMask={(oid, polys) =>
@@ -2407,6 +2420,10 @@ export default function FrameEditor() {
                 onDeleteRelationship: delRelationship,
                 onRecomputeDynamics: recomputeDynamics,
                 onFitCuboid: fitCuboid,
+                onClearAmodal: () => {
+                  const o = stRef.current.objects.find((x) => x.id === stRef.current.selectedId);
+                  if (o) dispatch({ t: "update", id: o.id, patch: { bbox_amodal: null } });
+                },
                 onSetYaw: (yaw: number) => {
                   const o = stRef.current.objects.find((x) => x.id === stRef.current.selectedId);
                   if (!o?.cuboid_3d) return;

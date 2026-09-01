@@ -91,6 +91,13 @@ def write_coco(
                     "state": r.state,
                     "source": r.source,
                     "attributes": r.attrs,
+                    # The whole extent where a person judged it, in COCO's own [x, y, w, h]. Absent when
+                    # nobody has said: writing the visible box here instead would let a consumer read a
+                    # copy as though it were a judgement about what is hidden.
+                    "bbox_amodal": ([r.bbox_amodal[0], r.bbox_amodal[1],
+                                     r.bbox_amodal[2] - r.bbox_amodal[0],
+                                     r.bbox_amodal[3] - r.bbox_amodal[1]]
+                                    if r.bbox_amodal and len(r.bbox_amodal) == 4 else None),
                     "provenance": r.provenance,
                     # Relations have been on ExportRecord since they were added and only Parquet ever wrote
                     # them, so every COCO consumer has been reading a rider and a motorcycle as two

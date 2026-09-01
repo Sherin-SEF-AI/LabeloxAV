@@ -245,6 +245,7 @@ def _detail(obj: Object, frame: Frame, onto) -> ObjectDetail:
         provenance=obj.provenance or {},
         version=obj.version,
         rot_deg=obj.rot_deg or 0.0,
+        bbox_amodal=list(obj.bbox_amodal) if obj.bbox_amodal else None,
         keypoints=obj.keypoints,
         polyline=obj.polyline,
         cuboid_3d=obj.cuboid_3d,
@@ -436,6 +437,7 @@ async def frame_objects(frame_id: str, job_id: str | None = None, limit: int = 2
             "mask_polygons": masks.get(o.mask_uri or "", []),
             "version": o.version,
             "rot_deg": o.rot_deg or 0.0,
+            "bbox_amodal": list(o.bbox_amodal) if o.bbox_amodal else None,
             "keypoints": o.keypoints,
             "polyline": o.polyline,
             "cuboid_3d": o.cuboid_3d,
@@ -460,6 +462,44 @@ async def frame_risk(frame_id: str, db: AsyncSession = Depends(db_session)):
     from services.activelearn.frame_risk import rank_frame_objects
 
     return await rank_frame_objects(db, UUID(frame_id), get_ontology())
+
+
+@router.post("/frames/{frame_id}/occlusion", dependencies=[Depends(current_user)])
+async def frame_occlusion(frame_id: str, commit: bool = False,
+                          db: AsyncSession = Depends(db_session)):
+    """Which object is in front of which, derived from the depth already being computed.
+
+    `ObjectRelationship` has allowed `kind="occludes"` with `source="geometry"` since relations were
+    added and nothing has ever written one; `ObjectDynamics.distance_m` holds a ground-contact depth for
+    367,000 objects. The two were never joined.
+
+    `commit=false` returns the proposal, which is the useful default: the depth is a monocular
+    ground-plane lift and a reviewer should see the overlap and the depth gap behind each claim. Committed
+    rows are always `proposed`, never confirmed.
+
+    `unordered` is as much of the answer as `pairs`. Two objects whose depths differ by less than those
+    depths' own error have no order this can see, and 66% of overlapping pairs are in that band.
+    """
+    from services.quality.occlusion import commit_occlusion, propose_occlusion
+
+    fid = UUID(frame_id)
+    if commit:
+        res = await commit_occlusion(db, fid)
+        await db.commit()
+        return res
+    return await propose_occlusion(db, fid)
+
+
+@router.get("/frames/{frame_id}/depth-order", dependencies=[Depends(current_user)])
+async def frame_depth_order(frame_id: str, db: AsyncSession = Depends(db_session)):
+    """The frame's objects from nearest to furthest, for drawing back to front.
+
+    Objects with no depth are listed separately rather than sorted to one end, which would be a statement
+    about them that nothing measured.
+    """
+    from services.quality.occlusion import depth_order
+
+    return await depth_order(db, UUID(frame_id))
 
 
 class LintIn(BaseModel):
@@ -754,6 +794,7 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         bbox=payload.bbox, mask_uri=mask_uri, mask_encoding=mask_encoding,
         attrs=onto.derive_attrs(payload.attrs or {}, onto.by_name(payload.class_name).id),
         conf=1.0, source="human", state=state, rot_deg=payload.rot_deg, keypoints=payload.keypoints,
+        bbox_amodal=list(payload.bbox_amodal) if payload.bbox_amodal else None,
         polyline=payload.polyline, cuboid_3d=payload.cuboid_3d,
         # Who drew it and under which job. Both null for a label drawn outside a job, which is every
         # existing flow and stays exactly as it was.

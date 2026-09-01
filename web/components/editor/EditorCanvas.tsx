@@ -51,6 +51,8 @@ type Props = {
   selectedIds?: string[];
   onUpdateBbox: (id: string, bbox: number[], rot?: number) => void;
   onDrawBox: (bbox: number[]) => void;
+  /** Set the selected object's whole extent, including the occluded part. */
+  onDrawAmodal?: (bbox: number[]) => void;
   onDrawPolygon: (points: number[]) => void;   // manual polygon: flattened [x,y,...], no GPU/SAM needed
   onDrawPolyline: (points: number[]) => void;  // open polyline (curb/road_edge/barrier), not closed
   onDrawAdverse: (points: number[]) => void;   // adverse-condition region polygon (glare/shadow/...)
@@ -204,7 +206,7 @@ export default function EditorCanvas(p: Props) {
       setMarquee({ x0: x, y0: y, x1: x, y1: y, additive: e.evt.shiftKey || e.evt.metaKey });
       return;
     }
-    if (p.tool === "box" || p.tool === "sam-box") {
+    if (p.tool === "box" || p.tool === "sam-box" || p.tool === "amodal") {
       setDraw({ x0: x, y0: y, x1: x, y1: y });
     } else if (p.tool === "measure") {
       setMeasure({ x0: x, y0: y, x1: x, y1: y });
@@ -296,6 +298,10 @@ export default function EditorCanvas(p: Props) {
     if (box[2] - box[0] < 3 || box[3] - box[1] < 3) return; // ignore tiny
     if (p.tool === "box") p.onDrawBox(box);
     else if (p.tool === "sam-box") p.onSamBox(box);
+    // The whole extent of the selected object, including the part something else hides. A separate tool
+    // rather than a mode on the box tool, because it writes a different field with a different meaning
+    // and a drag that silently changed which box it edited would be the worst kind of surprise.
+    else if (p.tool === "amodal") p.onDrawAmodal?.(box);
   }
 
   const sel = p.objects.find((o) => o.id === p.selectedId) || null;
@@ -394,6 +400,21 @@ export default function EditorCanvas(p: Props) {
               Order matters for hit-testing: draw the largest boxes first so the smallest one sits on top,
               and a click inside a dense cluster selects the tightest object rather than the big one behind
               it. The selected box is forced to the very top so its transform handles are never occluded. */}
+          {/* Amodal boxes: the whole extent of a partly hidden object, dashed and drawn UNDER the visible
+              boxes so the solid one an annotator is editing is never obscured by it.
+              Only where somebody has judged one. Falling back to the visible box would draw a claim about
+              what is hidden that nobody made. */}
+          {L.boxes && p.objects.map((o: EdObject) => (
+            o.visible !== false && o.bbox_amodal?.length === 4 ? (
+              <Rect key={`am:${o.id}`} listening={false}
+                x={o.bbox_amodal[0]} y={o.bbox_amodal[1]}
+                width={o.bbox_amodal[2] - o.bbox_amodal[0]}
+                height={o.bbox_amodal[3] - o.bbox_amodal[1]}
+                stroke={classColor(o.class_id)} strokeWidth={1 / s} opacity={0.55}
+                dash={[8 / s, 5 / s]} fill="transparent" />
+            ) : null
+          ))}
+
           {L.boxes && boxOrder.map((o: EdObject) => {
             const w = o.bbox[2] - o.bbox[0];
             const h = o.bbox[3] - o.bbox[1];

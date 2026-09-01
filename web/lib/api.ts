@@ -662,7 +662,7 @@ export const api = {
     post<{ predictions: { class_id: number; class_name: string; conf: number }[] }>("/api/objects/classify", { frame_id, box }),
   createObject: (
     frame_id: string,
-    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][]; cuboid_3d?: { center: number[]; size: number[]; yaw: number }; job_id?: string },
+    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][]; cuboid_3d?: { center: number[]; size: number[]; yaw: number }; bbox_amodal?: number[]; job_id?: string },
   ) => post<ObjectDetail>(`/api/frames/${frame_id}/objects`, body),
   updateMask: (object_id: string, polygons: number[][], width?: number, height?: number) =>
     put<{ object_id: string; version: number }>(`/api/objects/${object_id}/mask`, { polygons, width, height }),
@@ -1408,6 +1408,8 @@ export const api = {
       keypoints?: Keypoints | null;
       mask_polygons?: number[][];
       polyline?: number[][];
+      /** The whole extent including the occluded part. An empty array clears it. */
+      bbox_amodal?: number[];
       cuboid_3d?: { center: number[]; size: number[]; yaw: number };
     },
   ) => post<ObjectDetail & { version?: number; rot_deg?: number }>(`/api/objects/${id}/review`, payload),

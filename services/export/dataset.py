@@ -185,6 +185,7 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
                 provenance=obj.provenance or {},
                 cuboid_3d=obj.cuboid_3d,
                 rot_deg=obj.rot_deg or 0.0,
+                bbox_amodal=list(obj.bbox_amodal) if obj.bbox_amodal else None,
                 keypoints=obj.keypoints,
                 polyline=obj.polyline,
                 relationships=rel_map.get(str(obj.object_id), []),

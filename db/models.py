@@ -228,6 +228,13 @@ class Object(Base):
     track_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("track.track_id", ondelete="SET NULL"))
     class_id: Mapped[int] = mapped_column(ForeignKey("ontology_class.id"))
     bbox: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)  # xyxy pixel
+    # The whole extent of the object, including the part another object hides. `bbox` above stays the
+    # VISIBLE box, which is what every existing consumer means by it.
+    #
+    # Null means nobody has said, and it is deliberately not backfilled: an amodal box is a judgement
+    # about what is hidden, and guessing one from a class prior for 578,436 objects would fill the corpus
+    # with confident fabrications indistinguishable from observations.
+    bbox_amodal: Mapped[list[float] | None] = mapped_column(ARRAY(Float))
     mask_uri: Mapped[str | None] = mapped_column(Text)
     mask_encoding: Mapped[str | None] = mapped_column(String(16))
     attrs: Mapped[dict] = mapped_column(JSONB, default=dict)

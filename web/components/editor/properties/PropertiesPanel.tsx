@@ -70,6 +70,8 @@ export type PropertiesPanelProps = {
     onFitCuboid?: () => void;
     /** Set the cuboid's yaw, in radians. */
     onSetYaw?: (yaw: number) => void;
+    /** Take back the whole-extent box. */
+    onClearAmodal?: () => void;
   };
   onCollapse: () => void;
   tools: {
@@ -121,7 +123,8 @@ export default function PropertiesPanel({ frame, editor, klass, sel, tools, onCo
                 relationships={sel.relationships} linkKind={sel.linkKind} linkFrom={sel.linkFrom}
                 onLinkKind={sel.onLinkKind} onToggleLink={sel.onToggleLink}
                 onDeleteRelationship={sel.onDeleteRelationship} onSetAttr={sel.onSetAttr}
-                onFitCuboid={sel.onFitCuboid} onSetYaw={sel.onSetYaw} />
+                onFitCuboid={sel.onFitCuboid} onSetYaw={sel.onSetYaw}
+                onClearAmodal={sel.onClearAmodal} />
             </div>
             <PanelSection title="dynamics">
               <DynamicsCard row={sel.dynamics[selected.id]} onRecompute={sel.onRecomputeDynamics} />

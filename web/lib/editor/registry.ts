@@ -31,6 +31,9 @@ export const MODES: EditorMode[] = [
         { key: "box", label: "box", hotkey: "B" },
         { key: "polygon", label: "polygon", hotkey: "G" },
         { key: "polyline", label: "polyline", hotkey: "L" },
+        // The whole extent of a partly hidden object. Draws into bbox_amodal, never into bbox: the
+        // visible box is what every existing consumer means by "the box".
+        { key: "amodal", label: "whole extent", hotkey: "K" },
       ] },
       { key: "ai", label: "AI assist", tools: [
         { key: "sam-point", label: "sam point", hotkey: "S" },

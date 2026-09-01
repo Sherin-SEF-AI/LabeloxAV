@@ -1443,6 +1443,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/frames/{frame_id}/cuboids",
                           params=None, json_body=None)
 
+    def get_frames_by_frame_id_depth_order(self, frame_id: str) -> Any:
+        """Frame Depth Order"""
+        return self._call("GET", f"/api/frames/{frame_id}/depth-order",
+                          params=None, json_body=None)
+
     def get_frames_by_frame_id_drivable(self, frame_id: str) -> Any:
         """Get Drivable"""
         return self._call("GET", f"/api/frames/{frame_id}/drivable",
@@ -1507,6 +1512,11 @@ class LabeloxClient:
         """Create Object"""
         return self._call("POST", f"/api/frames/{frame_id}/objects",
                           params=None, json_body=body)
+
+    def post_frames_by_frame_id_occlusion(self, frame_id: str, commit: bool | None = False) -> Any:
+        """Frame Occlusion"""
+        return self._call("POST", f"/api/frames/{frame_id}/occlusion",
+                          params={"commit": commit}, json_body=None)
 
     def get_frames_by_frame_id_relations(self, frame_id: str) -> Any:
         """Relations List"""
@@ -3581,4 +3591,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 699 routes generated from the server schema.
+# 701 routes generated from the server schema.

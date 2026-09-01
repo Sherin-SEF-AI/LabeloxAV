@@ -556,7 +556,9 @@ export type FrameObject = {
   track_id: string | null;
   class_id: number;
   class_name: string;
-  bbox: number[]; // xyxy
+  bbox: number[]; // xyxy, the VISIBLE extent
+  /** The whole extent including the occluded part, where somebody has judged it. Null means nobody has. */
+  bbox_amodal?: number[] | null;
   conf: number;
   quality_score?: number | null;
   state: string;

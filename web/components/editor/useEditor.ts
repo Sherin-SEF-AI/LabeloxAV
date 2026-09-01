@@ -6,7 +6,7 @@
 
 import { useReducer } from "react";
 
-export type Tool = "select" | "box" | "polygon" | "polyline" | "adverse" | "cuboid" | "keypoint" | "measure" | "sam-point" | "sam-box" | "magic-wand" | "brush" | "eraser" | "superpixel";
+export type Tool = "select" | "box" | "amodal" | "polygon" | "polyline" | "adverse" | "cuboid" | "keypoint" | "measure" | "sam-point" | "sam-box" | "magic-wand" | "brush" | "eraser" | "superpixel";
 
 export type EdObject = {
   id: string; // server object_id, or "tmp-N" for locally-created
@@ -27,6 +27,10 @@ export type EdObject = {
   dirty?: boolean;
   version?: number; // optimistic-lock version from the server; sent back on save to detect stale writes
   rot?: number; // oriented-box rotation in degrees about the box centre (0 = axis-aligned)
+  // The whole extent of a partly hidden object. `bbox` above stays the VISIBLE extent, which is what
+  // every existing consumer means by it. Undefined means nobody has said, and that is different from
+  // "the object is fully visible": a renderer must draw nothing rather than fall back to bbox.
+  bbox_amodal?: number[] | null;
   keypoints?: { skeleton: string; points: number[][] }; // COCO-style pose [[x,y,v],...]
   polyline?: number[][]; // open linear feature (curb/road_edge/barrier) as ordered [[x,y],...]
   // ego-frame 3D box (size [w,l,h]). `yaw_source` records whether the yaw was measured from the road

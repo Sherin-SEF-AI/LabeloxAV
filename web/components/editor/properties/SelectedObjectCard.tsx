@@ -36,7 +36,7 @@ const QUALITY_CLASS = {
 
 export default function SelectedObjectCard({
   object, onto, relationships, linkKind, linkFrom,
-  onLinkKind, onToggleLink, onDeleteRelationship, onSetAttr, onFitCuboid, onSetYaw,
+  onLinkKind, onToggleLink, onDeleteRelationship, onSetAttr, onFitCuboid, onSetYaw, onClearAmodal,
 }: {
   object: EdObject;
   onto: Ontology;
@@ -51,6 +51,8 @@ export default function SelectedObjectCard({
   onFitCuboid?: () => void;
   /** Set the cuboid's yaw, in radians. */
   onSetYaw?: (yaw: number) => void;
+  /** Take back the whole-extent box. */
+  onClearAmodal?: () => void;
 }) {
   const router = useRouter();
   const [explainOpen, setExplainOpen] = useState(false);
@@ -61,6 +63,7 @@ export default function SelectedObjectCard({
     ["polyline", !!object.polyline?.length],
     ["pose", !!object.keypoints],
     ["3D", !!object.cuboid_3d],
+    ["whole extent", !!object.bbox_amodal?.length],
     ["rotated", !!object.rot],
   ] as [string, boolean][]).filter(([, on]) => on);
 
@@ -118,6 +121,35 @@ export default function SelectedObjectCard({
           </div>
         </div>
       </div>
+
+      {/* The whole extent of a partly hidden object, when somebody has judged one.
+          Shown separately from the geometry chips above because it is the one piece of geometry here
+          that is a claim about what CANNOT be seen, and it is worth being able to take back. */}
+      {object.bbox_amodal?.length === 4 && (
+        <div className="flex items-center gap-2 bg-bg-2 border border-line rounded p-2 mb-1.5 font-mono text-[10px]">
+          <span className="text-ink-3 w-16 shrink-0">extent</span>
+          <span className="text-ink-2 truncate">
+            {Math.round(object.bbox_amodal[2] - object.bbox_amodal[0])} x{" "}
+            {Math.round(object.bbox_amodal[3] - object.bbox_amodal[1])} px
+            {object.bbox?.length === 4 && (
+              <span className="text-ink-3">
+                {" "}({Math.round(
+                  (100 * ((object.bbox_amodal[2] - object.bbox_amodal[0]) *
+                          (object.bbox_amodal[3] - object.bbox_amodal[1]))) /
+                  Math.max(1, (object.bbox[2] - object.bbox[0]) * (object.bbox[3] - object.bbox[1])) - 100,
+                )}% larger than what is visible)
+              </span>
+            )}
+          </span>
+          {onClearAmodal && (
+            <button onClick={onClearAmodal}
+              title="take back the whole-extent box; the visible box is unaffected"
+              className="ml-auto shrink-0 border border-line rounded px-1.5 py-0.5 text-ink-3 hover:border-block hover:text-block">
+              clear
+            </button>
+          )}
+        </div>
+      )}
 
       {/* The 3D box, and the way to get one.
           The monocular solve has existed since cuboids were added and was reachable only as a frame-wide
