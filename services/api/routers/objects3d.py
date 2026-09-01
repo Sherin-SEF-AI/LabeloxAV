@@ -324,6 +324,26 @@ async def object3d_consistency(object_3d_id: uuid.UUID):
     return res
 
 
+@router.post("/lidar/quality3d/bridge")
+async def quality3d_bridge(cloud_id: uuid.UUID | None = None, session_id: uuid.UUID | None = None,
+                           commit: bool = False, db: AsyncSession = Depends(db_session)):
+    """Put 3D quality flags into the queue annotators actually work.
+
+    The checker finds real problems - a cuboid floating above the road, one whose reprojection does not
+    match its 2D label - and writes them to `quality_flag_3d`, a table with its own review endpoint and no
+    reader anywhere a person goes. The 2D side has `error_candidate`, which has a page, a keymap and a
+    throughput counter, and it has never received a 3D finding.
+
+    `unbridgeable` is the important half of the response. An error candidate hangs off a 2D `Object`, so a
+    cuboid with no `object_id` has nowhere to surface, and 42 of the 56 cuboids in this corpus are in that
+    state. Reporting that is what tells somebody the fix is linking cuboids to objects, rather than
+    leaving them to conclude the checker found nothing.
+    """
+    from services.lidar.quality3d.bridge import bridge_flags
+
+    return await bridge_flags(db, cloud_id=cloud_id, session_id=session_id, commit=commit)
+
+
 class AggLabelIn(BaseModel):
     center: list[float]                       # [x, y, z] in the aggregated-map frame
     dims: list[float]                         # [L, W, H] metres, the one size used across the whole track

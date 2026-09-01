@@ -16,6 +16,13 @@ import { api, humanizeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import type { TrackEvent, TrackEventType, TrackItem } from "@/lib/types";
 
+// How far a dragged span edge may be pulled to reach a changepoint.
+//
+// Small on purpose. An edge dropped in the middle of a steady stretch means what it says, and hauling it
+// several frames to the nearest event would move a span the annotator placed deliberately. Three frames
+// at 3fps is one second, which is about the width of a hand-drag's imprecision.
+const SNAP_WINDOW = 3;
+
 const STATE_TONE: Record<string, string> = {
   accepted: "bg-pass/60 border-pass",
   proposed: "bg-warn/20 border-warn",
@@ -75,14 +82,47 @@ export default function EventLane({ trackId, items, onChanged }: {
 
   const applicable = useMemo(() => types.filter((t) => t.applicable), [types]);
 
+  // Where the track's motion actually changes, as snap targets for a span edge.
+  //
+  // A dragged edge lands where the mouse came up, which is within a frame or two of the moment that
+  // matters and almost never on it. Snapping is only honest if there is a measured moment to snap to,
+  // which is why this is a request rather than a heuristic: the server refuses when the signal it was
+  // asked for does not exist, and 86% of real tracks legitimately have no changepoint at all.
+  const [cps, setCps] = useState<{ index: number; sigmas: number; before: number; after: number }[]>([]);
+  const [snapOn, setSnapOn] = useState(true);
+
+  useEffect(() => {
+    let live = true;
+    api.trackChangepoints(trackId)
+      .then((r) => { if (live) setCps(r.changepoints.map((c) => ({ index: c.index, sigmas: c.sigmas, before: c.before, after: c.after }))); })
+      // Quietly: a track with no dynamics computed is the common case and not an error the annotator can
+      // act on. The absence shows as no snap marks, which is what it means.
+      .catch(() => { if (live) setCps([]); });
+    return () => { live = false; };
+  }, [trackId]);
+
+  /**
+   * Pull an index onto the nearest changepoint, when one is close enough.
+   *
+   * The window is deliberately small. An edge dragged into the middle of a steady stretch means what it
+   * says, and hauling it several frames to the nearest event would move a span placed deliberately.
+   */
+  const snap = useCallback((i: number) => {
+    if (!snapOn || !cps.length) return i;
+    const near = cps.filter((c) => Math.abs(c.index - i) <= SNAP_WINDOW);
+    if (!near.length) return i;
+    return near.reduce((a, b) => (Math.abs(a.index - i) <= Math.abs(b.index - i) ? a : b)).index;
+  }, [cps, snapOn]);
+
   const endDrag = useCallback(() => {
     if (!dragging.current) return;
     dragging.current = false;
     setDrag((d) => {
-      if (d) setPending([Math.min(d[0], d[1]), Math.max(d[0], d[1])]);
+      // Both edges snap independently: a span usually starts at one event and ends at another.
+      if (d) setPending([snap(Math.min(d[0], d[1])), snap(Math.max(d[0], d[1]))]);
       return null;
     });
-  }, []);
+  }, [snap]);
 
   useEffect(() => {
     // On window, not on the lane: releasing outside the lane must still finish the drag, or the next click
@@ -134,14 +174,33 @@ export default function EventLane({ trackId, items, onChanged }: {
       </div>
 
       <div className="p-3 space-y-1.5">
+        {/* Off is a real choice: 86% of tracks have no changepoint at all, and on the rest an annotator
+            may be marking something the speed does not show. */}
+        {cps.length > 0 && (
+          <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-3 cursor-pointer">
+            <input type="checkbox" checked={snapOn} onChange={(e) => setSnapOn(e.target.checked)} />
+            snap span edges to the {cps.length} point{cps.length === 1 ? "" : "s"} where this
+            track&apos;s speed changes
+          </label>
+        )}
         <div className="flex gap-2 overflow-x-auto select-none">
           {items.map((it, i) => {
             const inDrag = drag && i >= Math.min(drag[0], drag[1]) && i <= Math.max(drag[0], drag[1]);
+            const cp = cps.find((c) => c.index === i);
             return (
               <button key={it.object_id} aria-label={`mark from frame ${i + 1}`}
                 onMouseDown={() => { dragging.current = true; setDrag([i, i]); }}
                 onMouseEnter={() => { if (dragging.current) setDrag((d) => (d ? [d[0], i] : null)); }}
-                className={`shrink-0 w-28 h-6 border ${inDrag ? "bg-accent/30 border-accent" : "border-line hover:border-ink-3"}`} />
+                title={cp
+                  ? `the speed changes here: ${cp.before.toFixed(0)} to ${cp.after.toFixed(0)} km/h`
+                  : undefined}
+                className={`relative shrink-0 w-28 h-6 border ${inDrag ? "bg-accent/30 border-accent" : "border-line hover:border-ink-3"}`}>
+                {/* Where the motion actually changes. Drawn so an annotator can see what an edge will
+                    snap to before dragging, rather than being surprised by it afterwards. */}
+                {cp && (
+                  <span className={`absolute inset-y-0 left-0 w-0.5 ${snapOn ? "bg-accent" : "bg-ink-3"}`} />
+                )}
+              </button>
             );
           })}
         </div>

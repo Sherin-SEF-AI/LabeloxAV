@@ -65,6 +65,10 @@ vi.mock("@/lib/api", () => ({
     ] })),
     intentVocab: vi.fn(async () => ({ vehicle: [], vru: [] })),
     trackEvents: vi.fn(async () => ({ events: [], event_types: [] })),
+    // EventLane asks for the track's changepoints so a dragged span edge can snap to one.
+    trackChangepoints: vi.fn(async () => ({
+      track_id: "track-abc-def-123", source: "object_speed", samples: 0, changepoints: [],
+    })),
     cropSheet,
     acceptTrack,
     bulkReview,

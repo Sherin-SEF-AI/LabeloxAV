@@ -771,8 +771,16 @@ export const api = {
     }>(`/api/agent/frames/${frame_id}/cuboid/at`, { u, v, class_name }),
   agentCuboids: (frame_id: string) =>
     post<{ run_id: string; attached: number; counts: { auto_accept: number; review: number; skip: number } }>(`/api/agent/frames/${frame_id}/cuboids`, {}),
+  // The per-camera candidates come back in `items` and were being dropped by this binding, so the one
+  // piece a UI needs to draw the proposal was unreachable from the client.
   agentCrossCamPlan: (object_id: string) =>
-    post<{ counts: { targets: number; auto_accept: number; review: number; skip: number }; class_name?: string; reason?: string }>(`/api/agent/objects/${object_id}/crosscam/plan`, {}),
+    post<{
+      object_id: string; class_name?: string; cuboid_source?: string; reason?: string;
+      counts: { targets: number; auto_accept: number; review: number; skip: number };
+      items: { cam_id: string; frame_id: string; action: string; visibility: number;
+               box?: number[]; box_norm?: number[]; frame_width?: number; frame_height?: number;
+               class_name?: string; reason?: string }[];
+    }>(`/api/agent/objects/${object_id}/crosscam/plan`, {}),
   agentCrossCam: (object_id: string) =>
     post<{ run_id: string; created: number; counts: { auto_accept: number; review: number; skip: number } }>(`/api/agent/objects/${object_id}/crosscam`, {}),
   agentPropagatePlan: (object_id: string, span = 24) =>
@@ -1334,6 +1342,14 @@ export const api = {
   track: (id: string) => get<Track>(`/api/tracks/${id}`),
   // Track events: typed spans within a track. The vocabulary rides with the list so the picker never needs
   // a second request and always shows the definitions from the pack this track's session was captured under.
+  // Where a track's motion actually changes, as targets a span edge can snap to. `source=ego_speed`
+  // refuses on this corpus with the count, rather than silently using a different signal.
+  trackChangepoints: (track_id: string, source: "object_speed" | "ego_speed" = "object_speed") =>
+    get<{
+      track_id: string; source: string; samples: number; caveat?: string; reason?: string;
+      changepoints: { index: number; frame_id: string; ts_ns: number; before: number; after: number;
+                      shift: number; sigmas: number }[];
+    }>(`/api/tracks/${track_id}/changepoints?source=${source}`),
   trackEvents: (id: string) => get<TrackEventsResponse>(`/api/tracks/${id}/events`),
   createTrackEvent: (id: string, body: { event_type: string; start_frame_id: string; end_frame_id: string; notes?: string }) =>
     post<TrackEvent>(`/api/tracks/${id}/events`, body),
@@ -1364,6 +1380,15 @@ export const api = {
   calibrationImport: (sid: string, body: { cam_id: string; format: string; ref_width?: number; calib_text?: string; camera_intrinsic?: number[][]; translation?: number[] }) =>
     post<Record<string, unknown>>(`/api/calibration/${sid}/import`, body),
   // M3.1 multi-camera
+  // Whether cross-view linking can work here, and what is missing when it cannot. The machinery is
+  // complete; the corpus is not, and an inert grid with no explanation is the worst state for a working
+  // tool to be in.
+  multicamReadiness: (session_id: string) =>
+    get<{
+      session_id: string; ready: boolean; cameras: string[]; frame_groups: number;
+      multi_camera_groups: number; calibration_passed: string[]; objects: number;
+      blockers: { code: string; detail: string; fix: string }[];
+    }>(`/api/multicam/readiness?session_id=${session_id}`),
   multicamGroups: (sid: string) => get<MulticamGroups>(`/api/multicam/groups?session_id=${sid}`),
   multicamAssociate: (sid: string) => post<{ associated: number; rig_tracks: number; cameras: string[]; reason?: string }>(`/api/multicam/associate?session_id=${sid}`, {}),
   // M-MC.0 persisted frame groups + group-aware navigation

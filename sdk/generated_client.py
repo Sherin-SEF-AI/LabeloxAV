@@ -2263,6 +2263,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/lidar/objects3d/{object_3d_id}/similar",
                           params={"k": k}, json_body=None)
 
+    def post_lidar_quality3d_bridge(self, cloud_id: Any | None = None, session_id: Any | None = None, commit: bool | None = False) -> Any:
+        """Quality3D Bridge"""
+        return self._call("POST", f"/api/lidar/quality3d/bridge",
+                          params={"cloud_id": cloud_id, "session_id": session_id, "commit": commit}, json_body=None)
+
     def post_lidar_quality3d_by_flag_id_confirm(self, flag_id: str) -> Any:
         """Confirm Quality3D"""
         return self._call("POST", f"/api/lidar/quality3d/{flag_id}/confirm",
@@ -2422,6 +2427,11 @@ class LabeloxClient:
         """Propagate Ep"""
         return self._call("POST", f"/api/multicam/propagate",
                           params={"object_id": object_id, "use_sam": use_sam}, json_body=None)
+
+    def get_multicam_readiness(self, session_id: str) -> Any:
+        """Readiness"""
+        return self._call("GET", f"/api/multicam/readiness",
+                          params={"session_id": session_id}, json_body=None)
 
     def get_multicam_rig_objects(self, session_id: str, group_id: str) -> Any:
         """Rig Objects Ep"""
@@ -3303,6 +3313,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/tracks/{track_id}/attribute-timeline",
                           params={"key": key}, json_body=None)
 
+    def get_tracks_by_track_id_changepoints(self, track_id: str, source: str | None = 'object_speed') -> Any:
+        """Track Changepoints Ep"""
+        return self._call("GET", f"/api/tracks/{track_id}/changepoints",
+                          params={"source": source}, json_body=None)
+
     def get_tracks_by_track_id_driving_events(self, track_id: str) -> Any:
         """Track Events"""
         return self._call("GET", f"/api/tracks/{track_id}/driving-events",
@@ -3606,4 +3621,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 704 routes generated from the server schema.
+# 707 routes generated from the server schema.
