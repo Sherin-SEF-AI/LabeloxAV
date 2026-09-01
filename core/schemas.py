@@ -84,6 +84,11 @@ class Provenance(BaseModel):
     proposals: list[PathProposal] = Field(default_factory=list)
     agreement: bool = False
     mask_box_disagree: bool = False
+    # Mask-versus-mask, distinct from mask_box_disagree above, which is mask-versus-detection-box. This is
+    # how far an independent second segmenter agreed with the mask that was kept: None when no verifier
+    # ran, which is not the same as agreement and must not be read as it. See
+    # services/autolabel/sam_hybrid.py for why the second opinion is scored rather than fused in.
+    mask_agreement: float | None = None
     # Entropy of the ensemble class-vote distribution at fusion (nats): 0 when the paths agree on one class,
     # higher as their votes spread across classes. A class-distribution uncertainty the scalar conf misses;
     # the active-learning value score reads it. Computed by core.accel.uncertainty.entropy_margin.

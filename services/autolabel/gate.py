@@ -111,6 +111,13 @@ def gate_object(obj: UnifiedObject, onto: Ontology, cfg: GateSettings,
     if cfg.force_review_on_mask_box_disagree and prov.mask_box_disagree:
         return GateState.review
 
+    # Two independent segmenters produced materially different masks for this object. Measured on this
+    # corpus that happens to about a fifth of objects and concentrates on riders, motorcycles and
+    # autorickshaws, where the mask boundary is genuinely ambiguous - which is exactly the clique the pack
+    # marks as crossing a safety boundary. `None` means no verifier ran and is not a disagreement.
+    if prov.mask_agreement is not None and prov.mask_agreement < cfg.mask_agree_min:
+        return GateState.review
+
     # Strict escape hatch: when set, a rare/fallback class never auto-accepts, whatever else is true. Off by
     # default because M-Q.4's agreement+VLM rule below is the smarter policy; flip on to fully freeze the
     # long tail (e.g. a fresh ontology before any rare class has earned trust).
@@ -140,5 +147,6 @@ def needs_vlm(obj: UnifiedObject, onto: Ontology, cfg: GateSettings, quality_ok:
     prov = obj.provenance
     class_disagree = any(p.verdict == "overruled" for p in prov.proposals) and len(prov.proposals) > 1
     in_review_band = cfg.review_low <= obj.conf < class_auto_accept(obj.class_id, onto, cfg, fitted)
+    mask_disagree = (prov.mask_agreement is not None and prov.mask_agreement < cfg.mask_agree_min)
     return bool(class_disagree or in_review_band or is_rare(obj.class_id, onto)
-                or prov.mask_box_disagree or not quality_ok)
+                or prov.mask_box_disagree or mask_disagree or not quality_ok)
