@@ -21,6 +21,7 @@ cattle on the carriageway, overloaded two-wheelers, hand carts, potholes.
 | --- | --- | --- |
 | `path_a_detect` | Closed-set detector | `yolo11l.pt` (target YOLO26; weights swap by config) |
 | `path_b_openvocab` | Open-vocabulary + segmentation | YOLO-World + `sam2_b.pt` |
+| _(optional)_ | Mask second opinion | `sam_b.pt`, off by default |
 | `path_c_vlm` | VLM verifier | `qwen2.5vl:7b` via Ollama |
 
 Fused proposals are calibrated with isotonic regression, fit against a judge whose own sensitivity and
@@ -32,6 +33,19 @@ specificity are measured and corrected for. Calibrated confidence then routes ea
     are **configured constants, not measured precision floors.** A per-class fitted operating point replaces
     them where one exists, and the gate logs which it used. The realized precision of the auto-accepted
     subset has not been measured against human verdicts. See [Measurement](MEASUREMENT.md).
+
+!!! note "Two segmenters, optionally"
+    With `seg_verify: true`, SAM 1 is re-prompted with the same box and scores the mask SAM 2 produced. The
+    agreement lands in `Provenance.mask_agreement` and the gate routes anything below 0.80 to review rather
+    than auto-accepting.
+
+    The two agree at a median mask IoU of 0.893 on this corpus, but a fifth fall below 0.8 - concentrated on
+    riders, motorcycles and autorickshaws, where the mask boundary is genuinely ambiguous and which the pack
+    already marks as the one confusion clique crossing a safety boundary.
+
+    It is a score, not a fusion. Combining the two masks would produce a third that no ground truth here can
+    check, and would have replaced the thing a later human pass could have validated. Costs roughly 195ms
+    per masked object on top of 78ms, so it is off by default.
 
 ## Honest numbers
 

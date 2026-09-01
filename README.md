@@ -34,6 +34,7 @@ all work without one; the model paths that need CUDA refuse rather than fabricat
 |---|---|---|
 | `path_a_detect` | Closed-set detector | `yolo11l.pt` (target: YOLO26; weights swap by config) |
 | `path_b_openvocab` | Open-vocabulary + segmentation | YOLO-World + `sam2_b.pt` |
+| _(optional)_ | Mask second opinion | `sam_b.pt`, off by default - see below |
 | `path_c_vlm` | VLM verifier | `qwen2.5vl:7b` via Ollama |
 
 The filenames say what runs today; the identity strings in stored provenance keep their historical
@@ -41,6 +42,13 @@ spellings. Fused proposals are calibrated (isotonic, fit against a judge whose o
 corrected for), then gated: `auto_accept` at 0.45 / safety classes at 0.47 on a calibrated scale.
 **Those thresholds are configured constants, not measured precision floors** - a per-class fit replaces
 them where one exists, and the gate logs which it used.
+
+**Two segmenters, optionally.** With `seg_verify: true`, SAM 1 is re-prompted with the same box and scores
+the mask SAM 2 produced; the agreement lands in provenance and the gate sends anything below 0.80 to review
+instead of auto-accepting. Measured on this corpus the two agree at a median mask IoU of 0.893, but a fifth
+fall below 0.8 and that fifth is concentrated on riders, motorcycles and autorickshaws, where the mask
+boundary is genuinely ambiguous. It is a score, not a fusion - combining the masks would produce a third
+one that no ground truth here can check. Costs about 195ms per masked object, so it is off by default.
 
 ## Honest numbers (2026-08-27)
 
