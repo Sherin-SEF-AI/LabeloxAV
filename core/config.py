@@ -603,6 +603,15 @@ class PacksSettings(BaseModel):
 
 class PathsSettings(BaseModel):
     scratch: str = ".scratch"
+    # Directories the API may read local media from, for assets whose uri is a `file://` path.
+    #
+    # An allowlist rather than "read whatever the row says". `Asset.uri` is caller-supplied: an importer
+    # sets it, and nothing validates it, so an endpoint that opened any path in it would be an arbitrary
+    # file read wearing an asset id. Empty means no local media is served at all, which is the right
+    # default for a deployment whose media lives in object storage.
+    #
+    # Set LBX_PATHS__MEDIA_ROOTS to a comma-separated list of absolute directories.
+    media_roots: list[str] = []
 
 
 # ---- Phase 3 Multi-Sensor and Spatial ----

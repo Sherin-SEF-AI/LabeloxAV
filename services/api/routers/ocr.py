@@ -43,14 +43,21 @@ async def ocr_region(payload: RegionOcrIn) -> dict:
     import cv2
     import numpy as np
 
-    from core.storage import get_object_store
+    from services.assets.media import MediaError, read_asset_bytes
     from services.autolabel.ocr.reader import read_text
 
     if len(payload.bbox) != 4:
         raise HTTPException(400, "bbox must be [x1, y1, x2, y2] in image pixels")
 
+    # Through the shared asset reader rather than straight at object storage. Every asset in this corpus
+    # has a `file://` uri, so the object-store-only version could not read a single document the editor
+    # was showing, and "the page is on screen but the reader cannot open it" is a confusing way to fail.
+    # The reader applies the same media-root allowlist, so this does not become a way to read any file
+    # the API process can: payload.uri is caller-supplied.
     try:
-        raw = get_object_store().get_bytes(payload.uri)
+        raw, _ct = read_asset_bytes(payload.uri)
+    except MediaError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "could not read that image") from exc
     img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)

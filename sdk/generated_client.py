@@ -543,6 +543,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/assets/{asset_id}/annotations",
                           params=None, json_body=body)
 
+    def get_assets_by_asset_id_media(self, asset_id: str) -> Any:
+        """Asset Media"""
+        return self._call("GET", f"/api/assets/{asset_id}/media",
+                          params=None, json_body=None)
+
     def post_assets_by_asset_id_state(self, asset_id: str, state: str) -> Any:
         """Set Asset State"""
         return self._call("POST", f"/api/assets/{asset_id}/state",
@@ -3621,4 +3626,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 707 routes generated from the server schema.
+# 708 routes generated from the server schema.

@@ -6,11 +6,11 @@ job and issue machinery from labelops.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.api.deps import db_session, require_role
+from services.api.deps import current_user, db_session, require_role
 from services.assets import store
 from services.assets.labelconfig import KINDS, ConfigError, PayloadError, validate_config
 
@@ -108,6 +108,43 @@ async def get_asset(asset_id: str, db: AsyncSession = Depends(db_session)):
         return await store.get_asset(db, asset_id)
     except store.AssetError as exc:
         raise HTTPException(404, str(exc)) from None
+
+
+@router.get("/assets/{asset_id}/media", dependencies=[Depends(current_user)])
+async def asset_media(asset_id: str, db: AsyncSession = Depends(db_session)):
+    """The asset's bytes, so the editor has something a browser will actually load.
+
+    The document and audio editors pointed an `<img>`/`<audio>` straight at `Asset.uri`. Every asset in
+    this corpus carries a `file://` uri, and a browser refuses `file://` from an http page, so the whole
+    surface showed nothing: "Not allowed to load local resource". Frames have had a server-side reader
+    since they existed; assets had none.
+
+    A local path is served only from a directory an operator has explicitly allowed, because `Asset.uri`
+    is caller-supplied and an endpoint that opened any path in it would be an arbitrary file read wearing
+    an asset id.
+    """
+    import asyncio
+    from uuid import UUID
+
+    from db.models import Asset
+    from services.assets.media import MediaError, read_asset_bytes
+
+    # The row directly rather than store.get_asset: that also loads every annotation and the project's
+    # label config, none of which this endpoint needs to hand back a JPEG.
+    try:
+        asset = await db.get(Asset, UUID(asset_id))
+    except ValueError:
+        raise HTTPException(404, "not an asset id") from None
+    if asset is None:
+        raise HTTPException(404, "asset not found")
+    try:
+        data, content_type = await asyncio.to_thread(read_asset_bytes, asset.uri or "")
+    except MediaError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    # Cacheable: the bytes behind an asset uri do not change, and the editor re-requests on every open.
+    return Response(content=data, media_type=content_type,
+                    headers={"Cache-Control": "private, max-age=3600",
+                             "ETag": f'W/"{asset_id}-{asset.state}"'})
 
 
 @router.post("/assets/{asset_id}/state")
