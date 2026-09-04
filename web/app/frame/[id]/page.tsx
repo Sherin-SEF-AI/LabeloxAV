@@ -19,6 +19,7 @@ import CanvasMenu from "@/components/editor/CanvasMenu";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
 import { PERSON_17 } from "@/lib/skeleton";
 import BackButton from "@/components/BackButton";
+import PulseDot from "@/components/PulseDot";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { ObjectSourceBadge } from "@/components/SourceBadge";
 import CorrectionModal, { type CorrectionChange } from "@/components/CorrectionModal";
@@ -270,6 +271,32 @@ export default function FrameEditor() {
   // What the guideline check said about this frame, and which rules could not run. Refreshed after every
   // save, because the point of a linter here is to check the edit that was just made.
   const [lint, setLint] = useState<Awaited<ReturnType<typeof api.lintFrame>> | null>(null);
+
+  /**
+   * Whether the GPU is free, so the AI tools can say they are unavailable before a click finds out.
+   *
+   * `/api/gpu/slot` has existed and no client has ever asked it. Until now the only way to learn that a
+   * training job holds the card was to place a SAM point, wait, and read a 503 - which is the same answer
+   * arriving after the work instead of before it.
+   *
+   * Advisory, exactly as the endpoint says: the answer can be stale the instant it returns, so nothing
+   * here decides anything from it. It is a warning, and the tools stay enabled: the lease can be released
+   * between the poll and the click, and disabling a button on stale state is worse than a click that
+   * occasionally fails.
+   */
+  const [gpuFree, setGpuFree] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    const check = () => api.gpuSlot()
+      .then((r) => { if (live) setGpuFree(r.free); })
+      // Quietly: not knowing is a third state, and it renders as no indicator rather than a false alarm.
+      .catch(() => { if (live) setGpuFree(null); });
+    void check();
+    // Slow. This is a background fact that changes when a training run starts or stops, not something to
+    // poll at interaction speed.
+    const t = setInterval(check, 20_000);
+    return () => { live = false; clearInterval(t); };
+  }, []);
 
   // Risk order for this frame: which object is most likely to be wrong, and how much of that is known.
   // Held beside the object list rather than folded into it, because the list is in drawing order.
@@ -1760,6 +1787,18 @@ export default function FrameEditor() {
             blind audit · label from scratch
           </span>
         ) : null}
+        {/* Said before the click, not after it. The AI tools stay enabled: the lease can be released
+            between the poll and the click, and a button disabled on stale state is worse than one that
+            occasionally refuses. */}
+        {gpuFree === false && (
+          <span
+            title={"A training job holds the GPU, so SAM, the magic wand and segmentation will refuse "
+                   + "until it finishes. Boxes, masks drawn by hand and review all work without it."}
+            className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide px-1.5 py-0.5 border border-warn/60 text-warn whitespace-nowrap">
+            <PulseDot tone="warn" size="sm" />
+            gpu busy
+          </span>
+        )}
         <button onClick={() => router.push(`/search?frame=${id}`)} title="find visually similar frames (DINOv3)"
           className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="search" size={16} /></button>
         {/* Label by example, without having to make a mistake first. The correction modal already does

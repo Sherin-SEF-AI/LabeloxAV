@@ -206,12 +206,58 @@ describe("summarizeJobs", () => {
   });
 
   it("an empty or absent frame is empty, not an error", () => {
-    expect(summarizeJobs(null)).toEqual({ running: [], waiting: 0 });
-    expect(summarizeJobs(frame())).toEqual({ running: [], waiting: 0 });
+    expect(summarizeJobs(null)).toEqual({ running: [], waiting: 0, connected: false });
+    expect(summarizeJobs(frame())).toEqual({ running: [], waiting: 0, connected: false });
   });
 });
 
 describe("the summary fan-out", () => {
+  it("tells a summary subscriber when the connection drops", () => {
+    // The reason this exists. A dropped stream sends no frames, so a chip watching only the counts shows
+    // "idle" - identical to a system with nothing to do, and meaning the opposite. The summary callback
+    // used to return early on a null frame, which is exactly when a disconnect arrives, so the one
+    // subscriber that renders a live indicator never heard about it.
+    let got: JobsSummary | null = null;
+    const off = subscribeJobSummary((x) => { got = x; });
+    FakeES.last!.listeners.get("open")?.({} as Event);
+    FakeES.last!.push(frame({ autolabel: [row("a1", "running", 0.4)] }));
+    expect(got!.connected).toBe(true);
+    expect(got!.running).toHaveLength(1);
+
+    FakeES.last!.listeners.get("error")?.({} as Event);
+    expect(got!.connected).toBe(false);
+    // And the counts survive: the last thing the server said is still the last thing it said. Blanking
+    // them would replace one wrong answer with another.
+    expect(got!.running).toHaveLength(1);
+    off();
+  });
+
+  it("tells a summary subscriber the stream is up before the server has said anything", () => {
+    // The case that distinguishes a working implementation from the obvious broken one, and the reason
+    // the first two attempts at this test were worthless.
+    //
+    // On a quiet system the stream connects and no frame follows, because the server pushes on change.
+    // The summary callback used to return early whenever the frame was null - which is every notification
+    // until the first change - so the summary kept its initial `connected: false` and the chip warned
+    // "not receiving updates" about a stream that was perfectly healthy.
+    //
+    // Asserting `false` after a drop cannot catch that: false is also the initial value, so the test
+    // passes whether or not anything was ever told. Watching it go TRUE is what requires the callback to
+    // have run on a null frame.
+    let got: JobsSummary | null = null;
+    const off = subscribeJobSummary((x) => { got = x; });
+    expect(got!.connected).toBe(false);
+
+    FakeES.last!.listeners.get("open")?.({} as Event);
+    expect(got!.connected).toBe(true);
+    expect(got!.running).toHaveLength(0);
+
+    // And back down again, still with no frame in either direction.
+    FakeES.last!.listeners.get("error")?.({} as Event);
+    expect(got!.connected).toBe(false);
+    off();
+  });
+
   it("hands the current summary to a subscriber that attaches between pushes", () => {
     const a = subscribeJobSummary(() => {});
     FakeES.last!.push(frame({ autolabel: [row("a1", "running", 0.4)] }));

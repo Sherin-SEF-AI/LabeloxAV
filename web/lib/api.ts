@@ -530,6 +530,10 @@ export const api = {
       ranking: string[];
       components_available?: string[]; components_missing?: string[]; reason?: string;
     }>(`/api/frames/${frame_id}/risk`),
+  // Whether the local GPU slot is held. Advisory by the endpoint's own docstring: the answer can be stale
+  // the instant it returns, so nothing decides from it - it exists so an annotator can see that SAM will
+  // refuse before spending a click finding out.
+  gpuSlot: () => get<{ free: boolean; cuda: Record<string, unknown>; detail: string }>("/api/gpu/slot"),
   ontology: () => get<Ontology>("/api/ontology"),
   // Attribute sweep: what is unanswered, a page of crops to answer it on, and the write.
   attrCoverage: (session_id?: string) =>
