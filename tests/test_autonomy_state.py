@@ -75,3 +75,39 @@ async def test_a_paused_tick_still_counts_as_a_heartbeat():
         await _tick_row(db, age_seconds=5, decision="tick_paused")
         res = await _daemon_liveness(db)
         assert res["alive"] is True and res["last_status"] == "tick_paused"
+
+
+async def test_a_running_tick_is_alive_not_stale():
+    """The defect this pins was found live: the daemon spent 25 minutes evaluating 13 challengers on
+    the GPU and the page called it 'stale (22m ago)' - the busiest moment read as death. A start
+    marker with no completion yet means mid-tick: alive, and it says so."""
+    from services.api.routers.autonomy import TICK_MAX_SECONDS, _daemon_liveness
+
+    async with get_sessionmaker()() as db:
+        await db.execute(delete(AuditDecision).where(AuditDecision.actor == "controller"))
+        await db.commit()
+        await _tick_row(db, age_seconds=22 * 60, decision="tick_started")
+        res = await _daemon_liveness(db)
+        assert res["alive"] is True, "a long tick in progress is the opposite of a dead daemon"
+        assert "mid-tick" in res["last_status"]
+
+        # but a start that never completes eventually IS death: the daemon died mid-work
+        await db.execute(delete(AuditDecision).where(AuditDecision.actor == "controller"))
+        await db.commit()
+        await _tick_row(db, age_seconds=TICK_MAX_SECONDS + 60, decision="tick_started")
+        dead = await _daemon_liveness(db)
+        assert dead["alive"] is False, "an unfinished start past the bound means it died mid-work"
+
+
+async def test_a_completed_tick_supersedes_its_own_start_marker():
+    """After completion the newest row is 'tick', so the strict two-tick window applies again."""
+    from services.api.routers.autonomy import _daemon_liveness
+
+    async with get_sessionmaker()() as db:
+        await db.execute(delete(AuditDecision).where(AuditDecision.actor == "controller"))
+        await db.commit()
+        await _tick_row(db, age_seconds=300, decision="tick_started")
+        await _tick_row(db, age_seconds=200, decision="tick")
+        res = await _daemon_liveness(db)
+        assert res["alive"] is False and res["last_status"] == "tick", \
+            "the completion marker is newest; 200s of silence after it is two missed ticks"

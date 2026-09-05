@@ -22,6 +22,10 @@ router = APIRouter()
 # not guessed. A dead daemon looks exactly like a healthy idle one on every other surface.
 TICK_SECONDS = 60
 STALE_AFTER_TICKS = 2
+# A tick that is still running has only its start marker, and a full challenger sweep on the GPU
+# can hold a tick open for tens of minutes. Mid-tick is alive up to this bound; past it, a start
+# with no completion is a daemon that died mid-work, which IS stale.
+TICK_MAX_SECONDS = 3600
 
 
 async def _daemon_liveness(db: AsyncSession) -> dict:
@@ -30,12 +34,18 @@ async def _daemon_liveness(db: AsyncSession) -> dict:
     row = (await db.execute(
         select(AuditDecision.decision, AuditDecision.created_at)
         .where(AuditDecision.actor == "controller",
-               AuditDecision.decision.in_(("tick", "tick_paused")))
+               AuditDecision.decision.in_(("tick", "tick_paused", "tick_started")))
         .order_by(AuditDecision.created_at.desc()).limit(1))).first()
     if row is None:
         return {"alive": False, "last_tick_at": None, "seconds_since": None,
                 "detail": "no tick has ever been recorded; the daemon has not run"}
     age = (datetime.now(UTC) - row.created_at).total_seconds()
+    if row.decision == "tick_started":
+        # Newest marker is a start with no completion: the tick is still running. Alive, and SAYS
+        # it is mid-tick, up to the bound past which an unfinished start means it died mid-work.
+        return {"alive": age <= TICK_MAX_SECONDS,
+                "last_tick_at": row.created_at.isoformat(), "seconds_since": round(age),
+                "last_status": f"mid-tick (started {round(age)}s ago)"}
     return {"alive": age <= TICK_SECONDS * STALE_AFTER_TICKS,
             "last_tick_at": row.created_at.isoformat(), "seconds_since": round(age),
             "last_status": row.decision}
