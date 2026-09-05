@@ -180,29 +180,35 @@ def test_governance_end_to_end():
 
 
 @requires_infra
-def test_drift_pause_recovers_but_not_killswitch():
-    """R1.4: a drift-induced soft pause lifts when the breach clears; a non-drift pause does not."""
+def test_drift_recovery_clears_the_pause_but_never_rearms_autonomy():
+    """Found live: one drift-scan click flipped auto_promote_enabled back to True. Under promote-by-
+    approval (migration 0104) the flag's NORMAL state is False, so the old symmetric resume was
+    granting autonomy nobody opted into. Recovery clears the pause reason and tells the operator;
+    the opt-in stays an opt-in - the release() rule, applied to the soft pause."""
     from db.session import get_sessionmaker
     from services.govern import killswitch as K
 
     async def run():
         async with get_sessionmaker()() as db:
             st = await K.get_state(db)
+            prior = st.auto_promote_enabled
             st.loop_enabled, st.auto_promote_enabled = True, False
             st.paused_reason = "drift breach: control_precision=0.5"
             await db.commit()
-            assert await K.resume_auto_promote(db) is True
+            assert await K.resume_auto_promote(db) is True, "the drift pause itself must clear"
             st = await K.get_state(db)
-            assert st.auto_promote_enabled is True and st.paused_reason is None
+            assert st.paused_reason is None
+            assert st.auto_promote_enabled is False, \
+                "recovery must not grant unattended promotion; that is the operator's click"
 
-            # a non-drift pause (operator/kill switch) is never auto-resumed
-            st.loop_enabled, st.auto_promote_enabled = True, False
+            # a non-drift pause (operator/kill switch) is never auto-cleared
             st.paused_reason = "manual operator hold"
             await db.commit()
             assert await K.resume_auto_promote(db) is False
-
             st = await K.get_state(db)
-            st.auto_promote_enabled, st.paused_reason = True, None
+            assert st.paused_reason == "manual operator hold"
+
+            st.auto_promote_enabled, st.paused_reason = prior, None
             await db.commit()
 
     asyncio.run(run())

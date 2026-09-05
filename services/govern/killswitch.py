@@ -83,16 +83,30 @@ async def pause_auto_promote(db: AsyncSession, reason: str) -> None:
 
 
 async def resume_auto_promote(db: AsyncSession) -> bool:
-    """Lift a drift-induced soft pause once the breach clears. Only resumes a pause that drift set (not
-    the kill switch): requires the loop still enabled and a drift paused_reason. Returns True if resumed."""
+    """Clear a drift-induced soft pause once the breach clears - WITHOUT re-arming auto-promotion.
+
+    This used to set auto_promote_enabled back to True, which was symmetric when the flag defaulted
+    on. Under promote-by-approval (migration 0104) the flag's normal state is False, so the old resume
+    GRANTED autonomy nobody opted into: a drift breach paused, the next clean scan "resumed", and the
+    loop was silently promoting on its own - observed live when a single drift-scan click flipped the
+    operator's chosen default. The rule is the release() rule: anything that was an opt-in before the
+    pause stays an opt-in after. An operator who had opted in re-enables with one click; a notification
+    tells them the breach cleared. Returns True if a drift pause was cleared."""
     st = await get_state(db)
-    if not st.loop_enabled or st.auto_promote_enabled:
+    if not st.loop_enabled:
         return False
     if not (st.paused_reason or "").startswith(_DRIFT_PAUSE_PREFIX):
         return False  # paused by something other than drift; leave it to an operator
-    st.auto_promote_enabled = True
     st.paused_reason = None
     await db.commit()
+    from services.notify import notify
+
+    await notify(db, kind="drift_breach", severity="info",
+                 title="drift breach cleared; auto-promotion stays off (opt-in)",
+                 body="The metrics that breached are back inside their bounds. Promotion remains "
+                      "propose-and-approve; re-enable unattended promotion on the govern page if "
+                      "that is what you want.",
+                 href="/govern", subject_type="drift", subject_id="soft-pause")
     return True
 
 
