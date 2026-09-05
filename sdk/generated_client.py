@@ -673,6 +673,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/autolabel/{job_id}",
                           params=None, json_body=None)
 
+    def get_autonomy_state(self) -> Any:
+        """Autonomy State"""
+        return self._call("GET", f"/api/autonomy/state",
+                          params=None, json_body=None)
+
     def post_billing_certify_by_commit_id(self, commit_id: str, eval_id: str, gold_id: str, model_version: str) -> Any:
         """Certify"""
         return self._call("POST", f"/api/billing/certify/{commit_id}",
@@ -3656,4 +3661,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 714 routes generated from the server schema.
+# 715 routes generated from the server schema.

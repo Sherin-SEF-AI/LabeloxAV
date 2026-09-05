@@ -1324,3 +1324,39 @@ export type AgentRunRow = {
   fraction: number | null;
   error?: string | null;
 };
+
+// ---- autonomy (phase 3) ----
+export type LadderRung = {
+  class_name: string; class_id: number; level: number; basis: Record<string, unknown>;
+  set_by: string; pinned: boolean; cooldown_until: string | null; explicit: boolean;
+};
+export type SettlementLotRow = {
+  lot_id: string; class_name: string; epoch: string; tier: string; far_bound: number;
+  population: number; sample_n: number; defects: number; skips: number; topups: number;
+  status: string; decision: Record<string, unknown>; spot_total: number; spot_defects: number;
+  batch_id: string | null; review_at: string | null; created_at: string | null;
+  decided_at: string | null;
+};
+export type AutonomyState = {
+  switches: {
+    loop_enabled: boolean; auto_accept_enabled: boolean; auto_promote_enabled: boolean;
+    settlement_enabled: boolean; paused_reason: string | null; champion_version: string | null;
+  };
+  daemon: { alive: boolean; last_tick_at: string | null; seconds_since: number | null;
+            last_status?: string; detail?: string };
+  ladder: LadderRung[];
+  measurements: {
+    control_precision: { reviewed: number; incorrect: number; precision: number | null;
+                         pending: number; measured_at: string | null;
+                         interval: { p: number | null; lo: number; hi: number } };
+    class_precision: { class_name: string; measured_at: string; age_days: number;
+                       verdicts: number }[];
+    judge_calibration: { measured_at: string | null; verdicts: number; age_days: number | null };
+    active_fitted_thresholds: number;
+  };
+  settlement: { lots_by_status: Record<string, number>; settled_objects: number;
+                settlement_runs: Record<string, number>; revert_rate: number | null };
+  last_digest: { run_id: string; status: string; created_at: string | null;
+                 report: Record<string, unknown> } | null;
+  journal: { kind: string; status: string; created_at: string | null; run_id: string }[];
+};

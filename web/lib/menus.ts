@@ -163,6 +163,8 @@ export const MENUS: Menu[] = [
         separatorBefore: true, hint: "training jobs and model registry" },
       { key: "govern", label: "Govern", icon: "flag", href: "/govern",
         hint: "loop control, champion gate, kill switch" },
+      { key: "autonomy", label: "Autonomy", icon: "activity", href: "/autonomy",
+        hint: "what the machine may do right now, per class, and why" },
       { key: "campaigns", label: "Campaigns", icon: "target", href: "/campaigns",
         hint: "the improvement loop, run by the system" },
       { key: "lineage", label: "Lineage", icon: "route", href: "/lineage",

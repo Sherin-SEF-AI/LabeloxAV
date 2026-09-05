@@ -388,16 +388,9 @@ async def settlement_revert(lot_id: str, reason: str = "manual revert",
 @router.get("/govern/autonomy/ladder", dependencies=[Depends(require_role("annotator"))])
 async def autonomy_ladder(db: AsyncSession = Depends(db_session)):
     """Every class's effective level with its basis - the Autonomy page's backbone."""
-    from services.autolabel.ontology import get_ontology
-    from services.govern.class_autonomy import effective_level
+    from services.govern.class_autonomy import ladder_snapshot
 
-    onto = get_ontology()
-    out = []
-    for cls in onto.classes:
-        lvl = await effective_level(db, cls.id)
-        out.append({"class_name": cls.name, **lvl})
-    out.sort(key=lambda r: (-r["level"], r["class_name"]))
-    return out
+    return await ladder_snapshot(db)
 
 
 @router.post("/govern/autonomy/{class_name}/level", dependencies=[Depends(require_role("reviewer"))])

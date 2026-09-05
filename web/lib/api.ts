@@ -1,4 +1,6 @@
 import type {
+  AutonomyState,
+  SettlementLotRow,
   AttrCoverage,
   AttrQueue,
   TrackEvent,
@@ -609,6 +611,15 @@ export const api = {
   governPromote: (v: string) => post(`/api/govern/promote?model_version=${v}`, {}),
   governKill: (reason: string) => post("/api/govern/killswitch/engage", { reason }),
   governRelease: () => post("/api/govern/killswitch/release", {}),
+  // Autonomy: the ladder, the switches, staleness, the night's journal - one read
+  autonomyState: () => get<AutonomyState>("/api/autonomy/state"),
+  settlementLots: (status?: string) =>
+    get<SettlementLotRow[]>(`/api/govern/settlement/lots${status ? `?status=${status}` : ""}`),
+  settlementAck: (lotId: string) => post(`/api/govern/settlement/${lotId}/ack`, {}),
+  settlementRevert: (lotId: string, reason: string) =>
+    post(`/api/govern/settlement/${lotId}/revert?reason=${encodeURIComponent(reason)}`, {}),
+  autonomySetLevel: (className: string, level: number, pinned = false) =>
+    post(`/api/govern/autonomy/${className}/level?level=${level}&pinned=${pinned}`, {}),
   // M4.3 collaboration
   collabBranches: () => get<{ branches: string[] }>("/api/collaborate/branches"),
   collabAssignments: () => get<AssignmentRow[]>("/api/collaborate/assignments"),

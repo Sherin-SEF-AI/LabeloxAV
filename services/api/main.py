@@ -24,6 +24,7 @@ from services.api.routers import (
     assets,
     attrsweep,
     autolabel,
+    autonomy,
     billing,
     calibration,
     campaigns,
@@ -623,6 +624,7 @@ app.include_router(errordetect.router, prefix="/api", tags=["errordetect"])
 app.include_router(relabel.router, prefix="/api", tags=["relabel"])
 app.include_router(collaborate.router, prefix="/api", tags=["collaborate"])
 app.include_router(govern.router, prefix="/api", tags=["govern"])
+app.include_router(autonomy.router, prefix="/api", tags=["autonomy"])
 app.include_router(service_accounts.router, prefix="/api", tags=["service-accounts"])
 app.include_router(multicam.router, prefix="/api", tags=["multicam"])
 app.include_router(mapassist.router, prefix="/api", tags=["mapassist"])

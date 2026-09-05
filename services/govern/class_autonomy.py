@@ -137,3 +137,44 @@ async def on_champion_change(db: AsyncSession, new_champion: str) -> dict:
     if dropped:
         log.info("class_autonomy.champion_change", dropped=dropped, champion=new_champion)
     return {"dropped_to_l1": dropped}
+
+
+async def ladder_snapshot(db: AsyncSession) -> list[dict]:
+    """Every class's effective level in three queries, for surfaces that show the whole ladder.
+
+    `effective_level` is the per-class truth; calling it 170 times per page load is 340 round trips.
+    Same semantics, assembled in bulk: explicit active rows win, then the computed default (L1 where
+    the champion carries a measured active threshold for the class, else L0).
+    """
+    from services.autolabel.ontology import get_ontology
+    from services.govern.registry import get_champion
+    from services.oraclyx.threshold_fit import active_thresholds
+
+    onto = get_ontology()
+    rows = (await db.execute(select(ClassAutonomy).where(
+        ClassAutonomy.active.is_(True)))).scalars().all()
+    explicit = {r.class_id: r for r in rows}
+
+    champ = await get_champion(db, "detection")
+    fitted: dict = {}
+    if champ is not None:
+        fitted = (await active_thresholds(db, champ.model_version)).get("by_class") or {}
+
+    out = []
+    for cls in onto.classes:
+        row = explicit.get(cls.id)
+        if row is not None:
+            out.append({"class_name": cls.name, "class_id": cls.id, "level": int(row.level),
+                        "basis": row.basis or {}, "set_by": row.set_by, "pinned": bool(row.pinned),
+                        "cooldown_until": (row.cooldown_until.isoformat()
+                                           if row.cooldown_until else None),
+                        "explicit": True})
+        else:
+            lvl = 1 if cls.id in fitted else 0
+            out.append({"class_name": cls.name, "class_id": cls.id, "level": lvl,
+                        "basis": ({"reason": "champion carries a measured active threshold"}
+                                  if lvl else {"reason": "no measured threshold; propose-only"}),
+                        "set_by": "computed_default", "pinned": False, "cooldown_until": None,
+                        "explicit": False})
+    out.sort(key=lambda r: (-r["level"], r["class_name"]))
+    return out
