@@ -4,7 +4,7 @@ drift scan, the controller tick, the kill switch, and the audit log."""
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -295,3 +295,124 @@ async def killswitch_release(db: AsyncSession = Depends(db_session)):
 @router.get("/govern/audit")
 async def audit(actor: str | None = None, limit: int = 100, db: AsyncSession = Depends(db_session)):
     return await list_audit(db, actor, limit)
+
+
+# ---- settlement ----
+# Reading is annotator-level (the Autonomy page shows it to everyone who labels); every write is a
+# governance act behind reviewer. The two clicks that exist by design - the safety-tier first-lot ack
+# and the killswitch-era revert - live here, next to the switches they answer to.
+@router.get("/govern/settlement/lots", dependencies=[Depends(require_role("annotator"))])
+async def settlement_lots(status: str | None = None, limit: int = 50,
+                          db: AsyncSession = Depends(db_session)):
+    from sqlalchemy import select
+
+    from db.models import SettlementLot
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
+    q = select(SettlementLot).order_by(SettlementLot.created_at.desc()).limit(max(1, min(limit, 200)))
+    if status:
+        q = q.where(SettlementLot.status == status)
+    rows = (await db.execute(q)).scalars().all()
+    return [{"lot_id": str(lo.lot_id), "class_name": onto.by_id(lo.class_id).name,
+             "epoch": lo.model_epoch, "tier": lo.tier, "far_bound": lo.far_bound,
+             "population": lo.population, "sample_n": lo.sample_n, "defects": lo.defects,
+             "skips": lo.skips, "topups": lo.topups, "status": lo.status,
+             "decision": lo.decision or {}, "spot_total": lo.spot_total,
+             "spot_defects": lo.spot_defects, "batch_id": lo.batch_id,
+             "review_at": f"/review/grid?flywheel={lo.batch_id}&states=review" if lo.batch_id else None,
+             "created_at": lo.created_at.isoformat() if lo.created_at else None,
+             "decided_at": lo.decided_at.isoformat() if lo.decided_at else None}
+            for lo in rows]
+
+
+@router.post("/govern/settlement/plan", dependencies=[Depends(require_role("reviewer"))])
+async def settlement_plan(class_name: str, epoch: str | None = None,
+                          db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Plan a lot by hand. Evidence collection needs no autonomy - a lot can be built and judged at
+    any ladder level; only the settle write is gated."""
+    from services.labelops.settlement import plan_lot
+
+    res = await plan_lot(db, class_name, epoch=epoch,
+                         created_by=(user.name if user else "reviewer"))
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@router.post("/govern/settlement/{lot_id}/ack", dependencies=[Depends(require_role("reviewer"))])
+async def settlement_ack(lot_id: str, db: AsyncSession = Depends(db_session),
+                         user=Depends(current_user)):
+    """The safety-tier one-click: a person acks the FIRST lot of a safety class per epoch, and the
+    nightly agent settles it on its next pass. Recorded on the lot's decision, with the name."""
+    from db.models import SettlementLot
+
+    lot = await db.get(SettlementLot, uuid.UUID(lot_id))
+    if lot is None:
+        raise HTTPException(404, "lot not found")
+    if lot.status != "accepted":
+        raise HTTPException(400, f"only an accepted lot takes an ack; this one is {lot.status}")
+    lot.decision = {**(lot.decision or {}), "human_ack": True,
+                    "acked_by": user.name if user else "reviewer",
+                    "acked_at": datetime.now(UTC).isoformat()}
+    await db.commit()
+    from services.govern.audit import record
+
+    await record(db, "settlement", "ack", lot_id,
+                 {"acked_by": user.name if user else "reviewer", "tier": lot.tier})
+    return {"lot_id": lot_id, "acked": True}
+
+
+@router.post("/govern/settlement/{lot_id}/revert", dependencies=[Depends(require_role("reviewer"))])
+async def settlement_revert(lot_id: str, reason: str = "manual revert",
+                            db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """The other one-click: undo a settled lot. Also the answer to a spot-check breach found while the
+    kill switch was engaged. A manual revert steps the class 2 -> 1 (a person doubting a lot is a
+    signal, softer than a measured breach)."""
+    from db.models import SettlementLot
+    from services.govern.class_autonomy import step_down
+    from services.labelops.settlement import revert_lot
+
+    lot = await db.get(SettlementLot, uuid.UUID(lot_id))
+    if lot is None:
+        raise HTTPException(404, "lot not found")
+    who = user.name if user else "reviewer"
+    res = await revert_lot(db, lot_id, reason=f"{reason} (by {who})")
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    res["ladder"] = await step_down(db, lot.class_id, 1,
+                                    reason=f"manual revert of lot {lot_id}", set_by=f"human:{who}")
+    return res
+
+
+@router.get("/govern/autonomy/ladder", dependencies=[Depends(require_role("annotator"))])
+async def autonomy_ladder(db: AsyncSession = Depends(db_session)):
+    """Every class's effective level with its basis - the Autonomy page's backbone."""
+    from services.autolabel.ontology import get_ontology
+    from services.govern.class_autonomy import effective_level
+
+    onto = get_ontology()
+    out = []
+    for cls in onto.classes:
+        lvl = await effective_level(db, cls.id)
+        out.append({"class_name": cls.name, **lvl})
+    out.sort(key=lambda r: (-r["level"], r["class_name"]))
+    return out
+
+
+@router.post("/govern/autonomy/{class_name}/level", dependencies=[Depends(require_role("reviewer"))])
+async def autonomy_set_level(class_name: str, level: int, pinned: bool = False,
+                             db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """A person sets a class's rung directly. Pinning caps machine promotion at this level."""
+    from services.autolabel.ontology import get_ontology
+    from services.govern.class_autonomy import set_level
+
+    onto = get_ontology()
+    if not onto.has_name(class_name):
+        raise HTTPException(400, f"unknown class '{class_name}'")
+    who = user.name if user else "reviewer"
+    res = await set_level(db, onto.by_name(class_name).id, level, set_by=f"human:{who}",
+                          basis={"reason": "set by hand"}, pinned=pinned)
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res

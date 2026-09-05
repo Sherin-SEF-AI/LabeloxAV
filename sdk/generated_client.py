@@ -1603,6 +1603,16 @@ class LabeloxClient:
         return self._call("GET", f"/api/govern/audit",
                           params={"actor": actor, "limit": limit}, json_body=None)
 
+    def get_govern_autonomy_ladder(self) -> Any:
+        """Autonomy Ladder"""
+        return self._call("GET", f"/api/govern/autonomy/ladder",
+                          params=None, json_body=None)
+
+    def post_govern_autonomy_by_class_name_level(self, class_name: str, level: int, pinned: bool | None = False) -> Any:
+        """Autonomy Set Level"""
+        return self._call("POST", f"/api/govern/autonomy/{class_name}/level",
+                          params={"level": level, "pinned": pinned}, json_body=None)
+
     def post_govern_consent(self, body: Any = None) -> Any:
         """Consent"""
         return self._call("POST", f"/api/govern/consent",
@@ -1712,6 +1722,26 @@ class LabeloxClient:
         """Retention Sweep"""
         return self._call("POST", f"/api/govern/retention/sweep",
                           params=None, json_body=body)
+
+    def get_govern_settlement_lots(self, status: Any | None = None, limit: int | None = 50) -> Any:
+        """Settlement Lots"""
+        return self._call("GET", f"/api/govern/settlement/lots",
+                          params={"status": status, "limit": limit}, json_body=None)
+
+    def post_govern_settlement_plan(self, class_name: str, epoch: Any | None = None) -> Any:
+        """Settlement Plan"""
+        return self._call("POST", f"/api/govern/settlement/plan",
+                          params={"class_name": class_name, "epoch": epoch}, json_body=None)
+
+    def post_govern_settlement_by_lot_id_ack(self, lot_id: str) -> Any:
+        """Settlement Ack"""
+        return self._call("POST", f"/api/govern/settlement/{lot_id}/ack",
+                          params=None, json_body=None)
+
+    def post_govern_settlement_by_lot_id_revert(self, lot_id: str, reason: str | None = 'manual revert') -> Any:
+        """Settlement Revert"""
+        return self._call("POST", f"/api/govern/settlement/{lot_id}/revert",
+                          params={"reason": reason}, json_body=None)
 
     def get_govern_state(self) -> Any:
         """State"""
@@ -3626,4 +3656,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 708 routes generated from the server schema.
+# 714 routes generated from the server schema.

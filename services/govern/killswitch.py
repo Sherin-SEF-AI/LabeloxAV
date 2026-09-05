@@ -41,6 +41,9 @@ async def engage(db: AsyncSession, reason: str, task: str = "detection") -> dict
     st.loop_enabled = False
     st.auto_accept_enabled = False
     st.auto_promote_enabled = False
+    # Settlement stops with everything else, including its own nightly auto-revert: a person who pulled
+    # the cord gets no surprise writes in either direction, only one-click proposals.
+    st.settlement_enabled = False
     st.paused_reason = reason
     await db.commit()
     rollback = await rollback_to_last_champion(db, task)
@@ -50,10 +53,18 @@ async def engage(db: AsyncSession, reason: str, task: str = "detection") -> dict
 
 
 async def release(db: AsyncSession) -> dict:
+    """Resume the loop. Deliberately NOT symmetric with engage.
+
+    Releasing restores the loop and the auto-accept gate, and nothing else. `auto_promote_enabled`
+    defaults to False under promote-by-approval (migration 0104) and is an explicit opt-in; a release
+    that set it True would resurrect full autonomous promotion as a side effect of clearing an
+    unrelated emergency, which is precisely the kind of silent re-arming a kill switch must not do.
+    The same holds for `settlement_enabled` once it exists: anything that was an opt-in before the
+    cord was pulled stays an opt-in after.
+    """
     st = await get_state(db)
     st.loop_enabled = True
     st.auto_accept_enabled = True
-    st.auto_promote_enabled = True
     st.paused_reason = None
     await db.commit()
     await record(db, "killswitch", "release", None, {})

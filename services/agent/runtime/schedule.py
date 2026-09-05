@@ -45,6 +45,18 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
     except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
         log.error("schedule.campaign_tick_failed", error=str(exc))
 
+    # settlement lifecycle, the cheap half: tally judging lots as verdicts arrive, settle accepted
+    # ones the guards allow. Inline (no worker): a tally is a handful of reads and settle_lot commits
+    # chunk by chunk itself.
+    try:
+        from services.govern.settlement_agent import maybe_tally_and_settle
+
+        ts = await maybe_tally_and_settle(db)
+        if ts.get("ran"):
+            actions.append({"action": "settlement_tick", "lots": ts.get("actions")})
+    except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+        log.error("schedule.settlement_tick_failed", error=str(exc))
+
     # nightly rebuild of the class-compatibility matrix. It is a corpus-wide aggregate over
     # human-confirmed co-occurrence, so it moves only when somebody labels, and reading it per frame would
     # be a full-corpus scan on the labelling hot path. Off-hours because it walks every human object.
@@ -154,6 +166,20 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
                     actions.append({"action": label, "run_id": m.get("run_id")})
         except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
             log.error("schedule.measurement_failed", error=str(exc))
+
+    # settlement lifecycle, the nightly half: plan one lot for the best-ranked eligible class, and run
+    # the reverse acceptance decision over every settled lot's spot verdicts (the one automatic revert).
+    if offhours:
+        try:
+            from services.govern.settlement_agent import maybe_build_lots, maybe_spot_check
+
+            for fn, label in ((maybe_build_lots, "settlement_build"),
+                              (maybe_spot_check, "settlement_spot_check")):
+                sres = await fn(db)
+                if sres.get("ran"):
+                    actions.append({"action": label, "run_id": sres.get("run_id")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.settlement_nightly_failed", error=str(exc))
 
     # yardstick upkeep: reseal rotted gold sets (weekly), keep unfinished blind audits visible (daily).
     if offhours:

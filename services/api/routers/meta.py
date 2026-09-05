@@ -270,7 +270,8 @@ async def session_stats(session_id: uuid.UUID, db: AsyncSession = Depends(db_ses
         .where(Frame.session_id == session_id).group_by(Object.state))).all()
     by_state = {k: int(v) for k, v in rows}
     objects = sum(by_state.values())
-    done = by_state.get("auto_accept", 0) + by_state.get("accepted", 0)
+    done = (by_state.get("auto_accept", 0) + by_state.get("accepted", 0)
+            + by_state.get("settled", 0))
     return {"session_id": str(session_id), "frames": int(frames), "objects": objects,
             "by_state": by_state, "done": done,
             "progress": round(done / objects, 3) if objects else 0.0}

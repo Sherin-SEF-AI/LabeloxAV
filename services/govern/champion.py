@@ -315,6 +315,15 @@ async def _evaluate_and_promote_locked(db, reg, challenger_version, task, cfg, o
         await db.commit()
         await record(db, "champion", "promote", challenger_version,
                      {"gate": gate, "promoted_from": prev, "approved_by": approved_by})
+        # Settlement autonomy is evidence about an epoch, and the epoch just changed: every class at
+        # L2 drops to L1 until a lot passes under the new champion. Best-effort - a promotion must
+        # never fail over ladder bookkeeping - but a failure here is logged, not swallowed silently.
+        try:
+            from services.govern.class_autonomy import on_champion_change
+
+            await on_champion_change(db, challenger_version)
+        except Exception as exc:  # noqa: BLE001
+            log.error("govern.champion_change_ladder_failed", error=str(exc))
         log.info("govern.promote", challenger=challenger_version, promoted_from=prev)
         from services.integrations.webhooks import emit
 

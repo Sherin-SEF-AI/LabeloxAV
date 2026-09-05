@@ -533,10 +533,12 @@ async def lint_frame_ep(frame_id: str, payload: LintIn | None = None,
     return res
 
 
-# States that mean a person has dealt with the object, which is what "is this frame finished" asks. A
-# rejection is as settled as an acceptance. auto_accept is deliberately not here: it is the machine's
-# opinion, and counting it would draw a strip of finished frames nobody has looked at.
-_SETTLED_STATES = ("accepted", "rejected")
+# States that mean the object is dealt with, which is what "is this frame finished" asks. A rejection
+# is as settled as an acceptance, and 'settled' is a closure backed by a passed acceptance lot - the
+# strip asks "does anyone still need to look?", and for a settled object the answer is no unless a spot
+# check reopens it. auto_accept is deliberately not here: it is the machine's opinion with no lot
+# behind it, and counting it would draw a strip of finished frames nobody has vouched for.
+_SETTLED_STATES = ("accepted", "rejected", "settled")
 
 
 @router.get("/frames/{frame_id}/filmstrip")
