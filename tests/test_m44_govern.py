@@ -206,3 +206,85 @@ def test_drift_pause_recovers_but_not_killswitch():
             await db.commit()
 
     asyncio.run(run())
+
+
+@requires_infra
+def test_promote_by_approval_files_a_proposal_and_a_human_click_still_promotes():
+    """User decision (2026-09-01): the loop retrains and gates, a person promotes.
+
+    Two halves, both of which were silently wrong before. With auto-promotion off, a gate-PASSING
+    challenger used to record `promotion_paused` and tell nobody - the loop's quietest stall, since
+    the propose-and-approve default makes it the NORMAL path. And the human promote endpoint called
+    the same function, so with the flag off a person could not promote at all: the "human promotes"
+    policy had no working promote.
+
+    Asserted here: (1) flag off + gate pass -> not promoted, awaiting_approval, and a superseding
+    `promotion_ready` notification exists for the challenger; (2) the same call WITH `approved_by`
+    promotes; (3) approval never bypasses the gate - an unsafe challenger stays refused even when
+    approved.
+    """
+    from sqlalchemy import delete as _delete
+    from sqlalchemy import select
+
+    from db.models import ModelRegistry, Notification
+    from db.session import get_sessionmaker
+    from services.govern import killswitch as K
+    from services.govern.champion import evaluate_and_promote
+    from services.govern.registry import register
+
+    tag = uuid.uuid4().hex[:6]
+    task = f"det-appr-{tag}"
+    v_champ, v_good, v_unsafe = f"m-champ-{tag}", f"m-good-{tag}", f"m-unsafe-{tag}"
+    good = {"map": 0.74, "safe_miou": 0.91, "per_class": {"pedestrian": 0.82, "child": 0.79, "motorcycle": 0.70},
+            "per_class_recall": {"pedestrian": 0.82, "child": 0.79, "motorcycle": 0.70}}
+    unsafe = {"map": 0.80, "safe_miou": 0.91, "per_class": {"pedestrian": 0.50, "child": 0.79, "motorcycle": 0.95},
+              "per_class_recall": {"pedestrian": 0.79, "child": 0.79, "motorcycle": 0.95}}
+
+    async def run():
+        maker = get_sessionmaker()
+        async with maker() as db:
+            st = await K.get_state(db)
+            prior = st.auto_promote_enabled
+            st.loop_enabled, st.auto_promote_enabled, st.paused_reason = True, True, None
+            await db.commit()
+            try:
+                # seat a champion first (flag on so the seating itself is unattended, as before the change)
+                await register(db, v_champ, task, CHAMP)
+                assert (await evaluate_and_promote(db, v_champ, task))["promoted"] is True
+
+                # the new default: flag off
+                st = await K.get_state(db)
+                st.auto_promote_enabled = False
+                await db.commit()
+
+                # (1) gate pass with the flag off: paused, awaiting approval, and somebody is told
+                await register(db, v_good, task, good)
+                r = await evaluate_and_promote(db, v_good, task)
+                assert r["promoted"] is False and r.get("awaiting_approval") is True
+                note = (await db.execute(select(Notification).where(
+                    Notification.kind == "promotion_ready",
+                    Notification.subject_id == v_good))).scalars().first()
+                assert note is not None, "a passing challenger under promote-by-approval must notify a person"
+                assert note.href == "/govern"
+
+                # (2) the same challenger, approved by a person: promotes despite the flag
+                r2 = await evaluate_and_promote(db, v_good, task, approved_by="test-reviewer")
+                assert r2["promoted"] is True and r2["promoted_from"] == v_champ
+
+                # (3) approval is not a gate bypass: an unsafe challenger stays refused even when approved
+                await register(db, v_unsafe, task, unsafe)
+                r3 = await evaluate_and_promote(db, v_unsafe, task, approved_by="test-reviewer")
+                assert r3["promoted"] is False and "pedestrian" in r3["gate"]["regressed_safety"]
+            finally:
+                # cleanup: this test's registry rows and notifications; restore the singleton
+                for v in (v_champ, v_good, v_unsafe):
+                    reg = await db.get(ModelRegistry, v)
+                    if reg:
+                        await db.delete(reg)
+                await db.execute(_delete(Notification).where(Notification.subject_id.in_(
+                    [v_champ, v_good, v_unsafe])))
+                st = await K.get_state(db)
+                st.auto_promote_enabled, st.champion_version = prior, None
+                await db.commit()
+
+    asyncio.run(run())

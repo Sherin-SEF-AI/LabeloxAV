@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.api.deps import db_session, require_role
+from services.api.deps import current_user, db_session, require_role
 from services.govern import killswitch as K
 from services.govern.audit import list_audit
 from services.govern.champion import evaluate_and_promote
@@ -166,7 +166,8 @@ async def registry_list(task: str | None = None, db: AsyncSession = Depends(db_s
 
 
 @router.post("/govern/promote")
-async def promote(model_version: str, task: str = "detection", db: AsyncSession = Depends(db_session)):
+async def promote(model_version: str, task: str = "detection", db: AsyncSession = Depends(db_session),
+                  user=Depends(current_user)):
     """Attempt a promotion, and tell somebody how it went.
 
     A blocked promotion was the loop's quietest failure: the gate refused, the reason was recorded, and
@@ -174,7 +175,10 @@ async def promote(model_version: str, task: str = "detection", db: AsyncSession 
     """
     from services.notify import notify
 
-    result = await evaluate_and_promote(db, model_version, task)
+    # This endpoint IS the approval: a person asking for the promotion. It bypasses the unattended-
+    # promotion flag (that flag governs the loop, not people) and can never bypass the gate.
+    result = await evaluate_and_promote(db, model_version, task,
+                                        approved_by=(user.name if user else "anonymous"))
     promoted = bool(result.get("promoted"))
     await notify(
         db, kind="model_promoted" if promoted else "promotion_blocked",

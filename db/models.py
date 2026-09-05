@@ -1948,7 +1948,9 @@ class GovernanceState(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     loop_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_accept_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    auto_promote_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Default False: promotion is propose-and-approve. The loop retrains, gates, and files a ready-to-
+    # promote notification; a person clicks promote. True is the documented opt-in to full closure.
+    auto_promote_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     champion_version: Mapped[str | None] = mapped_column(String(128))
     paused_reason: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

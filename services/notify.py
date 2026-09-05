@@ -42,6 +42,8 @@ KINDS: dict[str, str] = {
     "job_finished": "annotator",
     "job_failed": "annotator",
     "promotion_blocked": "reviewer",
+    "promotion_ready": "reviewer",
+    "nightly_digest": "reviewer",
     "model_promoted": "reviewer",
     "kill_switch": "admin",
     "drift_breach": "reviewer",

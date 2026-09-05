@@ -32,6 +32,19 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
     except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
         log.error("schedule.embed_daemon_failed", error=str(exc))
 
+    # standing campaigns: advance each one by at most one stage per tick. The state machine self-guards
+    # (waits on humans at the label stage, on the GPU lease at train, on approvals unless a stage is on
+    # autopilot), so ticking is cheap when nothing can move and this is what makes campaigns autonomous
+    # rather than autonomous-while-watched.
+    try:
+        from services.flywheel.campaign import maybe_tick_campaigns
+
+        t = await maybe_tick_campaigns(db)
+        if t.get("ran"):
+            actions.append({"action": "campaign_tick", "ticked": t.get("ticked")})
+    except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+        log.error("schedule.campaign_tick_failed", error=str(exc))
+
     # nightly rebuild of the class-compatibility matrix. It is a corpus-wide aggregate over
     # human-confirmed co-occurrence, so it moves only when somebody labels, and reading it per frame would
     # be a full-corpus scan on the labelling hot path. Off-hours because it walks every human object.
@@ -60,6 +73,33 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
                                 "remaining": r.get("remaining")})
         except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
             log.error("schedule.rarity_sweep_failed", error=str(exc))
+
+    # a blocked promotion fires its own unblock attempt: VLM re-review of the starved classes first
+    # (free, revertible), then a gate-directed review batch for the remaining deficit, then a
+    # notification. Once per blocked run - a retrain moves the deficit, not a second scan of the pool.
+    if offhours:
+        try:
+            from services.agent.gate_unblock import maybe_unblock_gate
+
+            u = await maybe_unblock_gate(db)
+            if u.get("ran"):
+                actions.append({"action": "gate_unblock", "run_id": u.get("run_id"),
+                                "target_run": u.get("target_run")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.gate_unblock_failed", error=str(exc))
+
+    # nightly champion-degradation check against the sealed gold sets. This existed behind a button
+    # (POST /api/agent/gold-drift) since the daemon work; a safety check that runs only when somebody
+    # remembers to press it is a dashboard, not a check. Its rollback remedy is check_gold_drift's own.
+    if offhours:
+        try:
+            from services.agent.training_daemon import maybe_check_gold_drift
+
+            g = await maybe_check_gold_drift(db)
+            if g.get("ran"):
+                actions.append({"action": "gold_drift_check", "run_id": g.get("run_id")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.gold_drift_failed", error=str(exc))
 
     # nightly patrol of the day's auto-accepts
     if offhours:
@@ -95,5 +135,21 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
                 actions.append({"action": "drift_investigation", "run_id": d.get("run_id")})
         except Exception as exc:  # noqa: BLE001
             log.error("schedule.drift_investigator_failed", error=str(exc))
+
+    # the morning digest and the weekly report, last on purpose: the digest declines to send while any
+    # agent run is still in flight, so putting it after every launcher gives tonight's agents their turn
+    # before the first attempt rather than always deferring to tomorrow.
+    if offhours:
+        try:
+            from services.agent.digest import maybe_send_digest, maybe_weekly_report
+
+            w = await maybe_weekly_report(db)
+            if w.get("ran"):
+                actions.append({"action": "weekly_report", "run_id": w.get("run_id")})
+            g2 = await maybe_send_digest(db)
+            if g2.get("ran"):
+                actions.append({"action": "nightly_digest", "run_id": g2.get("run_id")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.digest_failed", error=str(exc))
 
     return actions

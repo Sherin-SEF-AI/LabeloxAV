@@ -246,7 +246,20 @@ async def _attach_recapture(db, metrics: dict, gold_id: str | None) -> dict:
     return {**metrics, "recapture": est} if est is not None else metrics
 
 
-async def evaluate_and_promote(db: AsyncSession, challenger_version: str, task: str = "detection") -> dict:
+async def evaluate_and_promote(db: AsyncSession, challenger_version: str, task: str = "detection",
+                               *, approved_by: str | None = None) -> dict:
+    """Gate the challenger, and promote it only if the gate passes AND somebody may promote.
+
+    `approved_by` is a person's explicit approval. It bypasses `auto_promote_enabled` - that flag decides
+    whether the LOOP may promote unattended, and a human clicking promote is the opposite of unattended -
+    but it never bypasses the gate itself. There is no path, human or machine, past a failing gate.
+
+    Without approval and with the flag off, a passing challenger becomes a standing "ready to promote"
+    notification rather than a silent paused audit row. That branch used to record `promotion_paused` and
+    tell nobody, which under a promote-by-approval policy is the loop's quietest possible stall: the
+    champion the whole flywheel worked towards sits ready, and the person whose click it awaits has to
+    go looking.
+    """
     from sqlalchemy.exc import IntegrityError
 
     cfg = get_settings().phase4.govern
@@ -259,7 +272,8 @@ async def evaluate_and_promote(db: AsyncSession, challenger_version: str, task: 
     # champion for the same task impossible: the loser's commit raises IntegrityError instead of silently
     # creating split-brain. Catch it and report a lost race rather than surfacing a 500.
     try:
-        return await _evaluate_and_promote_locked(db, reg, challenger_version, task, cfg, onto)
+        return await _evaluate_and_promote_locked(db, reg, challenger_version, task, cfg, onto,
+                                                  approved_by=approved_by)
     except IntegrityError:
         await db.rollback()
         log.info("govern.promotion_race_lost", challenger=challenger_version, task=task)
@@ -267,24 +281,40 @@ async def evaluate_and_promote(db: AsyncSession, challenger_version: str, task: 
                 "reason": "another promotion for this task committed first"}
 
 
-async def _evaluate_and_promote_locked(db, reg, challenger_version, task, cfg, onto) -> dict:
+async def _evaluate_and_promote_locked(db, reg, challenger_version, task, cfg, onto,
+                                       *, approved_by: str | None = None) -> dict:
     champ = await get_champion(db, task)
     chal_metrics, champ_metrics, basis = await _common_gold_metrics(db, reg, champ, task)
     gate = champion_gate(chal_metrics, champ_metrics, onto, cfg)
     gate["comparison_basis"] = basis
 
     state = await get_state(db)
-    if gate["promote"] and not state.auto_promote_enabled:
+    if gate["promote"] and not state.auto_promote_enabled and approved_by is None:
         await record(db, "champion", "promotion_paused", challenger_version,
                      {"gate": gate, "paused_reason": state.paused_reason})
-        return {"promoted": False, "paused": True, "gate": gate, "reason": state.paused_reason}
+        # A standing, superseding notification, because this is now the NORMAL path: promotion defaults
+        # to propose-and-approve, so "gate passed, awaiting a person" must reach the person rather than
+        # sit in the audit trail. Superseded per challenger, so re-evaluation every tick stays one line.
+        from services.notify import notify
+
+        await notify(db, kind="promotion_ready", severity="info",
+                     title=f"{task} model {challenger_version} passed the gate and awaits approval",
+                     body=(state.paused_reason or
+                           "Auto-promotion is off (promote-by-approval). Review the gate report and "
+                           "approve from the governance page."),
+                     href="/govern", subject_type="model", subject_id=challenger_version,
+                     meta={"task": task, "gate": {k: gate[k] for k in ("promote", "reasons")
+                                                  if k in gate}})
+        return {"promoted": False, "paused": True, "awaiting_approval": True, "gate": gate,
+                "reason": state.paused_reason or "auto-promotion is off; approval required"}
 
     if gate["promote"]:
         prev = champ.model_version if champ else None
         await set_champion(db, challenger_version, task, promoted_from=prev)
         state.champion_version = challenger_version
         await db.commit()
-        await record(db, "champion", "promote", challenger_version, {"gate": gate, "promoted_from": prev})
+        await record(db, "champion", "promote", challenger_version,
+                     {"gate": gate, "promoted_from": prev, "approved_by": approved_by})
         log.info("govern.promote", challenger=challenger_version, promoted_from=prev)
         from services.integrations.webhooks import emit
 
