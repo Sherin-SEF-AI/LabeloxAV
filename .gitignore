@@ -24,7 +24,12 @@ runs/
 *.log
 *.mcap
 .DS_Store
-data/
+# Anchored. A bare `data/` matches a directory of that name at ANY depth, which silently swallowed
+# `packs/av/data/` - 142 lines of source that `packs/av/pack.py` imports at module scope. The result was
+# that a fresh clone could not import the AV pack at all, and CI said so:
+#   RuntimeError: pack 'av' failed to import (packs.av): No module named 'packs.av.data'
+# The leading slash confines it to a data directory at the repository root, which is what it was for.
+/data/
 AUDIT.md
 *.bin
 *.pcd

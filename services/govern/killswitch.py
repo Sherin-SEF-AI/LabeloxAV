@@ -41,6 +41,9 @@ async def engage(db: AsyncSession, reason: str, task: str = "detection") -> dict
     st.loop_enabled = False
     st.auto_accept_enabled = False
     st.auto_promote_enabled = False
+    # Settlement stops with everything else, including its own nightly auto-revert: a person who pulled
+    # the cord gets no surprise writes in either direction, only one-click proposals.
+    st.settlement_enabled = False
     st.paused_reason = reason
     await db.commit()
     rollback = await rollback_to_last_champion(db, task)
@@ -50,10 +53,18 @@ async def engage(db: AsyncSession, reason: str, task: str = "detection") -> dict
 
 
 async def release(db: AsyncSession) -> dict:
+    """Resume the loop. Deliberately NOT symmetric with engage.
+
+    Releasing restores the loop and the auto-accept gate, and nothing else. `auto_promote_enabled`
+    defaults to False under promote-by-approval (migration 0104) and is an explicit opt-in; a release
+    that set it True would resurrect full autonomous promotion as a side effect of clearing an
+    unrelated emergency, which is precisely the kind of silent re-arming a kill switch must not do.
+    The same holds for `settlement_enabled` once it exists: anything that was an opt-in before the
+    cord was pulled stays an opt-in after.
+    """
     st = await get_state(db)
     st.loop_enabled = True
     st.auto_accept_enabled = True
-    st.auto_promote_enabled = True
     st.paused_reason = None
     await db.commit()
     await record(db, "killswitch", "release", None, {})
@@ -72,16 +83,30 @@ async def pause_auto_promote(db: AsyncSession, reason: str) -> None:
 
 
 async def resume_auto_promote(db: AsyncSession) -> bool:
-    """Lift a drift-induced soft pause once the breach clears. Only resumes a pause that drift set (not
-    the kill switch): requires the loop still enabled and a drift paused_reason. Returns True if resumed."""
+    """Clear a drift-induced soft pause once the breach clears - WITHOUT re-arming auto-promotion.
+
+    This used to set auto_promote_enabled back to True, which was symmetric when the flag defaulted
+    on. Under promote-by-approval (migration 0104) the flag's normal state is False, so the old resume
+    GRANTED autonomy nobody opted into: a drift breach paused, the next clean scan "resumed", and the
+    loop was silently promoting on its own - observed live when a single drift-scan click flipped the
+    operator's chosen default. The rule is the release() rule: anything that was an opt-in before the
+    pause stays an opt-in after. An operator who had opted in re-enables with one click; a notification
+    tells them the breach cleared. Returns True if a drift pause was cleared."""
     st = await get_state(db)
-    if not st.loop_enabled or st.auto_promote_enabled:
+    if not st.loop_enabled:
         return False
     if not (st.paused_reason or "").startswith(_DRIFT_PAUSE_PREFIX):
         return False  # paused by something other than drift; leave it to an operator
-    st.auto_promote_enabled = True
     st.paused_reason = None
     await db.commit()
+    from services.notify import notify
+
+    await notify(db, kind="drift_breach", severity="info",
+                 title="drift breach cleared; auto-promotion stays off (opt-in)",
+                 body="The metrics that breached are back inside their bounds. Promotion remains "
+                      "propose-and-approve; re-enable unattended promotion on the govern page if "
+                      "that is what you want.",
+                 href="/govern", subject_type="drift", subject_id="soft-pause")
     return True
 
 

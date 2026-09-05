@@ -175,3 +175,58 @@ describe("touched: what 'Confirm frame' will actually accept", () => {
     expect(s.objects.every((o) => o.state === "review")).toBe(true);
   });
 });
+
+describe("acceptRest: finishing the frame the risk order left behind", () => {
+  // The deliberate counterpart to acceptAll, and the two must not become the same action.
+  //
+  // acceptAll confirms what the annotator looked at, which is what stops Confirm rubber-stamping
+  // auto-labels. That leaves no way to say "I have dealt with the three that were wrong and the other
+  // fourteen are fine" - the mean frame carries 16.7 objects and the busiest 187 - so the sentence cost
+  // one click per object and nobody said it.
+
+  it("accepts exactly the objects nobody touched", () => {
+    const s = editorReducer(
+      state([obj("a"), obj("b"), obj("c")], { touched: ["a"] }),
+      { t: "acceptRest" },
+    );
+    // b and c were not looked at individually and are now accepted; a was, and acceptAll owns it.
+    expect(s.objects.find((o) => o.id === "b")?.state).toBe("accepted");
+    expect(s.objects.find((o) => o.id === "c")?.state).toBe("accepted");
+    expect(s.objects.find((o) => o.id === "a")?.state).toBe("review");
+  });
+
+  it("marks them dirty so they persist through the normal save path", () => {
+    // Without this the state change lives only in the browser: nothing is written, the frame looks
+    // finished, and reloading it brings every object back at `review`.
+    const s = editorReducer(state([obj("a")]), { t: "acceptRest" });
+    expect(s.objects[0].dirty).toBe(true);
+  });
+
+  it("does not touch an object the annotator drew", () => {
+    // A new box is human-authored on creation. Sweeping it up here would restate that as a review
+    // verdict on somebody else's work.
+    const s = editorReducer(state([obj("tmp-1", { isNew: true }), obj("b")]), { t: "acceptRest" });
+    expect(s.objects.find((o) => o.id === "tmp-1")?.state).toBe("review");
+    expect(s.objects.find((o) => o.id === "tmp-1")?.dirty).toBeFalsy();
+  });
+
+  it("is a no-op when there is nothing left, rather than a history entry", () => {
+    // Pressing it twice must not stack undo steps that undo nothing, which is how an undo stack stops
+    // being usable.
+    const first = editorReducer(state([obj("a")]), { t: "acceptRest" });
+    const second = editorReducer(first, { t: "acceptRest" });
+    expect(second).toBe(first);
+  });
+
+  it("leaves an already-accepted object alone", () => {
+    const s = editorReducer(state([obj("a", { state: "accepted" }), obj("b")]), { t: "acceptRest" });
+    expect(s.objects.find((o) => o.id === "a")?.dirty).toBeFalsy();
+    expect(s.objects.find((o) => o.id === "b")?.state).toBe("accepted");
+  });
+
+  it("is undoable in one step", () => {
+    const s = editorReducer(state([obj("a"), obj("b")]), { t: "acceptRest" });
+    const back = editorReducer(s, { t: "undo" });
+    expect(back.objects.every((o) => o.state === "review")).toBe(true);
+  });
+});

@@ -11,13 +11,15 @@ import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
 import { beginOp, endOp, resetOps, trackOp } from "@/lib/canvasOps";
 import { openConsole } from "@/components/console/ConsoleModal";
-import { simplifyMask, simplifyPolygon } from "@/lib/simplify";
+import { simplifyMaskLikeServer, simplifyPolygon } from "@/lib/simplify";
+import { addPoint as addSamClick, describe as describeSamPrompt, undoPoint } from "@/lib/samPrompt";
 import { UNTRACKED_NOTE, propagationMessage, shouldPropagate } from "@/lib/trackPropagate";
 import CanvasConsole from "@/components/editor/CanvasConsole";
 import CanvasMenu from "@/components/editor/CanvasMenu";
 import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
 import { PERSON_17 } from "@/lib/skeleton";
 import BackButton from "@/components/BackButton";
+import PulseDot from "@/components/PulseDot";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { ObjectSourceBadge } from "@/components/SourceBadge";
 import CorrectionModal, { type CorrectionChange } from "@/components/CorrectionModal";
@@ -168,7 +170,10 @@ function overlapFrac(box: number[], ref: number[]): number {
 // export, and it is what put a draggable handle every two pixels along the outline. One image pixel of
 // tolerance removes what cannot be seen at 100% zoom and keeps every corner that can.
 const MASK_TOLERANCE_PX = 1;
-const trim = (polys: number[][]) => simplifyMask(polys, MASK_TOLERANCE_PX);
+// Simplified the way the server will when it stores the mask, rather than at a fixed pixel tolerance.
+// _write_mask now simplifies on every write with a tolerance derived from each ring's own perimeter, so
+// a client trimming at a flat 1px would show an outline that differs from the one on disk.
+const trim = (polys: number[][]) => simplifyMaskLikeServer(polys);
 
 export default function FrameEditor() {
   const router = useRouter();
@@ -263,6 +268,44 @@ export default function FrameEditor() {
   // Driving events on this frame's session (lane changes, signal phases), shown in the events mode.
   const [frameEvents, setFrameEvents] = useState<DrivingEvent[]>([]);
 
+  // What the guideline check said about this frame, and which rules could not run. Refreshed after every
+  // save, because the point of a linter here is to check the edit that was just made.
+  const [lint, setLint] = useState<Awaited<ReturnType<typeof api.lintFrame>> | null>(null);
+
+  /**
+   * Whether the GPU is free, so the AI tools can say they are unavailable before a click finds out.
+   *
+   * `/api/gpu/slot` has existed and no client has ever asked it. Until now the only way to learn that a
+   * training job holds the card was to place a SAM point, wait, and read a 503 - which is the same answer
+   * arriving after the work instead of before it.
+   *
+   * Advisory, exactly as the endpoint says: the answer can be stale the instant it returns, so nothing
+   * here decides anything from it. It is a warning, and the tools stay enabled: the lease can be released
+   * between the poll and the click, and disabling a button on stale state is worse than a click that
+   * occasionally fails.
+   */
+  const [gpuFree, setGpuFree] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    const check = () => api.gpuSlot()
+      .then((r) => { if (live) setGpuFree(r.free); })
+      // Quietly: not knowing is a third state, and it renders as no indicator rather than a false alarm.
+      .catch(() => { if (live) setGpuFree(null); });
+    void check();
+    // Slow. This is a background fact that changes when a training run starts or stops, not something to
+    // poll at interaction speed.
+    const t = setInterval(check, 20_000);
+    return () => { live = false; clearInterval(t); };
+  }, []);
+
+  // Risk order for this frame: which object is most likely to be wrong, and how much of that is known.
+  // Held beside the object list rather than folded into it, because the list is in drawing order.
+  const [risk, setRisk] = useState<Awaited<ReturnType<typeof api.frameRisk>> | null>(null);
+  // The throughput this frame is actually running at. The claim the risk order makes is a throughput
+  // claim, so it is measured on screen rather than asserted.
+  const [reviewed, setReviewed] = useState(0);
+  const reviewStart = useRef<number>(Date.now());
+
   const flash = (m: string) => {
     setNotice(m);
     setTimeout(() => setNotice(null), 3500);
@@ -289,6 +332,7 @@ export default function FrameEditor() {
           id: x.object_id, track_id: x.track_id, class_id: x.class_id, class_name: x.class_name, bbox: x.bbox,
           mask: x.mask_polygons || [], attrs: {}, conf: x.conf, quality_score: x.quality_score, state: x.state, visible: true, version: x.version,
           rot: x.rot_deg, keypoints: x.keypoints ?? undefined, polyline: x.polyline ?? undefined,
+          bbox_amodal: x.bbox_amodal ?? null,
           cuboid_3d: x.cuboid_3d ?? undefined,
         }));
         dispatch({ t: "load", objects: eds, viewport: { scale: 0, ox: 0, oy: 0 }, selectedId: focus });
@@ -301,6 +345,76 @@ export default function FrameEditor() {
     })();
     return () => { live = false; };
   }, [id, focus, dispatch, reloadKey]);
+
+  // Risk is a second, optional view over the same objects. Fetched separately so a slow or failing rank
+  // cannot stop the frame from opening, and surfaced rather than swallowed when it does fail: a silently
+  // absent risk order looks exactly like a frame where nothing is risky.
+  useEffect(() => {
+    let live = true;
+    setRisk(null);
+    setReviewed(0);
+    reviewStart.current = Date.now();
+    api.frameRisk(id)
+      .then((r) => { if (live) setRisk(r); })
+      .catch((e) => { if (live) flash(`risk order unavailable: ${humanizeError(e)}`); });
+    return () => { live = false; };
+  }, [id, reloadKey]);
+
+  /**
+   * Ask the server which guidelines this frame breaks.
+   *
+   * Read-only. `dormant` matters as much as `findings`: a rule that cannot run because nobody is
+   * collecting the data it needs is a fact about the corpus, and hiding it would make the check look like
+   * it had inspected something it never looked at.
+   */
+  const runLint = useCallback(async () => {
+    try {
+      setLint(await api.lintFrame(id));
+    } catch (e) {
+      // Surfaced, not swallowed. An absent lint result and a clean frame look identical on screen.
+      flash(`guideline check unavailable: ${humanizeError(e)}`);
+    }
+  }, [id]);
+
+  useEffect(() => { setLint(null); void runLint(); }, [runLint, reloadKey]);
+
+  /**
+   * Turn the findings into issue threads, which is the surface that survives leaving this frame.
+   *
+   * A decision, not a side effect of saving: the editor autosaves every 700ms, and a lint that opened a
+   * thread per finding each time would make the Issues panel unusable inside a minute. The server side is
+   * idempotent per object and rule, so pressing it twice does not stack duplicates.
+   */
+  const openLintIssues = useCallback(async () => {
+    try {
+      const r = await api.lintFrame(id, true);
+      setLint(r);
+      toast(r.issues?.opened
+        ? `${r.issues.opened} issue${r.issues.opened === 1 ? "" : "s"} opened, in the panel on the right`
+        : "these findings are already open as issues", r.issues?.opened ? "success" : "info");
+    } catch (e) {
+      toast(humanizeError(e), "error");
+    }
+  }, [id]);
+
+  // The shape the object list wants: position in the risk order by id, plus the score and reasons. Built
+  // here rather than in the panel so the panel never sees the ranked array and cannot be tempted to
+  // render it as the object list.
+  // Objects settled per minute on this frame. Null until there is enough elapsed time for the number to
+  // mean anything: a rate computed over two seconds reads in the thousands and says nothing.
+  const perMinute = useMemo(() => {
+    const mins = (Date.now() - reviewStart.current) / 60000;
+    return mins > 0.05 && reviewed > 0 ? Math.round(reviewed / mins) : null;
+  }, [reviewed]);
+
+  const riskView = useMemo(() => {
+    if (!risk?.ranking?.length) return null;
+    const rank: Record<string, number> = {};
+    risk.ranking.forEach((oid, i) => { rank[oid] = i; });
+    const score: Record<string, { risk: number; reasons: string[] }> = {};
+    for (const [oid, r] of Object.entries(risk.objects ?? {})) score[oid] = { risk: r.risk, reasons: r.reasons };
+    return { rank, score, coverage: risk.coverage ?? 0 };
+  }, [risk]);
 
   // M-MC.1: resolve the synchronized frame group this frame belongs to, so the rig view can show the sibling
   // cameras. Uses the persisted groups; if none exist yet for the session it builds them once on demand.
@@ -390,17 +504,46 @@ export default function FrameEditor() {
     setRelationships(await api.frameRelationships(id).catch(() => []));
   };
   // cuboid tool: click the ground in the image, lift to an ego ground point, drop a default 3D box there
+  /**
+   * Place a cuboid on the road, sized for the class and aligned to the lane.
+   *
+   * This used to lift the click and then drop a hardcoded `size: [1.8, 4.2, 1.5], yaw: 0` on it, so a bus
+   * and a scooter came out the same size facing the same way, and every cuboid in a frame pointed along
+   * the x axis regardless of which way the road ran. The solve for both has existed since cuboids were
+   * added, as a frame-wide batch nothing here could reach.
+   */
   const placeCuboid = async (pt: number[]) => {
     if (!currentClass) return;
     try {
-      const { ego, reason } = await api.liftGround(id, pt[0], pt[1]);
-      if (!ego) { flash(reason || "click on the road ahead to place a cuboid"); return; }
-      const cub = { center: [ego[0], ego[1], 0.75], size: [1.8, 4.2, 1.5], yaw: 0 };
+      const r = await api.cuboidAt(id, pt[0], pt[1], currentClass.name);
+      if (!r.cuboid) { flash(r.reason || "click on the road ahead to place a cuboid"); return; }
       dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name,
-        bbox: [pt[0] - 40, pt[1] - 40, pt[0] + 40, pt[1] + 40], mask: [], cuboid_3d: cub, attrs: {},
+        bbox: [pt[0] - 40, pt[1] - 40, pt[0] + 40, pt[1] + 40], mask: [], cuboid_3d: r.cuboid, attrs: {},
         conf: 1, state: "accepted", visible: true, isNew: true } });
+      flash(r.yaw_source === "lane"
+        ? `${currentClass.name} cuboid, aligned to the lane`
+        : `${currentClass.name} cuboid, axis-aligned (no lane to align to on this frame)`);
     } catch (e) { flash("could not place cuboid: " + humanizeError(e)); }
   };
+
+  /**
+   * Fit a cuboid to the object already selected, from its 2D box.
+   *
+   * The full monocular solve: ground-lift the box's contact point, size from the class prior, yaw by
+   * reprojection and then snapped to the road where a lane agrees.
+   */
+  const fitCuboid = useCallback(async () => {
+    const o = stRef.current.objects.find((x) => x.id === stRef.current.selectedId);
+    if (!o) { flash("select an object to fit a cuboid to"); return; }
+    if (o.id.startsWith("tmp-")) { flash("save the object first (Cmd S), then fit a cuboid"); return; }
+    try {
+      const r = await api.cuboidFit(o.id);
+      if (!r.cuboid) { flash(r.reason || "this object cannot be lifted to a cuboid"); return; }
+      dispatch({ t: "update", id: o.id, patch: { cuboid_3d: r.cuboid } });
+      flash(`${r.class_name} cuboid, reprojection IoU ${r.reproj_iou?.toFixed(2)}`
+            + (r.yaw_source === "lane" ? ", yaw from the lane" : ""));
+    } catch (e) { flash("could not fit a cuboid: " + humanizeError(e)); }
+  }, [dispatch]);
   // Auto-detect the class of a freshly-drawn object from its crop (SigLIP2 zero-shot over the ontology), so
   // a SAM box or wand click picks the class for you. Overrides the palette class; you can still relabel.
   const autoClassify = async (objId: string, box: number[]) => {
@@ -760,6 +903,7 @@ export default function FrameEditor() {
       // lock still guards the geometry-edit path (adjust_geometry), where a concurrent box edit does matter.
       const r = await api.review(o.id, { action: verdict, state: newState });
       dispatch({ t: "reviewed", id: o.id, state: newState, version: r.version });
+      setReviewed((n) => n + 1);   // one settled object, for the throughput readout
       setAlItems((s) => s.filter((it) => it.object_id !== o.id)); // drop the handled item so the queue advances
       flash(newState);
       advanceReview(o.id);
@@ -907,11 +1051,25 @@ export default function FrameEditor() {
       if (selected) dispatch({ t: "select", id: null }); // moved off the old object -> keep creating new
     }
     dispatch({ t: "candidate", polys: null });
+    // The clicks belonged to the mask that was just committed. Carrying them into the next object would
+    // refine the new one against the old one's negatives.
+    setSamPrompt(null);
   }, [st.candidate, selected, currentClass, dispatch]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * The clicks making up the mask currently being refined.
+   *
+   * SAM takes a list of points with per-point labels and has done from the start; the server has always
+   * forwarded both, and the canvas has always sent label 0 on shift-click. What was missing was here:
+   * `runSam` opened by committing the pending candidate, so every click ended the previous mask and
+   * started a new one. A shift-click therefore sent a lone negative point with no positive anchor, which
+   * SAM cannot act on, and there was no way to say "this bit, but not that bit".
+   */
+  const [samPrompt, setSamPrompt] = useState<{ points: number[][]; labels: number[] } | null>(null);
+  const clearSam = useCallback(() => setSamPrompt(null), []);
 
   const runSam = useCallback(
     async (prompt: { points?: number[][]; labels?: number[]; box?: number[] }) => {
-      if (st.candidate?.length) acceptCandidate(); // commit the pending mask before starting the next
       try {
         const r = await trackOp("sam", segKind === "panoptic" ? "SAM (precise)" : "SAM segment",
           () => api.segmentPrompt(id, { ...prompt, precise: segKind === "panoptic" }),
@@ -925,6 +1083,20 @@ export default function FrameEditor() {
     },
     [id, dispatch, st.candidate, acceptCandidate, segKind],
   );
+
+  /**
+   * Add one click to the current SAM prompt and re-run it, rather than starting a new mask.
+   *
+   * This is the whole feature. Every layer below has always supported it: `SegmentIn` takes `points` and
+   * `labels`, `sam_service.segment` forwards both to SAM, the endpoint validates that they are the same
+   * length, and the canvas sends label 0 on shift-click. Only the accumulator was missing.
+   */
+  const addSamPoint = useCallback((pt: number[], label: number) => {
+    const r = addSamClick(samPrompt, pt, label);
+    if (!r.ok) { flash(r.reason); return; }
+    setSamPrompt(r.prompt);
+    void runSam(r.prompt);
+  }, [samPrompt, runSam]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Leaving a SAM tool (or switching away) commits any uncommitted mask instead of dropping it.
   const acceptRef = useRef(acceptCandidate);
@@ -1028,6 +1200,7 @@ export default function FrameEditor() {
             class_name: o.class_name, bbox: o.bbox, attrs: o.attrs,
             mask_polygons: o.mask.length ? o.mask : undefined, state: tgt, idem_key: o.id, rot_deg: o.rot ?? 0,
             keypoints: o.keypoints ?? null, polyline: o.polyline, cuboid_3d: o.cuboid_3d ?? undefined,
+            bbox_amodal: o.bbox_amodal ?? undefined,
             job_id: jobParam ?? undefined,
           });
           remap[o.id] = created.object_id;
@@ -1038,6 +1211,10 @@ export default function FrameEditor() {
           const r = await api.review(o.id, { action: "adjust_geometry",
             class_name: o.class_name, bbox: o.bbox, attrs: o.attrs, state: tgt, expected_version: o.version,
             rot_deg: o.rot ?? 0, keypoints: o.keypoints ?? null, polyline: o.polyline, cuboid_3d: o.cuboid_3d ?? undefined,
+            // An empty array is how the server is told to clear it, which is why this is `?? []` rather
+            // than `?? undefined`: undefined would mean "leave it alone" and there would be no way to
+            // take back an amodal box once drawn.
+            bbox_amodal: o.bbox_amodal ?? [],
             mask_polygons: o.mask.length ? o.mask : undefined });
           if (r.version != null) versions[o.id] = r.version;
         }
@@ -1051,6 +1228,10 @@ export default function FrameEditor() {
       // cannot race the lock this editor is holding. Its own failure cannot fail the save, which has
       // already committed.
       await propagateClassChanges();
+      // The guideline check, after the save committed. Its failure cannot fail the save, and it does not
+      // open issue threads on its own: an autosave every 700ms that opened a thread each time would make
+      // the Issues panel unusable inside a minute. The findings are shown; opening one is a decision.
+      void runLint();
     } catch (e) {
       const msg = humanizeError(e);
       lastFailRef.current = pendingSig();         // do not auto-retry this exact set until something changes
@@ -1198,6 +1379,8 @@ export default function FrameEditor() {
       save: () => void save(),
       saveAs: () => void saveAs(),
       confirmFrame: () => confirmFrame(true),
+      acceptRest: () => acceptRest(),
+      nextRisk: () => nextRisk(),
       prevFrame: () => void gotoFrame(meta?.prev_frame_id ?? null),
       nextFrame: () => void gotoFrame(meta?.next_frame_id ?? null),
       openDrives: () => document.querySelector<HTMLButtonElement>("header button[aria-haspopup='dialog']")?.click(),
@@ -1258,6 +1441,56 @@ export default function FrameEditor() {
   // the redo stack - no state change, no message, button still enabled. And it never advanced: on a
   // 200-frame job that is 200 extra keystrokes and 200 chances to forget. The A shortcut needs the same
   // treatment or it is simply a way around the gate.
+  /**
+   * Accept every object on this frame the annotator did not touch.
+   *
+   * The deliberate counterpart to confirmFrame, which confirms only what was looked at. The mean frame
+   * carries 16.7 objects and the busiest 187, most of them correct, so the value of a risk order is being
+   * able to deal with the few that are wrong and then say "the rest are fine" once. Without this that
+   * sentence costs one click per object and nobody says it.
+   *
+   * The count is stated rather than implied, because this is the one action here that approves things the
+   * person did not individually look at.
+   */
+  const acceptRest = useCallback(() => {
+    const rest = stRef.current.objects.filter(
+      (o) => !o.isNew && !stRef.current.touched.includes(o.id) && o.state !== "accepted");
+    if (!rest.length) {
+      toast("nothing left untouched on this frame", "warn");
+      return;
+    }
+    dispatch({ t: "acceptRest" });
+    setReviewed((n) => n + rest.length);
+    toast(rest.length === 1 ? "accepted the 1 remaining object" : `accepted the remaining ${rest.length} objects`,
+          "success");
+  }, [dispatch]);
+
+  /**
+   * Select the highest-risk object nobody has dealt with yet.
+   *
+   * Walks the server's risk order, not the object list, and skips anything already touched or accepted,
+   * so repeated presses move through the frame worst-first and stop when there is nothing left to look at.
+   */
+  const nextRisk = useCallback(() => {
+    if (!risk?.ranking?.length) {
+      flash("no risk order for this frame");
+      return;
+    }
+    const st2 = stRef.current;
+    const byId = new Map(st2.objects.map((o) => [o.id, o]));
+    const next = risk.ranking.find((oid) => {
+      const o = byId.get(oid);
+      return o && !st2.touched.includes(oid) && o.state !== "accepted" && o.state !== "rejected";
+    });
+    if (!next) {
+      flash("every object on this frame has been dealt with");
+      return;
+    }
+    dispatch({ t: "select", id: next });
+    const r = risk.objects[next];
+    if (r?.reasons?.length) flash(r.reasons.slice(0, 2).join("; "));
+  }, [risk, dispatch]);
+
   const confirmFrame = useCallback((advance: boolean) => {
     const n = st.objects.filter((o) => !o.isNew && st.touched.includes(o.id)).length;
     if (!st.touched.length) {
@@ -1265,6 +1498,7 @@ export default function FrameEditor() {
       return;
     }
     dispatch({ t: "acceptAll" });
+    setReviewed((x) => x + n);
     if (advance && meta?.next_frame_id) gotoFrame(meta.next_frame_id);
     else toast(n === 1 ? "1 object confirmed" : `${n} objects confirmed`, "success");
   }, [st.objects, st.touched, dispatch, meta, gotoFrame]);
@@ -1378,6 +1612,7 @@ export default function FrameEditor() {
       else if (k === "w") dispatch({ t: "tool", tool: "magic-wand" });
       else if (k === "p") dispatch({ t: "tool", tool: "brush" });
       else if (k === "e") dispatch({ t: "tool", tool: "eraser" });
+      else if (k === "k") dispatch({ t: "tool", tool: "amodal" });
       else if (k === "u") dispatch({ t: "tool", tool: "superpixel" });
       else if (k === "h" && ridable(selected)) toggleHelmets();
       else if (k === "o" && ridable(selected)) bumpOccupants();
@@ -1385,14 +1620,31 @@ export default function FrameEditor() {
       else if (e.key === "=" || e.key === "+") zoomBy(1.2);
       else if (e.key === "-") zoomBy(1 / 1.2);
       else if (e.key === "Enter") {
-        if (stRef.current.tool === "keypoint" && kpDraftRef.current?.length) finishKeypoints(kpDraftRef.current);
+        // Shift is the "and the rest" modifier here, matching the menu. Plain Enter still commits the
+        // in-progress mask or keypoint, which is the more frequent thing by far.
+        if (e.shiftKey) acceptRest();
+        else if (stRef.current.tool === "keypoint" && kpDraftRef.current?.length) finishKeypoints(kpDraftRef.current);
         else acceptCandidate();
       }
+      else if (e.key === "Tab") { e.preventDefault(); nextRisk(); }
       else if (e.key === "Escape") {
         // Escape clears in the order a person means it: the in-progress thing first, then the selection.
         // Dropping both at once loses a selection somebody was still using.
-        if (st.candidate || kpDraft) { dispatch({ t: "candidate", polys: null }); setKpDraft(null); }
+        if (st.candidate || kpDraft || samPrompt) {
+          dispatch({ t: "candidate", polys: null });
+          setKpDraft(null);
+          setSamPrompt(null);
+        }
         else if (st.selectedIds.length) dispatch({ t: "selectBy", how: "none" });
+      }
+      else if (e.key === "Backspace" && samPrompt?.points.length) {
+        // Take back the last click without starting the mask over. Checked before the delete binding
+        // below, because while a SAM prompt is open Backspace can only mean this.
+        e.preventDefault();
+        const back = undoPoint(samPrompt);
+        setSamPrompt(back);
+        if (back) void runSam(back);
+        else dispatch({ t: "candidate", polys: null });
       }
       else if ((e.key === "Delete" || e.key === "Backspace") && st.selectedId) dispatch({ t: "delete", id: st.selectedId });
       else if (e.key === "[") gotoFrame(meta?.prev_frame_id ?? null);
@@ -1467,8 +1719,15 @@ export default function FrameEditor() {
       keypointDraft={kpDraft} skeletonEdges={PERSON_17.edges as unknown as number[][]}
       onPlaceKeypoint={onPlaceKeypoint} onUpdateKeypoints={onUpdateKeypoints}
       mPerPx={meta.lidar_res ?? undefined}
-      onSamPoint={(pt, label) => runSam({ points: [pt], labels: [label] })}
-      onSamBox={(box) => runSam({ box })}
+      samPrompt={samPrompt}
+      onDrawAmodal={(box) => {
+        const o = stRef.current.objects.find((x) => x.id === stRef.current.selectedId);
+        if (!o) { flash("select the object first, then draw its whole extent"); return; }
+        dispatch({ t: "update", id: o.id, patch: { bbox_amodal: box } });
+        flash(`whole extent set on ${o.class_name}`);
+      }}
+      onSamPoint={(pt, label) => addSamPoint(pt, label)}
+      onSamBox={(box) => { setSamPrompt(null); void runSam({ box }); }}
       onUpdateMask={(oid, polys) =>
         // Keep the bbox in sync with the edited mask so geometry and segmentation never diverge.
         dispatch({ t: "update", id: oid, patch: polys.length ? { mask: polys, bbox: bboxOfPolys(polys) } : { mask: polys } })}
@@ -1528,8 +1787,31 @@ export default function FrameEditor() {
             blind audit · label from scratch
           </span>
         ) : null}
+        {/* Said before the click, not after it. The AI tools stay enabled: the lease can be released
+            between the poll and the click, and a button disabled on stale state is worse than one that
+            occasionally refuses. */}
+        {gpuFree === false && (
+          <span
+            title={"A training job holds the GPU, so SAM, the magic wand and segmentation will refuse "
+                   + "until it finishes. Boxes, masks drawn by hand and review all work without it."}
+            className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide px-1.5 py-0.5 border border-warn/60 text-warn whitespace-nowrap">
+            <PulseDot tone="warn" size="sm" />
+            gpu busy
+          </span>
+        )}
         <button onClick={() => router.push(`/search?frame=${id}`)} title="find visually similar frames (DINOv3)"
           className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="search" size={16} /></button>
+        {/* Label by example, without having to make a mistake first. The correction modal already does
+            this whole flow and only opens after a correction, so the one way to find every other object
+            that looks like this one was to relabel it wrongly and change your mind. An unsaved box has no
+            server id and no embedding, so it is offered only once the object exists. */}
+        {selected && !selected.id.startsWith("tmp-") && (
+          <button onClick={() => router.push(`/search?object=${selected.id}`)}
+            title="find objects that look like this one, and label them together"
+            className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink font-mono text-[11px]">
+            similar
+          </button>
+        )}
         {meta.has_mcap && (
           <button onClick={() => router.push(`/inspect/${meta.session_id}?ts=${meta.ts_ns}`)} title="inspect this moment in the Session Inspector (MCAP timeline)"
             className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink font-mono text-[11px]">inspect</button>
@@ -1754,9 +2036,18 @@ export default function FrameEditor() {
               <button onClick={() => advanceReview(selected.id)} className="text-ink-3 hover:text-ink">skip</button>
             </div>
           )}
+          {/* Rewritten because the behaviour changed. Clicking again used to commit this mask and start
+              a new one; it now refines this one, which is what makes shift-click mean anything. */}
           {st.candidate?.length ? (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 font-mono text-[11px] text-ink-2">
-              mask ready, click the next object to keep this one &amp; continue, <span className="text-pass">Enter</span> to finish, <span className="text-ink-3">Esc</span> to discard
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 font-mono text-[11px] text-ink-2 flex items-center gap-3">
+              {samPrompt && samPrompt.points.length > 1 && (
+                <span className="text-ink-3">{describeSamPrompt(samPrompt)}</span>
+              )}
+              <span>
+                click to add, <span className="text-block">shift-click</span> to exclude,{" "}
+                <span className="text-warn">Backspace</span> to undo a click,{" "}
+                <span className="text-pass">Enter</span> to keep, <span className="text-ink-3">Esc</span> to discard
+              </span>
             </div>
           ) : null}
 
@@ -1830,6 +2121,15 @@ export default function FrameEditor() {
             <div className="absolute top-3 left-3 z-10 flex flex-col gap-1 pointer-events-none">
               <span className="font-mono text-[11px] text-ink-2 bg-bg/60 px-1.5 py-0.5 rounded w-fit">{new Date(Number(meta.ts_ns) / 1e6).toISOString().replace("T", " ").replace("Z", "")}</span>
               <span className="font-mono text-[11px] text-ink-3 bg-bg/60 px-1.5 py-0.5 rounded w-fit">{camLabel(meta.cam_id)}{meta.is_lidar ? " · lidar" : ""}<CursorReadout /></span>
+              {/* Throughput, measured rather than asserted. The risk order and the accept-the-rest key
+                  are both throughput claims, and the two review grids already show this number; the
+                  editor, where most of the work happens, showed nothing. */}
+              {perMinute != null && (
+                <span className="font-mono text-[11px] text-accent bg-bg/60 px-1.5 py-0.5 rounded w-fit"
+                  title={`${reviewed} objects settled on this frame since it opened`}>
+                  {perMinute}/min
+                </span>
+              )}
             </div>
           )}
 
@@ -2146,6 +2446,9 @@ export default function FrameEditor() {
             <PropertiesPanel
               frame={{ id, meta, onto, dirty, flash }}
               editor={{ st, dispatch, selected }}
+              risk={riskView}
+              lint={lint}
+              onOpenLintIssues={openLintIssues}
               onCollapse={() => setRightCollapsed(true)}
               klass={{ current: currentClass ?? null, onPick: relabelSelected, onAdd: addAndRelabel }}
               sel={{
@@ -2155,6 +2458,18 @@ export default function FrameEditor() {
                 onToggleLink: () => setLinkFrom(linkFrom === selected?.id ? null : (selected?.id ?? null)),
                 onDeleteRelationship: delRelationship,
                 onRecomputeDynamics: recomputeDynamics,
+                onFitCuboid: fitCuboid,
+                onClearAmodal: () => {
+                  const o = stRef.current.objects.find((x) => x.id === stRef.current.selectedId);
+                  if (o) dispatch({ t: "update", id: o.id, patch: { bbox_amodal: null } });
+                },
+                onSetYaw: (yaw: number) => {
+                  const o = stRef.current.objects.find((x) => x.id === stRef.current.selectedId);
+                  if (!o?.cuboid_3d) return;
+                  // Hand-set, so the source stops claiming the road agreed with it.
+                  dispatch({ t: "update", id: o.id,
+                             patch: { cuboid_3d: { ...o.cuboid_3d, yaw, yaw_source: "human" } } });
+                },
               }}
               tools={{
                 lanes, hasDrivable: !!drivable,

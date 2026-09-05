@@ -22,7 +22,9 @@ from services.api.routers import (
     agent,
     analytics,
     assets,
+    attrsweep,
     autolabel,
+    autonomy,
     billing,
     calibration,
     campaigns,
@@ -609,6 +611,7 @@ app.include_router(autolabel.router, prefix="/api", tags=["autolabel"])
 app.include_router(jobs.router, prefix="/api", tags=["jobs"])
 app.include_router(events.router, prefix="/api", tags=["events"])
 app.include_router(labelops.router, prefix="/api", tags=["labelops"])
+app.include_router(attrsweep.router, prefix="/api", tags=["attrsweep"])
 app.include_router(assets.router, prefix="/api", tags=["assets"])
 app.include_router(integrations.router, prefix="/api", tags=["integrations"])
 app.include_router(users.router, prefix="/api", tags=["users"])
@@ -621,6 +624,7 @@ app.include_router(errordetect.router, prefix="/api", tags=["errordetect"])
 app.include_router(relabel.router, prefix="/api", tags=["relabel"])
 app.include_router(collaborate.router, prefix="/api", tags=["collaborate"])
 app.include_router(govern.router, prefix="/api", tags=["govern"])
+app.include_router(autonomy.router, prefix="/api", tags=["autonomy"])
 app.include_router(service_accounts.router, prefix="/api", tags=["service-accounts"])
 app.include_router(multicam.router, prefix="/api", tags=["multicam"])
 app.include_router(mapassist.router, prefix="/api", tags=["mapassist"])

@@ -91,4 +91,22 @@ describe("which vertices get a handle", () => {
     expect(handleIndices([0, 0, 100, 0], 0).length).toBe(2);
     expect(handleIndices([0, 0, 100, 0], Number.NaN).length).toBe(2);
   });
+
+  it("drops the redundant vertex RDP leaves at the ring seam", () => {
+    // RDP always keeps its two endpoints, and on a closed ring both are vertex 0, so the vertex just
+    // before the seam survives whether or not it says anything. On a square outlined with points along
+    // each edge that leaves a fifth vertex sitting in the middle of one.
+    //
+    // It matters because core/polygons.py simplifies again when the mask is written. A client stopping
+    // one vertex short would draw an outline that differs from the one being stored.
+    const square: number[] = [];
+    const n = 20;
+    for (let i = 0; i < n; i++) square.push((200 * i) / n, 0);
+    for (let i = 0; i < n; i++) square.push(200, (200 * i) / n);
+    for (let i = 0; i < n; i++) square.push(200 - (200 * i) / n, 200);
+    for (let i = 0; i < n; i++) square.push(0, 200 - (200 * i) / n);
+
+    const out = simplifyPolygon(square, 1);
+    expect(out.length / 2).toBe(4);
+  });
 });

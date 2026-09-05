@@ -33,6 +33,10 @@ if (typeof window !== "undefined") {
       disconnect() {}
     } as unknown as typeof ResizeObserver);
 
+  // jsdom implements no layout, so it ships no scrollIntoView at all. Any component that keeps a cursor
+  // on screen calls it and throws here, which reads as a component bug and is not one.
+  if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = function () {};
+
   globalThis.IntersectionObserver =
     globalThis.IntersectionObserver ||
     (class {

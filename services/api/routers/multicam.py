@@ -13,6 +13,26 @@ from pydantic import BaseModel
 router = APIRouter()
 
 
+@router.get("/multicam/readiness")
+async def readiness(session_id: str):
+    """Whether cross-view linking can work on this session, and what is missing when it cannot.
+
+    The cross-camera machinery is complete: `plan_cross_camera` returns a candidate box and a visibility
+    grade per camera, `commit_cross_camera` writes them as one reversible run, and `propagate.py` already
+    refuses with `gated=True` on a session that has not passed calibration validation.
+
+    What was missing was any way to ask before opening the page, so an annotator saw an inert grid with no
+    explanation, which is the worst state for a working tool to be in. The blockers come back ordered by
+    what has to happen first: labelling objects on a session whose calibration has never been validated
+    produces labels that cannot be projected anywhere.
+    """
+    from db.session import get_sessionmaker
+    from services.multicam.readiness import session_readiness
+
+    async with get_sessionmaker()() as db:
+        return await session_readiness(db, UUID(session_id))
+
+
 @router.get("/multicam/groups")
 async def groups(session_id: str, tol_ms: int = 20):
     """In-memory rig groups (no writes): live assembly at an arbitrary tolerance."""

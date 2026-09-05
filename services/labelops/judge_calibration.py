@@ -65,6 +65,9 @@ log = get_logger("labelops.judge_calibration")
 # States a human moved an object to that mean "the label was right".
 ACCEPTED_STATES = ("accepted", "submitted")
 
+# Decisions each of a group's two rates needs before a per-L1 sens/spec is reported as a number.
+MIN_GROUP_DECISIONS = 10
+
 
 def _is_refinement(onto, asked_class: str | None, proposed_class_id: int | None) -> bool:
     """Whether a rejection swapped one class for a sibling under the same L1.
@@ -168,6 +171,72 @@ async def build_calibration_set(db: AsyncSession, *, limit: int | None = None) -
     return out
 
 
+def summarize_decisions(per_decision: dict[str, dict]) -> dict:
+    """Confusion counts from per-decision votes, pooled and per L1 superclass. Pure, so it is testable
+    without a judge.
+
+    Majority of the objects under one human decision; a tie, or all abstentions, counts as an abstention
+    rather than being broken arbitrarily toward agreement.
+
+    The per-L1 split exists because the corpus-pooled sens/spec is a property of the MIX of classes in
+    the calibration set; a judge that is sharp on vehicles and lost on animals pools to a middling number
+    that is wrong for both. A group is reported as numbers only when each rate has at least
+    MIN_GROUP_DECISIONS decisions behind it; below that it is named with its counts instead, because a
+    sensitivity over four decisions is a coin flip wearing four decimal places.
+    """
+    tp = fp = tn = fn = abstain_pos = abstain_neg = 0
+    refinements = 0
+    by_l1: dict[str, dict] = {}
+    for d in per_decision.values():
+        if d["correct"] > d["incorrect"]:
+            verdict = "correct"
+        elif d["incorrect"] > d["correct"]:
+            verdict = "incorrect"
+        else:
+            verdict = "unsure"
+
+        g = by_l1.setdefault(d.get("l1") or "unknown",
+                             {"tp": 0, "fp": 0, "tn": 0, "fn": 0, "abstain": 0})
+        if verdict == "unsure":
+            g["abstain"] += 1
+            if d["human_says_correct"]:
+                abstain_pos += 1
+            else:
+                abstain_neg += 1
+        elif d["human_says_correct"]:
+            if verdict == "correct":
+                tp += 1
+                g["tp"] += 1
+            else:
+                fn += 1
+                g["fn"] += 1
+                if d.get("refinement"):
+                    refinements += 1
+        else:
+            if verdict == "incorrect":
+                tn += 1
+                g["tn"] += 1
+            else:
+                fp += 1
+                g["fp"] += 1
+
+    per_l1: dict[str, dict] = {}
+    for l1, g in sorted(by_l1.items()):
+        pos, neg = g["tp"] + g["fn"], g["tn"] + g["fp"]
+        if pos >= MIN_GROUP_DECISIONS and neg >= MIN_GROUP_DECISIONS:
+            per_l1[l1] = {"sensitivity": round(g["tp"] / pos, 4), "specificity": round(g["tn"] / neg, 4),
+                          "sensitivity_interval": wilson_interval(g["tp"], pos),
+                          "specificity_interval": wilson_interval(g["tn"], neg),
+                          "decisions": pos + neg + g["abstain"], "usable": True}
+        else:
+            per_l1[l1] = {"usable": False, "positives": pos, "negatives": neg,
+                          "reason": f"needs {MIN_GROUP_DECISIONS} decisions on each side; "
+                                    f"has {pos} positive, {neg} negative"}
+
+    return {"tp": tp, "fp": fp, "tn": tn, "fn": fn, "abstain_pos": abstain_pos,
+            "abstain_neg": abstain_neg, "refinements": refinements, "per_l1": per_l1}
+
+
 async def calibrate_judge(db: AsyncSession, *, limit: int | None = None, client=None,
                           model_version: str | None = None, persist: bool = True) -> dict:
     """Run the judge over the retrospective set and report how often it agrees with the humans.
@@ -229,6 +298,7 @@ async def calibrate_judge(db: AsyncSession, *, limit: int | None = None, client=
 
         d = per_decision.setdefault(item.decision_key, {
             "human_says_correct": item.human_says_correct,
+            "l1": onto.by_name(item.asked_class).l1,
             "correct": 0, "incorrect": 0, "unsure": 0, "objects": 0, "refinement": False})
         d[parsed["verdict"]] += 1
         d["objects"] += 1
@@ -261,35 +331,10 @@ async def calibrate_judge(db: AsyncSession, *, limit: int | None = None, client=
     if persist:
         await db.commit()
 
-    tp = fp = tn = fn = abstain_pos = abstain_neg = 0
-    refinements = 0
-    for d in per_decision.values():
-        # Majority of the objects under one human decision. A tie, or all abstentions, counts as an
-        # abstention rather than being broken arbitrarily toward agreement.
-        if d["correct"] > d["incorrect"]:
-            verdict = "correct"
-        elif d["incorrect"] > d["correct"]:
-            verdict = "incorrect"
-        else:
-            verdict = "unsure"
-
-        if verdict == "unsure":
-            if d["human_says_correct"]:
-                abstain_pos += 1
-            else:
-                abstain_neg += 1
-        elif d["human_says_correct"]:
-            if verdict == "correct":
-                tp += 1
-            else:
-                fn += 1
-                if d.get("refinement"):
-                    refinements += 1
-        else:
-            if verdict == "incorrect":
-                tn += 1
-            else:
-                fp += 1
+    agg = summarize_decisions(per_decision)
+    tp, fp, tn, fn = agg["tp"], agg["fp"], agg["tn"], agg["fn"]
+    abstain_pos, abstain_neg = agg["abstain_pos"], agg["abstain_neg"]
+    refinements, per_l1 = agg["refinements"], agg["per_l1"]
 
     sens = tp / (tp + fn) if (tp + fn) else None
     spec = tn / (tn + fp) if (tn + fp) else None
@@ -313,6 +358,7 @@ async def calibrate_judge(db: AsyncSession, *, limit: int | None = None, client=
         "refinements_within_superclass": refinements,
         "confusion": {"tp": tp, "fp": fp, "tn": tn, "fn": fn,
                       "abstained_on_correct": abstain_pos, "abstained_on_wrong": abstain_neg},
+        "per_l1": per_l1,
         "usable": sens is not None and spec is not None and (sens + spec) > 1.0,
         "source": ("retrospective: built from review history, so it cost no new human time. Positives are "
                    "objects a person accepted without changing the class; negatives are objects a person "

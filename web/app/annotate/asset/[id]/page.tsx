@@ -77,6 +77,13 @@ export default function AssetEditor() {
 
   const duration = Number(asset?.meta?.duration_s ?? 0);
 
+  // What the browser can actually load.
+  //
+  // These editors pointed straight at `asset.uri`, and every asset here carries a `file://` uri, which a
+  // browser refuses to load from an http page: "Not allowed to load local resource". So the whole surface
+  // showed nothing. The bytes come through the API now, the way a frame's image always has.
+  const mediaUrl = asset ? `/api/assets/${asset.asset_id}/media` : null;
+
   const canvas = () => {
     if (!asset) return <div className="p-4 font-mono text-[11px] text-ink-3">loading...</div>;
     switch (asset.media_type) {
@@ -88,7 +95,7 @@ export default function AssetEditor() {
             add("relation", { from_annotation_id, to_annotation_id })} />;
       case "audio":
         return asset.uri
-          ? <AudioRegionEditor uri={asset.uri} annotations={anns} config={config} activeLabel={label}
+          ? <AudioRegionEditor uri={mediaUrl!} annotations={anns} config={config} activeLabel={label}
               selectedId={selectedId} onSelect={setSelectedId}
               onCreate={(t_start, t_end) => add("region", { t_start, t_end })} />
           : <div className="p-4 font-mono text-[11px] text-ink-3">audio asset has no uri</div>;
@@ -100,7 +107,7 @@ export default function AssetEditor() {
       case "document":
       case "image":
         return asset.uri
-          ? <DocumentEditor uri={asset.uri} annotations={anns} config={config} activeLabel={label}
+          ? <DocumentEditor uri={mediaUrl!} annotations={anns} config={config} activeLabel={label}
               selectedId={selectedId} onSelect={setSelectedId}
               onCreate={(bbox) => add("bbox", { bbox })}
               onTranscribe={async (annotationId, bbox) => {

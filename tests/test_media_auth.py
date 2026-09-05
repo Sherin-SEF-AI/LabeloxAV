@@ -76,6 +76,9 @@ def test_the_media_path_set_is_the_image_routes_and_nothing_adjacent():
     assert is_media_read(f"/api/predictions/{oid}/crop")
     assert is_media_read(f"/api/frames/{fid}/segment/labelids.png")
     assert is_media_read(f"/api/frames/{fid}/segment/overlay")
+    # An asset's bytes: the document and audio editors render an <img>/<audio> at this, and neither can
+    # set a header. Added after that endpoint shipped without it and answered 401 to every editor open.
+    assert is_media_read(f"/api/assets/{uuid.uuid4()}/media")
 
     # Matched end to end, so a data route sharing the prefix does not come along with it.
     assert not is_media_read(f"/api/frames/{fid}/objects")
@@ -83,6 +86,11 @@ def test_the_media_path_set_is_the_image_routes_and_nothing_adjacent():
     assert not is_media_read(f"/api/objects/{oid}")
     assert not is_media_read("/api/sessions")
     assert not is_media_read(f"/api/frames/{fid}/segment")
+    # The asset routes that are data, not media, must not come with it: annotations are writable and the
+    # media cookie is a credential the browser attaches by itself.
+    assert not is_media_read(f"/api/assets/{oid}/annotations")
+    assert not is_media_read(f"/api/assets/{oid}")
+    assert not is_media_read(f"/api/assets/{oid}/media/../annotations")
 
 
 # ---------------------------------------------------------------- over HTTP

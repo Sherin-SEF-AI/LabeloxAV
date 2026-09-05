@@ -4,16 +4,16 @@ attributes:
   occlusion:      { type: enum, values: [0, 25, 50, 75, 100] }
   truncation:     { type: float, range: [0.0, 1.0] }
   direction:      { type: enum, values: [same, cross, wrong_way] }
-  helmet:         { type: bool_array }          # per rider
-  passenger_load: { type: int, range: [0, 12] }   # measured max in corpus is 4
-  overload:       { type: bool }
+  helmet:         { type: bool_array, track_constant: true }          # per rider
+  passenger_load: { type: int, range: [0, 12], track_constant: true }   # measured max in corpus is 4
+  overload:       { type: bool, track_constant: true }
   on_shoulder:    { type: bool }
-  marking_state:  { type: enum, values: [present, faded, absent] }
+  marking_state:  { type: enum, values: [present, faded, absent], track_constant: true }
   blocks_lane:    { type: bool }
   static:         { type: bool }
-  articulated:    { type: bool }
+  articulated:    { type: bool, track_constant: true }
   signal_state:   { type: enum, values: [R, Y, G, "off"] }
-  livery:         { type: bool }
+  livery:         { type: bool, track_constant: true }
   # ---- P2 behavioral attributes: dynamic per-object state for planning + prediction. Global like the
   # rest; annotators fill the ones relevant to the object's class (vehicles get motion/brake/indicator,
   # signals get signal_arrow/kind/mount, etc). YAML-boolean words (on/off/none) are quoted so they stay
@@ -38,44 +38,44 @@ attributes:
   # Declared here so the distinction has somewhere to live that is not the class id. Additive on purpose:
   # no class is removed, no object is relabelled, and nothing downstream changes until somebody chooses to
   # populate it. Collapsing the classes or relabelling 142,447 objects is a larger decision and is not this.
-  body_style:     { type: enum, values: [sedan, hatchback, suv, mpv, van, pickup, coupe, wagon, unknown] }
-  signal_arrow:   { type: enum, values: ["none", left, right, straight, u_turn] }
-  signal_kind:    { type: enum, values: [vehicle, pedestrian, cyclist] }
-  signal_mount:   { type: enum, values: [pole, gantry, wall, portable] }
-  pole_id:        { type: int }                 # id of the pole/structure a signal or sign is mounted on
+  body_style:     { type: enum, values: [sedan, hatchback, suv, mpv, van, pickup, coupe, wagon, unknown], track_constant: true }
+  signal_arrow:   { type: enum, values: ["none", left, right, straight, u_turn], track_constant: true }
+  signal_kind:    { type: enum, values: [vehicle, pedestrian, cyclist], track_constant: true }
+  signal_mount:   { type: enum, values: [pole, gantry, wall, portable], track_constant: true }
+  pole_id:        { type: int, track_constant: true }                 # id of the pole/structure a signal or sign is mounted on
   # ---- P3 India attributes: what a vehicle is carrying, who is on it, and how it was modified.
   #
   # These are the axes on which Indian road data is distinctive and on which every public AV dataset is
   # silent. A truck with rebar out the back and a scooter with a family of five are both correctly boxed
   # and correctly classed today, and nothing in the record distinguishes either from an empty one. ----
-  load_type:      { type: enum, values: ["none", goods, construction_material, agricultural, water, gas_cylinders, livestock, passengers, waste, unknown] }
-  load_overhang:  { type: bool }                # load projects past the body outline: rebar, pipes, poles
-  cargo_secured:  { type: enum, values: [secured, unsecured, not_applicable, unknown] }
-  trailer_attached: { type: bool }
+  load_type:      { type: enum, values: ["none", goods, construction_material, agricultural, water, gas_cylinders, livestock, passengers, waste, unknown], track_constant: true }
+  load_overhang:  { type: bool, track_constant: true }                # load projects past the body outline: rebar, pipes, poles
+  cargo_secured:  { type: enum, values: [secured, unsecured, not_applicable, unknown], track_constant: true }
+  trailer_attached: { type: bool, track_constant: true }
   # Scoped per class, not per l1: l1 `heavy` collapses bus, truck, tractor, tipper, ambulance, fire_truck,
   # bullock_cart and harvester, and an attribute offered on a fire truck is an attribute somebody sets.
-  roof_load:          { type: bool }            # goods or people on the roof
-  footboard_passengers: { type: bool }          # riding the step outside the doorway
-  passengers_on_load: { type: bool }            # people riding on top of the cargo itself
+  roof_load:          { type: bool, track_constant: true }            # goods or people on the roof
+  footboard_passengers: { type: bool, track_constant: true }          # riding the step outside the doorway
+  passengers_on_load: { type: bool, track_constant: true }            # people riding on top of the cargo itself
   # Occupancy. The range stops at 6 rather than the 4 the brief proposed: a family of five on a scooter is
   # a real and photographable thing, and a ceiling that refuses to record it turns the observation this
   # attribute exists to capture into a validation error.
-  occupant_count: { type: int, range: [0, 6] }
+  occupant_count: { type: int, range: [0, 6], track_constant: true }
   # Read from occupant_count, never written. Two independently settable fields produce objects that say
   # three occupants and not triple riding, and no consumer can tell which one to believe.
-  triple_riding:  { type: bool, derived_from: occupant_count }
-  delivery_box:   { type: bool }                # the brief is right that this is an attribute, not a class
-  rain_gear:      { type: enum, values: ["none", poncho, umbrella, raincoat, unknown] }
-  head_load:      { type: bool }                # carrying on the head, hands free
-  mobility_aid:   { type: enum, values: ["none", crutches, wheelchair, walking_stick, unknown] }
-  animal_control: { type: enum, values: [herded, tethered, stray, unknown] }
-  group_size:     { type: int, range: [1, 50] } # a herd or a crowd boxed as one; 1 means a single animal
-  modified_body:  { type: bool }                # rebuilt or extended beyond the factory body
+  triple_riding:  { type: bool, derived_from: occupant_count, track_constant: true }
+  delivery_box:   { type: bool, track_constant: true }                # the brief is right that this is an attribute, not a class
+  rain_gear:      { type: enum, values: ["none", poncho, umbrella, raincoat, unknown], track_constant: true }
+  head_load:      { type: bool, track_constant: true }                # carrying on the head, hands free
+  mobility_aid:   { type: enum, values: ["none", crutches, wheelchair, walking_stick, unknown], track_constant: true }
+  animal_control: { type: enum, values: [herded, tethered, stray, unknown], track_constant: true }
+  group_size:     { type: int, range: [1, 50], track_constant: true } # a herd or a crowd boxed as one; 1 means a single animal
+  modified_body:  { type: bool, track_constant: true }                # rebuilt or extended beyond the factory body
   # What the bus is for, as an attribute rather than as three classes, for the reason recorded against the
   # P3 leaves below. A city bus stops in the running lane every few hundred metres, an intercity coach does
   # not stop at all, and a school service stops and unloads children into the road. That is the planning
   # distinction, and it is worth having without splitting a class that already holds 19,948 objects.
-  bus_service:    { type: enum, values: [city, intercity, school, staff, tourist, unknown] }
+  bus_service:    { type: enum, values: [city, intercity, school, staff, tourist, unknown], track_constant: true }
   # ---- P3 infrastructure and hazard attributes ----
   #
   # `script` records WHICH writing systems appear on a sign, board or road marking, and nothing about what
@@ -84,15 +84,15 @@ attributes:
   # answerable without transcribing a single word. Multi-select because a Bengaluru signboard routinely
   # carries Kannada and English together, and forcing one would record the wrong half.
   script:         { type: multi_select, values: [devanagari, kannada, tamil, telugu, malayalam, bengali,
-                                                 gujarati, gurmukhi, odia, urdu, latin, other] }
-  sign_condition: { type: enum, values: [clear, faded, bent, obscured, defaced, missing_face] }
+                                                 gujarati, gurmukhi, odia, urdu, latin, other], track_constant: true }
+  sign_condition: { type: enum, values: [clear, faded, bent, obscured, defaced, missing_face], track_constant: true }
   # How much of the carriageway the defect takes and how far a wheel drops into it. Severity is an
   # attribute rather than three classes because a pothole does not become a different kind of thing as it
   # grows, and because the same hole is `moderate` in the dry and `severe` when the monsoon fills it.
-  hazard_severity: { type: enum, values: [minor, moderate, severe] }
+  hazard_severity: { type: enum, values: [minor, moderate, severe], track_constant: true }
   # Whether the hole or trench is currently full of water, which is what makes it invisible and is the
   # single most common way a two-wheeler goes into one.
-  water_filled:   { type: bool }
+  water_filled:   { type: bool, track_constant: true }
 
 # Per-subclass (L1) applicable-attribute allowlist. An object's class restricts which global attributes
 # apply, so the editor shows only the relevant ones and validation rejects the rest. A subclass not listed

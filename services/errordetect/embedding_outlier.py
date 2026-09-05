@@ -14,7 +14,10 @@ from services.autolabel.ontology import get_ontology
 from services.errordetect.score import as_suspicion
 
 log = get_logger("ed_outlier")
-_ACCEPTED = ("accepted", "auto_accept")
+# Trusted-enough labels to mine outliers against. 'settled' belongs here: a lot-backed closure is a
+# better prior than an auto_accept, and outlier mining over settled labels is exactly the kind of
+# check that catches a lot that should not have passed.
+_ACCEPTED = ("accepted", "auto_accept", "settled")
 
 
 async def detect_embedding_outliers(db: AsyncSession, session_id: str | None = None,

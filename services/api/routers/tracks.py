@@ -192,6 +192,74 @@ async def relabel_track(track_id: UUID, payload: RelabelTrackIn, db: AsyncSessio
             "id_switch_events": switches}
 
 
+class AcceptTrackIn(BaseModel):
+    # Left to the clamp in services/review_policy.py rather than defaulted here: an annotator pressing
+    # accept means `submitted` and a reviewer means `accepted`, and the server is what decides which.
+    state: str | None = None
+    # The frame the editor is holding, excluded so its version is not bumped underneath it.
+    origin_object_id: str | None = None
+    time_spent_ms: int = 0
+    reviewer: str = "anon"
+
+
+@router.post("/tracks/{track_id}/accept")
+async def accept_track(track_id: UUID, payload: AcceptTrackIn, db: AsyncSession = Depends(db_session),
+                       user=Depends(current_user)):
+    """Confirm every object on the track in one action, without asserting a class.
+
+    Tube review is built on this. 7,512 tracks of ten or more objects hold 549,038 objects, 95% of the
+    corpus, so a track a reviewer can confirm as a whole is one keystroke standing in for fifty.
+
+    Until now the only track-wide write was `relabel_track`, which requires a class name and writes
+    `source="propagated"`, so confirming a correctly-labelled track meant restating its own class and
+    relabelling every frame to say so. `services/api/routers/track_events.py` already records that this
+    became the accept path by default; it was a workaround.
+
+    Nothing here moves a box or changes a class. `source=None` leaves each object's own source in place,
+    so an interpolated box stays interpolated and gains an accepted state and a Review row naming who
+    accepted it. The per-object work is the same `apply_review_batch` the bulk grid uses, which is where
+    the optimistic lock, the role clamp and the revertible run come from.
+    """
+    onto = get_ontology()
+    rows = (await db.execute(select(Object).where(Object.track_id == track_id))).scalars().all()
+    if not rows:
+        raise HTTPException(404, "track not found or has no objects")
+    if len(rows) > MAX_TRACK_RELABEL_OBJECTS:
+        raise HTTPException(409, f"track holds {len(rows)} objects, above the {MAX_TRACK_RELABEL_OBJECTS} "
+                                 "limit; it is more likely mis-linked than real, so fix the track first")
+
+    origin = str(payload.origin_object_id) if payload.origin_object_id else None
+    targets = [o for o in rows if str(o.object_id) != origin]
+
+    reviewer = user.name if user is not None else payload.reviewer
+    uid = user.user_id if user is not None else None
+    try:
+        res = await apply_review_batch(
+            db, targets, action="accept", onto=onto, requested_state=payload.state,
+            role=getattr(user, "role", None), source=None, reviewer=reviewer, uid=uid,
+            time_spent_ms=payload.time_spent_ms,
+            provenance_extra={"track_accept": True},
+            skip_human=True)
+    except ReviewStateError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    run_id = await record_batch(
+        db, res.changes, created_by=reviewer, commit=False,
+        policy={"action": "accept_track", "track_id": str(track_id)}) if res.changes else None
+    await db.commit()
+
+    # Surfaced for the same reason relabel surfaces it: a re-identification event is where the tracker lost
+    # the object and picked it up again, so a whole-track verdict may have covered two physical objects.
+    track = await db.get(Track, track_id)
+    switches = 0
+    if track is not None and isinstance(track.id_switch_flags, dict):
+        switches = len(track.id_switch_flags.get("events") or [])
+
+    return {"track_id": str(track_id), "accepted": res.n, "state": res.new_state,
+            "clamped": res.clamped, "run_id": run_id, "skipped_stale": res.stale,
+            "skipped_human": res.skipped_human, "id_switch_events": switches}
+
+
 class MergeTrackIn(BaseModel):
     from_track_id: UUID
     force: bool = False

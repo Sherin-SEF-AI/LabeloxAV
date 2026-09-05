@@ -199,7 +199,8 @@ async def run_drift_scan(db: AsyncSession, ref_sessions: list[str] | None = None
         # No breach this scan: lift a prior drift-induced pause so the loop is not trapped forever.
         resumed = await resume_auto_promote(db)
         if resumed:
-            await record(db, "drift", "resume_auto_promote", None, {})
+            await record(db, "drift", "drift_pause_cleared", None,
+                         {"note": "auto-promotion stays off; re-enabling it is the operator opt-in"})
             log.info("govern.drift_recovered")
     return {"metrics": results, "breached": [b["metric"] for b in breaches], "paused": bool(breaches),
             "resumed": resumed}

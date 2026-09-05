@@ -1,4 +1,8 @@
 import type {
+  AutonomyState,
+  SettlementLotRow,
+  AttrCoverage,
+  AttrQueue,
   TrackEvent,
   TrackEventsResponse,
   AgentRunRow,
@@ -504,7 +508,51 @@ export const api = {
   lidarBatchCorrect: (ids: string[], classId?: number, dims?: number[]) =>
     post<{ updated: number }>(`/api/lidar/objects3d/batch_correct`,
       { object_3d_ids: ids, class_id: classId ?? null, dims: dims ?? null }),
+  // Guideline check for one frame, run where the work happens rather than in a corpus sweep. `dormant` is
+  // as much of the answer as `findings`: a rule whose counterpart data nobody is collecting says so.
+  lintFrame: (frame_id: string, open_issues = false) =>
+    post<{
+      frame_id: string; n_objects?: number;
+      findings: { object_id: string; rule: string; label: string; severity: string; score: number; reason: string }[];
+      systemic: Record<string, number>;
+      dormant: { rule: string; label: string; reason: string }[];
+      issues?: { opened: number; issue_ids: string[] };
+      reason?: string;
+    }>(`/api/frames/${frame_id}/lint`, { open_issues }),
+  // Which object on a frame is most likely to be wrong. A separate call rather than a field on
+  // frameObjects, and ranked ids rather than a reordered array: the object list is in drawing order and
+  // objectGroups.ts records that re-sorting it breaks the correspondence with the canvas.
+  frameRisk: (frame_id: string) =>
+    get<{
+      frame_id: string; n?: number; coverage?: number;
+      objects: Record<string, {
+        object_id: string; risk: number; coverage: number; reasons: string[];
+        components: Record<string, { value: number; present: boolean; detail: string }>;
+      }>;
+      ranking: string[];
+      components_available?: string[]; components_missing?: string[]; reason?: string;
+    }>(`/api/frames/${frame_id}/risk`),
+  // Whether the local GPU slot is held. Advisory by the endpoint's own docstring: the answer can be stale
+  // the instant it returns, so nothing decides from it - it exists so an annotator can see that SAM will
+  // refuse before spending a click finding out.
+  gpuSlot: () => get<{ free: boolean; cuda: Record<string, unknown>; detail: string }>("/api/gpu/slot"),
   ontology: () => get<Ontology>("/api/ontology"),
+  // Attribute sweep: what is unanswered, a page of crops to answer it on, and the write.
+  attrCoverage: (session_id?: string) =>
+    get<{ session_id: string | null; attributes: AttrCoverage[] }>(
+      `/api/attrsweep/coverage${session_id ? `?session_id=${session_id}` : ""}`),
+  attrQueue: (q: { attr: string; class_name?: string; session_id?: string; limit?: number; unit?: string }) =>
+    get<AttrQueue>(`/api/attrsweep/queue?${new URLSearchParams(
+      Object.entries(q).filter(([, v]) => v !== undefined && v !== "")
+        .map(([k, v]) => [k, String(v)])).toString()}`),
+  attrApply: (body: {
+    attr: string; value: unknown; unit: string; ids: string[];
+    overwrite?: boolean; time_spent_ms?: number;
+  }) =>
+    post<{
+      updated: number; objects: number; run_id: string | null; state: string | null;
+      clamped?: boolean; reason?: string; attrs_dropped?: Record<string, string[]>;
+    }>("/api/attrsweep/apply", body),
   addClass: (name: string) => post<OntologyClass & { existed: boolean }>("/api/ontology/classes", { name }),
   // Repair, not just growth. merge/rename/retire have existed server-side and been reachable from nothing,
   // so the vocabulary could be added to and never fixed - which is exactly the asymmetry the commit that
@@ -563,6 +611,15 @@ export const api = {
   governPromote: (v: string) => post(`/api/govern/promote?model_version=${v}`, {}),
   governKill: (reason: string) => post("/api/govern/killswitch/engage", { reason }),
   governRelease: () => post("/api/govern/killswitch/release", {}),
+  // Autonomy: the ladder, the switches, staleness, the night's journal - one read
+  autonomyState: () => get<AutonomyState>("/api/autonomy/state"),
+  settlementLots: (status?: string) =>
+    get<SettlementLotRow[]>(`/api/govern/settlement/lots${status ? `?status=${status}` : ""}`),
+  settlementAck: (lotId: string) => post(`/api/govern/settlement/${lotId}/ack`, {}),
+  settlementRevert: (lotId: string, reason: string) =>
+    post(`/api/govern/settlement/${lotId}/revert?reason=${encodeURIComponent(reason)}`, {}),
+  autonomySetLevel: (className: string, level: number, pinned = false) =>
+    post(`/api/govern/autonomy/${className}/level?level=${level}&pinned=${pinned}`, {}),
   // M4.3 collaboration
   collabBranches: () => get<{ branches: string[] }>("/api/collaborate/branches"),
   collabAssignments: () => get<AssignmentRow[]>("/api/collaborate/assignments"),
@@ -620,7 +677,7 @@ export const api = {
     post<{ predictions: { class_id: number; class_name: string; conf: number }[] }>("/api/objects/classify", { frame_id, box }),
   createObject: (
     frame_id: string,
-    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][]; cuboid_3d?: { center: number[]; size: number[]; yaw: number }; job_id?: string },
+    body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][]; cuboid_3d?: { center: number[]; size: number[]; yaw: number }; bbox_amodal?: number[]; job_id?: string },
   ) => post<ObjectDetail>(`/api/frames/${frame_id}/objects`, body),
   updateMask: (object_id: string, polygons: number[][], width?: number, height?: number) =>
     put<{ object_id: string; version: number }>(`/api/objects/${object_id}/mask`, { polygons, width, height }),
@@ -714,10 +771,31 @@ export const api = {
     post<{ run_id: string; relabeled: number; counts: Record<string, number> }>(`/api/agent/temporal-repair`, session_id ? { session_id } : {}),
   agentCuboidsPlan: (frame_id: string) =>
     post<{ counts: { total: number; auto_accept: number; review: number; skip: number } }>(`/api/agent/frames/${frame_id}/cuboids/plan`, {}),
+  // The monocular cuboid solve, per object and per road click. It has existed since cuboids were added
+  // and was reachable only as a frame-wide batch, so the editor's own cuboid tool used a hardcoded
+  // sedan-sized box at yaw 0 for everything it placed.
+  cuboidFit: (object_id: string, contact?: number[]) =>
+    post<{
+      object_id: string; cuboid: { center: number[]; size: number[]; yaw: number; yaw_source?: string } | null;
+      reproj_iou?: number; class_name?: string; yaw_source?: string; lanes_available?: number; reason?: string;
+    }>(`/api/agent/objects/${object_id}/cuboid/fit`, contact ? { contact } : {}),
+  cuboidAt: (frame_id: string, u: number, v: number, class_name: string) =>
+    post<{
+      cuboid: { center: number[]; size: number[]; yaw: number; yaw_source?: string } | null;
+      class_name?: string; yaw_source?: string; lanes_available?: number; reason?: string;
+    }>(`/api/agent/frames/${frame_id}/cuboid/at`, { u, v, class_name }),
   agentCuboids: (frame_id: string) =>
     post<{ run_id: string; attached: number; counts: { auto_accept: number; review: number; skip: number } }>(`/api/agent/frames/${frame_id}/cuboids`, {}),
+  // The per-camera candidates come back in `items` and were being dropped by this binding, so the one
+  // piece a UI needs to draw the proposal was unreachable from the client.
   agentCrossCamPlan: (object_id: string) =>
-    post<{ counts: { targets: number; auto_accept: number; review: number; skip: number }; class_name?: string; reason?: string }>(`/api/agent/objects/${object_id}/crosscam/plan`, {}),
+    post<{
+      object_id: string; class_name?: string; cuboid_source?: string; reason?: string;
+      counts: { targets: number; auto_accept: number; review: number; skip: number };
+      items: { cam_id: string; frame_id: string; action: string; visibility: number;
+               box?: number[]; box_norm?: number[]; frame_width?: number; frame_height?: number;
+               class_name?: string; reason?: string }[];
+    }>(`/api/agent/objects/${object_id}/crosscam/plan`, {}),
   agentCrossCam: (object_id: string) =>
     post<{ run_id: string; created: number; counts: { auto_accept: number; review: number; skip: number } }>(`/api/agent/objects/${object_id}/crosscam`, {}),
   agentPropagatePlan: (object_id: string, span = 24) =>
@@ -804,6 +882,24 @@ export const api = {
   getSegment: (frame_id: string, kind = "semantic") =>
     get<{ found: boolean; coverage?: Record<string, number>; has_overlay?: boolean; source?: string; model_version?: string | null }>(`/api/frames/${frame_id}/segment?kind=${kind}`),
   // M2.1 lanes
+  // The road flattened, plus the two-way mapping that makes it drawable. The inverse of the ground lift
+  // did not exist anywhere until now, which is why every lane tool here has been image-space only.
+  frameBev: (frame_id: string) =>
+    get<{
+      frame_id: string;
+      view: { near_m: number; far_m: number; half_width_m: number; px_per_m: number; width: number; height: number };
+      image: string;
+      calibration: { source: string; quality: number; model: string; cam_id: string };
+      caveat: string;
+    }>(`/api/frames/${frame_id}/bev`),
+  lanesInBev: (frame_id: string) =>
+    get<{
+      frame_id: string;
+      view: { near_m: number; far_m: number; half_width_m: number; px_per_m: number; width: number; height: number };
+      lanes: (LaneRow & { bev_points: number[][]; dropped: number })[];
+    }>(`/api/frames/${frame_id}/lanes/bev`),
+  createLaneFromBev: (frame_id: string, body: { points: number[][]; lane_type?: string; is_ego?: boolean }) =>
+    post<LaneRow>(`/api/frames/${frame_id}/lanes/bev`, body),
   framesLanes: (frameId: string) => get<LaneRow[]>(`/api/frames/${frameId}/lanes`),
   proposeLanes: (frameId: string) => post<{ proposed: number; lanes: LaneRow[]; model: string }>(`/api/frames/${frameId}/lanes/propose`, {}),
   createLane: (frameId: string, body: { control_points: number[][]; lane_type: string; is_ego: boolean }) =>
@@ -920,6 +1016,18 @@ export const api = {
       `/api/tracklets/objects/${objectId}/propagate?direction=${direction}&frames=${frames}`, {}),
   setTrackAttributes: (trackId: string, attrs: Record<string, unknown>) =>
     post<{ objects: number }>(`/api/tracklets/${trackId}/attributes`, { attrs }),
+  // Which of a track's machine-filled boxes have slid off the object their anchor was drawn around.
+  // Encoding takes the GPU lease in bounded batches, so this can wait behind a training job.
+  trackDrift: (trackId: string, limit = 120) =>
+    get<{
+      track_id: string; checked: number; anchors?: number; fill?: number; reason?: string;
+      counts?: { drifted: number; ok: number; unknown: number };
+      rows: {
+        object_id: string; frame_id: string; ts_ns: number; source: string;
+        anchor_object_id: string; gap_ns: number; similarity: number | null;
+        size_ok: boolean; verdict: "drifted" | "ok" | "unknown"; why: string;
+      }[];
+    }>(`/api/tracklets/${trackId}/drift?limit=${limit}`),
   suggestKeyframes: (trackId: string, budget = 8) =>
     get<{ suggestions: { object_id: string; frame_id: string; curvature: number }[] }>(
       `/api/tracklets/${trackId}/suggest-keyframes?budget=${budget}`),
@@ -1249,6 +1357,14 @@ export const api = {
   track: (id: string) => get<Track>(`/api/tracks/${id}`),
   // Track events: typed spans within a track. The vocabulary rides with the list so the picker never needs
   // a second request and always shows the definitions from the pack this track's session was captured under.
+  // Where a track's motion actually changes, as targets a span edge can snap to. `source=ego_speed`
+  // refuses on this corpus with the count, rather than silently using a different signal.
+  trackChangepoints: (track_id: string, source: "object_speed" | "ego_speed" = "object_speed") =>
+    get<{
+      track_id: string; source: string; samples: number; caveat?: string; reason?: string;
+      changepoints: { index: number; frame_id: string; ts_ns: number; before: number; after: number;
+                      shift: number; sigmas: number }[];
+    }>(`/api/tracks/${track_id}/changepoints?source=${source}`),
   trackEvents: (id: string) => get<TrackEventsResponse>(`/api/tracks/${id}/events`),
   createTrackEvent: (id: string, body: { event_type: string; start_frame_id: string; end_frame_id: string; notes?: string }) =>
     post<TrackEvent>(`/api/tracks/${id}/events`, body),
@@ -1279,6 +1395,15 @@ export const api = {
   calibrationImport: (sid: string, body: { cam_id: string; format: string; ref_width?: number; calib_text?: string; camera_intrinsic?: number[][]; translation?: number[] }) =>
     post<Record<string, unknown>>(`/api/calibration/${sid}/import`, body),
   // M3.1 multi-camera
+  // Whether cross-view linking can work here, and what is missing when it cannot. The machinery is
+  // complete; the corpus is not, and an inert grid with no explanation is the worst state for a working
+  // tool to be in.
+  multicamReadiness: (session_id: string) =>
+    get<{
+      session_id: string; ready: boolean; cameras: string[]; frame_groups: number;
+      multi_camera_groups: number; calibration_passed: string[]; objects: number;
+      blockers: { code: string; detail: string; fix: string }[];
+    }>(`/api/multicam/readiness?session_id=${session_id}`),
   multicamGroups: (sid: string) => get<MulticamGroups>(`/api/multicam/groups?session_id=${sid}`),
   multicamAssociate: (sid: string) => post<{ associated: number; rig_tracks: number; cameras: string[]; reason?: string }>(`/api/multicam/associate?session_id=${sid}`, {}),
   // M-MC.0 persisted frame groups + group-aware navigation
@@ -1318,6 +1443,13 @@ export const api = {
       refused: { object_id: string; reason: string }[]; attrs_dropped: Record<string, string[]>;
       id_switch_events: number;
     }>(`/api/tracks/${id}/relabel`, { class_name, ...(opts ?? {}) }),
+  // Confirm a whole track without asserting a class. Distinct from relabelTrack, which requires one and
+  // rewrites every box's source: this only moves state, so an interpolated box stays interpolated.
+  acceptTrack: (id: string, opts?: { state?: string; origin_object_id?: string; time_spent_ms?: number }) =>
+    post<{
+      accepted: number; state: string | null; clamped: boolean; run_id: string | null;
+      skipped_human: string[]; skipped_stale: unknown[]; id_switch_events: number;
+    }>(`/api/tracks/${id}/accept`, { ...(opts ?? {}) }),
   deleteTrack: (id: string) => del<{ n_objects: number }>(`/api/tracks/${id}`),
   review: (
     id: string,
@@ -1334,6 +1466,8 @@ export const api = {
       keypoints?: Keypoints | null;
       mask_polygons?: number[][];
       polyline?: number[][];
+      /** The whole extent including the occluded part. An empty array clears it. */
+      bbox_amodal?: number[];
       cuboid_3d?: { center: number[]; size: number[]; yaw: number };
     },
   ) => post<ObjectDetail & { version?: number; rot_deg?: number }>(`/api/objects/${id}/review`, payload),

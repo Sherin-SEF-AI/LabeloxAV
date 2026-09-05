@@ -28,6 +28,7 @@ import PanelSection from "@/components/editor/PanelSection";
 
 import DynamicsCard from "./DynamicsCard";
 import LidarBevSection from "./LidarBevSection";
+import LintCard from "./LintCard";
 import ObjectsCard from "./ObjectsCard";
 import PanelHeader from "./PanelHeader";
 import RoadSegSection from "./RoadSegSection";
@@ -48,6 +49,12 @@ const TAB_KEYS = TABS.map((t) => t.key);
 export type PropertiesPanelProps = {
   frame: { id: string; meta: FrameMeta; onto: Ontology; dirty: boolean; flash: (m: string) => void };
   editor: { st: EditorState; dispatch: Dispatch<Action>; selected: EdObject | null };
+  /** What the guideline check said about this frame, and which rules could not run. */
+  lint?: import("./LintCard").LintResult | null;
+  onOpenLintIssues?: () => void;
+  /** The frame's risk order, marked on the object rows and never used to reorder them. */
+  risk?: { rank: Record<string, number>; score: Record<string, { risk: number; reasons: string[] }>;
+           coverage: number } | null;
   klass: { current: OntologyClass | null; onPick: (c: OntologyClass) => void; onAdd: (raw: string) => void };
   sel: {
     relationships: Relationship[];
@@ -59,6 +66,12 @@ export type PropertiesPanelProps = {
     onToggleLink: () => void;
     onDeleteRelationship: (rid: string) => void;
     onRecomputeDynamics: () => void;
+    /** Lift this object's 2D box to a cuboid with the monocular solve. */
+    onFitCuboid?: () => void;
+    /** Set the cuboid's yaw, in radians. */
+    onSetYaw?: (yaw: number) => void;
+    /** Take back the whole-extent box. */
+    onClearAmodal?: () => void;
   };
   onCollapse: () => void;
   tools: {
@@ -72,7 +85,7 @@ export type PropertiesPanelProps = {
   };
 };
 
-export default function PropertiesPanel({ frame, editor, klass, sel, tools, onCollapse }: PropertiesPanelProps) {
+export default function PropertiesPanel({ frame, editor, klass, sel, tools, onCollapse, risk, lint, onOpenLintIssues }: PropertiesPanelProps) {
   const { st, dispatch, selected } = editor;
   const [tab, setTab] = usePanelPref<ToolTab>(PREF_TOOL_TAB, "agent", TAB_KEYS);
 
@@ -109,7 +122,9 @@ export default function PropertiesPanel({ frame, editor, klass, sel, tools, onCo
               <SelectedObjectCard object={selected} onto={frame.onto}
                 relationships={sel.relationships} linkKind={sel.linkKind} linkFrom={sel.linkFrom}
                 onLinkKind={sel.onLinkKind} onToggleLink={sel.onToggleLink}
-                onDeleteRelationship={sel.onDeleteRelationship} onSetAttr={sel.onSetAttr} />
+                onDeleteRelationship={sel.onDeleteRelationship} onSetAttr={sel.onSetAttr}
+                onFitCuboid={sel.onFitCuboid} onSetYaw={sel.onSetYaw}
+                onClearAmodal={sel.onClearAmodal} />
             </div>
             <PanelSection title="dynamics">
               <DynamicsCard row={sel.dynamics[selected.id]} onRecompute={sel.onRecomputeDynamics} />
@@ -118,7 +133,11 @@ export default function PropertiesPanel({ frame, editor, klass, sel, tools, onCo
         )}
 
         <ObjectsCard objects={st.objects} selectedIds={st.selectedIds} dispatch={dispatch}
-          filters={<SelectionFilters dispatch={dispatch} />} />
+          filters={<SelectionFilters dispatch={dispatch} />} risk={risk} />
+
+        <LintCard lint={lint ?? null} selectedIds={st.selectedIds}
+          onSelect={(oid) => dispatch({ t: "select", id: oid })}
+          onOpenIssues={onOpenLintIssues} />
 
         <ToolTabs tabs={[...TABS]} value={tab} onChange={setTab} idPrefix="props" label="Editor tools" />
 

@@ -228,6 +228,13 @@ class Object(Base):
     track_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("track.track_id", ondelete="SET NULL"))
     class_id: Mapped[int] = mapped_column(ForeignKey("ontology_class.id"))
     bbox: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)  # xyxy pixel
+    # The whole extent of the object, including the part another object hides. `bbox` above stays the
+    # VISIBLE box, which is what every existing consumer means by it.
+    #
+    # Null means nobody has said, and it is deliberately not backfilled: an amodal box is a judgement
+    # about what is hidden, and guessing one from a class prior for 578,436 objects would fill the corpus
+    # with confident fabrications indistinguishable from observations.
+    bbox_amodal: Mapped[list[float] | None] = mapped_column(ARRAY(Float))
     mask_uri: Mapped[str | None] = mapped_column(Text)
     mask_encoding: Mapped[str | None] = mapped_column(String(16))
     attrs: Mapped[dict] = mapped_column(JSONB, default=dict)
@@ -364,6 +371,12 @@ class VlmTarget(Base):
 class Lane(Base):
     # M2.1: a lane line per frame (linked across frames by track_ref). Bezier/B-spline control points in
     # image coordinates; never a raster mask. Implicit/fallback lanes are hand-drawn on unmarked roads.
+    #
+    # A `virtual_lane` type was proposed and deliberately not added: `implicit` already means exactly that,
+    # a lane a person drew where there is no paint, and it has an editor tool of its own. Adding a synonym
+    # would split the same concept across two values that every consumer would then have to check for,
+    # which is how 48,322 objects ended up in `traffic_sign`. Nothing uses `implicit` yet - the corpus is
+    # 3,750 machine-proposed lanes and 3 human ones - so the gap is annotation, not vocabulary.
     __tablename__ = "lane"
 
     lane_id: Mapped[uuid.UUID] = _uuid_pk()
@@ -1862,6 +1875,9 @@ class ControlSample(Base):
     object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
     was_auto_accepted: Mapped[bool] = mapped_column(Boolean, default=False)
     human_verdict: Mapped[str | None] = mapped_column(String(16))      # correct|incorrect (null until reviewed)
+    # When the verdict landed (null for verdicts recorded before the column existed, whose times were
+    # never captured). created_at is the seeding time and must not be read as the measurement time.
+    verdict_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_control_sample_verdict", "human_verdict"),)
@@ -1935,10 +1951,101 @@ class GovernanceState(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     loop_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_accept_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    auto_promote_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Default False: promotion is propose-and-approve. The loop retrains, gates, and files a ready-to-
+    # promote notification; a person clicks promote. True is the documented opt-in to full closure.
+    auto_promote_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Settlement is its own switch, born false (migration 0106): the machine may close labels only
+    # under a passed acceptance lot, and only while an operator has this on. The kill switch clears it
+    # and release does not restore it - an opt-in before the cord was pulled stays an opt-in after.
+    settlement_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     champion_version: Mapped[str | None] = mapped_column(String(128))
     paused_reason: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SettlementLot(Base):
+    """One acceptance-sampling decision over one stratum, and everything needed to defend or revoke it.
+
+    A stratum is (class_id, model_epoch): the same detector asserting the same class is one population
+    with one defect rate, and mixing epochs would let a good new model launder a bad old one's labels.
+    The lot freezes the drawn sample, the FAR bound in force, the Wilson decision verbatim, and the ids
+    of the AgentRuns that wrote the settlement - so "why is this label closed?" has a one-row answer
+    and "undo it" is a revert of named runs, not a hunt.
+    """
+
+    __tablename__ = "settlement_lot"
+
+    lot_id: Mapped[uuid.UUID] = _uuid_pk()
+    class_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The champion whose proposals the stratum froze under; pre-attribution objects pool as "legacy".
+    model_epoch: Mapped[str] = mapped_column(String(128), nullable=False)
+    population: Mapped[int] = mapped_column(Integer, nullable=False)
+    tier: Mapped[str] = mapped_column(String(16), nullable=False)      # default | safety | critical
+    # Snapshot of the tier's FAR bound at planning time: a later config change cannot silently
+    # re-justify or invalidate a decision made under different rules.
+    far_bound: Mapped[float] = mapped_column(Float, nullable=False)
+    sample_object_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    batch_id: Mapped[str | None] = mapped_column(String(64))           # review batch carrying the verdicts
+    sample_n: Mapped[int] = mapped_column(Integer, nullable=False, default=0)   # verdicts counted
+    defects: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skips: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    topups: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    decision: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # acceptance_decision, verbatim
+    # sampling -> judging -> accepted | rejected | parked; accepted -> settled -> (maybe) reverted
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="sampling")
+    run_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    spot_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    spot_defects: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_settlement_lot_stratum", "class_id", "model_epoch", "status"),)
+
+
+class ClassAutonomy(Base):
+    """How far the machine may go for one class: 0 propose-only, 1 auto-accept band, 2 settlement.
+
+    History rows with one active per class (the ThresholdFit idiom): a step-down is a new row, so the
+    ladder's whole history stays readable and a revert is a re-activation rather than a lost record.
+    A human-pinned level is never auto-promoted past.
+    """
+
+    __tablename__ = "class_autonomy"
+
+    autonomy_id: Mapped[uuid.UUID] = _uuid_pk()
+    class_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    level: Mapped[int] = mapped_column(Integer, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    basis: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)   # the evidence, verbatim
+    set_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_class_autonomy_active", "class_id", "active"),)
+
+
+class SettlementSpot(Base):
+    """The continuous check on a settled lot: a small mirror of what was settled, always sent to a human.
+
+    Deliberately separate from `control_sample`, which is the auto-accept GATE auditing itself; mixing
+    settlement spots into it would pollute the gate's precision denominator, which is the exact
+    contamination the settlement design exists to avoid.
+    """
+
+    __tablename__ = "settlement_spot"
+
+    spot_id: Mapped[uuid.UUID] = _uuid_pk()
+    lot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("settlement_lot.lot_id", ondelete="CASCADE"),
+                                              nullable=False)
+    object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"),
+                                                 nullable=False)
+    human_verdict: Mapped[str | None] = mapped_column(String(16))      # correct | incorrect
+    verdict_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_settlement_spot_lot", "lot_id", "human_verdict"),)
 
 
 class ObjectDynamics(Base):

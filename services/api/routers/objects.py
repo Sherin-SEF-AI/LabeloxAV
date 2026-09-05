@@ -198,8 +198,27 @@ def _mask_key(session_id, frame_id, object_id) -> str:
 
 
 def _write_mask(store, session_id, frame_id, object_id, polygons, width, height) -> str:
+    """Store a mask, simplified to a tolerance derived from the outline's own size.
+
+    Every mask that reaches storage goes through here, and until now nothing looked at it: the polygons
+    were serialised exactly as handed over. The two simplifications that exist run somewhere else -
+    the open-vocabulary path simplifies at contour extraction, the browser trims a SAM candidate before
+    sending - so a mask that was hand-brushed, imported, or edited by dragging vertices was stored raw.
+
+    The tolerance comes from the ring's perimeter rather than from a screen pixel, because a 1px tolerance
+    on a 20px sign removes real shape while the same 1px on a 900px bus leaves hundreds of vertices
+    tracing a straight edge. Rings below a small absolute area are left alone entirely; see
+    `core/polygons.py` for the measurement that set that floor.
+
+    Measured over 899 stored masks: 2.8% of vertices removed at a mean shape agreement of 0.9985 IoU.
+    Most of the corpus is already tidy, so this is a guard against what arrives next rather than a repair
+    of what is there.
+    """
+    from core.polygons import simplify_mask
+
     # Same polygon-JSON shape services/autolabel/persist.py writes, so the read path is identical.
-    payload = {"encoding": "polygon", "polygons": polygons, "height": height, "width": width}
+    payload = {"encoding": "polygon", "polygons": simplify_mask(polygons), "height": height,
+               "width": width}
     return store.put_bytes(_mask_key(session_id, frame_id, object_id),
                            json.dumps(payload).encode(), "application/json")
 
@@ -226,6 +245,7 @@ def _detail(obj: Object, frame: Frame, onto) -> ObjectDetail:
         provenance=obj.provenance or {},
         version=obj.version,
         rot_deg=obj.rot_deg or 0.0,
+        bbox_amodal=list(obj.bbox_amodal) if obj.bbox_amodal else None,
         keypoints=obj.keypoints,
         polyline=obj.polyline,
         cuboid_3d=obj.cuboid_3d,
@@ -417,6 +437,7 @@ async def frame_objects(frame_id: str, job_id: str | None = None, limit: int = 2
             "mask_polygons": masks.get(o.mask_uri or "", []),
             "version": o.version,
             "rot_deg": o.rot_deg or 0.0,
+            "bbox_amodal": list(o.bbox_amodal) if o.bbox_amodal else None,
             "keypoints": o.keypoints,
             "polyline": o.polyline,
             "cuboid_3d": o.cuboid_3d,
@@ -425,10 +446,99 @@ async def frame_objects(frame_id: str, job_id: str | None = None, limit: int = 2
     ]
 
 
-# States that mean a person has dealt with the object, which is what "is this frame finished" asks. A
-# rejection is as settled as an acceptance. auto_accept is deliberately not here: it is the machine's
-# opinion, and counting it would draw a strip of finished frames nobody has looked at.
-_SETTLED_STATES = ("accepted", "rejected")
+@router.get("/frames/{frame_id}/risk", dependencies=[Depends(current_user)])
+async def frame_risk(frame_id: str, db: AsyncSession = Depends(db_session)):
+    """How likely each object on this frame is to be wrong, and how much of that is actually known.
+
+    A separate call rather than a field on `/objects`, and ranked ids rather than reordered objects.
+    `web/components/editor/properties/objectGroups.ts` records that the order `/objects` returns is
+    drawing order and that re-sorting it silently breaks the correspondence between the list and the
+    canvas; the risk order is a second view over the same rows, not a replacement for the first.
+
+    Every response carries `coverage` and `components_missing`, because the signals are unevenly present
+    (`quality_score` on 11.9% of the corpus, `clique_bandit` empty) and a rank computed from two of eight
+    signals is a weaker claim than one computed from eight.
+    """
+    from services.activelearn.frame_risk import rank_frame_objects
+
+    return await rank_frame_objects(db, UUID(frame_id), get_ontology())
+
+
+@router.post("/frames/{frame_id}/occlusion", dependencies=[Depends(current_user)])
+async def frame_occlusion(frame_id: str, commit: bool = False,
+                          db: AsyncSession = Depends(db_session)):
+    """Which object is in front of which, derived from the depth already being computed.
+
+    `ObjectRelationship` has allowed `kind="occludes"` with `source="geometry"` since relations were
+    added and nothing has ever written one; `ObjectDynamics.distance_m` holds a ground-contact depth for
+    367,000 objects. The two were never joined.
+
+    `commit=false` returns the proposal, which is the useful default: the depth is a monocular
+    ground-plane lift and a reviewer should see the overlap and the depth gap behind each claim. Committed
+    rows are always `proposed`, never confirmed.
+
+    `unordered` is as much of the answer as `pairs`. Two objects whose depths differ by less than those
+    depths' own error have no order this can see, and 66% of overlapping pairs are in that band.
+    """
+    from services.quality.occlusion import commit_occlusion, propose_occlusion
+
+    fid = UUID(frame_id)
+    if commit:
+        res = await commit_occlusion(db, fid)
+        await db.commit()
+        return res
+    return await propose_occlusion(db, fid)
+
+
+@router.get("/frames/{frame_id}/depth-order", dependencies=[Depends(current_user)])
+async def frame_depth_order(frame_id: str, db: AsyncSession = Depends(db_session)):
+    """The frame's objects from nearest to furthest, for drawing back to front.
+
+    Objects with no depth are listed separately rather than sorted to one end, which would be a statement
+    about them that nothing measured.
+    """
+    from services.quality.occlusion import depth_order
+
+    return await depth_order(db, UUID(frame_id))
+
+
+class LintIn(BaseModel):
+    # Off by default. A lint that silently opened issue threads every time the editor autosaved would fill
+    # the panel with duplicates of things nobody had asked about yet.
+    open_issues: bool = False
+
+
+@router.post("/frames/{frame_id}/lint")
+async def lint_frame_ep(frame_id: str, payload: LintIn | None = None,
+                        db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+    """Every annotation guideline this frame breaks, plus the rules that could not run and why.
+
+    The rules existed as a corpus sweep with one caller and no way to reach a frame. This runs them where
+    the work happens, and without the sweep's `source != "human"` filter, because a linter that runs on
+    save exists to check the edit that was just made.
+
+    `dormant` is as much of the answer as `findings`. Measured over the corpus, the relation and attribute
+    rules fire on 100% of their scope, because `object_relationship` holds 98 rows and `occupant_count` is
+    set on none. Those rules stay dormant until the counterpart data is being collected on the frame in
+    front of them, and say so, rather than opening 56,410 issues that are all the same fact.
+    """
+    from services.quality.lint import lint_frame, open_issues_for
+
+    res = await lint_frame(db, UUID(frame_id))
+    if payload is not None and payload.open_issues and res.get("findings"):
+        made = await open_issues_for(db, UUID(frame_id), res["findings"],
+                                     user_id=getattr(user, "user_id", None))
+        await db.commit()
+        res["issues"] = made
+    return res
+
+
+# States that mean the object is dealt with, which is what "is this frame finished" asks. A rejection
+# is as settled as an acceptance, and 'settled' is a closure backed by a passed acceptance lot - the
+# strip asks "does anyone still need to look?", and for a settled object the answer is no unless a spot
+# check reopens it. auto_accept is deliberately not here: it is the machine's opinion with no lot
+# behind it, and counting it would draw a strip of finished frames nobody has vouched for.
+_SETTLED_STATES = ("accepted", "rejected", "settled")
 
 
 @router.get("/frames/{frame_id}/filmstrip")
@@ -686,6 +796,7 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
         bbox=payload.bbox, mask_uri=mask_uri, mask_encoding=mask_encoding,
         attrs=onto.derive_attrs(payload.attrs or {}, onto.by_name(payload.class_name).id),
         conf=1.0, source="human", state=state, rot_deg=payload.rot_deg, keypoints=payload.keypoints,
+        bbox_amodal=list(payload.bbox_amodal) if payload.bbox_amodal else None,
         polyline=payload.polyline, cuboid_3d=payload.cuboid_3d,
         # Who drew it and under which job. Both null for a label drawn outside a job, which is every
         # existing flow and stays exactly as it was.
@@ -729,7 +840,10 @@ async def update_mask(object_id: str, payload: MaskIn, db: AsyncSession = Depend
                          "n_polygons": len(payload.polygons), "version": obj.version},
                   time_spent_ms=0, ts_ns=now_ns()))
     await db.commit()
-    return {"object_id": str(obj.object_id), "mask_polygons": payload.polygons, "version": obj.version}
+    # What was stored, not what was sent. `_write_mask` simplifies, so echoing the request back would
+    # leave the editor drawing an outline that differs from the one on disk until the next reload.
+    return {"object_id": str(obj.object_id), "mask_polygons": _mask_polygons(obj.mask_uri),
+            "version": obj.version}
 
 
 @router.delete("/objects/{object_id}", dependencies=[Depends(require_role("annotator"))])

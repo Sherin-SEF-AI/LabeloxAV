@@ -30,6 +30,7 @@ from core.logging import get_logger
 from core.storage import get_object_store
 from db.models import AgentRun, Frame, Object, Track
 from services.intelligence.propagate import _clip_box, _gray
+from services.temporal import drift
 
 log = get_logger("agent.propagate")
 
@@ -62,41 +63,13 @@ def _flow_box(prev_gray, cur_gray, box) -> list | None:
     return b if (b[2] - b[0] >= 4 and b[3] - b[1] >= 4) else None
 
 
-def _crop(store, uri, box):
-    img = cv2.imdecode(np.frombuffer(store.get_bytes(uri), np.uint8), cv2.IMREAD_COLOR)
-    if img is None:
-        return None
-    h, w = img.shape[:2]
-    x1, y1, x2, y2 = (int(round(v)) for v in box)
-    x1, y1 = max(0, x1), max(0, y1)
-    x2, y2 = min(w, x2), min(h, y2)
-    return img[y1:y2, x1:x2] if (x2 - x1 >= 2 and y2 - y1 >= 2) else None
-
-
-def _appearance(store, uri, box, ref_vec):
-    """DINOv3 cosine of the box crop against the source crop; None if embedding is unavailable."""
-    if ref_vec is None:
-        return None
-    try:
-        from services.intelligence.embed import dinov3
-        from services.intelligence.embed.prep import square_letterbox
-        crop = _crop(store, uri, box)
-        if crop is None:
-            return None
-        v = dinov3.encode_image(square_letterbox(crop))
-        return float(np.dot(np.asarray(v), np.asarray(ref_vec)))
-    except Exception:  # noqa: BLE001 -- no GPU / weights: fall back to geometry-only confidence
-        return None
-
-
-def _source_vec(store, uri, box):
-    try:
-        from services.intelligence.embed import dinov3
-        from services.intelligence.embed.prep import square_letterbox
-        crop = _crop(store, uri, box)
-        return None if crop is None else np.asarray(dinov3.encode_image(square_letterbox(crop)))
-    except Exception:  # noqa: BLE001
-        return None
+# The appearance primitives live in services/temporal/drift.py now, because this check is also what says
+# whether a box already in the corpus is still on its object, and that pass needs the same three
+# functions. Aliased rather than renamed here: the walk below reads better with these names, and they are
+# the names the docstring at the top of this file uses.
+_crop = drift.crop_box
+_appearance = drift.cosine_to
+_source_vec = drift.encode_crop
 
 
 async def _neighbors(db, session_id, ts_ns, *, forward: bool, span: int):

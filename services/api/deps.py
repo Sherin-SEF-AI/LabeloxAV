@@ -160,6 +160,8 @@ class ObjectDetail(BaseModel):
     class_id: int
     class_name: str
     bbox: list[float]
+    # The whole extent including the hidden part, when somebody has said. `bbox` stays the visible box.
+    bbox_amodal: list[float] | None = None
     mask_polygons: list[list[float]]
     attrs: dict
     conf: float
@@ -194,6 +196,10 @@ class ReviewIn(BaseModel):
     mask_polygons: list[list[float]] | None = None  # write the mask in the same request (atomic save)
     polyline: list[list[float]] | None = None       # open polyline points (only updated when provided)
     cuboid_3d: dict | None = None                    # ego-frame {center,size,yaw} (only when provided)
+    # The whole extent of a partly hidden object. Only updated when provided, and an explicit empty list
+    # clears it: "nobody has said" and "the object is fully visible" are different, and a client needs to
+    # be able to express taking an amodal box back.
+    bbox_amodal: list[float] | None = None
 
 
 class SegmentIn(BaseModel):
@@ -213,6 +219,7 @@ class CreateObjectIn(BaseModel):
     idem_key: str | None = None                    # client temp id; de-dupes a retried/raced create
     rot_deg: float = 0.0                           # oriented-box rotation about the box centre
     keypoints: dict | None = None                  # {"skeleton": str, "points": [[x,y,v],...]} image px
+    bbox_amodal: list[float] | None = None         # whole extent including the occluded part
     polyline: list[list[float]] | None = None      # open polyline points [[x,y],...] for linear features
     cuboid_3d: dict | None = None                  # ego-frame {center:[x,y,z], size:[w,l,h], yaw:rad}
     # The job this label was drawn under, when the annotator reached the frame through one. In the body
