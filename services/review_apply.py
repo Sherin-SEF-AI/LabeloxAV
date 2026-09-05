@@ -64,6 +64,8 @@ class ApplyResult:
     refused: list[dict] = field(default_factory=list)
     #: attributes dropped because they do not apply to the new class, by object id
     attrs_dropped: dict[str, list[str]] = field(default_factory=dict)
+    #: settlement spot checks whose verdict this batch supplied
+    spot_judged: int = 0
     #: control samples whose pending verdict this batch answered in passing
     control_judged: int = 0
     #: the undo record, keyed by object id
@@ -205,6 +207,22 @@ async def apply_review_batch(
                 cs.human_verdict = "correct" if ok else "incorrect"
                 cs.verdict_at = datetime.now(UTC)
                 res.control_judged += 1
+
+        # The same rule for the settlement spot mirror: a person ruling on a settled object answers
+        # the continuous check on the lot that settled it. Spots had no writer at all before this;
+        # settled objects never reached a grid and `human_verdict` stayed null on every row.
+        from db.models import SettlementSpot
+
+        spots = (await db.execute(_select(SettlementSpot).where(
+            SettlementSpot.object_id.in_([oid for oid, _ in control_verdicts]),
+            SettlementSpot.human_verdict.is_(None)))).scalars().all()
+        spot_by_obj = {sp.object_id: sp for sp in spots}
+        for oid, ok in control_verdicts:
+            sp = spot_by_obj.get(oid)
+            if sp is not None:
+                sp.human_verdict = "correct" if ok else "incorrect"
+                sp.verdict_at = datetime.now(UTC)
+                res.spot_judged += 1
 
     return res
 

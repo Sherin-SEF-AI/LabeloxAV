@@ -475,3 +475,351 @@ def test_settlement_changes_no_calibration_input(monkeypatch):
             await _governance(settlement=prior[0], loop=prior[1])
 
     run_async(_flow())
+
+
+# ---- WP1: the sequential rule on real rows ----
+# `_shrink(sample=10)` makes the cap 10, so every lot above draws its first increment AT the cap and
+# decides by Wilson alone, which is the legacy path and stays covered. The tests below raise the cap
+# so the sequential machinery has room: increments, the completed-prefix tally, the early accept,
+# the draw-order grid, the spot writer, and the migration round-trip.
+
+
+async def _permutation(class_id: int, epoch: str, n: int, *, exclude: list[str] = ()) -> list[str]:
+    """The first n judgeable review-state crops of the stratum in the engine's own permutation,
+    after `exclude`. Judged crops leave the review state, so a later increment is the head of the
+    permutation over what remains, which is the same order restricted to the same set."""
+    from sqlalchemy import text as sql
+
+    from services.autolabel.ontology import get_ontology
+    from services.labelops.settlement import _EPOCH_SQL, MIN_SIDE_PX, SAMPLE_SALT
+
+    cname = get_ontology().by_id(class_id).name
+    async with get_sessionmaker()() as db:
+        return [str(i) for i in (await db.execute(sql(f"""
+            select o.object_id from object o
+            where o.class_id = :cid and o.state = 'review' and o.source <> 'human'
+              and least(o.bbox[3] - o.bbox[1], o.bbox[4] - o.bbox[2]) >= :minside
+              and {_EPOCH_SQL} = :epoch
+              and not (o.object_id::text = any(cast(:have as text[])))
+            order by md5(o.object_id::text || :salt) limit :n"""),
+            {"cid": class_id, "class_name": cname, "epoch": epoch, "minside": MIN_SIDE_PX,
+             "salt": SAMPLE_SALT, "n": n, "have": list(exclude)})).scalars().all()]
+
+
+@requires_infra
+def test_a_clean_sequential_lot_accepts_on_its_first_increment(monkeypatch):
+    """Cap 60, first increment 25, all clean: the SPRT crosses its accept bound and Wilson agrees, so
+    the lot accepts after 25 verdicts instead of 60. The decision names both rules."""
+    from services.labelops.settlement import SPRT_INCREMENT, plan_lot, tally_lot
+
+    _shrink(monkeypatch, sample=60)
+
+    async def _flow():
+        sid, cid, oids, *_ = await _seed_stratum("sedan", 80)
+        await _clear_stratum(cid)
+        async with get_sessionmaker()() as db:
+            plan = await plan_lot(db, "sedan", epoch=EPOCH, created_by="test")
+        assert "error" not in plan, plan
+        try:
+            assert plan["rule"] == "sprt" and plan["cap_n"] == 60
+            assert plan["sample_n"] == SPRT_INCREMENT == 25
+            assert plan["human_minutes_estimate"] == round(25 / 10)
+            assert (await _permutation(cid, EPOCH, 25)) == (await _lot_ids(plan["lot_id"])), \
+                "the first increment is the head of the stratum's permutation"
+
+            await _judge_sample(plan["lot_id"])
+            async with get_sessionmaker()() as db:
+                res = await tally_lot(db, plan["lot_id"])
+                lot = await db.get(SettlementLot, uuid.UUID(plan["lot_id"]))
+            assert res["status"] == "accepted", res
+            d = res["decision"]
+            assert d["rule"] == "sprt" and d["sprt"]["verdict"] == "accept" \
+                and d["wilson"]["verdict"] == "accept"
+            assert d["n"] == 25 and d["defects"] == 0 and d["increments_complete"] == 1
+            assert lot.llr is not None and lot.llr <= lot.sprt["bound_accept"]
+            assert lot.sprt["trajectory"][-1]["n"] == 25
+            assert len(lot.increments) == 1 and lot.increments[0]["added"] == 25
+        finally:
+            await _drop_lot(plan.get("lot_id"))
+
+    run_async(_flow())
+
+
+async def _lot_ids(lot_id: str) -> list[str]:
+    async with get_sessionmaker()() as db:
+        return list((await db.get(SettlementLot, uuid.UUID(lot_id))).sample_object_ids)
+
+
+async def _clear_stratum(class_id: int) -> None:
+    """Open lots a crashed earlier run left on the stratum would refuse the next plan."""
+    async with get_sessionmaker()() as db:
+        for lot in (await db.execute(select(SettlementLot).where(
+                SettlementLot.class_id == class_id, SettlementLot.model_epoch == EPOCH,
+                SettlementLot.status.in_(("sampling", "judging", "accepted"))))).scalars().all():
+            await db.delete(lot)
+        await db.commit()
+
+
+async def _drop_lot(lot_id: str | None) -> None:
+    """A lot left accepted or judging blocks the next plan on its stratum; tests that stop short of
+    settle-and-revert remove theirs."""
+    if not lot_id:
+        return
+    async with get_sessionmaker()() as db:
+        lot = await db.get(SettlementLot, uuid.UUID(lot_id))
+        if lot is not None:
+            await db.delete(lot)
+            await db.commit()
+
+
+@requires_infra
+def test_a_partial_increment_never_tallies_and_continue_draws_the_next_prefix(monkeypatch):
+    """Judged 20 of 25: nothing tallies (floor 0.9). Judged 25 with 5 defects at far 0.35: the SPRT
+    says continue, the engine reports inconclusive, and the top-up draws the NEXT 25 of the same
+    permutation. While that increment is half judged the next one is refused, and the tally over
+    the completed prefix is unchanged by the partial one."""
+    from services.labelops.settlement import plan_lot, tally_lot, top_up_lot
+
+    _shrink(monkeypatch, sample=100)
+
+    async def _flow():
+        sid, cid, oids, *_ = await _seed_stratum("sedan", 120)
+        await _clear_stratum(cid)
+        async with get_sessionmaker()() as db:
+            plan = await plan_lot(db, "sedan", epoch=EPOCH, created_by="test")
+        assert "error" not in plan and plan["cap_n"] == 100, plan
+        lot_id = plan["lot_id"]
+        try:
+
+            await _judge_sample(lot_id, defects=5, leave=5)      # 20 of 25 judged
+            async with get_sessionmaker()() as db:
+                res = await tally_lot(db, lot_id)
+            assert res["status"] == "judging" and "waiting" in res["detail"], res
+            assert "decision" not in res
+
+            await _judge_sample(lot_id, defects=5)               # all 25 judged, 5 defects
+            async with get_sessionmaker()() as db:
+                res = await tally_lot(db, lot_id)
+            d = res["decision"]
+            assert res["status"] == "judging" and d["verdict"] == "inconclusive", res
+            assert d["sprt"]["verdict"] == "continue" and d["rule"] == "sprt"
+            assert d["increments_complete"] == 1 and d["next_increment"] == 25
+            llr_after_one = d["sprt"]["llr"]
+
+            first = await _lot_ids(lot_id)
+            expected_next = await _permutation(cid, EPOCH, 25, exclude=first)
+            async with get_sessionmaker()() as db:
+                top = await top_up_lot(db, lot_id)
+            assert top["added"] == 25 and top["increments"] == 2 and top["sample_total"] == 50, top
+            assert (await _lot_ids(lot_id)) == [*first, *expected_next], \
+                "the second increment is the next 25 of the same permutation, appended in order"
+
+            # Judge only the first 10 of the second increment: its 25 are 40% judged, so the prefix
+            # is still one increment and the llr does not move; the next draw is refused.
+            ids = await _lot_ids(lot_id)
+            await _judge_ids(ids[25:35], defects=0)
+            async with get_sessionmaker()() as db:
+                res = await tally_lot(db, lot_id)
+                top = await top_up_lot(db, lot_id)
+            assert res["decision"]["increments_complete"] == 1
+            assert res["decision"]["sprt"]["llr"] == llr_after_one
+            assert "still being judged" in top.get("error", ""), top
+
+            # Complete the second increment clean: 5 defects in 50 at far 0.35 accepts (both rules).
+            await _judge_ids(ids[35:50], defects=0)
+            async with get_sessionmaker()() as db:
+                res = await tally_lot(db, lot_id)
+                lot = await db.get(SettlementLot, uuid.UUID(lot_id))
+            assert res["status"] == "accepted", res
+            assert res["decision"]["n"] == 50 and res["decision"]["increments_complete"] == 2
+            assert len(lot.sprt["trajectory"]) == 2 and lot.topups == 0, \
+                "sequential increments are not top-ups; the counter is for the post-cap rule"
+        finally:
+            await _drop_lot(lot_id)
+
+    run_async(_flow())
+
+
+async def _judge_ids(ids: list[str], *, defects: int) -> None:
+    from services.autolabel.ontology import get_ontology
+    from services.review_apply import apply_review_batch
+
+    async with get_sessionmaker()() as db:
+        objs = (await db.execute(select(Object).where(
+            Object.object_id.in_([uuid.UUID(s) for s in ids])))).scalars().all()
+        by = {str(o.object_id): o for o in objs}
+        ordered = [by[s] for s in ids]
+        onto = get_ontology()
+        if ordered[:defects]:
+            await apply_review_batch(db, ordered[:defects], action="reject", onto=onto,
+                                     role="reviewer", reviewer="lot-judge")
+        if ordered[defects:]:
+            await apply_review_batch(db, ordered[defects:], action="accept", onto=onto,
+                                     role="reviewer", reviewer="lot-judge")
+        await db.commit()
+
+
+@requires_infra
+def test_five_straight_defects_reject_a_sequential_lot_early(monkeypatch):
+    """The saving the rule was built for: a bad class fails on its first increment. Cap 100 at far
+    0.05 (the real default tier) would have asked for 100 verdicts; 25 with 8 defects rejects."""
+    from services.labelops.settlement import plan_lot, tally_lot
+
+    _shrink(monkeypatch, far=0.05, sample=100)
+
+    async def _flow():
+        sid, cid, oids, *_ = await _seed_stratum("sedan", 120)
+        await _clear_stratum(cid)
+        async with get_sessionmaker()() as db:
+            plan = await plan_lot(db, "sedan", epoch=EPOCH, created_by="test")
+        await _judge_sample(plan["lot_id"], defects=8)
+        async with get_sessionmaker()() as db:
+            res = await tally_lot(db, plan["lot_id"])
+        assert res["status"] == "rejected", res
+        assert res["decision"]["sprt"]["verdict"] == "reject"
+        assert res["decision"]["n"] == 25 < 100
+
+    run_async(_flow())
+
+
+@requires_infra
+def test_at_the_cap_the_fixed_rule_decides_verbatim(monkeypatch):
+    """Cap 10 (the legacy shrink): the first increment IS the cap, and the decision is
+    `acceptance_decision` byte for byte, with the SPRT recorded beside it for the record."""
+    from services.labelops.sampling import acceptance_decision
+    from services.labelops.settlement import plan_lot, tally_lot
+
+    _shrink(monkeypatch)
+
+    async def _flow():
+        sid, cid, oids, *_ = await _seed_stratum("sedan", 30)
+        await _clear_stratum(cid)
+        async with get_sessionmaker()() as db:
+            plan = await plan_lot(db, "sedan", epoch=EPOCH, created_by="test")
+        assert plan["sample_n"] == plan["cap_n"] == 10
+        await _judge_sample(plan["lot_id"], defects=2)
+        async with get_sessionmaker()() as db:
+            res = await tally_lot(db, plan["lot_id"])
+        d = res["decision"]
+        assert d["rule"] == "wilson_at_cap"
+        expected = acceptance_decision(2, 10, max_defect_rate=0.35)
+        assert d["verdict"] == expected["verdict"] and d["wilson"] == expected
+        assert "sprt" in d
+
+    run_async(_flow())
+
+
+@requires_infra
+def test_the_grid_serves_a_settlement_batch_in_draw_order_and_nothing_else_changes(monkeypatch):
+    """Triage ranks by (1-conf)*rarity*boost everywhere; a `settle-` batch is served in the order it
+    was drawn so every judged prefix is a random sample. A batch with any other cycle id keeps the
+    formula exactly."""
+    from sqlalchemy import text as sql
+
+    from services.api.routers.triage import _why_and_priority, triage
+    from services.autolabel.ontology import get_ontology
+    from services.labelops.settlement import plan_lot
+
+    _shrink(monkeypatch, sample=60)
+
+    async def _flow():
+        sid, cid, oids, *_ = await _seed_stratum("sedan", 80)
+        await _clear_stratum(cid)
+        async with get_sessionmaker()() as db:
+            # make the confidences differ so the formula would reorder the batch
+            await db.execute(sql("update object set conf = random() * 0.5 + 0.4 "
+                                 "where object_id = any(cast(:ids as uuid[]))"),
+                             {"ids": [str(o) for o in oids]})
+            await db.commit()
+            plan = await plan_lot(db, "sedan", epoch=EPOCH, created_by="test")
+            assert "error" not in plan, plan
+            # no session filter: the stratum spans every session that seeded this epoch
+            rows = await triage(db=db, states="review", flywheel=plan["batch_id"], limit=200)
+        drawn = await _lot_ids(plan["lot_id"])
+        await _drop_lot(plan["lot_id"])
+        served = [r.object_id for r in rows]
+        assert served == drawn, "a settlement batch is served in draw order"
+        assert all(r.flags[0].code == "settlement_sample" for r in rows)
+        assert rows[0].priority > rows[-1].priority
+
+        # the same objects under an ordinary cycle id: the formula, untouched
+        onto = get_ontology()
+        async with get_sessionmaker()() as db:
+            await db.execute(sql("""
+                update object set provenance = provenance || jsonb_build_object('flywheel',
+                    jsonb_build_object('cycle_id', 'cycle-plain'))
+                where object_id = any(cast(:ids as uuid[]))"""),
+                {"ids": [str(o) for o in oids[:20]]})
+            await db.commit()
+            rows = await triage(db=db, states="review", session_id=str(sid),
+                                flywheel="cycle-plain", limit=200)
+            objs = {str(o.object_id): o for o in (await db.execute(select(Object).where(
+                Object.object_id.in_(oids[:20])))).scalars().all()}
+        assert len(rows) == 20
+        for r in rows:
+            _why, prio, _flags = _why_and_priority(objs[r.object_id], onto)
+            assert r.priority == prio
+        assert [r.priority for r in rows] == sorted((r.priority for r in rows), reverse=True)
+
+    run_async(_flow())
+
+
+@requires_infra
+def test_a_spot_verdict_lands_through_the_review_path(monkeypatch):
+    """Spots were dead: settle_lot minted them on settled objects no grid ever listed and nothing
+    wrote human_verdict. Now the spot objects carry a `spot-` cycle id the grid serves under
+    states=settled, and a person's ruling through apply_review_batch writes the spot verdict."""
+    from services.api.routers.triage import triage
+    from services.autolabel.ontology import get_ontology
+    from services.govern.class_autonomy import set_level
+    from services.labelops.settlement import plan_lot, settle_lot, tally_lot
+    from services.review_apply import apply_review_batch
+
+    _shrink(monkeypatch)
+
+    async def _flow():
+        sid, cid, oids, *_ = await _seed_stratum("tempo", 30)
+        await _clear_stratum(cid)
+        prior = await _governance(settlement=True, loop=True)
+        try:
+            async with get_sessionmaker()() as db:
+                plan = await plan_lot(db, "tempo", epoch=EPOCH, created_by="test")
+            await _judge_sample(plan["lot_id"])
+            async with get_sessionmaker()() as db:
+                assert (await tally_lot(db, plan["lot_id"]))["status"] == "accepted"
+                await set_level(db, cid, 2, set_by="test")
+                settled = await settle_lot(db, plan["lot_id"], created_by="test")
+            assert settled["spots"] > 0
+            assert settled["spot_review_at"] == \
+                f"/review/grid?flywheel={settled['spot_batch']}&states=settled"
+
+            async with get_sessionmaker()() as db:
+                rows = await triage(db=db, states="settled", flywheel=settled["spot_batch"],
+                                    limit=200)
+                assert len(rows) == settled["spots"], "every spot is on the grid"
+                assert all(r.flags[0].code == "settlement_spot" for r in rows)
+
+                spots = (await db.execute(select(SettlementSpot).where(
+                    SettlementSpot.lot_id == uuid.UUID(plan["lot_id"])))).scalars().all()
+                assert all(s.human_verdict is None for s in spots)
+                first, second = spots[0], spots[1] if len(spots) > 1 else None
+                obj = await db.get(Object, first.object_id)
+                res = await apply_review_batch(db, [obj], action="accept", onto=get_ontology(),
+                                               role="reviewer", reviewer="spot-judge")
+                await db.commit()
+                assert res.spot_judged == 1
+                await db.refresh(first)
+                assert first.human_verdict == "correct" and first.verdict_at is not None
+                await db.refresh(obj)
+                assert obj.state == "accepted", "a person's ruling on a settled object upgrades it"
+                if second is not None:
+                    obj2 = await db.get(Object, second.object_id)
+                    res = await apply_review_batch(db, [obj2], action="reject", onto=get_ontology(),
+                                                   role="reviewer", reviewer="spot-judge")
+                    await db.commit()
+                    await db.refresh(second)
+                    assert second.human_verdict == "incorrect" and res.spot_judged == 1
+        finally:
+            await _governance(settlement=prior[0], loop=prior[1])
+
+    run_async(_flow())

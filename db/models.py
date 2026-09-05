@@ -1996,6 +1996,20 @@ class SettlementLot(Base):
     run_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     spot_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     spot_defects: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # The decision rule the lot was planned under: 'wilson' (one fixed draw, the original rule) or
+    # 'sprt' (sequential increments up to cap_n, accept conjunctive with Wilson). cap_n is the fixed
+    # sample the sequential lot may grow to; 0 marks a lot planned before the rule existed.
+    rule: Mapped[str] = mapped_column(String(16), nullable=False, default="wilson",
+                                      server_default="wilson")
+    cap_n: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    llr: Mapped[float | None] = mapped_column(Float)    # null: never computed, which is not zero
+    # {p0, p1, alpha, beta, bound_accept, bound_reject, increment, expected_remaining, oc,
+    #  trajectory: [{n, defects, llr, at}]}
+    sprt: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict,
+                                       server_default=sql_text("'{}'::jsonb"))
+    # [{at, added, n_after, kind}] in draw order; the sample is the concatenation of the increments.
+    increments: Mapped[list] = mapped_column(JSONB, nullable=False, default=list,
+                                             server_default=sql_text("'[]'::jsonb"))
     created_by: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

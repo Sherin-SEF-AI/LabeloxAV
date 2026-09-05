@@ -34,6 +34,8 @@ FLAG_SEVERITY = {
     "low_conf": "medium",
     "rare_class": "low",
     "review_band": "low",
+    "settlement_sample": "medium",
+    "settlement_spot": "medium",
 }
 
 # Named for what the reader is being asked to check, not for the comparison that produced them. "mask != box"
@@ -45,6 +47,8 @@ FLAG_LABEL = {
     "low_conf": "Low confidence",
     "rare_class": "Rare class",
     "review_band": "In review band",
+    "settlement_sample": "Settlement sample",
+    "settlement_spot": "Settlement spot check",
 }
 
 # The prose kept on `why`, so existing readers of that field are unaffected.
@@ -55,6 +59,8 @@ FLAG_PROSE = {
     "rare_class": "rare class",
     "low_conf": "low conf",
     "review_band": "review band",
+    "settlement_sample": "settlement sample: this verdict decides whether the lot settles",
+    "settlement_spot": "settlement spot check: this verdict audits a settled lot",
 }
 
 _SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
@@ -133,15 +139,38 @@ async def triage(
         stmt = stmt.where(DbSession.city == city)
     if klass:
         stmt = stmt.where(Object.class_id == onto.by_name(klass).id)
+    draw_order: dict[str, int] | None = None
     if flywheel:
         # the worklist a flywheel cycle dispatched: objects it stamped with this cycle id
         stmt = stmt.where(Object.provenance["flywheel"]["cycle_id"].astext == flywheel)
-    stmt = stmt.limit(max(limit * 3, limit))  # over-fetch, rank, then trim
+        if flywheel.startswith("settle-"):
+            # A settlement sample is a random draw and its verdicts tally in increments. Served
+            # hardest-first, the judged prefix would be the lot's worst crops, not a sample of it;
+            # served in draw order, every completed prefix is one. The uncertainty formula stays as it
+            # is for every other worklist.
+            from db.models import SettlementLot
+
+            lot = (await db.execute(select(SettlementLot).where(
+                SettlementLot.batch_id == flywheel))).scalars().first()
+            if lot is not None:
+                draw_order = {oid: i for i, oid in enumerate(lot.sample_object_ids or [])}
+    if draw_order is None:
+        stmt = stmt.limit(max(limit * 3, limit))  # over-fetch, rank, then trim
 
     rows = (await db.execute(stmt)).all()
     out: list[TriageRow] = []
     for obj, sid in rows:
         why, priority, flags = _why_and_priority(obj, onto)
+        if draw_order is not None:
+            idx = draw_order.get(str(obj.object_id), len(draw_order))
+            priority = round(1.0 + (len(draw_order) - idx) / max(1, len(draw_order)), 4)
+            flags = [{"code": "settlement_sample", "label": FLAG_LABEL["settlement_sample"],
+                      "severity": FLAG_SEVERITY["settlement_sample"]}, *flags]
+            why = f"{FLAG_PROSE['settlement_sample']} (draw {idx + 1} of {len(draw_order)}), {why}"
+        elif flywheel and flywheel.startswith("spot-"):
+            flags = [{"code": "settlement_spot", "label": FLAG_LABEL["settlement_spot"],
+                      "severity": FLAG_SEVERITY["settlement_spot"]}, *flags]
+            why = f"{FLAG_PROSE['settlement_spot']}, {why}"
         if control:
             flags = [{"code": "control_sample", "label": FLAG_LABEL["control_sample"],
                       "severity": FLAG_SEVERITY["control_sample"]}, *flags]

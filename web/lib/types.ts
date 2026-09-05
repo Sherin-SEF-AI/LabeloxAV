@@ -1330,12 +1330,29 @@ export type LadderRung = {
   class_name: string; class_id: number; level: number; basis: Record<string, unknown>;
   set_by: string; pinned: boolean; cooldown_until: string | null; explicit: boolean;
 };
+export type SettlementAllocator = {
+  remaining: number; minutes: number; value: number; oc: number | null;
+};
 export type SettlementLotRow = {
   lot_id: string; class_name: string; epoch: string; tier: string; far_bound: number;
   population: number; sample_n: number; defects: number; skips: number; topups: number;
   status: string; decision: Record<string, unknown>; spot_total: number; spot_defects: number;
-  batch_id: string | null; review_at: string | null; created_at: string | null;
-  decided_at: string | null;
+  batch_id: string | null; review_at: string | null; spot_review_at: string | null;
+  created_at: string | null; decided_at: string | null;
+  // the sequential rule: 'wilson' for lots planned as one fixed draw, 'sprt' for incremental ones
+  rule: "wilson" | "sprt"; cap_n: number; llr: number | null; sample_drawn: number;
+  sprt: { p0?: number; p1?: number; alpha?: number; beta?: number; bound_accept?: number;
+          bound_reject?: number; expected_remaining?: number; oc?: number;
+          trajectory?: { n: number; defects: number; llr: number; at: string }[] };
+  increments: { at: string; added: number; n_after: number; kind?: string }[];
+  allocator: SettlementAllocator;
+};
+export type SettlementWorkItem = {
+  lot_id: string; class_name: string; batch_id: string | null; tier: string; rule: string;
+  population: number; sample_n: number; defects: number; drawn: number; cap_n: number;
+  llr: number | null; bound_accept: number | null; bound_reject: number | null;
+  remaining_verdicts: number; minutes: number; value: number; oc: number | null;
+  review_at: string | null;
 };
 export type AutonomyState = {
   switches: {
@@ -1355,7 +1372,8 @@ export type AutonomyState = {
     active_fitted_thresholds: number;
   };
   settlement: { lots_by_status: Record<string, number>; settled_objects: number;
-                settlement_runs: Record<string, number>; revert_rate: number | null };
+                settlement_runs: Record<string, number>; revert_rate: number | null;
+                worklist: SettlementWorkItem[]; verdict_minutes_open: number };
   last_digest: { run_id: string; status: string; created_at: string | null;
                  report: Record<string, unknown> } | null;
   journal: { kind: string; status: string; created_at: string | null; run_id: string }[];

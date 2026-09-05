@@ -103,11 +103,39 @@ async def _settlement_summary(db: AsyncSession) -> dict:
         .group_by(AgentRun.status))).all()
     run_counts = {k: int(v) for k, v in runs}
     total_runs = sum(run_counts.values())
+
+    # The verdict-minute worklist: every lot still asking for verdicts, ranked by the objects a
+    # passed lot would settle per minute of a person's time. Verdict minutes are the scarcest input
+    # to the loop, and this is the one number that says where the next one should go.
+    from services.autolabel.ontology import get_ontology
+    from services.labelops.settlement import expected_remaining
+
+    onto = get_ontology()
+    judging = (await db.execute(
+        select(SettlementLot).where(SettlementLot.status == "judging"))).scalars().all()
+    worklist = []
+    for lot in judging:
+        est = expected_remaining(lot)
+        worklist.append({"lot_id": str(lot.lot_id), "class_name": onto.by_id(lot.class_id).name,
+                         "batch_id": lot.batch_id, "tier": lot.tier, "rule": lot.rule,
+                         "population": lot.population, "sample_n": lot.sample_n,
+                         "defects": lot.defects, "drawn": len(lot.sample_object_ids or []),
+                         "cap_n": lot.cap_n, "llr": lot.llr,
+                         "bound_accept": (lot.sprt or {}).get("bound_accept"),
+                         "bound_reject": (lot.sprt or {}).get("bound_reject"),
+                         "remaining_verdicts": est["remaining"], "minutes": est["minutes"],
+                         "value": est["value"], "oc": est["oc"],
+                         "review_at": (f"/review/grid?flywheel={lot.batch_id}&states=review"
+                                       if lot.batch_id else None)})
+    worklist.sort(key=lambda w: -w["value"])
+
     return {"lots_by_status": by_status, "settled_objects": int(settled_objects),
             "settlement_runs": run_counts,
             # The displayed control signal: how often settlement has had to be taken back.
             "revert_rate": (round(run_counts.get("reverted", 0) / total_runs, 3)
-                            if total_runs else None)}
+                            if total_runs else None),
+            "worklist": worklist,
+            "verdict_minutes_open": round(sum(w["minutes"] for w in worklist), 1)}
 
 
 @router.get("/autonomy/state", dependencies=[Depends(require_role("annotator"))])

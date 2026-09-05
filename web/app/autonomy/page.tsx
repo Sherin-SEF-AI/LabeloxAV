@@ -7,7 +7,7 @@ import LoadState from "@/components/shell/LoadState";
 import PulseDot from "@/components/PulseDot";
 import { api, humanizeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
-import type { AutonomyState, SettlementLotRow } from "@/lib/types";
+import type { AutonomyState, SettlementLotRow, SettlementWorkItem } from "@/lib/types";
 
 // The autonomy console: the machine's answer to "what are you allowed to do right now, and why".
 //
@@ -24,6 +24,68 @@ import type { AutonomyState, SettlementLotRow } from "@/lib/types";
 const LEVEL_LABEL: Record<number, string> = {
   0: "propose only", 1: "auto-accept band", 2: "settlement",
 };
+
+// The log-likelihood ratio between its two bounds: left is accept, right is reject, the middle is
+// "keep asking". Drawn rather than printed because a person reading -1.7 has to remember which way
+// is good; a marker two thirds of the way to the accept edge does not need remembering.
+function LlrBar({ llr, lo, hi }: { llr: number | null; lo: number | null; hi: number | null }) {
+  if (llr == null || lo == null || hi == null || hi <= lo) {
+    return <span className="text-ink-3">not computed</span>;
+  }
+  const pct = Math.max(0, Math.min(100, ((llr - lo) / (hi - lo)) * 100));
+  return (
+    <span className="inline-flex items-center gap-1" title={`llr ${llr.toFixed(2)} in [${lo.toFixed(2)}, ${hi.toFixed(2)}]`}>
+      <span className="text-[9px] text-pass">accept</span>
+      <span className="relative inline-block h-[6px] w-[72px] rounded-sm bg-bg-2 border hairline">
+        <span className="absolute top-[-2px] h-[10px] w-[2px] bg-ink" style={{ left: `calc(${pct}% - 1px)` }} />
+      </span>
+      <span className="text-[9px] text-block">reject</span>
+    </span>
+  );
+}
+
+function Worklist({ items, minutes }: { items: SettlementWorkItem[]; minutes: number }) {
+  return (
+    <section className="panel">
+      <div className="uppercase text-[10px] text-ink-3 border-b hairline px-3 py-2 flex justify-between">
+        <span>verdict worklist · where the next minute goes</span>
+        <span>{minutes} min open</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px]">
+          <thead><tr className="text-ink-3 text-left">
+            <th className="px-3 py-1">class</th><th>evidence</th><th>llr</th>
+            <th>still to judge</th><th>objects / min</th><th></th>
+          </tr></thead>
+          <tbody>
+            {items.map((w) => (
+              <tr key={w.lot_id} className="border-t hairline">
+                <td className="px-3 py-1 text-ink-2">{w.class_name}</td>
+                <td className="text-ink-3">
+                  {w.sample_n ? `${w.defects}/${w.sample_n}` : "0 verdicts"} · {w.drawn}
+                  {w.rule === "sprt" && w.cap_n ? ` of ${w.cap_n}` : ""} drawn
+                </td>
+                <td><LlrBar llr={w.llr} lo={w.bound_accept} hi={w.bound_reject} /></td>
+                <td className="text-ink-3">~{w.remaining_verdicts} verdicts · {w.minutes} min</td>
+                <td className="text-ink-2 tabular-nums" title={w.oc != null ? `P(accept) ${w.oc}` : undefined}>
+                  {w.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </td>
+                <td className="px-2">
+                  {w.review_at && <a className="text-accent hover:underline" href={w.review_at}>judge</a>}
+                </td>
+              </tr>
+            ))}
+            {items.length === 0 && (
+              <tr><td className="px-3 py-2 text-ink-3" colSpan={6}>
+                no lot is asking for verdicts
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
 
 function age(iso: string | null | undefined): string {
   if (!iso) return "never";
@@ -198,6 +260,8 @@ export default function AutonomyPage() {
           </section>
         </div>
 
+        <Worklist items={settle?.worklist ?? []} minutes={settle?.verdict_minutes_open ?? 0} />
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* lots */}
           <section className="panel lg:col-span-2">
@@ -217,11 +281,17 @@ export default function AutonomyPage() {
                       <td className="px-3 py-1 text-ink-2">{l.class_name}</td>
                       <td className={l.tier === "critical" ? "text-block" : l.tier === "safety" ? "text-warn" : "text-ink-3"}>{l.tier}</td>
                       <td className="text-ink-3">{l.population.toLocaleString()}</td>
-                      <td className="text-ink-3">{l.sample_n ? `${l.defects}/${l.sample_n} defects` : `${(l.decision?.n as number) ?? "…"} awaiting verdicts`}</td>
+                      <td className="text-ink-3">
+                        {l.sample_n ? `${l.defects}/${l.sample_n} defects` : `${l.sample_drawn} awaiting verdicts`}
+                        {l.rule === "sprt" && l.cap_n ? ` · ${l.sample_drawn}/${l.cap_n} drawn` : ""}
+                      </td>
                       <td className="text-ink-3">{l.status}</td>
-                      <td className="px-2">
+                      <td className="px-2 whitespace-nowrap">
                         {l.review_at && l.status === "judging" && (
                           <a className="text-accent hover:underline" href={l.review_at}>judge</a>
+                        )}
+                        {l.spot_review_at && l.status === "settled" && (
+                          <a className="text-accent hover:underline mr-2" href={l.spot_review_at}>spot check</a>
                         )}
                         {l.status === "settled" && (
                           <button className="text-warn hover:underline"

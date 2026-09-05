@@ -308,6 +308,7 @@ async def settlement_lots(status: str | None = None, limit: int = 50,
 
     from db.models import SettlementLot
     from services.autolabel.ontology import get_ontology
+    from services.labelops.settlement import expected_remaining
 
     onto = get_ontology()
     q = select(SettlementLot).order_by(SettlementLot.created_at.desc()).limit(max(1, min(limit, 200)))
@@ -320,7 +321,12 @@ async def settlement_lots(status: str | None = None, limit: int = 50,
              "skips": lo.skips, "topups": lo.topups, "status": lo.status,
              "decision": lo.decision or {}, "spot_total": lo.spot_total,
              "spot_defects": lo.spot_defects, "batch_id": lo.batch_id,
+             "rule": lo.rule, "cap_n": lo.cap_n, "llr": lo.llr, "sprt": lo.sprt or {},
+             "increments": lo.increments or [], "sample_drawn": len(lo.sample_object_ids or []),
+             "allocator": expected_remaining(lo),
              "review_at": f"/review/grid?flywheel={lo.batch_id}&states=review" if lo.batch_id else None,
+             "spot_review_at": (f"/review/grid?flywheel=spot-{lo.lot_id.hex[:8]}&states=settled"
+                                if lo.status in ("settled", "reverted") and lo.spot_total else None),
              "created_at": lo.created_at.isoformat() if lo.created_at else None,
              "decided_at": lo.decided_at.isoformat() if lo.decided_at else None}
             for lo in rows]

@@ -114,7 +114,9 @@ async def maybe_build_lots(db: AsyncSession) -> dict:
                         title=f"settlement sample ready: {res['sample_n']} {cand['class_name']} "
                               f"crops (~{res['human_minutes_estimate']} min)",
                         body=(f"Verdicts on this sample decide whether {res['population']} "
-                              f"{cand['class_name']} labels settle (far bound {res['far_bound']})."),
+                              f"{cand['class_name']} labels settle (far bound {res['far_bound']}); "
+                              f"the sequential test asks for more only if it needs them, up to "
+                              f"{res.get('cap_n', res['sample_n'])}."),
                         href=res["review_at"], subject_type="settlement_lot",
                         subject_id=res["lot_id"],
                         meta={k: res[k] for k in ("lot_id", "batch_id", "population", "tier")})
@@ -206,6 +208,18 @@ async def maybe_tally_and_settle(db: AsyncSession) -> dict:
                              meta={"lot_id": str(lot.lot_id), "tier": lot.tier})
                 continue
         res = await settle_lot(db, str(lot.lot_id), created_by="settlement_agent")
+        if res.get("spots"):
+            # The spot mirror is the continuous check on the settlement; it only checks anything
+            # if a person is pointed at it.
+            await notify(db, kind="gate_batch_ready", severity="info",
+                         title=f"spot check ready: {res['spots']} settled {class_name} crops "
+                               f"(~{round(res['spots'] / 10)} min)",
+                         body=(f"Verdicts here audit the {res['settled']} {class_name} labels the "
+                               f"lot settled; a provable breach of far {lot.far_bound} reverts it."),
+                         href=res["spot_review_at"], subject_type="settlement_lot",
+                         subject_id=str(lot.lot_id),
+                         meta={"lot_id": str(lot.lot_id), "batch_id": res["spot_batch"],
+                               "spots": res["spots"]})
         actions.append({"lot": str(lot.lot_id), "class_name": class_name, **{
             k: res[k] for k in ("status", "settled", "spots", "error") if k in res}})
 
