@@ -11,9 +11,18 @@ through a confidence gate to human review, mines the rare and risky moments, and
 closed loop. One ontology, 178 governed classes, tuned for what global datasets never saw: autorickshaws,
 cattle on the carriageway, overloaded two-wheelers, hand carts, potholes.
 
-[Get started](getting-started.md){ .md-button .md-button--primary }
+[Watch the demo film](demo.md){ .md-button .md-button--primary }
+[Get started](getting-started.md){ .md-button }
 [REST API](api/rest.md){ .md-button }
 [Engineering log](ENGINEERING_LOG.md){ .md-button }
+
+## See it running
+
+A four-minute narrated tour, recorded live against the running system on real dashcam footage -
+every canvas tool, real GPU segmentation, and the autonomy console. Nothing mocked, nothing staged.
+
+<video controls preload="metadata" style="width:100%; border-radius:6px;"
+       src="demo/labeloxav-demo-narrated.mp4"></video>
 
 ## What actually runs
 
