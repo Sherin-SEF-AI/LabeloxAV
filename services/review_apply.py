@@ -64,6 +64,8 @@ class ApplyResult:
     refused: list[dict] = field(default_factory=list)
     #: attributes dropped because they do not apply to the new class, by object id
     attrs_dropped: dict[str, list[str]] = field(default_factory=dict)
+    #: control samples whose pending verdict this batch answered in passing
+    control_judged: int = 0
     #: the undo record, keyed by object id
     changes: dict[str, dict] = field(default_factory=dict)
 
@@ -101,6 +103,7 @@ async def apply_review_batch(
     # The batch's time is divided across its members rather than attributed to any one of them, so a grid
     # that triages sixty crops in a minute reports sixty seconds of work and not sixty minutes or zero.
     per_item_ms = int(time_spent_ms / len(objects)) if objects and time_spent_ms > 0 else 0
+    control_verdicts: list[tuple] = []
 
     for obj in objects:
         oid = str(obj.object_id)
@@ -175,6 +178,33 @@ async def apply_review_batch(
                              "attrs": dict(obj.attrs or {}), "state": obj.state},
                       time_spent_ms=per_item_ms, ts_ns=now_ns()))
         res.n += 1
+
+        # A verdict on a control-sampled object IS the control verdict. The control sample asks exactly
+        # one question - was the gate right to auto-accept this? - and a person who just ruled on the
+        # object has answered it, whichever surface they were on. Before this, the answer only counted
+        # when it arrived through the dedicated control endpoint, which is how the corpus reached 601
+        # sampled / 0 judged: the work was being done and the measurement was not receiving it.
+        if action in ("accept", "confirm", "reject", "reclassify"):
+            correct = action != "reject" and obj.class_id == before["class_id"]
+            control_verdicts.append((obj.object_id, correct))
+
+    if control_verdicts:
+        from datetime import UTC, datetime
+
+        from sqlalchemy import select as _select
+
+        from db.models import ControlSample
+
+        pending = (await db.execute(_select(ControlSample).where(
+            ControlSample.object_id.in_([oid for oid, _ in control_verdicts]),
+            ControlSample.human_verdict.is_(None)))).scalars().all()
+        by_obj = {cs.object_id: cs for cs in pending}
+        for oid, ok in control_verdicts:
+            cs = by_obj.get(oid)
+            if cs is not None:
+                cs.human_verdict = "correct" if ok else "incorrect"
+                cs.verdict_at = datetime.now(UTC)
+                res.control_judged += 1
 
     return res
 

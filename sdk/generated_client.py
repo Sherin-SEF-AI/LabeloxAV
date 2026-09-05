@@ -3438,10 +3438,10 @@ class LabeloxClient:
         return self._call("POST", f"/api/training/{job_id}/cancel",
                           params=None, json_body=None)
 
-    def get_triage(self, states: str | None = 'review,annotate', session_id: Any | None = None, klass: Any | None = None, city: Any | None = None, flywheel: Any | None = None, limit: int | None = 200) -> Any:
+    def get_triage(self, states: str | None = 'review,annotate', session_id: Any | None = None, klass: Any | None = None, city: Any | None = None, flywheel: Any | None = None, control: bool | None = False, limit: int | None = 200) -> Any:
         """Triage"""
         return self._call("GET", f"/api/triage",
-                          params={"states": states, "session_id": session_id, "klass": klass, "city": city, "flywheel": flywheel, "limit": limit}, json_body=None)
+                          params={"states": states, "session_id": session_id, "klass": klass, "city": city, "flywheel": flywheel, "control": control, "limit": limit}, json_body=None)
 
     def post_upload_abort(self, body: Any = None) -> Any:
         """Abort"""

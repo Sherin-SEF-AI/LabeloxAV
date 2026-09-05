@@ -6,6 +6,7 @@ The control sample is never skipped."""
 from __future__ import annotations
 
 import random
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -75,6 +76,7 @@ async def record_verdict(db: AsyncSession, sample_id: str, verdict: str) -> dict
     if cs is None:
         return {"error": "sample not found"}
     cs.human_verdict = verdict
+    cs.verdict_at = datetime.now(UTC)
     await db.commit()
     log.info("control.verdict", sample_id=sample_id, verdict=verdict)
     return {"sample_id": sample_id, "human_verdict": verdict}
@@ -118,7 +120,16 @@ async def pending_samples(db: AsyncSession, limit: int = 100) -> dict:
 
 
 async def measured_precision(db: AsyncSession) -> dict:
-    """True auto-accept precision = correct / reviewed among auto-accepted controls with a human verdict."""
+    """True auto-accept precision = correct / reviewed among auto-accepted controls with a human verdict.
+
+    Carries its uncertainty and its age, because both change what the number may be used for. The point
+    estimate alone let 5 reviewed samples read as authoritatively as 500 (the drift floor compares
+    against `precision` either way); `interval` is the Wilson bound a decision should actually use.
+    `measured_at` is the newest verdict's timestamp - null when every verdict predates the timestamp
+    column, which readers must treat as "age unknown", not "fresh".
+    """
+    from services.labelops.sampling import wilson_interval
+
     reviewed = (await db.execute(select(func.count()).select_from(ControlSample).where(
         ControlSample.was_auto_accepted.is_(True), ControlSample.human_verdict.isnot(None)))).scalar_one()
     incorrect = (await db.execute(select(func.count()).select_from(ControlSample).where(
@@ -126,4 +137,9 @@ async def measured_precision(db: AsyncSession) -> dict:
     precision = None if reviewed == 0 else round(1.0 - incorrect / reviewed, 4)
     pending = (await db.execute(select(func.count()).select_from(ControlSample).where(
         ControlSample.human_verdict.is_(None)))).scalar_one()
-    return {"reviewed": int(reviewed), "incorrect": int(incorrect), "precision": precision, "pending": int(pending)}
+    newest = (await db.execute(select(func.max(ControlSample.verdict_at)).where(
+        ControlSample.was_auto_accepted.is_(True), ControlSample.human_verdict.isnot(None)))).scalar_one()
+    return {"reviewed": int(reviewed), "incorrect": int(incorrect), "precision": precision,
+            "pending": int(pending),
+            "interval": wilson_interval(int(reviewed) - int(incorrect), int(reviewed)),
+            "measured_at": newest.isoformat() if newest else None}

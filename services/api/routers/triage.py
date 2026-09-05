@@ -28,6 +28,7 @@ router = APIRouter()
 # previously recovered it by running regexes over the joined prose, which put the taxonomy in two places and
 # meant a wording change silently restyled the queue.
 FLAG_SEVERITY = {
+    "control_sample": "medium",
     "mask_box": "high",
     "class_conflict": "high",
     "low_conf": "medium",
@@ -38,6 +39,7 @@ FLAG_SEVERITY = {
 # Named for what the reader is being asked to check, not for the comparison that produced them. "mask != box"
 # is a column name; the annotator's question is whether the outline fits the box.
 FLAG_LABEL = {
+    "control_sample": "Control sample",
     "mask_box": "Outline off box",
     "class_conflict": "Class conflict",
     "low_conf": "Low confidence",
@@ -47,6 +49,7 @@ FLAG_LABEL = {
 
 # The prose kept on `why`, so existing readers of that field are unaffected.
 FLAG_PROSE = {
+    "control_sample": "control sample: this verdict measures the auto-accept gate",
     "mask_box": "mask != box",
     "class_conflict": "class conflict",
     "rare_class": "rare class",
@@ -101,6 +104,7 @@ async def triage(
     klass: str | None = None,
     city: str | None = None,
     flywheel: str | None = None,
+    control: bool = False,
     limit: int = 200,
 ):
     limit = min(max(limit, 1), 1000)
@@ -110,8 +114,19 @@ async def triage(
         select(Object, Frame.session_id)
         .join(Frame, Object.frame_id == Frame.frame_id)
         .join(DbSession, Frame.session_id == DbSession.session_id)
-        .where(Object.state.in_(state_list))
     )
+    if control:
+        # The control queue: objects the gate auto-accepted that were randomly sampled for an always-human
+        # verdict. The sample defines the queue, so the states filter does not apply - these objects sit in
+        # auto_accept, which the default filter would exclude, and excluding them is how the corpus reached
+        # 601 sampled / 0 judged. Each verdict here moves the gate's measured precision (the number the
+        # 0.97 drift floor watches), which is why they outrank ordinary review work.
+        from db.models import ControlSample
+
+        stmt = stmt.join(ControlSample, ControlSample.object_id == Object.object_id).where(
+            ControlSample.human_verdict.is_(None))
+    else:
+        stmt = stmt.where(Object.state.in_(state_list))
     if session_id:
         stmt = stmt.where(Frame.session_id == UUID(session_id))
     if city:
@@ -127,6 +142,11 @@ async def triage(
     out: list[TriageRow] = []
     for obj, sid in rows:
         why, priority, flags = _why_and_priority(obj, onto)
+        if control:
+            flags = [{"code": "control_sample", "label": FLAG_LABEL["control_sample"],
+                      "severity": FLAG_SEVERITY["control_sample"]}, *flags]
+            why = f"{FLAG_PROSE['control_sample']}, {why}"
+            priority = round(priority + 1.0, 4)
         out.append(
             TriageRow(
                 object_id=str(obj.object_id),

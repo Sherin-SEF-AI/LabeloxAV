@@ -136,6 +136,38 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
         except Exception as exc:  # noqa: BLE001
             log.error("schedule.drift_investigator_failed", error=str(exc))
 
+    # measurement refresh: the denominators autonomy decides against, kept current instead of measured
+    # once. Each maybe_* declines with a reason when its evidence has not moved or the card is busy.
+    if offhours:
+        try:
+            from services.agent.measurement_agent import (
+                maybe_judge_detectors,
+                maybe_refresh_class_precision,
+                maybe_refresh_judge_calibration,
+            )
+
+            for fn, label in ((maybe_refresh_class_precision, "class_precision_refresh"),
+                              (maybe_refresh_judge_calibration, "judge_calibration_refresh"),
+                              (maybe_judge_detectors, "detector_judging")):
+                m = await fn(db)
+                if m.get("ran"):
+                    actions.append({"action": label, "run_id": m.get("run_id")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.measurement_failed", error=str(exc))
+
+    # yardstick upkeep: reseal rotted gold sets (weekly), keep unfinished blind audits visible (daily).
+    if offhours:
+        try:
+            from services.agent.yardstick_agent import maybe_nudge_blind_audit, maybe_repair_gold
+
+            for fn, label in ((maybe_repair_gold, "gold_repair"),
+                              (maybe_nudge_blind_audit, "blind_audit_nudge")):
+                y = await fn(db)
+                if y.get("ran"):
+                    actions.append({"action": label, "run_id": y.get("run_id")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.yardstick_failed", error=str(exc))
+
     # the morning digest and the weekly report, last on purpose: the digest declines to send while any
     # agent run is still in flight, so putting it after every launcher gives tonight's agents their turn
     # before the first attempt rather than always deferring to tomorrow.

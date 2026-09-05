@@ -414,3 +414,67 @@ def test_both_sensitivities_are_reported_rather_than_one_chosen():
         assert '"sensitivity"' in src and '"sensitivity_superclass"' in src, (
             f"{fn.__name__} must report both readings")
         assert '"refinements_within_superclass"' in src, "and the count behind the difference"
+
+
+class TestPerL1Calibration:
+    """Phase 1 of the autonomy work: sens/spec per superclass, only where the counts can carry it.
+
+    The pooled 0.76/0.80 is a property of the calibration set's class mix. Settlement will correct
+    per-class precision through these numbers, so a judge sharp on vehicles and lost on animals must
+    not lend the vehicles' calibration to the animals.
+    """
+
+    @staticmethod
+    def _decision(l1, human_correct, judge_verdict):
+        votes = {"correct": 0, "incorrect": 0, "unsure": 0}
+        votes[judge_verdict] = 1
+        return {"human_says_correct": human_correct, "l1": l1, **votes, "objects": 1,
+                "refinement": False}
+
+    def test_a_group_with_enough_decisions_gets_numbers_with_intervals(self):
+        from services.labelops.judge_calibration import MIN_GROUP_DECISIONS, summarize_decisions
+
+        per = {}
+        # vehicles: 10 positives the judge confirms 8 of, 10 negatives it catches 9 of
+        for i in range(10):
+            per[f"vp{i}"] = self._decision("vehicle", True, "correct" if i < 8 else "incorrect")
+            per[f"vn{i}"] = self._decision("vehicle", False, "incorrect" if i < 9 else "correct")
+        agg = summarize_decisions(per)
+        v = agg["per_l1"]["vehicle"]
+        assert v["usable"] is True
+        assert v["sensitivity"] == 0.8 and v["specificity"] == 0.9
+        assert v["sensitivity_interval"]["lo"] < 0.8 < v["sensitivity_interval"]["hi"]
+        assert MIN_GROUP_DECISIONS == 10, "the floor is part of the contract; moving it changes what " \
+                                          "counts as measured"
+
+    def test_a_starved_group_is_named_with_counts_not_given_a_number(self):
+        from services.labelops.judge_calibration import summarize_decisions
+
+        per = {f"a{i}": self._decision("animal", i % 2 == 0, "correct") for i in range(4)}
+        agg = summarize_decisions(per)
+        a = agg["per_l1"]["animal"]
+        assert a["usable"] is False and "sensitivity" not in a
+        assert "2 positive, 2 negative" in a["reason"], \
+            "a refusal must say what is missing, or nobody knows what labeling would fix it"
+
+    def test_groups_do_not_borrow_each_others_decisions(self):
+        from services.labelops.judge_calibration import summarize_decisions
+
+        per = {}
+        for i in range(10):
+            per[f"vp{i}"] = self._decision("vehicle", True, "correct")
+            per[f"vn{i}"] = self._decision("vehicle", False, "incorrect")
+        per["ap0"] = self._decision("animal", True, "incorrect")
+        agg = summarize_decisions(per)
+        assert agg["per_l1"]["vehicle"]["sensitivity"] == 1.0, \
+            "the animal miss must not dilute the vehicle group; that dilution is the pooled number's " \
+            "whole defect"
+        assert agg["per_l1"]["animal"]["usable"] is False
+
+    def test_a_tie_is_an_abstention_not_agreement(self):
+        from services.labelops.judge_calibration import summarize_decisions
+
+        d = {"human_says_correct": True, "l1": "vehicle", "correct": 1, "incorrect": 1, "unsure": 0,
+             "objects": 2, "refinement": False}
+        agg = summarize_decisions({"k": d})
+        assert agg["tp"] == 0 and agg["fn"] == 0 and agg["abstain_pos"] == 1

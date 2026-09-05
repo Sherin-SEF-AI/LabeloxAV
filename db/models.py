@@ -1875,6 +1875,9 @@ class ControlSample(Base):
     object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
     was_auto_accepted: Mapped[bool] = mapped_column(Boolean, default=False)
     human_verdict: Mapped[str | None] = mapped_column(String(16))      # correct|incorrect (null until reviewed)
+    # When the verdict landed (null for verdicts recorded before the column existed, whose times were
+    # never captured). created_at is the seeding time and must not be read as the measurement time.
+    verdict_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_control_sample_verdict", "human_verdict"),)
