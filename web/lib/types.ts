@@ -1393,3 +1393,22 @@ export type AutonomyState = {
                  report: Record<string, unknown> } | null;
   journal: { kind: string; status: string; created_at: string | null; run_id: string }[];
 };
+
+
+// Ego trajectory (migration 0112). `measured` is the load-bearing field and is not a grade: true means
+// an instrument observed position, false means it was recovered from the images, which is the only
+// source available for almost this whole corpus. `quality` grades within a source and never replaces it.
+export type EgoPosePoint = {
+  ts_ns: number; frame_id: string | null;
+  x: number; y: number; z: number; qw: number; qz: number;
+  speed_mps: number | null; yaw_rate: number | null;
+  quality: number | null; measured: boolean;
+};
+export type EgoTrajectory = {
+  session_id: string; poses: number; measured: number;
+  source: string | null; points: EgoPosePoint[];
+};
+export type EgoCoverage = {
+  real_selected_frames: number; pseudo_clouds: number; cloud_coverage: number | null;
+  ego_poses: number; ego_poses_measured: number; object_3d: number; track_3d: number;
+};

@@ -2178,6 +2178,55 @@ class ObjectDynamics(Base):
 
 
 # ---- LiDAR module (3D) ----
+class EgoPose(Base):
+    """Where the vehicle was at one instant, and whether anything actually observed that (0112).
+
+    The pose is in a session-local ENU frame whose origin is the session's first fix, or its first frame
+    when there is none: an absolute frame would imply a georeferencing accuracy no monocular method here
+    can deliver.
+
+    `measured` separates an instrument reading from an inference and is not a grade. True means a device
+    observed position; false means it was recovered from the images, which is the only source available
+    for almost this whole corpus. `quality` grades within a source and never stands in for it, because a
+    confident visual estimate is still not a measurement.
+
+    The absence of a row means the pose is unknown at that timestamp, which is the honest state for a
+    corpus carrying GNSS on 3 frames of 41,752.
+    """
+
+    __tablename__ = "ego_pose"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"), primary_key=True)
+    ts_ns: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("frame.frame_id", ondelete="SET NULL"))
+    x: Mapped[float] = mapped_column(Float, nullable=False)
+    y: Mapped[float] = mapped_column(Float, nullable=False)
+    z: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    qw: Mapped[float] = mapped_column(Float, nullable=False, default=1.0, server_default="1")
+    qx: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    qy: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    qz: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    speed_mps: Mapped[float | None] = mapped_column(Float)
+    yaw_rate: Mapped[float | None] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    quality: Mapped[float | None] = mapped_column(Float)
+    measured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                            server_default=sql_text("false"))
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_run.run_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("source in ('gnss_imu','visual','fused')", name="ck_ego_pose_source"),
+        CheckConstraint("abs(qw*qw + qx*qx + qy*qy + qz*qz - 1.0) < 0.01",
+                        name="ck_ego_pose_unit_quaternion"),
+        CheckConstraint("quality is null or (quality >= 0 and quality <= 1)",
+                        name="ck_ego_pose_quality_range"),
+        Index("ix_ego_pose_frame", "frame_id"),
+        Index("ix_ego_pose_session_measured", "session_id", "measured"),
+    )
+
+
 class PointCloud(Base):
     """One row per scan (real LiDAR) or per synthesized cloud (pseudo-LiDAR), from any source. ts_ns is on
     the PPS base, so a cloud and the camera frames captured at the same ts_ns in the session are one query."""

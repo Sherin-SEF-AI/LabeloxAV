@@ -69,6 +69,14 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
 
         return await revert_batch(db, run)
 
+    # A pseudo-LiDAR batch created clouds, not object edits. Reverting deletes the clouds and their
+    # blobs; the cuboids lifted from them cascade with the cloud rather than being left to point at a
+    # cloud that is gone. The parent lift reverts through child_runs like every other chunked run.
+    if run.kind == "pseudo_batch":
+        from services.lidar.pseudo_daemon import revert_batch as revert_pseudo_batch
+
+        return await revert_pseudo_batch(db, run)
+
     # A corpus run (e.g. relabel-all) owns no objects itself; it aggregates one child run per frame.
     # Reverting it reverts each child, so 'undo relabel all' is one click.
     child_ids = (run.changes or {}).get("child_runs")

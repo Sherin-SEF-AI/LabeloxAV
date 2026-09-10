@@ -193,6 +193,20 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
         except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
             log.error("schedule.shadow_sweep_failed", error=str(exc))
 
+    # pseudo-3D coverage: the lift has existed since the 3D module landed and has covered 0.2% of the
+    # corpus, because it only ever ran from a manual router call. This is the scheduling it never had,
+    # batch by batch behind the GPU slot, with the ego trajectory built first so the cuboids are
+    # comparable across frames at all.
+    if offhours:
+        try:
+            from services.lidar.pseudo_daemon import maybe_lift_pending
+
+            pl = await maybe_lift_pending(db)
+            if pl.get("ran"):
+                actions.append({"action": "pseudo_lift", "run_id": pl.get("run_id")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.pseudo_lift_failed", error=str(exc))
+
     # settlement lifecycle, the nightly half: plan one lot for the best-ranked eligible class, and run
     # the reverse acceptance decision over every settled lot's spot verdicts (the one automatic revert).
     if offhours:

@@ -109,8 +109,18 @@ def _seed(conn) -> dict:
         values (:d, :s, :f, :cr, :xr, :p, 'challenger_miss', :cid, 0.9, '{0,0,5,5}', 'pending')"""),
         {"d": dis_id, "s": sweep_id, "f": real_fid, "cr": run_ids[0], "xr": run_ids[1],
          "p": pred_id, "cid": cid})
+    # 0111/0112: a run with a declared class vocabulary, and an ego pose on the real frame. The pose
+    # carries a real quaternion because the table checks that it is a unit one.
+    conn.execute(sa.text("update inference_run set class_vocab = :v where run_id = :r"),
+                 {"v": '[1, 2, 3]', "r": run_ids[0]})
+    conn.execute(sa.text("""
+        insert into ego_pose (session_id, ts_ns, frame_id, x, y, z, qw, qx, qy, qz, speed_mps,
+                              source, quality, measured)
+        values (:s, 0, :f, 1.5, 2.5, 0.0, 1.0, 0.0, 0.0, 0.0, 8.3, 'visual', 0.42, false)"""),
+        {"s": real_sid, "f": real_fid})
     return {"lot_id": lot_id, "real_sid": real_sid, "synth_sid": synth_sid,
-            "sweep_id": sweep_id, "model_version": mv, "disagreement_id": dis_id}
+            "sweep_id": sweep_id, "model_version": mv, "disagreement_id": dis_id,
+            "vocab_run_id": run_ids[0]}
 
 
 def _assert_downgraded(conn, seeded: dict) -> None:
@@ -136,6 +146,13 @@ def _assert_downgraded(conn, seeded: dict) -> None:
     assert conn.execute(sa.text("select count(*) from model_registry where model_version = :m"),
                         {"m": seeded["model_version"]}).scalar() == 1, \
         "0110 drops columns, never the model rows that carried them"
+    assert "class_vocab" not in _columns(conn, "inference_run"), \
+        "0111 downgrade left inference_run.class_vocab"
+    assert conn.execute(sa.text("select count(*) from inference_run where run_id = :r"),
+                        {"r": seeded["vocab_run_id"]}).scalar() == 1, \
+        "0111 drops a column, never the runs that carried it"
+    assert conn.execute(sa.text("select to_regclass('public.ego_pose')")).scalar() is None, \
+        "0112 downgrade left the ego_pose table"
 
 
 def _assert_reupgraded(conn, seeded: dict) -> None:
@@ -152,6 +169,11 @@ def _assert_reupgraded(conn, seeded: dict) -> None:
     assert conn.execute(sa.text("select count(*) from shadow_disagreement")).scalar() == 0
     assert conn.execute(sa.text("select origin from model_registry where model_version = :m"),
                         {"m": seeded["model_version"]}).scalar() == "trained"
+    # A vocabulary the downgrade dropped is gone, and null is the honest reading of that: this run
+    # declared nothing, which the matcher reads as "compare every class" rather than as an empty one.
+    assert conn.execute(sa.text("select class_vocab from inference_run where run_id = :r"),
+                        {"r": seeded["vocab_run_id"]}).scalar() is None
+    assert conn.execute(sa.text("select count(*) from ego_pose")).scalar() == 0
 
 
 def test_every_migration_above_the_floor_round_trips_with_rows_present():

@@ -380,3 +380,161 @@ being written backwards),
 `tests/test_migrations_roundtrip.py` (1, extended over 0109 and 0110 with rows present). The full suite
 runs 3,249 passed, 6 skipped against `labeloxav_test`; the web suite 682 passed with `tsc --noEmit`
 clean.
+
+---
+
+## WP4. Pseudo-3D at fleet scale: coverage, ego pose, temporal consistency
+
+### The defect it fixes
+
+Three separate gaps that turn out to be one gap.
+
+The pseudo-LiDAR lift has existed end to end since the 3D module landed: a pinned metric depth model, a
+back-projection into the ego frame, a cuboid lifter that snaps a 2D box to the ground plane. It had
+covered 96 frames of 41,204, which is 0.23%, for a single reason. It only ever ran from a manual,
+bounded router call that a person had to make per session. Nothing was wrong with the lifter; it had no
+scheduling.
+
+Nothing in this engine has ever known where the vehicle was. `Frame.gnss` is populated on 3 frames of
+41,752 and `Frame.ego_speed` on 6, so `calyx/ego_propagate.ego_transform` refuses on every session in the
+corpus, which is the correct answer and also a dead end.
+
+And those two gaps are the same gap. A cuboid lifted from one frame sits in the ego frame of that
+instant, so two cuboids of the same car from two frames are in two different coordinate systems. There
+was nothing to compare them in, so a track's boxes jittered with no way to separate motion from
+measurement error.
+
+### The pose
+
+Migration `0112_ego_pose` adds one row per session and timestamp: a position and a yaw-only quaternion in
+a session-local ENU frame, with `source`, `quality`, and `measured`.
+
+`measured` is separate from `quality` and is not a grade. True means an instrument observed position.
+False means the pose was recovered from the images, which is the only source available for almost this
+entire corpus. `quality` grades within a source and never stands in for it, because a confident visual
+estimate is still not a measurement. Yaw only, because neither GNSS nor monocular odometry observes roll
+or pitch here, and a fabricated attitude would tilt every cuboid placed through the pose.
+
+`services/intelligence/ego_pose.py` fills the table. GNSS answers where fixes exist. Everywhere else it
+is ORB features, an essential matrix against the resolved intrinsics, and `recoverPose`.
+
+**Scale is the whole difficulty and there are two ways out of it.** A single camera cannot see scale, so
+a monocular step is a direction and no length. Where the session has a pseudo-LiDAR cloud at the
+timestamp, the metric depth already paid for gives the baseline. Where it does not, the road does: the
+camera height above the plane is known, so a pixel below the horizon has a metric distance, and how far
+ground features closed between two frames is how far the vehicle moved. Where neither is available the
+rotation is still written and the translation is not, with `speed_mps` null, so a consumer can use the
+heading and refuse the step. It is never scaled by a guess.
+
+### The bonnet again
+
+The first run on a real dashcam session recovered rotation on 58 of 59 pairs and scale on 20. The ego
+hood was the reason, for the same underlying fact that put riders on it in WP3: the bonnet is rigidly
+attached to the camera, so its features never move no matter what the vehicle does. They are not merely
+useless to visual odometry. They are a block of perfectly stationary correspondences pulling the
+essential matrix toward "no motion", and they crowd real ground features out of a fixed ORB budget.
+Masking them with the same per-camera hood mask took pose recovery to 59 of 59 pairs and scaled steps
+from 20 to 30.
+
+| on a 60-frame dashcam session | before | after |
+| --- | --- | --- |
+| pairs with a recovered pose | 58 of 59 | 59 of 59 |
+| steps with a metric scale | 20 | 30 |
+
+### The coverage daemon
+
+`services/lidar/pseudo_daemon.py::maybe_lift_pending` runs off-hours and picks the least covered sessions
+first, because coverage is the point and a session at 0% teaches more per GPU minute than the tail of
+one at 90%. Clouds are built 64 frames per `gpu_slot` hold, with `training_holds_gpu` and a VRAM floor
+checked between holds, and a host-memory ceiling checked before each session. Each batch commits as its
+own `pseudo_batch` run whose revert deletes the clouds and their blobs; the cuboids lifted from a cloud
+cascade with it rather than being left pointing at nothing. Ego pose is built first and once per
+session, because it is CPU work every later batch reads.
+
+### One track, one size, one frame
+
+`services/lidar/track3d/from2d.py::lift_track` places a track's cuboids in the session frame through the
+pose, locks every dimension to the per-track median, and smooths the positions with a constant-velocity
+filter stepped by real timestamps rather than by frame index, because dashcam frames are not evenly
+spaced and treating a two-second gap as one step turns it into acceleration that never happened.
+
+The trigonometric prior in `oraclyx/mono_depth.metric_depth` becomes a check rather than a second
+estimate. Where it and the lifted range disagree by more than 30%, the cuboid's confidence is halved and
+it is routed to review. Two methods that disagree are information about the calibration; averaging them
+would produce a box neither proposed.
+
+### One web bug worth naming
+
+`web/app/lidar/linked/page.tsx` drew its camera overlay into a viewBox hardcoded to 1280x960. That is
+right for the Tigor rig and wrong for every dashcam and imported session in the corpus, so on a 1920x1080
+frame every projected cuboid was drawn at two thirds scale and offset, and the boxes still looked like
+boxes. It now reads the frame's own dimensions.
+
+### Measured
+
+One nightly lift on the live corpus, two sessions, 222 seconds end to end:
+
+| | before | after |
+| --- | --- | --- |
+| pseudo clouds | 96 | 224 |
+| cloud coverage of real selected frames | 0.23% | 0.54% |
+| ego poses | 60 | 1,858 |
+| ego poses measured by an instrument | 0 | 0 |
+| `object_3d` rows | 56, all fixture | 1,029 |
+
+Not one pose in the corpus is measured, and that is the corpus rather than the method: 3 frames of 41,752
+carry a GNSS fix. Every row written is `source='visual', measured=false`, and every consumer can tell.
+
+Lifting cuboids from the new clouds produced 973 boxes from 64 frames in 13 seconds, taking the corpus
+from 56 `object_3d` rows to 1,029. The 56 that existed before were all fixture data: every session
+holding them is a test rig (`TRK-3D`, `TIGOR-3D`, `LINK-3D`, `MC-3D`), and all 56 carried the same
+class-prior dimensions. There was no real 3D data in this engine until this run.
+
+**Then the consistency check earned its place immediately.** Over six tracks and 272 cuboids on the
+first real session:
+
+| | value |
+| --- | --- |
+| median per-track length variance, before locking | 7.76 m² |
+| median per-track height variance, before locking | 0.90 m² |
+| after locking to the per-track median | 0 |
+| cuboids whose lifted range disagrees with the trigonometric prior by over 30% | 193 of 197 |
+
+A length variance of 7.76 m² is a standard deviation of 2.8 m on the length of one car across the frames
+of a single track. And the locked dimensions those tracks settle on are not vehicles: 8.1 m long by 0.88 m
+wide by 0.31 m tall is the shape of the arithmetic, not of a car.
+
+So the honest headline of this package is not the coverage number. It is that turning coverage on for the
+first time showed the existing lifter producing geometrically implausible cuboids on a session with no
+real calibration, on 98% of its boxes, and that nothing before this would have noticed. The session is
+BDD100K, an imported dataset whose calibration is estimated rather than measured, and a metric depth model
+back-projected through wrong intrinsics gives a distorted cloud that a ground-snapped box inherits.
+
+The check does what it was built to do: every one of those cuboids has its confidence halved and its
+state set to `review`, with the two disagreeing ranges recorded on the row. None of them can reach
+detector training, which reads `Object` and never `Object3D`. Fixing the lift on uncalibrated sessions
+is the next package's work, and it now has 193 examples and a number to move.
+
+**Two findings about visual odometry from the same run**, both about which sessions it can serve rather
+than about the method:
+
+The rig session recovered a pose on 709 of 1,032 pairs and a metric scale on 3. The camera it chose was
+`rear_wide`, and the ground-plane scale was written to expect road features closing on the camera. On a
+rear-facing camera they recede, so almost every measurement was discarded. Making the scale a magnitude
+and leaving direction to the camera took that session from 3 scaled steps to 42.
+
+The obvious follow-on was to prefer a forward-facing camera, and the corpus refused it. With
+`front_narrow` chosen instead, the same session gives 179 poses, 73 recovered and **0** scaled: the
+ground-plane scale needs a wide view of road surface, not a forward one, and a narrow lens sees less of
+it than a wide rear camera does. The preference was reverted and the camera is chosen by how much of the
+session's timeline it covers, which is what the measurement supports.
+
+| camera on the rig session | poses | pose recovered | metrically scaled |
+| --- | --- | --- | --- |
+| `rear_wide`, closing-only scale | 1,033 | 709 | 3 |
+| `rear_wide`, signed scale | 1,033 | 709 | 42 |
+| `front_narrow`, signed scale | 179 | 73 | 0 |
+
+The imported dataset session recovered a pose on 28 of 764 pairs. That is the correct answer: BDD100K is
+a collection of unrelated clips, so consecutive frames are not consecutive views of one scene and there
+is no ego motion between them to recover. Visual odometry needs a session that is actually a drive.

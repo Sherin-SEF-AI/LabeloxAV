@@ -1113,6 +1113,26 @@ class LabeloxClient:
         return self._call("POST", f"/api/edge/telemetry",
                           params=None, json_body=body)
 
+    def get_ego_coverage(self) -> Any:
+        """Ego Coverage"""
+        return self._call("GET", f"/api/ego/coverage",
+                          params=None, json_body=None)
+
+    def get_ego_sessions_by_session_id_pose(self, session_id: str, limit: int | None = 5000) -> Any:
+        """Session Pose"""
+        return self._call("GET", f"/api/ego/sessions/{session_id}/pose",
+                          params={"limit": limit}, json_body=None)
+
+    def post_ego_sessions_by_session_id_pose(self, session_id: str, body: Any = None) -> Any:
+        """Build Pose"""
+        return self._call("POST", f"/api/ego/sessions/{session_id}/pose",
+                          params=None, json_body=body)
+
+    def post_ego_tracks_by_track_id_lift3d(self, track_id: str, dry_run: bool | None = False) -> Any:
+        """Lift Track 3D"""
+        return self._call("POST", f"/api/ego/tracks/{track_id}/lift3d",
+                          params={"dry_run": dry_run}, json_body=None)
+
     def post_embeddings_compute(self, body: Any = None) -> Any:
         """Embeddings Compute"""
         return self._call("POST", f"/api/embeddings/compute",
@@ -3696,4 +3716,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 722 routes generated from the server schema.
+# 726 routes generated from the server schema.

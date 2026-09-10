@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { api, lidarCloudPoints, type Cuboid3D, type LidarCloud, type LidarPoints , humanizeError } from "@/lib/api";
-import type { OntologyClass } from "@/lib/types";
+import type { EgoTrajectory, OntologyClass } from "@/lib/types";
 import type { ColorBy } from "@/components/lidar/PointCloudViewer";
 import PageShell from "@/components/shell/PageShell";
 import { useConfirm } from "@/components/ConfirmProvider";
@@ -17,6 +17,7 @@ import { StateBadge } from "@/components/StateBadge";
 import SessionPicker from "@/components/lidar/SessionPicker";
 
 const PointCloudViewer = dynamic(() => import("@/components/lidar/PointCloudViewer"), { ssr: false });
+const EgoTrajectoryPlot = dynamic(() => import("@/components/lidar/EgoTrajectory"), { ssr: false });
 
 const DEFAULT_DIMS: Record<string, number[]> = {
   sedan: [4.2, 1.8, 1.5], suv: [4.6, 1.9, 1.7], truck: [7.0, 2.5, 3.0], bus: [11.0, 2.6, 3.2],
@@ -35,6 +36,7 @@ export default function CuboidAnnotatePage() {
   const [classes, setClasses] = useState<OntologyClass[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [trajectory, setTrajectory] = useState<EgoTrajectory | null>(null);
 
   useEffect(() => {
     api.ontology().then((o) => setClasses(o.classes)).catch(() => {});
@@ -52,10 +54,30 @@ export default function CuboidAnnotatePage() {
       const r = await api.lidarClouds(sid.trim());
       setClouds(r.clouds);
       if (!r.clouds.length) setErr("No clouds in this session.");
+      // Loaded beside the clouds rather than on demand: the trajectory is what makes two clouds
+      // comparable, so its absence is something to see before annotating, not after.
+      try {
+        setTrajectory(await api.egoSessionPose(sid.trim()));
+      } catch {
+        setTrajectory(null);
+      }
     } catch (e) {
       setErr(humanizeError(e));
     }
   }, []);
+
+  const buildPose = useCallback(async () => {
+    if (!sessionId.trim()) return;
+    setBusy(true);
+    try {
+      await api.egoBuildPose(sessionId.trim());
+      setTrajectory(await api.egoSessionPose(sessionId.trim()));
+    } catch (e) {
+      setErr(humanizeError(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [sessionId]);
 
   const openCloud = useCallback(async (c: LidarCloud) => {
     setCloud(c);
@@ -182,6 +204,23 @@ export default function CuboidAnnotatePage() {
                 {c.source} | {c.point_count.toLocaleString()} pts | {c.cloud_id.slice(0, 8)}
               </button>
             ))}
+          </div>
+        )}
+
+        {/* The trajectory the cuboids are placed against. A session without one is a session where every
+            cuboid sits in the coordinate frame of its own instant and cannot be compared to the next. */}
+        {sessionId && (
+          <div className="rounded border border-neutral-800 bg-neutral-950">
+            <div className="border-b border-neutral-800 px-2 py-1 text-[10px] uppercase text-neutral-500">
+              ego trajectory
+            </div>
+            <EgoTrajectoryPlot trajectory={trajectory} currentTs={cloud?.ts_ns ?? null} height={160} />
+            {trajectory && trajectory.poses === 0 && (
+              <button onClick={buildPose} disabled={busy}
+                className="m-2 rounded border border-neutral-700 px-2 py-1 text-xs hover:border-cyan-700 disabled:opacity-40">
+                recover trajectory
+              </button>
+            )}
           </div>
         )}
 

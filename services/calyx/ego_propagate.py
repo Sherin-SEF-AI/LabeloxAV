@@ -57,6 +57,14 @@ async def ego_transform(db: AsyncSession, from_frame: Frame, to_frame: Frame) ->
     no pose table, there is nothing to derive a rigid transform from for any real pair, and the module
     says which of the two frames lacked what rather than reporting a generic failure.
     """
+    # The pose table (0112) is asked first, because it is the only source that can answer for this corpus
+    # at all: GNSS is on 3 frames of 41,752, and `services/intelligence/ego_pose` fills the rest from the
+    # images. A pose pair gives both rotation and translation, which is what propagation actually needs.
+    poses = await _pose_pair(db, from_frame, to_frame)
+    if poses is not None:
+        a, b = poses
+        return _transform_from_poses(a, b)
+
     missing = []
     for label, f in (("from", from_frame), ("to", to_frame)):
         if f.gnss is None:
@@ -64,14 +72,53 @@ async def ego_transform(db: AsyncSession, from_frame: Frame, to_frame: Frame) ->
     if missing:
         return {"measured": False, "R": None, "t": None,
                 "reason": "; ".join(missing) + ". Ego-compensated propagation needs the camera motion "
-                          "between the two frames, and this corpus carries GNSS on 3 frames of 41,752 "
-                          "and has no per-frame 6-DOF pose table at all"}
+                          "between the two frames, and neither frame has a row in the ego_pose table "
+                          "either, so the motion between them is unknown"}
 
     # With both fixes present the translation is derivable; rotation needs a heading source this corpus
     # also lacks, so the honest transform is translation-only and is declared as such.
     return {"measured": False, "R": None, "t": None,
             "reason": "both frames carry GNSS but no heading or IMU attitude, so the rotation between "
                       "them is unknown; a translation-only transform would place a rotated scene wrongly"}
+
+
+async def _pose_pair(db: AsyncSession, a: Frame, b: Frame):
+    """The two frames' ego poses, or None when either is missing one."""
+    from db.models import EgoPose
+
+    rows = (await db.execute(select(EgoPose).where(
+        EgoPose.session_id == a.session_id,
+        EgoPose.ts_ns.in_((int(a.ts_ns), int(b.ts_ns)))))).scalars().all()
+    by_ts = {int(r.ts_ns): r for r in rows}
+    pa, pb = by_ts.get(int(a.ts_ns)), by_ts.get(int(b.ts_ns))
+    return (pa, pb) if (pa is not None and pb is not None) else None
+
+
+def _transform_from_poses(a, b) -> dict[str, Any]:
+    """The rigid transform from one pose to the next, and whether either end was actually measured.
+
+    `measured` is the conjunction on purpose: a transform between a measured pose and an inferred one is
+    an inferred transform, and calling it measured because half of it was would be the kind of quiet
+    upgrade this whole table exists to prevent. Yaw only, because that is all either source observes.
+    """
+    import math
+
+    ya = 2.0 * math.atan2(a.qz, a.qw)
+    yb = 2.0 * math.atan2(b.qz, b.qw)
+    dyaw = (yb - ya + math.pi) % (2 * math.pi) - math.pi
+    c, s = math.cos(dyaw), math.sin(dyaw)
+    R = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]], dtype=float)
+    # World displacement rotated into the first frame's ego axes.
+    dx, dy, dz = b.x - a.x, b.y - a.y, b.z - a.z
+    t = np.array([dx * math.cos(-ya) - dy * math.sin(-ya),
+                  dx * math.sin(-ya) + dy * math.cos(-ya), dz], dtype=float)
+    measured = bool(a.measured and b.measured)
+    quality = min(float(a.quality or 0.0), float(b.quality or 0.0))
+    return {"measured": measured, "R": R, "t": t, "quality": quality,
+            "pose_source": f"{a.source}->{b.source}",
+            "reason": None if measured else
+                      (f"both poses come from {a.source} and were inferred rather than observed "
+                       f"(quality {quality:.2f}); the transform is usable but is not a measurement")}
 
 
 def _agreement(geometry_box: tuple[float, ...], tracker_box: list[float]) -> float:

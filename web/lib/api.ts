@@ -1,5 +1,7 @@
 import type {
   AutonomyState,
+  EgoCoverage,
+  EgoTrajectory,
   SettlementLotRow,
   AttrCoverage,
   AttrQueue,
@@ -480,6 +482,15 @@ export const api = {
     return (await r.json()) as Cuboid3D;
   },
   lidarDeleteCuboid: (id: string) => del<{ deleted: string }>(`/api/lidar/objects3d/${id}`),
+  // Ego trajectory and pseudo-3D coverage (WP4). A session with no poses returns an empty list rather
+  // than an error: nobody having built one is a state the viewer shows, not a failure.
+  egoCoverage: () => get<EgoCoverage>("/api/ego/coverage"),
+  egoSessionPose: (sessionId: string, limit = 5000) =>
+    get<EgoTrajectory>(`/api/ego/sessions/${sessionId}/pose?limit=${limit}`),
+  egoBuildPose: (sessionId: string, body: { cam_id?: string; limit?: number } = {}) =>
+    post<Record<string, unknown>>(`/api/ego/sessions/${sessionId}/pose`, body),
+  egoLiftTrack3d: (trackId: string, dryRun = false) =>
+    post<Record<string, unknown>>(`/api/ego/tracks/${trackId}/lift3d?dry_run=${dryRun}`, {}),
   lidarLiftFrame: (frameId: string) =>
     post<{ frame_id: string; cuboids: number; objects: unknown[] }>(`/api/lidar/frames/${frameId}/lift`, {}),
   lidarLiftCloud: (cloudId: string) =>
