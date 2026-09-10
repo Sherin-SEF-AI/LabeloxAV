@@ -62,6 +62,13 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
 
         return await revert_cleanup(db, run)
 
+    # A synthetic batch created frames, not object edits; reverting deletes the frames it composed (their
+    # labels cascade) and the synthetic session once it is empty. The parent build reverts through child_runs.
+    if run.kind == "synth_batch":
+        from services.synth.copy_paste import revert_batch
+
+        return await revert_batch(db, run)
+
     # A corpus run (e.g. relabel-all) owns no objects itself; it aggregates one child run per frame.
     # Reverting it reverts each child, so 'undo relabel all' is one click.
     child_ids = (run.changes or {}).get("child_runs")

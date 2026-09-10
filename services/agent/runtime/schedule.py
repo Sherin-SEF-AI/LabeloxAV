@@ -100,6 +100,19 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
         except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
             log.error("schedule.gate_unblock_failed", error=str(exc))
 
+    # Copy-paste positives for the classes the blocked run is starved on. CPU only, batch by batch,
+    # once per class per week; the next retrain decides through the unchanged gate whether it helped.
+    if offhours:
+        try:
+            from services.synth.agent import maybe_synth_starved
+
+            sy = await maybe_synth_starved(db)
+            if sy.get("ran"):
+                actions.append({"action": "synth_starved", "run_id": sy.get("run_id"),
+                                "classes": sy.get("classes"), "n_frames": sy.get("n_frames")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.synth_starved_failed", error=str(exc))
+
     # nightly champion-degradation check against the sealed gold sets. This existed behind a button
     # (POST /api/agent/gold-drift) since the daemon work; a safety check that runs only when somebody
     # remembers to press it is a dashboard, not a check. Its rollback remedy is check_gold_drift's own.

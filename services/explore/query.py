@@ -32,6 +32,7 @@ from uuid import UUID
 from sqlalchemy import Select, or_, select
 from sqlalchemy.sql.elements import ColumnElement
 
+from core.origin import REAL
 from db.models import Frame, Object
 from db.models import Session as DbSession
 
@@ -88,8 +89,15 @@ def object_clauses(pred: dict) -> list[ColumnElement]:
 
 
 def frame_clauses(pred: dict) -> list[ColumnElement]:
-    """Clauses on the frame and its session."""
+    """Clauses on the frame and its session.
+
+    Real frames only unless the predicate says `include_synthetic`: the explorer, the campaign
+    predicates and every bulk action compile through here, and a composite from the copy-paste
+    generator must be asked for, never found (core/origin.py).
+    """
     out: list[ColumnElement] = list(scene_clauses(pred))
+    if not pred.get("include_synthetic"):
+        out.append(Frame.origin == REAL)
     if pred.get("frame_tags"):
         out.append(_any_tag(Frame.tags, list(pred["frame_tags"])))
     if pred.get("session_id"):

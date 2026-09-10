@@ -20,6 +20,7 @@ from sqlalchemy import Float, func, select
 
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
+from core.origin import REAL, SYNTHETIC, SYNTHETIC_STATE
 from core.storage import get_object_store
 from db.models import DatasetCommit, Frame, Object, ObjectRelationship, TrackEvent
 from db.models import Session as DbSession
@@ -81,6 +82,9 @@ class SliceSpec(BaseModel):
     split_group_by: str = "session"
     # Defaults to the slice name, so each named dataset splits stably and independently of the others.
     split_seed: str | None = None
+    # Composites from the copy-paste generator (core/origin.py) are excluded unless asked for, and the
+    # datasheet states how many were shipped when they are.
+    include_synthetic: bool = False
 
 
 async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
@@ -93,8 +97,13 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
             .join(DbSession, Frame.session_id == DbSession.session_id)
             .order_by(Frame.ts_ns, Object.object_id)
         )
+        if spec.include_synthetic:
+            stmt = stmt.where(Frame.origin.in_((REAL, SYNTHETIC)))
+        else:
+            stmt = stmt.where(Frame.origin == REAL)
         if spec.states:
-            stmt = stmt.where(Object.state.in_(spec.states))
+            states = [*spec.states, SYNTHETIC_STATE] if spec.include_synthetic else list(spec.states)
+            stmt = stmt.where(Object.state.in_(states))
         if spec.min_conf is not None:
             stmt = stmt.where(Object.conf >= spec.min_conf)
         if spec.has_mask is True:

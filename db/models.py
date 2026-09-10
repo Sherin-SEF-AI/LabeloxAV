@@ -95,6 +95,9 @@ class Session(Base):
     ontology_version: Mapped[str] = mapped_column(String(64), nullable=False)
     commit_id: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # real | synthetic | perturbed (core/origin.py): the listing-level twin of Frame.origin. A synthetic
+    # session holds only synthetic frames, so the two never disagree (tests/test_origin_quarantine.py).
+    origin: Mapped[str] = mapped_column(String(16), nullable=False, default="real", server_default="real")
 
     frames: Mapped[list[Frame]] = relationship(back_populates="session")
 
@@ -115,6 +118,14 @@ class Frame(Base):
     ego_speed: Mapped[float | None] = mapped_column(Float)
     quality: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # real | synthetic | perturbed (core/origin.py). Every reader that sweeps frames by time or by the
+    # absence of a derived row must say `Frame.origin == REAL`; a composite must never be embedded,
+    # scored, audited, exported or trained on by accident.
+    origin: Mapped[str] = mapped_column(String(16), nullable=False, default="real", server_default="real")
+    # The real frame a synthetic or perturbed one was built from. Null on real frames. SET NULL on delete
+    # so erasing a source frame leaves the composite (and its own erasure path) intact.
+    source_frame_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("frame.frame_id", ondelete="SET NULL"))
 
     # Data Intelligence Layer (Phase 1), all nullable + additive:
     scene: Mapped[dict | None] = mapped_column(JSONB)  # {weather,time_of_day,road_type,density,confidence_per_axis}
@@ -149,6 +160,9 @@ class Frame(Base):
         Index("ix_frame_session_ts", "session_id", "ts_ns"),
         Index("ix_frame_ts", "ts_ns"),
         Index("ix_frame_tags_gin", "tags", postgresql_using="gin"),
+        Index("ix_frame_origin", "origin", postgresql_where=sql_text("origin <> 'real'")),
+        Index("ix_frame_source_frame", "source_frame_id",
+              postgresql_where=sql_text("source_frame_id IS NOT NULL")),
     )
 
 

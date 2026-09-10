@@ -96,3 +96,158 @@ verdict-minute numbers will come from whichever lot is judged first.
 
 Tests: `tests/test_sprt.py` (21), `tests/test_settlement.py` (16, including the calibration umbrella
 `test_settlement_changes_no_calibration_input`), `tests/test_migrations_roundtrip.py` (1).
+
+---
+
+## WP3. Synthetic data behind a quarantine, and the copy-paste generator
+
+### The defect it fixes
+
+Cattle and rider are the two classes the gate keeps blocking on, and both are starved of positives:
+cattle has 6 human-accepted objects in the whole corpus, rider has 4 with a polygon mask. Pasting real
+instances of a class onto real road scenes is the cheapest proven way to add positives, but it is only
+safe if nothing that measures a model can ever see a composited pixel. A predicate sprinkled across
+readers cannot deliver that: over 160 modules select `Object` outside the API, so "remember to exclude
+synthetic" is a rule nobody can audit.
+
+### The quarantine
+
+Isolation is structural rather than a predicate everyone must remember. A synthetic object is written
+with `state = 'synthetic'` and `source = 'synthetic'`, two values no real object has ever held, so every
+allow-list reader excludes it without being changed: gold builds take `source == 'human'`, the precision
+draw takes `MACHINE_STATES`, the control sample takes `auto_accept`, settlement takes `review`, triage
+defaults to `review,annotate`. `OBJECT_STATES` gains the value and `state_for` refuses it for a human
+actor, making it machine-only in the way `settled` is human-only in reverse.
+
+The readers that select frames rather than objects cannot inherit that, so they carry the explicit
+predicate `Frame.origin == REAL` (`core/origin.py`): `training/dataset_builder._select`,
+`export/dataset`, `export/coverage`, `intelligence/embed/pending` (no GPU is spent embedding a
+composite, and it stays out of novelty and dedup), `context/rarity`, `intelligence/search/rarity`,
+`agent/scenario_miner`, `explore/query` (default on, with an opt-in flag) and `verdyx/blind_audit`.
+The training builder is the one place that can opt in, `BuildSpec.include_synthetic`, and even then a
+synthetic frame is never validation and is dropped when its source frame's session lands in val, so a
+composite can never be scored against the model built from it.
+
+Migration `0108_origin` adds `session.origin` and `frame.origin` (`real|synthetic|perturbed`) with
+`frame.source_frame_id` pointing back at the background, and extends `ck_object_state` and
+`ck_object_source` with the new value. The downgrade deletes synthetic frames and their sessions before
+restoring the narrower CHECKs, so it leaves a database no wider than the one it started from.
+
+### The generator
+
+`services/synth/copy_paste.py` is CPU-only OpenCV, takes no GPU slot, and composes each frame inside
+`asyncio.to_thread`. Donors are human-accepted objects of the wanted class on real frames that carry a
+polygon mask and are at least 48 px on the short side. Backgrounds are real, selected frames that have
+a drivable mask and at least one object already labelled.
+
+That background rule is looser than the plan's "no `review` or `annotate` object", and the corpus is
+the reason. The strict rule left 24 usable frames. Frames with no object at all are not clean
+backgrounds either: 7,160 of them have zero predictions, meaning they were never labelled rather than
+labelled empty, and training on them would re-teach the lesson that made recall 0.411. Requiring at
+least one labelled object and no pending `annotate` work gives 14,136 backgrounds over 197 sessions.
+
+Placement scale comes from the row: the horizon is `cy - fy*tan(pitch)` from the resolved calibration,
+and a donor moved from its own horizon to the background's scales by the ratio of its distance below
+each. Colour is matched with a Reinhard transfer in LAB at strength 0.5 with the chroma ratio clamped
+to [0.5, 2], and the mask edge is feathered. A paste is refused rather than fudged when it would cover
+more than 30% of an existing box, leave the frame, or imply a scale outside [0.35, 3.0].
+
+Each build is a parent `AgentRun(kind='synth_build')` whose children are `synth_batch` runs of 200
+frames, committed one at a time; `revert_run` cascades to the children, and each child deletes its own
+frames, images and mask blobs. Memory is checked against `resources.host()` before every batch and the
+build waits rather than pushing the host past 90%.
+
+### The bonnet, which only looking at the output revealed
+
+The first 500-frame build passed every test and put riders on the recording car's own bonnet. The
+drivable segmenter reads the lower frame as road on most dashcams, because a bonnet is smooth, grey and
+continuous with the road, so the placement band happily included it. The fix reuses the per-camera hood
+mask the detector cleanup sweep already estimates (`autolabel/ego_mask`) and subtracts it from the
+drivable surface before a footprint row is drawn. Cameras with no cached hood mask keep the raw surface
+and the run report counts them separately, so the gap is visible rather than assumed away.
+
+### Measured
+
+One build of 500 frames on the live corpus, launched by the agent's own off-hours hook
+(`maybe_synth_starved`, run `81a9cc00`, `created_by='synth_starved'`) against the gate deficit of run
+`mr-real-v2-nano-7a66432d`:
+
+| quantity | value |
+| --- | --- |
+| frames written | 500 in 3 batches |
+| objects written | 6,747, every one `state` and `source` `synthetic` |
+| class pasted | pedestrian, from 7 donors |
+| backgrounds available | 14,136 of 41,752 real frames |
+| composites refused | 67 |
+| backgrounds with a hood mask | 498 |
+| backgrounds without one | 26 |
+
+The refusals, by reason: 43 had a drivable mask with no `drivable` polygon, 19 would have covered more
+than 30% of an existing box, 2 would have left the frame, 2 implied a scale outside the band, and 1 had
+no drivable surface left in the placement band once the bonnet was removed.
+
+The quarantine was then checked against the live database rather than assumed: of 6,747 synthetic
+objects, all sit on the 500 synthetic frames, none on a real frame, and no object in any other state
+sits on a synthetic frame. Reverting the earlier 500-frame build took the whole thing back through the
+same cascade, three child runs and 500 frames, leaving no synthetic session, frame, object, image or
+mask behind and touching nothing real.
+
+A cattle build is refused with its reason rather than attempted: no cattle object in the corpus is
+human-accepted, on a real frame, and carries a polygon mask. The 153 cattle masks that exist were
+accepted by the VLM judge, not by a person, and the donor rule deliberately does not take them.
+
+### The opt-in path, measured on the live corpus
+
+`BuildSpec.include_synthetic` was run both ways over the whole corpus, selection only, no training:
+
+| | `include_synthetic=False` | `include_synthetic=True` |
+| --- | --- | --- |
+| candidate objects | 513,157 | 519,663 |
+| frames | 34,504 | 34,903 |
+| synthetic frames | 0 | 399 kept, 101 dropped |
+| validation frames | 7,013 | 7,013 |
+
+The validation side is identical to the object, which is the property the quarantine exists to give. The
+101 dropped composites are the leak guard firing on real data: their background frame's session landed
+in validation, so training on them would have shown the model val pixels under a different frame id.
+One composite in five was built on a background that validation later claimed.
+
+**The hier_ap50 delta is not reported, because this build cannot produce a resolvable one.** The
+arithmetic, not a missing capability: the build added 500 pasted pedestrians to a corpus that already
+holds 35,616 pedestrian objects on real frames, a 1.4% increase, spread over 399 of 27,491 training
+frames. A single-seed A/B at that effect size measures the seed, not the synthetic data, and reporting
+the difference between two 60-epoch runs as evidence would be exactly the kind of number this document
+refuses to print.
+
+The reason it landed on pedestrian is worth more than the delta would have been. `maybe_synth_starved`
+fires on the champion gate's recall deficit, and the gate's deficit for pedestrian is a recall problem
+on 35,616 existing labels, not a shortage of them. The class that is genuinely label-starved is cattle,
+with 1,617 objects against motorcycle's 66,786, and cattle is precisely the class the donor rule cannot
+serve: of its 6 human-accepted objects, none carries a polygon mask.
+
+| cattle objects on real frames | total | with a polygon mask | and at least 48 px |
+| --- | --- | --- | --- |
+| `accepted` by a person | 6 | 0 | 0 |
+| `accepted` by the VLM judge | 171 | 153 | 26 |
+
+So the generator is correct, quarantined and reverted cleanly, and it currently cannot reach the one
+class that needs it. Opening the donor rule to VLM-accepted masks would turn 0 cattle donors into 26.
+That is a policy decision about what "accepted" is allowed to mean for a donor, not a defect to patch
+quietly, and it is left for the operator: WP3 keeps the strict rule, in which a donor is something a
+person ruled on.
+
+**One guard was found failing open and was fixed here rather than noted for later.** The host's NVIDIA
+kernel module is 595.84 and its userspace library is 595.91, so NVML fails to initialise. CUDA is
+unaffected, and `VramGuard` is unaffected with it, because that guard reads `torch.cuda.mem_get_info`
+rather than the driver library. What was blind is `services/hardening/resources.gpus()`, which shells
+out to `nvidia-smi` and returned no cards, and with it `class_precision.free_vram_mb()`, which derived
+free VRAM from that list and returned None. `wait_for_headroom` reads None as "no GPU to check here"
+and proceeds, so on a host with a working, busy 16 GB card the headroom guard stopped guarding. That is
+the wrong direction for a guard to fail, so `free_vram_mb` now falls back to the CUDA runtime and
+returns None only when neither reading can see a device.
+
+Tests: `tests/test_origin_quarantine.py` (12), `tests/test_synth_compose.py` (15),
+`tests/test_synth_build.py` (3), `tests/test_migrations_roundtrip.py` (1), `tests/test_class_precision.py`
+(the two new headroom readings). The quarantine tests were proven non-vacuous by removing the origin
+predicate from `embed/pending` and from `dataset_builder` and watching each one fail. The full suite
+runs 3,219 passed, 5 skipped against `labeloxav_test`, against a 3,124 baseline.

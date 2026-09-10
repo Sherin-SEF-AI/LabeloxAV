@@ -89,24 +89,48 @@ async def sample_class(db: AsyncSession, class_id: int, n: int, *, seed: float |
     return list((await db.execute(q)).scalars().all())
 
 
+def _free_vram_mb_from_torch() -> float | None:
+    """Free VRAM straight from the CUDA runtime, or None when there is no usable CUDA device.
+
+    The second reading exists because the first one can go blind while the card keeps working. `gpus()`
+    shells out to `nvidia-smi`, which fails whole when the kernel module and the userspace NVML library
+    are different versions (595.84 against 595.91 on this host after a driver update without a reboot).
+    CUDA is unaffected by that mismatch, so the card is still there, still busy, and still able to run a
+    job out of memory, while the guard that was meant to stop that reads "no GPU here" and waves it
+    through. `torch.cuda.mem_get_info` asks the runtime instead of the driver library and keeps answering.
+    """
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            return None
+        free = min(float(torch.cuda.mem_get_info(i)[0]) for i in range(torch.cuda.device_count()))
+        return free / (1024 * 1024)
+    except Exception:  # noqa: BLE001 - a reading that fails must not decide the job
+        return None
+
+
 async def free_vram_mb() -> float | None:
     """Free VRAM on the busiest card, or None when there is no GPU to read.
 
     None is not zero. A box with no nvidia-smi is a box where this check cannot apply, and treating that as
-    "no memory free" would stop the sweep on every CPU-only host.
+    "no memory free" would stop the sweep on every CPU-only host. But "no reading" and "no card" are not
+    the same thing either, so a card that CUDA can still see is read through CUDA before this returns None.
     """
     from services.hardening.resources import gpus
 
     try:
         cards = gpus()
     except Exception:  # noqa: BLE001 - a reading that fails must not decide the job
-        return None
+        cards = []
     # Derived from used and total: `gpus()` reports those two and no free figure, and a `memory_free_mb`
     # lookup silently returned None on a box with a working card, which made this guard a no-op that read
     # as "no GPU here".
     vals = [float(c["memory_total_mb"]) - float(c["memory_used_mb"]) for c in cards
             if c.get("memory_total_mb") is not None and c.get("memory_used_mb") is not None]
-    return min(vals) if vals else None
+    if vals:
+        return min(vals)
+    return _free_vram_mb_from_torch()
 
 
 async def wait_for_headroom(db: AsyncSession, *, holder: str, max_wait_s: float = 900.0) -> dict:

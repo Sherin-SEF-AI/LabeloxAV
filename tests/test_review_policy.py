@@ -14,7 +14,13 @@ from __future__ import annotations
 
 import pytest
 
-from services.review_policy import OBJECT_STATES, ReviewStateError, state_for, was_clamped
+from services.review_policy import (
+    _MACHINE_ONLY,
+    OBJECT_STATES,
+    ReviewStateError,
+    state_for,
+    was_clamped,
+)
 
 
 class TestAnnotatorsSubmit:
@@ -66,8 +72,20 @@ class TestTheEdges:
 
     def test_every_state_it_can_return_is_a_real_state(self):
         for role in ("annotator", "reviewer", "admin", None):
-            for requested in sorted(OBJECT_STATES):
+            for requested in sorted(OBJECT_STATES - _MACHINE_ONLY):
                 assert state_for(None, requested, role, "review") in OBJECT_STATES
+
+    def test_a_machine_only_state_cannot_be_asked_for_by_anyone(self):
+        """`synthetic` is written by the generator that composed the label and by nothing else.
+
+        It is the mirror of `accepted`: that one means a person ruled and the machine may never write it,
+        this one means no person ever saw these pixels in the wild and no review may claim otherwise.
+        Refusing it here is what keeps a composite from being laundered into the corpus by an edit.
+        """
+        for role in ("annotator", "reviewer", "admin", None):
+            for requested in sorted(_MACHINE_ONLY):
+                with pytest.raises(ReviewStateError):
+                    state_for(None, requested, role, "review")
 
     def test_an_unknown_verb_leaves_the_object_where_it_was(self):
         # A geometry edit carries `adjust_geometry`, which is not a verdict and must not move the state.

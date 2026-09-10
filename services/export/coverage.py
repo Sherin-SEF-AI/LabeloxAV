@@ -37,6 +37,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
+from core.origin import REAL, SYNTHETIC
 from db.models import (
     BlindAudit,
     DatasetCommit,
@@ -246,15 +247,22 @@ async def build_datasheet(db: AsyncSession, commit_id: str) -> dict:
     if not session_ids:
         # A release with no explicit session list covers the corpus it was cut from. Counting over
         # everything is the honest reading, and the sheet says which it did.
-        session_ids = list((await db.execute(select(Session.session_id))).scalars())
-        scope = "all sessions (the release's slice spec names none, so this describes the whole corpus)"
+        session_ids = list((await db.execute(
+            select(Session.session_id).where(Session.origin == REAL))).scalars())
+        scope = "all real sessions (the release's slice spec names none, so this describes the whole corpus)"
     else:
         scope = f"{len(session_ids)} session(s) selected by the slice spec"
 
     sessions = list((await db.execute(
         select(Session).where(Session.session_id.in_(session_ids)))).scalars())
+    # Composites are counted apart, never folded into the composition: a datasheet that mixed pasted
+    # instances into the class table would misstate what the release was cut from.
+    synthetic_sessions = [s for s in sessions if s.origin != REAL]
+    sessions = [s for s in sessions if s.origin == REAL]
+    session_ids = [s.session_id for s in sessions]
     n_frames = (await db.execute(
         select(func.count(Frame.frame_id)).where(Frame.session_id.in_(session_ids)))).scalar() or 0
+    synthetic = await _synthetic(db, [s.session_id for s in synthetic_sessions], spec)
 
     sheet = {
         "schema": SCHEMA_VERSION,
@@ -275,9 +283,28 @@ async def build_datasheet(db: AsyncSession, commit_id: str) -> dict:
         "quality": await _quality(db, commit),
         "recapture": await _recapture(db),
         "privacy": await _privacy(db, session_ids, n_frames),
+        "synthetic": synthetic,
     }
     sheet["limitations"] = _limitations(sheet)
     return sheet
+
+
+async def _synthetic(db: AsyncSession, synthetic_session_ids: list, spec: dict) -> dict:
+    """What the release carries that no camera saw.
+
+    The slice excludes composites unless it says `include_synthetic`, so the shipped count is zero
+    unless the spec asked; the corpus count is reported regardless so the reader knows composites exist
+    beside the real frames this sheet describes.
+    """
+    in_corpus = (await db.execute(
+        select(func.count(Frame.frame_id)).where(Frame.origin == SYNTHETIC))).scalar() or 0
+    shipped = 0
+    if spec.get("include_synthetic") and synthetic_session_ids:
+        shipped = (await db.execute(
+            select(func.count(Frame.frame_id)).where(Frame.session_id.in_(synthetic_session_ids),
+                                                     Frame.origin == SYNTHETIC))).scalar() or 0
+    return {"frames_in_corpus": int(in_corpus), "frames_shipped": int(shipped),
+            "included_by_spec": bool(spec.get("include_synthetic"))}
 
 
 def _limitations(sheet: dict) -> list[str]:
@@ -292,6 +319,10 @@ def _limitations(sheet: dict) -> list[str]:
         top = next(iter(reg["by_stratum"]), "one place")
         out.append(f"{conc:.1%} of sessions are {top}. This is a single-location corpus; nothing here "
                    f"supports a claim about regional generalisation.")
+    syn = sheet.get("synthetic") or {}
+    if syn.get("frames_shipped"):
+        out.append(f"{syn['frames_shipped']:,} frames are composites from the copy-paste generator, not "
+                   f"camera frames. Nothing measured on this release may be read as a field number.")
     if len(reg.get("raw_strings", {})) > len(reg.get("by_stratum", {})):
         out.append("The same place is recorded under more than one string. Any stratification built on the "
                    "raw city column will overcount locations.")
@@ -391,6 +422,10 @@ def render_html(sheet: dict) -> str:
 
 {block("Privacy", f"<table>{_rows({k: v for k, v in priv.items() if k != 'note'})}</table>"
                   f"<p class=meta>{html.escape(priv['note'])}</p>")}
+
+{block("Synthetic frames", f"<table>{_rows(sheet.get('synthetic') or {})}</table>"
+                           f"<p class=meta>Composites from the copy-paste generator. Shipped only when the "
+                           f"slice spec asks; never counted in the composition above.</p>")}
 """
 
 

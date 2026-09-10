@@ -23,6 +23,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
+from core.origin import REAL
 from db.models import Frame, Object
 from services.intelligence.search.rarity import class_frame_counts, frame_rarity
 
@@ -47,7 +48,8 @@ async def sweep_rarity(db: AsyncSession, *, limit: int = 2000, session_id=None,
     if not total:
         return {"scored": 0, "skipped": "no objects in the corpus, so idf is undefined"}
 
-    q = select(Frame.frame_id, Frame.scene).order_by(Frame.ts_ns)
+    # Real frames only: a composite's class mix is whatever the generator pasted, not a rarity signal.
+    q = select(Frame.frame_id, Frame.scene).where(Frame.origin == REAL).order_by(Frame.ts_ns)
     if session_id is not None:
         q = q.where(Frame.session_id == session_id)
     if not force:

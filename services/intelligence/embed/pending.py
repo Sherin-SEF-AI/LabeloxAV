@@ -21,31 +21,46 @@ every vector this object needs actually present".
 
 from __future__ import annotations
 
-from sqlalchemy import exists
+from sqlalchemy import and_, exists
 
+from core.origin import REAL
 from db.models import Frame, FrameEmbedding, Object, ObjectEmbedding
 
 
+def frame_is_real():
+    """SQL predicate: the frame's pixels came from a camera (core/origin.py).
+
+    A composite from the copy-paste generator is never embedded: no GPU is spent on it, and it stays out
+    of dedup, novelty and find-similar, all of which would otherwise pull it into a real neighbourhood.
+    """
+    return Frame.origin == REAL
+
+
+def object_on_real_frame():
+    """SQL predicate, usable without a Frame join: the object's frame is real."""
+    return exists().where(Frame.frame_id == Object.frame_id, Frame.origin == REAL)
+
+
 def object_needs_embedding():
-    """SQL predicate: this object has no embedding, or an incomplete one."""
-    return ~exists().where(
+    """SQL predicate: this object has no embedding, or an incomplete one, and sits on a real frame."""
+    return and_(object_on_real_frame(), ~exists().where(
         ObjectEmbedding.object_id == Object.object_id,
         ObjectEmbedding.dino_vec.isnot(None),
         ObjectEmbedding.siglip_vec.isnot(None),
-    )
+    ))
 
 
 def frame_needs_embedding():
-    """SQL predicate: this frame has no embedding, or an incomplete one.
+    """SQL predicate: this frame has no embedding, or an incomplete one, and is real.
 
     Frames carry both vectors for the same reason objects do: DINOv3 backs find-similar and dedup, SigLIP2
     backs text search. A frame with only one of them is half indexed.
     """
-    return ~exists().where(
+    return and_(frame_is_real(), ~exists().where(
         FrameEmbedding.frame_id == Frame.frame_id,
         FrameEmbedding.dino_vec.isnot(None),
         FrameEmbedding.siglip_vec.isnot(None),
-    )
+    ))
 
 
 def object_missing_siglip():

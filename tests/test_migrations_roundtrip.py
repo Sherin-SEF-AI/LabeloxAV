@@ -53,7 +53,30 @@ def _seed(conn) -> dict:
         values (:lot, :cid, 'roundtrip-epoch', 5000, 'default', 0.05, '[]'::jsonb, :bid, 'judging',
                 'roundtrip', 'sprt', 110, -1.25, '{"p0": 0.05}'::jsonb, '[{"added": 25}]'::jsonb)"""),
         {"lot": lot_id, "cid": cid, "bid": f"settle-{lot_id.hex[:8]}"})
-    return {"lot_id": lot_id}
+    # 0108: a synthetic session with a composite frame and a synthetic-state object, plus a real session
+    # the composite points back at. The downgrade must remove the synthetic rows (the tighter CHECKs it
+    # restores would otherwise refuse to come back) and keep the real ones.
+    real_sid, synth_sid = uuid.uuid4(), uuid.uuid4()
+    real_fid, synth_fid = uuid.uuid4(), uuid.uuid4()
+    for sid, origin in ((real_sid, "real"), (synth_sid, "synthetic")):
+        conn.execute(sa.text("""
+            insert into session (session_id, vehicle_id, start_ts_ns, end_ts_ns, sensors, ontology_version, origin)
+            values (:sid, 'roundtrip', 0, 1, '{}'::jsonb, :ov, :origin)"""),
+            {"sid": sid, "ov": get_ontology().version, "origin": origin})
+    conn.execute(sa.text("""
+        insert into frame (frame_id, session_id, ts_ns, cam_id, img_uri, width, height, quality, origin)
+        values (:fid, :sid, 0, 'front', 's3://x/roundtrip-real.jpg', 10, 10, 0, 'real')"""),
+        {"fid": real_fid, "sid": real_sid})
+    conn.execute(sa.text("""
+        insert into frame (frame_id, session_id, ts_ns, cam_id, img_uri, width, height, quality, origin,
+                           source_frame_id)
+        values (:fid, :sid, 0, 'front', 's3://x/roundtrip-synth.jpg', 10, 10, 0, 'synthetic', :src)"""),
+        {"fid": synth_fid, "sid": synth_sid, "src": real_fid})
+    conn.execute(sa.text("""
+        insert into object (object_id, frame_id, class_id, bbox, conf, source, state, provenance, attrs)
+        values (:oid, :fid, :cid, '{0,0,5,5}', 1.0, 'synthetic', 'synthetic', '{}'::jsonb, '{}'::jsonb)"""),
+        {"oid": uuid.uuid4(), "fid": synth_fid, "cid": cid})
+    return {"lot_id": lot_id, "real_sid": real_sid, "synth_sid": synth_sid}
 
 
 def _assert_downgraded(conn, seeded: dict) -> None:
@@ -62,6 +85,14 @@ def _assert_downgraded(conn, seeded: dict) -> None:
         assert c not in cols, f"0107 downgrade left settlement_lot.{c}"
     assert conn.execute(sa.text("select count(*) from settlement_lot where lot_id = :l"),
                         {"l": seeded["lot_id"]}).scalar() == 1, "the downgrade must keep the lot"
+    fcols = _columns(conn, "frame")
+    assert "origin" not in fcols and "source_frame_id" not in fcols, "0108 downgrade left frame.origin"
+    assert "origin" not in _columns(conn, "session")
+    assert conn.execute(sa.text("select count(*) from session where session_id = :s"),
+                        {"s": seeded["synth_sid"]}).scalar() == 0, "0108 downgrade must remove the composite"
+    assert conn.execute(sa.text("select count(*) from session where session_id = :s"),
+                        {"s": seeded["real_sid"]}).scalar() == 1, "0108 downgrade must keep the real session"
+    assert conn.execute(sa.text("select count(*) from object where state = 'synthetic'")).scalar() == 0
 
 
 def _assert_reupgraded(conn, seeded: dict) -> None:
@@ -71,6 +102,8 @@ def _assert_reupgraded(conn, seeded: dict) -> None:
     assert row.rule == "wilson" and row.cap_n == 0 and row.llr is None, \
         "a lot that lived through the downgrade is a fixed-rule lot: the stricter reading"
     assert row.sprt == {} and row.increments == []
+    assert conn.execute(sa.text("select origin from session where session_id = :s"),
+                        {"s": seeded["real_sid"]}).scalar() == "real"
 
 
 def test_every_migration_above_the_floor_round_trips_with_rows_present():
@@ -102,4 +135,6 @@ def test_every_migration_above_the_floor_round_trips_with_rows_present():
         engine = sa.create_engine(dsn)
         with engine.begin() as c:
             c.execute(sa.text("delete from settlement_lot where lot_id = :l"), {"l": seeded["lot_id"]})
+            c.execute(sa.text("delete from session where session_id in (:a, :b)"),
+                      {"a": seeded["real_sid"], "b": seeded["synth_sid"]})
         engine.dispose()

@@ -48,10 +48,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.accel.recapture import lincoln_petersen, stratified_recapture
 from core.logging import get_logger
+from core.origin import REAL
 from db.models import (
     BlindAudit,
     BlindAuditFrame,
     EvalPatch,
+    Frame,
     InferenceRun,
     LabelJob,
     LabelProject,
@@ -138,6 +140,13 @@ async def seed_audit(db: AsyncSession, *, run_id: str, n_frames: int = 200,
         select(Prediction.frame_id).where(Prediction.run_id == run.run_id).distinct())).scalars().all()
     for fid in scored:
         counted.setdefault(fid, 0)
+    # A composite is never audited: the human-only objects it would surface are the generator's pastes.
+    if counted:
+        unreal = set((await db.execute(
+            select(Frame.frame_id).where(Frame.frame_id.in_(list(counted)),
+                                         Frame.origin != REAL))).scalars().all())
+        for fid in unreal:
+            counted.pop(fid, None)
     if not counted:
         return {"error": "the run has no predictions, so there is nothing to audit against",
                 "run_id": run_id}

@@ -3273,6 +3273,21 @@ class LabeloxClient:
         return self._call("POST", f"/api/superpixels/{frame_id}",
                           params={"n": n}, json_body=None)
 
+    def post_synth_build(self, body: Any = None) -> Any:
+        """Synth Build"""
+        return self._call("POST", f"/api/synth/build",
+                          params=None, json_body=body)
+
+    def post_synth_plan(self, body: Any = None) -> Any:
+        """Synth Plan"""
+        return self._call("POST", f"/api/synth/plan",
+                          params=None, json_body=body)
+
+    def get_synth_runs(self, limit: int | None = 50) -> Any:
+        """Synth Runs"""
+        return self._call("GET", f"/api/synth/runs",
+                          params={"limit": limit}, json_body=None)
+
     def get_system_resources(self) -> Any:
         """System Resources"""
         return self._call("GET", f"/api/system/resources",
@@ -3661,4 +3676,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 715 routes generated from the server schema.
+# 718 routes generated from the server schema.

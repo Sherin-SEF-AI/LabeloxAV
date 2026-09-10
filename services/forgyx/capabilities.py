@@ -22,6 +22,9 @@ _BACKENDS: dict[str, tuple[str, ...]] = {
     "agx_orin_trt": ("tensorrt",),
     "orin_nano_trt": ("tensorrt",),
     "pi_hailo": ("hailo_sdk_client",),
+    # Diffusion harmonisation of copy-paste composites (services/synth). The slot is reserved so a caller
+    # can ask for it and get a CapabilityError naming the missing backend; no harmoniser is built yet.
+    "diffusion": ("diffusers",),
 }
 
 

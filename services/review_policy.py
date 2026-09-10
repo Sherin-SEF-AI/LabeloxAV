@@ -24,9 +24,12 @@ from __future__ import annotations
 
 from services.api.deps import role_rank
 
-# The canonical set, from `ck_object_state` (migration 0020, extended by 0106_settlement).
+# The canonical set, from `ck_object_state` (migration 0020, extended by 0106_settlement and 0108_origin).
 OBJECT_STATES = frozenset({"review", "auto_accept", "accepted", "rejected", "annotate", "submitted",
-                           "settled"})
+                           "settled", "synthetic"})
+# States a review may never write, whoever asks. `synthetic` is the copy-paste generator's word for a
+# label it composed (core/origin.py); it is the opposite of a human ruling and no ruling may become one.
+_MACHINE_ONLY = frozenset({"synthetic"})
 
 # What each verb means before the role is taken into account.
 ACTION_STATE = {"confirm": "accepted", "accept": "accepted", "reject": "rejected"}
@@ -54,6 +57,9 @@ def state_for(action: str | None, requested: str | None, role: str | None, curre
         return None
     if state not in OBJECT_STATES:
         raise ReviewStateError(f"unknown object state {state!r}; expected one of {sorted(OBJECT_STATES)}")
+    if state in _MACHINE_ONLY:
+        raise ReviewStateError(f"{state!r} is written only by the generator that composed the label; "
+                               "a review cannot make an object synthetic")
     # 'settled' is the settlement engine's word and only the engine writes it: it means "the machine
     # settled this under a passed acceptance lot". A person asking for it gets 'accepted', which is
     # the right semantics for free - a human ruling on a settled object upgrades it to human ground
