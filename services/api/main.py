@@ -79,6 +79,7 @@ from services.api.routers import (
     segment_assist,
     segmentation,
     service_accounts,
+    shadow,
     signs,
     synth,
     track_events,
@@ -608,6 +609,7 @@ app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(imports.router, prefix="/api", tags=["imports"])
 app.include_router(training.router, prefix="/api", tags=["training"])
 app.include_router(synth.router, prefix="/api", tags=["synth"])
+app.include_router(shadow.router, prefix="/api", tags=["shadow"])
 app.include_router(tracks.router, prefix="/api", tags=["tracks"])
 app.include_router(autolabel.router, prefix="/api", tags=["autolabel"])
 app.include_router(jobs.router, prefix="/api", tags=["jobs"])

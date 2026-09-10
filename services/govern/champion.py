@@ -104,6 +104,44 @@ def _recapture(challenger: dict, cfg) -> dict:
                         f"(overstated by {over:.3f})"]}
 
 
+# Adjudicated disagreements needed before shadow evidence is allowed to refuse anything. Below this the
+# Wilson interval on a win share spans most of the unit interval and would refuse a good challenger as
+# readily as a bad one.
+MIN_SHADOW_PAIRS = 30
+
+
+def _shadow(challenger: dict) -> dict:
+    """Whether the challenger lost badly enough on adjudicated disagreements to block, and why.
+
+    Fail-closed only, and only in one direction. Shadow evidence can refuse a challenger that people have
+    judged worse than the champion where the two disagree; it can never promote one, because a model that
+    wins on the frames two models argue about has not been shown to be safe on the frames they agree on,
+    which is most of them.
+
+    Below `MIN_SHADOW_PAIRS` discordant pairs this reports "unmeasured" and blocks nothing. That is the
+    same rule the rest of this file follows: too little evidence is not evidence of adequacy, but it is
+    not evidence of failure either, and reporting it as a zero win share would refuse every challenger on
+    the first night of shadow mode.
+    """
+    sh = challenger.get("shadow")
+    if not sh or not sh.get("measured"):
+        return {"ok": True, "measured": False,
+                "reasons": [], "detail": (sh or {}).get("reason", "no shadow sweep has adjudicated this challenger")}
+    n = int(sh.get("discordant") or 0)
+    if n < MIN_SHADOW_PAIRS:
+        return {"ok": True, "measured": False, "reasons": [],
+                "detail": f"only {n} adjudicated disagreements, need {MIN_SHADOW_PAIRS} to say anything"}
+    hi = float(sh.get("hi", 1.0))
+    if hi < 0.5:
+        return {"ok": False, "measured": True,
+                "reasons": [f"people judged the champion better where the two disagree: the challenger won "
+                            f"{sh.get('challenger_right')} of {n} and the upper bound of its win share is "
+                            f"{hi:.2f}, below even"],
+                "detail": f"win share {float(sh.get('share', 0.0)):.2f} [{float(sh.get('lo', 0.0)):.2f}, {hi:.2f}] on {n} pairs"}
+    return {"ok": True, "measured": True, "reasons": [],
+            "detail": f"win share {float(sh.get('share', 0.0)):.2f} on {n} adjudicated pairs"}
+
+
 def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None) -> dict:
     """Pure promotion decision. Fail-closed: a challenger that cannot prove its safety (no Safe-mIoU,
     or no safety-class recall) is never promoted, and a safety-class AP, Safe-mIoU, or safety-class
@@ -178,7 +216,8 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
                 "recall_ok": rec_floor["ok"], "recapture_ok": recap["ok"],
                 "recapture": recap, "reasons": reasons}
 
-    promote = bool(beats_map and safe_ok and safety_ok and recall_ok and recap["ok"])
+    shadow = _shadow(challenger)
+    promote = bool(beats_map and safe_ok and safety_ok and recall_ok and recap["ok"] and shadow["ok"])
     reasons: list[str] = []
     if not beats_map:
         reasons.append(f"does not beat champion mAP ({map_c:.3f} vs {map_ch:.3f})")
@@ -189,12 +228,13 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
                        else f"Safe-mIoU regressed ({sm_c} vs {sm_ch})")
     if not safety_ok:
         reasons.append(f"safety-class regression: {regressed}")
-    reasons += rec_floor["reasons"] + rec_reg["reasons"] + recap["reasons"]
+    reasons += rec_floor["reasons"] + rec_reg["reasons"] + recap["reasons"] + shadow["reasons"]
     if promote:
         reasons.append("beats champion without any safety regression")
     return {"promote": promote, "beats_map": beats_map, "map_delta": round(map_c - map_ch, 4),
             "safe_ok": safe_ok, "safety_ok": safety_ok, "regressed_safety": regressed,
             "recall_ok": recall_ok, "recapture_ok": recap["ok"], "recapture": recap,
+            "shadow_ok": shadow["ok"], "shadow": shadow,
             "reasons": reasons, "evidence": evidence}
 
 
@@ -227,7 +267,44 @@ async def _common_gold_metrics(db, reg, champ, task):
     # attached here or the recapture condition would see nothing on every real promotion and fail closed
     # against a check that had in fact been performed.
     chal_m = await _attach_recapture(db, chal_m, gold_id)
+    chal_m = await _attach_shadow(db, chal_m, reg.model_version)
     return chal_m, champ_m, f"common_gold:{gold_id}"
+
+
+async def _attach_shadow(db, metrics: dict, model_version: str) -> dict:
+    """Put the adjudicated shadow record for this challenger onto its metric dict, under "shadow".
+
+    Keyed on the model version rather than one sweep, because a challenger that survives several nights
+    has been judged several times and every one of those verdicts is about the same weights. Absent stays
+    absent: a challenger nobody has shadowed carries no key, and `_shadow` reads that as unmeasured rather
+    than as a loss.
+    """
+    from sqlalchemy import select
+
+    from db.models import InferenceRun, ShadowDisagreement
+    from services.verdyx.shadow_run import win_share
+
+    run_ids = (await db.execute(
+        select(ShadowDisagreement.challenger_run_id)
+        .join(InferenceRun, InferenceRun.run_id == ShadowDisagreement.challenger_run_id)
+        .where(InferenceRun.model_version == model_version).distinct())).scalars().all()
+    if not run_ids:
+        return metrics
+    total = {"n_adjudicated": 0, "champion_right": 0, "challenger_right": 0, "both_right": 0,
+             "both_wrong": 0, "discordant": 0}
+    for rid in run_ids:
+        s = await win_share(db, rid)
+        for k in total:
+            total[k] += int(s.get(k) or 0)
+    if total["discordant"] == 0:
+        return {**metrics, "shadow": {**total, "measured": False,
+                                      "reason": "no disagreement of this challenger has been adjudicated "
+                                                "for or against it"}}
+    from services.labelops.sampling import wilson_interval
+
+    ci = wilson_interval(total["challenger_right"], total["discordant"])
+    return {**metrics, "shadow": {**total, "measured": True, "share": ci["p"], "lo": ci["lo"],
+                                  "hi": ci["hi"], "runs": len(run_ids)}}
 
 
 async def _attach_recapture(db, metrics: dict, gold_id: str | None) -> dict:

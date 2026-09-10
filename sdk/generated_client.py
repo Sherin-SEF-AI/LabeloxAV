@@ -3218,6 +3218,26 @@ class LabeloxClient:
         return self._call("GET", f"/api/sessions/{session_id}/timeline",
                           params=None, json_body=None)
 
+    def get_shadow_disagreements(self, sweep_run_id: Any | None = None, state: Any | None = None, kind: Any | None = None, limit: int | None = 100) -> Any:
+        """List Disagreements"""
+        return self._call("GET", f"/api/shadow/disagreements",
+                          params={"sweep_run_id": sweep_run_id, "state": state, "kind": kind, "limit": limit}, json_body=None)
+
+    def get_shadow_runs(self, limit: int | None = 20) -> Any:
+        """Shadow Runs"""
+        return self._call("GET", f"/api/shadow/runs",
+                          params={"limit": limit}, json_body=None)
+
+    def get_shadow_summary(self, limit: int | None = 5) -> Any:
+        """Shadow Summary"""
+        return self._call("GET", f"/api/shadow/summary",
+                          params={"limit": limit}, json_body=None)
+
+    def post_shadow_sweep(self, body: Any = None) -> Any:
+        """Start Sweep"""
+        return self._call("POST", f"/api/shadow/sweep",
+                          params=None, json_body=body)
+
     def get_sievyx_cliques(self) -> Any:
         """Cliques Report"""
         return self._call("GET", f"/api/sievyx/cliques",
@@ -3676,4 +3696,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 718 routes generated from the server schema.
+# 722 routes generated from the server schema.

@@ -251,3 +251,132 @@ Tests: `tests/test_origin_quarantine.py` (12), `tests/test_synth_compose.py` (15
 (the two new headroom readings). The quarantine tests were proven non-vacuous by removing the origin
 predicate from `embed/pending` and from `dataset_builder` and watching each one fail. The full suite
 runs 3,219 passed, 5 skipped against `labeloxav_test`, against a 3,124 baseline.
+
+---
+
+## WP2. Shadow mode: challenger inference and disagreement mining
+
+### The defect it fixes
+
+Every model this program has built was measured on frozen gold: 164 validation images sealed months ago.
+The corpus has taken in 377 sessions and 41,752 frames since, and no model has ever been compared on any
+of them. Worse, the frames that would teach the most are the ones two models read differently, and
+nothing surfaced those to anybody. A promotion decision had exactly one kind of evidence, and that
+evidence stopped being new the day it was sealed.
+
+### The sweep
+
+`services/govern/shadow_agent.py::maybe_shadow_sweep` runs off-hours. It takes real, selected,
+non-duplicate frames newer than the last committed sweep, oldest first, scores the champion and each
+challenger over them, and files every disagreement. It promotes nothing and labels nothing.
+
+The GPU discipline matters more than usual because two detectors are involved. They run one at a time
+inside `gpu_slot`, never both resident, in chunks of 256 frames, with `training_holds_gpu` and a VRAM
+floor checked between chunks so a training job that starts mid-sweep gets the card back in seconds
+rather than at the end of the sweep.
+
+The high-water mark only advances on a **committed** sweep, and it is the maximum across committed
+sweeps rather than the latest one. A failed or reverted sweep compared nothing on its frames, and
+letting its mark stand would step the window past them permanently with nothing ever saying so. This
+was not a hypothetical: reverting the first real sweep and running another one showed the second
+starting after the frames the first had named rather than at them.
+
+### Three things `run_inference` had to be fixed for first
+
+It was already an idempotent batched writer, but not one that could carry two models over thousands of
+frames.
+
+1. **The idempotency key made a nightly sweep a no-op after the first night.** The key is
+   `(model_version, gold_id, code_sha, params)`, and for a sweep `gold_id` is null and the params are
+   identical every night. The second night would have matched the first night's key exactly, reused
+   that run, and scored nothing. `scope` now names the sweep and is folded into the key, so a new night
+   is a new run and a retry of the same night is a reuse. `force=True` is not the answer, because it
+   would duplicate rows when a crashed sweep retries.
+2. **The model was constructed per 16-frame batch.** A 2,000-frame sweep is 125 batches, each re-reading
+   the checkpoint from disk. It is loaded once per run now.
+3. **It took no GPU slot at all.** The sweep wraps each chunk in one.
+
+### The matcher
+
+`services/verdyx/shadow_run.py::compare_frame` is pure and takes two lists of detections. It pairs boxes
+greedily by IoU, class-agnostically so a class flip pairs instead of reading as two misses, and names
+four kinds: `champion_miss`, `challenger_miss`, `class_flip`, `conf_gap`.
+
+Both models are cut at the champion's operating point rather than at the 0.001 inference floor.
+Comparing raw floors would turn every low-confidence tail detection of one model into a "miss" by the
+other, which is an artefact of the floor and not a disagreement about the picture.
+
+### The artefact the first real sweep was made of
+
+The first sweep ran clean and produced a number that was almost entirely wrong. Comparing the 15-class
+champion against a 4-class challenger, 3,091 of its 3,240 disagreements were `challenger_miss`. The
+challenger had not missed anything. It had never been taught those words, and a model that cannot say
+`pedestrian` will register every pedestrian the champion finds as its own failure. A win share computed
+from those rows would have measured vocabulary size.
+
+Migration `0111_inference_class_vocab` records, on each inference run, the ontology class ids that
+model's own class order maps onto: what it was able to say at all, which is a property of the checkpoint
+and knowable only at inference time. The matcher compares on the intersection. Null stays null and means
+"this run declared no vocabulary", which is not an empty one, and a comparison facing null covers every
+class as it did before.
+
+### Where the human verdict lands
+
+A `champion_miss` has no Object for anyone to rule on, so this is not a Review-row flow. The sweep files
+one labelling task over the 40 worst disagreement frames, and everything pending on a queued frame is
+queued with it so one person opening one frame settles every disagreement on it at once. On
+`submit_job`, `adjudicate_for_job` matches each disagreement's box against that frame's human objects at
+IoU 0.5 and reads the verdict off the person's drawing rather than asking them to vote.
+
+That direction was written backwards on the first attempt and a test caught it. A `champion_miss` where
+the person also found nothing means the challenger invented a box, so the champion was right; the code
+had it awarding the challenger. Left in, every challenger hallucination would have become evidence in
+the challenger's favour, and the gate would have read a model that invents objects as one that finds
+them.
+
+### The gate clause
+
+`champion_gate` gains one clause, fail-closed only. With at least 30 adjudicated discordant pairs and a
+Wilson upper bound on the challenger's win share below 0.5, the promotion is blocked with a reason.
+It can never promote: a model that wins on the frames two models argue about has not been shown to be
+safe on the frames they agree on, which is nearly all of them. Below 30 pairs it reports "unmeasured"
+and blocks nothing, because too little evidence is not evidence of failure.
+
+### Measured
+
+One sweep on the live corpus, 512 frames, champion `mr-idd-yolo11l-local-aa408c72b0` against two
+challengers, at the ship-default threshold of 0.5 because no fitted threshold exists for this champion
+and the run says so rather than implying one was measured.
+
+| model | frames | GPU seconds |
+| --- | --- | --- |
+| champion (yolo11l, 15 classes) | 512 | 20.4 |
+| `mr-real-v2-nano` (10 classes) | 512 | 19.0 |
+| `dashlab-det9class` (4 classes) | 512 | 9.1 |
+
+The whole sweep took 50 seconds wall clock and filed a task of 40 frames carrying 369 disagreements.
+
+The vocabulary fix was then measured against itself, on the identical predictions, changing only whether
+the comparison was restricted to shared classes:
+
+| challenger | shared classes | all classes | shared only | artefact |
+| --- | --- | --- | --- | --- |
+| `dashlab-det9class` | 4 of 15 | 4,153 | 379 | 91% |
+| `mr-real-v2-nano` | 10 of 15 | 2,953 | 2,884 | 2% |
+
+The disagreements that survive, by kind and by class, for the challenger that shares most of the
+champion's vocabulary: 2,239 `challenger_miss`, 417 `champion_miss`, 138 `conf_gap`, 90 `class_flip`.
+The three classes the two argue about most are sedan, pedestrian and traffic sign. The commonest class
+flips are sedan against truck and bus against truck, which is the large-vehicle boundary rather than
+noise.
+
+**No win share is reported, and the reason is that nobody has ruled yet.** The sweep filed its 40 frames
+and they wait on a person. `win_share` returns `measured: false` with that reason rather than a number,
+the gate reads it as unmeasured and blocks nothing, and the autonomy page prints the reason where the
+share would go. The first real win share arrives when that task is submitted.
+
+Tests: `tests/test_shadow_match.py` (17), `tests/test_shadow_run.py` (14, one of which caught the verdicts
+being written backwards),
+`tests/test_migrations_roundtrip.py` (1, extended over 0109 and 0110 with rows present). The full suite
+runs 3,249 passed, 6 skipped against `labeloxav_test`; the web suite 682 passed with `tsc --noEmit`
+clean.

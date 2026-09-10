@@ -273,6 +273,16 @@ async def submit_job(db: AsyncSession, job_id: str, *, expected_version: int | N
             n = await mark_frames_labeled(db, audit.audit_id,
                                           [UUID(str(f)) for f in (job.frame_ids or [])])
             log.info("labelops.audit_frames_marked", job=job_id, audit=str(audit.audit_id), frames=n)
+
+        # A shadow-mode job exists to settle disagreements between two models, and the person who took it
+        # settled them by drawing what is actually there rather than by voting. Read the verdicts off
+        # their work now, while the labels and the open disagreements are both in front of us: waiting
+        # for a nightly pass would leave the gate reading "unmeasured" on evidence that already exists.
+        from services.verdyx.shadow_run import adjudicate_for_job
+
+        adj = await adjudicate_for_job(db, job.job_id)
+        if adj.get("adjudicated"):
+            log.info("labelops.shadow_adjudicated", job=job_id, adjudicated=adj["adjudicated"])
     log.info("labelops.job_submitted", job=job_id, stage=job.stage, state=job.state,
              honeypot_accuracy=job.honeypot_accuracy, failed=failed)
     # Let external pipelines react without polling. Fire and forget: a slow receiver must not hold up the

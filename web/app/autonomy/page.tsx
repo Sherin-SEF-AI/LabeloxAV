@@ -7,7 +7,9 @@ import LoadState from "@/components/shell/LoadState";
 import PulseDot from "@/components/PulseDot";
 import { api, humanizeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
-import type { AutonomyState, SettlementLotRow, SettlementWorkItem } from "@/lib/types";
+import type {
+  AutonomyState, SettlementLotRow, SettlementWorkItem, ShadowSummary,
+} from "@/lib/types";
 
 // The autonomy console: the machine's answer to "what are you allowed to do right now, and why".
 //
@@ -83,6 +85,67 @@ function Worklist({ items, minutes }: { items: SettlementWorkItem[]; minutes: nu
           </tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+const KIND_LABEL: Record<string, string> = {
+  champion_miss: "champion missed",
+  challenger_miss: "challenger missed",
+  class_flip: "read as another class",
+  conf_gap: "same box, different confidence",
+};
+
+function ShadowPanel({ shadow }: { shadow: ShadowSummary | undefined }) {
+  const kinds = Object.entries(shadow?.disagreements_by_kind ?? {}).sort((a, b) => b[1] - a[1]);
+  const states = shadow?.disagreements_by_state ?? {};
+  const open = (states.pending ?? 0) + (states.queued ?? 0);
+  const last = shadow?.sweeps?.[0];
+  return (
+    <section className="panel">
+      <div className="uppercase text-[10px] text-ink-3 border-b hairline px-3 py-2 flex justify-between">
+        <span>shadow mode · where two models read the same pixels differently</span>
+        <span>{open} open</span>
+      </div>
+      {!shadow?.sweeps?.length ? (
+        <div className="px-3 py-2 text-[11px] text-ink-3">
+          no sweep has run. gold is frozen, so nothing yet compares the models on the sessions
+          ingested since it was sealed.
+        </div>
+      ) : (
+        <div className="px-3 py-2 text-[11px] space-y-2">
+          <div className="text-ink-3">
+            last sweep {age(last?.created_at)} · {String(last?.status ?? "")}
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {kinds.map(([k, n]) => (
+              <span key={k} className="text-ink-2">
+                {KIND_LABEL[k] ?? k} <span className="tabular-nums text-ink-3">{n}</span>
+              </span>
+            ))}
+            {kinds.length === 0 && <span className="text-ink-3">no disagreement recorded</span>}
+          </div>
+          <div className="space-y-1">
+            {(shadow?.win_shares ?? []).map((w) => (
+              <div key={w.challenger_run_id} className="flex justify-between gap-3">
+                <span className="text-ink-3 truncate">{w.challenger_run_id.slice(0, 8)}</span>
+                {w.measured ? (
+                  <span className="text-ink-2 tabular-nums">
+                    challenger won {w.challenger_right}/{w.discordant}
+                    {w.share != null && ` · ${(w.share * 100).toFixed(0)}%`}
+                    {w.lo != null && w.hi != null &&
+                      ` [${(w.lo * 100).toFixed(0)}, ${(w.hi * 100).toFixed(0)}]`}
+                  </span>
+                ) : (
+                  // Unmeasured, said out loud. A win share of zero and nobody having looked are
+                  // different facts and this panel refuses to draw them the same way.
+                  <span className="text-ink-3">unmeasured · {w.reason ?? "nobody has ruled yet"}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -261,6 +324,8 @@ export default function AutonomyPage() {
         </div>
 
         <Worklist items={settle?.worklist ?? []} minutes={settle?.verdict_minutes_open ?? 0} />
+
+        <ShadowPanel shadow={state?.shadow} />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* lots */}

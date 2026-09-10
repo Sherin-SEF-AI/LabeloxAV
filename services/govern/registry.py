@@ -13,20 +13,54 @@ from db.models import ModelRegistry, ModelRun
 log = get_logger("govern_registry")
 
 
+def _arch_of(base_weights: str | None) -> str | None:
+    """The architecture family a checkpoint name denotes, or None when the name does not say.
+
+    Read off the base weights rather than guessed from the run, because that string is the one thing that
+    is always literally true about what was loaded. None rather than a default: "we do not know which
+    architecture this is" and "it is a yolo11n" are different facts and the column has to be able to hold
+    the first one.
+    """
+    if not base_weights:
+        return None
+    stem = str(base_weights).rsplit("/", 1)[-1]
+    for suffix in (".pt", ".onnx", ".engine"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+    return stem or None
+
+
 async def register(db: AsyncSession, model_version: str, task: str, gold_metrics: dict,
                    dataset_commit: str | None = None, weights_uri: str | None = None,
-                   notes: str | None = None) -> dict:
-    """Register a challenger (not champion yet). Idempotent on model_version."""
+                   notes: str | None = None, arch: str | None = None,
+                   parent_version: str | None = None, teacher_version: str | None = None,
+                   origin: str = "trained") -> dict:
+    """Register a challenger (not champion yet). Idempotent on model_version.
+
+    The lineage arguments (0110) say where the weights came from: `parent_version` is the checkpoint this
+    one continued, `teacher_version` the model a distilled student was fit against, `origin` how it came to
+    exist. They are set on insert and on update, so a row registered before lineage existed gains it the
+    next time its run is registered rather than staying blank forever.
+    """
     existing = await db.get(ModelRegistry, model_version)
     if existing is None:
         db.add(ModelRegistry(model_version=model_version, task=task, gold_metrics=gold_metrics,
-                             is_champion=False, dataset_commit=dataset_commit, weights_uri=weights_uri, notes=notes))
+                             is_champion=False, dataset_commit=dataset_commit, weights_uri=weights_uri,
+                             notes=notes, arch=arch, parent_version=parent_version,
+                             teacher_version=teacher_version, origin=origin))
     else:
         existing.gold_metrics = gold_metrics
         existing.task = task
+        # Only fill what is missing: a later registration of the same version must not blank a lineage
+        # that an earlier, better-informed caller already recorded.
+        existing.arch = existing.arch or arch
+        existing.parent_version = existing.parent_version or parent_version
+        existing.teacher_version = existing.teacher_version or teacher_version
+        if origin != "trained":
+            existing.origin = origin
     await db.commit()
-    log.info("registry.registered", model_version=model_version, task=task)
-    return {"model_version": model_version, "task": task, "is_champion": False}
+    log.info("registry.registered", model_version=model_version, task=task, origin=origin)
+    return {"model_version": model_version, "task": task, "is_champion": False, "origin": origin}
 
 
 async def get_champion(db: AsyncSession, task: str) -> ModelRegistry | None:
@@ -50,7 +84,9 @@ async def register_from_run(db: AsyncSession, run_id: str, task: str | None = No
     if run is None:
         return {"error": "model run not found"}
     return await register(db, run_id, task or run.task_type, run.metrics or {},
-                          dataset_commit=run.dataset_name, weights_uri=run.weights_uri, notes=run.notes)
+                          dataset_commit=run.dataset_name, weights_uri=run.weights_uri, notes=run.notes,
+                          arch=_arch_of(run.base_weights), parent_version=run.base_weights,
+                          origin="trained")
 
 
 async def list_models(db: AsyncSession, task: str | None = None) -> list[dict]:

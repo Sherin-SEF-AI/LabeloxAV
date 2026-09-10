@@ -773,6 +773,10 @@ class InferenceRun(Base):
     frame_count: Mapped[int] = mapped_column(Integer, default=0)
     params: Mapped[dict] = mapped_column(JSONB, default=dict)   # imgsz, conf_floor, nms_iou, device, pack_id, ontology_version
     code_sha: Mapped[str | None] = mapped_column(String(40))    # git sha of the tree that produced the run
+    # The ontology class ids this model's own class order maps onto (0111): what it was able to say at
+    # all. Null means the run predates the column and declared no vocabulary, which is not the same as a
+    # model that emits nothing; a comparison faced with null compares every class, as it did before.
+    class_vocab: Mapped[list | None] = mapped_column(JSONB)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")  # running | complete | failed
@@ -1876,9 +1880,81 @@ class ModelRegistry(Base):
     dataset_commit: Mapped[str | None] = mapped_column(String(128))
     weights_uri: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
+    # Lineage (0110). `parent_version` is the checkpoint this one continued from, `teacher_version` the
+    # model whose soft targets a distilled student was fit against; both are plain names rather than
+    # foreign keys, because either can be a checkpoint this system never registered (a COCO release, a
+    # pod-side pretraining stage). `origin` is how the weights came to exist.
+    arch: Mapped[str | None] = mapped_column(String(64))
+    parent_version: Mapped[str | None] = mapped_column(String(128))
+    teacher_version: Mapped[str | None] = mapped_column(String(128))
+    origin: Mapped[str] = mapped_column(String(16), nullable=False, default="trained",
+                                        server_default="trained")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_model_registry_champion", "task", "is_champion"),)
+    __table_args__ = (Index("ix_model_registry_champion", "task", "is_champion"),
+                      Index("ix_model_registry_parent", "parent_version"),
+                      Index("ix_model_registry_teacher", "teacher_version"))
+
+
+class ShadowDisagreement(Base):
+    """One place two models read the same pixels differently, and what a person said about it (0109).
+
+    Gold is frozen by design, so it says nothing about the sessions ingested since it was sealed. A shadow
+    sweep scores the champion and a challenger over the same new frames and files a row here for every
+    place they part company. The rows are a worklist ranked by `score` and a measurement at once: once
+    people have adjudicated enough of them, the share the challenger won on the disagreements is evidence
+    about the challenger that frozen gold cannot produce.
+
+    `verdict` is null until somebody rules, and the null is load-bearing: an unadjudicated disagreement is
+    not a tie and not a loss, and counting it as either is how an unmeasured quantity becomes a zero.
+    """
+
+    __tablename__ = "shadow_disagreement"
+
+    disagreement_id: Mapped[uuid.UUID] = _uuid_pk()
+    sweep_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("agent_run.run_id", ondelete="CASCADE"), nullable=False)
+    frame_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("frame.frame_id", ondelete="CASCADE"), nullable=False)
+    champion_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("inference_run.run_id", ondelete="CASCADE"), nullable=False)
+    challenger_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("inference_run.run_id", ondelete="CASCADE"), nullable=False)
+    champion_prediction_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("prediction.prediction_id", ondelete="CASCADE"))
+    challenger_prediction_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("prediction.prediction_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    champion_class_id: Mapped[int | None] = mapped_column(ForeignKey("ontology_class.id"))
+    challenger_class_id: Mapped[int | None] = mapped_column(ForeignKey("ontology_class.id"))
+    iou: Mapped[float | None] = mapped_column(Float)
+    conf_gap: Mapped[float | None] = mapped_column(Float)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    bbox: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending",
+                                       server_default="pending")
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("label_task.task_id", ondelete="SET NULL"))
+    verdict: Mapped[str | None] = mapped_column(String(24))
+    verdict_object_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("object.object_id", ondelete="SET NULL"))
+    adjudicated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("kind in ('champion_miss','challenger_miss','class_flip','conf_gap')",
+                        name="ck_shadow_disagreement_kind"),
+        CheckConstraint("state in ('pending','queued','adjudicated','dismissed')",
+                        name="ck_shadow_disagreement_state"),
+        CheckConstraint("verdict is null or verdict in "
+                        "('champion_right','challenger_right','both_right','both_wrong')",
+                        name="ck_shadow_disagreement_verdict"),
+        CheckConstraint("champion_prediction_id is not null or challenger_prediction_id is not null",
+                        name="ck_shadow_disagreement_has_a_side"),
+        Index("ix_shadow_disagreement_sweep", "sweep_run_id", "state"),
+        Index("ix_shadow_disagreement_challenger", "challenger_run_id", "verdict"),
+        Index("ix_shadow_disagreement_frame", "frame_id"),
+    )
 
 
 class ControlSample(Base):

@@ -1354,6 +1354,20 @@ export type SettlementWorkItem = {
   remaining_verdicts: number; minutes: number; value: number; oc: number | null;
   review_at: string | null;
 };
+export type ShadowWinShare = {
+  challenger_run_id: string; n_adjudicated: number; champion_right: number; challenger_right: number;
+  both_right: number; both_wrong: number; discordant: number;
+  // measured is false until people have ruled on a disagreement in one direction or the other. The
+  // share is then absent rather than zero, because nobody having looked is not the same as a loss.
+  measured: boolean; reason?: string; share?: number; lo?: number; hi?: number;
+};
+export type ShadowSummary = {
+  sweeps: { run_id: string; status: string; created_at: string | null;
+            report: Record<string, unknown> }[];
+  disagreements_by_state: Record<string, number>;
+  disagreements_by_kind: Record<string, number>;
+  win_shares: ShadowWinShare[];
+};
 export type AutonomyState = {
   switches: {
     loop_enabled: boolean; auto_accept_enabled: boolean; auto_promote_enabled: boolean;
@@ -1374,6 +1388,7 @@ export type AutonomyState = {
   settlement: { lots_by_status: Record<string, number>; settled_objects: number;
                 settlement_runs: Record<string, number>; revert_rate: number | null;
                 worklist: SettlementWorkItem[]; verdict_minutes_open: number };
+  shadow: ShadowSummary;
   last_digest: { run_id: string; status: string; created_at: string | null;
                  report: Record<string, unknown> } | null;
   journal: { kind: string; status: string; created_at: string | null; run_id: string }[];

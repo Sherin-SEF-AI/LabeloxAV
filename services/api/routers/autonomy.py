@@ -138,6 +138,18 @@ async def _settlement_summary(db: AsyncSession) -> dict:
             "verdict_minutes_open": round(sum(w["minutes"] for w in worklist), 1)}
 
 
+async def _shadow_summary(db: AsyncSession) -> dict:
+    """What shadow mode has found and what it is still waiting on a person for.
+
+    Kept beside the other measurement panels because it answers the same question they do: what does the
+    machine actually know about the model it is about to promote, and how much of that is measured rather
+    than assumed.
+    """
+    from services.govern.shadow_agent import sweep_summary
+
+    return await sweep_summary(db)
+
+
 @router.get("/autonomy/state", dependencies=[Depends(require_role("annotator"))])
 async def autonomy_state(db: AsyncSession = Depends(db_session)):
     from db.models import AgentRun
@@ -159,6 +171,7 @@ async def autonomy_state(db: AsyncSession = Depends(db_session)):
         "ladder": await ladder_snapshot(db),
         "measurements": await _measurement_staleness(db),
         "settlement": await _settlement_summary(db),
+        "shadow": await _shadow_summary(db),
         "last_digest": await latest_run(db, "nightly_digest"),
         "journal": [{"kind": k, "status": s2, "created_at": c.isoformat() if c else None,
                      "run_id": str(r)} for k, s2, c, r in journal],

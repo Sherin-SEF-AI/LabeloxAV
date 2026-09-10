@@ -180,6 +180,19 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
         except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
             log.error("schedule.measurement_failed", error=str(exc))
 
+    # shadow mode: score the champion and its recent challengers on frames nobody has compared them on,
+    # and file every disagreement as a worklist. Scores nothing on gold and promotes nothing; the frames
+    # it picks are the ones the frozen yardstick can say nothing about.
+    if offhours:
+        try:
+            from services.govern.shadow_agent import maybe_shadow_sweep
+
+            sw = await maybe_shadow_sweep(db)
+            if sw.get("ran"):
+                actions.append({"action": "shadow_sweep", "run_id": sw.get("run_id")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.shadow_sweep_failed", error=str(exc))
+
     # settlement lifecycle, the nightly half: plan one lot for the best-ranked eligible class, and run
     # the reverse acceptance decision over every settled lot's spot verdicts (the one automatic revert).
     if offhours:

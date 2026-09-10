@@ -76,7 +76,41 @@ def _seed(conn) -> dict:
         insert into object (object_id, frame_id, class_id, bbox, conf, source, state, provenance, attrs)
         values (:oid, :fid, :cid, '{0,0,5,5}', 1.0, 'synthetic', 'synthetic', '{}'::jsonb, '{}'::jsonb)"""),
         {"oid": uuid.uuid4(), "fid": synth_fid, "cid": cid})
-    return {"lot_id": lot_id, "real_sid": real_sid, "synth_sid": synth_sid}
+    # 0109/0110: a disagreement needs a sweep run, two inference runs and a registered model to hang on,
+    # and 0110's lineage columns need a row carrying non-default values or the downgrade would be
+    # dropping columns nothing ever wrote to.
+    sweep_id = uuid.uuid4()
+    conn.execute(sa.text("""
+        insert into agent_run (run_id, kind, scope, status, policy, counts, changes, critic, created_by)
+        values (:r, 'shadow_sweep', '{}'::jsonb, 'committed', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
+                '{}'::jsonb, 'roundtrip')"""), {"r": sweep_id})
+    mv = f"roundtrip-model-{sweep_id.hex[:8]}"
+    conn.execute(sa.text("""
+        insert into model_registry (model_version, task, gold_metrics, is_champion, arch, parent_version,
+                                    teacher_version, origin)
+        values (:mv, 'detection', '{}'::jsonb, false, 'yolo11n', 'yolo11n.pt', :mv2, 'distilled')"""),
+        {"mv": mv, "mv2": f"{mv}-teacher"})
+    run_ids = []
+    for _ in range(2):
+        rid = uuid.uuid4()
+        conn.execute(sa.text("""
+            insert into inference_run (run_id, model_version, params, code_sha, status, frame_count)
+            values (:r, :mv, '{}'::jsonb, 'roundtrip', 'complete', 1)"""), {"r": rid, "mv": mv})
+        run_ids.append(rid)
+    dis_id = uuid.uuid4()
+    pred_id = uuid.uuid4()
+    conn.execute(sa.text("""
+        insert into prediction (prediction_id, run_id, frame_id, class_id, bbox, conf)
+        values (:p, :r, :f, :cid, '{0,0,5,5}', 0.9)"""),
+        {"p": pred_id, "r": run_ids[0], "f": real_fid, "cid": cid})
+    conn.execute(sa.text("""
+        insert into shadow_disagreement (disagreement_id, sweep_run_id, frame_id, champion_run_id,
+            challenger_run_id, champion_prediction_id, kind, champion_class_id, score, bbox, state)
+        values (:d, :s, :f, :cr, :xr, :p, 'challenger_miss', :cid, 0.9, '{0,0,5,5}', 'pending')"""),
+        {"d": dis_id, "s": sweep_id, "f": real_fid, "cr": run_ids[0], "xr": run_ids[1],
+         "p": pred_id, "cid": cid})
+    return {"lot_id": lot_id, "real_sid": real_sid, "synth_sid": synth_sid,
+            "sweep_id": sweep_id, "model_version": mv, "disagreement_id": dis_id}
 
 
 def _assert_downgraded(conn, seeded: dict) -> None:
@@ -93,6 +127,15 @@ def _assert_downgraded(conn, seeded: dict) -> None:
     assert conn.execute(sa.text("select count(*) from session where session_id = :s"),
                         {"s": seeded["real_sid"]}).scalar() == 1, "0108 downgrade must keep the real session"
     assert conn.execute(sa.text("select count(*) from object where state = 'synthetic'")).scalar() == 0
+    assert conn.execute(sa.text(
+        "select to_regclass('public.shadow_disagreement')")).scalar() is None, \
+        "0109 downgrade left the shadow_disagreement table"
+    mcols = _columns(conn, "model_registry")
+    for c in ("arch", "parent_version", "teacher_version", "origin"):
+        assert c not in mcols, f"0110 downgrade left model_registry.{c}"
+    assert conn.execute(sa.text("select count(*) from model_registry where model_version = :m"),
+                        {"m": seeded["model_version"]}).scalar() == 1, \
+        "0110 drops columns, never the model rows that carried them"
 
 
 def _assert_reupgraded(conn, seeded: dict) -> None:
@@ -104,6 +147,11 @@ def _assert_reupgraded(conn, seeded: dict) -> None:
     assert row.sprt == {} and row.increments == []
     assert conn.execute(sa.text("select origin from session where session_id = :s"),
                         {"s": seeded["real_sid"]}).scalar() == "real"
+    # The disagreements are gone with the table and the lineage is back to its default: a downgrade that
+    # dropped them cannot invent them again, and claiming otherwise would be the lie this test exists for.
+    assert conn.execute(sa.text("select count(*) from shadow_disagreement")).scalar() == 0
+    assert conn.execute(sa.text("select origin from model_registry where model_version = :m"),
+                        {"m": seeded["model_version"]}).scalar() == "trained"
 
 
 def test_every_migration_above_the_floor_round_trips_with_rows_present():

@@ -38,21 +38,27 @@ log = get_logger("inference_run")
 _BATCH = 16
 
 
-def _load_weights_and_names(weights_uri: str, local_path: str) -> tuple[str, list[str]]:
-    """Download the weights once and read the model's class order. Blocking (network + torch): worker thread.
-    Same download pattern as services/govern/gold_eval.py::_load_weights_and_names."""
+def _load_model(weights_uri: str, local_path: str):
+    """Download the weights once, build the model once, and read its class order from it.
+
+    Returns the live model rather than a path. `_infer` used to construct a `YOLO` per 16-frame batch,
+    which re-read the checkpoint from disk and re-initialised the graph thousands of times over a sweep;
+    a shadow sweep over 2,000 frames would have paid that 125 times per model. The model is built on the
+    caller's worker thread and used only from worker threads after that.
+    """
     from ultralytics import YOLO
 
     from core.storage import get_object_store
 
     if not Path(local_path).exists():
         Path(local_path).write_bytes(get_object_store().get_bytes(weights_uri))
-    names = YOLO(local_path).names
+    model = YOLO(local_path)
+    names = model.names
     names_list = [names[i] for i in range(len(names))] if isinstance(names, dict) else list(names)
-    return local_path, names_list
+    return model, names_list
 
 
-def _infer(local_weights: str, images: list[np.ndarray], imgsz: int, conf_floor: float, device) -> list[list]:
+def _infer(model, images: list[np.ndarray], imgsz: int, conf_floor: float, device) -> list[list]:
     """Predict on a batch of decoded BGR frames. Blocking GPU work (worker thread). Returns, per frame, a
     list of (model_class_idx, conf, [x1,y1,x2,y2], top_k) at the low conf floor.
 
@@ -64,9 +70,6 @@ def _infer(local_weights: str, images: list[np.ndarray], imgsz: int, conf_floor:
     reconstructed from what it does expose. Where it cannot be, `top_k` is empty rather than a fabricated
     one-hot: a distribution invented from the argmax would look like evidence and carry none.
     """
-    from ultralytics import YOLO
-
-    model = YOLO(local_weights)
     res = model.predict(images, imgsz=imgsz, conf=conf_floor, device=device, verbose=False)
     out: list[list] = []
     for r in res:
@@ -88,19 +91,31 @@ def _infer(local_weights: str, images: list[np.ndarray], imgsz: int, conf_floor:
     return out
 
 
-def _run_params(imgsz: int, conf_floor: float, device) -> dict:
+def _run_params(imgsz: int, conf_floor: float, device, scope: dict | None = None) -> dict:
     from packs.registry import default_pack_id
     from services.autolabel.ontology import get_ontology
 
-    return {"imgsz": int(imgsz), "conf_floor": float(conf_floor), "device": str(device),
-            "pack_id": default_pack_id(), "ontology_version": get_ontology().version}
+    params = {"imgsz": int(imgsz), "conf_floor": float(conf_floor), "device": str(device),
+              "pack_id": default_pack_id(), "ontology_version": get_ontology().version}
+    if scope:
+        params["scope"] = scope
+    return params
 
 
 async def run_inference(db: AsyncSession, *, model_version: str, frame_ids: list[UUID],
                         gold_id: str | None = None, imgsz: int | None = None,
-                        conf_floor: float = 0.001, force: bool = False) -> str | None:
+                        conf_floor: float = 0.001, force: bool = False,
+                        scope: dict | None = None) -> str | None:
     """Score `frame_ids` with `model_version`, writing one InferenceRun and its Prediction rows. Returns the
-    run_id, or None when the model has no downloadable weights (nothing to score)."""
+    run_id, or None when the model has no downloadable weights (nothing to score).
+
+    `scope` names what this run covers when the frames are not a sealed gold set, and it is folded into
+    the idempotency key. Without it, a nightly sweep over new frames matches yesterday's key exactly, and
+    every night after the first would reuse yesterday's run and score nothing: same model_version, same
+    `gold_id=None`, same code_sha, same params. `force=True` is not the answer there, because it would
+    also duplicate the rows when a crashed sweep is retried within one scope. A scope that names the
+    sweep makes a new night a new run and a retry of the same night a reuse.
+    """
     reg = await db.get(ModelRegistry, model_version)
     if reg is None or not reg.weights_uri:
         log.warning("inference.no_weights", model_version=model_version)
@@ -110,7 +125,7 @@ async def run_inference(db: AsyncSession, *, model_version: str, frame_ids: list
     imgsz = int(imgsz or getattr(settings.training, "eval_imgsz", 960))
     device = settings.gpu.device
     sha = code_sha()
-    params = _run_params(imgsz, conf_floor, device)
+    params = _run_params(imgsz, conf_floor, device, scope)
 
     # Idempotent by (model_version, gold_id, code_sha, params): reuse a complete run with the identical key.
     if not force:
@@ -133,10 +148,16 @@ async def run_inference(db: AsyncSession, *, model_version: str, frame_ids: list
         scratch = settings.scratch_path() / "inference"
         scratch.mkdir(parents=True, exist_ok=True)
         local = str(scratch / f"{model_version}.pt")
-        local, names_list = await loop.run_in_executor(None, _load_weights_and_names, reg.weights_uri, local)
+        model, names_list = await loop.run_in_executor(None, _load_model, reg.weights_uri, local)
 
         from services.training.gold import align_model_to_ontology
         idx_to_onto = align_model_to_ontology(names_list)
+        # What this model was able to say at all. Recorded on the run because it is a property of the
+        # checkpoint, knowable only here with the weights loaded, and a comparison that does not know it
+        # reads every class the other model lacks as a miss.
+        run = await db.get(InferenceRun, run_id)
+        run.class_vocab = sorted({int(i) for i in idx_to_onto if i is not None})
+        await db.commit()
 
         from core.storage import get_object_store
         store = get_object_store()
@@ -157,7 +178,7 @@ async def run_inference(db: AsyncSession, *, model_version: str, frame_ids: list
                 fids.append(fr.frame_id)
             if not images:
                 continue
-            dets_per_frame = await loop.run_in_executor(None, _infer, local, images, imgsz, conf_floor, device)
+            dets_per_frame = await loop.run_in_executor(None, _infer, model, images, imgsz, conf_floor, device)
             for fid, dets in zip(fids, dets_per_frame, strict=False):
                 for cls_idx, conf, box, top_k in dets:
                     onto_id = idx_to_onto[cls_idx] if cls_idx < len(idx_to_onto) else None
