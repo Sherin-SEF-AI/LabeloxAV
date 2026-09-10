@@ -468,6 +468,16 @@ class LabeloxClient:
         return self._call("GET", f"/api/analytics/growth",
                           params=None, json_body=None)
 
+    def get_analytics_label_value(self, run_id: Any | None = None) -> Any:
+        """Label Value"""
+        return self._call("GET", f"/api/analytics/label-value",
+                          params={"run_id": run_id}, json_body=None)
+
+    def post_analytics_label_value_snapshot(self, run_id: Any | None = None) -> Any:
+        """Label Value Snapshot"""
+        return self._call("POST", f"/api/analytics/label-value/snapshot",
+                          params={"run_id": run_id}, json_body=None)
+
     def get_analytics_overview(self, session_id: Any | None = None) -> Any:
         """Overview"""
         return self._call("GET", f"/api/analytics/overview",
@@ -3751,4 +3761,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 733 routes generated from the server schema.
+# 735 routes generated from the server schema.

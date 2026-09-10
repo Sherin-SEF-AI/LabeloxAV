@@ -49,6 +49,12 @@ class OntologyVersion(Base):
     version: Mapped[str] = mapped_column(String(64), primary_key=True)
     hierarchy_levels: Mapped[int] = mapped_column(Integer, nullable=False)
     attributes: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # The version this one descended from (0114), making the versions a chain rather than a set, so
+    # "the latest descended from the one this gold set was sealed under" becomes a query rather than
+    # something a person has to remember. Null on the first version, and on any that predates the column.
+    parent_version: Mapped[str | None] = mapped_column(String(64))
+    changelog: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict,
+                                             server_default=sql_text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     classes: Mapped[list[OntologyClass]] = relationship(back_populates="ontology", cascade="all, delete-orphan")
@@ -68,6 +74,79 @@ class OntologyClass(Base):
     ontology: Mapped[OntologyVersion] = relationship(back_populates="classes")
 
     __table_args__ = (Index("ix_ontology_class_name", "name"),)
+
+
+class ClassMigration(Base):
+    """What became what between two ontology versions, and the rule that decided it (0114).
+
+    A version bump leaves new rows and no record of the relationship between old and new, so a model
+    trained under one version and a gold set sealed under another can only be compared by somebody who
+    remembers the history. This is that record.
+
+    The rule matters for exactly one kind. A rename, a merge and a retire can all be read off the rows
+    afterwards; a split cannot, because which side an object went to was decided by a predicate that
+    leaves no trace in the result. So the predicate is stored, and a split is replayable.
+    """
+
+    __tablename__ = "class_migration"
+
+    migration_id: Mapped[uuid.UUID] = _uuid_pk()
+    from_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    to_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    from_id: Mapped[int | None] = mapped_column(Integer)
+    to_id: Mapped[int | None] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    rule: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict,
+                                        server_default=sql_text("'{}'::jsonb"))
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_run.run_id", ondelete="SET NULL"))
+    created_by: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("kind in ('split','merge','rename','retire')", name="ck_class_migration_kind"),
+        CheckConstraint("from_id is not null or to_id is not null", name="ck_class_migration_has_an_end"),
+        CheckConstraint("from_version <> to_version", name="ck_class_migration_across_versions"),
+        Index("ix_class_migration_from", "from_version", "from_id"),
+        Index("ix_class_migration_to", "to_version", "to_id"),
+    )
+
+
+class LabelValueSnapshot(Base):
+    """What one class's next label was worth, and what it cost, at one moment (0115).
+
+    A snapshot rather than a view, because every input moves: the gate's deficit changes with each
+    retrain and the measured minutes change with each review. A decision made last Tuesday has to be
+    explainable against what was true last Tuesday.
+
+    `measured` is the field that keeps this honest. A class with too few timed reviews to estimate
+    minutes from gets a row saying so rather than a row carrying an assumed median, so "this class is
+    cheap" and "nobody has timed this class" cannot be confused.
+    """
+
+    __tablename__ = "label_value_snapshot"
+
+    snapshot_id: Mapped[uuid.UUID] = _uuid_pk()
+    class_id: Mapped[int] = mapped_column(ForeignKey("ontology_class.id"), nullable=False)
+    ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    model_run_id: Mapped[str | None] = mapped_column(String(128))
+    deficit: Mapped[float | None] = mapped_column(Float)
+    minutes_per_label: Mapped[float | None] = mapped_column(Float)
+    inr_per_label: Mapped[float | None] = mapped_column(Float)
+    expected_recall_gain: Mapped[float | None] = mapped_column(Float)
+    value_per_inr: Mapped[float | None] = mapped_column(Float)
+    measured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                            server_default=sql_text("false"))
+    reason: Mapped[str | None] = mapped_column(Text)
+    n_timed_reviews: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("minutes_per_label is null or minutes_per_label >= 0",
+                        name="ck_label_value_minutes_nonneg"),
+        CheckConstraint("inr_per_label is null or inr_per_label >= 0", name="ck_label_value_inr_nonneg"),
+        CheckConstraint("measured or reason is not null", name="ck_label_value_unmeasured_has_reason"),
+        Index("ix_label_value_class_ts", "class_id", "ts_ns"),
+    )
 
 
 class Session(Base):
@@ -593,6 +672,11 @@ class Workforce(Base):
     capacity_jobs_per_day: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # The acceptance bar is a commercial term negotiated per vendor, not a global constant.
     min_honeypot_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.9)
+    # What this workforce charges (0115). A verdict and a box are different work at different prices, so
+    # they are separate columns. Nullable, and null means nobody entered a rate: a default rate would put
+    # a fabricated number into every value calculation with no way to tell it from a real one.
+    rate_inr_per_verdict: Mapped[float | None] = mapped_column(Float)
+    rate_inr_per_box: Mapped[float | None] = mapped_column(Float)
     contact: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

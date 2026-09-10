@@ -26,7 +26,7 @@ import json
 import uuid
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
@@ -165,3 +165,116 @@ def rename_in_sidecar(class_id: int, new_name: str) -> dict:
     get_ontology.cache_clear()
     log.info("ontology.renamed", class_id=class_id, frm=old, to=norm)
     return {"class_id": class_id, "from": old, "to": norm}
+
+
+SPLIT_KIND = "ontology_split"
+# Objects moved per commit. A split touching a common class is tens of thousands of rows and must not be
+# one transaction, for the same reason nothing else here is.
+SPLIT_BATCH = 500
+# The only states a split may move. `accepted` means a person ruled on that object's class, and a machine
+# reassigning it would overwrite a human judgement; those are listed for a person instead.
+SPLITTABLE_STATES = ("review", "auto_accept")
+
+
+class SplitError(Exception):
+    """Raised rather than returned, because a caller that ignores this reclassifies the corpus."""
+
+
+def _matches(obj, rule: dict) -> bool:
+    """Whether an object falls on this side of a split, by the rule's attribute predicate.
+
+    Attributes only. A split rule may also carry a VLM prompt for the objects attributes cannot decide,
+    and that half deliberately does not run here: asking a model to reclassify tens of thousands of crops
+    is a labelling job with its own budget and gate, not something a schema change should do on the way
+    past. Objects no rule claims stay where they are and the run counts them.
+    """
+    attrs = obj.attrs or {}
+    for key, want in (rule.get("attrs") or {}).items():
+        got = attrs.get(key)
+        if isinstance(want, list):
+            if got not in want:
+                return False
+        elif got != want:
+            return False
+    if (rule.get("min_conf") is not None) and float(obj.conf or 0.0) < float(rule["min_conf"]):
+        return False
+    return True
+
+
+async def split_class(db: AsyncSession, *, from_id: int, into: list[dict],
+                      to_version: str | None = None, created_by: str | None = None) -> dict:
+    """Split one class into several by rule, batch by batch, as one revertible run.
+
+    `into` is a list of `{"to_id": int, "rule": {...}}` in priority order: the first rule an object
+    matches wins, so overlapping rules are resolved by the order a person wrote them rather than by
+    whichever query returned first.
+
+    Only `review` and `auto_accept` objects move. An `accepted` object is one a person ruled on, and a
+    split reassigning it would overwrite a human judgement with a predicate; the run reports how many it
+    left alone so the remainder is visible work rather than a silent omission.
+    """
+    from db.models import ClassMigration
+
+    src = await db.get(OntologyClass, from_id)
+    if src is None:
+        raise SplitError(f"class {from_id} does not exist")
+    if not into:
+        raise SplitError("a split needs at least one target class and rule")
+    targets = {}
+    for spec in into:
+        tid = int(spec["to_id"])
+        dst = await db.get(OntologyClass, tid)
+        if dst is None:
+            raise SplitError(f"class {tid} does not exist, so objects would have nowhere to go")
+        if tid == from_id:
+            raise SplitError("a class cannot be split into itself")
+        targets[tid] = dst
+
+    rows = (await db.execute(
+        select(Object).where(Object.class_id == from_id,
+                             Object.state.in_(SPLITTABLE_STATES)))).scalars().all()
+    protected = (await db.execute(
+        select(func.count()).select_from(Object)
+        .where(Object.class_id == from_id,
+               Object.state.notin_(SPLITTABLE_STATES)))).scalar_one()
+
+    run_id = uuid.uuid4()
+    changes: dict[str, dict] = {}
+    moved: dict[int, int] = dict.fromkeys(targets, 0)
+    unclaimed = 0
+    for i, obj in enumerate(rows):
+        chosen = next((int(s["to_id"]) for s in into if _matches(obj, s.get("rule") or {})), None)
+        if chosen is None:
+            unclaimed += 1
+            continue
+        changes[str(obj.object_id)] = {"from_class": from_id}
+        obj.class_id = chosen
+        moved[chosen] += 1
+        if (i + 1) % SPLIT_BATCH == 0:
+            await db.commit()
+
+    db.add(AgentRun(
+        run_id=run_id, kind=SPLIT_KIND, status="committed",
+        scope={"from_id": from_id, "from_name": src.name,
+               "into": [{"to_id": t, "to_name": targets[t].name} for t in targets]},
+        policy={"into": into, "states": list(SPLITTABLE_STATES)},
+        counts={"moved": sum(moved.values()), "per_target": {str(k): v for k, v in moved.items()},
+                "unclaimed": unclaimed, "left_human_ruled": int(protected)},
+        changes={"objects": changes}, critic={}, created_by=created_by))
+
+    # The rule is recorded because it is the only part of a split that cannot be read off the rows
+    # afterwards: which side an object went to leaves no trace of why.
+    for spec in into:
+        db.add(ClassMigration(
+            from_version=src.version, to_version=(to_version or src.version) + "+split",
+            from_id=from_id, to_id=int(spec["to_id"]), kind="split",
+            rule=spec.get("rule") or {}, run_id=run_id, created_by=created_by))
+    await db.commit()
+
+    log.info("ontology.split", run_id=str(run_id), frm=src.name, moved=sum(moved.values()),
+             unclaimed=unclaimed, left_human_ruled=int(protected))
+    return {"run_id": str(run_id), "from": src.name, "moved": sum(moved.values()),
+            "per_target": {targets[k].name: v for k, v in moved.items()},
+            "unclaimed": unclaimed, "left_human_ruled": int(protected),
+            "note": ("objects a person accepted were not moved: a split reassigning them would overwrite "
+                     "a human ruling with a predicate")}

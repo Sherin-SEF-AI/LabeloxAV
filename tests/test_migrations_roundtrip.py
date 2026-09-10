@@ -126,6 +126,15 @@ def _seed(conn) -> dict:
                                     grid_uri, source, ego_pose_ts, occupied, flow_voxels)
         values (:g, :s, 0, :f, '{0,0,0}', 0.5, '{10,10,10}', 's3://x/grid.npz', 'pseudo', 0, 120, 30)"""),
         {"g": grid_id, "s": real_sid, "f": real_fid})
+    # 0114/0115: a class migration between two versions, and a label-value snapshot whose unmeasured
+    # row must carry a reason (the CHECK the migration adds).
+    conn.execute(sa.text("""
+        insert into class_migration (from_version, to_version, from_id, to_id, kind, rule, created_by)
+        values (:fv, :tv, :cid, :cid2, 'split', '{"attrs": {"colour": "red"}}'::jsonb, 'roundtrip')"""),
+        {"fv": get_ontology().version, "tv": get_ontology().version + "+rt", "cid": cid, "cid2": cid})
+    conn.execute(sa.text("""
+        insert into label_value_snapshot (class_id, ts_ns, deficit, measured, reason, n_timed_reviews)
+        values (:cid, 0, 0.12, false, 'no timed reviews of this class', 0)"""), {"cid": cid})
     return {"lot_id": lot_id, "real_sid": real_sid, "synth_sid": synth_sid,
             "sweep_id": sweep_id, "model_version": mv, "disagreement_id": dis_id,
             "vocab_run_id": run_ids[0], "grid_id": grid_id}
@@ -163,6 +172,14 @@ def _assert_downgraded(conn, seeded: dict) -> None:
         "0112 downgrade left the ego_pose table"
     assert conn.execute(sa.text("select to_regclass('public.occupancy_grid')")).scalar() is None, \
         "0113 downgrade left the occupancy_grid table"
+    assert conn.execute(sa.text("select to_regclass('public.class_migration')")).scalar() is None, \
+        "0114 downgrade left the class_migration table"
+    assert "parent_version" not in _columns(conn, "ontology_version"), \
+        "0114 downgrade left ontology_version.parent_version"
+    assert conn.execute(sa.text("select to_regclass('public.label_value_snapshot')")).scalar() is None, \
+        "0115 downgrade left the label_value_snapshot table"
+    assert "rate_inr_per_verdict" not in _columns(conn, "workforce"), \
+        "0115 downgrade left workforce.rate_inr_per_verdict"
 
 
 def _assert_reupgraded(conn, seeded: dict) -> None:
@@ -185,6 +202,8 @@ def _assert_reupgraded(conn, seeded: dict) -> None:
                         {"r": seeded["vocab_run_id"]}).scalar() is None
     assert conn.execute(sa.text("select count(*) from ego_pose")).scalar() == 0
     assert conn.execute(sa.text("select count(*) from occupancy_grid")).scalar() == 0
+    assert conn.execute(sa.text("select count(*) from class_migration")).scalar() == 0
+    assert conn.execute(sa.text("select count(*) from label_value_snapshot")).scalar() == 0
 
 
 def test_every_migration_above_the_floor_round_trips_with_rows_present():

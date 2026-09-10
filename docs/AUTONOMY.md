@@ -943,3 +943,96 @@ same way when it was added.
 The full suite runs 3,376 passed, 6 skipped against `labeloxav_test`, on a 10 minute 30 second run that
 would have failed on the reaper fixture before it was fixed. The web suite runs 699 passed with
 `tsc --noEmit` clean.
+
+---
+
+## WP8. Ontology evolution, IRC:67 signs, what a label costs, and curriculum order
+
+### Versioning, and the primary key that was deliberately left alone
+
+An ontology changes: a class turns out to be two things, two turn out to be one, a name was wrong. The
+only trace of any of that was a new `ontology_version` row and whatever somebody remembered, so a model
+trained under one version and a gold set sealed under another could only be compared by a person who knew
+the history.
+
+Migration `0114` makes the versions a chain (`parent_version`, `changelog`) and adds `class_migration`:
+which class became which, under which kind, and for a split the rule that decided membership. The rule is
+stored for exactly one kind because it is the only one that cannot be read off the rows afterwards. A
+rename, a merge and a retire are all visible in the result; which side of a split an object went to leaves
+no trace of why.
+
+**The plan called for `ontology_class`'s primary key to become `(version, id)`, and that is not what
+shipped.** A composite key lets one id mean different things in two versions, and it also forces a version
+column onto all eight tables that reference a class, including `object`, whose 578,436 rows carry a
+`class_id` every existing query reads without one. A `class_id` only meaningful alongside a version is a
+schema where every one of those queries is silently wrong. The id stays globally unique instead, which it
+already is in practice, and a `UNIQUE(version, id)` makes that a rule rather than a convention.
+
+`split_class` applies a split batch by batch as one revertible run, and moves only `review` and
+`auto_accept` objects. An `accepted` object is one a person ruled on, and a predicate reassigning it would
+overwrite a human judgement; the run reports how many it left alone, so the remainder is visible work
+rather than a silent omission. The rule's attribute predicate runs; its VLM half deliberately does not,
+because asking a model to reclassify tens of thousands of crops is a labelling job with its own budget and
+gate, not something a schema change does on the way past.
+
+### IRC:67
+
+The 22 sign types now carry the code and group of the standard the signs are actually erected under. That
+is what a road authority calls a sign, so a class here can be talked about outside this system, and it
+gives hierarchical evaluation a real middle level: a stop sign read as a give way is a mandatory sign read
+as a mandatory sign, which is a smaller error than reading it as a hospital. An unrecognised type gets no
+group rather than a default one, because folding it into informatory would make the group-level metric
+look better than it is.
+
+### What a label costs
+
+The engine could already say which classes the gate is short on. It could not say what closing that costs,
+so every allocation was made on counts: a class needing 500 verdicts looked twice as expensive as one
+needing 250, whatever either was worth or however long its crops took to judge.
+
+`marginal_value` combines three measured quantities and refuses when any is missing. The deficit comes
+from the gate. The minutes come from the median of plausibly timed reviews of that class, with a tab left
+open for an hour and a misclick both dropped before the median rather than after, because one of either
+sets the price of the class. The rupees come from a workforce's own entered rate, and there is no default
+rate, because a default would put a fabricated number into every calculation with no way to tell it from a
+real one.
+
+### Measured
+
+Against the training run the gate is blocked on:
+
+| class | recall deficit | timed reviews | priced |
+| --- | --- | --- | --- |
+| rider | 0.331 | 0 | no |
+| cattle | 0.288 | 0 | no |
+| pedestrian | 0.017 | 0 | no |
+
+**Not one class can be priced, and the reason is that the input was never collected.** Of 30,865 recorded
+reviews, 30,863 carry `time_spent_ms = 0` and 2 carry a plausible value. Five review surfaces send the
+elapsed time and the main frame editor, where nearly all reviewing happens, did not. It does now, timed
+from selection rather than page load, because the interesting quantity is the judgement and not how long
+the frame had been open. No workforce has a rate entered either, and that one is a person's to fill in.
+
+So the ranking is built, tested and correct, and it will produce its first real number after roughly
+twenty timed reviews of one class exist and one rate has been entered. Reporting an order over three
+classes from an assumed median would have been the easier thing and it would have been a budget spent on
+arithmetic.
+
+### Curriculum
+
+`services/training/curriculum.py` orders an epoch by what the model still has to learn: class weight from
+the gate's deficit, discounted by how much the machine already agrees with the human labels on that image.
+Easy first, then the full set, which is what the literature settles on and the opposite of what feels
+intuitive; starting on the hardest examples trains on the noisiest gradients.
+
+Two properties the tests pin. Weights are normalised so the largest is 2.0, because a raw recall deficit
+sits between 0 and 1 and would leave every weight near the floor, making the curriculum a no-op that still
+changed the run's provenance. And every image appears at least once: a curriculum that dropped images
+would silently change the dataset a metric was computed on, and two runs would be incomparable with
+nothing saying so. `BuildSpec.curriculum` is off by default and recorded on the datasheet, so a comparison
+between a run that had it and one that did not is visibly not a comparison.
+
+Tests: `tests/test_label_economics.py` (26), `tests/test_migrations_roundtrip.py` extended over 0114 and
+0115 with rows present, so the unmeasured-row-carries-a-reason CHECK is exercised rather than declared.
+The full suite runs 3,402 passed, 6 skipped against `labeloxav_test`; the web suite 699 passed with
+`tsc --noEmit` clean.

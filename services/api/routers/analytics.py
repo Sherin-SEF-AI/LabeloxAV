@@ -6,9 +6,10 @@ no db dependency is needed here. Mounted at /api by main.py.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from services.analytics import dashboards
+from services.api.deps import require_role
 
 router = APIRouter()
 
@@ -89,3 +90,29 @@ async def productivity():
     from services.analytics.productivity import productivity_report
 
     return await productivity_report()
+
+
+@router.get("/analytics/label-value", dependencies=[Depends(require_role("annotator"))])
+async def label_value(run_id: str | None = None):
+    """What the next label of each class the gate is short on is worth, per rupee.
+
+    Rows the inputs cannot price come back with the reason rather than a number, so a class nobody has
+    timed is visibly unpriced instead of ranking last on a fabricated median.
+    """
+    from db.session import get_sessionmaker
+    from services.analytics.label_value import marginal_value
+
+    # Its own session, like every other handler in this router: they delegate to modules that open one,
+    # which is why this file has never carried a db dependency.
+    async with get_sessionmaker()() as db:
+        return await marginal_value(db, run_id=run_id)
+
+
+@router.post("/analytics/label-value/snapshot", dependencies=[Depends(require_role("reviewer"))])
+async def label_value_snapshot(run_id: str | None = None):
+    """Record the ranking now, so a decision made today stays explainable against today's inputs."""
+    from db.session import get_sessionmaker
+    from services.analytics.label_value import snapshot
+
+    async with get_sessionmaker()() as db:
+        return await snapshot(db, run_id=run_id)

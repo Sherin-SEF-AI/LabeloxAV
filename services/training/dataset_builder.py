@@ -70,6 +70,10 @@ class BuildSpec:
     # validation, and a composite whose source frame's session lands in val is dropped with it, so the
     # val side never sees a background it also trained on.
     include_synthetic: bool = False
+    # Order the epoch's images by how much the model still has to learn from them, rather than shuffling.
+    # Off by default: it changes what a run means, so a comparison between two runs where one had it on
+    # and the other did not is not a comparison, and the flag is recorded on the run so that is visible.
+    curriculum: bool = False
 
 
 async def _select(spec: BuildSpec):
@@ -327,6 +331,7 @@ async def build_training_dataset(spec: BuildSpec) -> dict:
         # their background sat on the val side.
         "synthetic_frames": n_synth_frames, "synthetic_dropped_for_val": n_synth_dropped,
         "include_synthetic": spec.include_synthetic,
+        "curriculum": spec.curriculum,
     }
     log.info("trainset.built", **{k: result[k] for k in ("classes", "n_train_images", "n_val_images")})
     return result

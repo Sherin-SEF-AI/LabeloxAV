@@ -45,7 +45,10 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
     # A class merge moved objects wholesale, including human-labelled ones, so undoing it needs its own
     # path: the generic restore below deliberately refuses to touch anything a person owns, which is right
     # for an agent relabel and wrong for reversing an ontology decision.
-    if run.kind == "ontology_merge":
+    # A split reverses through the same path: it records the same `scope.from_id` and per-object
+    # `changes.objects` shape, and it moved only machine-state objects, so putting them back is the same
+    # operation with the same reason for bypassing the generic restore.
+    if run.kind in ("ontology_merge", "ontology_split"):
         from services.agent.ontology_merge import revert_merge
 
         return await revert_merge(db, run)

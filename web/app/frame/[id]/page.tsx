@@ -839,6 +839,11 @@ export default function FrameEditor() {
   // PREVIOUSLY selected object: `selected` is computed at render time and the dispatch has not landed yet,
   // so right-clicking an unselected box and choosing accept would silently accept a different one.
   const reviewObject = async (verdict: "accept" | "reject", target?: EdObject) => {
+    // How long this object was in front of the person. Five other review surfaces already send this and
+    // the main editor did not, which is why 30,863 of 30,865 recorded reviews carry a zero and nothing
+    // could price a class's labelling time. Measured from selection rather than from page load: the
+    // interesting quantity is the judgement, not how long the frame had been open.
+    const elapsed = selectedAtRef.current ? Math.max(0, Date.now() - selectedAtRef.current) : 0;
     const newState = verdict === "accept" ? acceptState(getUser()?.role) : "rejected";
     const o = target ?? selected;
     if (!o) { flash("select an object to review"); return; }
@@ -851,7 +856,8 @@ export default function FrameEditor() {
       // already blocked above, so there is nothing to clobber. Gating the human's decision on a version that
       // a background re-autolabel or embed pass may have bumped just produced spurious 409s. The optimistic
       // lock still guards the geometry-edit path (adjust_geometry), where a concurrent box edit does matter.
-      const r = await api.review(o.id, { action: verdict, state: newState });
+      const r = await api.review(o.id, { action: verdict, state: newState,
+                                         time_spent_ms: elapsed });
       dispatch({ t: "reviewed", id: o.id, state: newState, version: r.version });
       setReviewed((n) => n + 1);   // one settled object, for the throughput readout
       setAlItems((s) => s.filter((it) => it.object_id !== o.id)); // drop the handled item so the queue advances
@@ -877,6 +883,12 @@ export default function FrameEditor() {
 
   // each new selection starts with the compact chip (class name + edit), not the open picker
   useEffect(() => { setEditOpen(false); setEditSearch(""); }, [st.selectedId]);
+
+  // When the current object was selected, for the review timing. A ref rather than state: it is read at
+  // the moment a verdict is sent and never rendered, so making it state would re-render the canvas on
+  // every selection for nothing.
+  const selectedAtRef = useRef<number | null>(null);
+  useEffect(() => { selectedAtRef.current = st.selectedId ? Date.now() : null; }, [st.selectedId]);
   const editClasses = useMemo(
     () => (onto ? onto.classes.filter((c) => c.name.includes(editSearch.toLowerCase().replace(/\s/g, "_"))) : []),
     [onto, editSearch],
