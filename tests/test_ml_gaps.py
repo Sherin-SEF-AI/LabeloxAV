@@ -27,13 +27,18 @@ def test_every_task_type_is_registered_with_head_appropriate_weights():
     from services.training.tasks import get_task, list_tasks
 
     types = {t["task_type"] for t in list_tasks()}
-    assert types == {"detection", "segmentation", "pose", "classification", "lane", "detect3d"}
+    assert types == {"detection", "segmentation", "pose", "classification", "lane", "detect3d",
+                     "pretrain", "selftrain"}
 
     assert "cls" in get_task("classification").default_base_weights()
     assert "seg" in get_task("segmentation").default_base_weights()
     assert "pose" in get_task("pose").default_base_weights()
     # A lane model is a segmentation model over ribbon masks, so it inherits that head.
     assert "seg" in get_task("lane").default_base_weights()
+    # Self-training produces a detector, so it starts from a detection checkpoint; pretraining produces
+    # a backbone with no head at all and starts from the embedding model the corpus is embedded with.
+    assert "yolo" in get_task("selftrain").default_base_weights().lower()
+    assert "vit" in get_task("pretrain").default_base_weights().lower()
 
 
 def test_the_3d_task_refuses_to_train_rather_than_faking_a_number():

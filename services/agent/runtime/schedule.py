@@ -207,6 +207,19 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
         except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
             log.error("schedule.pseudo_lift_failed", error=str(exc))
 
+    # self-training: the corpus holds 443 human-accepted objects and hundreds of thousands of machine
+    # detections, so a detector trained only on the first throws away nearly everything the fleet saw.
+    # Declines unless the consensus has actually grown since the last run, and never promotes.
+    if offhours:
+        try:
+            from services.training.selftrain_agent import maybe_selftrain
+
+            stj = await maybe_selftrain(db)
+            if stj.get("ran"):
+                actions.append({"action": "selftrain", "job_id": stj.get("job_id")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.selftrain_failed", error=str(exc))
+
     # settlement lifecycle, the nightly half: plan one lot for the best-ranked eligible class, and run
     # the reverse acceptance decision over every settled lot's spot verdicts (the one automatic revert).
     if offhours:

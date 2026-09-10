@@ -62,6 +62,10 @@ def _score_yaml(local_weights: str, data_yaml: str, gold_id: str, imgsz: int) ->
     except Exception as exc:  # noqa: BLE001
         log.warning("gold_eval.safe_miou_failed", gold_id=gold_id, error=str(exc))
     metrics["gold_id"] = gold_id
+    # What yardstick produced these numbers. The registry column is called `gold_metrics` and the
+    # auto-register path also writes a job's own val metrics into it, so without this a reader comparing
+    # two rows can be comparing a two-image val split against a 202-frame sealed set.
+    metrics["basis"] = f"sealed_gold:{gold_id}"
     return metrics
 
 

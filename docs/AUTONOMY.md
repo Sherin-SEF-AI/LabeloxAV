@@ -538,3 +538,141 @@ session's timeline it covers, which is what the measurement supports.
 The imported dataset session recovered a pose on 28 of 764 pairs. That is the correct answer: BDD100K is
 a collection of unrelated clips, so consecutive frames are not consecutive views of one scene and there
 is no ego motion between them to recover. Visual odometry needs a session that is actually a drive.
+
+---
+
+## WP5. Domain-adaptive pretraining, and detector self-training
+
+### The defect it fixes
+
+Every model this engine trains starts from weights that have never seen an Indian road. The detector
+starts from COCO. The embedding backbone that drives duplicate detection, similarity, clustering and
+novelty is `vit_base_patch16_dinov3.lvd1689m`, pretrained on LVD-1689M. Those are good weights and they
+are not weights for this domain: an autorickshaw, a hoarding, a metro pillar and traffic at Indian
+densities are all out of distribution, and everything downstream inherits the gap.
+
+The second half is starker. The corpus holds 418 human-accepted objects on real frames and hundreds of
+thousands of machine detections. A detector trained only on the first throws away nearly everything the
+fleet has seen; one trained on raw machine detections learns its own mistakes back.
+
+### The ViT stage, which does not run here
+
+`services/training/tasks/pretrain.py` builds a manifest and dispatches. It does not train locally and
+says so rather than leaving a stub: continued DINO/iBOT pretraining of a ViT-B is days of an A100, and
+this host has one shared 16 GB card that the detector, the autolabel plane and the depth model already
+compete for. `cloud/pretrain_dino_pod.py` is the pod-side runtime, with the student/teacher
+self-distillation, the centring and sharpening that stop the pair collapsing, and checkpoints every
+2,000 steps so a pod that dies mid-run leaves usable weights behind.
+
+Three refusals rather than guesses. Composites never enter the manifest, because a backbone that learns
+the seams of the copy-paste generator would find those seams similar for the rest of its life.
+Duplicates are collapsed to one frame per `dup_group_id`, because a self-supervised objective that sees
+the same picture a thousand times learns that picture. And a job over the spend cap is refused with the
+number before anything is uploaded.
+
+**The step budget is derived from the cap rather than fixed.** A fixed 20,000 steps costs $11.81 at the
+ship rate of $1.89/h against a $10 per-job cap, so every unmodified dispatch would have been refused by
+its own guard. Deriving it gives 16,000 steps at $9.45, and raising the cap raises the default instead
+of leaving a constant that has silently stopped fitting.
+
+The task also refuses to auto-promote and refuses to invent a metric. A self-supervised backbone has no
+task score; adopting it re-embeds 41,000 frames and changes every similarity, duplicate and novelty
+surface in the product, which is a person's decision.
+
+### Where the soft targets actually come from
+
+The designed source is `oraclyx.export_distillation`, the consensus of several auto-label paths. That
+table is empty and will stay empty: `record_consensus` writes one object at a time from a router call and
+nothing batches it. This is the same shape of gap as the pseudo-LiDAR lift in WP4, a capability with no
+scheduling.
+
+So the source is a ladder, and the run records which rung answered, because a label from two agreeing
+models and a label from a fused multi-path consensus are not the same evidence. The second rung is the
+prediction plane: several independently trained models have scored the same frames, and where two of
+them put the same box on the same class, that is a consensus.
+
+**The soft target is the product of the two confidences, not the mean.** A product is the one of the
+three that cannot be carried by a single confident model. Two models each at 0.5 give 0.25 and are
+rejected by the 0.30 floor; their mean would be 0.5 and would pass. Two models that are each unsure do
+not become sure by agreeing.
+
+**Choosing the pair by size was wrong and the corpus said so.** Picking the two runs with the most
+predictions chose a pair overlapping on 4 frames and produced 9 consensus labels. Two runs that scored
+different frames cannot agree on anything however large they are. Choosing by shared frames instead
+gives 256 shared frames and 1,190 labels from the same corpus.
+
+| pair chosen by | shared frames | consensus labels |
+| --- | --- | --- |
+| prediction count | 4 | 9 |
+| frame overlap | 256 | 1,190 |
+
+### Two stages, in this order
+
+Stage one is the pseudo-labelled set with a soft-target weighted loss. Stage two is the human labels
+alone at a tenth of the learning rate. Ending on the human pass is the point: the last evidence the
+weights see is the only evidence a person ruled on, and the pseudo-labels act as the prior rather than
+the conclusion.
+
+The weighting is a wrapper around the criterion Ultralytics builds, because it exposes no per-instance
+loss weight. Whether the wrap succeeded is recorded on the run: a job that silently trained unweighted
+and one that trained weighted produce different models and the same log line otherwise.
+
+An unlabelled batch weighs 1.0 rather than 0.0. A background image carries real information, which is
+the lesson that took this corpus's recall from 0.411 to 0.770, and zeroing the loss on a frame with no
+pseudo-label would teach the model to ignore exactly where it currently hallucinates.
+
+### Measured
+
+One self-training run on the live corpus, 200 seconds end to end, both stages, through the ordinary job
+executor and the ordinary registry:
+
+| | value |
+| --- | --- |
+| consensus source | model agreement, two teachers over 256 shared frames |
+| pseudo-labels | 1,190 across 8 classes |
+| stage one | 228 train images, 2 val |
+| human labels for stage two | 418 across 192 images |
+| registered as | `origin='distilled'`, teacher `mr-real-v2-nano-7a66432d` |
+
+**Scored against the sealed gold set, the candidate loses decisively and the reason is not the method.**
+
+| model on `gold-d7343a6ae96a9caa`, 202 frames, 399 instances | map50 | recall | precision |
+| --- | --- | --- | --- |
+| champion `mr-idd-yolo11l-local` | 0.4407 | 0.3931 | measured |
+| self-trained candidate | 0.0484 | 0.0563 | 0.4523 |
+
+A detector fine-tuned from COCO weights on 228 images for 12 epochs is not going to beat a champion
+trained on the whole corpus, and it did not. The binding constraint is the size of the consensus pool,
+not the two-stage recipe: only 256 frames in this corpus have been scored by two different models, and
+that number is the size of one shadow sweep rather than anything corpus-scale. Self-training becomes
+worth running when that pool is in the tens of thousands, and the lever that moves it is the WP2 sweep,
+which is already scheduled and already picks up where it left off each night.
+
+The candidate's own precision of 0.45 against its recall of 0.056 is the shape you would expect: it
+learned a few classes from confident agreement and has never seen the rest.
+
+**Two defects this run exposed, both fixed here:**
+
+Choosing the teacher pair by prediction count gave 9 consensus labels from a pair overlapping on 4
+frames. Choosing by shared frames gives 1,190. Two runs that scored different frames cannot agree on
+anything, however large they are.
+
+And the registry column named `gold_metrics` holds two different yardsticks. The self-trained model
+registered map50 0.4975 from its own two-image validation split, next to the champion's 0.4407 from a
+202-frame sealed gold set, under one column name. The promotion gate is unaffected, because it re-scores
+both sides on common gold before comparing. A person reading the registry was not. Both writers now
+stamp the dict with the basis that produced it, `sealed_gold:<id>` or `job_val_split:<n>_images`.
+
+**One environmental defect worth recording,** because it would have silently killed every training run
+on this host. Ultralytics ships its third-party experiment trackers on by default and fires them from
+inside the training loop. MLflow now refuses a filesystem tracking backend, so its callback raised, and
+the failure surfaced as a broken pipe from every dataloader worker with nothing naming MLflow anywhere
+in the trace. The trackers are turned off when the task registry is imported; this engine records its
+own runs in `model_run` and `training_job`, so none of them had a job to do.
+
+The pretraining stage produced no number, and the reason is the design rather than a failure: it does
+not run locally, and there is no provisioned pod. What it produced instead is a manifest, a cost of
+$9.45 for 16,000 steps at the ship rate, and a refusal path that fires before anything is uploaded.
+
+Tests: `tests/test_selftrain_pretrain.py` (31), plus the task-registry assertion in `tests/test_ml_gaps.py`
+extended to cover the two new heads. The full suite runs 3,334 passed, 6 skipped against `labeloxav_test`.

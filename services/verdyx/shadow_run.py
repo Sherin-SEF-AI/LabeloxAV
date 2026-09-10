@@ -393,3 +393,69 @@ async def queue_for_labelling(db: AsyncSession, *, sweep_run_id: uuid.UUID,
              frames=len(frame_ids), disagreements=len(pend))
     return {"queued": len(pend), "frames": len(frame_ids), "task_id": str(task_id),
             "jobs": task.get("n_jobs")}
+
+
+# Agreement between two independently trained models is the consensus signal this corpus actually has.
+# `oraclyx.record_consensus` is the designed source and it is written one object at a time from a router
+# call, so `pseudo_label` holds nothing; the prediction plane meanwhile holds hundreds of thousands of
+# detections from several models over the same frames. Where two models that were not trained together
+# put the same box on the same class, that is a stronger label than either alone.
+AGREE_CONF_FLOOR = 0.35
+
+
+async def agreements_for_runs(db: AsyncSession, *, run_a: uuid.UUID, run_b: uuid.UUID,
+                              iou_thr: float = MATCH_IOU, conf_floor: float = AGREE_CONF_FLOOR,
+                              chunk: int = 200, limit: int | None = None) -> dict:
+    """Boxes two inference runs agree on, with a soft target from how sure both of them were.
+
+    The soft target is the product of the two confidences rather than the mean or the maximum. A product
+    is the one of the three that cannot be carried by a single confident model: 0.95 and 0.4 gives 0.38,
+    where a mean would give 0.68 and dress one model's uncertainty as consensus.
+
+    Restricted to the classes both models can emit, for the reason migration 0111 exists: a class one of
+    them was never trained on cannot be agreed upon, and counting its absence would silently reweight
+    every remaining class.
+    """
+    a = await db.get(InferenceRun, run_a)
+    b = await db.get(InferenceRun, run_b)
+    for name, run in (("a", a), ("b", b)):
+        if run is None:
+            return {"error": f"inference run {name} not found"}
+        if run.status != "complete":
+            return {"error": f"inference run {name} is '{run.status}'; a partial run is not a consensus"}
+
+    shared: set[int] | None = None
+    if a.class_vocab is not None and b.class_vocab is not None:
+        shared = {int(i) for i in a.class_vocab} & {int(i) for i in b.class_vocab}
+
+    frames = sorted({f for f in (await db.execute(
+        select(Prediction.frame_id).where(
+            Prediction.run_id.in_((a.run_id, b.run_id))).distinct())).scalars().all()}, key=str)
+
+    out: list[dict] = []
+    for i in range(0, len(frames), chunk):
+        window = frames[i:i + chunk]
+        by_a = await _dets_by_frame(db, a.run_id, window)
+        by_b = await _dets_by_frame(db, b.run_id, window)
+        for fid in window:
+            da = [d for d in by_a.get(fid, []) if d.conf >= conf_floor
+                  and (shared is None or d.class_id in shared)]
+            dbx = [d for d in by_b.get(fid, []) if d.conf >= conf_floor
+                   and (shared is None or d.class_id in shared)]
+            pairs, _lone_a, _lone_b = _pair(da, dbx, iou_thr)
+            for ia, ib, iou in pairs:
+                if da[ia].class_id != dbx[ib].class_id:
+                    continue          # they found the same object and disagree about what it is
+                out.append({"frame_id": str(fid), "class_id": da[ia].class_id,
+                            # The higher-confidence model's geometry, not an average: averaging two boxes
+                            # produces a box neither model proposed.
+                            "bbox": (da[ia].bbox if da[ia].conf >= dbx[ib].conf else dbx[ib].bbox),
+                            "soft_target": round(da[ia].conf * dbx[ib].conf, 6),
+                            "iou": round(iou, 4)})
+                if limit and len(out) >= limit:
+                    return {"n": len(out), "frames": len(frames), "manifest": out,
+                            "source": "model_agreement", "truncated": True,
+                            "shared_classes": (sorted(shared) if shared is not None else None)}
+    return {"n": len(out), "frames": len(frames), "manifest": out, "source": "model_agreement",
+            "truncated": False, "conf_floor": conf_floor,
+            "shared_classes": (sorted(shared) if shared is not None else None)}
