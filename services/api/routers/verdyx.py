@@ -430,3 +430,40 @@ async def hierarchical_eval(run_id: str, gold_id: str | None = None, score_thr: 
     if not res.get("measured"):
         raise HTTPException(400, res.get("reason", "not measurable"))
     return res
+
+
+@router.post("/verdyx/counterfactual/{run_id}")
+async def run_counterfactual(run_id: str, perturbations: str | None = None,
+                             max_frames: int = 100, score_thr: float = 0.5):
+    """Score a run's gold frames, then perturbed copies of the same frames, and report the recall drop.
+
+    Nothing is written: the perturbed images exist for one forward pass. Persisting a copy of every gold
+    frame for every perturbation would multiply the corpus to answer a question that is the same next
+    week.
+    """
+    from db.session import get_sessionmaker
+    from services.verdyx.counterfactual import counterfactual_eval
+
+    names = [p.strip() for p in (perturbations or "").split(",") if p.strip()] or None
+    async with get_sessionmaker()() as db:
+        res = await counterfactual_eval(db, run_id=run_id, perturbations=names,
+                                        max_frames=max_frames, score_thr=score_thr)
+    if not res.get("measured"):
+        raise HTTPException(status_code=409, detail=res.get("reason", "nothing could be scored"))
+    return res
+
+
+@router.get("/verdyx/sim/capability")
+async def sim_capability():
+    """Whether an exported scenario can be replayed here, and what is missing when it cannot.
+
+    A scenario nobody could validate and one that failed validation are different facts, and this is the
+    endpoint that lets a caller tell them apart before reading a datasheet's `sim_validated: false`.
+    """
+    from services.forgyx.capabilities import CapabilityError, available_targets, require
+
+    try:
+        require("esmini")
+        return {"available": True, "reason": None, "targets": available_targets()}
+    except CapabilityError as exc:
+        return {"available": False, "reason": str(exc), "targets": available_targets()}

@@ -546,6 +546,23 @@ class TrainingSettings(BaseModel):
     resume_orphaned_runs: bool = True
 
 
+class SimSettings(BaseModel):
+    """Replaying an exported scenario, to check it describes something that can actually happen.
+
+    A scenario document that parses is not a scenario that runs: an actor placed off the road network, a
+    speed no vehicle reaches, or a trigger that never fires all produce a valid file describing nothing.
+    Replaying it headlessly is the only way to tell, and it is why this is a capability with a binary
+    rather than a library.
+    """
+
+    esmini_bin: str = ""              # empty means "look on PATH"
+    duration_s: float = 20.0          # how long a replay runs before it is called done
+    timeout_s: float = 60.0           # and how long the process may take before it is called stuck
+    # How far a challenger's reproduced actor track may sit from the recorded one before the scenario
+    # counts as not reproduced. Two metres is about half a lane.
+    traj_tol_m: float = 2.0
+
+
 class CloudSettings(BaseModel):
     # Hybrid GPU: the RunPod A100 environment for heavy real-model work. Shared by the cloud/ runbook
     # scripts and the app so they agree on names/paths. The pod itself is provisioned on demand.
@@ -1095,6 +1112,7 @@ class Settings(BaseSettings):
     m9: M9Settings = M9Settings()
     training: TrainingSettings = TrainingSettings()
     cloud: CloudSettings = CloudSettings()
+    sim: SimSettings = SimSettings()
     ontology: OntologySettings = OntologySettings()
     packs: PacksSettings = PacksSettings()      # active domain pack for non-session-routed engine paths
     paths: PathsSettings = PathsSettings()

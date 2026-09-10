@@ -110,6 +110,38 @@ def _recapture(challenger: dict, cfg) -> dict:
 MIN_SHADOW_PAIRS = 30
 
 
+def _counterfactual(challenger: dict) -> dict:
+    """Whether the challenger fell apart under a controlled change to the frames, and by how much.
+
+    Fail-closed only, like the shadow clause beside it. A model that survives occlusion and dusk has not
+    been shown to be better at anything, so this can never promote; a safety class whose recall falls past
+    the tolerance with the intervals separated is a model that will fail on a Tuesday evening in the rain,
+    and that does block.
+
+    Absent evidence is unmeasured, not a pass and not a failure. The counterfactual needs the model's
+    weights and a gold set, and a challenger evaluated before this existed carries neither.
+    """
+    cf = challenger.get("counterfactual")
+    if not cf or not cf.get("measured"):
+        return {"ok": True, "measured": False, "reasons": [],
+                "detail": (cf or {}).get("reason", "no counterfactual evaluation has been run")}
+    blocking: list[dict] = []
+    for pname, res in (cf.get("perturbations") or {}).items():
+        for row in res.get("blocking") or []:
+            blocking.append({"perturbation": pname, **row})
+    if not blocking:
+        return {"ok": True, "measured": True, "reasons": [],
+                "detail": "no safety class fell past the tolerance under any perturbation"}
+    worst = max(blocking, key=lambda b: b["drop"])
+    return {
+        "ok": False, "measured": True, "blocking": blocking,
+        "reasons": [f"{worst['class_name']} recall falls {worst['drop']:.0%} under {worst['perturbation']} "
+                    f"({worst['recall_before']:.2f} to {worst['recall_after']:.2f} on "
+                    f"{worst['support']} objects), which is more than a model on this road can lose"],
+        "detail": f"{len(blocking)} safety class drops past the tolerance",
+    }
+
+
 def _shadow(challenger: dict) -> dict:
     """Whether the challenger lost badly enough on adjudicated disagreements to block, and why.
 
@@ -217,7 +249,9 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
                 "recapture": recap, "reasons": reasons}
 
     shadow = _shadow(challenger)
-    promote = bool(beats_map and safe_ok and safety_ok and recall_ok and recap["ok"] and shadow["ok"])
+    counterfactual = _counterfactual(challenger)
+    promote = bool(beats_map and safe_ok and safety_ok and recall_ok and recap["ok"]
+                   and shadow["ok"] and counterfactual["ok"])
     reasons: list[str] = []
     if not beats_map:
         reasons.append(f"does not beat champion mAP ({map_c:.3f} vs {map_ch:.3f})")
@@ -228,13 +262,15 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
                        else f"Safe-mIoU regressed ({sm_c} vs {sm_ch})")
     if not safety_ok:
         reasons.append(f"safety-class regression: {regressed}")
-    reasons += rec_floor["reasons"] + rec_reg["reasons"] + recap["reasons"] + shadow["reasons"]
+    reasons += (rec_floor["reasons"] + rec_reg["reasons"] + recap["reasons"] + shadow["reasons"]
+                + counterfactual["reasons"])
     if promote:
         reasons.append("beats champion without any safety regression")
     return {"promote": promote, "beats_map": beats_map, "map_delta": round(map_c - map_ch, 4),
             "safe_ok": safe_ok, "safety_ok": safety_ok, "regressed_safety": regressed,
             "recall_ok": recall_ok, "recapture_ok": recap["ok"], "recapture": recap,
             "shadow_ok": shadow["ok"], "shadow": shadow,
+            "counterfactual_ok": counterfactual["ok"], "counterfactual": counterfactual,
             "reasons": reasons, "evidence": evidence}
 
 

@@ -1036,3 +1036,90 @@ Tests: `tests/test_label_economics.py` (26), `tests/test_migrations_roundtrip.py
 0115 with rows present, so the unmeasured-row-carries-a-reason CHECK is exercised rather than declared.
 The full suite runs 3,402 passed, 6 skipped against `labeloxav_test`; the web suite 699 passed with
 `tsc --noEmit` clean.
+
+---
+
+## WP9. One thing changed, and the simulator that is not here
+
+### The defect it fixes
+
+Every number in this engine is observational. Gold measures a model on the conditions gold happens to
+contain, and a slice metric says the model is worse on dark frames without being able to say whether that
+is the darkness or the fact that dark frames in this corpus are also mostly highways at speed.
+
+An Indian road at dusk in the rain with a truck half-blocking a rider is not a rare condition, it is
+Tuesday. A model can score well on a sealed gold set and fail on all of it, because the gold set was
+collected in daylight.
+
+### A counterfactual
+
+Hold the scene fixed, change one thing, score the same labels again. The difference is attributable to
+that one thing, which is the only causal statement this engine can make.
+
+Five perturbations, each deterministic under its seed, because a counterfactual whose result moves between
+runs cannot be checked in exactly the situation where somebody wants to check it. Occlusion covers a
+fraction of an object's box from a randomly chosen edge rather than the centre, because that is how
+occlusion happens and a centred hole leaves the outline intact on all four sides. Dusk darkens by gamma
+rather than subtraction, which compresses the whole range the way falling light does instead of clipping
+the shadows to black. Rain adds both streaks and the veiling haze, because streaks alone are noise a
+convolution shrugs off and the veil is what costs a detector its contrast. Fog thickens with distance
+through the depth map from WP4 when there is one. Motion blur is directional.
+
+**Perturbed frames never get objects.** A rider behind an added occlusion is still a rider at the same box.
+That is what makes the before and after a comparison, and writing labels for a perturbed frame would
+create a second copy of every object with a different origin.
+
+**A drop is reported with an interval or not at all.** A recall of 3 of 4 falling to 2 of 4 is not a 25%
+regression, it is four objects. The gate refuses only when the perturbed upper bound sits below the
+baseline lower bound, on at least 30 gold objects, so it cannot block a promotion on sampling noise.
+
+### Measured
+
+The serving champion on 60 gold frames, 146 seconds, all five perturbations:
+
+| perturbation | motorcycle recall | drop | sedan recall | drop |
+| --- | --- | --- | --- | --- |
+| none | 0.513 | | 1.000 | |
+| occlude 0.3 | 0.270 | 0.243 | 0.875 | 0.125 |
+| motion blur | 0.297 | 0.216 | 1.000 | 0.000 |
+| rain | 0.486 | 0.027 | 1.000 | 0.000 |
+| dusk | 0.540 | -0.027 | 1.000 | 0.000 |
+| fog | 0.513 | 0.000 | 1.000 | 0.000 |
+
+Two findings, and one of them is about the gate rather than the model.
+
+**Occlusion and motion blur cost the champion about half its motorcycle recall.** A 24 point drop from
+covering 30% of a box, and a 22 point drop from camera shake, on the class this corpus is made of. Neither
+is visible in any gold number, because gold frames are sharp and unoccluded.
+
+**Nothing blocks, and that is the interval doing its job.** Thirty-seven motorcycles is above the support
+floor and still not enough for a 24 point drop to separate from noise: the Wilson intervals overlap. The
+finding is real and the evidence is not yet decisive, and the gate says the second thing rather than
+acting on the first. It becomes decisive at a few hundred objects, which is a larger gold set rather than
+a different method.
+
+**Dusk and fog cost this model nothing at all**, and dusk very slightly helps. That is a result about the
+champion rather than about the perturbation, and a plausible one for a model trained with photometric
+augmentation. It is worth knowing before anybody spends a night collecting low-light data to fix a problem
+this model does not have.
+
+### The simulator
+
+`services/sim/esmini_runner.py` replays an exported OpenSCENARIO document headlessly and parses its
+trajectory log, because a document that parses is not a scenario that runs: an actor placed off the road
+network, a speed no vehicle reaches, or a trigger that never fires all produce a well-formed file
+describing nothing.
+
+**esmini is a binary and it is not installed on this host, so what runs here is the refusal.** `replay`
+returns `ok=False` with the reason rather than raising, and the capability names both the binary and the
+setting an operator can point at instead. A scenario nobody could validate and one that failed validation
+are different facts, and an export that conflated them would claim a check it never performed.
+
+The parser tolerates a renamed column, because one that returned nothing when the simulator changed a
+heading would make every scenario look like one where nobody moved. The trajectory checksum rounds before
+hashing, because a checksum that changed on a patch release would report every scenario as regressed on
+the day of an upgrade.
+
+Tests: `tests/test_counterfactual.py` (45). The full suite runs 3,445 passed, 6 skipped against
+`labeloxav_test`; the two autolabel tests that fail alongside it are the VRAM guard refusing to load a
+second model while the API holds the card, and both pass when it is free.

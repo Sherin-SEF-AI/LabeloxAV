@@ -3658,6 +3658,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/verdyx/blind-audits",
                           params={"run_id": run_id, "limit": limit}, json_body=None)
 
+    def post_verdyx_counterfactual_by_run_id(self, run_id: str, perturbations: Any | None = None, max_frames: int | None = 100, score_thr: float | None = 0.5) -> Any:
+        """Run Counterfactual"""
+        return self._call("POST", f"/api/verdyx/counterfactual/{run_id}",
+                          params={"perturbations": perturbations, "max_frames": max_frames, "score_thr": score_thr}, json_body=None)
+
     def post_verdyx_evaluate(self, body: Any = None) -> Any:
         """Evaluate"""
         return self._call("POST", f"/api/verdyx/evaluate",
@@ -3692,6 +3697,11 @@ class LabeloxClient:
         """Shadow Triage"""
         return self._call("POST", f"/api/verdyx/shadow/triage",
                           params=None, json_body=body)
+
+    def get_verdyx_sim_capability(self) -> Any:
+        """Sim Capability"""
+        return self._call("GET", f"/api/verdyx/sim/capability",
+                          params=None, json_body=None)
 
     def post_verdyx_stats_bootstrap(self, body: Any = None) -> Any:
         """Stats Bootstrap"""
@@ -3761,4 +3771,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 735 routes generated from the server schema.
+# 737 routes generated from the server schema.
