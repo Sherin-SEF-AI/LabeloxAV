@@ -46,47 +46,29 @@ export const MODES: EditorMode[] = [
         { key: "superpixel", label: "cells", hotkey: "U" },
       ] },
       { key: "region", label: "Region", tools: [{ key: "adverse", label: "adverse", hotkey: "D" }] },
+      { key: "cuboid", label: "3D box", tools: [{ key: "cuboid", label: "cuboid", hotkey: "C" }] },
       { key: "measure", label: "Measure", tools: [{ key: "measure", label: "measure", hotkey: "R" }] },
     ],
   },
   {
+    // Lane drawing is driven by the lane panel's own controls rather than by the canvas tool, so the
+    // strip carries Select alone. It used to list five lane types and three surfaces here; none of them
+    // reached the canvas, so every one of those buttons was inert and every one of those hotkeys did
+    // nothing. A tool belongs in this registry when the canvas dispatches it and not before.
     key: "lanes", label: "Lanes and drivable", rail: "LANE", hotkey: "2", canvas: "konva",
     groups: [
       { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
-      // Lane type is a tool rather than a property set after the fact, because it decides whether a crossing
-      // of this boundary is a manoeuvre or an offence, and picking it while drawing is when the annotator
-      // is actually looking at the line.
-      { key: "lane", label: "Lane", tools: [
-        { key: "lane-solid", label: "solid", hotkey: "B" },
-        { key: "lane-dashed", label: "dashed", hotkey: "N" },
-        { key: "lane-double", label: "double", hotkey: "J" },
-        { key: "lane-edge", label: "road edge", hotkey: "H" },
-        { key: "lane-implicit", label: "implicit", hotkey: "Y" },
-      ] },
-      { key: "freespace", label: "Free space", tools: [
-        { key: "drivable", label: "drivable", hotkey: "F" },
-        { key: "non-drivable", label: "non drivable", hotkey: "X" },
-        { key: "fallback", label: "fallback", hotkey: "Z" },
-      ] },
-      { key: "laneops", label: "Lane ops", tools: [
-        { key: "lane-propose", label: "propose", hotkey: "O" },
-        { key: "lane-propagate", label: "propagate", hotkey: "P" },
-      ] },
     ],
   },
   {
     key: "semantic", label: "Semantic", rail: "SEM", hotkey: "3", canvas: "konva",
     groups: [
       { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
-      { key: "paint", label: "Paint", tools: [
-        { key: "sem-polygon", label: "region", hotkey: "G" },
-        { key: "sem-brush", label: "brush", hotkey: "P" },
-        { key: "sem-eraser", label: "eraser", hotkey: "E" },
-        { key: "sem-fill", label: "fill", hotkey: "F" },
-      ] },
-      { key: "assist", label: "Assist", tools: [
-        { key: "sem-superpixel", label: "cells", hotkey: "U" },
-        { key: "sem-auto", label: "auto segment", hotkey: "A" },
+      // A region drawn for a class and a region drawn for an instance are the same gesture, so semantic
+      // reuses the object canvas's polygon and eraser rather than teaching a second pair.
+      { key: "semantic", label: "Semantic", tools: [
+        { key: "sem-region", label: "region", hotkey: "G" },
+        { key: "sem-erase", label: "erase", hotkey: "E" },
       ] },
     ],
   },
@@ -94,14 +76,6 @@ export const MODES: EditorMode[] = [
     key: "events", label: "Events", rail: "EVT", hotkey: "4", canvas: "table",
     groups: [
       { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
-      { key: "mark", label: "Mark", tools: [
-        { key: "event-point", label: "instant", hotkey: "I" },
-        { key: "event-interval", label: "interval", hotkey: "T" },
-      ] },
-      { key: "derive", label: "Derive", tools: [
-        { key: "event-derive", label: "derive", hotkey: "D" },
-        { key: "event-link-lanes", label: "link lanes", hotkey: "K" },
-      ] },
     ],
   },
   {
@@ -109,17 +83,15 @@ export const MODES: EditorMode[] = [
     groups: [
       { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
       { key: "pose", label: "Pose", tools: [{ key: "keypoint", label: "keypoint", hotkey: "K" }] },
+      { key: "measure", label: "Measure", tools: [{ key: "measure", label: "measure", hotkey: "R" }] },
     ],
   },
   {
+    // The point-cloud viewer is driven by its own panel controls, not by the canvas tool, so the same
+    // rule applies here as to lanes: Select alone until a tool actually reaches the canvas.
     key: "lidar3d", label: "3D and LiDAR", rail: "3D", hotkey: "6", canvas: "three",
     groups: [
       { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
-      { key: "cuboid", label: "Cuboid", tools: [
-        { key: "cuboid-add", label: "add box", hotkey: "B" },
-        { key: "cuboid-lift", label: "lift 2D to 3D", hotkey: "C" },
-      ] },
-      { key: "measure", label: "Measure", tools: [{ key: "measure", label: "measure", hotkey: "R" }] },
     ],
   },
   {
@@ -132,4 +104,51 @@ export const MODES: EditorMode[] = [
 
 export function modeByKey(key: string): EditorMode | undefined {
   return MODES.find((m) => m.key === key);
+}
+
+/** Every tool key a mode's strip offers, in strip order. */
+export function toolsForMode(modeKey: string): string[] {
+  return (modeByKey(modeKey)?.groups ?? []).flatMap((g) => g.tools.map((t) => t.key));
+}
+
+/** The strip's groups for a mode, falling back to Objects so an unknown mode still renders something. */
+export function groupsForMode(modeKey: string): ToolGroup[] {
+  return modeByKey(modeKey)?.groups ?? modeByKey("objects")?.groups ?? [];
+}
+
+/**
+ * The tool a single keystroke selects in a mode, or null when that key means nothing here.
+ *
+ * Resolved per mode, which is what makes the same letter able to mean two things without either one
+ * being unreachable. The editor previously dispatched tools from a hardcoded if/else chain that knew
+ * nothing about modes, so `k` was written twice in it: the first branch won for every mode and the
+ * second, which selected the whole-extent tool, could never run. That tool had a button and a documented
+ * shortcut and no way to reach it.
+ */
+export function toolForHotkey(modeKey: string, key: string): string | null {
+  const want = key.toLowerCase();
+  for (const g of groupsForMode(modeKey)) {
+    for (const t of g.tools) {
+      if (t.hotkey.toLowerCase() === want) return t.key;
+    }
+  }
+  return null;
+}
+
+/** Modes whose hotkeys collide inside one mode. Empty is the invariant; the test asserts it. */
+export function hotkeyCollisions(): { mode: string; hotkey: string; tools: string[] }[] {
+  const out: { mode: string; hotkey: string; tools: string[] }[] = [];
+  for (const m of MODES) {
+    const byKey = new Map<string, string[]>();
+    for (const g of m.groups) {
+      for (const t of g.tools) {
+        const k = t.hotkey.toLowerCase();
+        byKey.set(k, [...(byKey.get(k) ?? []), t.key]);
+      }
+    }
+    for (const [hotkey, tools] of byKey) {
+      if (tools.length > 1) out.push({ mode: m.key, hotkey, tools });
+    }
+  }
+  return out;
 }

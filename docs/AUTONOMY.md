@@ -676,3 +676,152 @@ $9.45 for 16,000 steps at the ship rate, and a refusal path that fires before an
 
 Tests: `tests/test_selftrain_pretrain.py` (31), plus the task-registry assertion in `tests/test_ml_gaps.py`
 extended to cover the two new heads. The full suite runs 3,334 passed, 6 skipped against `labeloxav_test`.
+
+---
+
+## WP6. The annotation canvas: describing, judging tubes, and reading the interface
+
+### One registry, and the two defects two registries caused
+
+The editor kept two tool registries. `lib/editor/registry.ts` drove the mode rail; a second copy inside
+the frame editor's page drove the tool strip; and a third list, a hardcoded if/else chain in the keyboard
+handler, decided what a keystroke actually did. Three sources for one fact, and each had drifted.
+
+Both costs were visible to an annotator and neither failed anything:
+
+**`k` was written twice in the same chain.** The first branch selected the keypoint tool and won for every
+mode; the second selected the whole-extent tool and could never run. That tool had a button, a documented
+shortcut in the overlay, and no way to reach it from either.
+
+**Eleven buttons did nothing.** The registry declared five lane types, three drivable surfaces, two lane
+operations and two event marks. None of them reached the canvas, because lanes, 3D and events are driven
+by their own panel controls rather than by the canvas tool. Every one of those was an inert button with a
+hotkey that did nothing.
+
+There is one registry now. Shortcuts resolve through it per mode, which is what lets `k` mean the
+whole-extent tool in Objects and the keypoint tool in Pose without either being unreachable. A tool is in
+the registry when the canvas dispatches it and not before, so the lanes, 3D and events strips carry Select
+alone until something reaches the canvas. `hotkeyCollisions()` returns the modes where two tools share a
+letter, and the test asserts it is empty.
+
+The coupling test between the overlay and the real bindings was scraping a regex over the 2,000-line page.
+It now reads the registry, which is both stronger and no longer dependent on how the handler happens to be
+written.
+
+### Describing an object the ontology has no word for
+
+An annotator on an Indian road sees things the class list does not carry: a cycle rickshaw, a hand cart, a
+water tanker, a pile of construction sand in a lane. The choices were to force it into the nearest class,
+which corrupts that class, or to skip it, which loses the object.
+
+`POST /api/frames/{id}/describe-label` takes a phrase, prompts the open-vocabulary detector and segmenter
+the autolabel plane already loads, and returns proposals with masks. It writes nothing: the point of
+describing an object is that a person is looking at it, so they see what the phrase matched and at what
+confidence, and commit the ones that are right.
+
+**The phrase is evidence, not a class.** A described object carries `source='described'` and the phrase on
+its provenance. It does not invent an ontology entry, because an ontology grown by whatever somebody typed
+is how a class list stops meaning anything. What it does is make the object exist and be findable, so a
+later ontology decision has real examples rather than an argument.
+
+The caveat ships with the tool rather than in a design note. An open-vocabulary model finds whatever it is
+asked for, which is the hallucination that made an ungrounded concept list dangerous in the corpus sweep.
+One frame, prompted by a person looking at it, with the result shown before anything is written, is a
+different situation: the person is the grounding, and the response and the interface both say so.
+
+### Judging a whole track instead of one crop
+
+A single blurred crop of a distant rider is genuinely ambiguous, and a judge shown one abstains or
+guesses. The same object across eight frames of its track usually is not ambiguous, because one clear view
+settles it.
+
+`judge_tracks` samples up to eight objects spread evenly across the track, tiles their crops into one
+contact sheet, and asks once. Evenly rather than the first eight, because the first frames of a track are
+where the object is smallest and furthest away, and a sheet made of those asks the hardest possible
+version of the question. Each crop is letterboxed rather than stretched: an aspect ratio is evidence about
+what a thing is, and a squashed motorcycle looks like a different vehicle.
+
+The verdict lands on every object of the track under `judge='vlm_tube'`, which keeps it apart from the
+per-crop judge in the uniqueness key so a track can carry both and the two can be compared rather than one
+overwriting the other. `judged_precision` gained a `judge=` argument for that comparison, defaulting to
+the per-crop judge so every existing caller means what it meant before.
+
+### Where to look next inside a frame
+
+The order a frame's objects are drawn in is the order the machine emitted them, which has nothing to do
+with which one a person should look at. `GET /api/frames/{id}/next-object` ranks the frame's own
+unconfirmed objects by the same active-learning value the review queue uses, and adds track continuity: an
+object whose track was corrected on the previous frame is likely wrong here too, and it is the cheapest
+correction to make while the previous one is still in mind. The continuity bump is modest and stated
+rather than a re-ranking, so the value still explains why an object was chosen.
+
+A frame with nothing unconfirmed reports that it is finished, which is a different fact from a ranking
+that happened to come back empty.
+
+### Reading the interface
+
+The dictionaries were inline in `lib/i18n.ts`, so the file grew by four entries every time one string was
+translated and every review of that module was a review of four unrelated languages. They are one file per
+language now, and `t()` takes an interpolation form.
+
+Interpolation belongs in the dictionary rather than at the call site because the parts of a sentence do
+not sit in the same order in every language. "{n} objects" is "{n} वस्तुएँ" in Hindi, and a template
+assembled by concatenation in the component would force English word order onto all four. An unknown
+placeholder renders as written rather than blank: a visible `{total}` names the bug, where an empty gap
+reads as a missing value in the data.
+
+Coverage went from 32 keys to 73, extending to the tool strip, the describe tool, the tube verdict and the
+next-object hint, in Hindi, Kannada and Tamil. Governance and compliance surfaces stay English on purpose:
+a half-translated compliance page invites the reader to trust a phrasing nobody reviewed for legal meaning.
+
+### Measured
+
+**A track in this corpus is usually not one object.** The tube judge's first real run exposed it. A
+version that took the first object's class as the track's class stamped a verdict about minivans onto a
+"track" holding 147 objects across 18 classes on 147 different frames.
+
+| tracks with a track_id | count |
+| --- | --- |
+| one class | 1,306 |
+| more than one class | 9,982 |
+
+So 88% of tracks would have received a verdict about a class most of their objects are not. The judge now
+groups by class within the track, each group gets its own contact sheet, verdict and batch id, and the
+number of classes the track spans rides on the verdict, because a track carrying eighteen classes is a
+tracker failure worth seeing rather than a detail to discover later.
+
+The corrected run, over three tracks on the live corpus:
+
+| | value |
+| --- | --- |
+| tracks asked | 3 |
+| class groups judged | 14 |
+| verdicts returned | 3, one each of correct, incorrect and unsure |
+| objects stamped | 78 |
+| calls that never reached the judge | 11 |
+
+**The eleven failures are the honest headline and they are not abstentions.** The local Ollama judge
+times out on a contact sheet, which is a larger image than the single crops it was sized for, and the
+code records that as `failed` rather than as `unsure`. That distinction is the whole reason it exists: an
+outage recorded as abstention reads as a finding about the labels, which is how a run against a dead
+judge once came back looking like a class nobody could rule on. The tube judge needs a faster judge
+before it is practical at scale, and a merged track needs one call per class, so the cost of a bad track
+is paid in judge calls as well as in labels.
+
+**The registry unification, counted:** 11 buttons that dispatched nothing were removed from the strips,
+1 tool that had a button and a documented shortcut and could not be selected became reachable, and the
+overlay coupling test now reads structured bindings instead of a regex over a 2,000-line file.
+
+**Interface coverage** went from 32 translated keys to 73, in Hindi, Kannada and Tamil, reaching the tool
+strip, the describe tool, the tube verdict and the next-object hint.
+
+Tests: `tests/test_canvas_wp6.py` (20), `web/lib/editor/registry.test.ts` (9), `web/lib/i18n.test.ts`
+(12, up from 4). The hardcoded-string test was proven non-vacuous by planting a literal in the editor and
+watching it fail. The web suite runs 699 passed with `tsc --noEmit` clean, and the backend suite 3,354
+passed, 6 skipped.
+
+**One thing learned about the suite itself.** Two `pytest` runs against `labeloxav_test` at once corrupt
+each other: the `db` fixtures share one database and seed overlapping rows, so concurrent runs reported 6
+and 16 failures where a single clean run of the same tree passed. Three more failures came from running
+the tube judge alongside a suite containing wall-clock staleness assertions. Neither was a regression, and
+both are the kind of thing that costs an hour if it is not written down.

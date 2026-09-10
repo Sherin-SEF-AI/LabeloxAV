@@ -40,7 +40,7 @@ import IssuePanel from "@/components/labelops/IssuePanel";
 import CloudControl from "@/components/shell/CloudControl";
 import NotificationBell from "@/components/shell/NotificationBell";
 import CommandPalette from "@/components/shell/CommandPalette";
-import { MODES, type ToolGroup } from "@/lib/editor/registry";
+import { MODES, groupsForMode, toolForHotkey, toolsForMode } from "@/lib/editor/registry";
 import type { SelectHow } from "@/components/editor/useEditor";
 import Filmstrip from "@/components/editor/Filmstrip";
 import HistoryPanel from "@/components/editor/HistoryPanel";
@@ -71,56 +71,6 @@ const CUBOID_DIMS: Record<string, number[]> = {
   motorcycle: [2.0, 0.8, 1.4], pedestrian: [0.6, 0.6, 1.7], autorickshaw: [2.6, 1.4, 1.8],
 };
 const LANE_COLOR: Record<string, string> = { proposed: "#58A6FF", human: "#FF7A2F", propagated: "#E3B341" };
-
-// Editor tools grouped so the strip renders one button per group (not 14 peers in a row). Tool keys match
-// the editor's dispatch keys. The groups are split across modes: switching mode swaps which groups show,
-// so each mode's strip stays short and one row. A new tool is one entry in a group's flyout.
-const G = {
-  select: { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
-  draw: { key: "draw", label: "Draw", tools: [
-    { key: "box", label: "box", hotkey: "B" },
-    { key: "polygon", label: "polygon", hotkey: "G" },
-    { key: "polyline", label: "polyline", hotkey: "L" },
-  ] },
-  ai: { key: "ai", label: "AI assist", tools: [
-    { key: "sam-point", label: "sam point", hotkey: "S" },
-    { key: "sam-box", label: "sam box", hotkey: "M" },
-    { key: "magic-wand", label: "wand", hotkey: "W" },
-  ] },
-  mask: { key: "mask", label: "Mask edit", tools: [
-    { key: "brush", label: "brush", hotkey: "P" },
-    { key: "eraser", label: "eraser", hotkey: "E" },
-    { key: "superpixel", label: "cells", hotkey: "U" },
-  ] },
-  pose: { key: "pose", label: "Pose", tools: [{ key: "keypoint", label: "pose", hotkey: "K" }] },
-  region: { key: "region", label: "Region", tools: [{ key: "adverse", label: "adverse", hotkey: "D" }] },
-  cuboid: { key: "cuboid", label: "3D box", tools: [{ key: "cuboid", label: "cuboid", hotkey: "C" }] },
-  measure: { key: "measure", label: "Measure", tools: [{ key: "measure", label: "measure", hotkey: "R" }] },
-  // Semantic paints a dense class raster rather than creating objects. It reuses the polygon and brush the
-  // object canvas already has, because a region drawn for a class and a region drawn for an instance are
-  // the same gesture and teaching the annotator two of them would be gratuitous.
-  semantic: { key: "semantic", label: "Semantic", tools: [
-    { key: "sem-region", label: "region", hotkey: "G" },
-    { key: "sem-erase", label: "erase", hotkey: "E" },
-  ] },
-} satisfies Record<string, ToolGroup>;
-
-// Per-mode tool strips. The mode rail picks one; the strip renders only that mode's groups.
-// Each mode lists only tools its canvas actually honors. Objects/Pose/Review use the Konva EditorCanvas
-// (select, draw, AI, mask, region, the 2D cuboid placement, measure, keypoint all work there). Lanes
-// (LaneCanvas) and 3D (PointCloudViewer) are driven by their panel/options controls, not st.tool, so their
-// strip is just Select; showing draw/measure/cuboid there would be inert buttons.
-const MODE_GROUPS: Record<string, ToolGroup[]> = {
-  objects: [G.select, G.draw, G.ai, G.mask, G.region, G.cuboid, G.measure],
-  pose: [G.select, G.pose, G.measure],
-  lidar3d: [G.select],
-  lanes: [G.select],
-  semantic: [G.select, G.semantic],
-  events: [G.select],
-  review: [G.select],
-};
-const MODE_TOOLS: Record<string, string[]> = Object.fromEntries(
-  Object.entries(MODE_GROUPS).map(([m, gs]) => [m, gs.flatMap((g) => g.tools.map((t) => t.key))]));
 
 // The three surface classes the ternary drivable mask carries. Fallback is the unpaved shoulder India
 // actually drives on, which is why it is a first-class surface rather than a kind of non-drivable.
@@ -261,7 +211,7 @@ export default function FrameEditor() {
   // switching mode swaps the tool strip; reset the active tool to the mode's first tool if it does not carry over
   const switchMode = (m: string) => {
     setMode(m);
-    const tools = MODE_TOOLS[m] ?? [];
+    const tools = toolsForMode(m);
     if (!tools.includes(stRef.current.tool)) dispatch({ t: "tool", tool: (tools[0] ?? "select") as Tool });
   };
   const [layers, setLayers] = useState({ boxes: true, masks: true, labels: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true });
@@ -1598,22 +1548,13 @@ export default function FrameEditor() {
         if (k === "a") { reviewObject("accept"); return; }
         if (k === "x") { reviewObject("reject"); return; }
       }
-      if (k === "a") confirmFrame(false);
-      else if (k === "v") dispatch({ t: "tool", tool: "select" });
-      else if (k === "b") dispatch({ t: "tool", tool: "box" });
-      else if (k === "g") dispatch({ t: "tool", tool: "polygon" });
-      else if (k === "l") dispatch({ t: "tool", tool: "polyline" });
-      else if (k === "d") dispatch({ t: "tool", tool: "adverse" });
-      else if (k === "c") dispatch({ t: "tool", tool: "cuboid" });
-      else if (k === "k") dispatch({ t: "tool", tool: "keypoint" });
-      else if (k === "r") dispatch({ t: "tool", tool: "measure" });
-      else if (k === "s") dispatch({ t: "tool", tool: "sam-point" });
-      else if (k === "m") dispatch({ t: "tool", tool: "sam-box" });
-      else if (k === "w") dispatch({ t: "tool", tool: "magic-wand" });
-      else if (k === "p") dispatch({ t: "tool", tool: "brush" });
-      else if (k === "e") dispatch({ t: "tool", tool: "eraser" });
-      else if (k === "k") dispatch({ t: "tool", tool: "amodal" });
-      else if (k === "u") dispatch({ t: "tool", tool: "superpixel" });
+      // Tool shortcuts come from the registry, resolved for the current mode. They used to be a
+      // hardcoded if/else chain that knew nothing about modes, which is how `k` came to be written twice
+      // in it: the first branch won everywhere and the whole-extent tool, which had a button and a
+      // documented shortcut, could never be reached by either.
+      const registryTool = toolForHotkey(mode, k);
+      if (registryTool) dispatch({ t: "tool", tool: registryTool as Tool });
+      else if (k === "a") confirmFrame(false);
       else if (k === "h" && ridable(selected)) toggleHelmets();
       else if (k === "o" && ridable(selected)) bumpOccupants();
       else if (k === "f") fit();
@@ -1869,7 +1810,7 @@ export default function FrameEditor() {
           {/* No overflow-x here: the strip collapses its own tail into an overflow flyout, and a scroll
               container would hide the tail again with no affordance, which is the bug it just fixed. */}
           <div className="h-[50px] shrink-0 flex items-center gap-1.5 px-2.5 border-b hairline overflow-hidden">
-          <ToolStrip groups={MODE_GROUPS[mode] ?? MODE_GROUPS.objects} tool={st.tool}
+          <ToolStrip groups={groupsForMode(mode)} tool={st.tool}
             modeIcon={MODE_ICON[mode]} modeLabel={MODES.find((m) => m.key === mode)?.label}
             onSelect={(t) => dispatch({ t: "tool", tool: t as Tool })}
             options={

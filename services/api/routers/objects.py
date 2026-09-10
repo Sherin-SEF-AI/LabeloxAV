@@ -1180,3 +1180,112 @@ async def classify_object(payload: ClassifyIn, db: AsyncSession = Depends(db_ses
             raise HTTPException(503, "GPU busy; auto-classify unavailable right now") from exc
         raise
     return {"predictions": preds}
+
+
+class DescribeIn(BaseModel):
+    phrase: str
+    class_id: int | None = None
+    max_proposals: int | None = None
+
+
+@router.post("/frames/{frame_id}/describe-label",
+             dependencies=[Depends(require_role("annotator"))])
+async def describe_label(frame_id: UUID, payload: DescribeIn, db: AsyncSession = Depends(db_session)):
+    """Propose objects on one frame from a phrase, for the things the ontology has no word for.
+
+    Proposals only. Nothing is written here, because the point of describing an object is that a person is
+    looking at it: they see what the phrase matched, at what confidence, and commit the ones that are
+    right. Committing goes through the ordinary object create with `source='described'`.
+
+    Yields the card to training exactly as `/api/segment` does. Loading an open-vocabulary detector and a
+    segmenter on top of a running training job would OOM and kill a run measured in hours.
+    """
+    from services.autolabel.describe import normalize_phrase, propose
+    from services.training.gpu_lease import gpu_busy_detail
+
+    text = normalize_phrase(payload.phrase)
+    if not text:
+        raise HTTPException(400, "a phrase is required; describe what you can see in a few words")
+
+    busy = await gpu_busy_detail(db)
+    if busy:
+        raise HTTPException(503, busy)
+
+    frame = await db.get(Frame, frame_id)
+    if frame is None:
+        raise HTTPException(404, "frame not found")
+    buf = np.frombuffer(get_object_store().get_bytes(frame.img_uri), dtype=np.uint8)
+    img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+    if img is None:
+        raise HTTPException(500, "failed to decode frame image")
+
+    import asyncio
+
+    try:
+        kwargs = {"max_proposals": payload.max_proposals} if payload.max_proposals else {}
+        props = await asyncio.to_thread(propose, img, text, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("describe.failed", frame_id=str(frame_id), phrase=text)
+        detail = segment_failure_detail(exc, gpu_busy=bool(await gpu_busy_detail(db)))
+        if detail is None:
+            raise
+        raise HTTPException(503, detail) from exc
+
+    return {
+        "frame_id": str(frame_id), "phrase": text, "class_id": payload.class_id,
+        "proposals": [{"bbox": p.bbox, "conf": round(p.conf, 4), "polygons": p.polygons}
+                      for p in props],
+        # Said out loud rather than implied: an open-vocabulary detector finds what it is asked for, so
+        # a low-confidence proposal is the model complying with the prompt, not evidence of an object.
+        "note": ("these are proposals from the phrase, not detections of a known class; the confidence "
+                 "is how well the phrase matched, and an open-vocabulary model will always find "
+                 "something for a phrase"),
+    }
+
+
+@router.get("/frames/{frame_id}/next-object",
+            dependencies=[Depends(require_role("annotator"))])
+async def next_object(frame_id: UUID, limit: int = 5, db: AsyncSession = Depends(db_session)):
+    """Which unconfirmed object on this frame is worth a person's attention next, and why.
+
+    The order a frame's objects are drawn in is the order the machine happened to emit them, which has
+    nothing to do with which one a person should look at. This ranks the frame's own unconfirmed objects
+    by the active-learning value the review queue already uses, so the same judgement that decides which
+    frames to review decides where to start inside one.
+
+    Track continuity is added on top: an object whose track was corrected on the previous frame is likely
+    wrong here too, and it is the cheapest correction to make while the previous one is still in mind.
+    """
+    from services.activelearn.selector import score_candidates
+
+    frame = await db.get(Frame, frame_id)
+    if frame is None:
+        raise HTTPException(404, "frame not found")
+
+    ranked = await score_candidates(db, session_id=str(frame.session_id))
+    here = [r for r in ranked if r["frame_id"] == str(frame_id)]
+
+    # Tracks a person already touched on the frame before this one, in capture order on the same camera.
+    prev = (await db.execute(
+        select(Frame.frame_id).where(Frame.session_id == frame.session_id,
+                                     Frame.cam_id == frame.cam_id, Frame.ts_ns < frame.ts_ns)
+        .order_by(Frame.ts_ns.desc()).limit(1))).scalar_one_or_none()
+    touched: set[str] = set()
+    if prev is not None:
+        rows = (await db.execute(
+            select(Object.track_id).where(Object.frame_id == prev, Object.source == "human",
+                                          Object.track_id.isnot(None)))).scalars().all()
+        touched = {str(t) for t in rows}
+
+    for r in here:
+        r["continues_corrected_track"] = bool(r.get("track_id") and str(r["track_id"]) in touched)
+        # A modest, stated bump rather than a re-ranking: continuity is a real signal and a weak one
+        # beside uncertainty, and burying the value under it would hide why an object was chosen.
+        r["value"] = round(float(r["value"]) * (1.25 if r["continues_corrected_track"] else 1.0), 6)
+    here.sort(key=lambda r: -r["value"])
+
+    return {"frame_id": str(frame_id), "n_candidates": len(here),
+            "previous_frame_id": str(prev) if prev else None,
+            "next": here[: max(1, min(limit, 25))],
+            "reason": (None if here else
+                       "nothing on this frame is unconfirmed, so there is no next object to go to")}

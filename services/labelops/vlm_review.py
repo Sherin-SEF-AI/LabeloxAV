@@ -449,13 +449,19 @@ async def judge_agreement(db: AsyncSession, *, judge: str = JUDGE,
 
 async def judged_precision(db: AsyncSession, batch_id: str, *, confidence: float = 0.95,
                            model_version: str | None = None,
-                           agreement_batch_id: str | None = None) -> dict:
+                           agreement_batch_id: str | None = None,
+                           judge: str = JUDGE) -> dict:
     """Precision from machine verdicts, with the judge's own error corrected for where it can be measured.
 
     Returns both numbers on purpose. `raw` is what the judge said, which is what a naive implementation
     would have reported as precision; `corrected` is that rate inverted through the judge's measured
     sensitivity and specificity. When nobody has adjudicated enough for those to exist, `corrected` is null
     and `caveat` says why, rather than quietly falling back to the raw number.
+
+    `judge` selects which judge's verdicts to read. The per-crop judge and the tube judge write under
+    different names against the same objects on purpose, so the two can be compared rather than one
+    overwriting the other; a caller that does not say which one it means gets the per-crop judge, which is
+    what every existing caller meant.
 
     The judge is measured on this same batch by default, and that default is a statistical claim rather
     than a convenience. A judge's sensitivity and specificity are properties of the population it is
@@ -471,7 +477,7 @@ async def judged_precision(db: AsyncSession, batch_id: str, *, confidence: float
                 MachineVerdict.detail)
          .join(Object, Object.object_id == MachineVerdict.object_id)
          .join(OntologyClass, OntologyClass.id == Object.class_id)
-         .where(MachineVerdict.batch_id == batch_id, MachineVerdict.judge == JUDGE))
+         .where(MachineVerdict.batch_id == batch_id, MachineVerdict.judge == judge))
     if model_version:
         q = q.where(MachineVerdict.model_version == model_version)
 
@@ -511,7 +517,7 @@ async def judged_precision(db: AsyncSession, batch_id: str, *, confidence: float
     if judge_model is None:
         judges = [r[0] for r in (await db.execute(
             select(MachineVerdict.model_version)
-            .where(MachineVerdict.batch_id == batch_id, MachineVerdict.judge == JUDGE)
+            .where(MachineVerdict.batch_id == batch_id, MachineVerdict.judge == judge)
             .distinct())).all()]
         judge_model = judges[0] if len(judges) == 1 else None
 
@@ -575,3 +581,170 @@ def verdicts_to_jsonl(rows: list[MachineVerdict]) -> str:
         "proposed_class_id": r.proposed_class_id, "confidence": r.confidence,
         "detail": r.detail, "batch_id": r.batch_id,
     }) for r in rows)
+
+
+# The tube judge. A track is one object over many frames, and judging its crops one at a time asks the
+# model a question it cannot answer well: a single blurred crop of a distant rider is genuinely ambiguous,
+# and the judge abstains or guesses. The same object seen across eight frames of its track usually is not
+# ambiguous, because one clear view settles it.
+TUBE_JUDGE = "vlm_tube"
+TUBE_BATCH_PREFIX = "tube"
+# Crops per contact sheet. Enough views to resolve an ambiguous one, few enough to stay inside a vision
+# model's useful attention and one request's image budget.
+TUBE_SHEET_MAX = 8
+TUBE_SHEET_COLS = 4
+TUBE_CROP_PX = 224
+
+
+def build_contact_sheet(crops: list, *, cols: int = TUBE_SHEET_COLS, cell: int = TUBE_CROP_PX):
+    """Tile a track's crops into one image, in track order, left to right and top to bottom.
+
+    One image rather than several, because the question is about the object and not about any one frame,
+    and a model given eight separate images answers eight times. Each crop is letterboxed rather than
+    stretched: an aspect ratio is evidence about what a thing is, and a squashed motorcycle looks like a
+    different vehicle.
+    """
+    import cv2 as _cv2
+    import numpy as _np
+
+    kept = [c for c in crops if c is not None and getattr(c, "size", 0)]
+    if not kept:
+        return None
+    cols = max(1, min(cols, len(kept)))
+    rows = (len(kept) + cols - 1) // cols
+    sheet = _np.zeros((rows * cell, cols * cell, 3), dtype=_np.uint8)
+    for i, crop in enumerate(kept):
+        h, w = crop.shape[:2]
+        scale = min(cell / max(w, 1), cell / max(h, 1))
+        rw, rh = max(1, int(w * scale)), max(1, int(h * scale))
+        resized = _cv2.resize(crop, (rw, rh), interpolation=_cv2.INTER_AREA)
+        r, c = divmod(i, cols)
+        y0 = r * cell + (cell - rh) // 2
+        x0 = c * cell + (cell - rw) // 2
+        sheet[y0:y0 + rh, x0:x0 + rw] = resized
+    return sheet
+
+
+def sample_track_objects(objects: list, *, n: int = TUBE_SHEET_MAX) -> list:
+    """Up to `n` objects spread evenly across a track, in order.
+
+    Evenly rather than the first n, because the first frames of a track are the ones where the object is
+    smallest and furthest away, and a sheet made of those is the hardest possible version of the question.
+    """
+    if len(objects) <= n:
+        return list(objects)
+    step = len(objects) / float(n)
+    return [objects[min(len(objects) - 1, int(i * step))] for i in range(n)]
+
+
+async def judge_tracks(db: AsyncSession, track_ids: list, *, client=None,
+                       model_version: str | None = None, skip_judged: bool = True) -> dict:
+    """Judge each class group within a track from a contact sheet of its crops.
+
+    **Per class group, not per track, because a track here is not one object.** 9,982 of this corpus's
+    11,288 tracks carry objects of more than one class, and the largest of them holds 147 objects across
+    18 classes on 147 different frames. A first version of this took the first object's class as the
+    track's class and stamped that one verdict on every object of the track; on 88% of tracks that means
+    stamping a verdict about sedans onto riders, pedestrians and traffic signs. Grouping by class is
+    correct whether the track is a clean tube or a tracker failure, and it makes the failure visible: the
+    verdict detail carries how many classes the track spans.
+
+    The verdict lands on every object of its group, which is what makes it usable by `judged_precision`,
+    which counts objects. `judge='vlm_tube'` keeps it apart from the per-crop judge in the uniqueness key,
+    so an object can carry both and the two can be compared rather than one overwriting the other.
+
+    A `track_event` is written beside each verdict with the evidence, because a verdict with no trace of
+    what was looked at cannot be argued with later.
+    """
+    import uuid as _uuid
+
+    from db.models import Frame, Track, TrackEvent
+    from services.autolabel.ontology import get_ontology
+    from services.llm.router import make_vlm_client
+
+    settings = get_settings()
+    onto = get_ontology()
+    client = client or make_vlm_client(settings)
+    provider = getattr(settings.models.vlm, "vision_provider", "ollama")
+    model_version = model_version or _model_version_for(settings, provider)
+    margin = settings.models.vlm.crop_margin
+
+    out = {"tracks": 0, "groups": 0, "judged": 0, "skipped": 0, "unreadable": 0, "failed": 0,
+           "verdicts": dict.fromkeys(VERDICTS, 0), "objects_stamped": 0, "mixed_class_tracks": 0}
+    for tid in track_ids:
+        tid = _uuid.UUID(str(tid))
+        out["tracks"] += 1
+        # The frame timestamps come back with the objects: an Object carries no ts_ns of its own, and the
+        # event's span is in timestamps.
+        rows = (await db.execute(
+            select(Object, Frame.ts_ns).join(Frame, Frame.frame_id == Object.frame_id)
+            .where(Object.track_id == tid).order_by(Frame.ts_ns))).all()
+        if not rows:
+            out["skipped"] += 1
+            continue
+        ts_of = {r[0].object_id: int(r[1]) for r in rows}
+        by_class: dict[int, list] = {}
+        for obj, _ts in rows:
+            by_class.setdefault(int(obj.class_id), []).append(obj)
+        if len(by_class) > 1:
+            out["mixed_class_tracks"] += 1
+
+        track = await db.get(Track, tid)
+        for class_id, objects in by_class.items():
+            out["groups"] += 1
+            batch_id = f"{TUBE_BATCH_PREFIX}-{tid.hex[:8]}-c{class_id}"
+            if skip_judged:
+                seen = (await db.execute(select(MachineVerdict.verdict_id).where(
+                    MachineVerdict.judge == TUBE_JUDGE, MachineVerdict.batch_id == batch_id,
+                    MachineVerdict.model_version == model_version).limit(1))).first()
+                if seen is not None:
+                    out["skipped"] += 1
+                    continue
+
+            sample = sample_track_objects(objects)
+            crops = [await _load_crop(db, o, margin) for o in sample]
+            sheet = build_contact_sheet(crops)
+            if sheet is None:
+                out["unreadable"] += 1
+                continue
+
+            given = onto.by_id(class_id).name
+            reply = _ask(client, sheet, given, _alternatives(onto, class_id),
+                         model=getattr(settings.models.vlm, "judge_tag", None))
+            if reply is None:
+                # The judge was never reached. Not an abstention, and not recorded as one.
+                out["failed"] += 1
+                continue
+            parsed = parse_judge_reply(reply, onto, given_class=given)
+            out["verdicts"][parsed["verdict"]] = out["verdicts"].get(parsed["verdict"], 0) + 1
+            out["judged"] += 1
+
+            detail = {**(parsed.get("detail") or {}), "tube": True,
+                      "crops_shown": len([c for c in crops if c is not None]),
+                      "group_objects": len(objects), "track_objects": len(rows),
+                      # A track spanning several classes is a tracker failure worth seeing, so the count
+                      # rides on the verdict rather than being discovered later by whoever wonders.
+                      "track_classes": len(by_class),
+                      "reason": parsed.get("reason")}
+            now = now_ns()
+            for o in objects:
+                await db.merge(MachineVerdict(
+                    object_id=o.object_id, judge=TUBE_JUDGE, provider=provider,
+                    model_version=model_version, verdict=parsed["verdict"],
+                    proposed_class_id=parsed.get("proposed_class_id"),
+                    confidence=parsed.get("confidence"), detail=detail, batch_id=batch_id, ts_ns=now))
+                out["objects_stamped"] += 1
+
+            if track is not None:
+                db.add(TrackEvent(
+                    track_id=tid, event_type="tube_judged",
+                    start_frame_id=objects[0].frame_id, end_frame_id=objects[-1].frame_id,
+                    start_ts_ns=ts_of[objects[0].object_id], end_ts_ns=ts_of[objects[-1].object_id],
+                    source="vlm", state="proposed", confidence=parsed.get("confidence"),
+                    evidence={"verdict": parsed["verdict"], "given_class": given,
+                              "proposed_class_id": parsed.get("proposed_class_id"),
+                              "batch_id": batch_id, **detail}))
+            await db.commit()
+
+    log.info("vlm_review.tubes_judged", **{k: v for k, v in out.items() if k != "verdicts"})
+    return out

@@ -15,7 +15,13 @@
 // Missing keys fall through to English rather than rendering a key. A half-translated interface should read
 // as partly English, not as `nav.review.queue`.
 
+import { EN, type Dict } from "./locales/en";
+import { HI } from "./locales/hi";
+import { KN } from "./locales/kn";
+import { TA } from "./locales/ta";
+
 export type Locale = "en" | "hi" | "kn" | "ta";
+export type { Dict };
 
 export const LOCALES: { code: Locale; label: string; native: string }[] = [
   { code: "en", label: "English", native: "English" },
@@ -26,152 +32,9 @@ export const LOCALES: { code: Locale; label: string; native: string }[] = [
 
 const KEY = "lbx_locale";
 
-// Only the strings an annotator actually reads while working are translated. The governance and platform
-// surfaces stay English on purpose: they are read by operators who configured the deployment, and a
-// half-translated compliance page is worse than an English one because it invites the reader to trust a
-// phrasing nobody reviewed for legal meaning.
-type Dict = Record<string, string>;
-
-const EN: Dict = {
-  "action.accept": "accept",
-  "action.reject": "reject",
-  "action.reclassify": "reclassify",
-  "action.skip": "skip",
-  "action.undo": "undo",
-  "action.save": "save",
-  "action.cancel": "cancel",
-  "action.confirm": "confirm frame",
-  "action.next": "next",
-  "action.previous": "previous",
-  "review.queue": "review queue",
-  "review.rapid": "rapid review",
-  "review.empty": "nothing in the queue",
-  "review.decided": "decided",
-  "editor.objects": "objects",
-  "editor.lanes": "lanes",
-  "editor.pose": "pose",
-  "editor.review": "review",
-  "editor.class": "class",
-  "editor.confidence": "confidence",
-  "editor.saved": "saved",
-  "editor.unsaved": "unsaved changes",
-  "editor.pick_label": "pick a label first",
-  "nav.home": "home",
-  "nav.activity": "activity",
-  "nav.profile": "your account",
-  "notify.empty": "nothing yet",
-  "notify.mark_all": "mark all read",
-  "onboarding.welcome": "Welcome to LabeloxAV",
-  "onboarding.skip": "skip the tour",
-  "onboarding.next": "next",
-  "onboarding.done": "start working",
-};
-
-const HI: Dict = {
-  "action.accept": "स्वीकार करें",
-  "action.reject": "अस्वीकार करें",
-  "action.reclassify": "वर्ग बदलें",
-  "action.skip": "छोड़ें",
-  "action.undo": "पूर्ववत करें",
-  "action.save": "सहेजें",
-  "action.cancel": "रद्द करें",
-  "action.confirm": "फ़्रेम की पुष्टि करें",
-  "action.next": "अगला",
-  "action.previous": "पिछला",
-  "review.queue": "समीक्षा सूची",
-  "review.rapid": "त्वरित समीक्षा",
-  "review.empty": "सूची में कुछ नहीं है",
-  "review.decided": "निर्णय लिए गए",
-  "editor.objects": "वस्तुएँ",
-  "editor.lanes": "लेन",
-  "editor.pose": "मुद्रा",
-  "editor.review": "समीक्षा",
-  "editor.class": "वर्ग",
-  "editor.confidence": "विश्वास",
-  "editor.saved": "सहेजा गया",
-  "editor.unsaved": "असहेजे बदलाव",
-  "editor.pick_label": "पहले एक लेबल चुनें",
-  "nav.home": "होम",
-  "nav.activity": "गतिविधि",
-  "nav.profile": "आपका खाता",
-  "notify.empty": "अभी कुछ नहीं",
-  "notify.mark_all": "सभी पढ़ा हुआ चिह्नित करें",
-  "onboarding.welcome": "LabeloxAV में आपका स्वागत है",
-  "onboarding.skip": "परिचय छोड़ें",
-  "onboarding.next": "अगला",
-  "onboarding.done": "काम शुरू करें",
-};
-
-const KN: Dict = {
-  "action.accept": "ಸ್ವೀಕರಿಸಿ",
-  "action.reject": "ತಿರಸ್ಕರಿಸಿ",
-  "action.reclassify": "ವರ್ಗ ಬದಲಿಸಿ",
-  "action.skip": "ಬಿಟ್ಟುಬಿಡಿ",
-  "action.undo": "ರದ್ದುಗೊಳಿಸಿ",
-  "action.save": "ಉಳಿಸಿ",
-  "action.cancel": "ರದ್ದು",
-  "action.confirm": "ಫ್ರೇಮ್ ದೃಢೀಕರಿಸಿ",
-  "action.next": "ಮುಂದೆ",
-  "action.previous": "ಹಿಂದೆ",
-  "review.queue": "ಪರಿಶೀಲನಾ ಸಾಲು",
-  "review.rapid": "ತ್ವರಿತ ಪರಿಶೀಲನೆ",
-  "review.empty": "ಸಾಲಿನಲ್ಲಿ ಏನೂ ಇಲ್ಲ",
-  "review.decided": "ನಿರ್ಧರಿಸಲಾಗಿದೆ",
-  "editor.objects": "ವಸ್ತುಗಳು",
-  "editor.lanes": "ಪಥಗಳು",
-  "editor.pose": "ಭಂಗಿ",
-  "editor.review": "ಪರಿಶೀಲನೆ",
-  "editor.class": "ವರ್ಗ",
-  "editor.confidence": "ವಿಶ್ವಾಸ",
-  "editor.saved": "ಉಳಿಸಲಾಗಿದೆ",
-  "editor.unsaved": "ಉಳಿಸದ ಬದಲಾವಣೆಗಳು",
-  "editor.pick_label": "ಮೊದಲು ಲೇಬಲ್ ಆಯ್ಕೆಮಾಡಿ",
-  "nav.home": "ಮುಖಪುಟ",
-  "nav.activity": "ಚಟುವಟಿಕೆ",
-  "nav.profile": "ನಿಮ್ಮ ಖಾತೆ",
-  "notify.empty": "ಇನ್ನೂ ಏನೂ ಇಲ್ಲ",
-  "notify.mark_all": "ಎಲ್ಲವನ್ನೂ ಓದಿದೆ ಎಂದು ಗುರುತಿಸಿ",
-  "onboarding.welcome": "LabeloxAV ಗೆ ಸ್ವಾಗತ",
-  "onboarding.skip": "ಪರಿಚಯ ಬಿಟ್ಟುಬಿಡಿ",
-  "onboarding.next": "ಮುಂದೆ",
-  "onboarding.done": "ಕೆಲಸ ಪ್ರಾರಂಭಿಸಿ",
-};
-
-const TA: Dict = {
-  "action.accept": "ஏற்கவும்",
-  "action.reject": "நிராகரிக்கவும்",
-  "action.reclassify": "வகை மாற்று",
-  "action.skip": "தவிர்",
-  "action.undo": "செயல்தவிர்",
-  "action.save": "சேமி",
-  "action.cancel": "ரத்து",
-  "action.confirm": "சட்டகத்தை உறுதிப்படுத்து",
-  "action.next": "அடுத்து",
-  "action.previous": "முந்தைய",
-  "review.queue": "மதிப்பாய்வு வரிசை",
-  "review.rapid": "விரைவு மதிப்பாய்வு",
-  "review.empty": "வரிசையில் எதுவும் இல்லை",
-  "review.decided": "முடிவு செய்யப்பட்டது",
-  "editor.objects": "பொருட்கள்",
-  "editor.lanes": "பாதைகள்",
-  "editor.pose": "நிலை",
-  "editor.review": "மதிப்பாய்வு",
-  "editor.class": "வகை",
-  "editor.confidence": "நம்பிக்கை",
-  "editor.saved": "சேமிக்கப்பட்டது",
-  "editor.unsaved": "சேமிக்கப்படாத மாற்றங்கள்",
-  "editor.pick_label": "முதலில் ஒரு லேபிளைத் தேர்ந்தெடுக்கவும்",
-  "nav.home": "முகப்பு",
-  "nav.activity": "செயல்பாடு",
-  "nav.profile": "உங்கள் கணக்கு",
-  "notify.empty": "இன்னும் எதுவும் இல்லை",
-  "notify.mark_all": "அனைத்தையும் படித்ததாகக் குறி",
-  "onboarding.welcome": "LabeloxAV க்கு வரவேற்கிறோம்",
-  "onboarding.skip": "அறிமுகத்தைத் தவிர்",
-  "onboarding.next": "அடுத்து",
-  "onboarding.done": "வேலையைத் தொடங்கு",
-};
-
+// The dictionaries live in lib/locales/*.ts, one file per language. They were inline here and the file
+// grew by four entries every time a single string was translated, which made every review of this module
+// a review of four unrelated languages.
 const DICTS: Record<Locale, Dict> = { en: EN, hi: HI, kn: KN, ta: TA };
 
 let _locale: Locale | null = null;
@@ -200,10 +63,30 @@ export function setLocale(locale: Locale): void {
   }
 }
 
-/** Translate a key. Falls through to English, then to the key, so nothing ever renders blank. */
-export function t(key: string, fallback?: string): string {
+/**
+ * Translate a key, substituting `{name}` placeholders from `vars`.
+ *
+ * Falls through to English, then to the supplied fallback, then to the key, so nothing ever renders
+ * blank and a partly translated interface reads as partly English rather than as dotted keys.
+ *
+ * Interpolation is here rather than at the call site because the parts of a sentence do not sit in the
+ * same order in every language: "{n} objects" is "{n} वस्तुएँ" in Hindi but a template assembled by
+ * concatenation in the component would force English word order onto all four. A placeholder the
+ * translator can move is the whole point.
+ */
+export function t(key: string, fallback?: string, vars?: Record<string, string | number>): string {
   const dict = DICTS[getLocale()];
-  return dict[key] ?? EN[key] ?? fallback ?? key;
+  const raw = dict[key] ?? EN[key] ?? fallback ?? key;
+  if (!vars) return raw;
+  return raw.replace(/\{(\w+)\}/g, (whole, name) =>
+    // An unknown placeholder is left as written rather than blanked: a visible {count} in the interface
+    // names the bug, where an empty gap reads as a missing value in the data.
+    (name in vars ? String(vars[name]) : whole));
+}
+
+/** The placeholders a key expects, for the test that keeps translations from dropping one. */
+export function placeholdersOf(text: string): string[] {
+  return [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 }
 
 /** Every key, for the test that keeps the dictionaries from drifting apart. */

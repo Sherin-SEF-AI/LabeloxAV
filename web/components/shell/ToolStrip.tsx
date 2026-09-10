@@ -5,6 +5,13 @@ import { createPortal } from "react-dom";
 import type { ToolGroup } from "@/lib/editor/registry";
 import Icon, { TOOL_ICON } from "@/components/shell/Icon";
 import { fitCount } from "@/lib/editor/toolStripFit";
+import { t as translate } from "@/lib/i18n";
+
+// Labels come from the dictionary, keyed by the registry's own tool and group keys, and fall back to the
+// registry's English label when a key has no translation yet. That fallback is the point: adding a tool
+// must not require translating it into four languages before it can ship.
+const toolLabel = (key: string, fallback: string) => translate(`tool.${key}`, fallback);
+const groupLabel = (key: string, fallback: string) => translate(`group.${key}`, fallback);
 
 // The contextual tool strip. Renders the current mode (icon + label) then one button per GROUP, not per
 // tool: a single-tool group is a direct button, a multi-tool group is one button showing the active tool
@@ -110,16 +117,19 @@ export default function ToolStrip({ groups, tool, onSelect, options, modeIcon, m
               className="relative shrink-0 flex items-center">
               <button
                 onClick={() => { onSelect(shown.key); setOpen(null); }}
-                title={`${g.label} (${shown.hotkey})`}
+                title={`${groupLabel(g.key, g.label)} (${shown.hotkey})`}
                 className={`flex items-center gap-1.5 h-8 pl-2.5 ${single ? "pr-2.5" : "pr-1.5"} rounded-md border ${on ? "border-accent/40 bg-accent/10 text-accent" : "border-transparent text-ink-2 hover:bg-line/40"}`}>
                 <span className="flex"><Icon name={TOOL_ICON[shown.key] ?? "dot"} size={16} /></span>
-                <span className="hidden lg:inline font-body text-[12px]">{single ? g.tools[0].label : active ? active.label : g.label}</span>
+                <span className="hidden lg:inline font-body text-[12px]">{
+                  single ? toolLabel(g.tools[0].key, g.tools[0].label)
+                    : active ? toolLabel(active.key, active.label)
+                      : groupLabel(g.key, g.label)}</span>
                 <span className={`hidden lg:inline-block font-mono text-[9px] leading-none px-1 py-0.5 rounded border ${on ? "border-accent/30" : "border-line text-ink-3"}`}>{shown.hotkey}</span>
               </button>
               {!single && (
                 <button
-                  aria-label={`${g.label} tools`}
-                  title={`${g.label} tools`}
+                  aria-label={`${groupLabel(g.key, g.label)} tools`}
+                  title={`${groupLabel(g.key, g.label)} tools`}
                   onClick={(e) => openAt(g.key, e.currentTarget.parentElement as HTMLElement)}
                   className={`flex items-center h-8 pl-0.5 pr-1 rounded-md ${open?.key === g.key ? "text-accent" : "text-ink-3 hover:text-ink-2"}`}>
                   <Icon name="chevD" size={13} />
@@ -131,7 +141,7 @@ export default function ToolStrip({ groups, tool, onSelect, options, modeIcon, m
         {hidden.length > 0 && (
           <button
             aria-label={`${hidden.length} more tools`}
-            title={`${hidden.length} more tools: ${hidden.map((g) => g.label).join(", ")}`}
+            title={`${hidden.length} more tools: ${hidden.map((g) => groupLabel(g.key, g.label)).join(", ")}`}
             onClick={(e) => openAt(OVERFLOW_KEY, e.currentTarget)}
             // Accented when the active tool lives in here, so a narrow window never shows a strip with no
             // tool selected anywhere while one plainly is.
@@ -154,7 +164,7 @@ export default function ToolStrip({ groups, tool, onSelect, options, modeIcon, m
               <button key={t.key} onClick={() => { onSelect(t.key); setOpen(null); }}
                 className={`flex w-full items-center gap-2 px-2 py-1.5 rounded ${t.key === tool ? "text-accent bg-accent/10" : "text-ink-2 hover:bg-line/50"}`}>
                 <span className="flex"><Icon name={TOOL_ICON[t.key] ?? "dot"} size={15} /></span>
-                <span className="flex-1 text-left font-body text-[12px]">{t.label}</span>
+                <span className="flex-1 text-left font-body text-[12px]">{toolLabel(t.key, t.label)}</span>
                 <span className="font-mono text-[10px] text-ink-3 min-w-[14px] text-center px-1 py-0.5 rounded border border-line bg-bg-2">{t.hotkey}</span>
               </button>
             ))}

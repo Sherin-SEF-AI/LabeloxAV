@@ -1483,6 +1483,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/frames/{frame_id}/depth-order",
                           params=None, json_body=None)
 
+    def post_frames_by_frame_id_describe_label(self, frame_id: str, body: Any = None) -> Any:
+        """Describe Label"""
+        return self._call("POST", f"/api/frames/{frame_id}/describe-label",
+                          params=None, json_body=body)
+
     def get_frames_by_frame_id_drivable(self, frame_id: str) -> Any:
         """Get Drivable"""
         return self._call("GET", f"/api/frames/{frame_id}/drivable",
@@ -1547,6 +1552,11 @@ class LabeloxClient:
         """Lint Frame Ep"""
         return self._call("POST", f"/api/frames/{frame_id}/lint",
                           params=None, json_body=body)
+
+    def get_frames_by_frame_id_next_object(self, frame_id: str, limit: int | None = 5) -> Any:
+        """Next Object"""
+        return self._call("GET", f"/api/frames/{frame_id}/next-object",
+                          params={"limit": limit}, json_body=None)
 
     def get_frames_by_frame_id_objects(self, frame_id: str, job_id: Any | None = None, limit: int | None = 2000) -> Any:
         """Frame Objects"""
@@ -3383,6 +3393,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/tracklets/{track_id}/suggest-keyframes",
                           params={"budget": budget}, json_body=None)
 
+    def post_tracks_judge_tubes(self, body: Any = None) -> Any:
+        """Judge Tubes"""
+        return self._call("POST", f"/api/tracks/judge-tubes",
+                          params=None, json_body=body)
+
     def post_tracks_retrack(self, session_id: str) -> Any:
         """Retrack"""
         return self._call("POST", f"/api/tracks/retrack",
@@ -3477,6 +3492,11 @@ class LabeloxClient:
         """Split Track Ep"""
         return self._call("POST", f"/api/tracks/{track_id}/split",
                           params=None, json_body=body)
+
+    def get_tracks_by_track_id_tube_verdict(self, track_id: str) -> Any:
+        """Tube Verdict"""
+        return self._call("GET", f"/api/tracks/{track_id}/tube-verdict",
+                          params=None, json_body=None)
 
     def get_training(self, limit: int | None = 50) -> Any:
         """List Jobs"""
@@ -3716,4 +3736,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 726 routes generated from the server schema.
+# 730 routes generated from the server schema.
