@@ -41,6 +41,7 @@ from services.export.adapter_scene import (
     write_hdmap,
     write_lanes,
     write_masks,
+    write_occupancy,
     write_panoptic,
 )
 from services.export.adapter_yolo import write_yolo
@@ -308,6 +309,7 @@ _SCENE_WRITERS = {
     "drivable": lambda fids, store, d, commit: write_drivable(fids, store, d / "drivable"),
     "hdmap": lambda fids, store, d, commit: write_hdmap(d / "hdmap", commit),
     "panoptic": lambda fids, store, d, commit: write_panoptic(fids, store, d / "panoptic"),
+    "occupancy": lambda fids, store, d, commit: write_occupancy(fids, store, d / "occupancy"),
 }
 
 # Parquet is always written (lossless provenance) and so is accepted but never dispatched.

@@ -2,6 +2,8 @@ import type {
   AutonomyState,
   EgoCoverage,
   EgoTrajectory,
+  OccupancyGridRow,
+  OccupancyVoxels,
   SettlementLotRow,
   AttrCoverage,
   AttrQueue,
@@ -489,6 +491,13 @@ export const api = {
     get<EgoTrajectory>(`/api/ego/sessions/${sessionId}/pose?limit=${limit}`),
   egoBuildPose: (sessionId: string, body: { cam_id?: string; limit?: number } = {}) =>
     post<Record<string, unknown>>(`/api/ego/sessions/${sessionId}/pose`, body),
+  occupancyList: (sessionId: string, limit = 500) =>
+    get<{ session_id: string; n: number; grids: OccupancyGridRow[] }>(
+      `/api/occupancy/sessions/${sessionId}?limit=${limit}`),
+  occupancyVoxels: (gridId: string, maxVoxels = 60000) =>
+    get<OccupancyVoxels>(`/api/occupancy/${gridId}/voxels?max_voxels=${maxVoxels}`),
+  occupancyBuild: (sessionId: string, body: { limit?: number; voxel_m?: number } = {}) =>
+    post<Record<string, unknown>>(`/api/occupancy/sessions/${sessionId}/build`, body),
   egoLiftTrack3d: (trackId: string, dryRun = false) =>
     post<Record<string, unknown>>(`/api/ego/tracks/${trackId}/lift3d?dry_run=${dryRun}`, {}),
   lidarLiftFrame: (frameId: string) =>

@@ -825,3 +825,121 @@ each other: the `db` fixtures share one database and seed overlapping rows, so c
 and 16 failures where a single clean run of the same tree passed. Three more failures came from running
 the tube judge alongside a suite containing wall-clock staleness assertions. Neither was a regression, and
 both are the kind of thing that costs an hour if it is not written down.
+
+---
+
+## WP7. Occupancy with scene flow, and annotate-once across the rig
+
+### The defect it fixes
+
+A cuboid list answers "which objects did the detector find". It has no answer for the space between them,
+and on an Indian road the space between them is where the sand pile, the handcart and the object the
+detector missed all are. "Is there anything in that lane" is not a question a list of found objects can
+answer, because the thing in the lane is exactly what was not found.
+
+The second half is time. A static grid cannot separate a parked car from one reversing toward the ego at
+the instant the frame was taken, and that difference is the whole of planning.
+
+### The grid, and the number that says whether to trust it
+
+Migration `0113_occupancy` stores one grid per session and instant: the packed voxels and their flow in
+the object store, the geometry to place them in the row. Sparse rather than dense, because a 160 by 120
+by 12 window is 230,400 cells and a road scene fills a few thousand; indices plus values is the same
+information an order of magnitude smaller, and the test asserts the ratio.
+
+`flow_voxels` is the field that decides whether the grid is worth anything. Each occupied voxel takes the
+velocity of the 3D track whose cuboid contains it; a voxel no track claims holds zero. Zero is the right
+value, because most of a road scene genuinely is static and inventing motion for unclaimed space would be
+worse than assuming none. But an assumed zero and a measured zero are different facts, and counting
+non-zero flow would conflate them: a parked car reads zero exactly as empty road does. So the count is of
+voxels a track spoke for, whatever it said, and a grid whose share is small carries a caveat in the run
+report rather than leaving the reader to divide two numbers.
+
+Placement needs a pose. Without one the grid sits in the ego frame of its own instant, `ego_pose_ts` is
+null, and a consumer stacking it against the next one can tell.
+
+### Annotate-once, exactly rather than inferred
+
+`propagate_object` derived a box in each other camera by lifting the source box's ground-contact pixel to
+the road plane and re-projecting. That works for something standing on the road and carries the flat-road
+assumption into every target view. When the object already has a lifted cuboid, the cuboid is projected
+instead: it is already a 3D extent, so this is exact geometry rather than an inference.
+
+Corners behind the camera are dropped rather than projected. A point behind the lens maps to a
+plausible-looking pixel on the wrong side of the image, and a hull that includes one is a box in the
+wrong place with nothing marking it wrong. A rejected cuboid is never projected at all, because a 3D box
+somebody looked at and called wrong would otherwise be multiplied into four views.
+
+### Measured
+
+Two sessions, 128 grids, about 20 seconds each:
+
+| | BDD100K | rig session |
+| --- | --- | --- |
+| grids built | 64 | 64 |
+| occupied voxels | 181,734 | 210,822 |
+| grids placed by an ego pose | 64 | 33 |
+
+The rig session places only half its grids because its poses were recovered on the camera with the most
+frames and its clouds were built on the frames of another, so half the timestamps have no pose to match.
+That is visible in the row rather than silently absorbed.
+
+**The flow field was entirely assumed zero on the first pass, and the fix was upstream.** There were no
+real `track_3d` rows in the corpus, so nothing could claim a voxel. Running WP4's track lifter over the
+973 cuboids that package created produced 38 real 3D tracks from 960 cuboids, and the rebuilt grids carry
+a real flow field:
+
+| BDD100K occupancy | first pass | after 38 tracks existed |
+| --- | --- | --- |
+| flow voxels | 0 | 17,273 |
+| share of occupied space with a track velocity | 0.0% | 9.5% |
+
+Nine and a half percent is a small number and it is the honest one: 38 tracks over 64 frames cover the
+vehicles and nothing else, and the rest of the occupied space is road surface, buildings and vegetation,
+which genuinely are static. The caveat fires below 5% and this is above it.
+
+### Three defects found by running it
+
+**The occupancy builder could not be re-run.** It used `merge`, which keys on the primary key, and every
+new row carries a fresh uuid, so rebuilding a session raised a unique violation on
+`(session_id, ts_ns, source)` instead of replacing the grids. It upserts on the natural key now. This was
+found the moment the grids had to be rebuilt, which is the moment a builder's re-runnability stops being
+hypothetical.
+
+**A wrong import had been silently disabling depth-based scale since WP4.**
+`services/intelligence/ego_pose.py` imported `load_cloud` from `ingest.normalize`, where it does not
+live, inside a `try/except` that returns None on any exception. So every ego-pose run reported
+`scaled_by_depth: 0`, and that number was read in the WP4 write-up as an absence of clouds when it
+actually meant the import failed. The same wrong import sat in the new occupancy builder, where it failed
+loudly because nothing swallowed it, which is how it was found at all.
+
+Both are fixed and the depth path is still unmeasured, for a reason worth stating rather than leaving as
+another zero. The only two sessions with pseudo-LiDAR clouds cannot exercise it: BDD100K has clouds but
+is a collection of unrelated clips, so odometry recovers a pose on 5 of 199 pairs and there is almost
+nothing to scale; the rig session has clouds built on one camera and its trajectory recovered on another,
+so no timestamp carries both. `scaled_by_depth` in every measurement so far should be read as unmeasured,
+not as zero, and it stays that way until a session has clouds and temporal continuity on one camera.
+
+**A metric height was computed and discarded** in the ground-projection path, left looking load-bearing
+in a function whose geometry is otherwise hard to follow. Removed.
+
+**And a test that failed whenever the suite was slow.** `tests/test_job_reaper.py` built its "fresh" and
+"dead" timestamps as module constants, evaluated at import. The staleness window is ten minutes, so on
+any suite run longer than that the fresh row had aged past the window by the time three tests read it,
+and they failed with nothing wrong. It cost three full runs here before it was recognised as a fixture
+rather than a regression, and a loaded CI machine is exactly where a suite takes longer than ten minutes.
+The timestamps are computed per call now, and the old form was reproduced to confirm the diagnosis: a
+row stamped thirteen minutes ago reads stale, the same row stamped now does not.
+
+Tests: `tests/test_occupancy4d.py` (22), `tests/test_migrations_roundtrip.py` extended over 0113 with a
+grid row present so the flow-within-occupied CHECK is exercised rather than merely declared.
+
+Two existing tests refused the new export format until it was classified and offered, which is what an
+exact-set assertion is for: `test_every_registered_format_is_classified` made the taxonomy decision
+explicit (derived, out only, no round trip), and `test_the_scene_formats_are_accepted_and_dispatchable`
+would not accept a writer registered without being validated. Both had caught the panoptic writer the
+same way when it was added.
+
+The full suite runs 3,376 passed, 6 skipped against `labeloxav_test`, on a 10 minute 30 second run that
+would have failed on the reaper fixture before it was fixed. The web suite runs 699 passed with
+`tsc --noEmit` clean.

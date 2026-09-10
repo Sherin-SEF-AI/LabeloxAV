@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { api, lidarCloudPoints, type Cuboid3D, type LidarCloud, type LidarPoints , humanizeError } from "@/lib/api";
-import type { EgoTrajectory, OntologyClass } from "@/lib/types";
+import type { EgoTrajectory, OccupancyGridRow, OccupancyVoxels, OntologyClass } from "@/lib/types";
 import type { ColorBy } from "@/components/lidar/PointCloudViewer";
 import PageShell from "@/components/shell/PageShell";
 import { useConfirm } from "@/components/ConfirmProvider";
@@ -37,6 +37,9 @@ export default function CuboidAnnotatePage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [trajectory, setTrajectory] = useState<EgoTrajectory | null>(null);
+  const [grids, setGrids] = useState<OccupancyGridRow[]>([]);
+  const [occ, setOcc] = useState<OccupancyVoxels | null>(null);
+  const [gridIdx, setGridIdx] = useState(0);
 
   useEffect(() => {
     api.ontology().then((o) => setClasses(o.classes)).catch(() => {});
@@ -60,6 +63,15 @@ export default function CuboidAnnotatePage() {
         setTrajectory(await api.egoSessionPose(sid.trim()));
       } catch {
         setTrajectory(null);
+      }
+      try {
+        const g = await api.occupancyList(sid.trim());
+        setGrids(g.grids);
+        setGridIdx(0);
+        setOcc(null);
+      } catch {
+        setGrids([]);
+        setOcc(null);
       }
     } catch (e) {
       setErr(humanizeError(e));
@@ -224,6 +236,36 @@ export default function CuboidAnnotatePage() {
           </div>
         )}
 
+        {/* The occupancy scrubber. A grid per instant, stepped in time, with the share of its flow field
+            that a track actually spoke for printed beside it: the rest is an assumed zero and an arrow
+            drawn from it would be confidence nobody has. */}
+        {grids.length > 0 && (
+          <div className="rounded border border-neutral-800 bg-neutral-950 p-2">
+            <div className="mb-1 text-[10px] uppercase text-neutral-500">
+              occupancy · {grids.length} grids
+            </div>
+            <input type="range" min={0} max={grids.length - 1} value={gridIdx} className="w-full"
+              aria-label="occupancy time"
+              onChange={(e) => {
+                const i = Number(e.target.value);
+                setGridIdx(i);
+                api.occupancyVoxels(grids[i].grid_id).then(setOcc).catch(() => setOcc(null));
+              }} />
+            <div className="text-[10px] text-neutral-400">
+              {grids[gridIdx]?.occupied.toLocaleString()} voxels ·{" "}
+              {grids[gridIdx]?.flow_share != null
+                ? `${((grids[gridIdx].flow_share ?? 0) * 100).toFixed(1)}% with a track velocity`
+                : "no flow recorded"}
+              {grids[gridIdx] && !grids[gridIdx].placed_by_pose && " · not placed by a pose"}
+            </div>
+            {occ?.truncated && (
+              <div className="text-[10px] text-warn">
+                showing {occ.n.toLocaleString()} of {occ.total.toLocaleString()} voxels
+              </div>
+            )}
+          </div>
+        )}
+
         {cloud && (
           <div className="flex gap-2">
             <button onClick={aiLift} disabled={busy}
@@ -305,6 +347,9 @@ export default function CuboidAnnotatePage() {
           <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-neutral-500">3D</div>
           {data && (
             <PointCloudViewer points={data.points} count={data.count} colorBy={colorBy}
+              occupancy={occ ? { voxels: occ.voxels, flow: occ.flow, origin: occ.origin,
+                                 voxelM: occ.voxel_m } : null}
+              flowShare={grids[gridIdx]?.flow_share ?? null}
               intensityRange={[data.intensityMin, data.intensityMax]} source={data.source} mode="perspective"
               cuboids={cuboids} selectedId={selectedId} onSelectCuboid={setSelectedId} />
           )}

@@ -2643,6 +2643,21 @@ class LabeloxClient:
         return self._call("GET", f"/api/objects/{object_id}/similar",
                           params={"limit": limit}, json_body=None)
 
+    def get_occupancy_sessions_by_session_id(self, session_id: str, limit: int | None = 500) -> Any:
+        """List Occupancy"""
+        return self._call("GET", f"/api/occupancy/sessions/{session_id}",
+                          params={"limit": limit}, json_body=None)
+
+    def post_occupancy_sessions_by_session_id_build(self, session_id: str, body: Any = None) -> Any:
+        """Build Occupancy"""
+        return self._call("POST", f"/api/occupancy/sessions/{session_id}/build",
+                          params=None, json_body=body)
+
+    def get_occupancy_by_grid_id_voxels(self, grid_id: str, max_voxels: int | None = 60000) -> Any:
+        """Occupancy Voxels"""
+        return self._call("GET", f"/api/occupancy/{grid_id}/voxels",
+                          params={"max_voxels": max_voxels}, json_body=None)
+
     def post_ocr_region(self, body: Any = None) -> Any:
         """Ocr Region"""
         return self._call("POST", f"/api/ocr/region",
@@ -3736,4 +3751,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 730 routes generated from the server schema.
+# 733 routes generated from the server schema.

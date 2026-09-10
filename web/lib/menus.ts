@@ -50,6 +50,10 @@ const EXPORT_FORMATS: [string, string][] = [
   // until adapter_scene existed.
   ["panoptic", "COCO panoptic"], ["lanes", "Lanes (CULane+)"],
   ["drivable", "Drivable (BDD)"], ["hdmap", "HD map (GeoJSON)"],
+  // 4D occupancy: the voxels and their scene flow, packed. Derived like the rest of this group, and the
+  // one whose manifest carries a caveat, because a flow field that is mostly an assumed zero is not the
+  // same deliverable as one tracks spoke for.
+  ["occupancy", "Occupancy 4D (voxels + flow)"],
 ];
 
 export const MENUS: Menu[] = [

@@ -511,3 +511,59 @@ def _load_npz(store: ObjectStore, uri: str | None):
     except Exception as exc:  # noqa: BLE001
         log.warning("export.panoptic.unreadable", uri=uri, error=str(exc)[:120])
         return None
+
+
+async def write_occupancy(frame_ids: list[str], store: ObjectStore, out_dir: Path) -> Path:
+    """4D occupancy grids for the exported frames: the packed voxels, their flow, and a manifest.
+
+    A derived layer, so it exports what was built rather than rebuilding it: the grid the corpus holds is
+    the one a model was or was not trained against, and re-deriving at export time would ship a different
+    artefact under the same name.
+
+    The manifest carries `flow_share` per grid, because a grid whose flow field is mostly an assumed zero
+    is not the same deliverable as one where tracks spoke for the space, and a consumer opening a folder
+    of npz files has no way to tell them apart.
+    """
+    import json
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from db.models import OccupancyGrid
+    from db.session import get_sessionmaker
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if not frame_ids:
+        (out_dir / "manifest.json").write_text(json.dumps({"grids": [], "n": 0}, indent=2))
+        return out_dir
+
+    async with get_sessionmaker()() as db:
+        rows = (await db.execute(
+            select(OccupancyGrid).where(OccupancyGrid.frame_id.in_([_uuid.UUID(f) for f in frame_ids]))
+            .order_by(OccupancyGrid.ts_ns))).scalars().all()
+
+    manifest = []
+    for g in rows:
+        name = f"{g.session_id}_{g.ts_ns}.npz"
+        try:
+            (out_dir / name).write_bytes(store.get_bytes(g.grid_uri))
+        except Exception:  # noqa: BLE001 - a missing blob drops one grid, never the export
+            continue
+        share = (g.flow_voxels / g.occupied) if g.occupied else None
+        manifest.append({
+            "file": name, "session_id": str(g.session_id), "ts_ns": g.ts_ns,
+            "frame_id": str(g.frame_id) if g.frame_id else None,
+            "origin": [float(v) for v in g.origin], "voxel_m": float(g.voxel_m),
+            "dims": [int(v) for v in g.dims], "source": g.source,
+            "occupied": g.occupied, "flow_voxels": g.flow_voxels,
+            "flow_share": round(share, 4) if share is not None else None,
+            # Null means the grid was never placed by a pose, so it sits in the ego frame of its own
+            # instant and cannot be stacked against its neighbour.
+            "ego_pose_ts": g.ego_pose_ts,
+        })
+    (out_dir / "manifest.json").write_text(json.dumps(
+        {"grids": manifest, "n": len(manifest),
+         "encoding": ("npz with `voxels` (N,3 int32 indices), `flow` (N,3 float16 m/s) and `dims` (3,); "
+                      "a voxel absent from `voxels` is unoccupied, and a flow of zero is either measured "
+                      "static or an assumed zero, told apart by flow_share")}, indent=2))
+    return out_dir

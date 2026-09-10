@@ -163,13 +163,13 @@ async def test_lane_export_writes_culane_geometry_and_the_attributes_it_cannot_c
 def test_the_scene_formats_are_accepted_and_dispatchable():
     from services.export.dataset import _SCENE_WRITERS, SUPPORTED_EXPORT_FORMATS, validate_formats
 
-    for fmt in ("masks", "lanes", "drivable", "hdmap", "panoptic"):
+    for fmt in ("masks", "lanes", "drivable", "hdmap", "panoptic", "occupancy"):
         assert fmt in SUPPORTED_EXPORT_FORMATS
-    # Exhaustive on purpose, and it earned that: adding the panoptic writer failed here, which is what an
-    # exact-set assertion is for. A writer registered without being validated, or validated without being
-    # registered, ships a format that either cannot be asked for or silently writes nothing.
-    assert set(_SCENE_WRITERS) == {"lanes", "drivable", "hdmap", "panoptic"}
-    validate_formats(["coco", "masks", "lanes", "drivable", "hdmap", "panoptic"])   # must not raise
+    # Exhaustive on purpose, and it has earned that twice: adding the panoptic writer failed here, and so
+    # did adding the occupancy one. A writer registered without being validated, or validated without
+    # being registered, ships a format that either cannot be asked for or silently writes nothing.
+    assert set(_SCENE_WRITERS) == {"lanes", "drivable", "hdmap", "panoptic", "occupancy"}
+    validate_formats(["coco", "masks", "lanes", "drivable", "hdmap", "panoptic", "occupancy"])
 
 
 def test_an_unsupported_format_is_still_refused():

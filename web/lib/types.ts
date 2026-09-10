@@ -1412,3 +1412,19 @@ export type EgoCoverage = {
   real_selected_frames: number; pseudo_clouds: number; cloud_coverage: number | null;
   ego_poses: number; ego_poses_measured: number; object_3d: number; track_3d: number;
 };
+
+
+// 4D occupancy (migration 0113). `flow_share` is the load-bearing field: it is how much of the occupied
+// space carries a velocity a track actually spoke for, and the rest is an assumed zero. A viewer drawing
+// arrows from a field that is 3% real and 97% assumption would be drawing confidence nobody has.
+export type OccupancyGridRow = {
+  grid_id: string; ts_ns: number; frame_id: string | null;
+  origin: number[]; voxel_m: number; dims: number[]; source: string;
+  occupied: number; flow_voxels: number; flow_share: number | null;
+  placed_by_pose: boolean;
+};
+export type OccupancyVoxels = {
+  grid_id: string; ts_ns: number; voxel_m: number; origin: number[]; dims: number[];
+  n: number; total: number; truncated: boolean;
+  voxels: number[][]; flow: number[][]; placed_by_pose: boolean;
+};

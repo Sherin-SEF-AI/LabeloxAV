@@ -270,7 +270,7 @@ def _depth_from_cloud(cloud_uri: str, width: int, height: int) -> np.ndarray | N
     to recover a number it has already stored would be the expensive way to learn the same fact.
     """
     try:
-        from services.lidar.ingest.normalize import load_cloud
+        from services.lidar.ingest.store import load_cloud
 
         cloud = load_cloud(cloud_uri)
     except Exception:  # noqa: BLE001 - an unreadable cloud means no scale, not a failed session

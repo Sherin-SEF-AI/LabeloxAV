@@ -41,6 +41,11 @@ type Props = {
   showEgo?: boolean;
   trajectory?: { x: number; y: number }[];
   cuboids?: ViewerCuboid[];
+  // Occupancy voxels in the same frame as the points, with a velocity each. `flowShare` is how much of
+  // the field a track actually spoke for; the rest is an assumed zero, and the layer says which it is
+  // rather than drawing every arrow with the same confidence.
+  occupancy?: { voxels: number[][]; flow: number[][]; origin: number[]; voxelM: number } | null;
+  flowShare?: number | null;
   selectedId?: string | null;
   onSelectCuboid?: (id: string | null) => void;
   onMoveCuboid?: (id: string, x: number, y: number, commit: boolean) => void;
@@ -85,7 +90,7 @@ function buildLUT(colorBy: ColorBy, source: string): Float32Array {
 
 export default function PointCloudViewer({
   points, count, colorBy, intensityRange, source, mode, pointSize = 0.06, onMeasure,
-  showEgo = false, trajectory, cuboids, selectedId, onSelectCuboid, onMoveCuboid,
+  showEgo = false, trajectory, cuboids, occupancy, flowShare, selectedId, onSelectCuboid, onMoveCuboid,
 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<{
@@ -341,6 +346,64 @@ export default function PointCloudViewer({
       cubeRef.current = null;
     };
   }, [cuboids, selectedId]);
+
+  // occupancy: one instanced cube per occupied voxel, plus an arrow for every voxel a track claimed.
+  //
+  // Instanced rather than a mesh each, because a road scene fills a few thousand voxels and three
+  // thousand separate meshes is three thousand draw calls. Arrows only where the flow is non-zero: a
+  // zero-length arrow is invisible anyway, and drawing one per voxel would triple the geometry to say
+  // nothing. Voxels are coloured by whether a track spoke for them, so an assumed-static cell and a
+  // measured-static cell do not look the same.
+  useEffect(() => {
+    const st = stateRef.current;
+    if (!st || !occupancy || !occupancy.voxels.length) return;
+    const { voxels, flow, origin, voxelM } = occupancy;
+    const group = new THREE.Group();
+
+    const geo = new THREE.BoxGeometry(voxelM * 0.9, voxelM * 0.9, voxelM * 0.9);
+    const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.25, depthWrite: false });
+    const mesh = new THREE.InstancedMesh(geo, mat, voxels.length);
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(voxels.length * 3), 3);
+    const m = new THREE.Matrix4();
+    const claimed = new THREE.Color(0xf97316);   // a track spoke for this space
+    const assumed = new THREE.Color(0x38bdf8);   // occupied, velocity assumed zero
+    const arrows: number[] = [];
+    for (let i = 0; i < voxels.length; i++) {
+      const [ix, iy, iz] = voxels[i];
+      const x = origin[0] + (ix + 0.5) * voxelM;
+      const y = origin[1] + (iy + 0.5) * voxelM;
+      const z = origin[2] + (iz + 0.5) * voxelM;
+      m.makeTranslation(x, y, z);
+      mesh.setMatrixAt(i, m);
+      const f = flow[i] || [0, 0, 0];
+      const moving = f[0] !== 0 || f[1] !== 0 || f[2] !== 0;
+      mesh.setColorAt(i, moving ? claimed : assumed);
+      if (moving) {
+        // One second of travel, so the arrow's length is the speed and a reader can size it by eye.
+        arrows.push(x, y, z, x + f[0], y + f[1], z + f[2]);
+      }
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    group.add(mesh);
+
+    if (arrows.length) {
+      const ageo = new THREE.BufferGeometry();
+      ageo.setAttribute("position", new THREE.Float32BufferAttribute(arrows, 3));
+      group.add(new THREE.LineSegments(ageo, new THREE.LineBasicMaterial({ color: 0xfb923c })));
+    }
+
+    st.scene.add(group);
+    return () => {
+      st.scene.remove(group);
+      group.traverse((o) => {
+        const im = o as THREE.Mesh;
+        if (im.geometry) im.geometry.dispose();
+        const mm = im.material as THREE.Material | undefined;
+        if (mm && mm.dispose) mm.dispose();
+      });
+    };
+  }, [occupancy]);
 
   // cuboid selection (both views) and drag-to-move on the ground plane (BEV)
   useEffect(() => {

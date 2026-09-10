@@ -2227,6 +2227,54 @@ class EgoPose(Base):
     )
 
 
+class OccupancyGrid(Base):
+    """What space is occupied around the vehicle at one instant, and how that space is moving (0113).
+
+    A cuboid list says where the labelled objects are and nothing about the space between them. "Is there
+    anything in that lane" has no answer in a cuboid list when the thing in the lane is a pile of sand, an
+    unlabelled truck, or an object the detector missed. This answers it per cubic metre.
+
+    The fourth dimension is scene flow. A static grid cannot separate a parked car from one reversing
+    toward the ego, which is the distinction planning is made of. `flow_voxels` counts how much of the
+    occupied space carries a velocity from a real track rather than an assumed zero, so a grid that is
+    mostly assumption reads as one nobody should plan against.
+
+    The packed grid lives in the object store for the same reason clouds do; the row carries enough
+    geometry to place and interpret it without opening the blob.
+    """
+
+    __tablename__ = "occupancy_grid"
+
+    grid_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"), nullable=False)
+    ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("frame.frame_id", ondelete="SET NULL"))
+    origin: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)
+    voxel_m: Mapped[float] = mapped_column(Float, nullable=False)
+    dims: Mapped[list[int]] = mapped_column(ARRAY(Integer), nullable=False)
+    grid_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Which pose placed this grid, or null when none did. A grid built without a pose sits in the ego
+    # frame of one instant and cannot be compared with the next; the null is what says so.
+    ego_pose_ts: Mapped[int | None] = mapped_column(BigInteger)
+    occupied: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    flow_voxels: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_run.run_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("source in ('pseudo','lidar','fused')", name="ck_occupancy_source"),
+        CheckConstraint("voxel_m > 0", name="ck_occupancy_voxel_positive"),
+        CheckConstraint("array_length(dims, 1) = 3", name="ck_occupancy_dims_3d"),
+        CheckConstraint("array_length(origin, 1) = 3", name="ck_occupancy_origin_3d"),
+        CheckConstraint("flow_voxels <= occupied", name="ck_occupancy_flow_within_occupied"),
+        UniqueConstraint("session_id", "ts_ns", "source", name="uq_occupancy_session_ts_source"),
+        Index("ix_occupancy_session_ts", "session_id", "ts_ns"),
+        Index("ix_occupancy_frame", "frame_id"),
+    )
+
+
 class PointCloud(Base):
     """One row per scan (real LiDAR) or per synthesized cloud (pseudo-LiDAR), from any source. ts_ns is on
     the PPS base, so a cloud and the camera frames captured at the same ts_ns in the session are one query."""

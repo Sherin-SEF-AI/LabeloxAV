@@ -118,9 +118,17 @@ def _seed(conn) -> dict:
                               source, quality, measured)
         values (:s, 0, :f, 1.5, 2.5, 0.0, 1.0, 0.0, 0.0, 0.0, 8.3, 'visual', 0.42, false)"""),
         {"s": real_sid, "f": real_fid})
+    # 0113: an occupancy grid on the real frame, with a flow count inside its occupied count so the
+    # CHECK the migration adds is exercised rather than merely present.
+    grid_id = uuid.uuid4()
+    conn.execute(sa.text("""
+        insert into occupancy_grid (grid_id, session_id, ts_ns, frame_id, origin, voxel_m, dims,
+                                    grid_uri, source, ego_pose_ts, occupied, flow_voxels)
+        values (:g, :s, 0, :f, '{0,0,0}', 0.5, '{10,10,10}', 's3://x/grid.npz', 'pseudo', 0, 120, 30)"""),
+        {"g": grid_id, "s": real_sid, "f": real_fid})
     return {"lot_id": lot_id, "real_sid": real_sid, "synth_sid": synth_sid,
             "sweep_id": sweep_id, "model_version": mv, "disagreement_id": dis_id,
-            "vocab_run_id": run_ids[0]}
+            "vocab_run_id": run_ids[0], "grid_id": grid_id}
 
 
 def _assert_downgraded(conn, seeded: dict) -> None:
@@ -153,6 +161,8 @@ def _assert_downgraded(conn, seeded: dict) -> None:
         "0111 drops a column, never the runs that carried it"
     assert conn.execute(sa.text("select to_regclass('public.ego_pose')")).scalar() is None, \
         "0112 downgrade left the ego_pose table"
+    assert conn.execute(sa.text("select to_regclass('public.occupancy_grid')")).scalar() is None, \
+        "0113 downgrade left the occupancy_grid table"
 
 
 def _assert_reupgraded(conn, seeded: dict) -> None:
@@ -174,6 +184,7 @@ def _assert_reupgraded(conn, seeded: dict) -> None:
     assert conn.execute(sa.text("select class_vocab from inference_run where run_id = :r"),
                         {"r": seeded["vocab_run_id"]}).scalar() is None
     assert conn.execute(sa.text("select count(*) from ego_pose")).scalar() == 0
+    assert conn.execute(sa.text("select count(*) from occupancy_grid")).scalar() == 0
 
 
 def test_every_migration_above_the_floor_round_trips_with_rows_present():
