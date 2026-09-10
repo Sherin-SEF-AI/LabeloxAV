@@ -9,6 +9,7 @@ to avoid binding an engine to a closed/foreign loop. Mirrors tests/test_m6_api.p
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 
 import pytest
@@ -201,6 +202,8 @@ def test_overview_rollup():
 
 @requires_infra
 def test_geo_points_returns_lat_lon():
+    """The internal reader still returns fixes. It is what the aggregation consumes, and it is no longer
+    reachable from the API: the endpoint aggregates before anything leaves."""
     from services.analytics.dashboards import geo_points
 
     sid = _seed()
@@ -226,8 +229,16 @@ def test_api_endpoints_via_testclient():
         scen = c.get(f"/api/analytics/scenarios?session_id={sid}").json()
         assert isinstance(scen, list)
 
+        # The endpoint used to return this session's single raw fix as a lat/lon pair, and this line
+        # asserted that it did. A driving trace is among the most identifying data a vehicle produces, so
+        # it now returns aggregated cells, and one fix is far below the k of ten and is suppressed.
         geo = c.get(f"/api/analytics/geo?session_id={sid}").json()
-        assert len(geo) == 1
+        assert geo["cells"] == [], "one fix cannot clear k-anonymity"
+        assert geo["suppressed_points"] == 1
+        assert geo["k_anonymity"] >= 10 and geo["cell_m"] > 0
+        # The property the change exists for, asserted on the response itself rather than inferred.
+        body = json.dumps(geo)
+        assert "12.972" not in body and "77.595" not in body, "a raw coordinate reached the response"
 
         agr = c.get("/api/analytics/review-agreement").json()
         assert agr["total_reviews"] >= 2

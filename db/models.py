@@ -149,6 +149,57 @@ class LabelValueSnapshot(Base):
     )
 
 
+class PrivacyBudget(Base):
+    """One scope's epsilon allowance, and what it has spent (0116).
+
+    Differential privacy composes additively: ten releases at epsilon 0.1 leak as much as one at 1.0. A
+    system applying a per-query epsilon without tracking the total provides a guarantee it has already
+    spent, and no single query reveals that. This row is the guarantee; the per-query epsilon is only how
+    it is spent.
+    """
+
+    __tablename__ = "privacy_budget"
+
+    scope: Mapped[str] = mapped_column(String(64), primary_key=True)
+    epsilon_total: Mapped[float] = mapped_column(Float, nullable=False)
+    epsilon_spent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("epsilon_total > 0", name="ck_privacy_budget_total_positive"),
+        CheckConstraint("epsilon_spent >= 0", name="ck_privacy_budget_spent_nonneg"),
+    )
+
+
+class PrivacyReleaseLog(Base):
+    """Every release that spent from a budget, with what it cost and what produced it (0116).
+
+    The half that survives a mistake. If a scope's budget is reset by hand, the releases already made are
+    still here and the reset is visible beside them, so the real total is recoverable by summing rather
+    than by trusting a counter.
+    """
+
+    __tablename__ = "privacy_release_log"
+
+    release_id: Mapped[uuid.UUID] = _uuid_pk()
+    scope: Mapped[str] = mapped_column(String(64), nullable=False)
+    endpoint: Mapped[str] = mapped_column(String(128), nullable=False)
+    epsilon: Mapped[float] = mapped_column(Float, nullable=False)
+    mechanism: Mapped[str] = mapped_column(String(64), nullable=False)
+    k: Mapped[int | None] = mapped_column(Integer)
+    cells_released: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    cells_suppressed: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    requested_by: Mapped[str | None] = mapped_column(String(64))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("epsilon > 0", name="ck_privacy_release_epsilon_positive"),
+        Index("ix_privacy_release_scope_at", "scope", "at"),
+    )
+
+
 class Session(Base):
     __tablename__ = "session"
 
@@ -1646,6 +1697,11 @@ class ExportJob(Base):
     # percent restarted from zero, which on a large corpus means hours of repeated work.
     checkpoint: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     resumed_from: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # What privacy treatment this export shipped under (0116): the epsilon spent, the k it suppressed at,
+    # and the mechanism. A bundle whose datasheet cannot say whether its geography was aggregated is a
+    # bundle nobody can assess.
+    privacy: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict,
+                                           server_default=sql_text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

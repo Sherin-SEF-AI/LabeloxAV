@@ -458,10 +458,10 @@ class LabeloxClient:
         return self._call("GET", f"/api/analytics/dedup-rate",
                           params={"session_id": session_id}, json_body=None)
 
-    def get_analytics_geo(self, session_id: Any | None = None, limit: int | None = 2000) -> Any:
+    def get_analytics_geo(self, session_id: Any | None = None, limit: int | None = 20000, epsilon: Any | None = None) -> Any:
         """Geo"""
         return self._call("GET", f"/api/analytics/geo",
-                          params={"session_id": session_id, "limit": limit}, json_body=None)
+                          params={"session_id": session_id, "limit": limit, "epsilon": epsilon}, json_body=None)
 
     def get_analytics_growth(self) -> Any:
         """Growth"""
@@ -487,6 +487,11 @@ class LabeloxClient:
         """Pii"""
         return self._call("GET", f"/api/analytics/pii",
                           params={"session_id": session_id}, json_body=None)
+
+    def get_analytics_privacy_budget(self) -> Any:
+        """Privacy Budget"""
+        return self._call("GET", f"/api/analytics/privacy-budget",
+                          params=None, json_body=None)
 
     def get_analytics_productivity(self) -> Any:
         """Productivity"""
@@ -1427,6 +1432,16 @@ class LabeloxClient:
         """Deployments"""
         return self._call("GET", f"/api/forgyx/deployments",
                           params={"model_version": model_version}, json_body=None)
+
+    def post_forgyx_distill(self, teacher_version: str, target: str, student_arch: str | None = 'yolo11n') -> Any:
+        """Start Distill"""
+        return self._call("POST", f"/api/forgyx/distill",
+                          params={"teacher_version": teacher_version, "target": target, "student_arch": student_arch}, json_body=None)
+
+    def get_forgyx_distill_by_run_id(self, run_id: str) -> Any:
+        """Distill Run"""
+        return self._call("GET", f"/api/forgyx/distill/{run_id}",
+                          params=None, json_body=None)
 
     def post_forgyx_export_by_model_version(self, model_version: str, body: Any = None) -> Any:
         """Export Model"""
@@ -3771,4 +3786,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 737 routes generated from the server schema.
+# 740 routes generated from the server schema.

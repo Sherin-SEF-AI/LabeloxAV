@@ -1123,3 +1123,101 @@ the day of an upgrade.
 Tests: `tests/test_counterfactual.py` (45). The full suite runs 3,445 passed, 6 skipped against
 `labeloxav_test`; the two autolabel tests that fail alongside it are the VRAM guard refusing to load a
 second model while the API holds the card, and both pass when it is free.
+
+---
+
+## WP10. A budget for what leaves, and a loop that stops before it wastes the card
+
+### The disclosure that was live
+
+`/analytics/geo` returned latitude and longitude pairs straight from `Frame.gnss`. A driving trace is
+among the most identifying data a vehicle produces: a handful of points reconstructs a home address, a
+workplace and a daily route, and removing names changes none of that. It is also exactly what a buyer
+legitimately wants in aggregate, which is why the answer is a mechanism rather than a deletion.
+
+Three steps, and the order is the mechanism. A fix becomes the 250 metre cell it fell in. A cell holding
+fewer than ten fixes is dropped entirely, not noised, because noise on a count of one still says somebody
+was there. What survives gets Laplace noise. Noising before suppressing would let a cell with one fix
+acquire a count of eleven and be released; suppressing on the noisy count would leak which cells sat near
+the threshold. Suppress on the truth, then noise what survives.
+
+Cells are fixed metric size rather than a decimal-degree grid, because a degree of longitude is 111 km at
+the equator and 96 km at Bengaluru, and a degree grid would make the privacy guarantee depend on where the
+vehicle drove.
+
+**The noise is deliberately not reproducible.** Every other random draw in this engine is seeded so a
+result can be replayed. This one comes from the system's cryptographic source, because an attacker who can
+replay the noise can subtract it, and a seeded privacy mechanism provides no privacy at all.
+
+### Epsilon is a budget, not a setting
+
+Differential privacy composes additively: ten releases at epsilon 0.1 leak as much as one at 1.0. A system
+that applies a per-query epsilon and never tracks the total is providing a guarantee it has already spent,
+and no single query reveals that. Migration `0116` holds one allowance per scope and logs every release
+against it. Both numbers are reported, the counter and the log sum, because they can disagree: a budget
+reset by hand moves the first and not the second, and the gap is the record of the reset.
+
+A scope nobody configured gets the default allowance rather than being treated as unlimited. Unlimited is
+the one reading that cannot be right, because a scope nobody thought about would then have an unbounded
+first release.
+
+A query returning no cells still costs. Asking the question is what spends privacy: a release that comes
+back empty has told the asker that every cell in that region is thin.
+
+### Measured
+
+Run against the live corpus:
+
+| | value |
+| --- | --- |
+| raw GNSS fixes available | 3 |
+| cells released | 0 |
+| epsilon charged | 0.5 of 5.0 |
+
+The endpoint that was returning three raw coordinates now returns none, and the corpus is far too sparse
+for any cell to clear the k of ten. That is the correct output and it is also a fact about the corpus:
+`Frame.gnss` is populated on 3 frames of 41,752, which is the same gap WP4 found when it could not build
+an ego trajectory from GNSS.
+
+### The distillation loop
+
+The champion is a YOLO11l, which is right for a server and will not run at 25 frames a second on an Orin
+Nano. `distill_to_budget` trains a student against the teacher's soft targets, exports, quantises,
+compiles for the target, benchmarks, and compares measured latency to that target's budget, repeating
+through the co-optimisation planner's configurations until it fits or four rounds are gone.
+
+Every round is recorded, including the failed ones. A loop that reported only its final configuration
+would hide that three of four missed the budget, which is what somebody choosing between an Orin Nano and
+an AGX actually needs to see.
+
+The student is compared to its teacher with WP2's matcher on frames neither was trained on, rather than a
+second notion of agreement, so the distillation quality number and the shadow number are the same
+statistic.
+
+**On this host the loop's honest output is the refusal, and it comes before the training.** The capability
+check runs first, so a target whose toolchain is absent costs nothing:
+
+| target | budget | round 1 | what stopped it |
+| --- | --- | --- | --- |
+| `orin_nano_trt` | 40 ms | compile | tensorrt is not installed |
+| `sentrixai_litert` | 33 ms | compile | ai_edge_litert is not installed |
+
+Ordering the capability check ahead of the training call is the whole point of that arrangement: a student
+nobody can compile for a target cannot be measured against its budget, and training one first would spend
+GPU hours to arrive at the same sentence. A test pins the order.
+
+### One thing the plan asked for that is not here
+
+WP9 called for a `scenario_regression` table storing per-scenario trajectory checksums. The checksum
+function exists and is tested; the table does not, because esmini is not installed and there is no
+checksum to store. A table whose only rows would be absent is a schema change made in advance of a
+capability, and it is cheaper to add when the simulator arrives than to carry empty.
+
+Tests: `tests/test_privacy.py` (33), covering the mechanisms, the suppression order, the accountant's
+refusal, and the distillation loop's refusals. One existing test asserted that the geo endpoint returned
+a raw coordinate, which is precisely the leak this package closed; it now asserts the opposite, checking
+the serialised response for the fix's own digits.
+
+The full suite runs 3,478 passed, 6 skipped against `labeloxav_test`. The two autolabel tests that fail
+alongside a full run are the VRAM guard refusing a second model while the API or the govern daemon holds
+the card; both pass with it free.
