@@ -1,5 +1,30 @@
 # Demo film
 
+## Full tour (20 min)
+
+Every page in the product, narrated, with subtitles and twelve chapter marks. Seventy five scenes
+covering seventy two of the seventy three routes in the web application; the one it skips is the
+sign-in page.
+
+Every number spoken in it is read from the live database at record time and substituted into the
+script, so the voice cannot disagree with the screen. That includes the unflattering ones: the tour
+says out loud that 788 of 598,179 objects carry a human verdict, that 30,863 of 30,865 reviews have no
+timing, and that the multi-camera benefit is measured over six sessions and is therefore small.
+
+It was filmed on three recordings ingested for it: two dashcam clips from Bengaluru and KITTI drive
+`2011_09_26_drive_0005`, whose import gave the corpus its first measured ego poses (154) and its first
+laser points (154 clouds, 18 million points).
+
+<video controls preload="metadata" style="width:100%; border-radius:6px;"
+       src="demo/labeloxav-tour.mp4"></video>
+
+[Download the tour](demo/labeloxav-tour.mp4) (50 MB, H.264 1080p) ·
+[subtitles](demo/labeloxav-tour.srt)
+
+How it was made, and the two defects making it uncovered: [the recorded tour](DEMO_TOUR.md).
+
+## The earlier films
+
 Everything in these films is the real application, recorded live from a browser driving the running
 system: the real corpus (578,436 objects, 41,752 frames, 377 sessions), the operator's own
 `DASHCAM-01` fleet footage in the editor, real GPU SAM segmentation, a real drift scan hitting the

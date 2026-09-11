@@ -374,6 +374,23 @@ def assemble(entries: list[dict], out: Path) -> None:
     print(f"{n} chapters written into the file")
 
 
+def merge(existing: list[dict], fresh: list[dict]) -> list[dict]:
+    """Fold re-recorded scenes back into the full manifest, then re-time everything after them.
+
+    Without this, `--only` would save a manifest containing just the scenes it re-recorded and the tour
+    would assemble as those scenes alone. And a re-recorded scene rarely comes back the same length,
+    since the narration may have been edited, so every later scene's start has to move with it or the
+    captions after the edit would all be wrong by the difference.
+    """
+    by_key = {e["key"]: e for e in fresh}
+    out = [by_key.get(e["key"], e) for e in existing]
+    t = 0.0
+    for n, e in enumerate(out, 1):
+        e["index"], e["start"] = n, round(t, 3)
+        t += e["duration"]
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="", help="comma separated scene keys, for re-recording a few")
@@ -390,7 +407,11 @@ def main() -> None:
         import json
         entries = json.loads((OUT / "manifest.json").read_text())
     else:
-        entries = asyncio.run(record([k for k in a.only.split(",") if k], a.no_capture))
+        only = [k for k in a.only.split(",") if k]
+        entries = asyncio.run(record(only, a.no_capture))
+        if only and (OUT / "manifest.json").exists():
+            import json
+            entries = merge(json.loads((OUT / "manifest.json").read_text()), entries)
         save_manifest(entries, OUT / "manifest.json")
 
     total = sum(e["duration"] for e in entries)

@@ -1,0 +1,1088 @@
+1
+00:00:00,000 --> 00:00:05,831
+This is LabeloxAV, a data engine for autonomous driving built
+around Indian roads.
+
+2
+00:00:05,831 --> 00:00:15,622
+Everything you are about to see runs against a live database with 381 driving sessions, 42,766 frames and 598,179 labelled
+objects in it.
+
+3
+00:00:15,622 --> 00:00:18,142
+No screen in this tour is a mock up.
+
+4
+00:00:18,142 --> 00:00:26,133
+Where a number is small or a page is empty, that is the real
+state of the system and the narration will say so.
+
+5
+00:00:26,133 --> 00:00:29,265
+The product is ten platforms over a single data spine.
+
+6
+00:00:29,265 --> 00:00:39,607
+Annotation, review, measurement, governance, edge deployment and the rest each get their own surface, but they all read and
+write the same sessions, frames, objects and tracks.
+
+7
+00:00:39,607 --> 00:00:44,866
+That is why a correction made in the editor changes what the
+gate measures an hour later.
+
+8
+00:00:44,866 --> 00:00:48,968
+Work is scoped by project, and each project belongs to a
+domain pack.
+
+9
+00:00:48,968 --> 00:00:56,389
+The autonomous driving pack brings the road ontology, the camera and LiDAR sensor model and the traffic scenario
+vocabulary.
+
+10
+00:00:56,389 --> 00:01:01,999
+A second pack for physical security shares the same spine and
+none of the road specific code.
+
+11
+00:01:01,999 --> 00:01:03,012
+Data arrives here.
+
+12
+00:01:03,012 --> 00:01:11,886
+The importer takes dashcam video, ROS bags, MCAP recordings and raw sensor drives, and turns each one into a session with
+frames at a fixed timestamp.
+
+13
+00:01:11,886 --> 00:01:14,626
+For this tour I ingested three real recordings.
+
+14
+00:01:14,626 --> 00:01:22,666
+Two are dashcam clips from the owner of this machine, and one is a KITTI drive from Karlsruhe with a sixty four beam LiDAR
+on the roof.
+
+15
+00:01:22,666 --> 00:01:25,457
+Most teams already have labels somewhere else.
+
+16
+00:01:25,457 --> 00:01:35,939
+The migration path reads COCO, YOLO, Pascal and CVAT exports, maps their class names onto this ontology, and records the
+mapping so that nothing silently changes meaning.
+
+17
+00:01:35,939 --> 00:01:39,599
+Classes it cannot map are held back rather than guessed at.
+
+18
+00:01:39,599 --> 00:01:42,080
+Every ingested session lands in the inspector.
+
+19
+00:01:42,080 --> 00:01:49,136
+This is a Foxglove class viewer built into the product, so you can check a recording before you spend any labelling effort on
+it.
+
+20
+00:01:49,136 --> 00:01:51,617
+The health gate at the top is the useful part.
+
+21
+00:01:51,617 --> 00:01:59,666
+It refuses a session with broken timestamps, missing calibration or a camera that dropped out, instead of letting
+the problem reach the labellers.
+
+22
+00:01:59,666 --> 00:02:01,130
+This is the KITTI drive.
+
+23
+00:02:01,130 --> 00:02:06,668
+The timeline shows every topic on one clock, the camera
+alongside the LiDAR and the GPS.
+
+24
+00:02:06,668 --> 00:02:15,133
+The panels are native, not an embedded iframe, so a click on the timeline moves the point cloud, the image and the ego pose
+together.
+
+25
+00:02:15,133 --> 00:02:18,302
+Calibration is what makes three dimensional work possible.
+
+26
+00:02:18,302 --> 00:02:27,307
+This session carries real intrinsics from the KITTI rig, a focal length of seven hundred and twenty one pixels over a
+twelve forty two by three seventy five image.
+
+27
+00:02:27,307 --> 00:02:32,533
+Without this the system can still draw boxes, but it cannot
+tell you how far away anything is.
+
+28
+00:02:32,533 --> 00:02:34,369
+Here is the vehicle's own motion.
+
+29
+00:02:34,369 --> 00:02:36,837
+Speed, yaw rate and the trajectory it drove.
+
+30
+00:02:36,837 --> 00:02:41,313
+The KITTI import brought 154 measured ego poses from the GPS
+and inertial unit.
+
+31
+00:02:41,313 --> 00:02:52,733
+Before this import the entire corpus had three satellite fixes across forty one thousand frames, which is the honest reason most of the three dimensional work here was estimated rather
+than measured.
+
+32
+00:02:52,733 --> 00:02:56,311
+A dataset is a frozen selection of frames with a content hash.
+
+33
+00:02:56,311 --> 00:03:06,400
+Two people training on the same dataset identifier are training on exactly the same images and labels, which is the
+only way a comparison between two models means anything.
+
+34
+00:03:06,400 --> 00:03:08,133
+Labelling starts automatically.
+
+35
+00:03:08,133 --> 00:03:14,486
+You choose a session and the classes you care about, and the
+auto label runner works through it batch by batch.
+
+36
+00:03:14,486 --> 00:03:18,586
+Batch by batch is a deliberate constraint, not an
+implementation detail.
+
+37
+00:03:18,586 --> 00:03:28,000
+The runner holds a GPU slot, checks free video memory between batches, and stops if a training job wants the card, so a
+labelling run cannot take the machine down.
+
+38
+00:03:28,000 --> 00:03:32,889
+This is the annotation canvas with real machine predictions on
+a real frame.
+
+39
+00:03:32,889 --> 00:03:34,975
+The tools run down the left side.
+
+40
+00:03:34,975 --> 00:03:40,646
+Box, polygon, segment anything, lane, drivable area,
+keypoints, amodal extent and depth.
+
+41
+00:03:40,646 --> 00:03:48,533
+Every tool is registered in one place, so the keyboard shortcut you see in the panel is the shortcut that actually
+fires.
+
+42
+00:03:48,533 --> 00:03:51,191
+The describe tool is the one worth stopping on.
+
+43
+00:03:51,191 --> 00:04:00,033
+You type what you want in plain words, for example a cow standing on the median, and an open vocabulary detector
+proposes it with a segment anything mask.
+
+44
+00:04:00,033 --> 00:04:08,933
+This exists because the ontology will never have a word for everything on an Indian road, and the alternative is that
+those objects go unlabelled forever.
+
+45
+00:04:08,933 --> 00:04:12,847
+Lanes and drivable surface are annotated as geometry rather
+than boxes.
+
+46
+00:04:12,847 --> 00:04:17,489
+The drivable mask now covers ninety nine point nine percent of
+frames in the corpus.
+
+47
+00:04:17,489 --> 00:04:21,515
+It used to cover under four percent, and the gap was not a
+model problem.
+
+48
+00:04:21,515 --> 00:04:25,933
+Three separate consumers were reading the masks in a format
+nobody had written.
+
+49
+00:04:25,933 --> 00:04:30,209
+Attributes are swept across many objects at once instead of
+one at a time.
+
+50
+00:04:30,209 --> 00:04:36,242
+Occlusion level, truncation, whether a rider is wearing a
+helmet, whether a vehicle is parked or moving.
+
+51
+00:04:36,242 --> 00:04:44,266
+One pass over a hundred crops of the same class is far faster than a hundred visits to the editor, and it keeps the
+judgement consistent.
+
+52
+00:04:44,266 --> 00:04:46,590
+Road furniture gets its own surface.
+
+53
+00:04:46,590 --> 00:04:49,511
+Signs, signals, poles, barriers and markings.
+
+54
+00:04:49,511 --> 00:05:00,066
+Signs carry an IRC sixty seven code, which is the Indian standard, so a mandatory sign and a cautionary sign are
+distinguishable without reading the pictogram.
+
+55
+00:05:00,066 --> 00:05:02,366
+Behind the auto labelling sits an ensemble.
+
+56
+00:05:02,366 --> 00:05:06,417
+Several detectors run over the same frame and their outputs
+are reconciled.
+
+57
+00:05:06,417 --> 00:05:09,374
+Where they agree the label is cheap and probably right.
+
+58
+00:05:09,374 --> 00:05:15,999
+Where they disagree is exactly where a human should be looking, and that disagreement is mined rather than averaged
+away.
+
+59
+00:05:15,999 --> 00:05:19,641
+Agreement between models becomes pseudo ground truth for
+training.
+
+60
+00:05:19,641 --> 00:05:22,611
+One lesson from building this is recorded on the page.
+
+61
+00:05:22,611 --> 00:05:27,767
+Choosing the teacher pair by how many predictions each model
+made gave nine consensus labels.
+
+62
+00:05:27,767 --> 00:05:32,866
+Choosing by how many frames the two models shared gave one
+thousand one hundred and ninety.
+
+63
+00:05:32,866 --> 00:05:36,551
+Machine labels are proposals until a person rules on them.
+
+64
+00:05:36,551 --> 00:05:46,182
+The queue orders work by how much a verdict is worth, combining model uncertainty, class rarity and whether a gate
+is currently blocked on that class.
+
+65
+00:05:46,182 --> 00:05:54,133
+There are 528,793 objects waiting in review right now, which
+tells you honestly how far ahead of the humans the machine is.
+
+66
+00:05:54,133 --> 00:05:56,999
+Grid review shows many crops of one class at once.
+
+67
+00:05:56,999 --> 00:06:05,598
+The eye is very good at spotting the odd one out in a wall of similar images, and very bad at staying calibrated across a
+thousand single decisions.
+
+68
+00:06:05,598 --> 00:06:09,400
+Accept or reject applies to everything selected in one
+keystroke.
+
+69
+00:06:09,400 --> 00:06:12,856
+Rapid review is the keyboard only mode for a long session.
+
+70
+00:06:12,856 --> 00:06:14,554
+One crop, one key, next crop.
+
+71
+00:06:14,554 --> 00:06:22,800
+It records how long each verdict took, because the cost of a label in minutes is the number the whole economics of this
+system rests on.
+
+72
+00:06:22,800 --> 00:06:28,547
+This is the full annotation table, filterable by class, state,
+source, session and reviewer.
+
+73
+00:06:28,547 --> 00:06:30,379
+State is the important column.
+
+74
+00:06:30,379 --> 00:06:36,505
+A label is in review, auto accepted, settled or accepted, and
+accepted means a person ruled on it.
+
+75
+00:06:36,505 --> 00:06:38,779
+The machine can never write accepted.
+
+76
+00:06:38,779 --> 00:06:44,400
+That is enforced in code and there is a test that fails the
+build if any code path tries.
+
+77
+00:06:44,400 --> 00:06:47,351
+Any single label opens to its full history.
+
+78
+00:06:47,351 --> 00:06:57,470
+Which model proposed it, at what confidence, which human touched it and when, what it was before each change, and which
+training run consumed it.
+
+79
+00:06:57,470 --> 00:07:02,600
+You can answer where did this label come from for any of
+598,179 objects.
+
+80
+00:07:02,600 --> 00:07:04,556
+Quality is measured, not asserted.
+
+81
+00:07:04,556 --> 00:07:14,279
+Precision comes from stratified samples with Wilson confidence intervals, so a class with twelve judged crops reports a wide
+interval rather than a confident number.
+
+82
+00:07:14,279 --> 00:07:16,414
+Unmeasured is reported as unmeasured.
+
+83
+00:07:16,414 --> 00:07:19,200
+It is never reported as zero and never as fine.
+
+84
+00:07:19,200 --> 00:07:21,344
+Errors are typed rather than counted.
+
+85
+00:07:21,344 --> 00:07:33,133
+A missed detection, a duplicate, a class confusion and a loose box are four different problems with four different fixes, and lumping them into one accuracy number hides which one you
+actually have.
+
+86
+00:07:33,133 --> 00:07:34,898
+This page measures the reviewers.
+
+87
+00:07:34,898 --> 00:07:42,732
+Control samples with a known answer are mixed into the queue, so agreement between people can be computed without anybody
+re-reviewing anybody.
+
+88
+00:07:42,732 --> 00:07:44,553
+A finding worth admitting is here.
+
+89
+00:07:44,553 --> 00:07:53,600
+Thirty thousand eight hundred and sixty three of thirty thousand eight hundred and sixty five reviews carry no timing,
+because the field was only wired up recently.
+
+90
+00:07:53,600 --> 00:07:58,707
+An object across frames is a track, and a track is the unit
+that matters for driving.
+
+91
+00:07:58,707 --> 00:08:00,591
+The corpus holds 13,807 of them.
+
+92
+00:08:00,591 --> 00:08:05,273
+Eighty four percent of tracks used to blink out and restart as
+a new identity.
+
+93
+00:08:05,273 --> 00:08:12,933
+Interpolation across gaps had been written but never run, and turning it on filled one hundred and thirty seven thousand
+gaps.
+
+94
+00:08:12,933 --> 00:08:15,391
+Corrections apply to the track, not the frame.
+
+95
+00:08:15,391 --> 00:08:23,419
+Relabelling a motorcycle as a rider used to reach one frame out of ninety three, because the editor and the review queue
+took different write paths.
+
+96
+00:08:23,419 --> 00:08:27,133
+They now share one, and the propagation is visible on this
+timeline.
+
+97
+00:08:27,133 --> 00:08:31,057
+A vehicle with several cameras sees the same object more than
+once.
+
+98
+00:08:31,057 --> 00:08:37,299
+With calibration, a box drawn in one view projects into every
+other view in the rig, so you annotate once.
+
+99
+00:08:37,299 --> 00:08:43,600
+The corpus has six multi camera sessions, so the measured
+benefit here is small and I will not inflate it.
+
+100
+00:08:43,600 --> 00:08:47,093
+Between two labelled frames the vehicle moved a known
+distance.
+
+101
+00:08:47,093 --> 00:08:56,333
+That motion alone predicts where a static object should appear next, without running any model, and it is enough to carry a
+label forward through a stretch of road.
+
+102
+00:08:56,333 --> 00:09:04,095
+When a track breaks behind a bus and reappears, the recovery pass tries to rejoin the two halves using appearance and
+predicted position.
+
+103
+00:09:04,095 --> 00:09:11,000
+A rejoined track is marked as rejoined rather than silently
+merged, because a wrong merge is worse than two short tracks.
+
+104
+00:09:11,000 --> 00:09:13,390
+This is where the tour gets its real LiDAR.
+
+105
+00:09:13,390 --> 00:09:18,909
+The KITTI drive brought 154 point clouds from a sixty four
+beam Velodyne, about 18 million points.
+
+106
+00:09:18,909 --> 00:09:28,467
+Before this import the corpus had four hundred and fifty three thousand points in total, all of them estimated from single
+camera depth rather than measured by a laser.
+
+107
+00:09:28,467 --> 00:09:32,412
+Cuboids are drawn in the point cloud with the camera image
+beside them.
+
+108
+00:09:32,412 --> 00:09:39,400
+The ego trajectory runs underneath, so a box can be placed in
+the world frame and stays put while the vehicle moves past it.
+
+109
+00:09:39,400 --> 00:09:42,350
+The linked view keeps the image and the cloud in step.
+
+110
+00:09:42,350 --> 00:09:48,028
+Click a two dimensional box and the matching three dimensional
+box highlights, and the other way round.
+
+111
+00:09:48,028 --> 00:09:50,533
+This is also how the lifted boxes are checked.
+
+112
+00:09:50,533 --> 00:09:56,600
+A cuboid estimated from camera depth alone is compared against
+the laser points that actually fall inside it.
+
+113
+00:09:56,600 --> 00:09:58,844
+Sessions on a map, by route and by city.
+
+114
+00:09:58,844 --> 00:10:06,267
+The locations here are aggregated into cells rather than drawn as raw points, and I will come back to why in the privacy
+chapter.
+
+115
+00:10:06,267 --> 00:10:08,266
+Verdyx is where models are measured.
+
+116
+00:10:08,266 --> 00:10:15,062
+Accuracy is reported per class with an interval, and against a
+frozen gold set that no training run is allowed to touch.
+
+117
+00:10:15,062 --> 00:10:18,603
+There are 15 registered models, each with its lineage
+recorded.
+
+118
+00:10:18,603 --> 00:10:23,400
+What it was trained from, which teacher it distilled, and
+which dataset hash it saw.
+
+119
+00:10:23,400 --> 00:10:26,068
+An average number hides the cases that matter.
+
+120
+00:10:26,068 --> 00:10:30,931
+Performance is sliced by night, rain, occlusion and by the
+safety critical classes.
+
+121
+00:10:30,931 --> 00:10:33,065
+Frames are also perturbed on purpose.
+
+122
+00:10:33,065 --> 00:10:38,758
+Occlusion, dusk, rain, fog and motion blur are applied to real
+images and the model is re-scored.
+
+123
+00:10:38,758 --> 00:10:48,067
+The current champion loses twenty four points of motorcycle recall under occlusion, which is the kind of thing an average
+accuracy score will never tell you.
+
+124
+00:10:48,067 --> 00:10:51,792
+A scorecard is the summary a person actually reads before a
+release.
+
+125
+00:10:51,792 --> 00:10:57,742
+Per class recall and precision, the slices that regressed, the
+gate result and the reason if it was blocked.
+
+126
+00:10:57,742 --> 00:11:02,134
+It is generated from the measurement run, so it cannot drift
+from the evidence.
+
+127
+00:11:02,134 --> 00:11:07,630
+Training runs are scheduled here and they are the only thing
+allowed to hold the GPU for a long time.
+
+128
+00:11:07,630 --> 00:11:14,005
+Everything else in the system checks whether training holds
+the card before it asks for it, and backs off if it does.
+
+129
+00:11:14,005 --> 00:11:21,534
+That single rule is why labelling, embedding, depth and three dimensional lifting can all run on one desktop without
+fighting each other.
+
+130
+00:11:21,534 --> 00:11:25,612
+Lineage connects a deployed model back to every label it
+learned from.
+
+131
+00:11:25,612 --> 00:11:32,467
+If a label is found to be wrong, this answers which models saw
+it, and therefore which measurements are now suspect.
+
+132
+00:11:32,467 --> 00:11:34,646
+Events are the moments worth finding.
+
+133
+00:11:34,646 --> 00:11:39,308
+Hard braking, a cut in, a near miss, a pedestrian crossing
+against the signal.
+
+134
+00:11:39,308 --> 00:11:43,061
+They are detected from ego dynamics and object tracks
+together.
+
+135
+00:11:43,061 --> 00:11:45,180
+An honest caveat from building this.
+
+136
+00:11:45,180 --> 00:11:54,200
+The dynamics signal in this corpus is noisier than the events it is being asked to find, so the detector is tuned to over
+report and let a human cut.
+
+137
+00:11:54,200 --> 00:12:03,467
+Events are searchable by description, so you can ask for every time a rider overtook on the left while the vehicle was
+braking, and get frames rather than a report.
+
+138
+00:12:03,467 --> 00:12:06,138
+This is the part I would show a sceptic first.
+
+139
+00:12:06,138 --> 00:12:09,818
+The system proposes its own work, but it cannot approve
+itself.
+
+140
+00:12:09,818 --> 00:12:17,534
+Every autonomous action is a proposal with evidence, a named rule that fired, and a revert button that actually undoes the
+writes.
+
+141
+00:12:17,534 --> 00:12:21,508
+A class is signed off by sequential testing rather than a
+fixed sample.
+
+142
+00:12:21,508 --> 00:12:26,163
+A clean class proves itself in far fewer verdicts and a bad
+one fails in a handful.
+
+143
+00:12:26,163 --> 00:12:28,093
+Accept is deliberately conjunctive.
+
+144
+00:12:28,093 --> 00:12:39,334
+The sequential test and the confidence interval must both agree before anything is accepted, while a rejection is allowed to fire early, because rejecting early is the safe
+direction to be wrong in.
+
+145
+00:12:39,334 --> 00:12:44,740
+The agent layer plans labelling work, criticises its own
+output and reconciles conflicts.
+
+146
+00:12:44,740 --> 00:12:49,900
+It works in chunks, and every chunk is one recorded run with
+the exact rows it wrote.
+
+147
+00:12:49,900 --> 00:12:53,401
+Reverting a run is a real database operation, not a flag.
+
+148
+00:12:53,401 --> 00:12:55,146
+Governance sits above all of it.
+
+149
+00:12:55,146 --> 00:13:01,674
+There is one killswitch that stops every autonomous writer,
+and every automated path checks it before doing anything.
+
+150
+00:13:01,674 --> 00:13:10,734
+Approval thresholds are set per action here, so a team can let the system merge duplicate tracks on its own while still
+requiring a human for an ontology change.
+
+151
+00:13:10,734 --> 00:13:15,618
+Every long running piece of work is a job with a state, a
+progress figure and a log.
+
+152
+00:13:15,618 --> 00:13:22,267
+Jobs that die are reaped rather than left claiming to run,
+which sounds obvious and took a real bug to get right.
+
+153
+00:13:22,267 --> 00:13:26,823
+One chronological record of everything that changed, by
+machine or by person.
+
+154
+00:13:26,823 --> 00:13:30,600
+This is what you read when a number moved and nobody knows
+why.
+
+155
+00:13:30,600 --> 00:13:34,399
+The reasoner explains a decision in words, with the evidence
+attached.
+
+156
+00:13:34,399 --> 00:13:39,079
+Why this class was blocked, why this lot was rejected, why
+this model did not promote.
+
+157
+00:13:39,079 --> 00:13:46,733
+The words are generated from the same fields the gate read, so an explanation cannot flatter a decision that the evidence
+does not support.
+
+158
+00:13:46,733 --> 00:13:50,114
+The data engine is the loop that decides what to label next.
+
+159
+00:13:50,114 --> 00:13:51,718
+More data is not better data.
+
+160
+00:13:51,718 --> 00:13:56,933
+The question is always which thousand frames would move the
+number that is currently stuck.
+
+161
+00:13:56,933 --> 00:14:03,733
+Frames are embedded as vectors, 42,088 of them, so you can
+search the corpus by resemblance rather than by keyword.
+
+162
+00:14:03,733 --> 00:14:08,266
+Show me more scenes like this one is a query the system can
+answer directly.
+
+163
+00:14:08,266 --> 00:14:20,999
+Text search runs over classes, attributes, sessions and scenario descriptions, and combines with the vector search, so a natural request narrows to a set of frames you can send
+straight to a labelling job.
+
+164
+00:14:20,999 --> 00:14:24,255
+Discovery looks for what the ontology has no word for.
+
+165
+00:14:24,255 --> 00:14:29,722
+Clusters of frames that no class explains well are surfaced as
+candidates for a new class.
+
+166
+00:14:29,722 --> 00:14:35,066
+This is how an Indian road corpus grows a vocabulary that a
+western ontology never had.
+
+167
+00:14:35,066 --> 00:14:35,932
+Sievyx filters.
+
+168
+00:14:35,932 --> 00:14:41,688
+Near duplicate frames, frames that are almost all sky, frames
+the camera auto exposure ruined.
+
+169
+00:14:41,688 --> 00:14:50,599
+Removing these before labelling is the cheapest quality improvement available, because a duplicate frame costs a full
+label and teaches nothing.
+
+170
+00:14:50,599 --> 00:14:52,983
+The long tail is the whole problem in India.
+
+171
+00:14:52,983 --> 00:14:58,915
+Cattle on the carriageway, three people on one motorcycle, an
+auto rickshaw reversing, a hand cart at night.
+
+172
+00:14:58,915 --> 00:15:06,732
+These classes are rare in any corpus and over represented in the situations that matter, and this page ranks them by how
+starved each one is.
+
+173
+00:15:06,732 --> 00:15:07,883
+This closes the loop.
+
+174
+00:15:07,883 --> 00:15:17,785
+A blocked gate produces a recall deficit per class, the deficit builds its own review batch, the batch produces
+labels, the labels retrain the model and the gate runs again.
+
+175
+00:15:17,785 --> 00:15:23,599
+That loop cleared a class that had been stuck at zero point
+one four recall for five training cycles.
+
+176
+00:15:23,599 --> 00:15:26,987
+A campaign is a labelling goal with a budget and a deadline.
+
+177
+00:15:26,987 --> 00:15:35,599
+The system allocates it against the marginal value of a label per rupee, using the measured time a verdict actually takes
+rather than an assumed rate.
+
+178
+00:15:35,599 --> 00:15:43,405
+Interesting moments are exported as OpenSCENARIO files, so a situation found in real footage becomes a test case a
+simulator can replay.
+
+179
+00:15:43,405 --> 00:15:51,732
+Where the esmini simulator is installed, each exported scenario is replayed at export time and the bundle records
+whether it was actually valid.
+
+180
+00:15:51,732 --> 00:15:53,291
+Corpus level analytics.
+
+181
+00:15:53,291 --> 00:15:59,951
+Class balance, geographic coverage, time of day, weather, how
+much of each session is labelled.
+
+182
+00:15:59,951 --> 00:16:04,345
+One number here is uncomfortable and deliberately left
+visible.
+
+183
+00:16:04,345 --> 00:16:07,533
+Of 598,179 objects, 788 carry a human verdict.
+
+184
+00:16:07,533 --> 00:16:16,532
+The machine has run far ahead of the people, and pretending otherwise would make every quality number on this tour
+meaningless.
+
+185
+00:16:16,532 --> 00:16:19,571
+A dataset is built from a query rather than a folder.
+
+186
+00:16:19,571 --> 00:16:25,940
+All night time frames containing a rider without a helmet,
+excluding the gold set, excluding synthetic frames.
+
+187
+00:16:25,940 --> 00:16:30,732
+The result is frozen with a hash and a datasheet that states
+exactly what went in.
+
+188
+00:16:30,732 --> 00:16:36,218
+Synthetic frames exist, built by pasting real instances of
+starved classes into real backgrounds.
+
+189
+00:16:36,218 --> 00:16:39,475
+They are quarantined structurally rather than by a filter.
+
+190
+00:16:39,475 --> 00:16:47,589
+A synthetic label carries its own state and its own source, so every reader that measures anything excludes them without
+having to remember to.
+
+191
+00:16:47,589 --> 00:16:51,132
+No synthetic pixel can reach a validation split or a gold set.
+
+192
+00:16:51,132 --> 00:16:56,886
+Indian data protection law applies to road footage, because
+faces and number plates are personal data.
+
+193
+00:16:56,886 --> 00:17:06,399
+Faces and plates are detected and redacted, and the redaction is verified by re-running detection on the redacted image
+rather than trusting that the blur was applied.
+
+194
+00:17:06,399 --> 00:17:13,475
+Access to unredacted imagery is a role, every access is logged
+with a reason, and the log is not deletable from the product.
+
+195
+00:17:13,475 --> 00:17:16,639
+Aggregated releases carry a differential privacy budget.
+
+196
+00:17:16,639 --> 00:17:27,799
+Counts are noised, map cells with fewer than ten sessions are suppressed entirely, and when the budget for a scope is spent the endpoint refuses rather than quietly returning a weaker
+guarantee.
+
+197
+00:17:27,799 --> 00:17:30,489
+The same spine runs a physical security pack.
+
+198
+00:17:30,489 --> 00:17:32,017
+Cameras, zones, incidents.
+
+199
+00:17:32,017 --> 00:17:38,558
+It shares ingest, annotation, review, measurement and
+governance, and shares none of the road specific code.
+
+200
+00:17:38,558 --> 00:17:43,999
+An import contract is enforced in the build so that the core
+can never reach into a pack.
+
+201
+00:17:43,999 --> 00:17:47,709
+Incidents in the security pack are assembled from tracks and
+zones.
+
+202
+00:17:47,709 --> 00:17:50,351
+There is no transcription anywhere in this pack.
+
+203
+00:17:50,351 --> 00:17:57,266
+No text is read off a frame and no text content is stored, which is a deliberate scope limit rather than a missing
+feature.
+
+204
+00:17:57,266 --> 00:18:00,386
+Exports go out in the formats teams already use.
+
+205
+00:18:00,386 --> 00:18:04,569
+COCO, YOLO, KITTI, nuScenes, OpenLABEL and the scenario
+formats.
+
+206
+00:18:04,569 --> 00:18:13,066
+Every bundle carries a datasheet with the query that built it, the class counts, the synthetic share and the privacy
+parameters.
+
+207
+00:18:13,066 --> 00:18:15,485
+Forgyx takes a trained model to the edge.
+
+208
+00:18:15,485 --> 00:18:19,718
+Export, quantise to eight bit, compile for the target and
+benchmark it.
+
+209
+00:18:19,718 --> 00:18:26,733
+A model that is accurate and too slow has not solved the
+problem, so latency is a gate condition and not a footnote.
+
+210
+00:18:26,733 --> 00:18:27,813
+Deployment is staged.
+
+211
+00:18:27,813 --> 00:18:33,000
+A candidate runs in shadow beside the current model on the
+vehicle before it takes over anything.
+
+212
+00:18:33,000 --> 00:18:42,400
+The distillation loop here trains a small student from a large teacher and repeats until it fits the latency budget, or stops
+after four rounds and reports that it could not.
+
+213
+00:18:42,400 --> 00:18:43,959
+Deployed models report back.
+
+214
+00:18:43,959 --> 00:18:48,116
+Latency, thermal state, frames dropped and where the model was
+uncertain.
+
+215
+00:18:48,116 --> 00:18:54,467
+Uncertain frames come home and re-enter the labelling queue,
+which is the outer loop of the whole data engine.
+
+216
+00:18:54,467 --> 00:18:56,166
+Sanyx watches the hardware.
+
+217
+00:18:56,166 --> 00:19:01,134
+Device temperature, storage, camera health and clock drift
+across the fleet.
+
+218
+00:19:01,134 --> 00:19:03,002
+Predicted failures ahead of time.
+
+219
+00:19:03,002 --> 00:19:06,562
+A camera whose focus is slowly drifting or a drive filling up.
+
+220
+00:19:06,562 --> 00:19:14,734
+A vehicle that records unusable footage for a week is more expensive than one that stops, because nobody notices until
+the labelling starts.
+
+221
+00:19:14,734 --> 00:19:17,168
+Operations shows the system's own health.
+
+222
+00:19:17,168 --> 00:19:20,636
+Queue depths, GPU memory, worker state and the killswitch.
+
+223
+00:19:20,636 --> 00:19:25,139
+The resource rules here are the reason this whole tour runs on
+one desktop.
+
+224
+00:19:25,139 --> 00:19:31,467
+Every heavy path takes a slot, works in batches, checks free
+memory between them and yields to training.
+
+225
+00:19:31,467 --> 00:19:37,938
+Several people work the same corpus at once, with assignment,
+locking and comment threads on individual objects.
+
+226
+00:19:37,938 --> 00:19:45,867
+The interface is translated into Hindi, Kannada and Tamil, because the people doing the labelling are frequently not
+working in English.
+
+227
+00:19:45,867 --> 00:19:51,317
+Each person sees their own throughput, their agreement with
+control samples and their history.
+
+228
+00:19:51,317 --> 00:19:55,067
+Measured, not estimated, and visible to the person it
+describes.
+
+229
+00:19:55,067 --> 00:19:56,603
+That is the full system.
+
+230
+00:19:56,603 --> 00:20:07,425
+What is real today is the ingest, the auto labelling, the review surfaces, the tracking, the measurement with honest
+intervals, the governance and the export path.
+
+231
+00:20:07,425 --> 00:20:19,382
+What is thin today is human verdicts, with 788 of 598,179 objects ruled on, and measured ego pose, where the 154 poses
+from this KITTI import are the first the corpus has ever had.
+
+232
+00:20:19,382 --> 00:20:27,332
+Both of those are visible on the pages you just saw, because a
+data engine that hides its own gaps is not a data engine.
+
+233
+00:20:27,332 --> 00:20:28,200
+It is a demo.

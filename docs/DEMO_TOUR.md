@@ -1,7 +1,8 @@
 # The recorded tour
 
 A narrated walkthrough of every page in the product, recorded against the running system with a live
-database behind it. Twelve chapters, seventy five scenes, about half an hour.
+database behind it. Twelve chapters, seventy five scenes, 20 minutes and 28 seconds at 1920 by 1080,
+50 MB.
 
 It exists because the two earlier films are short. They show the system working; they do not explain
 what each surface is for, and they do not visit most of it. This one visits seventy two of the
@@ -98,7 +99,7 @@ in pixels comes out nearly four times too big. The ASS file states the real reso
 still written and attached as the selectable soft track, and both are generated from the same entries
 so they cannot disagree.
 
-## Two defects the tour found
+## Three defects the tour found
 
 Preparing the data for it surfaced two bugs, both of the shape that survives a test suite: each took a
 branch only reachable when the interesting data existed, and every test exercised the other branch.
@@ -114,3 +115,9 @@ the subquery with no FROM, which raises at compile time. `embed_objects` joins `
 image URI, so the one caller in production raised on every run while all six tests passed.
 
 Both fixes shipped with tests checked against the old code.
+
+Filming found a third, in the product rather than the pipeline. The console's Background panel
+interpolated each agent run count straight into a template string, and several agents write a list
+there, so every drift and lift row read `findings [object Object],[object Object]`. It had been that way
+for as long as the panel existed and nothing threw or logged. The scene was re-recorded after the fix,
+which is what `--only` and the manifest merge are for.
