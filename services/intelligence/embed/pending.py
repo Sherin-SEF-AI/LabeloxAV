@@ -21,7 +21,7 @@ every vector this object needs actually present".
 
 from __future__ import annotations
 
-from sqlalchemy import and_, exists
+from sqlalchemy import and_, exists, literal, select
 
 from core.origin import REAL
 from db.models import Frame, FrameEmbedding, Object, ObjectEmbedding
@@ -37,8 +37,24 @@ def frame_is_real():
 
 
 def object_on_real_frame():
-    """SQL predicate, usable without a Frame join: the object's frame is real."""
-    return exists().where(Frame.frame_id == Object.frame_id, Frame.origin == REAL)
+    """SQL predicate: the object's frame is real. Safe whether or not the caller also joins Frame.
+
+    The explicit `select_from(Frame).correlate(Object)` is the whole point of this shape. Written as a
+    bare `exists().where(...)`, SQLAlchemy decides the subquery's FROM by auto-correlation: against a
+    query that selects from Object alone it correctly keeps Frame inside the subquery, but against a
+    query that already joins Frame it correlates Frame outwards, leaves the subquery with no FROM at all
+    and raises `InvalidRequestError` at compile time.
+
+    That is exactly the difference between how the tests called it and how production did.
+    `embed_objects` joins Frame to read `img_uri`, so the one caller that mattered raised on every run
+    while the suite stayed green. Pinning the subquery's FROM makes the predicate mean the same thing in
+    both shapes.
+    """
+    return exists(
+        select(literal(1)).select_from(Frame)
+        .where(Frame.frame_id == Object.frame_id, Frame.origin == REAL)
+        .correlate(Object)
+    )
 
 
 def object_needs_embedding():

@@ -224,3 +224,69 @@ class TestCameraChoice:
         from services.intelligence.ego_pose import _pick_camera
 
         assert _pick_camera(self._rows({"rear_wide": 400}), {"rear_wide"}) == "rear_wide"
+
+
+class TestGnssRowsReadGeography:
+    """`Frame.gnss` is a PostGIS geography point, and reading it as a dict silently disabled measured pose.
+
+    `_gnss_rows` called `.get("lat")` on the selected column. Selecting a geography column hands back a
+    geoalchemy element whose `__getattr__` raises `AttributeError`, so every session that actually had
+    satellite fixes raised on the first row, and the only sessions that "worked" were the ones with no
+    GNSS at all, where the query returned nothing and the visual fallback took over.
+
+    That is the worst shape a bug can have: it failed exactly where the good data was, and the pass rate
+    of the old test suite was unaffected because no test seeded a real fix.
+    """
+
+    @pytest.mark.db
+    @pytest.mark.asyncio
+    async def test_measured_poses_come_back_from_real_fixes(self):
+        import uuid as _uuid
+
+        from sqlalchemy import text
+
+        from core.timebase import now_ns, seconds_to_ns
+        from db.models import Frame, OntologyClass, OntologyVersion
+        from db.models import Session as DbSession
+        from db.session import get_sessionmaker
+        from services.autolabel.ontology import get_ontology
+        from services.intelligence.ego_pose import _gnss_rows
+
+        t0 = now_ns()
+        sid = _uuid.uuid4()
+        onto = get_ontology()
+        async with get_sessionmaker()() as db:
+            if await db.get(OntologyVersion, onto.version) is None:
+                db.add(OntologyVersion(version=onto.version, hierarchy_levels=3, attributes={}))
+                await db.flush()
+                for c in onto.classes:
+                    db.add(OntologyClass(id=c.id, version=onto.version, name=c.name, l0=c.l0,
+                                         l1=c.l1, india=c.india, map_to={}))
+                await db.flush()
+            db.add(DbSession(session_id=sid, vehicle_id="TEST-EGO", city="BLR",
+                             route="ego-pose-gnss", start_ts_ns=t0,
+                             end_ts_ns=t0 + seconds_to_ns(6), sensors={},
+                             ontology_version=onto.version))
+            await db.flush()
+            # A short straight drive east, one fix per second, written the way ingest writes them.
+            for i in range(6):
+                lat, lon = 12.9716, 77.5946 + i * 0.0001
+                db.add(Frame(frame_id=_uuid.uuid4(), session_id=sid, cam_id="cam_f",
+                             ts_ns=t0 + seconds_to_ns(i), width=1920, height=1080, quality=0.9,
+                             scene={}, img_uri=f"s3://test/ego/{i}.jpg", ego_speed=10.0,
+                             gnss=f"SRID=4326;POINT({lon} {lat})"))
+            await db.commit()
+
+            try:
+                rows = await _gnss_rows(db, sid)
+                assert len(rows) == 6, "every fix should produce a pose"
+                assert all(r["measured"] is True for r in rows), "a satellite fix is measured"
+                assert all(r["source"] == "gnss_imu" for r in rows)
+                # The drive went east, so easting must increase and northing must stay put.
+                xs = [r["x"] for r in rows]
+                assert xs == sorted(xs) and xs[-1] > xs[0] + 1.0, "eastward motion should show in x"
+                assert max(abs(r["y"]) for r in rows) < 1.0, "a straight eastward drive has no northing"
+            finally:
+                await db.execute(text("delete from frame where session_id = :s"), {"s": sid})
+                await db.execute(text("delete from session where session_id = :s"), {"s": sid})
+                await db.commit()

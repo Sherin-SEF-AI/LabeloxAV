@@ -167,3 +167,36 @@ async def test_the_half_embedded_population_is_countable_on_its_own():
             select(func.count()).select_from(Object).where(object_missing_siglip()))).scalar_one()
         assert after == before + 1
         await db.rollback()
+
+
+def test_the_predicate_compiles_in_a_query_that_already_joins_frame():
+    """The production caller joins Frame, and that used to make the predicate uncompilable.
+
+    `object_on_real_frame` was written as a bare `exists().where(Frame.frame_id == Object.frame_id, ...)`.
+    SQLAlchemy fills in such a subquery's FROM by auto-correlation, so its meaning depends on the query
+    it lands in. Selecting from Object alone, Frame stays inside the subquery and it works. Joining Frame
+    in the outer query, Frame correlates outwards, the subquery is left with no FROM at all, and
+    compiling raises `InvalidRequestError`.
+
+    `embed_objects` joins Frame to read `img_uri`. So the only caller in production raised on every
+    single run while every test here passed, because every test called it the other way. This test calls
+    it the way production does, which is the only shape that was ever broken.
+
+    Compiling is the whole assertion. The failure was at statement compile time, before any row was read,
+    so this needs no database.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.dialects import postgresql
+
+    from db.models import Frame, Object
+    from services.intelligence.embed.pending import object_needs_embedding
+
+    stmt = (select(Object.object_id, Object.bbox, Frame.img_uri)
+            .join(Frame, Frame.frame_id == Object.frame_id)
+            .where(object_needs_embedding()))
+    sql = str(stmt.compile(dialect=postgresql.dialect()))
+    assert "EXISTS" in sql
+    # The subquery must carry its own FROM. Without it the origin check silently tests nothing, which
+    # would let a synthetic frame's crops through the quarantine.
+    inner = sql[sql.index("EXISTS"):]
+    assert "FROM frame" in inner, "the exists subquery lost its own FROM clause to auto-correlation"

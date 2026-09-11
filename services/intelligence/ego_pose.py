@@ -36,7 +36,8 @@ import uuid
 
 import cv2
 import numpy as np
-from sqlalchemy import delete, select
+from geoalchemy2 import Geometry
+from sqlalchemy import cast, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
@@ -228,13 +229,16 @@ async def _gnss_rows(db: AsyncSession, session_id: uuid.UUID) -> list[dict]:
     """Poses from GNSS fixes, or an empty list. These are the only measured rows this module can write."""
     from services.intelligence.egostate import derive_ego_state
 
+    # `Frame.gnss` is a PostGIS geography point, not JSON. Selecting the column itself hands back a
+    # geoalchemy element whose attribute access raises, so latitude and longitude are extracted in the
+    # database with ST_Y and ST_X, which is how the other five readers of this column already do it.
+    geom = cast(Frame.gnss, Geometry)
     rows = (await db.execute(
-        select(Frame.frame_id, Frame.ts_ns, Frame.gnss, Frame.ego_speed)
+        select(Frame.frame_id, Frame.ts_ns, func.ST_Y(geom), func.ST_X(geom), Frame.ego_speed)
         .where(Frame.session_id == session_id, Frame.gnss.isnot(None))
         .order_by(Frame.ts_ns))).all()
     fixes = []
-    for fid, ts, gnss, speed in rows:
-        lat, lon = (gnss or {}).get("lat"), (gnss or {}).get("lon")
+    for fid, ts, lat, lon, speed in rows:
         if lat is None or lon is None:
             continue
         fixes.append((fid, int(ts), float(lat), float(lon),
