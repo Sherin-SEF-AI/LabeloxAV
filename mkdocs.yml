@@ -65,6 +65,8 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Demo film: demo.md
+  - The recorded tour: DEMO_TOUR.md
   - Getting started: getting-started.md
   - Using it:
       - What it is for: guide/index.md

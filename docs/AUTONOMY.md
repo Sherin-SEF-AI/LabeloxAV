@@ -1,0 +1,1223 @@
+# The autonomy program
+
+One entry per work package of the feature program that started on 2026-09-05, in landing order.
+Every number here comes from a real run over the real corpus or from the rule itself evaluated
+exhaustively; where a number could not be produced honestly, its reason is printed instead.
+
+The invariants every package keeps: `accepted` means a person ruled, forever, and the machine never
+writes it; every autonomous write is one revertible chunked `AgentRun`; refuse with a reason rather
+than guess, and an unmeasured quantity is never reported as zero; GPU work runs batch by batch behind
+`gpu_slot`, `training_holds_gpu` and `VramGuard`; the killswitch gates all of it; every schema change
+ships an Alembic migration whose `downgrade()` has been run.
+
+---
+
+## WP1. Sequential acceptance (SPRT) and the verdict-minute allocator
+
+### The defect it fixes
+
+Settlement (migration 0106) proved a class clean by a fixed draw: `sample_target(far)` crops, sized so
+one defect still passes Wilson at the class's failure-rate bound. That is 110 crops at far 0.05, 283 at
+0.02, 562 at 0.01. A fixed draw spends the same number of human verdicts on a class that is obviously
+clean and on one that is obviously not, and the two live lots (motorcycle at far 0.01, traffic sign at
+far 0.05) were waiting on 672 verdicts, roughly 67 human minutes, before either could say anything.
+
+### The rule
+
+`services/labelops/sampling.py::sprt_decision(defects, n, *, p0, p1, alpha=0.05, beta=0.10)` is Wald's
+sequential probability ratio test on the defect rate. `p0 = far` is the rate the lot must reject,
+`p1 = far / 2` the rate it must accept (`settlement.py::sprt_params`). The log-likelihood ratio moves
+by `ln(p0/p1) = ln 2` on every defect and by `ln((1-p0)/(1-p1))` on every clean verdict; it stops at
+`ln(beta/(1-alpha)) = -2.2513` (accept) or `ln((1-beta)/alpha) = 2.8904` (reject). The operating
+characteristic is solved by bisection and reported per lot, and the expected remaining verdicts (Wald's
+ASN from the current llr) is what the allocator reads.
+
+Three things about how it is wired, because each one is where a sequential test goes wrong:
+
+- **Accept is conjunctive.** A lot accepts only when the SPRT crosses its accept bound and
+  `acceptance_decision` (the Wilson rule from 0106) also accepts at the same `(defects, n)`. Measured
+  over every `(k, n)` up to the cap: the SPRT is the binding rule at 0 to 2 defects and Wilson is the
+  binding rule at 3 or more, so neither implies the other and the conjunction is not decorative. Reject
+  is the SPRT alone; it is the conservative direction and steps the class down exactly as before.
+- **Verdicts arrive in draw order, and only whole increments count.** Triage served every batch in
+  `(1-conf) * rarity * boost` order, which would have made "the verdicts so far" the hardest-first prefix
+  and the early stop a biased one. For batches whose cycle id starts with `settle-`, triage now ranks by
+  the crop's index in the lot's draw (`sample_object_ids`); the formula for every other batch is
+  untouched and a test holds it there. `tally_lot` counts only increments judged to the completion floor
+  (0.9), never a partial one, and `top_up_lot` refuses to draw while the latest increment is incomplete.
+- **Increments are a prefix of one permutation.** The draw keeps the `settle-sample` salt and the
+  `not in have` exclusion, so 25 more crops are the next 25 of the same md5 order. At
+  `cap_n = sample_target(far)` the sample is identical to the old fixed draw and Wilson decides verbatim
+  (`rule="wilson_at_cap"`), so the worst case of the sequential rule is exactly the old rule.
+
+Migration `0107_settlement_sprt` adds `rule`, `cap_n`, `llr`, `sprt` and `increments` to
+`settlement_lot`. `llr` is null until computed, never 0. Downgrade drops the five columns and a judging
+lot then tallies as Wilson, the stricter rule, so nothing has to be moved; the round trip is exercised
+on a seeded lot by `tests/test_migrations_roundtrip.py`.
+
+### The spot check that never reached a person
+
+`settle_lot` created `settlement_spot` rows on `settled` objects with no cycle id, and triage defaults
+to `review,annotate`, so no spot was ever served and nothing wrote `human_verdict`. Spot objects are
+now stamped `provenance.flywheel.cycle_id = spot-{lot8}`, the settlement notification links to
+`/review/grid?flywheel=spot-{lot8}&states=settled`, and `apply_review_batch` writes `correct` or
+`incorrect` onto the spot when the verdict lands (`ApplyResult.spot_judged`). A human ruling on a
+`settled` object still upgrades it to `accepted`, as `state_for` already did.
+
+### The allocator
+
+`settlement.py::expected_remaining(lot)` gives, per judging lot, the expected verdicts to a decision
+(clamped to `cap_n - n`), minutes at the 10 verdicts per minute the estimate has always used, and
+`value = population * OC(p_hat) / minutes`: objects a passed lot would settle per minute of a person's
+time. `/autonomy/state` returns the ranked `worklist` and `verdict_minutes_open`; the autonomy page
+draws each lot's llr between its two bounds. `p_hat` is smoothed with one pseudo-verdict at the
+indifference midpoint `(p0+p1)/2`, because a Laplace prior made an unjudged lot look half defective
+and priced it at zero.
+
+### Measured
+
+From the rule itself, evaluated at every `(defects, n)` up to the cap for each tier:
+
+| far | cap (0106) | clean lot accepts at n | first whole increment | verdicts saved | straight defects to reject |
+| --- | --- | --- | --- | --- | --- |
+| 0.05 | 110 | 87 | 100 | 9% | 5 |
+| 0.02 | 283 | 222 | 225 | 20% | 5 |
+| 0.01 | 562 | 447 | 450 | 20% | 5 |
+
+A lot with exactly one defect never accepts early under the conjunction at any tier; it runs to the cap
+and Wilson accepts it there, as it did before. Five consecutive defects reject at any tier after 5
+verdicts, where the fixed draw would have needed the whole sample.
+
+**The two live lots produce no replay number.** `253cacf5` (motorcycle, far 0.01, 562 drawn) and
+`be7b3273` (traffic sign, far 0.05, 110 drawn) both have 0 verdicts, so there is nothing to replay
+through the SPRT. They were planned under 0106 and stay `rule='wilson', cap_n=0`; the tally treats that
+as the fixed rule. Re-planning them under the sequential rule is the operator's call, and the first
+verdict-minute numbers will come from whichever lot is judged first.
+
+Tests: `tests/test_sprt.py` (21), `tests/test_settlement.py` (16, including the calibration umbrella
+`test_settlement_changes_no_calibration_input`), `tests/test_migrations_roundtrip.py` (1).
+
+---
+
+## WP3. Synthetic data behind a quarantine, and the copy-paste generator
+
+### The defect it fixes
+
+Cattle and rider are the two classes the gate keeps blocking on, and both are starved of positives:
+cattle has 6 human-accepted objects in the whole corpus, rider has 4 with a polygon mask. Pasting real
+instances of a class onto real road scenes is the cheapest proven way to add positives, but it is only
+safe if nothing that measures a model can ever see a composited pixel. A predicate sprinkled across
+readers cannot deliver that: over 160 modules select `Object` outside the API, so "remember to exclude
+synthetic" is a rule nobody can audit.
+
+### The quarantine
+
+Isolation is structural rather than a predicate everyone must remember. A synthetic object is written
+with `state = 'synthetic'` and `source = 'synthetic'`, two values no real object has ever held, so every
+allow-list reader excludes it without being changed: gold builds take `source == 'human'`, the precision
+draw takes `MACHINE_STATES`, the control sample takes `auto_accept`, settlement takes `review`, triage
+defaults to `review,annotate`. `OBJECT_STATES` gains the value and `state_for` refuses it for a human
+actor, making it machine-only in the way `settled` is human-only in reverse.
+
+The readers that select frames rather than objects cannot inherit that, so they carry the explicit
+predicate `Frame.origin == REAL` (`core/origin.py`): `training/dataset_builder._select`,
+`export/dataset`, `export/coverage`, `intelligence/embed/pending` (no GPU is spent embedding a
+composite, and it stays out of novelty and dedup), `context/rarity`, `intelligence/search/rarity`,
+`agent/scenario_miner`, `explore/query` (default on, with an opt-in flag) and `verdyx/blind_audit`.
+The training builder is the one place that can opt in, `BuildSpec.include_synthetic`, and even then a
+synthetic frame is never validation and is dropped when its source frame's session lands in val, so a
+composite can never be scored against the model built from it.
+
+Migration `0108_origin` adds `session.origin` and `frame.origin` (`real|synthetic|perturbed`) with
+`frame.source_frame_id` pointing back at the background, and extends `ck_object_state` and
+`ck_object_source` with the new value. The downgrade deletes synthetic frames and their sessions before
+restoring the narrower CHECKs, so it leaves a database no wider than the one it started from.
+
+### The generator
+
+`services/synth/copy_paste.py` is CPU-only OpenCV, takes no GPU slot, and composes each frame inside
+`asyncio.to_thread`. Donors are human-accepted objects of the wanted class on real frames that carry a
+polygon mask and are at least 48 px on the short side. Backgrounds are real, selected frames that have
+a drivable mask and at least one object already labelled.
+
+That background rule is looser than the plan's "no `review` or `annotate` object", and the corpus is
+the reason. The strict rule left 24 usable frames. Frames with no object at all are not clean
+backgrounds either: 7,160 of them have zero predictions, meaning they were never labelled rather than
+labelled empty, and training on them would re-teach the lesson that made recall 0.411. Requiring at
+least one labelled object and no pending `annotate` work gives 14,136 backgrounds over 197 sessions.
+
+Placement scale comes from the row: the horizon is `cy - fy*tan(pitch)` from the resolved calibration,
+and a donor moved from its own horizon to the background's scales by the ratio of its distance below
+each. Colour is matched with a Reinhard transfer in LAB at strength 0.5 with the chroma ratio clamped
+to [0.5, 2], and the mask edge is feathered. A paste is refused rather than fudged when it would cover
+more than 30% of an existing box, leave the frame, or imply a scale outside [0.35, 3.0].
+
+Each build is a parent `AgentRun(kind='synth_build')` whose children are `synth_batch` runs of 200
+frames, committed one at a time; `revert_run` cascades to the children, and each child deletes its own
+frames, images and mask blobs. Memory is checked against `resources.host()` before every batch and the
+build waits rather than pushing the host past 90%.
+
+### The bonnet, which only looking at the output revealed
+
+The first 500-frame build passed every test and put riders on the recording car's own bonnet. The
+drivable segmenter reads the lower frame as road on most dashcams, because a bonnet is smooth, grey and
+continuous with the road, so the placement band happily included it. The fix reuses the per-camera hood
+mask the detector cleanup sweep already estimates (`autolabel/ego_mask`) and subtracts it from the
+drivable surface before a footprint row is drawn. Cameras with no cached hood mask keep the raw surface
+and the run report counts them separately, so the gap is visible rather than assumed away.
+
+### Measured
+
+One build of 500 frames on the live corpus, launched by the agent's own off-hours hook
+(`maybe_synth_starved`, run `81a9cc00`, `created_by='synth_starved'`) against the gate deficit of run
+`mr-real-v2-nano-7a66432d`:
+
+| quantity | value |
+| --- | --- |
+| frames written | 500 in 3 batches |
+| objects written | 6,747, every one `state` and `source` `synthetic` |
+| class pasted | pedestrian, from 7 donors |
+| backgrounds available | 14,136 of 41,752 real frames |
+| composites refused | 67 |
+| backgrounds with a hood mask | 498 |
+| backgrounds without one | 26 |
+
+The refusals, by reason: 43 had a drivable mask with no `drivable` polygon, 19 would have covered more
+than 30% of an existing box, 2 would have left the frame, 2 implied a scale outside the band, and 1 had
+no drivable surface left in the placement band once the bonnet was removed.
+
+The quarantine was then checked against the live database rather than assumed: of 6,747 synthetic
+objects, all sit on the 500 synthetic frames, none on a real frame, and no object in any other state
+sits on a synthetic frame. Reverting the earlier 500-frame build took the whole thing back through the
+same cascade, three child runs and 500 frames, leaving no synthetic session, frame, object, image or
+mask behind and touching nothing real.
+
+A cattle build is refused with its reason rather than attempted: no cattle object in the corpus is
+human-accepted, on a real frame, and carries a polygon mask. The 153 cattle masks that exist were
+accepted by the VLM judge, not by a person, and the donor rule deliberately does not take them.
+
+### The opt-in path, measured on the live corpus
+
+`BuildSpec.include_synthetic` was run both ways over the whole corpus, selection only, no training:
+
+| | `include_synthetic=False` | `include_synthetic=True` |
+| --- | --- | --- |
+| candidate objects | 513,157 | 519,663 |
+| frames | 34,504 | 34,903 |
+| synthetic frames | 0 | 399 kept, 101 dropped |
+| validation frames | 7,013 | 7,013 |
+
+The validation side is identical to the object, which is the property the quarantine exists to give. The
+101 dropped composites are the leak guard firing on real data: their background frame's session landed
+in validation, so training on them would have shown the model val pixels under a different frame id.
+One composite in five was built on a background that validation later claimed.
+
+**The hier_ap50 delta is not reported, because this build cannot produce a resolvable one.** The
+arithmetic, not a missing capability: the build added 500 pasted pedestrians to a corpus that already
+holds 35,616 pedestrian objects on real frames, a 1.4% increase, spread over 399 of 27,491 training
+frames. A single-seed A/B at that effect size measures the seed, not the synthetic data, and reporting
+the difference between two 60-epoch runs as evidence would be exactly the kind of number this document
+refuses to print.
+
+The reason it landed on pedestrian is worth more than the delta would have been. `maybe_synth_starved`
+fires on the champion gate's recall deficit, and the gate's deficit for pedestrian is a recall problem
+on 35,616 existing labels, not a shortage of them. The class that is genuinely label-starved is cattle,
+with 1,617 objects against motorcycle's 66,786, and cattle is precisely the class the donor rule cannot
+serve: of its 6 human-accepted objects, none carries a polygon mask.
+
+| cattle objects on real frames | total | with a polygon mask | and at least 48 px |
+| --- | --- | --- | --- |
+| `accepted` by a person | 6 | 0 | 0 |
+| `accepted` by the VLM judge | 171 | 153 | 26 |
+
+So the generator is correct, quarantined and reverted cleanly, and it currently cannot reach the one
+class that needs it. Opening the donor rule to VLM-accepted masks would turn 0 cattle donors into 26.
+That is a policy decision about what "accepted" is allowed to mean for a donor, not a defect to patch
+quietly, and it is left for the operator: WP3 keeps the strict rule, in which a donor is something a
+person ruled on.
+
+**One guard was found failing open and was fixed here rather than noted for later.** The host's NVIDIA
+kernel module is 595.84 and its userspace library is 595.91, so NVML fails to initialise. CUDA is
+unaffected, and `VramGuard` is unaffected with it, because that guard reads `torch.cuda.mem_get_info`
+rather than the driver library. What was blind is `services/hardening/resources.gpus()`, which shells
+out to `nvidia-smi` and returned no cards, and with it `class_precision.free_vram_mb()`, which derived
+free VRAM from that list and returned None. `wait_for_headroom` reads None as "no GPU to check here"
+and proceeds, so on a host with a working, busy 16 GB card the headroom guard stopped guarding. That is
+the wrong direction for a guard to fail, so `free_vram_mb` now falls back to the CUDA runtime and
+returns None only when neither reading can see a device.
+
+Tests: `tests/test_origin_quarantine.py` (12), `tests/test_synth_compose.py` (15),
+`tests/test_synth_build.py` (3), `tests/test_migrations_roundtrip.py` (1), `tests/test_class_precision.py`
+(the two new headroom readings). The quarantine tests were proven non-vacuous by removing the origin
+predicate from `embed/pending` and from `dataset_builder` and watching each one fail. The full suite
+runs 3,219 passed, 5 skipped against `labeloxav_test`, against a 3,124 baseline.
+
+---
+
+## WP2. Shadow mode: challenger inference and disagreement mining
+
+### The defect it fixes
+
+Every model this program has built was measured on frozen gold: 164 validation images sealed months ago.
+The corpus has taken in 377 sessions and 41,752 frames since, and no model has ever been compared on any
+of them. Worse, the frames that would teach the most are the ones two models read differently, and
+nothing surfaced those to anybody. A promotion decision had exactly one kind of evidence, and that
+evidence stopped being new the day it was sealed.
+
+### The sweep
+
+`services/govern/shadow_agent.py::maybe_shadow_sweep` runs off-hours. It takes real, selected,
+non-duplicate frames newer than the last committed sweep, oldest first, scores the champion and each
+challenger over them, and files every disagreement. It promotes nothing and labels nothing.
+
+The GPU discipline matters more than usual because two detectors are involved. They run one at a time
+inside `gpu_slot`, never both resident, in chunks of 256 frames, with `training_holds_gpu` and a VRAM
+floor checked between chunks so a training job that starts mid-sweep gets the card back in seconds
+rather than at the end of the sweep.
+
+The high-water mark only advances on a **committed** sweep, and it is the maximum across committed
+sweeps rather than the latest one. A failed or reverted sweep compared nothing on its frames, and
+letting its mark stand would step the window past them permanently with nothing ever saying so. This
+was not a hypothetical: reverting the first real sweep and running another one showed the second
+starting after the frames the first had named rather than at them.
+
+### Three things `run_inference` had to be fixed for first
+
+It was already an idempotent batched writer, but not one that could carry two models over thousands of
+frames.
+
+1. **The idempotency key made a nightly sweep a no-op after the first night.** The key is
+   `(model_version, gold_id, code_sha, params)`, and for a sweep `gold_id` is null and the params are
+   identical every night. The second night would have matched the first night's key exactly, reused
+   that run, and scored nothing. `scope` now names the sweep and is folded into the key, so a new night
+   is a new run and a retry of the same night is a reuse. `force=True` is not the answer, because it
+   would duplicate rows when a crashed sweep retries.
+2. **The model was constructed per 16-frame batch.** A 2,000-frame sweep is 125 batches, each re-reading
+   the checkpoint from disk. It is loaded once per run now.
+3. **It took no GPU slot at all.** The sweep wraps each chunk in one.
+
+### The matcher
+
+`services/verdyx/shadow_run.py::compare_frame` is pure and takes two lists of detections. It pairs boxes
+greedily by IoU, class-agnostically so a class flip pairs instead of reading as two misses, and names
+four kinds: `champion_miss`, `challenger_miss`, `class_flip`, `conf_gap`.
+
+Both models are cut at the champion's operating point rather than at the 0.001 inference floor.
+Comparing raw floors would turn every low-confidence tail detection of one model into a "miss" by the
+other, which is an artefact of the floor and not a disagreement about the picture.
+
+### The artefact the first real sweep was made of
+
+The first sweep ran clean and produced a number that was almost entirely wrong. Comparing the 15-class
+champion against a 4-class challenger, 3,091 of its 3,240 disagreements were `challenger_miss`. The
+challenger had not missed anything. It had never been taught those words, and a model that cannot say
+`pedestrian` will register every pedestrian the champion finds as its own failure. A win share computed
+from those rows would have measured vocabulary size.
+
+Migration `0111_inference_class_vocab` records, on each inference run, the ontology class ids that
+model's own class order maps onto: what it was able to say at all, which is a property of the checkpoint
+and knowable only at inference time. The matcher compares on the intersection. Null stays null and means
+"this run declared no vocabulary", which is not an empty one, and a comparison facing null covers every
+class as it did before.
+
+### Where the human verdict lands
+
+A `champion_miss` has no Object for anyone to rule on, so this is not a Review-row flow. The sweep files
+one labelling task over the 40 worst disagreement frames, and everything pending on a queued frame is
+queued with it so one person opening one frame settles every disagreement on it at once. On
+`submit_job`, `adjudicate_for_job` matches each disagreement's box against that frame's human objects at
+IoU 0.5 and reads the verdict off the person's drawing rather than asking them to vote.
+
+That direction was written backwards on the first attempt and a test caught it. A `champion_miss` where
+the person also found nothing means the challenger invented a box, so the champion was right; the code
+had it awarding the challenger. Left in, every challenger hallucination would have become evidence in
+the challenger's favour, and the gate would have read a model that invents objects as one that finds
+them.
+
+### The gate clause
+
+`champion_gate` gains one clause, fail-closed only. With at least 30 adjudicated discordant pairs and a
+Wilson upper bound on the challenger's win share below 0.5, the promotion is blocked with a reason.
+It can never promote: a model that wins on the frames two models argue about has not been shown to be
+safe on the frames they agree on, which is nearly all of them. Below 30 pairs it reports "unmeasured"
+and blocks nothing, because too little evidence is not evidence of failure.
+
+### Measured
+
+One sweep on the live corpus, 512 frames, champion `mr-idd-yolo11l-local-aa408c72b0` against two
+challengers, at the ship-default threshold of 0.5 because no fitted threshold exists for this champion
+and the run says so rather than implying one was measured.
+
+| model | frames | GPU seconds |
+| --- | --- | --- |
+| champion (yolo11l, 15 classes) | 512 | 20.4 |
+| `mr-real-v2-nano` (10 classes) | 512 | 19.0 |
+| `dashlab-det9class` (4 classes) | 512 | 9.1 |
+
+The whole sweep took 50 seconds wall clock and filed a task of 40 frames carrying 369 disagreements.
+
+The vocabulary fix was then measured against itself, on the identical predictions, changing only whether
+the comparison was restricted to shared classes:
+
+| challenger | shared classes | all classes | shared only | artefact |
+| --- | --- | --- | --- | --- |
+| `dashlab-det9class` | 4 of 15 | 4,153 | 379 | 91% |
+| `mr-real-v2-nano` | 10 of 15 | 2,953 | 2,884 | 2% |
+
+The disagreements that survive, by kind and by class, for the challenger that shares most of the
+champion's vocabulary: 2,239 `challenger_miss`, 417 `champion_miss`, 138 `conf_gap`, 90 `class_flip`.
+The three classes the two argue about most are sedan, pedestrian and traffic sign. The commonest class
+flips are sedan against truck and bus against truck, which is the large-vehicle boundary rather than
+noise.
+
+**No win share is reported, and the reason is that nobody has ruled yet.** The sweep filed its 40 frames
+and they wait on a person. `win_share` returns `measured: false` with that reason rather than a number,
+the gate reads it as unmeasured and blocks nothing, and the autonomy page prints the reason where the
+share would go. The first real win share arrives when that task is submitted.
+
+Tests: `tests/test_shadow_match.py` (17), `tests/test_shadow_run.py` (14, one of which caught the verdicts
+being written backwards),
+`tests/test_migrations_roundtrip.py` (1, extended over 0109 and 0110 with rows present). The full suite
+runs 3,249 passed, 6 skipped against `labeloxav_test`; the web suite 682 passed with `tsc --noEmit`
+clean.
+
+---
+
+## WP4. Pseudo-3D at fleet scale: coverage, ego pose, temporal consistency
+
+### The defect it fixes
+
+Three separate gaps that turn out to be one gap.
+
+The pseudo-LiDAR lift has existed end to end since the 3D module landed: a pinned metric depth model, a
+back-projection into the ego frame, a cuboid lifter that snaps a 2D box to the ground plane. It had
+covered 96 frames of 41,204, which is 0.23%, for a single reason. It only ever ran from a manual,
+bounded router call that a person had to make per session. Nothing was wrong with the lifter; it had no
+scheduling.
+
+Nothing in this engine has ever known where the vehicle was. `Frame.gnss` is populated on 3 frames of
+41,752 and `Frame.ego_speed` on 6, so `calyx/ego_propagate.ego_transform` refuses on every session in the
+corpus, which is the correct answer and also a dead end.
+
+And those two gaps are the same gap. A cuboid lifted from one frame sits in the ego frame of that
+instant, so two cuboids of the same car from two frames are in two different coordinate systems. There
+was nothing to compare them in, so a track's boxes jittered with no way to separate motion from
+measurement error.
+
+### The pose
+
+Migration `0112_ego_pose` adds one row per session and timestamp: a position and a yaw-only quaternion in
+a session-local ENU frame, with `source`, `quality`, and `measured`.
+
+`measured` is separate from `quality` and is not a grade. True means an instrument observed position.
+False means the pose was recovered from the images, which is the only source available for almost this
+entire corpus. `quality` grades within a source and never stands in for it, because a confident visual
+estimate is still not a measurement. Yaw only, because neither GNSS nor monocular odometry observes roll
+or pitch here, and a fabricated attitude would tilt every cuboid placed through the pose.
+
+`services/intelligence/ego_pose.py` fills the table. GNSS answers where fixes exist. Everywhere else it
+is ORB features, an essential matrix against the resolved intrinsics, and `recoverPose`.
+
+**Scale is the whole difficulty and there are two ways out of it.** A single camera cannot see scale, so
+a monocular step is a direction and no length. Where the session has a pseudo-LiDAR cloud at the
+timestamp, the metric depth already paid for gives the baseline. Where it does not, the road does: the
+camera height above the plane is known, so a pixel below the horizon has a metric distance, and how far
+ground features closed between two frames is how far the vehicle moved. Where neither is available the
+rotation is still written and the translation is not, with `speed_mps` null, so a consumer can use the
+heading and refuse the step. It is never scaled by a guess.
+
+### The bonnet again
+
+The first run on a real dashcam session recovered rotation on 58 of 59 pairs and scale on 20. The ego
+hood was the reason, for the same underlying fact that put riders on it in WP3: the bonnet is rigidly
+attached to the camera, so its features never move no matter what the vehicle does. They are not merely
+useless to visual odometry. They are a block of perfectly stationary correspondences pulling the
+essential matrix toward "no motion", and they crowd real ground features out of a fixed ORB budget.
+Masking them with the same per-camera hood mask took pose recovery to 59 of 59 pairs and scaled steps
+from 20 to 30.
+
+| on a 60-frame dashcam session | before | after |
+| --- | --- | --- |
+| pairs with a recovered pose | 58 of 59 | 59 of 59 |
+| steps with a metric scale | 20 | 30 |
+
+### The coverage daemon
+
+`services/lidar/pseudo_daemon.py::maybe_lift_pending` runs off-hours and picks the least covered sessions
+first, because coverage is the point and a session at 0% teaches more per GPU minute than the tail of
+one at 90%. Clouds are built 64 frames per `gpu_slot` hold, with `training_holds_gpu` and a VRAM floor
+checked between holds, and a host-memory ceiling checked before each session. Each batch commits as its
+own `pseudo_batch` run whose revert deletes the clouds and their blobs; the cuboids lifted from a cloud
+cascade with it rather than being left pointing at nothing. Ego pose is built first and once per
+session, because it is CPU work every later batch reads.
+
+### One track, one size, one frame
+
+`services/lidar/track3d/from2d.py::lift_track` places a track's cuboids in the session frame through the
+pose, locks every dimension to the per-track median, and smooths the positions with a constant-velocity
+filter stepped by real timestamps rather than by frame index, because dashcam frames are not evenly
+spaced and treating a two-second gap as one step turns it into acceleration that never happened.
+
+The trigonometric prior in `oraclyx/mono_depth.metric_depth` becomes a check rather than a second
+estimate. Where it and the lifted range disagree by more than 30%, the cuboid's confidence is halved and
+it is routed to review. Two methods that disagree are information about the calibration; averaging them
+would produce a box neither proposed.
+
+### One web bug worth naming
+
+`web/app/lidar/linked/page.tsx` drew its camera overlay into a viewBox hardcoded to 1280x960. That is
+right for the Tigor rig and wrong for every dashcam and imported session in the corpus, so on a 1920x1080
+frame every projected cuboid was drawn at two thirds scale and offset, and the boxes still looked like
+boxes. It now reads the frame's own dimensions.
+
+### Measured
+
+One nightly lift on the live corpus, two sessions, 222 seconds end to end:
+
+| | before | after |
+| --- | --- | --- |
+| pseudo clouds | 96 | 224 |
+| cloud coverage of real selected frames | 0.23% | 0.54% |
+| ego poses | 60 | 1,858 |
+| ego poses measured by an instrument | 0 | 0 |
+| `object_3d` rows | 56, all fixture | 1,029 |
+
+Not one pose in the corpus is measured, and that is the corpus rather than the method: 3 frames of 41,752
+carry a GNSS fix. Every row written is `source='visual', measured=false`, and every consumer can tell.
+
+Lifting cuboids from the new clouds produced 973 boxes from 64 frames in 13 seconds, taking the corpus
+from 56 `object_3d` rows to 1,029. The 56 that existed before were all fixture data: every session
+holding them is a test rig (`TRK-3D`, `TIGOR-3D`, `LINK-3D`, `MC-3D`), and all 56 carried the same
+class-prior dimensions. There was no real 3D data in this engine until this run.
+
+**Then the consistency check earned its place immediately.** Over six tracks and 272 cuboids on the
+first real session:
+
+| | value |
+| --- | --- |
+| median per-track length variance, before locking | 7.76 m² |
+| median per-track height variance, before locking | 0.90 m² |
+| after locking to the per-track median | 0 |
+| cuboids whose lifted range disagrees with the trigonometric prior by over 30% | 193 of 197 |
+
+A length variance of 7.76 m² is a standard deviation of 2.8 m on the length of one car across the frames
+of a single track. And the locked dimensions those tracks settle on are not vehicles: 8.1 m long by 0.88 m
+wide by 0.31 m tall is the shape of the arithmetic, not of a car.
+
+So the honest headline of this package is not the coverage number. It is that turning coverage on for the
+first time showed the existing lifter producing geometrically implausible cuboids on a session with no
+real calibration, on 98% of its boxes, and that nothing before this would have noticed. The session is
+BDD100K, an imported dataset whose calibration is estimated rather than measured, and a metric depth model
+back-projected through wrong intrinsics gives a distorted cloud that a ground-snapped box inherits.
+
+The check does what it was built to do: every one of those cuboids has its confidence halved and its
+state set to `review`, with the two disagreeing ranges recorded on the row. None of them can reach
+detector training, which reads `Object` and never `Object3D`. Fixing the lift on uncalibrated sessions
+is the next package's work, and it now has 193 examples and a number to move.
+
+**Two findings about visual odometry from the same run**, both about which sessions it can serve rather
+than about the method:
+
+The rig session recovered a pose on 709 of 1,032 pairs and a metric scale on 3. The camera it chose was
+`rear_wide`, and the ground-plane scale was written to expect road features closing on the camera. On a
+rear-facing camera they recede, so almost every measurement was discarded. Making the scale a magnitude
+and leaving direction to the camera took that session from 3 scaled steps to 42.
+
+The obvious follow-on was to prefer a forward-facing camera, and the corpus refused it. With
+`front_narrow` chosen instead, the same session gives 179 poses, 73 recovered and **0** scaled: the
+ground-plane scale needs a wide view of road surface, not a forward one, and a narrow lens sees less of
+it than a wide rear camera does. The preference was reverted and the camera is chosen by how much of the
+session's timeline it covers, which is what the measurement supports.
+
+| camera on the rig session | poses | pose recovered | metrically scaled |
+| --- | --- | --- | --- |
+| `rear_wide`, closing-only scale | 1,033 | 709 | 3 |
+| `rear_wide`, signed scale | 1,033 | 709 | 42 |
+| `front_narrow`, signed scale | 179 | 73 | 0 |
+
+The imported dataset session recovered a pose on 28 of 764 pairs. That is the correct answer: BDD100K is
+a collection of unrelated clips, so consecutive frames are not consecutive views of one scene and there
+is no ego motion between them to recover. Visual odometry needs a session that is actually a drive.
+
+---
+
+## WP5. Domain-adaptive pretraining, and detector self-training
+
+### The defect it fixes
+
+Every model this engine trains starts from weights that have never seen an Indian road. The detector
+starts from COCO. The embedding backbone that drives duplicate detection, similarity, clustering and
+novelty is `vit_base_patch16_dinov3.lvd1689m`, pretrained on LVD-1689M. Those are good weights and they
+are not weights for this domain: an autorickshaw, a hoarding, a metro pillar and traffic at Indian
+densities are all out of distribution, and everything downstream inherits the gap.
+
+The second half is starker. The corpus holds 418 human-accepted objects on real frames and hundreds of
+thousands of machine detections. A detector trained only on the first throws away nearly everything the
+fleet has seen; one trained on raw machine detections learns its own mistakes back.
+
+### The ViT stage, which does not run here
+
+`services/training/tasks/pretrain.py` builds a manifest and dispatches. It does not train locally and
+says so rather than leaving a stub: continued DINO/iBOT pretraining of a ViT-B is days of an A100, and
+this host has one shared 16 GB card that the detector, the autolabel plane and the depth model already
+compete for. `cloud/pretrain_dino_pod.py` is the pod-side runtime, with the student/teacher
+self-distillation, the centring and sharpening that stop the pair collapsing, and checkpoints every
+2,000 steps so a pod that dies mid-run leaves usable weights behind.
+
+Three refusals rather than guesses. Composites never enter the manifest, because a backbone that learns
+the seams of the copy-paste generator would find those seams similar for the rest of its life.
+Duplicates are collapsed to one frame per `dup_group_id`, because a self-supervised objective that sees
+the same picture a thousand times learns that picture. And a job over the spend cap is refused with the
+number before anything is uploaded.
+
+**The step budget is derived from the cap rather than fixed.** A fixed 20,000 steps costs $11.81 at the
+ship rate of $1.89/h against a $10 per-job cap, so every unmodified dispatch would have been refused by
+its own guard. Deriving it gives 16,000 steps at $9.45, and raising the cap raises the default instead
+of leaving a constant that has silently stopped fitting.
+
+The task also refuses to auto-promote and refuses to invent a metric. A self-supervised backbone has no
+task score; adopting it re-embeds 41,000 frames and changes every similarity, duplicate and novelty
+surface in the product, which is a person's decision.
+
+### Where the soft targets actually come from
+
+The designed source is `oraclyx.export_distillation`, the consensus of several auto-label paths. That
+table is empty and will stay empty: `record_consensus` writes one object at a time from a router call and
+nothing batches it. This is the same shape of gap as the pseudo-LiDAR lift in WP4, a capability with no
+scheduling.
+
+So the source is a ladder, and the run records which rung answered, because a label from two agreeing
+models and a label from a fused multi-path consensus are not the same evidence. The second rung is the
+prediction plane: several independently trained models have scored the same frames, and where two of
+them put the same box on the same class, that is a consensus.
+
+**The soft target is the product of the two confidences, not the mean.** A product is the one of the
+three that cannot be carried by a single confident model. Two models each at 0.5 give 0.25 and are
+rejected by the 0.30 floor; their mean would be 0.5 and would pass. Two models that are each unsure do
+not become sure by agreeing.
+
+**Choosing the pair by size was wrong and the corpus said so.** Picking the two runs with the most
+predictions chose a pair overlapping on 4 frames and produced 9 consensus labels. Two runs that scored
+different frames cannot agree on anything however large they are. Choosing by shared frames instead
+gives 256 shared frames and 1,190 labels from the same corpus.
+
+| pair chosen by | shared frames | consensus labels |
+| --- | --- | --- |
+| prediction count | 4 | 9 |
+| frame overlap | 256 | 1,190 |
+
+### Two stages, in this order
+
+Stage one is the pseudo-labelled set with a soft-target weighted loss. Stage two is the human labels
+alone at a tenth of the learning rate. Ending on the human pass is the point: the last evidence the
+weights see is the only evidence a person ruled on, and the pseudo-labels act as the prior rather than
+the conclusion.
+
+The weighting is a wrapper around the criterion Ultralytics builds, because it exposes no per-instance
+loss weight. Whether the wrap succeeded is recorded on the run: a job that silently trained unweighted
+and one that trained weighted produce different models and the same log line otherwise.
+
+An unlabelled batch weighs 1.0 rather than 0.0. A background image carries real information, which is
+the lesson that took this corpus's recall from 0.411 to 0.770, and zeroing the loss on a frame with no
+pseudo-label would teach the model to ignore exactly where it currently hallucinates.
+
+### Measured
+
+One self-training run on the live corpus, 200 seconds end to end, both stages, through the ordinary job
+executor and the ordinary registry:
+
+| | value |
+| --- | --- |
+| consensus source | model agreement, two teachers over 256 shared frames |
+| pseudo-labels | 1,190 across 8 classes |
+| stage one | 228 train images, 2 val |
+| human labels for stage two | 418 across 192 images |
+| registered as | `origin='distilled'`, teacher `mr-real-v2-nano-7a66432d` |
+
+**Scored against the sealed gold set, the candidate loses decisively and the reason is not the method.**
+
+| model on `gold-d7343a6ae96a9caa`, 202 frames, 399 instances | map50 | recall | precision |
+| --- | --- | --- | --- |
+| champion `mr-idd-yolo11l-local` | 0.4407 | 0.3931 | measured |
+| self-trained candidate | 0.0484 | 0.0563 | 0.4523 |
+
+A detector fine-tuned from COCO weights on 228 images for 12 epochs is not going to beat a champion
+trained on the whole corpus, and it did not. The binding constraint is the size of the consensus pool,
+not the two-stage recipe: only 256 frames in this corpus have been scored by two different models, and
+that number is the size of one shadow sweep rather than anything corpus-scale. Self-training becomes
+worth running when that pool is in the tens of thousands, and the lever that moves it is the WP2 sweep,
+which is already scheduled and already picks up where it left off each night.
+
+The candidate's own precision of 0.45 against its recall of 0.056 is the shape you would expect: it
+learned a few classes from confident agreement and has never seen the rest.
+
+**Two defects this run exposed, both fixed here:**
+
+Choosing the teacher pair by prediction count gave 9 consensus labels from a pair overlapping on 4
+frames. Choosing by shared frames gives 1,190. Two runs that scored different frames cannot agree on
+anything, however large they are.
+
+And the registry column named `gold_metrics` holds two different yardsticks. The self-trained model
+registered map50 0.4975 from its own two-image validation split, next to the champion's 0.4407 from a
+202-frame sealed gold set, under one column name. The promotion gate is unaffected, because it re-scores
+both sides on common gold before comparing. A person reading the registry was not. Both writers now
+stamp the dict with the basis that produced it, `sealed_gold:<id>` or `job_val_split:<n>_images`.
+
+**One environmental defect worth recording,** because it would have silently killed every training run
+on this host. Ultralytics ships its third-party experiment trackers on by default and fires them from
+inside the training loop. MLflow now refuses a filesystem tracking backend, so its callback raised, and
+the failure surfaced as a broken pipe from every dataloader worker with nothing naming MLflow anywhere
+in the trace. The trackers are turned off when the task registry is imported; this engine records its
+own runs in `model_run` and `training_job`, so none of them had a job to do.
+
+The pretraining stage produced no number, and the reason is the design rather than a failure: it does
+not run locally, and there is no provisioned pod. What it produced instead is a manifest, a cost of
+$9.45 for 16,000 steps at the ship rate, and a refusal path that fires before anything is uploaded.
+
+Tests: `tests/test_selftrain_pretrain.py` (31), plus the task-registry assertion in `tests/test_ml_gaps.py`
+extended to cover the two new heads. The full suite runs 3,334 passed, 6 skipped against `labeloxav_test`.
+
+---
+
+## WP6. The annotation canvas: describing, judging tubes, and reading the interface
+
+### One registry, and the two defects two registries caused
+
+The editor kept two tool registries. `lib/editor/registry.ts` drove the mode rail; a second copy inside
+the frame editor's page drove the tool strip; and a third list, a hardcoded if/else chain in the keyboard
+handler, decided what a keystroke actually did. Three sources for one fact, and each had drifted.
+
+Both costs were visible to an annotator and neither failed anything:
+
+**`k` was written twice in the same chain.** The first branch selected the keypoint tool and won for every
+mode; the second selected the whole-extent tool and could never run. That tool had a button, a documented
+shortcut in the overlay, and no way to reach it from either.
+
+**Eleven buttons did nothing.** The registry declared five lane types, three drivable surfaces, two lane
+operations and two event marks. None of them reached the canvas, because lanes, 3D and events are driven
+by their own panel controls rather than by the canvas tool. Every one of those was an inert button with a
+hotkey that did nothing.
+
+There is one registry now. Shortcuts resolve through it per mode, which is what lets `k` mean the
+whole-extent tool in Objects and the keypoint tool in Pose without either being unreachable. A tool is in
+the registry when the canvas dispatches it and not before, so the lanes, 3D and events strips carry Select
+alone until something reaches the canvas. `hotkeyCollisions()` returns the modes where two tools share a
+letter, and the test asserts it is empty.
+
+The coupling test between the overlay and the real bindings was scraping a regex over the 2,000-line page.
+It now reads the registry, which is both stronger and no longer dependent on how the handler happens to be
+written.
+
+### Describing an object the ontology has no word for
+
+An annotator on an Indian road sees things the class list does not carry: a cycle rickshaw, a hand cart, a
+water tanker, a pile of construction sand in a lane. The choices were to force it into the nearest class,
+which corrupts that class, or to skip it, which loses the object.
+
+`POST /api/frames/{id}/describe-label` takes a phrase, prompts the open-vocabulary detector and segmenter
+the autolabel plane already loads, and returns proposals with masks. It writes nothing: the point of
+describing an object is that a person is looking at it, so they see what the phrase matched and at what
+confidence, and commit the ones that are right.
+
+**The phrase is evidence, not a class.** A described object carries `source='described'` and the phrase on
+its provenance. It does not invent an ontology entry, because an ontology grown by whatever somebody typed
+is how a class list stops meaning anything. What it does is make the object exist and be findable, so a
+later ontology decision has real examples rather than an argument.
+
+The caveat ships with the tool rather than in a design note. An open-vocabulary model finds whatever it is
+asked for, which is the hallucination that made an ungrounded concept list dangerous in the corpus sweep.
+One frame, prompted by a person looking at it, with the result shown before anything is written, is a
+different situation: the person is the grounding, and the response and the interface both say so.
+
+### Judging a whole track instead of one crop
+
+A single blurred crop of a distant rider is genuinely ambiguous, and a judge shown one abstains or
+guesses. The same object across eight frames of its track usually is not ambiguous, because one clear view
+settles it.
+
+`judge_tracks` samples up to eight objects spread evenly across the track, tiles their crops into one
+contact sheet, and asks once. Evenly rather than the first eight, because the first frames of a track are
+where the object is smallest and furthest away, and a sheet made of those asks the hardest possible
+version of the question. Each crop is letterboxed rather than stretched: an aspect ratio is evidence about
+what a thing is, and a squashed motorcycle looks like a different vehicle.
+
+The verdict lands on every object of the track under `judge='vlm_tube'`, which keeps it apart from the
+per-crop judge in the uniqueness key so a track can carry both and the two can be compared rather than one
+overwriting the other. `judged_precision` gained a `judge=` argument for that comparison, defaulting to
+the per-crop judge so every existing caller means what it meant before.
+
+### Where to look next inside a frame
+
+The order a frame's objects are drawn in is the order the machine emitted them, which has nothing to do
+with which one a person should look at. `GET /api/frames/{id}/next-object` ranks the frame's own
+unconfirmed objects by the same active-learning value the review queue uses, and adds track continuity: an
+object whose track was corrected on the previous frame is likely wrong here too, and it is the cheapest
+correction to make while the previous one is still in mind. The continuity bump is modest and stated
+rather than a re-ranking, so the value still explains why an object was chosen.
+
+A frame with nothing unconfirmed reports that it is finished, which is a different fact from a ranking
+that happened to come back empty.
+
+### Reading the interface
+
+The dictionaries were inline in `lib/i18n.ts`, so the file grew by four entries every time one string was
+translated and every review of that module was a review of four unrelated languages. They are one file per
+language now, and `t()` takes an interpolation form.
+
+Interpolation belongs in the dictionary rather than at the call site because the parts of a sentence do
+not sit in the same order in every language. "{n} objects" is "{n} वस्तुएँ" in Hindi, and a template
+assembled by concatenation in the component would force English word order onto all four. An unknown
+placeholder renders as written rather than blank: a visible `{total}` names the bug, where an empty gap
+reads as a missing value in the data.
+
+Coverage went from 32 keys to 73, extending to the tool strip, the describe tool, the tube verdict and the
+next-object hint, in Hindi, Kannada and Tamil. Governance and compliance surfaces stay English on purpose:
+a half-translated compliance page invites the reader to trust a phrasing nobody reviewed for legal meaning.
+
+### Measured
+
+**A track in this corpus is usually not one object.** The tube judge's first real run exposed it. A
+version that took the first object's class as the track's class stamped a verdict about minivans onto a
+"track" holding 147 objects across 18 classes on 147 different frames.
+
+| tracks with a track_id | count |
+| --- | --- |
+| one class | 1,306 |
+| more than one class | 9,982 |
+
+So 88% of tracks would have received a verdict about a class most of their objects are not. The judge now
+groups by class within the track, each group gets its own contact sheet, verdict and batch id, and the
+number of classes the track spans rides on the verdict, because a track carrying eighteen classes is a
+tracker failure worth seeing rather than a detail to discover later.
+
+The corrected run, over three tracks on the live corpus:
+
+| | value |
+| --- | --- |
+| tracks asked | 3 |
+| class groups judged | 14 |
+| verdicts returned | 3, one each of correct, incorrect and unsure |
+| objects stamped | 78 |
+| calls that never reached the judge | 11 |
+
+**The eleven failures are the honest headline and they are not abstentions.** The local Ollama judge
+times out on a contact sheet, which is a larger image than the single crops it was sized for, and the
+code records that as `failed` rather than as `unsure`. That distinction is the whole reason it exists: an
+outage recorded as abstention reads as a finding about the labels, which is how a run against a dead
+judge once came back looking like a class nobody could rule on. The tube judge needs a faster judge
+before it is practical at scale, and a merged track needs one call per class, so the cost of a bad track
+is paid in judge calls as well as in labels.
+
+**The registry unification, counted:** 11 buttons that dispatched nothing were removed from the strips,
+1 tool that had a button and a documented shortcut and could not be selected became reachable, and the
+overlay coupling test now reads structured bindings instead of a regex over a 2,000-line file.
+
+**Interface coverage** went from 32 translated keys to 73, in Hindi, Kannada and Tamil, reaching the tool
+strip, the describe tool, the tube verdict and the next-object hint.
+
+Tests: `tests/test_canvas_wp6.py` (20), `web/lib/editor/registry.test.ts` (9), `web/lib/i18n.test.ts`
+(12, up from 4). The hardcoded-string test was proven non-vacuous by planting a literal in the editor and
+watching it fail. The web suite runs 699 passed with `tsc --noEmit` clean, and the backend suite 3,354
+passed, 6 skipped.
+
+**One thing learned about the suite itself.** Two `pytest` runs against `labeloxav_test` at once corrupt
+each other: the `db` fixtures share one database and seed overlapping rows, so concurrent runs reported 6
+and 16 failures where a single clean run of the same tree passed. Three more failures came from running
+the tube judge alongside a suite containing wall-clock staleness assertions. Neither was a regression, and
+both are the kind of thing that costs an hour if it is not written down.
+
+---
+
+## WP7. Occupancy with scene flow, and annotate-once across the rig
+
+### The defect it fixes
+
+A cuboid list answers "which objects did the detector find". It has no answer for the space between them,
+and on an Indian road the space between them is where the sand pile, the handcart and the object the
+detector missed all are. "Is there anything in that lane" is not a question a list of found objects can
+answer, because the thing in the lane is exactly what was not found.
+
+The second half is time. A static grid cannot separate a parked car from one reversing toward the ego at
+the instant the frame was taken, and that difference is the whole of planning.
+
+### The grid, and the number that says whether to trust it
+
+Migration `0113_occupancy` stores one grid per session and instant: the packed voxels and their flow in
+the object store, the geometry to place them in the row. Sparse rather than dense, because a 160 by 120
+by 12 window is 230,400 cells and a road scene fills a few thousand; indices plus values is the same
+information an order of magnitude smaller, and the test asserts the ratio.
+
+`flow_voxels` is the field that decides whether the grid is worth anything. Each occupied voxel takes the
+velocity of the 3D track whose cuboid contains it; a voxel no track claims holds zero. Zero is the right
+value, because most of a road scene genuinely is static and inventing motion for unclaimed space would be
+worse than assuming none. But an assumed zero and a measured zero are different facts, and counting
+non-zero flow would conflate them: a parked car reads zero exactly as empty road does. So the count is of
+voxels a track spoke for, whatever it said, and a grid whose share is small carries a caveat in the run
+report rather than leaving the reader to divide two numbers.
+
+Placement needs a pose. Without one the grid sits in the ego frame of its own instant, `ego_pose_ts` is
+null, and a consumer stacking it against the next one can tell.
+
+### Annotate-once, exactly rather than inferred
+
+`propagate_object` derived a box in each other camera by lifting the source box's ground-contact pixel to
+the road plane and re-projecting. That works for something standing on the road and carries the flat-road
+assumption into every target view. When the object already has a lifted cuboid, the cuboid is projected
+instead: it is already a 3D extent, so this is exact geometry rather than an inference.
+
+Corners behind the camera are dropped rather than projected. A point behind the lens maps to a
+plausible-looking pixel on the wrong side of the image, and a hull that includes one is a box in the
+wrong place with nothing marking it wrong. A rejected cuboid is never projected at all, because a 3D box
+somebody looked at and called wrong would otherwise be multiplied into four views.
+
+### Measured
+
+Two sessions, 128 grids, about 20 seconds each:
+
+| | BDD100K | rig session |
+| --- | --- | --- |
+| grids built | 64 | 64 |
+| occupied voxels | 181,734 | 210,822 |
+| grids placed by an ego pose | 64 | 33 |
+
+The rig session places only half its grids because its poses were recovered on the camera with the most
+frames and its clouds were built on the frames of another, so half the timestamps have no pose to match.
+That is visible in the row rather than silently absorbed.
+
+**The flow field was entirely assumed zero on the first pass, and the fix was upstream.** There were no
+real `track_3d` rows in the corpus, so nothing could claim a voxel. Running WP4's track lifter over the
+973 cuboids that package created produced 38 real 3D tracks from 960 cuboids, and the rebuilt grids carry
+a real flow field:
+
+| BDD100K occupancy | first pass | after 38 tracks existed |
+| --- | --- | --- |
+| flow voxels | 0 | 17,273 |
+| share of occupied space with a track velocity | 0.0% | 9.5% |
+
+Nine and a half percent is a small number and it is the honest one: 38 tracks over 64 frames cover the
+vehicles and nothing else, and the rest of the occupied space is road surface, buildings and vegetation,
+which genuinely are static. The caveat fires below 5% and this is above it.
+
+### Three defects found by running it
+
+**The occupancy builder could not be re-run.** It used `merge`, which keys on the primary key, and every
+new row carries a fresh uuid, so rebuilding a session raised a unique violation on
+`(session_id, ts_ns, source)` instead of replacing the grids. It upserts on the natural key now. This was
+found the moment the grids had to be rebuilt, which is the moment a builder's re-runnability stops being
+hypothetical.
+
+**A wrong import had been silently disabling depth-based scale since WP4.**
+`services/intelligence/ego_pose.py` imported `load_cloud` from `ingest.normalize`, where it does not
+live, inside a `try/except` that returns None on any exception. So every ego-pose run reported
+`scaled_by_depth: 0`, and that number was read in the WP4 write-up as an absence of clouds when it
+actually meant the import failed. The same wrong import sat in the new occupancy builder, where it failed
+loudly because nothing swallowed it, which is how it was found at all.
+
+Both are fixed and the depth path is still unmeasured, for a reason worth stating rather than leaving as
+another zero. The only two sessions with pseudo-LiDAR clouds cannot exercise it: BDD100K has clouds but
+is a collection of unrelated clips, so odometry recovers a pose on 5 of 199 pairs and there is almost
+nothing to scale; the rig session has clouds built on one camera and its trajectory recovered on another,
+so no timestamp carries both. `scaled_by_depth` in every measurement so far should be read as unmeasured,
+not as zero, and it stays that way until a session has clouds and temporal continuity on one camera.
+
+**A metric height was computed and discarded** in the ground-projection path, left looking load-bearing
+in a function whose geometry is otherwise hard to follow. Removed.
+
+**And a test that failed whenever the suite was slow.** `tests/test_job_reaper.py` built its "fresh" and
+"dead" timestamps as module constants, evaluated at import. The staleness window is ten minutes, so on
+any suite run longer than that the fresh row had aged past the window by the time three tests read it,
+and they failed with nothing wrong. It cost three full runs here before it was recognised as a fixture
+rather than a regression, and a loaded CI machine is exactly where a suite takes longer than ten minutes.
+The timestamps are computed per call now, and the old form was reproduced to confirm the diagnosis: a
+row stamped thirteen minutes ago reads stale, the same row stamped now does not.
+
+Tests: `tests/test_occupancy4d.py` (22), `tests/test_migrations_roundtrip.py` extended over 0113 with a
+grid row present so the flow-within-occupied CHECK is exercised rather than merely declared.
+
+Two existing tests refused the new export format until it was classified and offered, which is what an
+exact-set assertion is for: `test_every_registered_format_is_classified` made the taxonomy decision
+explicit (derived, out only, no round trip), and `test_the_scene_formats_are_accepted_and_dispatchable`
+would not accept a writer registered without being validated. Both had caught the panoptic writer the
+same way when it was added.
+
+The full suite runs 3,376 passed, 6 skipped against `labeloxav_test`, on a 10 minute 30 second run that
+would have failed on the reaper fixture before it was fixed. The web suite runs 699 passed with
+`tsc --noEmit` clean.
+
+---
+
+## WP8. Ontology evolution, IRC:67 signs, what a label costs, and curriculum order
+
+### Versioning, and the primary key that was deliberately left alone
+
+An ontology changes: a class turns out to be two things, two turn out to be one, a name was wrong. The
+only trace of any of that was a new `ontology_version` row and whatever somebody remembered, so a model
+trained under one version and a gold set sealed under another could only be compared by a person who knew
+the history.
+
+Migration `0114` makes the versions a chain (`parent_version`, `changelog`) and adds `class_migration`:
+which class became which, under which kind, and for a split the rule that decided membership. The rule is
+stored for exactly one kind because it is the only one that cannot be read off the rows afterwards. A
+rename, a merge and a retire are all visible in the result; which side of a split an object went to leaves
+no trace of why.
+
+**The plan called for `ontology_class`'s primary key to become `(version, id)`, and that is not what
+shipped.** A composite key lets one id mean different things in two versions, and it also forces a version
+column onto all eight tables that reference a class, including `object`, whose 578,436 rows carry a
+`class_id` every existing query reads without one. A `class_id` only meaningful alongside a version is a
+schema where every one of those queries is silently wrong. The id stays globally unique instead, which it
+already is in practice, and a `UNIQUE(version, id)` makes that a rule rather than a convention.
+
+`split_class` applies a split batch by batch as one revertible run, and moves only `review` and
+`auto_accept` objects. An `accepted` object is one a person ruled on, and a predicate reassigning it would
+overwrite a human judgement; the run reports how many it left alone, so the remainder is visible work
+rather than a silent omission. The rule's attribute predicate runs; its VLM half deliberately does not,
+because asking a model to reclassify tens of thousands of crops is a labelling job with its own budget and
+gate, not something a schema change does on the way past.
+
+### IRC:67
+
+The 22 sign types now carry the code and group of the standard the signs are actually erected under. That
+is what a road authority calls a sign, so a class here can be talked about outside this system, and it
+gives hierarchical evaluation a real middle level: a stop sign read as a give way is a mandatory sign read
+as a mandatory sign, which is a smaller error than reading it as a hospital. An unrecognised type gets no
+group rather than a default one, because folding it into informatory would make the group-level metric
+look better than it is.
+
+### What a label costs
+
+The engine could already say which classes the gate is short on. It could not say what closing that costs,
+so every allocation was made on counts: a class needing 500 verdicts looked twice as expensive as one
+needing 250, whatever either was worth or however long its crops took to judge.
+
+`marginal_value` combines three measured quantities and refuses when any is missing. The deficit comes
+from the gate. The minutes come from the median of plausibly timed reviews of that class, with a tab left
+open for an hour and a misclick both dropped before the median rather than after, because one of either
+sets the price of the class. The rupees come from a workforce's own entered rate, and there is no default
+rate, because a default would put a fabricated number into every calculation with no way to tell it from a
+real one.
+
+### Measured
+
+Against the training run the gate is blocked on:
+
+| class | recall deficit | timed reviews | priced |
+| --- | --- | --- | --- |
+| rider | 0.331 | 0 | no |
+| cattle | 0.288 | 0 | no |
+| pedestrian | 0.017 | 0 | no |
+
+**Not one class can be priced, and the reason is that the input was never collected.** Of 30,865 recorded
+reviews, 30,863 carry `time_spent_ms = 0` and 2 carry a plausible value. Five review surfaces send the
+elapsed time and the main frame editor, where nearly all reviewing happens, did not. It does now, timed
+from selection rather than page load, because the interesting quantity is the judgement and not how long
+the frame had been open. No workforce has a rate entered either, and that one is a person's to fill in.
+
+So the ranking is built, tested and correct, and it will produce its first real number after roughly
+twenty timed reviews of one class exist and one rate has been entered. Reporting an order over three
+classes from an assumed median would have been the easier thing and it would have been a budget spent on
+arithmetic.
+
+### Curriculum
+
+`services/training/curriculum.py` orders an epoch by what the model still has to learn: class weight from
+the gate's deficit, discounted by how much the machine already agrees with the human labels on that image.
+Easy first, then the full set, which is what the literature settles on and the opposite of what feels
+intuitive; starting on the hardest examples trains on the noisiest gradients.
+
+Two properties the tests pin. Weights are normalised so the largest is 2.0, because a raw recall deficit
+sits between 0 and 1 and would leave every weight near the floor, making the curriculum a no-op that still
+changed the run's provenance. And every image appears at least once: a curriculum that dropped images
+would silently change the dataset a metric was computed on, and two runs would be incomparable with
+nothing saying so. `BuildSpec.curriculum` is off by default and recorded on the datasheet, so a comparison
+between a run that had it and one that did not is visibly not a comparison.
+
+Tests: `tests/test_label_economics.py` (26), `tests/test_migrations_roundtrip.py` extended over 0114 and
+0115 with rows present, so the unmeasured-row-carries-a-reason CHECK is exercised rather than declared.
+The full suite runs 3,402 passed, 6 skipped against `labeloxav_test`; the web suite 699 passed with
+`tsc --noEmit` clean.
+
+---
+
+## WP9. One thing changed, and the simulator that is not here
+
+### The defect it fixes
+
+Every number in this engine is observational. Gold measures a model on the conditions gold happens to
+contain, and a slice metric says the model is worse on dark frames without being able to say whether that
+is the darkness or the fact that dark frames in this corpus are also mostly highways at speed.
+
+An Indian road at dusk in the rain with a truck half-blocking a rider is not a rare condition, it is
+Tuesday. A model can score well on a sealed gold set and fail on all of it, because the gold set was
+collected in daylight.
+
+### A counterfactual
+
+Hold the scene fixed, change one thing, score the same labels again. The difference is attributable to
+that one thing, which is the only causal statement this engine can make.
+
+Five perturbations, each deterministic under its seed, because a counterfactual whose result moves between
+runs cannot be checked in exactly the situation where somebody wants to check it. Occlusion covers a
+fraction of an object's box from a randomly chosen edge rather than the centre, because that is how
+occlusion happens and a centred hole leaves the outline intact on all four sides. Dusk darkens by gamma
+rather than subtraction, which compresses the whole range the way falling light does instead of clipping
+the shadows to black. Rain adds both streaks and the veiling haze, because streaks alone are noise a
+convolution shrugs off and the veil is what costs a detector its contrast. Fog thickens with distance
+through the depth map from WP4 when there is one. Motion blur is directional.
+
+**Perturbed frames never get objects.** A rider behind an added occlusion is still a rider at the same box.
+That is what makes the before and after a comparison, and writing labels for a perturbed frame would
+create a second copy of every object with a different origin.
+
+**A drop is reported with an interval or not at all.** A recall of 3 of 4 falling to 2 of 4 is not a 25%
+regression, it is four objects. The gate refuses only when the perturbed upper bound sits below the
+baseline lower bound, on at least 30 gold objects, so it cannot block a promotion on sampling noise.
+
+### Measured
+
+The serving champion on 60 gold frames, 146 seconds, all five perturbations:
+
+| perturbation | motorcycle recall | drop | sedan recall | drop |
+| --- | --- | --- | --- | --- |
+| none | 0.513 | | 1.000 | |
+| occlude 0.3 | 0.270 | 0.243 | 0.875 | 0.125 |
+| motion blur | 0.297 | 0.216 | 1.000 | 0.000 |
+| rain | 0.486 | 0.027 | 1.000 | 0.000 |
+| dusk | 0.540 | -0.027 | 1.000 | 0.000 |
+| fog | 0.513 | 0.000 | 1.000 | 0.000 |
+
+Two findings, and one of them is about the gate rather than the model.
+
+**Occlusion and motion blur cost the champion about half its motorcycle recall.** A 24 point drop from
+covering 30% of a box, and a 22 point drop from camera shake, on the class this corpus is made of. Neither
+is visible in any gold number, because gold frames are sharp and unoccluded.
+
+**Nothing blocks, and that is the interval doing its job.** Thirty-seven motorcycles is above the support
+floor and still not enough for a 24 point drop to separate from noise: the Wilson intervals overlap. The
+finding is real and the evidence is not yet decisive, and the gate says the second thing rather than
+acting on the first. It becomes decisive at a few hundred objects, which is a larger gold set rather than
+a different method.
+
+**Dusk and fog cost this model nothing at all**, and dusk very slightly helps. That is a result about the
+champion rather than about the perturbation, and a plausible one for a model trained with photometric
+augmentation. It is worth knowing before anybody spends a night collecting low-light data to fix a problem
+this model does not have.
+
+### The simulator
+
+`services/sim/esmini_runner.py` replays an exported OpenSCENARIO document headlessly and parses its
+trajectory log, because a document that parses is not a scenario that runs: an actor placed off the road
+network, a speed no vehicle reaches, or a trigger that never fires all produce a well-formed file
+describing nothing.
+
+**esmini is a binary and it is not installed on this host, so what runs here is the refusal.** `replay`
+returns `ok=False` with the reason rather than raising, and the capability names both the binary and the
+setting an operator can point at instead. A scenario nobody could validate and one that failed validation
+are different facts, and an export that conflated them would claim a check it never performed.
+
+The parser tolerates a renamed column, because one that returned nothing when the simulator changed a
+heading would make every scenario look like one where nobody moved. The trajectory checksum rounds before
+hashing, because a checksum that changed on a patch release would report every scenario as regressed on
+the day of an upgrade.
+
+Tests: `tests/test_counterfactual.py` (45). The full suite runs 3,445 passed, 6 skipped against
+`labeloxav_test`; the two autolabel tests that fail alongside it are the VRAM guard refusing to load a
+second model while the API holds the card, and both pass when it is free.
+
+---
+
+## WP10. A budget for what leaves, and a loop that stops before it wastes the card
+
+### The disclosure that was live
+
+`/analytics/geo` returned latitude and longitude pairs straight from `Frame.gnss`. A driving trace is
+among the most identifying data a vehicle produces: a handful of points reconstructs a home address, a
+workplace and a daily route, and removing names changes none of that. It is also exactly what a buyer
+legitimately wants in aggregate, which is why the answer is a mechanism rather than a deletion.
+
+Three steps, and the order is the mechanism. A fix becomes the 250 metre cell it fell in. A cell holding
+fewer than ten fixes is dropped entirely, not noised, because noise on a count of one still says somebody
+was there. What survives gets Laplace noise. Noising before suppressing would let a cell with one fix
+acquire a count of eleven and be released; suppressing on the noisy count would leak which cells sat near
+the threshold. Suppress on the truth, then noise what survives.
+
+Cells are fixed metric size rather than a decimal-degree grid, because a degree of longitude is 111 km at
+the equator and 96 km at Bengaluru, and a degree grid would make the privacy guarantee depend on where the
+vehicle drove.
+
+**The noise is deliberately not reproducible.** Every other random draw in this engine is seeded so a
+result can be replayed. This one comes from the system's cryptographic source, because an attacker who can
+replay the noise can subtract it, and a seeded privacy mechanism provides no privacy at all.
+
+### Epsilon is a budget, not a setting
+
+Differential privacy composes additively: ten releases at epsilon 0.1 leak as much as one at 1.0. A system
+that applies a per-query epsilon and never tracks the total is providing a guarantee it has already spent,
+and no single query reveals that. Migration `0116` holds one allowance per scope and logs every release
+against it. Both numbers are reported, the counter and the log sum, because they can disagree: a budget
+reset by hand moves the first and not the second, and the gap is the record of the reset.
+
+A scope nobody configured gets the default allowance rather than being treated as unlimited. Unlimited is
+the one reading that cannot be right, because a scope nobody thought about would then have an unbounded
+first release.
+
+A query returning no cells still costs. Asking the question is what spends privacy: a release that comes
+back empty has told the asker that every cell in that region is thin.
+
+### Measured
+
+Run against the live corpus:
+
+| | value |
+| --- | --- |
+| raw GNSS fixes available | 3 |
+| cells released | 0 |
+| epsilon charged | 0.5 of 5.0 |
+
+The endpoint that was returning three raw coordinates now returns none, and the corpus is far too sparse
+for any cell to clear the k of ten. That is the correct output and it is also a fact about the corpus:
+`Frame.gnss` is populated on 3 frames of 41,752, which is the same gap WP4 found when it could not build
+an ego trajectory from GNSS.
+
+### The distillation loop
+
+The champion is a YOLO11l, which is right for a server and will not run at 25 frames a second on an Orin
+Nano. `distill_to_budget` trains a student against the teacher's soft targets, exports, quantises,
+compiles for the target, benchmarks, and compares measured latency to that target's budget, repeating
+through the co-optimisation planner's configurations until it fits or four rounds are gone.
+
+Every round is recorded, including the failed ones. A loop that reported only its final configuration
+would hide that three of four missed the budget, which is what somebody choosing between an Orin Nano and
+an AGX actually needs to see.
+
+The student is compared to its teacher with WP2's matcher on frames neither was trained on, rather than a
+second notion of agreement, so the distillation quality number and the shadow number are the same
+statistic.
+
+**On this host the loop's honest output is the refusal, and it comes before the training.** The capability
+check runs first, so a target whose toolchain is absent costs nothing:
+
+| target | budget | round 1 | what stopped it |
+| --- | --- | --- | --- |
+| `orin_nano_trt` | 40 ms | compile | tensorrt is not installed |
+| `sentrixai_litert` | 33 ms | compile | ai_edge_litert is not installed |
+
+Ordering the capability check ahead of the training call is the whole point of that arrangement: a student
+nobody can compile for a target cannot be measured against its budget, and training one first would spend
+GPU hours to arrive at the same sentence. A test pins the order.
+
+### One thing the plan asked for that is not here
+
+WP9 called for a `scenario_regression` table storing per-scenario trajectory checksums. The checksum
+function exists and is tested; the table does not, because esmini is not installed and there is no
+checksum to store. A table whose only rows would be absent is a schema change made in advance of a
+capability, and it is cheaper to add when the simulator arrives than to carry empty.
+
+Tests: `tests/test_privacy.py` (33), covering the mechanisms, the suppression order, the accountant's
+refusal, and the distillation loop's refusals. One existing test asserted that the geo endpoint returned
+a raw coordinate, which is precisely the leak this package closed; it now asserts the opposite, checking
+the serialised response for the fix's own digits.
+
+The full suite runs 3,478 passed, 6 skipped against `labeloxav_test`. The two autolabel tests that fail
+alongside a full run are the VRAM guard refusing a second model while the API or the govern daemon holds
+the card; both pass with it free.

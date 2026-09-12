@@ -11,9 +11,23 @@ through a confidence gate to human review, mines the rare and risky moments, and
 closed loop. One ontology, 178 governed classes, tuned for what global datasets never saw: autorickshaws,
 cattle on the carriageway, overloaded two-wheelers, hand carts, potholes.
 
-[Get started](getting-started.md){ .md-button .md-button--primary }
+[Watch the demo film](demo.md){ .md-button .md-button--primary }
+[Get started](getting-started.md){ .md-button }
 [REST API](api/rest.md){ .md-button }
 [Engineering log](ENGINEERING_LOG.md){ .md-button }
+
+## See it running
+
+A twenty minute narrated tour of every page in the product, recorded live against the running system
+with a live database behind it. Every number spoken in it is read from that database at record time, so
+the voice cannot disagree with the screen, and the unflattering figures are spoken too.
+
+<video controls preload="metadata" style="width:100%; border-radius:6px;"
+       src="demo/labeloxav-tour.mp4"></video>
+
+Twelve chapters, seventy five scenes, covering seventy two of the seventy three routes in the web
+application. There is a [shorter four minute film](demo.md) as well, and
+[how the tour was made](DEMO_TOUR.md), including the three defects that filming it uncovered.
 
 ## What actually runs
 
