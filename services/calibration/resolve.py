@@ -91,6 +91,26 @@ def calibration_from_row(row, img_w: int, img_h: int) -> Calibration:
     )
 
 
+def ipm_args(cal) -> dict:
+    """The arguments the inverse-perspective pair in `services/hdmap/georef` takes, from a calibration.
+
+    Defined here rather than in either caller because it is the translation between this resolver's output
+    and the road-plane projection, and two independent copies of it are free to disagree. The BEV warp and
+    the georeferencer must place a lane in the same spot; they now do so by construction.
+
+    The mount height is the camera's z above the road, and the pitch is the mount's downward tilt. A stored
+    height of exactly zero means the extrinsic was never filled in, so it falls back rather than placing the
+    camera on the road surface, where the projection diverges.
+    """
+    return {
+        "fx": float(cal.fx), "fy": float(cal.fy), "cx": float(cal.cx), "cy": float(cal.cy),
+        "height_m": abs(float(cal.xyz_m[2])) or 1.5,
+        "pitch_rad": math.radians(float(cal.rpy_deg[1])),
+        "dist": list(cal.dist or []),
+        "fisheye": (cal.model == "fisheye"),
+    }
+
+
 async def resolve_calibration(session_id, cam_id: str, img_w: int, img_h: int) -> Calibration:
     """The stored per-session calibration for this camera, or the nominal rig default when none exists."""
     from sqlalchemy import select

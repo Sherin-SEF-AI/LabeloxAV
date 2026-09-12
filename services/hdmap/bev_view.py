@@ -97,15 +97,14 @@ def view_for(cal, *, near_m: float = DEFAULT_NEAR_M, half_width_m: float = DEFAU
 
 
 def _cal_args(cal) -> dict:
-    """The arguments the georef IPM pair takes, from a resolved calibration."""
-    return {
-        "fx": float(cal.fx), "fy": float(cal.fy), "cx": float(cal.cx), "cy": float(cal.cy),
-        # The mount height is the camera's z above the road; pitch is the mount's downward tilt.
-        "height_m": abs(float(cal.xyz_m[2])) or 1.5,
-        "pitch_rad": math.radians(float(cal.rpy_deg[1])),
-        "dist": list(cal.dist or []),
-        "fisheye": (cal.model == "fisheye"),
-    }
+    """The arguments the georef IPM pair takes, from a resolved calibration.
+
+    Delegates to the calibration module, which is where the translation lives now that the georeferencer
+    needs the same bundle. Kept as a name here because it is used throughout this file.
+    """
+    from services.calibration.resolve import ipm_args
+
+    return ipm_args(cal)
 
 
 def build_maps(cal, view: BevView) -> tuple[np.ndarray, np.ndarray]:
