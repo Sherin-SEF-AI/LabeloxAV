@@ -391,13 +391,15 @@ def assemble(entries: list[dict], out: Path) -> None:
                          f"{lines}\nre-record them with --only, or refit them.")
     concat(segs, OUT / "video.mp4")
     concat_audio(auds, OUT / "audio.m4a")
-    write_srt(entries, OUT / "tour.srt")
+    # The SRT goes to its own directory, never beside the video: a player auto-loads a `.srt` that
+    # shares the video's name and draws it over the caption already burned into the picture.
+    (OUT / "transcript").mkdir(parents=True, exist_ok=True)
+    write_srt(entries, OUT / "transcript" / "tour.srt")
     write_ass(entries, OUT / "tour.ass")
     n = write_chapters(entries, OUT / "chapters.txt")
     save_manifest(entries, OUT / "manifest.json")
     out.parent.mkdir(parents=True, exist_ok=True)
-    mux(OUT / "video.mp4", OUT / "audio.m4a", OUT / "tour.srt", OUT / "tour.ass", out,
-        chapters=OUT / "chapters.txt")
+    mux(OUT / "video.mp4", OUT / "audio.m4a", OUT / "tour.ass", out, chapters=OUT / "chapters.txt")
     print(f"{n} chapters written into the file")
 
 

@@ -100,11 +100,20 @@ seventy five came out a single frame short, and the film ended with the audio 33
 picture. Cut by frame count it is 5.7 milliseconds, and assembly now refuses to run at all if any
 segment is not the length the manifest claims.
 
-**Subtitles are burned from ASS, not SRT.** libass assumes a 384 by 288 play resolution for a format
-that carries none and scales everything it draws by the ratio to the real frame, so a font size chosen
-in pixels comes out nearly four times too big. The ASS file states the real resolution. The SRT is
-still written and attached as the selectable soft track, and both are generated from the same entries
-so they cannot disagree.
+**Subtitles are burned from ASS, and the film carries no subtitle track.** libass assumes a 384 by 288
+play resolution for a format that carries none and scales everything it draws by the ratio to the real
+frame, so a font size chosen in pixels comes out nearly four times too big. The ASS file states the real
+resolution.
+
+The first cut also embedded the SRT as a selectable `mov_text` track, on the reasoning that a burned
+caption always shows while a soft one stays searchable. Played back, both appeared at once: the embedded
+track is flagged `default`, so the player switched it on over the caption already in the picture and the
+two texts overlapped at different sizes. There is no arrangement that keeps both without that risk,
+because a player choosing its own subtitle source is exactly what a burned caption exists to prevent.
+
+So the film carries one caption, and the SRT is written beside it as a separate file, in its own
+directory. The directory is not tidiness: players auto-load a `.srt` that shares the video's name, which
+reproduces the doubling with no track embedded at all.
 
 ## Three defects the tour found
 

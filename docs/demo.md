@@ -2,7 +2,7 @@
 
 ## Full tour (20 min)
 
-Every page in the product, narrated, with subtitles and twelve chapter marks. Seventy five scenes
+Every page in the product, narrated, with captions burned into the picture and twelve chapter marks. Seventy five scenes
 covering seventy two of the seventy three routes in the web application; the one it skips is the
 sign-in page.
 
@@ -18,8 +18,12 @@ laser points (154 clouds, 18 million points).
 <video controls preload="metadata" style="width:100%; border-radius:6px;"
        src="demo/labeloxav-tour.mp4"></video>
 
-[Download the tour](demo/labeloxav-tour.mp4) (50 MB, H.264 1080p) ·
-[subtitles](demo/labeloxav-tour.srt)
+[Download the tour](demo/labeloxav-tour.mp4) (48 MB, H.264 1080p) ·
+[transcript](demo/transcript/labeloxav-tour.srt)
+
+The captions are part of the picture, so there is no subtitle track to switch on and nothing to line up.
+The transcript is the same text as a separate file, kept in its own directory because a player
+auto-loads a `.srt` sitting beside a video and would draw it over the captions already there.
 
 How it was made, and the two defects making it uncovered: [the recorded tour](DEMO_TOUR.md).
 

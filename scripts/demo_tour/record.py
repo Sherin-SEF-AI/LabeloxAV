@@ -248,25 +248,33 @@ def write_chapters(entries: list[dict], path: Path) -> int:
     return n
 
 
-def mux(video: Path, audio: Path, srt: Path, ass: Path, out: Path, burn: bool = True,
+def mux(video: Path, audio: Path, ass: Path, out: Path, burn: bool = True,
         chapters: Path | None = None) -> None:
-    """Combine picture, voice and captions.
+    """Combine picture, voice and chapters. Captions are burned into the picture and nowhere else.
 
-    Captions are burned in by default and also attached as a soft track: a burned caption always shows,
-    which is what makes a muted autoplay watchable, and the soft track stays selectable and searchable.
+    The first cut also carried the captions as a selectable `mov_text` track, on the reasoning that a
+    burned caption always shows while a soft one stays searchable. Played back, both appeared at once:
+    the embedded track is flagged `default`, so the player switched it on over the caption already in the
+    picture, and the two texts overlapped at different sizes.
+
+    There is no arrangement that keeps both without that risk, because a player deciding for itself which
+    subtitle source to enable is exactly what a burned caption is for. So the film carries one, and the
+    SRT is written beside it as a separate file for reading and searching.
+
+    That file is kept in its own directory rather than next to the video for the same reason: players
+    auto-load a `.srt` that shares the video's name, which reproduces the doubling without any track
+    being embedded at all.
     """
     # Input order fixes the map indices below, so it is written out once rather than computed: 0 video,
-    # 1 audio, 2 subtitles, 3 chapter metadata when present.
-    cmd = ["ffmpeg", "-y", "-loglevel", "error",
-           "-i", str(video), "-i", str(audio), "-i", str(srt)]
+    # 1 audio, 2 chapter metadata when present.
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(video), "-i", str(audio)]
     if chapters is not None:
-        cmd += ["-i", str(chapters), "-map_metadata", "3"]
-    # The finished file carries four streams, and the fourth is meant to be there. ffprobe reports it as
-    # `bin_data`, which reads like a stray stream worth suppressing; it is not. MP4 stores chapters as
-    # their own track, so that stream *is* the twelve chapter marks. Dropping the chapters input removes
-    # it, and `-dn` does not, which is the check that settles what it is. Leave it alone.
-    cmd += ["-map", "0:v:0", "-map", "1:a:0", "-map", "2:s:0", "-c:s", "mov_text",
-            "-metadata:s:s:0", "language=eng"]
+        cmd += ["-i", str(chapters), "-map_metadata", "2"]
+    # The finished file carries three streams and a fourth that is meant to be there. ffprobe reports the
+    # last as `bin_data`, which reads like a stray stream worth suppressing; it is not. MP4 stores
+    # chapters as their own track, so that stream *is* the twelve chapter marks. Dropping the chapters
+    # input removes it and `-dn` does not, which is the check that settles what it is. Leave it alone.
+    cmd += ["-map", "0:v:0", "-map", "1:a:0", "-sn"]
     if burn:
         cmd += ["-vf", f"ass={ass}", "-c:v", "libx264",
                 "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"]
