@@ -89,9 +89,16 @@ Chromium writing its own video captures the page rather than the desktop, so it 
 1920 by 1080, runs headless, and nothing else on the desktop can appear in the film.
 
 **Every scene length is decided, not observed.** The narration is synthesised first and measured, the
-length is rounded up to a whole frame, and then the picture is trimmed to that number and the audio
-padded to it. Picture, voice and captions are all built from one value that each can represent exactly.
-Letting the capture decide its own length drifts them apart by a frame per scene.
+length is rounded up to a whole frame, and then the picture is cut to that many frames and the audio
+padded to the same value. Picture, voice and captions are all built from one number that each can
+represent exactly. Letting the capture decide its own length drifts them apart by a frame per scene.
+
+The cut is by frame count rather than by `-t`, and that distinction is load bearing. A duration lands
+exactly on a frame boundary by construction here, which is the one place `-t` is ambiguous: whether the
+frame starting at that instant falls inside the cut is a floating point coin toss. Five segments of
+seventy five came out a single frame short, and the film ended with the audio 339 milliseconds past the
+picture. Cut by frame count it is 5.7 milliseconds, and assembly now refuses to run at all if any
+segment is not the length the manifest claims.
 
 **Subtitles are burned from ASS, not SRT.** libass assumes a 384 by 288 play resolution for a format
 that carries none and scales everything it draws by the ratio to the real frame, so a font size chosen

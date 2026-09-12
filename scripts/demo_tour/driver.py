@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from narration import SCENES, Scene, check  # noqa: E402
 from record import (  # noqa: E402
+    FPS,
     OUT,
     WEB,
     H,
@@ -38,6 +39,7 @@ from record import (  # noqa: E402
     fit_duration,
     mux,
     pad_audio,
+    probe_duration,
     quantize,
     save_manifest,
     synth,
@@ -373,6 +375,20 @@ def assemble(entries: list[dict], out: Path) -> None:
     missing = [p.name for p in segs + auds if not p.exists()]
     if missing:
         raise SystemExit(f"cannot assemble, {len(missing)} pieces missing, first: {missing[0]}")
+
+    # Every segment must be the length the manifest says, because the captions and the chapter marks are
+    # timed from the manifest and the audio is padded to it. A segment even one frame short shifts
+    # everything after it, and the shift accumulates silently across the film: the first cut of this tour
+    # ended with the audio 339 milliseconds past the picture, from five short segments out of seventy
+    # five. Half a frame is the tolerance; nothing correct can miss by that much.
+    tol = 0.5 / FPS
+    off = [(e["key"], e["duration"], round(probe_duration(p), 4))
+           for e, p in zip(entries, segs, strict=True)
+           if abs(probe_duration(p) - e["duration"]) > tol]
+    if off:
+        lines = "\n".join(f"  {k}: manifest {w:.3f}s, file {g:.4f}s" for k, w, g in off)
+        raise SystemExit(f"cannot assemble, {len(off)} segments are not the length the manifest says:\n"
+                         f"{lines}\nre-record them with --only, or refit them.")
     concat(segs, OUT / "video.mp4")
     concat_audio(auds, OUT / "audio.m4a")
     write_srt(entries, OUT / "tour.srt")

@@ -185,12 +185,19 @@ def fit_duration(src: Path, dst: Path, seconds: float, start: float = 0.0) -> No
     `tpad` freezes the final frame rather than looping or blanking. A frozen UI reads as a pause for the
     narration to finish, which is what it is; a black gap reads as a fault in the recording.
     """
+    # The cut is by frame count, not by `-t`. A duration lands exactly on a frame boundary by
+    # construction here, which is the one place `-t` is ambiguous: whether the frame that starts at
+    # `seconds` is inside the cut is a floating point coin toss, and five of seventy five segments came
+    # out a single frame short, for a third of a second of drift by the end of the film. A frame count
+    # has no boundary to fall on either side of.
+    frames = max(int(round(seconds * FPS)), 1)
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{max(start, 0.0):.3f}", "-i", str(src),
          "-vf", f"tpad=stop_mode=clone:stop_duration={max(seconds, 0.1):.3f},fps={FPS},"
                 f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
                 f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color=black",
-         "-t", f"{seconds:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+         "-frames:v", str(frames), "-fps_mode", "cfr", "-r", str(FPS),
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
          "-pix_fmt", "yuv420p", "-an", str(dst)], check=True)
 
 
