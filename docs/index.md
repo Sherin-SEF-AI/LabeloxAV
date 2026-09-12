@@ -18,11 +18,16 @@ cattle on the carriageway, overloaded two-wheelers, hand carts, potholes.
 
 ## See it running
 
-A four-minute narrated tour, recorded live against the running system on real dashcam footage -
-every canvas tool, real GPU segmentation, and the autonomy console. Nothing mocked, nothing staged.
+A twenty minute narrated tour of every page in the product, recorded live against the running system
+with a live database behind it. Every number spoken in it is read from that database at record time, so
+the voice cannot disagree with the screen, and the unflattering figures are spoken too.
 
 <video controls preload="metadata" style="width:100%; border-radius:6px;"
-       src="demo/labeloxav-demo-narrated.mp4"></video>
+       src="demo/labeloxav-tour.mp4"></video>
+
+Twelve chapters, seventy five scenes, covering seventy two of the seventy three routes in the web
+application. There is a [shorter four minute film](demo.md) as well, and
+[how the tour was made](DEMO_TOUR.md), including the three defects that filming it uncovered.
 
 ## What actually runs
 
