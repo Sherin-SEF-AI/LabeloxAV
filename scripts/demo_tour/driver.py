@@ -72,7 +72,17 @@ async def facts() -> dict[str, str]:
         "clouds": "select count(*) from point_cloud where session_id = :kitti",
         "poses": "select count(*) from ego_pose where measured is true",
         "points": "select coalesce(sum(point_count), 0) / 1000000 from point_cloud where session_id = :kitti",
+        # The recordings this tour was filmed on. Counted rather than written down: the first version of
+        # this scene said "three recordings, two dashcam clips" because that was true on the afternoon the
+        # script was written, and it stopped being true when a third clip was labelled. A tour that
+        # insists every figure comes from the database should not make an exception for the small ones.
+        "demo_recordings": "select count(*) from session where route = 'demo-tour-2026' or route like 'KITTI 2011%'",
+        "demo_dashcam": "select count(*) from session where route = 'demo-tour-2026'",
     }
+    # Small counts are spoken, so they are spelled. "3 are dashcam clips" is read correctly by the voice
+    # but reads as a stray digit in a caption sitting beside sentences that spell everything else out.
+    spell = {0: "no", 1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
+             6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten"}
     out: dict[str, str] = {}
     async with get_sessionmaker()() as db:
         kitti = (await db.execute(text(
@@ -87,7 +97,8 @@ async def facts() -> dict[str, str]:
                 print(f"  fact {name} unavailable: {str(exc).splitlines()[0][:90]}")
                 out[name] = "an unreadable"
                 continue
-            out[name] = f"{int(v or 0):,}"
+            n = int(v or 0)
+            out[name] = spell[n] if name.startswith("demo_") and n in spell else f"{n:,}"
     return out
 
 

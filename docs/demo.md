@@ -11,7 +11,7 @@ script, so the voice cannot disagree with the screen. That includes the unflatte
 says out loud that 788 of 598,179 objects carry a human verdict, that 30,863 of 30,865 reviews have no
 timing, and that the multi-camera benefit is measured over six sessions and is therefore small.
 
-It was filmed on three recordings ingested for it: two dashcam clips from Bengaluru and KITTI drive
+It was filmed on four recordings ingested for it: three dashcam clips from Bengaluru and KITTI drive
 `2011_09_26_drive_0005`, whose import gave the corpus its first measured ego poses (154) and its first
 laser points (154 clouds, 18 million points).
 

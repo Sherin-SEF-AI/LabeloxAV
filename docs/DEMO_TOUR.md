@@ -25,7 +25,7 @@ sales reel.
 
 ## The data it was recorded on
 
-Three recordings were ingested for it, and the corpus is measurably better for them.
+Four recordings were ingested for it, and the corpus is measurably better for them.
 
 | | before | after |
 | --- | --- | --- |
@@ -33,7 +33,7 @@ Three recordings were ingested for it, and the corpus is measurably better for t
 | real LiDAR points | 0 | 18,000,000 |
 | point clouds from a laser | 0 | 154 |
 
-The two dashcam clips are the operator's own footage from Bengaluru. The third recording is KITTI drive
+The three dashcam clips are the operator's own footage from Bengaluru. The fourth recording is KITTI drive
 `2011_09_26_drive_0005`, 154 frames from Karlsruhe with a sixty four beam Velodyne on the roof, real
 GPS and inertial measurements, and the rig's own calibration: focal length 721.54 pixels over a 1242 by
 375 image. It was imported by `scripts/import_kitti_raw.py`.
@@ -46,8 +46,8 @@ What was then built on those recordings, all measured from the runs:
 
 | stage | result |
 | --- | --- |
-| auto-labelling | 3,977 objects on the KITTI drive, 2,443 across the two dashcam clips |
-| tracking | 123 tracks and 48 scenarios on the KITTI drive |
+| auto-labelling | 3,977 objects on the KITTI drive, 4,397 across the three dashcam clips |
+| tracking | 123 tracks and 48 scenarios on the KITTI drive, 458 tracks across the dashcam clips |
 | ego pose | 154 poses, all 154 measured, from GPS and inertial |
 | cuboids from 2D | 2,089 across 154 frames, no frame failed |
 | tracks lifted to 3D | 40 |
@@ -121,3 +121,9 @@ interpolated each agent run count straight into a template string, and several a
 there, so every drift and lift row read `findings [object Object],[object Object]`. It had been that way
 for as long as the panel existed and nothing threw or logged. The scene was re-recorded after the fix,
 which is what `--only` and the manifest merge are for.
+
+A fourth was in the narration itself. The ingest scene said "three real recordings, two dashcam clips",
+which was true the afternoon the script was written and stopped being true when a third clip was
+labelled. Both counts now come from the database like every other figure, and `check()` refuses a
+sentence that begins with a placeholder, because a substituted count at the start of a sentence comes
+out in lower case.

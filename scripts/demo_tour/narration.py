@@ -67,8 +67,9 @@ SCENES: list[Scene] = [
     Scene("import", "Ingest", "Bringing data in", "/import",
           "Data arrives here. The importer takes dashcam video, ROS bags, MCAP recordings and raw "
           "sensor drives, and turns each one into a session with frames at a fixed timestamp. "
-          "For this tour I ingested three real recordings. Two are dashcam clips from the owner of this "
-          "machine, and one is a KITTI drive from Karlsruhe with a sixty four beam LiDAR on the roof."),
+          "For this tour I ingested {demo_recordings} real recordings, of which {demo_dashcam} are "
+          "dashcam clips from the owner of this machine. The last is a KITTI drive from Karlsruhe with a "
+          "sixty four beam LiDAR on the roof."),
     Scene("import_migrate", "Ingest", "Migrating an existing corpus", "/import/migrate",
           "Most teams already have labels somewhere else. "
           "The migration path reads COCO, YOLO, Pascal and CVAT exports, maps their class names onto "
@@ -502,6 +503,12 @@ def check() -> None:
     stray = set(ACTIONS) - {s.key for s in SCENES}
     if stray:
         raise ValueError(f"actions for scenes that do not exist: {sorted(stray)}")
+    # A placeholder at the start of a sentence would be substituted in lower case, which is how the
+    # recording counts first read. Caught here rather than by watching the film back.
+    for s in SCENES:
+        for frag in s.narration.replace("\n", " ").split(". "):
+            if frag.strip().startswith("{"):
+                raise ValueError(f"{s.key}: a sentence starts with a placeholder, so it will be lower case")
     for s in SCENES:
         if "—" in s.narration or "–" in s.narration:
             raise ValueError(f"dash in narration for {s.key}")

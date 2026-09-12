@@ -254,9 +254,11 @@ def mux(video: Path, audio: Path, srt: Path, ass: Path, out: Path, burn: bool = 
            "-i", str(video), "-i", str(audio), "-i", str(srt)]
     if chapters is not None:
         cmd += ["-i", str(chapters), "-map_metadata", "3"]
-    # `-dn` because the chapter metadata input otherwise arrives as a fourth, empty data stream in the
-    # output. Harmless, but a player that lists streams would show it, and it is not a stream.
-    cmd += ["-map", "0:v:0", "-map", "1:a:0", "-map", "2:s:0", "-c:s", "mov_text", "-dn",
+    # The finished file carries four streams, and the fourth is meant to be there. ffprobe reports it as
+    # `bin_data`, which reads like a stray stream worth suppressing; it is not. MP4 stores chapters as
+    # their own track, so that stream *is* the twelve chapter marks. Dropping the chapters input removes
+    # it, and `-dn` does not, which is the check that settles what it is. Leave it alone.
+    cmd += ["-map", "0:v:0", "-map", "1:a:0", "-map", "2:s:0", "-c:s", "mov_text",
             "-metadata:s:s:0", "language=eng"]
     if burn:
         cmd += ["-vf", f"ass={ass}", "-c:v", "libx264",
