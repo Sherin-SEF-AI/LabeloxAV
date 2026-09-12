@@ -1,0 +1,199 @@
+1
+00:00:00,000 --> 00:00:05,003
+This is a record of a verification pass over LabeloxAV, run
+against the live system.
+
+2
+00:00:05,003 --> 00:00:06,329
+Three things were done.
+
+3
+00:00:06,329 --> 00:00:15,672
+More real data was downloaded and ingested, every readable interface was called to see what answers, and the HD map was
+taken end to end for the first time.
+
+4
+00:00:15,672 --> 00:00:18,867
+Every number spoken here came from one of those runs.
+
+5
+00:00:18,867 --> 00:00:30,101
+Two KITTI raw drives were downloaded from the public archive and imported, adding four hundred and eighty five frames that each carry a synchronised Velodyne scan, a GPS fix and the
+drive's own calibration.
+
+6
+00:00:30,101 --> 00:00:35,800
+A third drive stopped part way through its download and was
+left out rather than imported half complete.
+
+7
+00:00:35,800 --> 00:00:43,489
+The corpus now holds 1,049 point clouds and about 159 million
+real laser points, against eighteen million before this pass.
+
+8
+00:00:43,489 --> 00:00:47,396
+Measured ego poses went from one hundred and fifty four to
+639.
+
+9
+00:00:47,396 --> 00:00:55,400
+Everything else in the corpus is still estimated from single camera depth, and the tooling says so on every page that reads
+it.
+
+10
+00:00:55,400 --> 00:01:00,530
+This is a drive in the session inspector, with the camera, the
+laser and the GPS on one clock.
+
+11
+00:01:00,530 --> 00:01:09,467
+The point cloud here is measured by a sixty four beam scanner, not inferred from pixels, which is what makes the three
+dimensional work on this session checkable.
+
+12
+00:01:09,467 --> 00:01:13,594
+Before this pass no session had both lane annotations and a
+position fix.
+
+13
+00:01:13,594 --> 00:01:21,619
+One hundred and fifty seven frames of forty two thousand carried a fix, and not one of them had a lane, so the map
+could not be built at all.
+
+14
+00:01:21,619 --> 00:01:29,643
+Lane proposal turned out to run locally rather than only on a rented GPU, so it was run across a drive that already had a
+fix on every frame.
+
+15
+00:01:29,643 --> 00:01:37,267
+One hundred and ninety nine lanes on one hundred and fifty four frames, with forty one rejected for sitting off the
+drivable surface.
+
+16
+00:01:37,267 --> 00:01:40,201
+Those lanes were then georeferenced into world space.
+
+17
+00:01:40,201 --> 00:01:46,916
+One hundred and ninety nine map elements, every one placed
+using the drive's own calibration rather than a nominal lens.
+
+18
+00:01:46,916 --> 00:01:48,721
+That distinction is not cosmetic.
+
+19
+00:01:48,721 --> 00:01:56,000
+With the wrong lens this projection put a lane six metres ahead at fifteen metres, and one at seventy metres at over a
+kilometre.
+
+20
+00:01:56,000 --> 00:02:04,217
+Fusion merged those into fifty three continuous boundaries, and the topology layer paired twenty nine of them into lanes
+with three links between them.
+
+21
+00:02:04,217 --> 00:02:08,655
+The exports now carry twenty nine lanelet relations and fifty
+eight driving lanes.
+
+22
+00:02:08,655 --> 00:02:14,133
+Both formats previously carried zero of each, which meant
+neither was a map anything could route on.
+
+23
+00:02:14,133 --> 00:02:17,851
+Every readable interface was then called against the live
+database.
+
+24
+00:02:17,851 --> 00:02:19,823
+Three hundred and fifty two of them.
+
+25
+00:02:19,823 --> 00:02:30,246
+Two hundred and twenty answered, fifty three refused properly, forty four could not be reached because this corpus has no identifier to fill the address, and one returned a server
+error.
+
+26
+00:02:30,246 --> 00:02:38,133
+The four hundred routes that change data were not called, because firing those blindly would train models, launch paid
+jobs and delete work.
+
+27
+00:02:38,133 --> 00:02:45,271
+The failure was the annotator branch listing, which returned a bare server error whenever the versioning service was not
+running.
+
+28
+00:02:45,271 --> 00:02:46,889
+That service is optional here.
+
+29
+00:02:46,889 --> 00:02:51,406
+Assignments, tasks and merge requests are all in the database
+and work without it.
+
+30
+00:02:51,406 --> 00:02:58,600
+It now refuses with the reason and says what is unaffected, which is what every other optional path in this codebase
+already did.
+
+31
+00:02:58,600 --> 00:03:07,914
+Three thousand five hundred and six tests pass with nothing failing, seven hundred and three in the web suite, the
+typecheck is clean and the import contract holds.
+
+32
+00:03:07,914 --> 00:03:11,400
+Seventy two of the seventy three pages load without a problem.
+
+33
+00:03:11,400 --> 00:03:13,800
+The one not checked is the sign in screen.
+
+34
+00:03:13,800 --> 00:03:17,678
+Two things in the map are not yet trustworthy and are worth
+saying plainly.
+
+35
+00:03:17,678 --> 00:03:24,334
+Fusion produced one boundary eight and a half kilometres long on a drive of a few hundred metres, which is a merge running
+away.
+
+36
+00:03:24,334 --> 00:03:34,658
+And the median paired lane came out two and a half metres wide where a German lane is three to three and a half, which says the pairing is still matching things that are not the two
+sides of a lane.
+
+37
+00:03:34,658 --> 00:03:35,968
+The layer runs end to end.
+
+38
+00:03:35,968 --> 00:03:41,733
+The geometry underneath it needs work, and calling that
+finished would be the easiest thing to get wrong here.
+
+39
+00:03:41,733 --> 00:03:43,157
+So the honest summary.
+
+40
+00:03:43,157 --> 00:03:56,104
+More real data is in, every readable route has been called and one genuine failure was found and fixed, and the HD map runs from a camera frame through to a routable export for the first
+time.
+
+41
+00:03:56,104 --> 00:04:00,849
+The human verdict count has not moved: 788 of 600,133 labels
+carry one.
+
+42
+00:04:00,849 --> 00:04:05,933
+That remains the thing most worth fixing, and no amount of
+code changes it.

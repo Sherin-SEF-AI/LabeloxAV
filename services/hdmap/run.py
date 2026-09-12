@@ -37,7 +37,6 @@ async def _region_center(db, session_ids: list[str]) -> tuple[float, float]:
 
 async def run_map_fusion(job_id: uuid.UUID) -> dict:
     """Execute a local map-fusion job end to end (fuse -> elevation -> export -> seal -> write elements)."""
-    cfg = get_settings()
     store = get_object_store()
     store.ensure_bucket()
     maker = get_sessionmaker()

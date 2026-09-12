@@ -26,7 +26,36 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from narration import SCENES, Scene, check  # noqa: E402
+import narration  # noqa: E402
+from narration import Scene, check  # noqa: E402
+
+# Which script to record. The tour explains the product; the verification film is a record of a checking
+# pass over it. Both are scene lists of the same shape, so the driver does not care which it is given.
+SCENES = narration.SCENES
+CHAPTERS = narration.CHAPTERS
+
+
+def use_script(name: str) -> None:
+    global SCENES, CHAPTERS
+    if name == "tour":
+        SCENES, CHAPTERS = narration.SCENES, narration.CHAPTERS
+        return
+    import importlib
+
+    mod = importlib.import_module(name)
+    SCENES = mod.SCENES
+    CHAPTERS = getattr(mod, "CHAPTERS", narration.CHAPTERS)
+    # `check()` validates the tour's own list, so the alternate script gets the same guards inline.
+    keys = [x.key for x in SCENES]
+    dupes = {k for k in keys if keys.count(k) > 1}
+    if dupes:
+        raise ValueError(f"duplicate scene keys: {sorted(dupes)}")
+    for x in SCENES:
+        for frag in x.narration.replace("\n", " ").split(". "):
+            if frag.strip().startswith("{"):
+                raise ValueError(f"{x.key}: a sentence starts with a placeholder, so it will be lower case")
+        if "—" in x.narration or "–" in x.narration:
+            raise ValueError(f"dash in narration for {x.key}")
 from record import (  # noqa: E402
     FPS,
     OUT,
@@ -72,6 +101,11 @@ async def facts() -> dict[str, str]:
         "models": "select count(*) from model_registry",
         "embeddings": "select count(*) from frame_embedding",
         "clouds": "select count(*) from point_cloud where session_id = :kitti",
+        # Corpus-wide, as distinct from the two above, which are scoped to one drive. Kept as separate
+        # names because a script that says "the corpus holds" and quotes one session's count is wrong in
+        # the way that is hardest to notice: the number is real, it just answers a different question.
+        "clouds_all": "select count(*) from point_cloud",
+        "points_all": "select coalesce(sum(point_count), 0) / 1000000 from point_cloud",
         "poses": "select count(*) from ego_pose where measured is true",
         "points": "select coalesce(sum(point_count), 0) / 1000000 from point_cloud where session_id = :kitti",
         # The recordings this tour was filmed on. Counted rather than written down: the first version of
@@ -220,7 +254,8 @@ def resolve(scene: Scene, f: dict[str, str], i: dict[str, str]) -> tuple[str | N
 async def record(only: list[str] | None, skip_capture: bool) -> list[dict]:
     from playwright.async_api import async_playwright
 
-    check()
+    if SCENES is narration.SCENES:
+        check()
     missing = check_tools()
     if missing:
         raise SystemExit(f"cannot record, missing: {', '.join(missing)}")
@@ -326,7 +361,8 @@ async def check_pages() -> int:
     """
     from playwright.async_api import async_playwright
 
-    check()
+    if SCENES is narration.SCENES:
+        check()
     f, i = await facts(), await ids()
     bad: list[tuple[str, str]] = []
     async with async_playwright() as pw:
@@ -427,7 +463,10 @@ def main() -> None:
     ap.add_argument("--no-capture", action="store_true", help="narration and timing only, no screen grab")
     ap.add_argument("--assemble-only", action="store_true")
     ap.add_argument("--check-pages", action="store_true", help="load every page, record nothing")
+    ap.add_argument("--script", default="tour",
+                    help="scene list module: 'tour' (default) or 'verification'")
     a = ap.parse_args()
+    use_script(a.script)
 
     if a.check_pages:
         raise SystemExit(1 if asyncio.run(check_pages()) else 0)
