@@ -20,6 +20,8 @@ from pathlib import Path
 import click
 import numpy as np
 
+# Defaults, overridable per run. Kept as constants so the original single-drive invocation still works
+# unchanged, while a second drive is one flag rather than an edit.
 DRIVE = "2011_09_26_drive_0005_sync"
 DATE = "2011_09_26"
 # KITTI's colour left camera, the one its own benchmarks use.
@@ -67,7 +69,8 @@ def _timestamps(drive_dir: Path, sub: str) -> list[int]:
     return out
 
 
-async def run(root: Path, vehicle: str, limit: int | None) -> dict:
+async def run(root: Path, vehicle: str, limit: int | None,
+              drive: str = DRIVE, date: str = DATE) -> dict:
     from geoalchemy2 import WKTElement
 
     from core.origin import REAL
@@ -79,7 +82,7 @@ async def run(root: Path, vehicle: str, limit: int | None) -> dict:
     from services.lidar.ingest.readers import read_kitti_bin
     from services.lidar.ingest.store import store_cloud
 
-    drive_dir = root / DATE / DRIVE
+    drive_dir = root / date / drive
     cam_dir = drive_dir / CAM / "data"
     velo_dir = drive_dir / "velodyne_points" / "data"
     images = sorted(cam_dir.glob("*.png"))
@@ -91,7 +94,7 @@ async def run(root: Path, vehicle: str, limit: int | None) -> dict:
     oxts = _oxts_rows(drive_dir)
 
     # Real intrinsics from the drive's own calibration, and the rectified projection KITTI publishes.
-    c2c = _read_calib(root / DATE / "calib_cam_to_cam.txt")
+    c2c = _read_calib(root / date / "calib_cam_to_cam.txt")
     P2 = c2c["P_rect_02"].reshape(3, 4)
     fx, fy, cx, cy = float(P2[0, 0]), float(P2[1, 1]), float(P2[0, 2]), float(P2[1, 2])
     size = c2c.get("S_rect_02")
@@ -108,8 +111,8 @@ async def run(root: Path, vehicle: str, limit: int | None) -> dict:
     async with maker() as db:
         db.add(DbSession(
             session_id=sid, vehicle_id=vehicle, start_ts_ns=cam_ts[0], end_ts_ns=cam_ts[len(images) - 1],
-            city="Karlsruhe", route=f"KITTI {DRIVE}", ontology_version=onto.version, origin=REAL,
-            sensors={"source": "KITTI raw", "drive": DRIVE, "lidar": "Velodyne HDL-64E",
+            city="Karlsruhe", route=f"KITTI {drive}", ontology_version=onto.version, origin=REAL,
+            sensors={"source": "KITTI raw", "drive": drive, "lidar": "Velodyne HDL-64E",
                      "camera": "PointGrey Flea2 (image_02, rectified)",
                      "license": "CC BY-NC-SA 3.0, KIT and Toyota Technological Institute",
                      "attribution": "Geiger et al., Vision meets Robotics: The KITTI Dataset"}))
@@ -173,7 +176,7 @@ async def run(root: Path, vehicle: str, limit: int | None) -> dict:
     for i, scan in enumerate(scans):
         cloud = read_kitti_bin(scan.read_bytes(), ts_ns=cam_ts[i])
         cloud.source = "lidar"
-        await store_cloud(cloud, sid, source="lidar", calibration_version=f"kitti-{DATE}")
+        await store_cloud(cloud, sid, source="lidar", calibration_version=f"kitti-{date}")
         n_clouds += 1
 
     return {"session_id": str(sid), "frames": n_frames, "clouds": n_clouds, "poses": n_poses,
@@ -185,11 +188,13 @@ async def run(root: Path, vehicle: str, limit: int | None) -> dict:
 @click.option("--root", default=".scratch/demo/kitti", type=click.Path(exists=True))
 @click.option("--vehicle", default="KITTI-0005")
 @click.option("--limit", type=int, default=None)
-def main(root: str, vehicle: str, limit: int | None) -> None:
+@click.option("--drive", default=DRIVE, help="drive folder name, e.g. 2011_09_26_drive_0027_sync")
+@click.option("--date", "date_", default=DATE, help="capture date folder holding the drive and its calibration")
+def main(root: str, vehicle: str, limit: int | None, drive: str, date_: str) -> None:
     from core.logging import setup_logging
 
     setup_logging("INFO")
-    res = asyncio.run(run(Path(root), vehicle, limit))
+    res = asyncio.run(run(Path(root), vehicle, limit, drive=drive, date=date_))
     for k, v in res.items():
         print(f"  {k}: {v}")
 

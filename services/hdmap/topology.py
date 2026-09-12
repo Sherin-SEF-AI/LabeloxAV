@@ -176,10 +176,22 @@ def build_lanelets(boundaries: list[dict], *, min_w: float = MIN_LANE_W_M, max_w
                    ) -> dict:
     """Pair boundaries into lanelets, then chain the lanelets that follow one another.
 
-    `boundaries` are dicts with `points` as (lon, lat) in travel order, plus optional `id`, `lane_type`
-    and `confidence`. A boundary may serve two lanelets, as the right of one lane and the left of the
-    next; that is how adjacent lanes share a marking, so reuse is allowed while duplicate lanelets are
-    not.
+    `boundaries` are dicts with `points` as (lon, lat) in travel order, plus optional `id`, `lane_type`,
+    `confidence` and `group`. A boundary may serve two lanelets, as the right of one lane and the left of
+    the next; that is how adjacent lanes share a marking, so reuse is allowed while duplicate lanelets
+    are not.
+
+    `group` scopes pairing to boundaries that were observed together, and leaving it out is only safe
+    when each boundary is already a continuous trace along the road. The first real run here shows why.
+    The georeferencer writes one element per source frame, so consecutive frames hold their own view of
+    the same marking, a metre or two apart after ego motion and projection error. Ungrouped, 127 of the
+    128 lanelets built from 199 real boundaries paired one frame's marking with the next frame's, and the
+    median "lane" came out 2.40 m wide on a German road where a lane is 3.0 to 3.5 m. Two views of one
+    marking are not the two sides of a lane. Passing the source frame as the group confines pairing to
+    boundaries that appeared in the same image, which is the only evidence that they bound one lane.
+
+    Merging consecutive observations of one marking into a continuous boundary is the upgrade that would
+    let pairing run across a whole drive. It is not done here.
 
     Pairing is nearest-valid rather than globally optimal. A global assignment would be the better answer
     on a wide multi-lane road, and is the upgrade seam here, but it needs more boundaries than a single
@@ -197,15 +209,25 @@ def build_lanelets(boundaries: list[dict], *, min_w: float = MIN_LANE_W_M, max_w
     origin = _origin(lines)
     local = [to_local(line, origin) for line in lines]
     heads = [heading(line) for line in local]
+    groups = [b.get("group") for b in keep]
 
     pairs: dict[tuple[int, int], dict] = {}
     reasons: dict[int, str] = {}
     for i in range(len(local)):
         best = None
-        why = "no boundary within a lane's width running the same way"
+        # The reason a boundary went unpaired is only useful if it is the most specific one that applied,
+        # so candidates that were never eligible do not overwrite the reason a real candidate failed. The
+        # first version reported whichever rejection happened last, which on a 199-boundary drive meant
+        # almost every boundary was blamed on being alone in its frame even where a same-frame candidate
+        # existed and had failed on width.
+        why = None
+        candidates = 0
         for j in range(len(local)):
             if i == j:
                 continue
+            if groups[i] is not None and groups[j] != groups[i]:
+                continue
+            candidates += 1
             if _angle_diff(heads[i], heads[j]) > MAX_HEADING_DIFF_RAD:
                 continue
             ov = overlap_fraction(local[i], local[j])
@@ -223,7 +245,11 @@ def build_lanelets(boundaries: list[dict], *, min_w: float = MIN_LANE_W_M, max_w
             if best is None or w < best[1]:
                 best = (j, w, off, ov)
         if best is None:
-            reasons[i] = why
+            if candidates == 0:
+                reasons[i] = ("no other boundary was observed alongside this one in the same frame"
+                              if groups[i] is not None else "no other boundary to pair with")
+            else:
+                reasons[i] = why or "no boundary within a lane's width running the same way"
             continue
         j, w, off, ov = best
         # `off` is the offset of j from i along i's left normal, so a positive offset puts j on the left.

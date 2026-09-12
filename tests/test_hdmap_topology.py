@@ -336,3 +336,59 @@ class TestExportsAreRoutable:
         root = ET.fromstring(to_opendrive(fused, (LAT0, LON0)))
         marks = {m.get("type") for m in root.findall("road/lanes/laneSection/*/lane/roadMark")}
         assert marks == {"solid", "broken"}, "a dashed marking is 'broken' in OpenDRIVE"
+
+
+class TestPairingIsScopedToWhatWasSeenTogether:
+    """Ungrouped pairing built lanes out of two views of the same marking.
+
+    The georeferencer writes one element per source frame, so consecutive frames each hold their own
+    view of a marking, a metre or two apart after ego motion and projection error. On the first real run,
+    199 boundaries from a KITTI drive produced 128 lanelets of which 127 paired one frame's marking with
+    the next frame's, and the median "lane" came out 2.40 m wide on a road whose lanes are 3.0 to 3.5 m.
+
+    `group` confines pairing to boundaries that appeared in the same image, which is the only evidence
+    that two boundaries bound one lane.
+    """
+
+    def test_boundaries_from_different_frames_are_not_a_lane(self):
+        out = build_lanelets([
+            {"id": "f1-left", "group": "frame-1", "points": _line(0.0, 0.0, 0.0, 50.0), "confidence": 0.9},
+            {"id": "f2-left", "group": "frame-2", "points": _line(2.4, 0.0, 2.4, 50.0), "confidence": 0.9},
+        ])
+        assert out["lanelets"] == []
+        assert all(u["reason"] == "no other boundary was observed alongside this one in the same frame"
+                   for u in out["unpaired"])
+
+    def test_the_same_two_boundaries_do_pair_when_seen_together(self):
+        """Same geometry, one frame. The grouping is the only thing that changed."""
+        out = build_lanelets([
+            {"id": "left", "group": "frame-1", "points": _line(0.0, 0.0, 0.0, 50.0), "confidence": 0.9},
+            {"id": "right", "group": "frame-1", "points": _line(3.3, 0.0, 3.3, 50.0), "confidence": 0.9},
+        ])
+        assert len(out["lanelets"]) == 1
+
+    def test_ungrouped_input_still_pairs_freely(self):
+        """Grouping is opt-in: a caller holding continuous traces rather than per-frame views omits it."""
+        out = build_lanelets([
+            {"id": "a", "points": _line(0.0, 0.0, 0.0, 50.0), "confidence": 0.9},
+            {"id": "b", "points": _line(3.3, 0.0, 3.3, 50.0), "confidence": 0.9},
+        ])
+        assert len(out["lanelets"]) == 1
+
+    def test_an_unpaired_boundary_is_blamed_on_the_most_specific_reason(self):
+        """The first version reported whichever rejection happened last.
+
+        With many boundaries in other frames, that meant a boundary was blamed on being alone in its
+        frame even where a same-frame candidate existed and had failed on width. The reason a person acts
+        on has to be the one that actually applied.
+        """
+        out = build_lanelets([
+            {"id": "a", "group": "f1", "points": _line(0.0, 0.0, 0.0, 50.0), "confidence": 0.9},
+            {"id": "b", "group": "f1", "points": _line(30.0, 0.0, 30.0, 50.0), "confidence": 0.9},
+            {"id": "elsewhere", "group": "f2", "points": _line(0.0, 0.0, 0.0, 50.0), "confidence": 0.9},
+        ])
+        assert out["lanelets"] == []
+        why = {u["id"]: u["reason"] for u in out["unpaired"]}
+        assert "outside one lane's width" in why["a"], why
+        assert "outside one lane's width" in why["b"], why
+        assert why["elsewhere"] == "no other boundary was observed alongside this one in the same frame"
