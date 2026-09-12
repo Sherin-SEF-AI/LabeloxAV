@@ -22,8 +22,13 @@ A twenty minute narrated tour of every page in the product, recorded live agains
 with a live database behind it. Every number spoken in it is read from that database at record time, so
 the voice cannot disagree with the screen, and the unflattering figures are spoken too.
 
-<video controls preload="metadata" style="width:100%; border-radius:6px;"
-       src="demo/labeloxav-tour.mp4"></video>
+<div style="position:relative;padding-top:56.25%;border-radius:6px;overflow:hidden;">
+  <iframe src="https://www.youtube-nocookie.com/embed/FN2l4jKTj-E"
+          style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;"
+          title="LabeloxAV: a tour of every page" loading="lazy"
+          allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowfullscreen></iframe>
+</div>
 
 Twelve chapters, seventy five scenes, covering seventy two of the seventy three routes in the web
 application. There is a [shorter four minute film](demo.md) as well, and

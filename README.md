@@ -11,6 +11,19 @@ label through a confidence gate to human review, mines the rare and risky moment
 models in a closed loop. One ontology, 178 governed classes, tuned for what global datasets never saw:
 autorickshaws, cattle on the carriageway, overloaded two-wheelers, hand carts, potholes.
 
+<p align="center">
+  <a href="https://youtu.be/FN2l4jKTj-E">
+    <img src="https://img.youtube.com/vi/FN2l4jKTj-E/maxresdefault.jpg"
+         alt="Watch the twenty minute tour of LabeloxAV" width="860">
+  </a>
+</p>
+
+<p align="center">
+  <b><a href="https://youtu.be/FN2l4jKTj-E">Watch the tour, twenty minutes</a></b><br>
+  Every page in the product, narrated, recorded live against the running system. Every number spoken in it
+  is read from the database at record time, including the ones that do not flatter it.
+</p>
+
 <img width="1920" alt="Home dashboard" src="https://github.com/user-attachments/assets/b68e1a19-94fe-4e9c-a5a0-5b47599e356f" />
 
 ## Install
