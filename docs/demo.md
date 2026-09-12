@@ -15,10 +15,16 @@ It was filmed on four recordings ingested for it: three dashcam clips from Benga
 `2011_09_26_drive_0005`, whose import gave the corpus its first measured ego poses (154) and its first
 laser points (154 clouds, 18 million points).
 
-<video controls preload="metadata" style="width:100%; border-radius:6px;"
-       src="demo/labeloxav-tour.mp4"></video>
+<div style="position:relative;padding-top:56.25%;border-radius:6px;overflow:hidden;">
+  <iframe src="https://www.youtube-nocookie.com/embed/FN2l4jKTj-E"
+          style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;"
+          title="LabeloxAV: a tour of every page" loading="lazy"
+          allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowfullscreen></iframe>
+</div>
 
-[Download the tour](demo/labeloxav-tour.mp4) (48 MB, H.264 1080p) ·
+[Watch on YouTube](https://youtu.be/FN2l4jKTj-E) ·
+[download the file](demo/labeloxav-tour.mp4) (48 MB, H.264 1080p) ·
 [transcript](demo/transcript/labeloxav-tour.srt)
 
 The captions are part of the picture, so there is no subtitle track to switch on and nothing to line up.
