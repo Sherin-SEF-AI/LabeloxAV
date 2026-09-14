@@ -432,6 +432,7 @@ The interpolated boxes are the reason the embedding figure above is no longer 10
 | [`docs/REMEDIATION_STATUS.md`](REMEDIATION_STATUS.md) | What a codebase audit found, what is fixed (each with the test that fails without it), and what is open with what it needs. |
 | [`docs/TESTING.md`](TESTING.md) | How the suite is organised, and the two things about it that are not obvious: `pytest.mark.db` is what arms the production-database guard, and nothing rolls back between individual tests. |
 | [`docs/DATA_RETENTION.md`](DATA_RETENTION.md) | Retention windows, subject-rights requests, and erasure. The machinery was tested and undocumented, which is the half a regulator asks for. States plainly what it does not cover. |
+| [`docs/AUTONOMY.md`](AUTONOMY.md) | The autonomy program, one entry per work package: what each rule does, how it is wired so it cannot bias itself, and the numbers it measured on the real corpus. |
 | [`docs/adr/`](adr/) | Decision records. ADR-0001 is the immutable prediction plane and the alternatives rejected. |
 | [`tests/KNOWN_FAILURES.md`](https://github.com/Sherin-SEF-AI/LabeloxAV/blob/main/tests/KNOWN_FAILURES.md) | The recorded test baseline, so a red run is interpretable. |
 
