@@ -1,0 +1,56 @@
+name: Release
+
+# A tag of the form v<version> builds the Debian package and publishes a GitHub release with it attached.
+# The tag must match the version in pyproject.toml, so a release cannot claim to be a version the code
+# does not say it is. Release notes are a file committed beside the packaging, so they are reviewed in a
+# pull request like everything else rather than typed into a form at the last moment.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  deb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: The tag names the version the code carries
+        run: |
+          v="v$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)"
+          test "$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME but pyproject says $v" >&2; exit 1; }
+
+      - name: Build and check the package
+        run: ./scripts/build_deb.sh --check
+
+      # The package is installed into a clean Debian container, with dependencies forced past because
+      # Docker cannot run inside this runner's container, and then removed again. It proves the archive
+      # unpacks, the maintainer scripts run, the launcher executes, and removal leaves nothing behind.
+      - name: Install the package into a clean container
+        run: |
+          docker run --rm -v "$PWD/dist:/dist:ro" debian:bookworm-slim bash -euxc '
+            dpkg -i --force-depends /dist/*.deb
+            test -x /usr/bin/labeloxav
+            labeloxav version
+            labeloxav url
+            test -f /opt/labeloxav/scripts/install.sh
+            dpkg -r labeloxav
+            test ! -e /usr/bin/labeloxav
+          '
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="packaging/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then
+            gh release create "$GITHUB_REF_NAME" dist/*.deb --title "$GITHUB_REF_NAME" --notes-file "$notes"
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.deb --title "$GITHUB_REF_NAME" --generate-notes
+          fi

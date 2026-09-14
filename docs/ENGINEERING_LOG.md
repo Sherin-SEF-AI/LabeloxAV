@@ -492,4 +492,5 @@ Building an India native, self improving data engine for autonomous driving.
 
 ## License
 
-Copyright (c) 2026 Sherin Joseph Roy. All rights reserved.
+Apache License 2.0. Copyright 2026 Sherin Joseph Roy. The full text is in `LICENSE` at the
+repository root.

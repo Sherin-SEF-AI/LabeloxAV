@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+#
+# labeloxav: the command the Debian package installs.
+#
+# The package puts the source tree under /opt/labeloxav and this launcher on the PATH. It does not turn
+# the product into native services. LabeloxAV runs as a set of containers (Postgres with PostGIS and
+# pgvector, MinIO, Redis, Redpanda, the API and the web app), and the honest thing a package can do is
+# ship the tree those containers are built from and a short, predictable command to drive them. A
+# package that pretended to be a native daemon would break the moment the compose file changed.
+#
+# Everything here runs from /opt/labeloxav. The first install writes .env and .admin-token there, which
+# is why `install` needs root; the containers' data lives in Docker volumes, so removing the package
+# leaves the database alone.
+
+set -Eeuo pipefail
+
+APP_DIR="${LABELOXAV_HOME:-/opt/labeloxav}"
+COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.app.yml)
+
+usage() {
+  cat <<USAGE
+labeloxav <command>
+
+  install         first-time setup: build images, start everything, migrate, create the admin
+  up | start      start the containers (after a reboot, or after 'down')
+  down | stop     stop the containers and keep their data
+  status          show which containers are running
+  logs [service]  follow logs, for everything or for one service (api, web, postgres, ...)
+  token <user>    mint a sign-in token for a user
+  url             print the address to open
+  version         print the packaged version
+
+Runs from ${APP_DIR}. 'install' needs root; the rest need to reach the Docker daemon.
+USAGE
+}
+
+need_app_dir() {
+  [ -d "$APP_DIR" ] || { echo "labeloxav: ${APP_DIR} is missing; reinstall the package." >&2; exit 1; }
+  cd "$APP_DIR"
+}
+
+need_docker() {
+  if ! docker info >/dev/null 2>&1; then
+    echo "labeloxav: cannot reach the Docker daemon. Is it running, and is this user allowed to use it?" >&2
+    echo "           Try again with sudo, or add yourself to the docker group." >&2
+    exit 1
+  fi
+}
+
+cmd="${1:-}"
+[ $# -gt 0 ] && shift
+
+case "$cmd" in
+  install)
+    need_app_dir
+    if [ "$(id -u)" -ne 0 ]; then
+      echo "labeloxav install writes configuration into ${APP_DIR} and needs root: sudo labeloxav install" >&2
+      exit 1
+    fi
+    exec ./scripts/install.sh "$@"
+    ;;
+  up|start)
+    need_app_dir; need_docker
+    [ -f .env ] || { echo "labeloxav: no configuration yet. Run: sudo labeloxav install" >&2; exit 1; }
+    exec "${COMPOSE[@]}" up -d "$@"
+    ;;
+  down|stop)
+    need_app_dir; need_docker
+    exec "${COMPOSE[@]}" down "$@"
+    ;;
+  status)
+    need_app_dir; need_docker
+    exec "${COMPOSE[@]}" ps "$@"
+    ;;
+  logs)
+    need_app_dir; need_docker
+    exec "${COMPOSE[@]}" logs -f "$@"
+    ;;
+  token)
+    need_app_dir; need_docker
+    [ $# -ge 1 ] || { echo "usage: labeloxav token <user>" >&2; exit 1; }
+    exec "${COMPOSE[@]}" exec api python -m scripts.mint_token --name "$1"
+    ;;
+  url)
+    echo "http://localhost:3000"
+    ;;
+  version)
+    if [ -f "${APP_DIR}/pyproject.toml" ]; then
+      sed -n 's/^version = "\(.*\)"/\1/p' "${APP_DIR}/pyproject.toml"
+    else
+      echo "unknown (${APP_DIR}/pyproject.toml missing)"
+    fi
+    ;;
+  -h|--help|help|"")
+    usage
+    ;;
+  *)
+    echo "labeloxav: unknown command '${cmd}'" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

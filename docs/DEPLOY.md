@@ -216,3 +216,25 @@ Store the whole timestamped directory off the machine. `MANIFEST` inside it reco
 | A model path refuses instead of running | Expected without a GPU. The refusal names what is missing; it never fabricates a result. |
 
 More in [`RUNBOOK.md`](RUNBOOK.md).
+
+## The Debian package
+
+Each tagged release ships `labeloxav_<version>_all.deb`. It installs the source tree under
+`/opt/labeloxav` and a `labeloxav` command; the product still runs as Docker containers built from that
+tree, so Docker remains a dependency. The package is a predictable way to get the tree onto a server
+and drive it, not a set of native services.
+
+```bash
+sudo apt install ./labeloxav_0.1.0_all.deb
+sudo labeloxav install     # first time only
+labeloxav up | down | status | logs [service] | token <user> | url
+```
+
+`install` writes `.env` and `.admin-token` into `/opt/labeloxav`, which is why it needs root. Removing
+the package keeps that configuration; purging removes it. The containers' data lives in Docker volumes
+and is never touched by the package; the removal message says how to delete it deliberately.
+
+The package is built by `scripts/build_deb.sh` from the committed tree at `HEAD`, never from the working
+directory, so a release is reproducible from its tag. The `Release` workflow builds it, installs it into a
+clean Debian container to prove the maintainer scripts and launcher work, and attaches it to the GitHub
+release when a `v*` tag is pushed. The tag must match the version in `pyproject.toml`.

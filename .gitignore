@@ -47,3 +47,7 @@ demos/
 /docs/guide/platforms.md
 /docs/guide/editor.md
 /docs/guide/shortcuts.md
+
+# Debian package build tree and output (scripts/build_deb.sh). The .deb is a release asset, not source.
+.build/
+dist/

@@ -37,7 +37,17 @@ cd LabeloxAV
 ```
 
 Generates secrets, migrates the schema, seeds the ontology, creates the first admin, and prints the token.
-Open `http://localhost:3000`. No GPU needed to install: annotation, review, governance, export, and search
+Open `http://localhost:3000`.
+
+Or install the Debian package from the [latest release](https://github.com/Sherin-SEF-AI/LabeloxAV/releases/latest),
+which puts the tree under `/opt/labeloxav` and gives you a `labeloxav` command. It needs Docker too;
+the product runs as containers either way.
+
+```bash
+sudo apt install ./labeloxav_0.1.0_all.deb
+sudo labeloxav install
+labeloxav url
+``` No GPU needed to install: annotation, review, governance, export, and search
 all work without one; the model paths that need CUDA refuse rather than fabricate. GPU, TLS, and backups:
 [docs/DEPLOY.md](docs/DEPLOY.md).
 
@@ -107,5 +117,9 @@ enforced by `lint-imports`; domain logic lives in swappable packs (`packs/av`, `
 
 ## License
 
-Copyright (c) 2026 Sherin Joseph Roy. All rights reserved. (A proper open-source license is under
-consideration; until one lands, this code is source-visible but not licensed for reuse.)
+Apache License 2.0. See [LICENSE](LICENSE).
+
+Copyright 2026 Sherin Joseph Roy. You may use, modify and redistribute this software, including
+commercially, under the terms of that licence. The KITTI raw drives referenced in the documentation are
+not part of this repository and carry their own licence (CC BY-NC-SA 3.0, KIT and Toyota Technological
+Institute).
