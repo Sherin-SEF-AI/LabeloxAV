@@ -33,6 +33,23 @@ auto-loads a `.srt` sitting beside a video and would draw it over the captions a
 
 How it was made, and the two defects making it uncovered: [the recorded tour](DEMO_TOUR.md).
 
+## Verification pass (4 min)
+
+A record of a checking pass over the system rather than a description of it: more data downloaded and
+ingested, every readable route called against the live database, the HD map taken end to end, and the
+one route that failed. Every number spoken came from one of those runs, including the two results that
+are not yet trustworthy.
+
+<div style="position:relative;padding-top:56.25%;border-radius:6px;overflow:hidden;">
+  <video controls preload="metadata"
+         style="position:absolute;top:0;left:0;width:100%;height:100%;border-radius:6px;"
+         src="demo/labeloxav-verification.mp4"></video>
+</div>
+
+[Download](demo/labeloxav-verification.mp4) (21 MB) ·
+[transcript](demo/transcript/labeloxav-verification.srt) ·
+[the written report](VERIFICATION.md)
+
 ## The earlier films
 
 Everything in these films is the real application, recorded live from a browser driving the running

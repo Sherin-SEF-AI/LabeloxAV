@@ -20,6 +20,7 @@ from sqlalchemy import Float, func, select
 
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
+from core.origin import REAL, SYNTHETIC, SYNTHETIC_STATE
 from core.storage import get_object_store
 from db.models import DatasetCommit, Frame, Object, ObjectRelationship, TrackEvent
 from db.models import Session as DbSession
@@ -40,6 +41,7 @@ from services.export.adapter_scene import (
     write_hdmap,
     write_lanes,
     write_masks,
+    write_occupancy,
     write_panoptic,
 )
 from services.export.adapter_yolo import write_yolo
@@ -81,6 +83,9 @@ class SliceSpec(BaseModel):
     split_group_by: str = "session"
     # Defaults to the slice name, so each named dataset splits stably and independently of the others.
     split_seed: str | None = None
+    # Composites from the copy-paste generator (core/origin.py) are excluded unless asked for, and the
+    # datasheet states how many were shipped when they are.
+    include_synthetic: bool = False
 
 
 async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
@@ -93,8 +98,13 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
             .join(DbSession, Frame.session_id == DbSession.session_id)
             .order_by(Frame.ts_ns, Object.object_id)
         )
+        if spec.include_synthetic:
+            stmt = stmt.where(Frame.origin.in_((REAL, SYNTHETIC)))
+        else:
+            stmt = stmt.where(Frame.origin == REAL)
         if spec.states:
-            stmt = stmt.where(Object.state.in_(spec.states))
+            states = [*spec.states, SYNTHETIC_STATE] if spec.include_synthetic else list(spec.states)
+            stmt = stmt.where(Object.state.in_(states))
         if spec.min_conf is not None:
             stmt = stmt.where(Object.conf >= spec.min_conf)
         if spec.has_mask is True:
@@ -185,6 +195,7 @@ async def fetch_records(spec: SliceSpec) -> list[ExportRecord]:
                 provenance=obj.provenance or {},
                 cuboid_3d=obj.cuboid_3d,
                 rot_deg=obj.rot_deg or 0.0,
+                bbox_amodal=list(obj.bbox_amodal) if obj.bbox_amodal else None,
                 keypoints=obj.keypoints,
                 polyline=obj.polyline,
                 relationships=rel_map.get(str(obj.object_id), []),
@@ -298,6 +309,7 @@ _SCENE_WRITERS = {
     "drivable": lambda fids, store, d, commit: write_drivable(fids, store, d / "drivable"),
     "hdmap": lambda fids, store, d, commit: write_hdmap(d / "hdmap", commit),
     "panoptic": lambda fids, store, d, commit: write_panoptic(fids, store, d / "panoptic"),
+    "occupancy": lambda fids, store, d, commit: write_occupancy(fids, store, d / "occupancy"),
 }
 
 # Parquet is always written (lossless provenance) and so is accepted but never dispatched.

@@ -22,12 +22,27 @@ import type { Action, EdObject } from "../useEditor";
 
 const QUALITY_DOT = { good: "bg-pass", weak: "bg-warn", bad: "bg-block" } as const;
 
-export default function ObjectsCard({ objects, selectedIds, dispatch, filters }: {
+/** 1st, 2nd, 3rd, 4th. Only ever called on the top few, so the teens are the only special case. */
+function ordinal(n: number): string {
+  if (n % 100 >= 11 && n % 100 <= 13) return `${n}th`;
+  return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
+}
+
+export default function ObjectsCard({ objects, selectedIds, dispatch, filters, risk }: {
   objects: EdObject[];
   selectedIds: string[];
   dispatch: Dispatch<Action>;
   /** The selection chips, passed in so this file does not need to know what a SelectHow is. */
   filters?: React.ReactNode;
+  /**
+   * Per-object risk, keyed by object id, and how much of the ranking was actually measurable.
+   *
+   * Rendered as a mark on the row and never as an ordering. The comment at the top of objectGroups.ts is
+   * the reason: rows keep the order the server sent, which is drawing order, and re-sorting them here
+   * silently breaks the correspondence between this list and the canvas.
+   */
+  risk?: { rank: Record<string, number>; score: Record<string, { risk: number; reasons: string[] }>;
+           coverage: number } | null;
 }) {
   const [open, setOpen] = usePanelFlag(PREF_OBJECTS_OPEN, true);
   const [query, setQuery] = useState("");
@@ -50,6 +65,18 @@ export default function ObjectsCard({ objects, selectedIds, dispatch, filters }:
           <span className="ml-auto font-mono text-[10px] text-warn"
             title="objects the model was unsure about, below the 0.5 threshold the selection chip uses">
             {low} low conf
+          </span>
+        )}
+        {/* A weak ranking is legible as one. Coverage is the share of the risk signals that were actually
+            present, and it is genuinely low in places: quality_score is set on 11.9% of the corpus and
+            clique_bandit is empty, so a frame can be ordered on two signals out of eight. */}
+        {risk && (
+          <span className={`font-mono text-[10px] ${low > 0 ? "" : "ml-auto"} ${
+            risk.coverage < 0.4 ? "text-ink-3" : "text-accent"}`}
+            title={risk.coverage < 0.4
+              ? "the risk order for this frame is based on only a few of the available signals, so treat it as a hint"
+              : "share of the risk signals that were available on this frame"}>
+            risk {Math.round(risk.coverage * 100)}%
           </span>
         )}
       </button>
@@ -113,6 +140,17 @@ export default function ObjectsCard({ objects, selectedIds, dispatch, filters }:
                         <span className="truncate flex-1">
                           {o.id.startsWith("tmp-") ? "new" : o.id.slice(0, 8)}{o.isNew ? " *" : ""}
                         </span>
+                        {/* Where this object sits in the frame's risk order, for the top few only. A
+                            number on every row is noise; the point is which handful to look at first. */}
+                        {risk && risk.rank[o.id] != null && risk.rank[o.id] < 5 && (
+                          <span
+                            title={`${ordinal(risk.rank[o.id] + 1)} most likely to be wrong on this frame: `
+                                   + `${risk.score[o.id]?.reasons.slice(0, 3).join("; ") || "no specific flag"}`
+                                   + ` (ranked on ${Math.round(risk.coverage * 100)}% of the available signals)`}
+                            className="shrink-0 px-1 rounded bg-warn/20 text-warn text-[9px] tabular-nums">
+                            #{risk.rank[o.id] + 1}
+                          </span>
+                        )}
                         {o.quality_score != null && (
                           <span title={`label quality ${o.quality_score.toFixed(2)}`}
                             className={`w-1.5 h-1.5 rounded-full shrink-0 ${QUALITY_DOT[qualityTone(o.quality_score)]}`} />

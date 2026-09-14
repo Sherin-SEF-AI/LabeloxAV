@@ -14,7 +14,7 @@ import { StateBadge, ConfBar } from "@/components/StateBadge";
 export default function GovernPage() {
   const [state, setState] = useState<GovState | null>(null);
   const [registry, setRegistry] = useState<RegistryRow[]>([]);
-  const [prec, setPrec] = useState<{ reviewed: number; incorrect: number; precision: number | null } | null>(null);
+  const [prec, setPrec] = useState<{ reviewed: number; incorrect: number; precision: number | null; pending?: number; interval?: { lo: number; hi: number; p: number | null } } | null>(null);
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<unknown>(null);
@@ -77,6 +77,16 @@ export default function GovernPage() {
               {prec?.precision != null ? <ConfBar conf={prec.precision} /> : "n/a"}
             </div>
             <div className="text-ink-3">{prec ? `${prec.incorrect}/${prec.reviewed} controls incorrect` : ""}</div>
+            {prec?.interval?.p != null && (
+              <div className="text-ink-3">95% interval {prec.interval.lo.toFixed(2)}-{prec.interval.hi.toFixed(2)}</div>
+            )}
+            {/* The queue that produces this number. Without a door to it, the measurement starves:
+                601 samples sat pending with the verdict route uncalled. */}
+            {(prec?.pending ?? 0) > 0 && (
+              <a href="/review/rapid?control=1" className="block text-accent hover:underline">
+                {prec!.pending} control verdicts pending &rarr; judge them
+              </a>
+            )}
           </section>
 
           {/* registry */}

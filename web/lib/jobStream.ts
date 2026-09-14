@@ -107,7 +107,7 @@ export function resetJobStream(): void {
   listeners.clear();
   summaryListeners.clear();
   summaryOff = null;
-  summary = { running: [], waiting: 0 };
+  summary = { running: [], waiting: 0, connected: false };
 }
 
 export type JobsSummary = {
@@ -115,13 +115,22 @@ export type JobsSummary = {
   running: { job_id: string; kind: string; progress: number }[];
   /** Jobs the system holds but is not working, which is the answer to "why is nothing happening". */
   waiting: number;
+  /**
+   * Whether the event stream is actually up.
+   *
+   * Part of the summary rather than a separate subscription, because a chip showing "idle" while the
+   * stream is down is not reporting the system, it is reporting its own silence. The comment on the
+   * error handler above already says losing the connection IS the change for anything showing a live
+   * indicator; this is what carries that to the indicator.
+   */
+  connected: boolean;
 };
 
 // The summary is a fan-out of the same stream rather than a second source. `subscribeJobs` replays its
 // snapshot to each new subscriber, and before the first frame that snapshot is null, which means "no answer
 // yet" and not "nothing is running": summarising it would blank the chip every time another subscriber
 // attached.
-let summary: JobsSummary = { running: [], waiting: 0 };
+let summary: JobsSummary = { running: [], waiting: 0, connected: false };
 const summaryListeners = new Set<(s: JobsSummary) => void>();
 // One jobs listener for the whole group, not one per summary subscriber. A listener each would summarise the
 // same frame N times and deliver it N-squared times, which two subscribers already make visible.
@@ -131,8 +140,11 @@ let summaryOff: (() => void) | null = null;
 export function subscribeJobSummary(fn: (s: JobsSummary) => void): () => void {
   summaryListeners.add(fn);
   summaryOff ??= subscribeJobs((frame) => {
-    if (!frame) return;
-    summary = summarizeJobs(frame);
+    // A null frame means no answer yet, so the counts are left alone - but the connection state is still
+    // news, and dropping the whole callback is why a disconnect never reached this summary at all.
+    summary = frame
+      ? { ...summarizeJobs(frame), connected: jobsConnected() }
+      : { ...summary, connected: jobsConnected() };
     summaryListeners.forEach((l) => l(summary));
   });
   fn(summary);
@@ -145,11 +157,14 @@ export function subscribeJobSummary(fn: (s: JobsSummary) => void): () => void {
   };
 }
 
-/** Flatten a stream frame into what a status chip needs. */
+/** Flatten a stream frame into what a status chip needs.
+ *
+ * `connected` is read from the module rather than from the frame, because it is not a property of a frame:
+ * the last frame received says nothing about whether the stream carrying it is still up. */
 export function summarizeJobs(s: JobStream | null): JobsSummary {
   const running: JobsSummary["running"] = [];
   let windowWaiting = 0;
-  if (!s) return { running, waiting: 0 };
+  if (!s) return { running, waiting: 0, connected: jobsConnected() };
   // `ingest` rides the same stream but is a progress summary rather than a list of jobs, so it has no job_id
   // to key on and is not a job for this purpose.
   for (const kind of ["import", "autolabel", "training", "export"] as const) {
@@ -167,5 +182,5 @@ export function summarizeJobs(s: JobStream | null): JobsSummary {
   const total = s.waiting
     ? Object.values(s.waiting).reduce((a: number, b) => a + (b ?? 0), 0)
     : windowWaiting;
-  return { running, waiting: total };
+  return { running, waiting: total, connected: jobsConnected() };
 }

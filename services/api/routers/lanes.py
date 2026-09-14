@@ -31,6 +31,9 @@ class LaneIn(BaseModel):
     control_points: list
     lane_type: str = "solid"
     is_ego: bool = False
+    # How strongly the paint supported the type, when the caller has actually measured it. Left out by a
+    # human editor, and that absence is meaningful: see the note in update_lane.
+    marking_conf: float | None = None
 
 
 def _decode(store, uri):
@@ -70,6 +73,112 @@ def _row(lane: Lane) -> dict:
 async def list_lanes(frame_id: UUID, db: AsyncSession = Depends(db_session)):
     rows = (await db.execute(select(Lane).where(Lane.frame_id == frame_id))).scalars().all()
     return [_row(lane) for lane in rows]
+
+
+class BevProjectIn(BaseModel):
+    # Points in BEV pixels, as drawn on the warp.
+    points: list
+    lane_type: str = "solid"
+    is_ego: bool = False
+
+
+async def _bev_context(db: AsyncSession, frame_id: UUID):
+    from services.calibration.resolve import resolve_calibration
+    from services.hdmap.bev_view import view_for
+
+    frame = await db.get(Frame, frame_id)
+    if frame is None:
+        raise HTTPException(404, "frame not found")
+    if not frame.cam_id:
+        raise HTTPException(400, "this frame has no camera, so there is nothing to calibrate against")
+    cal = await resolve_calibration(frame.session_id, frame.cam_id, frame.width, frame.height)
+    return frame, cal, view_for(cal)
+
+
+@router.get("/frames/{frame_id}/bev")
+async def frame_bev(frame_id: UUID, db: AsyncSession = Depends(db_session)):
+    """The road under this frame, flattened, plus the metric extent it covers.
+
+    A forward camera runs the road to a vanishing point, so the far half of a lane is a handful of pixels,
+    parallel lanes converge, and a curve and a lane change look alike. Flattening removes all three.
+
+    The far bound is `ipm_max_range_m`, the codebase's own limit on where a flat-road lift stops meaning
+    anything, rather than a number picked to fill the picture. `calibration` travels with the response
+    because a nominal calibration and a measured one produce views that look identical and mean different
+    things, and an annotator drawing metric lanes should know which they have.
+    """
+    import base64
+
+    frame, cal, view = await _bev_context(db, frame_id)
+    img = _decode(get_object_store(), frame.img_uri)
+    if img is None:
+        raise HTTPException(404, "frame image unavailable")
+
+    from services.hdmap.bev_view import render
+
+    bev = render(img, cal, view)
+    ok, buf = cv2.imencode(".jpg", bev, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not ok:
+        raise HTTPException(500, "failed to encode the bird's-eye view")
+    return {
+        "frame_id": str(frame_id),
+        "view": view.as_dict(),
+        "image": "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode(),
+        "calibration": {"source": cal.source, "quality": round(float(cal.quality), 3),
+                        "model": cal.model, "cam_id": cal.cam_id},
+        # Said plainly rather than left for the annotator to infer from a blurry far edge.
+        "caveat": ("the warp assumes a flat road, and a pixel near the far edge is worth many metres"
+                   + ("; this camera has no measured calibration, so the metric scale is nominal"
+                      if cal.source == "nominal" else "")),
+    }
+
+
+@router.get("/frames/{frame_id}/lanes/bev")
+async def lanes_in_bev(frame_id: UUID, db: AsyncSession = Depends(db_session)):
+    """This frame's existing lanes, in BEV pixels, so they can be drawn on the warp.
+
+    A control point above the horizon has no ground intersection and is dropped rather than clamped: it
+    was never on the road plane, and a clamped point is a coordinate nobody drew.
+    """
+    from services.hdmap.bev_view import image_to_bev
+
+    _frame, cal, view = await _bev_context(db, frame_id)
+    rows = (await db.execute(select(Lane).where(Lane.frame_id == frame_id))).scalars().all()
+    out = []
+    for lane in rows:
+        pts = image_to_bev(lane.control_points or [], cal, view)
+        out.append({**_row(lane), "bev_points": pts,
+                    "dropped": max(0, len(lane.control_points or []) - len(pts))})
+    return {"frame_id": str(frame_id), "view": view.as_dict(), "lanes": out}
+
+
+@router.post("/frames/{frame_id}/lanes/bev")
+async def create_lane_from_bev(frame_id: UUID, body: BevProjectIn, db: AsyncSession = Depends(db_session)):
+    """Create a lane from a line drawn on the bird's-eye view.
+
+    This is the half of the mathematics that did not exist. `ipm_pixel_to_vehicle` has lifted a pixel to
+    the ground since the georeferencing work; the inverse appeared nowhere, and without it a BEV can be
+    looked at and not drawn on.
+
+    The lane is stored in image space like every other lane, so nothing downstream needs to know it was
+    drawn on a warp. `marking_conf` is left null: a line drawn on a flattened image is an assertion about
+    where the lane runs, not a measurement of the paint.
+    """
+    from services.hdmap.bev_view import bev_to_image
+
+    frame, cal, view = await _bev_context(db, frame_id)
+    pts = bev_to_image(body.points or [], cal, view)
+    if len(pts) < 2:
+        raise HTTPException(400, {"reason": "fewer than two of those points land on the road ahead of "
+                                            "the camera, so they do not describe a lane",
+                                  "given": len(body.points or []), "projected": len(pts)})
+    lane = Lane(frame_id=frame.frame_id, session_id=frame.session_id, control_points=pts,
+                lane_type=body.lane_type, is_ego=body.is_ego, source="human")
+    db.add(lane)
+    await db.flush()
+    r = _row(lane)
+    await db.commit()
+    return r
 
 
 @router.post("/frames/{frame_id}/lanes/propose")
@@ -122,7 +231,8 @@ async def create_lane(frame_id: UUID, body: LaneIn, db: AsyncSession = Depends(d
     if frame is None:
         raise HTTPException(404, "frame not found")
     lane = Lane(frame_id=frame.frame_id, session_id=frame.session_id, control_points=body.control_points,
-                lane_type=body.lane_type, is_ego=body.is_ego, source="human")
+                lane_type=body.lane_type, is_ego=body.is_ego, source="human",
+                marking_conf=body.marking_conf)
     db.add(lane)
     await db.flush()
     r = _row(lane)
@@ -137,6 +247,14 @@ async def update_lane(lane_id: UUID, body: LaneIn, db: AsyncSession = Depends(db
         raise HTTPException(404, "lane not found")
     lane.control_points, lane.lane_type, lane.is_ego, lane.source = body.control_points, body.lane_type, body.is_ego, "human"
     lane.model_version = None  # a human now owns this lane; drop the stale proposing-model tag so provenance is not "human - clrernet"
+    # And the same for the paint confidence, for the same reason.
+    #
+    # `marking_conf` is documented as "how strongly the paint supported the type", written by
+    # classify_lane. A person retyping a lane has not measured the paint; they have asserted the type.
+    # Leaving the machine's number behind attaches a measurement to a claim it was not made about, and a
+    # consumer gating on "solid with confidence above 0.8" would then be reading the old type's evidence.
+    # Null is the honest value: `_row` already distinguishes it as "never measured".
+    lane.marking_conf = body.marking_conf
     await db.commit()
     return _row(lane)
 

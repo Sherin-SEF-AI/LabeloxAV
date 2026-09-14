@@ -50,6 +50,10 @@ const EXPORT_FORMATS: [string, string][] = [
   // until adapter_scene existed.
   ["panoptic", "COCO panoptic"], ["lanes", "Lanes (CULane+)"],
   ["drivable", "Drivable (BDD)"], ["hdmap", "HD map (GeoJSON)"],
+  // 4D occupancy: the voxels and their scene flow, packed. Derived like the rest of this group, and the
+  // one whose manifest carries a caveat, because a flow field that is mostly an assumed zero is not the
+  // same deliverable as one tracks spoke for.
+  ["occupancy", "Occupancy 4D (voxels + flow)"],
 ];
 
 export const MENUS: Menu[] = [
@@ -131,6 +135,8 @@ export const MENUS: Menu[] = [
         hint: "one crop, one keystroke" },
       { key: "grid", label: "Crop grid", icon: "layers", href: "/review/grid",
         hint: "many crops, one keystroke each" },
+      { key: "attrsweep", label: "Attribute sweep", icon: "list", href: "/annotate/attrsweep",
+        hint: "one attribute at a time, track-wide where it applies" },
       { key: "annotations", label: "Annotations", icon: "list", href: "/annotations",
         hint: "browse and resume" },
       { key: "agent", label: "Agent console", icon: "activity", href: "/agent",
@@ -161,6 +167,8 @@ export const MENUS: Menu[] = [
         separatorBefore: true, hint: "training jobs and model registry" },
       { key: "govern", label: "Govern", icon: "flag", href: "/govern",
         hint: "loop control, champion gate, kill switch" },
+      { key: "autonomy", label: "Autonomy", icon: "activity", href: "/autonomy",
+        hint: "what the machine may do right now, per class, and why" },
       { key: "campaigns", label: "Campaigns", icon: "target", href: "/campaigns",
         hint: "the improvement loop, run by the system" },
       { key: "lineage", label: "Lineage", icon: "route", href: "/lineage",

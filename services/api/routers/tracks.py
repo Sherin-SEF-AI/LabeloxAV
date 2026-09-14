@@ -192,6 +192,74 @@ async def relabel_track(track_id: UUID, payload: RelabelTrackIn, db: AsyncSessio
             "id_switch_events": switches}
 
 
+class AcceptTrackIn(BaseModel):
+    # Left to the clamp in services/review_policy.py rather than defaulted here: an annotator pressing
+    # accept means `submitted` and a reviewer means `accepted`, and the server is what decides which.
+    state: str | None = None
+    # The frame the editor is holding, excluded so its version is not bumped underneath it.
+    origin_object_id: str | None = None
+    time_spent_ms: int = 0
+    reviewer: str = "anon"
+
+
+@router.post("/tracks/{track_id}/accept")
+async def accept_track(track_id: UUID, payload: AcceptTrackIn, db: AsyncSession = Depends(db_session),
+                       user=Depends(current_user)):
+    """Confirm every object on the track in one action, without asserting a class.
+
+    Tube review is built on this. 7,512 tracks of ten or more objects hold 549,038 objects, 95% of the
+    corpus, so a track a reviewer can confirm as a whole is one keystroke standing in for fifty.
+
+    Until now the only track-wide write was `relabel_track`, which requires a class name and writes
+    `source="propagated"`, so confirming a correctly-labelled track meant restating its own class and
+    relabelling every frame to say so. `services/api/routers/track_events.py` already records that this
+    became the accept path by default; it was a workaround.
+
+    Nothing here moves a box or changes a class. `source=None` leaves each object's own source in place,
+    so an interpolated box stays interpolated and gains an accepted state and a Review row naming who
+    accepted it. The per-object work is the same `apply_review_batch` the bulk grid uses, which is where
+    the optimistic lock, the role clamp and the revertible run come from.
+    """
+    onto = get_ontology()
+    rows = (await db.execute(select(Object).where(Object.track_id == track_id))).scalars().all()
+    if not rows:
+        raise HTTPException(404, "track not found or has no objects")
+    if len(rows) > MAX_TRACK_RELABEL_OBJECTS:
+        raise HTTPException(409, f"track holds {len(rows)} objects, above the {MAX_TRACK_RELABEL_OBJECTS} "
+                                 "limit; it is more likely mis-linked than real, so fix the track first")
+
+    origin = str(payload.origin_object_id) if payload.origin_object_id else None
+    targets = [o for o in rows if str(o.object_id) != origin]
+
+    reviewer = user.name if user is not None else payload.reviewer
+    uid = user.user_id if user is not None else None
+    try:
+        res = await apply_review_batch(
+            db, targets, action="accept", onto=onto, requested_state=payload.state,
+            role=getattr(user, "role", None), source=None, reviewer=reviewer, uid=uid,
+            time_spent_ms=payload.time_spent_ms,
+            provenance_extra={"track_accept": True},
+            skip_human=True)
+    except ReviewStateError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    run_id = await record_batch(
+        db, res.changes, created_by=reviewer, commit=False,
+        policy={"action": "accept_track", "track_id": str(track_id)}) if res.changes else None
+    await db.commit()
+
+    # Surfaced for the same reason relabel surfaces it: a re-identification event is where the tracker lost
+    # the object and picked it up again, so a whole-track verdict may have covered two physical objects.
+    track = await db.get(Track, track_id)
+    switches = 0
+    if track is not None and isinstance(track.id_switch_flags, dict):
+        switches = len(track.id_switch_flags.get("events") or [])
+
+    return {"track_id": str(track_id), "accepted": res.n, "state": res.new_state,
+            "clamped": res.clamped, "run_id": run_id, "skipped_stale": res.stale,
+            "skipped_human": res.skipped_human, "id_switch_events": switches}
+
+
 class MergeTrackIn(BaseModel):
     from_track_id: UUID
     force: bool = False
@@ -313,3 +381,72 @@ async def interpolate(track_id: UUID, method: str = "cubic", anchor_policy: str 
     from services.temporal.interpolate import interpolate_track_keyframed
 
     return await interpolate_track_keyframed(track_id, method, anchor_policy=anchor_policy)
+
+
+class JudgeTubesIn(BaseModel):
+    track_ids: list[str] = []
+    skip_judged: bool = True
+
+
+@router.post("/tracks/judge-tubes")
+async def judge_tubes(payload: JudgeTubesIn, db: AsyncSession = Depends(db_session)):
+    """Judge whole tracks from a contact sheet of their crops, rather than one crop at a time.
+
+    A single blurred crop of a distant rider is genuinely ambiguous and the judge abstains or guesses; the
+    same object across eight frames of its track usually is not, because one clear view settles it. The
+    verdict lands on every object of the track under `judge='vlm_tube'`, which keeps it apart from the
+    per-crop judge in the uniqueness key so the two can be compared.
+    """
+    from services.labelops.vlm_review import judge_tracks
+
+    ids = [t for t in payload.track_ids if t]
+    if not ids:
+        raise HTTPException(400, "track_ids is required")
+    if len(ids) > 50:
+        raise HTTPException(400, "at most 50 tracks per request; a tube judge is one model call each")
+    try:
+        return await judge_tracks(db, ids, skip_judged=payload.skip_judged)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/tracks/{track_id}/tube-verdict")
+async def tube_verdict(track_id: UUID, db: AsyncSession = Depends(db_session)):
+    """What the tube judge said about this track, per class group, or that nobody has asked it.
+
+    A list rather than one verdict, because a track here is usually not one object: 9,982 of this corpus's
+    11,288 tracks carry more than one class, so the judge rules on each class group separately and a
+    single answer would have to pick one of them to report.
+
+    Absent is reported as absent rather than as an empty verdict: a track nobody judged and a track judged
+    `unsure` are different facts, and the tube page has to be able to show which one it is.
+    """
+    from db.models import MachineVerdict, Object
+    from services.labelops.vlm_review import TUBE_BATCH_PREFIX, TUBE_JUDGE
+
+    prefix = f"{TUBE_BATCH_PREFIX}-{track_id.hex[:8]}"
+    rows = (await db.execute(
+        select(MachineVerdict).where(MachineVerdict.batch_id.startswith(prefix),
+                                     MachineVerdict.judge == TUBE_JUDGE)
+        .order_by(MachineVerdict.created_at.desc()))).scalars().all()
+    if not rows:
+        return {"track_id": str(track_id), "judged": False, "groups": [],
+                "reason": "the tube judge has not been asked about this track"}
+    onto = get_ontology()
+    seen: set[str] = set()
+    groups = []
+    for r in rows:
+        if r.batch_id in seen:
+            continue
+        seen.add(r.batch_id)
+        obj = await db.get(Object, r.object_id)
+        groups.append({
+            "batch_id": r.batch_id,
+            "class_name": onto.by_id(obj.class_id).name if obj else None,
+            "verdict": r.verdict, "confidence": r.confidence,
+            "proposed_class_id": r.proposed_class_id,
+            "proposed_class_name": (onto.by_id(r.proposed_class_id).name
+                                    if r.proposed_class_id else None),
+            "detail": r.detail, "model_version": r.model_version,
+            "judged_at": r.created_at.isoformat() if r.created_at else None})
+    return {"track_id": str(track_id), "judged": True, "groups": groups}

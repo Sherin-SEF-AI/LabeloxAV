@@ -88,6 +88,7 @@ nav:
       - Runbook: RUNBOOK.md
       - Automation: AUTOMATION.md
       - Testing: TESTING.md
+      - Verification pass: VERIFICATION.md
       - Data retention: DATA_RETENTION.md
   - Reference:
       - Engineering log: ENGINEERING_LOG.md

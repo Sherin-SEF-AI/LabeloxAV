@@ -7,24 +7,62 @@ critic can only VETO an auto-accept (demote to review), never create one. This k
 one-directional: the worst the agent does autonomously is accept a wrong label, which the control-sample
 review and the reversible AgentRun both catch. It never auto-rejects or auto-deletes.
 
-Thresholds mirror the gate (0.95 calibrated auto-accept boundary, 0.60 review floor) so the agent and the
-batch autolabel pipeline speak the same language; they are surfaced here as a dataclass so a run can tune
-them (e.g. a stricter 0.98 for a fresh ontology) and record exactly what it used.
+The thresholds come from the gate's own configuration, resolved at construction, because a second copy
+of them was this module's one serious defect. The docstring here used to say the defaults "mirror the
+gate (0.95 ... 0.60)". They did not: configs/default.yaml runs the gate at 0.45 / 0.08 on a calibrated
+confidence scale whose corpus p50 is 0.411 and p90 is 0.479, so this module's hardcoded 0.95 matched
+26 objects out of 505,288 (0.005%) and its 0.60 floor routed 91.4% of everything to full re-annotation.
+The agent-side flywheel was, structurally, a no-op that nobody had measured.
+
+A dataclass rather than a bare config read, still, so a run can tighten a threshold on purpose (a fresh
+ontology wants 0.98) and record exactly what it used - but the DEFAULT is now the gate's running value,
+and there is no literal here to drift.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
+
+
+def _gate_auto_accept() -> float:
+    from core.config import get_settings
+
+    return float(get_settings().gate.auto_accept)
+
+
+def _gate_review_low() -> float:
+    from core.config import get_settings
+
+    return float(get_settings().gate.review_low)
 
 
 @dataclass(frozen=True)
 class PolicyThresholds:
-    auto_accept_conf: float = 0.95   # calibrated confidence required to auto-accept
-    review_low: float = 0.60         # below this, a full human annotate regardless of anything else
+    # Defaults resolve from the gate's running configuration at construction time, so the agent and the
+    # batch pipeline cannot disagree about what "confident" means. Pass explicit values to override on
+    # purpose; never to restate the config.
+    auto_accept_conf: float = field(default_factory=_gate_auto_accept)
+    review_low: float = field(default_factory=_gate_review_low)
     require_agreement: bool = True   # cross-path (model) agreement required to auto-accept
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    def for_class(self, class_id: int, onto, fitted: dict[int, float] | None = None) -> PolicyThresholds:
+        """These thresholds with the per-class auto-accept boundary the gate itself would use.
+
+        Delegates to the gate's `class_auto_accept`, which prefers a measured ThresholdFit for the class
+        and otherwise falls back to the configured constant (logging that nobody measured it). Safety
+        classes get the stricter configured bound the same way the gate gives it to them. An explicitly
+        overridden auto_accept_conf is respected: a caller who asked for 0.98 asked for 0.98 everywhere.
+        """
+        from core.config import get_settings
+        from services.autolabel.gate import class_auto_accept
+
+        if self.auto_accept_conf != _gate_auto_accept():
+            return self   # explicit override wins over per-class resolution
+        t = class_auto_accept(class_id, onto, get_settings().gate, fitted)
+        return replace(self, auto_accept_conf=float(t))
 
 
 @dataclass(frozen=True)

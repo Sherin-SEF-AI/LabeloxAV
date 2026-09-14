@@ -84,8 +84,20 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
     finally { setBusy(null); }
   };
 
+  // An object drawn in this session has a local id like `tmp-5` and does not exist on the server yet, so
+  // every object-scoped agent operation 404s on it. The id is the only thing the panel is given, and
+  // `tmp-` is how `useEditor` marks a box that has not been saved.
+  //
+  // Told rather than silently ignored: the button is enabled, the operation is a reasonable thing to want
+  // on the box you just drew, and "nothing happened" is a worse answer than "save it first".
+  const unsaved = (id: string) => id.startsWith("tmp-");
+
   const doCrossCam = async () => {
     if (!selectedId) return;
+    if (unsaved(selectedId)) {
+      setMsg("save this box first - it does not exist on the server yet");
+      return;
+    }
     setBusy("xcam"); setMsg(null);
     try {
       const p = await api.agentCrossCamPlan(selectedId);
@@ -99,6 +111,10 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
 
   const doPropagate = async () => {
     if (!selectedId) return;
+    if (unsaved(selectedId)) {
+      setMsg("save this box first - it does not exist on the server yet");
+      return;
+    }
     setBusy("track"); setMsg(null);
     try {
       const p = await api.agentPropagatePlan(selectedId);

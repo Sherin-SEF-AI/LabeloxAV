@@ -82,15 +82,64 @@ def _ctx(objs, **kw):
 # ---- policy ---------------------------------------------------------------------------------------
 
 def test_policy_bands():
+    """Band order and vetoes, pinned with explicit thresholds so the test cannot encode a stale copy.
+
+    The previous version constructed PolicyThresholds() bare and asserted against its hardcoded
+    0.95/0.60 - which is precisely how the real defect survived: the dataclass and the running gate
+    config (0.45/0.08 on the calibrated scale) disagreed for months while this test kept passing.
+    """
     from services.agent.policy import PolicyThresholds, decide
 
-    th = PolicyThresholds()
+    th = PolicyThresholds(auto_accept_conf=0.95, review_low=0.60)
     assert decide(0.97, True, True, True, th).action == "auto_accept"
     assert decide(0.97, False, True, True, th).action == "review"   # no agreement
     assert decide(0.97, True, True, False, th).action == "review"   # critic veto
     assert decide(0.97, True, False, True, th).action == "review"   # quality veto
     assert decide(0.80, True, True, True, th).action == "review"    # mid band
     assert decide(0.40, True, True, True, th).action == "annotate"  # below floor
+
+
+def test_policy_defaults_come_from_the_gate_not_from_a_literal():
+    """The regression for the no-op flywheel.
+
+    Measured on the corpus before the fix: calibrated confidence has p50 0.411 and p90 0.479, the
+    policy's hardcoded 0.95 matched 26 of 505,288 machine objects, and its 0.60 floor sent 91.4% of
+    everything to full re-annotation. A default-constructed policy must therefore agree with the gate's
+    running configuration, and a p90-confidence object must not be told to start over.
+    """
+    from core.config import get_settings
+    from services.agent.policy import PolicyThresholds, decide
+
+    cfg = get_settings().gate
+    th = PolicyThresholds()
+    assert th.auto_accept_conf == cfg.auto_accept, "the agent and the gate have diverged again"
+    assert th.review_low == cfg.review_low
+    p90 = 0.479
+    assert decide(p90, True, True, True, th).action != "annotate", (
+        "a p90-confidence object routed to full re-annotation is the exact no-op this fix removes")
+
+
+def test_per_class_resolution_prefers_a_fitted_threshold():
+    """for_class goes through the gate's own class_auto_accept, so a measured ThresholdFit reaches the
+    agent and a safety class gets its stricter configured bound - unless the caller explicitly overrode
+    the threshold, in which case 0.98 means 0.98 everywhere."""
+    from services.agent.policy import PolicyThresholds
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
+    sedan = onto.by_name("sedan").id
+    pedestrian = onto.by_name("pedestrian").id   # vru is a safety l1
+
+    th = PolicyThresholds()
+    fitted = {sedan: 0.61}
+    assert th.for_class(sedan, onto, fitted).auto_accept_conf == 0.61
+    from core.config import get_settings
+    cfg = get_settings().gate
+    assert th.for_class(pedestrian, onto, {}).auto_accept_conf == cfg.safety_auto_accept
+    assert th.for_class(sedan, onto, {}).auto_accept_conf == cfg.auto_accept
+
+    pinned = PolicyThresholds(auto_accept_conf=0.98)
+    assert pinned.for_class(sedan, onto, fitted).auto_accept_conf == 0.98
 
 
 def test_policy_agreement_optional():

@@ -120,3 +120,84 @@ class TestTheVerdictIsTheMeasurement:
             await record_verdict(db, sid, "incorrect")
             after = await measured_precision(db)
         assert after["reviewed"] == before["reviewed"]
+
+
+class TestAVerdictAnywhereCountsHere:
+    """Phase 1 of the autonomy work: reviewing a control-sampled object IS the control verdict.
+
+    The 601/0 state above had a second cause beyond the missing worklist: verdicts only counted when
+    they arrived through the dedicated control endpoint, so a reviewer who judged the same object in
+    the grid did the work and the measurement never received it. The absorption lives in
+    `apply_review_batch`, the one path every review surface flows through.
+    """
+
+    async def _seeded(self, db):
+        sid = await _sample(db)
+        cs = await db.get(ControlSample, uuid.UUID(sid))
+        return cs, await db.get(Object, cs.object_id)
+
+    async def test_an_accept_fills_the_pending_verdict_as_correct(self):
+        from services.autolabel.ontology import get_ontology
+        from services.review_apply import apply_review_batch
+
+        async with get_sessionmaker()() as db:
+            cs, obj = await self._seeded(db)
+            res = await apply_review_batch(db, [obj], action="accept", onto=get_ontology(),
+                                           role="reviewer", reviewer="t")
+            await db.commit()
+            assert res.control_judged == 1
+            await db.refresh(cs)
+            assert cs.human_verdict == "correct"
+            assert cs.verdict_at is not None, "a verdict without a time cannot be aged, and phase 1 " \
+                                              "makes staleness a first-class refusal"
+
+    async def test_a_reject_fills_it_as_incorrect(self):
+        from services.autolabel.ontology import get_ontology
+        from services.review_apply import apply_review_batch
+
+        async with get_sessionmaker()() as db:
+            cs, obj = await self._seeded(db)
+            await apply_review_batch(db, [obj], action="reject", onto=get_ontology(),
+                                     role="reviewer", reviewer="t")
+            await db.commit()
+            await db.refresh(cs)
+            assert cs.human_verdict == "incorrect", \
+                "the gate auto-accepted something a person threw out; that is exactly a gate error"
+
+    async def test_a_class_correction_fills_it_as_incorrect(self):
+        from services.autolabel.ontology import get_ontology
+        from services.review_apply import apply_review_batch
+
+        async with get_sessionmaker()() as db:
+            cs, obj = await self._seeded(db)
+            other = next(c.id for c in get_ontology().classes if c.id != obj.class_id)
+            await apply_review_batch(db, [obj], action="reclassify", onto=get_ontology(),
+                                     class_id=other, role="reviewer", reviewer="t")
+            await db.commit()
+            await db.refresh(cs)
+            assert cs.human_verdict == "incorrect", \
+                "the gate accepted the wrong class; a relabel is a defect verdict, not an accept"
+
+    async def test_an_already_judged_sample_is_not_overwritten(self):
+        from services.autolabel.ontology import get_ontology
+        from services.review_apply import apply_review_batch
+
+        async with get_sessionmaker()() as db:
+            cs, obj = await self._seeded(db)
+            await record_verdict(db, str(cs.sample_id), "incorrect")
+            await apply_review_batch(db, [obj], action="accept", onto=get_ontology(),
+                                     role="reviewer", reviewer="t")
+            await db.commit()
+            await db.refresh(cs)
+            assert cs.human_verdict == "incorrect", \
+                "the first ruling stands; a later review must not quietly flip the measurement"
+
+    async def test_precision_carries_its_interval_and_its_age(self):
+        async with get_sessionmaker()() as db:
+            sid = await _sample(db)
+            await record_verdict(db, sid, "correct")
+            prec = await measured_precision(db)
+            assert prec["interval"]["p"] is not None
+            assert 0.0 <= prec["interval"]["lo"] <= prec["interval"]["hi"] <= 1.0
+            assert prec["measured_at"] is not None, \
+                "the newest verdict just landed with a timestamp, so the age is known"

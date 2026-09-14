@@ -104,6 +104,76 @@ def _recapture(challenger: dict, cfg) -> dict:
                         f"(overstated by {over:.3f})"]}
 
 
+# Adjudicated disagreements needed before shadow evidence is allowed to refuse anything. Below this the
+# Wilson interval on a win share spans most of the unit interval and would refuse a good challenger as
+# readily as a bad one.
+MIN_SHADOW_PAIRS = 30
+
+
+def _counterfactual(challenger: dict) -> dict:
+    """Whether the challenger fell apart under a controlled change to the frames, and by how much.
+
+    Fail-closed only, like the shadow clause beside it. A model that survives occlusion and dusk has not
+    been shown to be better at anything, so this can never promote; a safety class whose recall falls past
+    the tolerance with the intervals separated is a model that will fail on a Tuesday evening in the rain,
+    and that does block.
+
+    Absent evidence is unmeasured, not a pass and not a failure. The counterfactual needs the model's
+    weights and a gold set, and a challenger evaluated before this existed carries neither.
+    """
+    cf = challenger.get("counterfactual")
+    if not cf or not cf.get("measured"):
+        return {"ok": True, "measured": False, "reasons": [],
+                "detail": (cf or {}).get("reason", "no counterfactual evaluation has been run")}
+    blocking: list[dict] = []
+    for pname, res in (cf.get("perturbations") or {}).items():
+        for row in res.get("blocking") or []:
+            blocking.append({"perturbation": pname, **row})
+    if not blocking:
+        return {"ok": True, "measured": True, "reasons": [],
+                "detail": "no safety class fell past the tolerance under any perturbation"}
+    worst = max(blocking, key=lambda b: b["drop"])
+    return {
+        "ok": False, "measured": True, "blocking": blocking,
+        "reasons": [f"{worst['class_name']} recall falls {worst['drop']:.0%} under {worst['perturbation']} "
+                    f"({worst['recall_before']:.2f} to {worst['recall_after']:.2f} on "
+                    f"{worst['support']} objects), which is more than a model on this road can lose"],
+        "detail": f"{len(blocking)} safety class drops past the tolerance",
+    }
+
+
+def _shadow(challenger: dict) -> dict:
+    """Whether the challenger lost badly enough on adjudicated disagreements to block, and why.
+
+    Fail-closed only, and only in one direction. Shadow evidence can refuse a challenger that people have
+    judged worse than the champion where the two disagree; it can never promote one, because a model that
+    wins on the frames two models argue about has not been shown to be safe on the frames they agree on,
+    which is most of them.
+
+    Below `MIN_SHADOW_PAIRS` discordant pairs this reports "unmeasured" and blocks nothing. That is the
+    same rule the rest of this file follows: too little evidence is not evidence of adequacy, but it is
+    not evidence of failure either, and reporting it as a zero win share would refuse every challenger on
+    the first night of shadow mode.
+    """
+    sh = challenger.get("shadow")
+    if not sh or not sh.get("measured"):
+        return {"ok": True, "measured": False,
+                "reasons": [], "detail": (sh or {}).get("reason", "no shadow sweep has adjudicated this challenger")}
+    n = int(sh.get("discordant") or 0)
+    if n < MIN_SHADOW_PAIRS:
+        return {"ok": True, "measured": False, "reasons": [],
+                "detail": f"only {n} adjudicated disagreements, need {MIN_SHADOW_PAIRS} to say anything"}
+    hi = float(sh.get("hi", 1.0))
+    if hi < 0.5:
+        return {"ok": False, "measured": True,
+                "reasons": [f"people judged the champion better where the two disagree: the challenger won "
+                            f"{sh.get('challenger_right')} of {n} and the upper bound of its win share is "
+                            f"{hi:.2f}, below even"],
+                "detail": f"win share {float(sh.get('share', 0.0)):.2f} [{float(sh.get('lo', 0.0)):.2f}, {hi:.2f}] on {n} pairs"}
+    return {"ok": True, "measured": True, "reasons": [],
+            "detail": f"win share {float(sh.get('share', 0.0)):.2f} on {n} adjudicated pairs"}
+
+
 def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None) -> dict:
     """Pure promotion decision. Fail-closed: a challenger that cannot prove its safety (no Safe-mIoU,
     or no safety-class recall) is never promoted, and a safety-class AP, Safe-mIoU, or safety-class
@@ -178,7 +248,10 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
                 "recall_ok": rec_floor["ok"], "recapture_ok": recap["ok"],
                 "recapture": recap, "reasons": reasons}
 
-    promote = bool(beats_map and safe_ok and safety_ok and recall_ok and recap["ok"])
+    shadow = _shadow(challenger)
+    counterfactual = _counterfactual(challenger)
+    promote = bool(beats_map and safe_ok and safety_ok and recall_ok and recap["ok"]
+                   and shadow["ok"] and counterfactual["ok"])
     reasons: list[str] = []
     if not beats_map:
         reasons.append(f"does not beat champion mAP ({map_c:.3f} vs {map_ch:.3f})")
@@ -189,12 +262,15 @@ def champion_gate(challenger: dict, champion: dict | None, onto, cfg, rcfg=None)
                        else f"Safe-mIoU regressed ({sm_c} vs {sm_ch})")
     if not safety_ok:
         reasons.append(f"safety-class regression: {regressed}")
-    reasons += rec_floor["reasons"] + rec_reg["reasons"] + recap["reasons"]
+    reasons += (rec_floor["reasons"] + rec_reg["reasons"] + recap["reasons"] + shadow["reasons"]
+                + counterfactual["reasons"])
     if promote:
         reasons.append("beats champion without any safety regression")
     return {"promote": promote, "beats_map": beats_map, "map_delta": round(map_c - map_ch, 4),
             "safe_ok": safe_ok, "safety_ok": safety_ok, "regressed_safety": regressed,
             "recall_ok": recall_ok, "recapture_ok": recap["ok"], "recapture": recap,
+            "shadow_ok": shadow["ok"], "shadow": shadow,
+            "counterfactual_ok": counterfactual["ok"], "counterfactual": counterfactual,
             "reasons": reasons, "evidence": evidence}
 
 
@@ -227,7 +303,44 @@ async def _common_gold_metrics(db, reg, champ, task):
     # attached here or the recapture condition would see nothing on every real promotion and fail closed
     # against a check that had in fact been performed.
     chal_m = await _attach_recapture(db, chal_m, gold_id)
+    chal_m = await _attach_shadow(db, chal_m, reg.model_version)
     return chal_m, champ_m, f"common_gold:{gold_id}"
+
+
+async def _attach_shadow(db, metrics: dict, model_version: str) -> dict:
+    """Put the adjudicated shadow record for this challenger onto its metric dict, under "shadow".
+
+    Keyed on the model version rather than one sweep, because a challenger that survives several nights
+    has been judged several times and every one of those verdicts is about the same weights. Absent stays
+    absent: a challenger nobody has shadowed carries no key, and `_shadow` reads that as unmeasured rather
+    than as a loss.
+    """
+    from sqlalchemy import select
+
+    from db.models import InferenceRun, ShadowDisagreement
+    from services.verdyx.shadow_run import win_share
+
+    run_ids = (await db.execute(
+        select(ShadowDisagreement.challenger_run_id)
+        .join(InferenceRun, InferenceRun.run_id == ShadowDisagreement.challenger_run_id)
+        .where(InferenceRun.model_version == model_version).distinct())).scalars().all()
+    if not run_ids:
+        return metrics
+    total = {"n_adjudicated": 0, "champion_right": 0, "challenger_right": 0, "both_right": 0,
+             "both_wrong": 0, "discordant": 0}
+    for rid in run_ids:
+        s = await win_share(db, rid)
+        for k in total:
+            total[k] += int(s.get(k) or 0)
+    if total["discordant"] == 0:
+        return {**metrics, "shadow": {**total, "measured": False,
+                                      "reason": "no disagreement of this challenger has been adjudicated "
+                                                "for or against it"}}
+    from services.labelops.sampling import wilson_interval
+
+    ci = wilson_interval(total["challenger_right"], total["discordant"])
+    return {**metrics, "shadow": {**total, "measured": True, "share": ci["p"], "lo": ci["lo"],
+                                  "hi": ci["hi"], "runs": len(run_ids)}}
 
 
 async def _attach_recapture(db, metrics: dict, gold_id: str | None) -> dict:
@@ -246,7 +359,20 @@ async def _attach_recapture(db, metrics: dict, gold_id: str | None) -> dict:
     return {**metrics, "recapture": est} if est is not None else metrics
 
 
-async def evaluate_and_promote(db: AsyncSession, challenger_version: str, task: str = "detection") -> dict:
+async def evaluate_and_promote(db: AsyncSession, challenger_version: str, task: str = "detection",
+                               *, approved_by: str | None = None) -> dict:
+    """Gate the challenger, and promote it only if the gate passes AND somebody may promote.
+
+    `approved_by` is a person's explicit approval. It bypasses `auto_promote_enabled` - that flag decides
+    whether the LOOP may promote unattended, and a human clicking promote is the opposite of unattended -
+    but it never bypasses the gate itself. There is no path, human or machine, past a failing gate.
+
+    Without approval and with the flag off, a passing challenger becomes a standing "ready to promote"
+    notification rather than a silent paused audit row. That branch used to record `promotion_paused` and
+    tell nobody, which under a promote-by-approval policy is the loop's quietest possible stall: the
+    champion the whole flywheel worked towards sits ready, and the person whose click it awaits has to
+    go looking.
+    """
     from sqlalchemy.exc import IntegrityError
 
     cfg = get_settings().phase4.govern
@@ -259,7 +385,8 @@ async def evaluate_and_promote(db: AsyncSession, challenger_version: str, task: 
     # champion for the same task impossible: the loser's commit raises IntegrityError instead of silently
     # creating split-brain. Catch it and report a lost race rather than surfacing a 500.
     try:
-        return await _evaluate_and_promote_locked(db, reg, challenger_version, task, cfg, onto)
+        return await _evaluate_and_promote_locked(db, reg, challenger_version, task, cfg, onto,
+                                                  approved_by=approved_by)
     except IntegrityError:
         await db.rollback()
         log.info("govern.promotion_race_lost", challenger=challenger_version, task=task)
@@ -267,24 +394,49 @@ async def evaluate_and_promote(db: AsyncSession, challenger_version: str, task: 
                 "reason": "another promotion for this task committed first"}
 
 
-async def _evaluate_and_promote_locked(db, reg, challenger_version, task, cfg, onto) -> dict:
+async def _evaluate_and_promote_locked(db, reg, challenger_version, task, cfg, onto,
+                                       *, approved_by: str | None = None) -> dict:
     champ = await get_champion(db, task)
     chal_metrics, champ_metrics, basis = await _common_gold_metrics(db, reg, champ, task)
     gate = champion_gate(chal_metrics, champ_metrics, onto, cfg)
     gate["comparison_basis"] = basis
 
     state = await get_state(db)
-    if gate["promote"] and not state.auto_promote_enabled:
+    if gate["promote"] and not state.auto_promote_enabled and approved_by is None:
         await record(db, "champion", "promotion_paused", challenger_version,
                      {"gate": gate, "paused_reason": state.paused_reason})
-        return {"promoted": False, "paused": True, "gate": gate, "reason": state.paused_reason}
+        # A standing, superseding notification, because this is now the NORMAL path: promotion defaults
+        # to propose-and-approve, so "gate passed, awaiting a person" must reach the person rather than
+        # sit in the audit trail. Superseded per challenger, so re-evaluation every tick stays one line.
+        from services.notify import notify
+
+        await notify(db, kind="promotion_ready", severity="info",
+                     title=f"{task} model {challenger_version} passed the gate and awaits approval",
+                     body=(state.paused_reason or
+                           "Auto-promotion is off (promote-by-approval). Review the gate report and "
+                           "approve from the governance page."),
+                     href="/govern", subject_type="model", subject_id=challenger_version,
+                     meta={"task": task, "gate": {k: gate[k] for k in ("promote", "reasons")
+                                                  if k in gate}})
+        return {"promoted": False, "paused": True, "awaiting_approval": True, "gate": gate,
+                "reason": state.paused_reason or "auto-promotion is off; approval required"}
 
     if gate["promote"]:
         prev = champ.model_version if champ else None
         await set_champion(db, challenger_version, task, promoted_from=prev)
         state.champion_version = challenger_version
         await db.commit()
-        await record(db, "champion", "promote", challenger_version, {"gate": gate, "promoted_from": prev})
+        await record(db, "champion", "promote", challenger_version,
+                     {"gate": gate, "promoted_from": prev, "approved_by": approved_by})
+        # Settlement autonomy is evidence about an epoch, and the epoch just changed: every class at
+        # L2 drops to L1 until a lot passes under the new champion. Best-effort - a promotion must
+        # never fail over ladder bookkeeping - but a failure here is logged, not swallowed silently.
+        try:
+            from services.govern.class_autonomy import on_champion_change
+
+            await on_champion_change(db, challenger_version)
+        except Exception as exc:  # noqa: BLE001
+            log.error("govern.champion_change_ladder_failed", error=str(exc))
         log.info("govern.promote", challenger=challenger_version, promoted_from=prev)
         from services.integrations.webhooks import emit
 

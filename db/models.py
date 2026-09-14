@@ -49,6 +49,12 @@ class OntologyVersion(Base):
     version: Mapped[str] = mapped_column(String(64), primary_key=True)
     hierarchy_levels: Mapped[int] = mapped_column(Integer, nullable=False)
     attributes: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # The version this one descended from (0114), making the versions a chain rather than a set, so
+    # "the latest descended from the one this gold set was sealed under" becomes a query rather than
+    # something a person has to remember. Null on the first version, and on any that predates the column.
+    parent_version: Mapped[str | None] = mapped_column(String(64))
+    changelog: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict,
+                                             server_default=sql_text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     classes: Mapped[list[OntologyClass]] = relationship(back_populates="ontology", cascade="all, delete-orphan")
@@ -68,6 +74,130 @@ class OntologyClass(Base):
     ontology: Mapped[OntologyVersion] = relationship(back_populates="classes")
 
     __table_args__ = (Index("ix_ontology_class_name", "name"),)
+
+
+class ClassMigration(Base):
+    """What became what between two ontology versions, and the rule that decided it (0114).
+
+    A version bump leaves new rows and no record of the relationship between old and new, so a model
+    trained under one version and a gold set sealed under another can only be compared by somebody who
+    remembers the history. This is that record.
+
+    The rule matters for exactly one kind. A rename, a merge and a retire can all be read off the rows
+    afterwards; a split cannot, because which side an object went to was decided by a predicate that
+    leaves no trace in the result. So the predicate is stored, and a split is replayable.
+    """
+
+    __tablename__ = "class_migration"
+
+    migration_id: Mapped[uuid.UUID] = _uuid_pk()
+    from_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    to_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    from_id: Mapped[int | None] = mapped_column(Integer)
+    to_id: Mapped[int | None] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    rule: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict,
+                                        server_default=sql_text("'{}'::jsonb"))
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_run.run_id", ondelete="SET NULL"))
+    created_by: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("kind in ('split','merge','rename','retire')", name="ck_class_migration_kind"),
+        CheckConstraint("from_id is not null or to_id is not null", name="ck_class_migration_has_an_end"),
+        CheckConstraint("from_version <> to_version", name="ck_class_migration_across_versions"),
+        Index("ix_class_migration_from", "from_version", "from_id"),
+        Index("ix_class_migration_to", "to_version", "to_id"),
+    )
+
+
+class LabelValueSnapshot(Base):
+    """What one class's next label was worth, and what it cost, at one moment (0115).
+
+    A snapshot rather than a view, because every input moves: the gate's deficit changes with each
+    retrain and the measured minutes change with each review. A decision made last Tuesday has to be
+    explainable against what was true last Tuesday.
+
+    `measured` is the field that keeps this honest. A class with too few timed reviews to estimate
+    minutes from gets a row saying so rather than a row carrying an assumed median, so "this class is
+    cheap" and "nobody has timed this class" cannot be confused.
+    """
+
+    __tablename__ = "label_value_snapshot"
+
+    snapshot_id: Mapped[uuid.UUID] = _uuid_pk()
+    class_id: Mapped[int] = mapped_column(ForeignKey("ontology_class.id"), nullable=False)
+    ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    model_run_id: Mapped[str | None] = mapped_column(String(128))
+    deficit: Mapped[float | None] = mapped_column(Float)
+    minutes_per_label: Mapped[float | None] = mapped_column(Float)
+    inr_per_label: Mapped[float | None] = mapped_column(Float)
+    expected_recall_gain: Mapped[float | None] = mapped_column(Float)
+    value_per_inr: Mapped[float | None] = mapped_column(Float)
+    measured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                            server_default=sql_text("false"))
+    reason: Mapped[str | None] = mapped_column(Text)
+    n_timed_reviews: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("minutes_per_label is null or minutes_per_label >= 0",
+                        name="ck_label_value_minutes_nonneg"),
+        CheckConstraint("inr_per_label is null or inr_per_label >= 0", name="ck_label_value_inr_nonneg"),
+        CheckConstraint("measured or reason is not null", name="ck_label_value_unmeasured_has_reason"),
+        Index("ix_label_value_class_ts", "class_id", "ts_ns"),
+    )
+
+
+class PrivacyBudget(Base):
+    """One scope's epsilon allowance, and what it has spent (0116).
+
+    Differential privacy composes additively: ten releases at epsilon 0.1 leak as much as one at 1.0. A
+    system applying a per-query epsilon without tracking the total provides a guarantee it has already
+    spent, and no single query reveals that. This row is the guarantee; the per-query epsilon is only how
+    it is spent.
+    """
+
+    __tablename__ = "privacy_budget"
+
+    scope: Mapped[str] = mapped_column(String(64), primary_key=True)
+    epsilon_total: Mapped[float] = mapped_column(Float, nullable=False)
+    epsilon_spent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("epsilon_total > 0", name="ck_privacy_budget_total_positive"),
+        CheckConstraint("epsilon_spent >= 0", name="ck_privacy_budget_spent_nonneg"),
+    )
+
+
+class PrivacyReleaseLog(Base):
+    """Every release that spent from a budget, with what it cost and what produced it (0116).
+
+    The half that survives a mistake. If a scope's budget is reset by hand, the releases already made are
+    still here and the reset is visible beside them, so the real total is recoverable by summing rather
+    than by trusting a counter.
+    """
+
+    __tablename__ = "privacy_release_log"
+
+    release_id: Mapped[uuid.UUID] = _uuid_pk()
+    scope: Mapped[str] = mapped_column(String(64), nullable=False)
+    endpoint: Mapped[str] = mapped_column(String(128), nullable=False)
+    epsilon: Mapped[float] = mapped_column(Float, nullable=False)
+    mechanism: Mapped[str] = mapped_column(String(64), nullable=False)
+    k: Mapped[int | None] = mapped_column(Integer)
+    cells_released: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    cells_suppressed: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    requested_by: Mapped[str | None] = mapped_column(String(64))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("epsilon > 0", name="ck_privacy_release_epsilon_positive"),
+        Index("ix_privacy_release_scope_at", "scope", "at"),
+    )
 
 
 class Session(Base):
@@ -95,6 +225,9 @@ class Session(Base):
     ontology_version: Mapped[str] = mapped_column(String(64), nullable=False)
     commit_id: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # real | synthetic | perturbed (core/origin.py): the listing-level twin of Frame.origin. A synthetic
+    # session holds only synthetic frames, so the two never disagree (tests/test_origin_quarantine.py).
+    origin: Mapped[str] = mapped_column(String(16), nullable=False, default="real", server_default="real")
 
     frames: Mapped[list[Frame]] = relationship(back_populates="session")
 
@@ -115,6 +248,14 @@ class Frame(Base):
     ego_speed: Mapped[float | None] = mapped_column(Float)
     quality: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # real | synthetic | perturbed (core/origin.py). Every reader that sweeps frames by time or by the
+    # absence of a derived row must say `Frame.origin == REAL`; a composite must never be embedded,
+    # scored, audited, exported or trained on by accident.
+    origin: Mapped[str] = mapped_column(String(16), nullable=False, default="real", server_default="real")
+    # The real frame a synthetic or perturbed one was built from. Null on real frames. SET NULL on delete
+    # so erasing a source frame leaves the composite (and its own erasure path) intact.
+    source_frame_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("frame.frame_id", ondelete="SET NULL"))
 
     # Data Intelligence Layer (Phase 1), all nullable + additive:
     scene: Mapped[dict | None] = mapped_column(JSONB)  # {weather,time_of_day,road_type,density,confidence_per_axis}
@@ -149,6 +290,9 @@ class Frame(Base):
         Index("ix_frame_session_ts", "session_id", "ts_ns"),
         Index("ix_frame_ts", "ts_ns"),
         Index("ix_frame_tags_gin", "tags", postgresql_using="gin"),
+        Index("ix_frame_origin", "origin", postgresql_where=sql_text("origin <> 'real'")),
+        Index("ix_frame_source_frame", "source_frame_id",
+              postgresql_where=sql_text("source_frame_id IS NOT NULL")),
     )
 
 
@@ -228,6 +372,13 @@ class Object(Base):
     track_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("track.track_id", ondelete="SET NULL"))
     class_id: Mapped[int] = mapped_column(ForeignKey("ontology_class.id"))
     bbox: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)  # xyxy pixel
+    # The whole extent of the object, including the part another object hides. `bbox` above stays the
+    # VISIBLE box, which is what every existing consumer means by it.
+    #
+    # Null means nobody has said, and it is deliberately not backfilled: an amodal box is a judgement
+    # about what is hidden, and guessing one from a class prior for 578,436 objects would fill the corpus
+    # with confident fabrications indistinguishable from observations.
+    bbox_amodal: Mapped[list[float] | None] = mapped_column(ARRAY(Float))
     mask_uri: Mapped[str | None] = mapped_column(Text)
     mask_encoding: Mapped[str | None] = mapped_column(String(16))
     attrs: Mapped[dict] = mapped_column(JSONB, default=dict)
@@ -364,6 +515,12 @@ class VlmTarget(Base):
 class Lane(Base):
     # M2.1: a lane line per frame (linked across frames by track_ref). Bezier/B-spline control points in
     # image coordinates; never a raster mask. Implicit/fallback lanes are hand-drawn on unmarked roads.
+    #
+    # A `virtual_lane` type was proposed and deliberately not added: `implicit` already means exactly that,
+    # a lane a person drew where there is no paint, and it has an editor tool of its own. Adding a synonym
+    # would split the same concept across two values that every consumer would then have to check for,
+    # which is how 48,322 objects ended up in `traffic_sign`. Nothing uses `implicit` yet - the corpus is
+    # 3,750 machine-proposed lanes and 3 human ones - so the gap is annotation, not vocabulary.
     __tablename__ = "lane"
 
     lane_id: Mapped[uuid.UUID] = _uuid_pk()
@@ -566,6 +723,11 @@ class Workforce(Base):
     capacity_jobs_per_day: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # The acceptance bar is a commercial term negotiated per vendor, not a global constant.
     min_honeypot_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.9)
+    # What this workforce charges (0115). A verdict and a box are different work at different prices, so
+    # they are separate columns. Nullable, and null means nobody entered a rate: a default rate would put
+    # a fabricated number into every value calculation with no way to tell it from a real one.
+    rate_inr_per_verdict: Mapped[float | None] = mapped_column(Float)
+    rate_inr_per_box: Mapped[float | None] = mapped_column(Float)
     contact: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -746,6 +908,10 @@ class InferenceRun(Base):
     frame_count: Mapped[int] = mapped_column(Integer, default=0)
     params: Mapped[dict] = mapped_column(JSONB, default=dict)   # imgsz, conf_floor, nms_iou, device, pack_id, ontology_version
     code_sha: Mapped[str | None] = mapped_column(String(40))    # git sha of the tree that produced the run
+    # The ontology class ids this model's own class order maps onto (0111): what it was able to say at
+    # all. Null means the run predates the column and declared no vocabulary, which is not the same as a
+    # model that emits nothing; a comparison faced with null compares every class, as it did before.
+    class_vocab: Mapped[list | None] = mapped_column(JSONB)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")  # running | complete | failed
@@ -1531,6 +1697,11 @@ class ExportJob(Base):
     # percent restarted from zero, which on a large corpus means hours of repeated work.
     checkpoint: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     resumed_from: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # What privacy treatment this export shipped under (0116): the epsilon spent, the k it suppressed at,
+    # and the mechanism. A bundle whose datasheet cannot say whether its geography was aggregated is a
+    # bundle nobody can assess.
+    privacy: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict,
+                                           server_default=sql_text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -1849,9 +2020,81 @@ class ModelRegistry(Base):
     dataset_commit: Mapped[str | None] = mapped_column(String(128))
     weights_uri: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
+    # Lineage (0110). `parent_version` is the checkpoint this one continued from, `teacher_version` the
+    # model whose soft targets a distilled student was fit against; both are plain names rather than
+    # foreign keys, because either can be a checkpoint this system never registered (a COCO release, a
+    # pod-side pretraining stage). `origin` is how the weights came to exist.
+    arch: Mapped[str | None] = mapped_column(String(64))
+    parent_version: Mapped[str | None] = mapped_column(String(128))
+    teacher_version: Mapped[str | None] = mapped_column(String(128))
+    origin: Mapped[str] = mapped_column(String(16), nullable=False, default="trained",
+                                        server_default="trained")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_model_registry_champion", "task", "is_champion"),)
+    __table_args__ = (Index("ix_model_registry_champion", "task", "is_champion"),
+                      Index("ix_model_registry_parent", "parent_version"),
+                      Index("ix_model_registry_teacher", "teacher_version"))
+
+
+class ShadowDisagreement(Base):
+    """One place two models read the same pixels differently, and what a person said about it (0109).
+
+    Gold is frozen by design, so it says nothing about the sessions ingested since it was sealed. A shadow
+    sweep scores the champion and a challenger over the same new frames and files a row here for every
+    place they part company. The rows are a worklist ranked by `score` and a measurement at once: once
+    people have adjudicated enough of them, the share the challenger won on the disagreements is evidence
+    about the challenger that frozen gold cannot produce.
+
+    `verdict` is null until somebody rules, and the null is load-bearing: an unadjudicated disagreement is
+    not a tie and not a loss, and counting it as either is how an unmeasured quantity becomes a zero.
+    """
+
+    __tablename__ = "shadow_disagreement"
+
+    disagreement_id: Mapped[uuid.UUID] = _uuid_pk()
+    sweep_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("agent_run.run_id", ondelete="CASCADE"), nullable=False)
+    frame_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("frame.frame_id", ondelete="CASCADE"), nullable=False)
+    champion_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("inference_run.run_id", ondelete="CASCADE"), nullable=False)
+    challenger_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("inference_run.run_id", ondelete="CASCADE"), nullable=False)
+    champion_prediction_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("prediction.prediction_id", ondelete="CASCADE"))
+    challenger_prediction_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("prediction.prediction_id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    champion_class_id: Mapped[int | None] = mapped_column(ForeignKey("ontology_class.id"))
+    challenger_class_id: Mapped[int | None] = mapped_column(ForeignKey("ontology_class.id"))
+    iou: Mapped[float | None] = mapped_column(Float)
+    conf_gap: Mapped[float | None] = mapped_column(Float)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    bbox: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending",
+                                       server_default="pending")
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("label_task.task_id", ondelete="SET NULL"))
+    verdict: Mapped[str | None] = mapped_column(String(24))
+    verdict_object_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("object.object_id", ondelete="SET NULL"))
+    adjudicated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("kind in ('champion_miss','challenger_miss','class_flip','conf_gap')",
+                        name="ck_shadow_disagreement_kind"),
+        CheckConstraint("state in ('pending','queued','adjudicated','dismissed')",
+                        name="ck_shadow_disagreement_state"),
+        CheckConstraint("verdict is null or verdict in "
+                        "('champion_right','challenger_right','both_right','both_wrong')",
+                        name="ck_shadow_disagreement_verdict"),
+        CheckConstraint("champion_prediction_id is not null or challenger_prediction_id is not null",
+                        name="ck_shadow_disagreement_has_a_side"),
+        Index("ix_shadow_disagreement_sweep", "sweep_run_id", "state"),
+        Index("ix_shadow_disagreement_challenger", "challenger_run_id", "verdict"),
+        Index("ix_shadow_disagreement_frame", "frame_id"),
+    )
 
 
 class ControlSample(Base):
@@ -1862,6 +2105,9 @@ class ControlSample(Base):
     object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"))
     was_auto_accepted: Mapped[bool] = mapped_column(Boolean, default=False)
     human_verdict: Mapped[str | None] = mapped_column(String(16))      # correct|incorrect (null until reviewed)
+    # When the verdict landed (null for verdicts recorded before the column existed, whose times were
+    # never captured). created_at is the seeding time and must not be read as the measurement time.
+    verdict_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_control_sample_verdict", "human_verdict"),)
@@ -1935,10 +2181,115 @@ class GovernanceState(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     loop_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_accept_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    auto_promote_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Default False: promotion is propose-and-approve. The loop retrains, gates, and files a ready-to-
+    # promote notification; a person clicks promote. True is the documented opt-in to full closure.
+    auto_promote_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Settlement is its own switch, born false (migration 0106): the machine may close labels only
+    # under a passed acceptance lot, and only while an operator has this on. The kill switch clears it
+    # and release does not restore it - an opt-in before the cord was pulled stays an opt-in after.
+    settlement_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     champion_version: Mapped[str | None] = mapped_column(String(128))
     paused_reason: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SettlementLot(Base):
+    """One acceptance-sampling decision over one stratum, and everything needed to defend or revoke it.
+
+    A stratum is (class_id, model_epoch): the same detector asserting the same class is one population
+    with one defect rate, and mixing epochs would let a good new model launder a bad old one's labels.
+    The lot freezes the drawn sample, the FAR bound in force, the Wilson decision verbatim, and the ids
+    of the AgentRuns that wrote the settlement - so "why is this label closed?" has a one-row answer
+    and "undo it" is a revert of named runs, not a hunt.
+    """
+
+    __tablename__ = "settlement_lot"
+
+    lot_id: Mapped[uuid.UUID] = _uuid_pk()
+    class_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The champion whose proposals the stratum froze under; pre-attribution objects pool as "legacy".
+    model_epoch: Mapped[str] = mapped_column(String(128), nullable=False)
+    population: Mapped[int] = mapped_column(Integer, nullable=False)
+    tier: Mapped[str] = mapped_column(String(16), nullable=False)      # default | safety | critical
+    # Snapshot of the tier's FAR bound at planning time: a later config change cannot silently
+    # re-justify or invalidate a decision made under different rules.
+    far_bound: Mapped[float] = mapped_column(Float, nullable=False)
+    sample_object_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    batch_id: Mapped[str | None] = mapped_column(String(64))           # review batch carrying the verdicts
+    sample_n: Mapped[int] = mapped_column(Integer, nullable=False, default=0)   # verdicts counted
+    defects: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skips: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    topups: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    decision: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # acceptance_decision, verbatim
+    # sampling -> judging -> accepted | rejected | parked; accepted -> settled -> (maybe) reverted
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="sampling")
+    run_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    spot_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    spot_defects: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # The decision rule the lot was planned under: 'wilson' (one fixed draw, the original rule) or
+    # 'sprt' (sequential increments up to cap_n, accept conjunctive with Wilson). cap_n is the fixed
+    # sample the sequential lot may grow to; 0 marks a lot planned before the rule existed.
+    rule: Mapped[str] = mapped_column(String(16), nullable=False, default="wilson",
+                                      server_default="wilson")
+    cap_n: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    llr: Mapped[float | None] = mapped_column(Float)    # null: never computed, which is not zero
+    # {p0, p1, alpha, beta, bound_accept, bound_reject, increment, expected_remaining, oc,
+    #  trajectory: [{n, defects, llr, at}]}
+    sprt: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict,
+                                       server_default=sql_text("'{}'::jsonb"))
+    # [{at, added, n_after, kind}] in draw order; the sample is the concatenation of the increments.
+    increments: Mapped[list] = mapped_column(JSONB, nullable=False, default=list,
+                                             server_default=sql_text("'[]'::jsonb"))
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_settlement_lot_stratum", "class_id", "model_epoch", "status"),)
+
+
+class ClassAutonomy(Base):
+    """How far the machine may go for one class: 0 propose-only, 1 auto-accept band, 2 settlement.
+
+    History rows with one active per class (the ThresholdFit idiom): a step-down is a new row, so the
+    ladder's whole history stays readable and a revert is a re-activation rather than a lost record.
+    A human-pinned level is never auto-promoted past.
+    """
+
+    __tablename__ = "class_autonomy"
+
+    autonomy_id: Mapped[uuid.UUID] = _uuid_pk()
+    class_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    level: Mapped[int] = mapped_column(Integer, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    basis: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)   # the evidence, verbatim
+    set_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_class_autonomy_active", "class_id", "active"),)
+
+
+class SettlementSpot(Base):
+    """The continuous check on a settled lot: a small mirror of what was settled, always sent to a human.
+
+    Deliberately separate from `control_sample`, which is the auto-accept GATE auditing itself; mixing
+    settlement spots into it would pollute the gate's precision denominator, which is the exact
+    contamination the settlement design exists to avoid.
+    """
+
+    __tablename__ = "settlement_spot"
+
+    spot_id: Mapped[uuid.UUID] = _uuid_pk()
+    lot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("settlement_lot.lot_id", ondelete="CASCADE"),
+                                              nullable=False)
+    object_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object.object_id", ondelete="CASCADE"),
+                                                 nullable=False)
+    human_verdict: Mapped[str | None] = mapped_column(String(16))      # correct | incorrect
+    verdict_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_settlement_spot_lot", "lot_id", "human_verdict"),)
 
 
 class ObjectDynamics(Base):
@@ -1967,6 +2318,103 @@ class ObjectDynamics(Base):
 
 
 # ---- LiDAR module (3D) ----
+class EgoPose(Base):
+    """Where the vehicle was at one instant, and whether anything actually observed that (0112).
+
+    The pose is in a session-local ENU frame whose origin is the session's first fix, or its first frame
+    when there is none: an absolute frame would imply a georeferencing accuracy no monocular method here
+    can deliver.
+
+    `measured` separates an instrument reading from an inference and is not a grade. True means a device
+    observed position; false means it was recovered from the images, which is the only source available
+    for almost this whole corpus. `quality` grades within a source and never stands in for it, because a
+    confident visual estimate is still not a measurement.
+
+    The absence of a row means the pose is unknown at that timestamp, which is the honest state for a
+    corpus carrying GNSS on 3 frames of 41,752.
+    """
+
+    __tablename__ = "ego_pose"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"), primary_key=True)
+    ts_ns: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("frame.frame_id", ondelete="SET NULL"))
+    x: Mapped[float] = mapped_column(Float, nullable=False)
+    y: Mapped[float] = mapped_column(Float, nullable=False)
+    z: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    qw: Mapped[float] = mapped_column(Float, nullable=False, default=1.0, server_default="1")
+    qx: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    qy: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    qz: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    speed_mps: Mapped[float | None] = mapped_column(Float)
+    yaw_rate: Mapped[float | None] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    quality: Mapped[float | None] = mapped_column(Float)
+    measured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                            server_default=sql_text("false"))
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_run.run_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("source in ('gnss_imu','visual','fused')", name="ck_ego_pose_source"),
+        CheckConstraint("abs(qw*qw + qx*qx + qy*qy + qz*qz - 1.0) < 0.01",
+                        name="ck_ego_pose_unit_quaternion"),
+        CheckConstraint("quality is null or (quality >= 0 and quality <= 1)",
+                        name="ck_ego_pose_quality_range"),
+        Index("ix_ego_pose_frame", "frame_id"),
+        Index("ix_ego_pose_session_measured", "session_id", "measured"),
+    )
+
+
+class OccupancyGrid(Base):
+    """What space is occupied around the vehicle at one instant, and how that space is moving (0113).
+
+    A cuboid list says where the labelled objects are and nothing about the space between them. "Is there
+    anything in that lane" has no answer in a cuboid list when the thing in the lane is a pile of sand, an
+    unlabelled truck, or an object the detector missed. This answers it per cubic metre.
+
+    The fourth dimension is scene flow. A static grid cannot separate a parked car from one reversing
+    toward the ego, which is the distinction planning is made of. `flow_voxels` counts how much of the
+    occupied space carries a velocity from a real track rather than an assumed zero, so a grid that is
+    mostly assumption reads as one nobody should plan against.
+
+    The packed grid lives in the object store for the same reason clouds do; the row carries enough
+    geometry to place and interpret it without opening the blob.
+    """
+
+    __tablename__ = "occupancy_grid"
+
+    grid_id: Mapped[uuid.UUID] = _uuid_pk()
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("session.session_id", ondelete="CASCADE"), nullable=False)
+    ts_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    frame_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("frame.frame_id", ondelete="SET NULL"))
+    origin: Mapped[list[float]] = mapped_column(ARRAY(Float), nullable=False)
+    voxel_m: Mapped[float] = mapped_column(Float, nullable=False)
+    dims: Mapped[list[int]] = mapped_column(ARRAY(Integer), nullable=False)
+    grid_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Which pose placed this grid, or null when none did. A grid built without a pose sits in the ego
+    # frame of one instant and cannot be compared with the next; the null is what says so.
+    ego_pose_ts: Mapped[int | None] = mapped_column(BigInteger)
+    occupied: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    flow_voxels: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_run.run_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("source in ('pseudo','lidar','fused')", name="ck_occupancy_source"),
+        CheckConstraint("voxel_m > 0", name="ck_occupancy_voxel_positive"),
+        CheckConstraint("array_length(dims, 1) = 3", name="ck_occupancy_dims_3d"),
+        CheckConstraint("array_length(origin, 1) = 3", name="ck_occupancy_origin_3d"),
+        CheckConstraint("flow_voxels <= occupied", name="ck_occupancy_flow_within_occupied"),
+        UniqueConstraint("session_id", "ts_ns", "source", name="uq_occupancy_session_ts_source"),
+        Index("ix_occupancy_session_ts", "session_id", "ts_ns"),
+        Index("ix_occupancy_frame", "frame_id"),
+    )
+
+
 class PointCloud(Base):
     """One row per scan (real LiDAR) or per synthesized cloud (pseudo-LiDAR), from any source. ts_ns is on
     the PPS base, so a cloud and the camera frames captured at the same ts_ns in the session are one query."""

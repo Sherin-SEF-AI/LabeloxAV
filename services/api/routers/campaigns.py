@@ -227,6 +227,29 @@ async def suggest_keyframes(track_id: str, budget: int = Query(8, ge=1, le=50),
     return await _suggest(db, track_id, budget=budget)
 
 
+@router.get("/tracklets/{track_id}/drift")
+async def track_drift(track_id: str, limit: int = Query(120, ge=1, le=400),
+                      db: AsyncSession = Depends(db_session)):
+    """Which of this track's machine-filled boxes have slid off the object they were anchored to.
+
+    The check has existed inside `services/agent/propagate_agent.py` since propagation was written, and
+    only ever ran at creation time on boxes that agent itself made. Nothing could ask it about the boxes
+    already in the corpus, which is where it matters: interpolated and propagated objects are most of the
+    machine fill. `errordetect/embedding_outlier.py` compares an object to its class centroid, which is a
+    different question - a box that has slid off a scooter onto the road behind it still resembles the
+    scooter centroid, and resembles the crop it started from not at all.
+
+    Three verdicts, and `unknown` is a real one: it means the crop or the encoder was unavailable, and it
+    is never folded into `drifted`. Encoding takes the GPU lease in bounded batches, so this yields to a
+    training job rather than competing with it, and it is capped per request.
+    """
+    import uuid as _uuid
+
+    from services.temporal.drift import track_drift as _drift
+
+    return await _drift(db, _uuid.UUID(track_id), limit=limit)
+
+
 @router.get("/tracklets/stats/summary")
 async def tracklet_stats(session_id: str | None = None, db: AsyncSession = Depends(db_session)):
     from services.temporal.tracklet import tracklet_stats as _stats

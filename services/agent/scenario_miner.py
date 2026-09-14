@@ -14,6 +14,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
+from core.origin import REAL
 from db.models import Frame, Object, ObjectDynamics, ScenarioCandidate, TimelineEvent
 
 log = get_logger("agent.scenario_miner")
@@ -35,7 +36,7 @@ async def mine_scenarios(db: AsyncSession, session_id: str | None = None, *, ttc
     q = (select(Object.frame_id, Frame.session_id, ObjectDynamics.ttc_s)
          .join(Object, Object.object_id == ObjectDynamics.object_id)
          .join(Frame, Frame.frame_id == Object.frame_id)
-         .where(ObjectDynamics.ttc_s.isnot(None), ObjectDynamics.ttc_s < ttc_thresh))
+         .where(Frame.origin == REAL, ObjectDynamics.ttc_s.isnot(None), ObjectDynamics.ttc_s < ttc_thresh))
     if session_id:
         q = q.where(Frame.session_id == UUID(session_id))
     for fid, sid, ttc in (await db.execute(q)).all():
@@ -45,7 +46,7 @@ async def mine_scenarios(db: AsyncSession, session_id: str | None = None, *, ttc
     rq = (select(Object.frame_id, Frame.session_id).select_from(ObjectDynamics)
           .join(Object, Object.object_id == ObjectDynamics.object_id)
           .join(Frame, Frame.frame_id == Object.frame_id)
-          .where(ObjectDynamics.risk_level == "high"))
+          .where(Frame.origin == REAL, ObjectDynamics.risk_level == "high"))
     if session_id:
         rq = rq.where(Frame.session_id == UUID(session_id))
     for fid, sid in (await db.execute(rq)).all():

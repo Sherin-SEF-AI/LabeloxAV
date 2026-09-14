@@ -188,6 +188,22 @@ export function useAgentRuns(enabled = true) {
   return runs;
 }
 
+/** One entry of an agent run's `counts`, rendered so a value that is not a number still says something.
+ *
+ * `counts` is `Record<string, unknown>`: free-form JSON written by whichever agent produced the run, and
+ * several of them put a list there. `drift_investigator` writes `findings` as an array of objects and
+ * `pseudo_lift` writes `sessions` the same way. Interpolating one of those into a template string
+ * produced `[object Object]`, which is what the console actually showed for every drift and lift run.
+ *
+ * A list is reported by its length, which is the number a reader wants from a list anyway, and a nested
+ * object by how many keys it has. Neither is guessed at: both are facts about the value.
+ */
+export function countText(k: string, v: unknown): string {
+  if (Array.isArray(v)) return `${k} ${v.length}`;
+  if (v && typeof v === "object") return `${k} ${Object.keys(v).length}`;
+  return `${k} ${String(v)}`;
+}
+
 export function BackgroundPanel({ runs }: { runs: AgentRunRow[] }) {
   if (!runs.length) {
     return <div className="py-6 text-center font-mono text-[11px] text-ink-3">no agent runs recorded.</div>;
@@ -202,7 +218,7 @@ export function BackgroundPanel({ runs }: { runs: AgentRunRow[] }) {
             {r.status}
           </span>
           <span className="text-ink-3 flex-1 truncate">
-            {Object.entries(r.counts ?? {}).slice(0, 3).map(([k, v]) => `${k} ${v}`).join(" · ")}
+            {Object.entries(r.counts ?? {}).slice(0, 3).map(([k, v]) => countText(k, v)).join(" · ")}
           </span>
         </div>
       ))}

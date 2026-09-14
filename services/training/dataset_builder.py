@@ -21,6 +21,7 @@ import yaml
 
 from core.config import get_settings
 from core.logging import get_logger
+from core.origin import REAL, SYNTHETIC, SYNTHETIC_STATE
 from core.storage import get_object_store
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
@@ -64,6 +65,15 @@ class BuildSpec:
     # Refuse to build if the trainset would contain objects that are also in this sealed gold set. Training
     # on the yardstick makes every gold metric meaningless, and nothing previously prevented it.
     exclude_gold_id: str | None = None
+    # Composites from the copy-paste generator (core/origin.py). Off by default: a trainset that will be
+    # measured must be provably real unless the caller asks. When on, synthetic frames still never reach
+    # validation, and a composite whose source frame's session lands in val is dropped with it, so the
+    # val side never sees a background it also trained on.
+    include_synthetic: bool = False
+    # Order the epoch's images by how much the model still has to learn from them, rather than shuffling.
+    # Off by default: it changes what a run means, so a comparison between two runs where one had it on
+    # and the other did not is not a comparison, and the flag is recorded on the run so that is visible.
+    curriculum: bool = False
 
 
 async def _select(spec: BuildSpec):
@@ -81,13 +91,21 @@ async def _select(spec: BuildSpec):
     maker = get_sessionmaker()
     async with maker() as db:
         stmt = (
-            select(Object, Frame.frame_id, Frame.img_uri, Frame.width, Frame.height, Frame.session_id)
+            select(Object, Frame.frame_id, Frame.img_uri, Frame.width, Frame.height, Frame.session_id,
+                   Frame.origin, Frame.source_frame_id)
             .join(Frame, Object.frame_id == Frame.frame_id)
             .join(DbSession, Frame.session_id == DbSession.session_id)
             .where(Object.state != "rejected", Object.conf >= spec.conf_floor)
         )
-        if spec.states:
-            stmt = stmt.where(Object.state.in_(spec.states))
+        states = list(spec.states)
+        if spec.include_synthetic:
+            stmt = stmt.where(Frame.origin.in_((REAL, SYNTHETIC)))
+            if states:
+                states.append(SYNTHETIC_STATE)
+        else:
+            stmt = stmt.where(Frame.origin == REAL)
+        if states:
+            stmt = stmt.where(Object.state.in_(states))
         if spec.route_prefix:
             stmt = stmt.where(DbSession.route.like(f"{spec.route_prefix}%"))
         if spec.cities:
@@ -95,7 +113,7 @@ async def _select(spec: BuildSpec):
         rows = (await db.execute(stmt)).all()
 
     cand = []
-    for obj, frame_id, img_uri, w, h, session_id in rows:
+    for obj, frame_id, img_uri, w, h, session_id, origin, source_frame_id in rows:
         if obj.class_id in fallback_ids or obj.class_id in drop_ids:
             continue
         if include_ids and obj.class_id not in include_ids:
@@ -107,7 +125,8 @@ async def _select(spec: BuildSpec):
         cand.append({
             "frame_id": str(frame_id), "session_id": str(session_id), "img_uri": img_uri, "w": w, "h": h,
             "class_id": obj.class_id, "bbox": list(obj.bbox), "agree": agree, "gold": is_gold,
-            "object_id": str(obj.object_id),
+            "object_id": str(obj.object_id), "origin": origin,
+            "source_frame_id": str(source_frame_id) if source_frame_id else None,
         })
     return cand
 
@@ -158,6 +177,31 @@ def _split_val_frames(by_frame: dict[str, list[dict]], gold_frames: set[str], n_
     return val_set
 
 
+def _partition(by_frame: dict[str, list[dict]], gold_frames: set[str], spec: BuildSpec) -> tuple[set[str], int, int]:
+    """Choose val over the real frames and prune the composites val would leak into. Mutates `by_frame`.
+
+    A composite is never validation, and one built on a background that sits in val (or whose background's
+    session does) is dropped: the model would otherwise train on the val frame's pixels under another id.
+    Returns (val frame ids, synthetic frames kept, synthetic frames dropped).
+    """
+    real_frames = {f: o for f, o in by_frame.items() if o[0].get("origin", REAL) == REAL}
+    frames = list(real_frames)
+    rng = random.Random(spec.seed)
+    n_val = max(1, int(len(frames) * spec.val_frac)) if len(frames) > 4 else 0
+    val_set = _split_val_frames(real_frames, gold_frames, n_val, rng, group_by_session=spec.group_split_by_session)
+    val_sessions = {real_frames[f][0].get("session_id") for f in val_set}
+    n_synth_frames = n_synth_dropped = 0
+    for fid in [f for f in by_frame if f not in real_frames]:
+        src = by_frame[fid][0].get("source_frame_id")
+        src_session = by_frame[src][0].get("session_id") if src in by_frame else None
+        if src in val_set or (src_session is not None and src_session in val_sessions):
+            del by_frame[fid]
+            n_synth_dropped += 1
+            continue
+        n_synth_frames += 1
+    return val_set, n_synth_frames, n_synth_dropped
+
+
 async def _exclude_gold_objects(cand: list[dict], gold_id: str | None) -> tuple[list[dict], int]:
     """Drop any candidate that is a member of the named sealed gold set.
 
@@ -192,7 +236,7 @@ def _cap_per_class(cand: list[dict], max_per_class: int, seed: int) -> list[dict
     for c in cand:
         by_class.setdefault(c["class_id"], []).append(c)
     kept = []
-    for cid, items in by_class.items():
+    for _cid, items in by_class.items():
         # always keep gold; cap the rest
         gold = [i for i in items if i["gold"]]
         rest = [i for i in items if not i["gold"]]
@@ -236,10 +280,7 @@ async def build_training_dataset(spec: BuildSpec) -> dict:
         if c["gold"]:
             gold_frames.add(c["frame_id"])
 
-    frames = list(by_frame)
-    rng = random.Random(spec.seed)
-    n_val = max(1, int(len(frames) * spec.val_frac)) if len(frames) > 4 else 0
-    val_set = _split_val_frames(by_frame, gold_frames, n_val, rng, group_by_session=spec.group_split_by_session)
+    val_set, n_synth_frames, n_synth_dropped = _partition(by_frame, gold_frames, spec)
 
     n_train_obj = n_val_obj = 0
     for fid, objs in by_frame.items():
@@ -286,6 +327,11 @@ async def build_training_dataset(spec: BuildSpec) -> dict:
         "val_sessions": len({by_frame[f][0].get("session_id") for f in val_set}) if val_set else 0,
         "excluded_gold_id": spec.exclude_gold_id,
         "excluded_gold_objects": excluded_gold,
+        # The synthetic share, stated on the sheet: composites in train, and composites dropped because
+        # their background sat on the val side.
+        "synthetic_frames": n_synth_frames, "synthetic_dropped_for_val": n_synth_dropped,
+        "include_synthetic": spec.include_synthetic,
+        "curriculum": spec.curriculum,
     }
     log.info("trainset.built", **{k: result[k] for k in ("classes", "n_train_images", "n_val_images")})
     return result

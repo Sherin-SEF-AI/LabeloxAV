@@ -33,6 +33,13 @@ class ExportRecord:
     provenance: dict = field(default_factory=dict)
     cuboid_3d: dict | None = None  # ego-frame {center,size,yaw} when a 3D label exists
     rot_deg: float = 0.0           # oriented-box rotation about the box centre (0 = axis-aligned)
+    # The whole extent of a partly hidden object, where somebody has said. `bbox` above stays the VISIBLE
+    # extent, which is what every existing consumer means by it and what every existing adapter writes.
+    #
+    # None means nobody has said, and an adapter must write nothing rather than fall back to `bbox`: a
+    # consumer reading an amodal field cannot tell a real judgement from a copy of the visible box, and
+    # would train on the second as though it were the first.
+    bbox_amodal: list[float] | None = None
     keypoints: dict | None = None  # COCO-style {"skeleton","points":[[x,y,v],...]} pose, when present
     polyline: list | None = None   # open linear feature [[x,y],...] (curb/road_edge/barrier), when present
     relationships: list = field(default_factory=list)  # outgoing [{"to_object_id","kind"},...] groupings

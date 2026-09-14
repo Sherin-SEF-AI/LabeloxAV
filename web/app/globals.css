@@ -246,6 +246,45 @@ button:not(:disabled) {
   animation: lbx-pulse 0.9s ease-in-out infinite;
 }
 
+/* Pulsing dots that mean more than one thing.
+   `.running-dot` above says "work is happening" in one colour, which is right for a job that is running
+   and cannot express the two states that are worth telling apart from it: something needing attention,
+   and something that has gone quiet when it should not have. A dropped event stream renders exactly like
+   an idle system today, which is the specific failure lib/jobStream.ts warns about in its own comment.
+
+   Three deliberate speeds. Work pulses briskly because it is moving. A warning pulses slowly, closer to
+   breathing, because it wants to be noticed without becoming a strobe next to the text it sits beside.
+   An idle dot does not pulse at all: a dot that always moves says nothing by moving. */
+.pulse-dot {
+  display: inline-block;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.pulse-dot--live { background: #5b87c9; animation: lbx-pulse 0.9s ease-in-out infinite; }
+.pulse-dot--good { background: #56D364; animation: lbx-pulse 1.6s ease-in-out infinite; }
+.pulse-dot--warn { background: #E3B341; animation: lbx-pulse 1.6s ease-in-out infinite; }
+.pulse-dot--bad  { background: #F85149; animation: lbx-pulse 1.2s ease-in-out infinite; }
+/* Present, measured, and not moving. The absence of motion is the message. */
+.pulse-dot--idle { background: #6C727A; }
+
+/* A halo for a dot that has to be found rather than read, on a page the eye is not already on. Kept off
+   the ordinary dots: a ring around every indicator is noise, and noise is what makes a real one invisible. */
+.pulse-dot--halo { position: relative; }
+.pulse-dot--halo::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  border: 1px solid currentColor;
+  opacity: 0.5;
+  animation: lbx-halo 1.6s ease-out infinite;
+}
+@keyframes lbx-halo {
+  0%   { transform: scale(0.7); opacity: 0.55; }
+  70%  { transform: scale(1.5); opacity: 0; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+
 .running {
   animation: lbx-running 1.1s ease-in-out infinite;
 }
@@ -321,6 +360,9 @@ button:not(:disabled) {
 
 @media (prefers-reduced-motion: reduce) {
   .reveal, .reveal-pop, .skeleton, .running-dot, .running, .lbx-progress-bar, .fade-up { animation: none; }
+  /* The dot stays, its motion goes. Colour still carries the state, which is the part that matters. */
+  .pulse-dot, .pulse-dot--halo::after { animation: none; }
+  .pulse-dot--halo::after { display: none; }
   .progress-live::after { animation: none; display: none; }
   .reveal, .reveal-pop, .fade-up { opacity: 1; transform: none; }
   .lift, .sheen::after, .rail::before { transition: none; }

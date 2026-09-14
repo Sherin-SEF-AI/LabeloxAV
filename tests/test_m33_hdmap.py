@@ -109,3 +109,57 @@ def test_georef_and_fuse_seal_a_commit():
             await db.commit()
 
     asyncio.run(run())
+
+
+def test_ipm_args_uses_the_real_principal_point_and_mount_height():
+    """`georef_session` read the rig defaults while the calibration resolver existed to prevent exactly that.
+
+    Its old arithmetic was: scale a nominal lens by image width, force the principal point to the image
+    centre, take one global mount height and a pitch of zero. `services/calibration/resolve.py` says in its
+    own docstring that every 3D consumer should read a resolved calibration "instead of reaching into the
+    config rig defaults", and this was the consumer that did not.
+
+    The error is worst where the data is best. The one session here with dataset calibration has cy at 46%
+    of image height rather than 50%, and cy is what fixes the horizon line, so an inverse perspective
+    projection diverges towards the far field precisely there. Its mount is 1.65 m against a configured
+    1.5 m, which scales every recovered distance by ten percent.
+
+    Pure arithmetic, no database: the point is that the bundle carries the stored values through.
+    """
+    from services.calibration.resolve import Calibration, ipm_args, nominal_calibration
+
+    kitti = Calibration(cam_id="cam_front", model="pinhole", fx=721.5, fy=721.5, cx=609.6, cy=172.9,
+                        rpy_deg=(0.0, 0.0, 0.0), xyz_m=(1.03, 0.0, 1.65), source="dataset", quality=0.9)
+    a = ipm_args(kitti)
+    assert (a["fx"], a["cx"], a["cy"]) == (721.5, 609.6, 172.9)
+    assert a["height_m"] == 1.65
+
+    # The same pixel lands at a different distance under the two calibrations, which is the whole point.
+    nom = ipm_args(nominal_calibration("cam_front", 1242, 375))
+    assert nom["cy"] == 375 / 2.0 and nom["cy"] != a["cy"]
+    px = (620.0, 300.0)
+    real = ipm_pixel_to_vehicle(*px, **a)
+    guess = ipm_pixel_to_vehicle(*px, **nom)
+    assert real is not None and guess is not None
+    assert abs(real[0] - guess[0]) > 1.0, "a wrong principal point and height must move the lane"
+
+    # A stored extrinsic that was never filled in must not put the camera on the road surface, where the
+    # projection has no solution at all.
+    flat = Calibration(cam_id="c", model="pinhole", fx=700, fy=700, cx=600, cy=180, xyz_m=(0.0, 0.0, 0.0))
+    assert ipm_args(flat)["height_m"] == 1.5
+
+
+def test_ipm_args_is_the_one_definition_the_bev_warp_also_uses():
+    """The BEV warp and the georeferencer must place a lane in the same spot.
+
+    They used to hold separate copies of this bundle, free to drift apart, and a lane drawn in the
+    bird's-eye editor would then be exported somewhere other than where it was drawn.
+    """
+    from services.calibration.resolve import Calibration, ipm_args
+    from services.hdmap.bev_view import _cal_args
+
+    cal = Calibration(cam_id="c", model="fisheye", fx=500, fy=505, cx=640, cy=350,
+                      dist=[0.1, -0.02], rpy_deg=(0.0, 4.0, -7.0), xyz_m=(1.0, 0.0, 1.4))
+    assert _cal_args(cal) == ipm_args(cal)
+    assert ipm_args(cal)["fisheye"] is True
+    assert abs(ipm_args(cal)["pitch_rad"] - math.radians(4.0)) < 1e-12

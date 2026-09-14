@@ -29,11 +29,18 @@ class EgoMask:
     grid: tuple[tuple[int, ...], ...]   # GRID_H x GRID_W of 0/1, 1 = ego hood
     area_frac: float
 
-    def contains_bbox(self, bbox: tuple[float, float, float, float], frame_w: float, frame_h: float,
-                      frac: float = 0.5) -> bool:
-        """True if at least `frac` of the box's area lies in the ego region (the box IS the hood)."""
+    def ego_fraction(self, bbox: tuple[float, float, float, float], frame_w: float,
+                     frame_h: float) -> float:
+        """How much of the box lies in the ego region, 0.0 to 1.0.
+
+        The fraction rather than the verdict, because the two callers want different things from it.
+        Deleting a box wants "is this the hood", which is the threshold below. Ranking a box for review
+        wants the middle of the range: a box half on the bonnet is usually a reflection or a piece of the
+        car read as an object, and it is exactly the one worth looking at, while a box fully on the hood
+        has already been removed by the cleanup sweep and one fully off it is unremarkable.
+        """
         if self.area_frac <= 0:
-            return False
+            return 0.0
         gh, gw = len(self.grid), len(self.grid[0])
         x1, y1, x2, y2 = bbox
         gx1 = max(0, min(gw - 1, int(x1 / frame_w * gw)))
@@ -41,13 +48,18 @@ class EgoMask:
         gy1 = max(0, min(gh - 1, int(y1 / frame_h * gh)))
         gy2 = max(0, min(gh, int(np.ceil(y2 / frame_h * gh))))
         if gx2 <= gx1 or gy2 <= gy1:
-            return False
+            return 0.0
         cells = ego = 0
         for gy in range(gy1, gy2):
             for gx in range(gx1, gx2):
                 cells += 1
                 ego += self.grid[gy][gx]
-        return cells > 0 and (ego / cells) >= frac
+        return (ego / cells) if cells else 0.0
+
+    def contains_bbox(self, bbox: tuple[float, float, float, float], frame_w: float, frame_h: float,
+                      frac: float = 0.5) -> bool:
+        """True if at least `frac` of the box's area lies in the ego region (the box IS the hood)."""
+        return self.ego_fraction(bbox, frame_w, frame_h) >= frac if self.area_frac > 0 else False
 
 
 class WelfordStd:

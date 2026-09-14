@@ -113,9 +113,13 @@ async def class_frame_counts(db) -> tuple[dict[int, float], int]:
 
     from sqlalchemy import text
 
-    total = int((await db.execute(text("select count(distinct frame_id) from object"))).scalar() or 0)
-    rows = (await db.execute(
-        text("select class_id, count(distinct frame_id) from object group by 1"))).all()
+    # Real frames only: a pasted instance is not evidence that its class is common.
+    total = int((await db.execute(text(
+        "select count(distinct o.frame_id) from object o join frame f on f.frame_id = o.frame_id "
+        "where f.origin = 'real'"))).scalar() or 0)
+    rows = (await db.execute(text(
+        "select o.class_id, count(distinct o.frame_id) from object o join frame f on f.frame_id = o.frame_id "
+        "where f.origin = 'real' group by 1"))).all()
     idf_map = build_idf({int(c): int(n) for c, n in rows if c is not None}, total)
     _cache.update({"at": now, "idf": idf_map, "total": total})
     return idf_map, total

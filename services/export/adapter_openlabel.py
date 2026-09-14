@@ -83,6 +83,13 @@ def write_openlabel(
         x1, y1, x2, y2 = rec.bbox
         cx, cy, w, h = (x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1
         object_data: dict = {"bbox": [{"name": "shape", "val": [cx, cy, w, h]}]}
+        # OpenLABEL allows several named bboxes per object, which is exactly the shape this needs: the
+        # visible extent stays "shape" and the whole extent is a sibling. Emitted only where somebody has
+        # judged it, so absence means "not stated" rather than "the same as the visible box".
+        if rec.bbox_amodal and len(rec.bbox_amodal) == 4:
+            ax1, ay1, ax2, ay2 = rec.bbox_amodal
+            object_data["bbox"].append({"name": "amodal",
+                                        "val": [(ax1 + ax2) / 2, (ay1 + ay2) / 2, ax2 - ax1, ay2 - ay1]})
         polys = _load_polygons(store, rec.mask_uri)
         if polys:
             object_data["poly2d"] = [

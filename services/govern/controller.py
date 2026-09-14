@@ -54,6 +54,12 @@ async def _queue_depth(db: AsyncSession) -> dict:
 async def tick(db: AsyncSession, now_hour_utc: int | None = None, schedule_bursts: bool = True) -> dict:
     """One deterministic control step. Returns the actions taken and the state observed."""
     cfg = get_settings().phase4
+    # The heartbeat beats at the START of the tick, not only at the end. A tick that evaluates a full
+    # challenger registry on the GPU can run for tens of minutes, and a heartbeat written only on
+    # completion makes that exact busiest moment indistinguishable from a dead daemon - the autonomy
+    # page showed "stale (22m ago)" while the loop was mid-evaluation. The completion row still lands
+    # ("tick" / "tick_paused"), so the pair also records how long the tick took.
+    await record(db, "controller", "tick_started", None, {})
     state = await get_state(db)
     actions: list[dict] = []
 

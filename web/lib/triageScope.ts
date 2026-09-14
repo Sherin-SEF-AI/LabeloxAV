@@ -17,6 +17,8 @@ const SCOPES: Record<string, string> = {
   city: "city",
   flywheel: "flywheel",
   states: "states",
+  // The control queue: gate-audited samples whose verdicts move the measured auto-accept precision.
+  control: "control",
 };
 
 // An unscoped queue is effectively endless, so a page of 200 is a page. A scoped one is a finite piece of
@@ -53,6 +55,8 @@ export function describeScope(params: { get(key: string): string | null }): stri
   const session = params.get("session")?.trim();
   const city = params.get("city")?.trim();
   const batch = params.get("flywheel")?.trim();
+  const control = params.get("control")?.trim();
+  if (control) parts.push("control samples (each verdict scores the auto-accept gate)");
   if (cls) parts.push(cls);
   if (city) parts.push(`in ${city}`);
   if (session) parts.push(`session ${session.slice(0, 8)}`);

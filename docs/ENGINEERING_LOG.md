@@ -444,6 +444,42 @@ A session that fails camera calibration is flagged and excluded from metric 3D w
 
 ![Calibration report](screenshots/05-calibration.png)
 
+The resolver exists so that no consumer reads the rig defaults directly, and for a long time one did.
+The HD map georeferencer scaled a nominal lens by image width, forced the principal point to the image
+centre, and used one global mount height with a pitch of zero. Measured against the one session here
+with dataset calibration, a KITTI drive at fx 721.5, cy 172.9 on 1242 by 375 with a 1.65 m mount, the
+old path resolved that camera to fx 1856.5, cy 187.5, height 1.50. Forward distance recovered for a
+pixel on the centre column came out 153% too far at 6 m and 1504% too far at 69 m, because cy is what
+fixes the horizon line and an inverse perspective projection diverges without bound there. It now reads
+the resolved calibration, and an element's confidence is its annotation confidence times its calibration
+quality, so a lane placed by a guessed lens is not returned at the same confidence as one placed by a
+measured rig.
+
+---
+
+## HD map topology
+
+A Lanelet2 file is defined by `relation type=lanelet` naming a left and a right boundary, and an
+OpenDRIVE road is drivable only if it has driving lanes. The exports had neither: boundaries went out as
+loose ways with no relations, and every road carried one centre lane of `type="none"`. Both files parsed
+as XML, which was all the test checked.
+
+Boundaries are now paired into lanelets and the lanelets chained. The pairing is conservative on
+purpose, because a lane invented to fill out the output cannot be told apart downstream from a real one.
+Four conditions, each rejecting a case the naive version gets wrong: headings within 20 degrees rejects a
+cross street; overlap of at least half rejects consecutive stretches of one boundary; separation between
+2.0 and 5.5 m rejects both a boundary 40 m away and a coincident duplicate; and requiring the offset to
+keep its sign along 90% of the length rejects two boundaries that cross, which have a perfectly
+plausible mean offset. Successors need proximity and heading together, since distance alone joins a lane
+to the oncoming lane beside it, which at a junction is exactly where both ends are.
+
+Anything unpaired is still exported, tagged with the reason. On this corpus the builder pairs nothing
+from the 14 lane elements present: 13 fail on overlap and one is a coincident duplicate at 0.0 m, and
+those 14 are 7 fixture boundaries plus their committed copies. The reason is upstream. No session here
+has both lane annotations and a position fix, 157 frames of 42,766 carry a fix and none of them has a
+lane, so the georeferencer cannot run end to end and there is no real lane map to build topology over.
+The layer is tested on constructed geometry; the data to exercise it does not exist yet.
+
 ---
 
 ## Author

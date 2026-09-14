@@ -3,23 +3,41 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { MODES } from "@/lib/editor/registry";
+
 import { GLOBAL, TOOLS } from "./ShortcutOverlay";
 
 // The coupling test this reference never had.
 //
-// The overlay is a hand-written list and the bindings live in a 2,000-line keyboard handler in the frame
-// editor. Nothing connected them, so the two could drift in either direction and neither would fail: a key
-// removed from the handler still appears here, and an annotator learns a shortcut that does nothing.
+// The overlay is a hand-written list and the bindings used to live in a 2,000-line keyboard handler in the
+// frame editor. Nothing connected them, so the two could drift in either direction and neither would fail:
+// a key removed from the handler still appeared here, and an annotator learned a shortcut that did nothing.
 //
-// This reads the handler's source rather than simulating keystrokes. Simulating would need the whole editor
-// page mounted with an ontology, a frame and a canvas, which is a different and much heavier test; what is
-// actually in question is whether the two lists agree about which letters exist.
+// Tool bindings now come from lib/editor/registry.ts, so this reads them from there rather than scraping a
+// regex over the page, which is both stronger and no longer dependent on how the handler happens to be
+// written. What remains in the handler is the handful of non-tool letters, and those are still scraped,
+// because they genuinely are written there.
 
 const PAGE = readFileSync(join(__dirname, "../../app/frame/[id]/page.tsx"), "utf8");
 
-/** Single letters the handler binds, from its `k === "x"` chain. */
-function boundLetters(src: string): Set<string> {
+/** Single letters the handler binds directly, from its `k === "x"` chain. */
+function handlerLetters(src: string): Set<string> {
   return new Set([...src.matchAll(/k === "([a-z])"/g)].map((m) => m[1]));
+}
+
+/** Single letters any mode's tools bind, from the registry. */
+function registryLetters(): Set<string> {
+  const out = new Set<string>();
+  for (const m of MODES) {
+    for (const g of m.groups) {
+      for (const t of g.tools) out.add(t.hotkey.toLowerCase());
+    }
+  }
+  return out;
+}
+
+function boundLetters(src: string): Set<string> {
+  return new Set([...handlerLetters(src), ...registryLetters()]);
 }
 
 /** Single letters the overlay claims, ignoring the chorded and named rows. */
@@ -40,8 +58,10 @@ describe("the shortcut overlay matches the editor keymap", () => {
     expect(undocumented).toEqual([]);
   });
 
-  it("reads the handler at all", () => {
-    // If the path ever moves, both assertions above pass vacuously on an empty set.
+  it("reads both sources at all", () => {
+    // If either source moves or empties, both assertions above pass vacuously.
+    expect(registryLetters().size).toBeGreaterThan(5);
+    expect(handlerLetters(PAGE).size).toBeGreaterThan(0);
     expect(boundLetters(PAGE).size).toBeGreaterThan(10);
   });
 

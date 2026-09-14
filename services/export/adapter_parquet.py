@@ -20,6 +20,9 @@ def write_parquet(records: list[ExportRecord], out_dir: Path, filename: str = "o
         "ts_ns": [], "cam_id": [], "img_uri": [], "width": [], "height": [],
         "vehicle_id": [], "city": [], "class_id": [], "class_name": [],
         "bbox_x1": [], "bbox_y1": [], "bbox_x2": [], "bbox_y2": [],
+        # Nullable on purpose: none means nobody judged what the hidden part looks like, and a column
+        # filled from the visible box would read as a judgement to anything that queried it.
+        "amodal_x1": [], "amodal_y1": [], "amodal_x2": [], "amodal_y2": [],
         "conf": [], "quality_score": [], "state": [], "source": [], "mask_uri": [], "mask_encoding": [],
         "rot_deg": [], "keypoints_json": [], "polyline_json": [], "relationships_json": [],
         "attrs_json": [], "provenance_json": [], "split": [],
@@ -43,6 +46,11 @@ def write_parquet(records: list[ExportRecord], out_dir: Path, filename: str = "o
         cols["bbox_y1"].append(r.bbox[1])
         cols["bbox_x2"].append(r.bbox[2])
         cols["bbox_y2"].append(r.bbox[3])
+        am = r.bbox_amodal if (r.bbox_amodal and len(r.bbox_amodal) == 4) else [None] * 4
+        cols["amodal_x1"].append(am[0])
+        cols["amodal_y1"].append(am[1])
+        cols["amodal_x2"].append(am[2])
+        cols["amodal_y2"].append(am[3])
         cols["conf"].append(r.conf)
         cols["quality_score"].append(r.quality_score)
         cols["state"].append(r.state)

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import PulseDot from "@/components/PulseDot";
 import { openConsole } from "@/components/console/ConsoleModal";
 import { indicatorView } from "@/lib/indicatorState";
 import { type JobsSummary, subscribeJobSummary } from "@/lib/jobStream";
@@ -27,7 +28,7 @@ import { summarize } from "@/lib/uploadQueue";
 // where the rules are tested; this file is the rendering of that answer and nothing else.
 
 export default function UploadIndicator() {
-  const [jobs, setJobs] = useState<JobsSummary>({ running: [], waiting: 0 });
+  const [jobs, setJobs] = useState<JobsSummary>({ running: [], waiting: 0, connected: false });
   const [local, setLocal] = useState<UploadState | null>(null);
 
   useEffect(() => subscribeJobSummary(setJobs), []);
@@ -58,15 +59,23 @@ export default function UploadIndicator() {
       // clicked from the frame editor, which is the one page where being taken somewhere else costs the
       // reader the thing they were looking at.
       onClick={() => openConsole()}
-      title={view.tip}
-      aria-label={view.tip}
+      // The dot carries the connection state and so must the text: a tooltip that says "idle" beside an
+      // amber dot leaves the reader to guess which one is right.
+      title={jobs.connected ? view.tip : `${view.tip} (not receiving updates: the live connection dropped)`}
+      aria-label={jobs.connected ? view.tip : `${view.tip}. Not receiving updates: the live connection dropped.`}
       data-state={view.kind}
       className={`btn text-[11px] gap-1.5 h-7 items-center ${working ? "" : "opacity-60 hover:opacity-100"}`}>
-      {/* Only running work gets the live dot. A pulsing dot over parked jobs is the lie the tooltip exists
-          to correct, and putting it on the chip itself would make the correction unreadable. */}
-      {working
-        ? <span className="running-dot" />
-        : <span className="w-1.5 h-1.5 rounded-full bg-ink-3 inline-block" />}
+      {/* Three states, not two.
+          Only running work gets the live dot: a pulsing dot over parked jobs is the lie the tooltip exists
+          to correct. But an idle chip and a chip whose stream has dropped used to render identically, and
+          they mean opposite things - one says the system has nothing to do, the other says this chip has
+          stopped being told. lib/jobStream.ts has always known the difference and nothing asked. */}
+      {!jobs.connected
+        ? <PulseDot tone="warn" halo
+            label="not receiving updates: the live connection dropped, so this may be out of date" />
+        : working
+          ? <PulseDot tone="live" label="work in progress" />
+          : <PulseDot tone="idle" label="connected, nothing running" />}
       <span className="hidden sm:inline text-ink-2">{view.verb}</span>
       {view.count !== null && <span className="text-ink-3">{view.count}</span>}
       {view.pct !== null && (

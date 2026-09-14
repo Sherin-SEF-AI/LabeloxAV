@@ -15,11 +15,11 @@ from geoalchemy2 import Geometry
 from geoalchemy2.elements import WKTElement
 from sqlalchemy import cast, delete, func, select
 
-from core.config import get_settings
 from core.logging import get_logger
 from db.models import Frame, Lane, MapElement, Object
 from db.session import get_sessionmaker
 from services.calibration.report import session_calibrated
+from services.calibration.resolve import ipm_args, resolve_calibration
 
 log = get_logger("hdmap_georef")
 
@@ -58,6 +58,43 @@ def ipm_pixel_to_vehicle(u: float, v: float, fx: float, fy: float, cx: float, cy
     return forward, lateral
 
 
+def vehicle_to_ipm_pixel(forward: float, lateral: float, fx: float, fy: float, cx: float, cy: float,
+                         height_m: float, pitch_rad: float = 0.0,
+                         dist: list[float] | None = None, fisheye: bool = False) -> tuple[float, float] | None:
+    """The inverse of `ipm_pixel_to_vehicle`: a ground point back to the pixel that sees it.
+
+    This direction did not exist anywhere in the repo, and without it a bird's-eye view can be looked at
+    and not drawn on. Every lane tool here works in image space for that reason: warping the road flat is
+    one call, and turning a line drawn on the warp back into control points a frame can store is this
+    function.
+
+    None when the point is behind the camera, which has no image. The same flat-road assumption as the
+    forward direction applies, so a point far from the camera projects near the horizon where a pixel is
+    worth many metres; a caller drawing at that range is drawing on sand and `ipm_max_range_m` in
+    `services/dynamics/compute.py` is the bound that says how far is too far.
+    """
+    if forward <= 1e-6:
+        return None
+    # Camera frame: x right, y down, z forward, with the road plane height_m below the camera.
+    x, y, z = float(lateral), float(height_m), float(forward)
+    if pitch_rad:
+        # The forward direction rotates the ray by +pitch, so coming back rotates by -pitch.
+        c, sn = math.cos(-pitch_rad), math.sin(-pitch_rad)
+        y, z = y * c - z * sn, y * sn + z * c
+    if z <= 1e-6:
+        return None
+    if fisheye and dist:
+        import cv2
+        import numpy as np
+
+        km = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float64)
+        d = np.array((list(dist) + [0.0, 0.0, 0.0, 0.0])[:4], dtype=np.float64).reshape(4, 1)
+        pts = np.array([[[x, y, z]]], dtype=np.float64)
+        uv, _ = cv2.fisheye.projectPoints(pts, np.zeros(3), np.zeros(3), km, d)
+        return float(uv[0, 0, 0]), float(uv[0, 0, 1])
+    return fx * x / z + cx, fy * y / z + cy
+
+
 def vehicle_to_world(forward: float, lateral: float, lat: float, lon: float,
                      heading_rad: float, cam_yaw_rad: float = 0.0) -> tuple[float, float]:
     """Vehicle-frame (forward, lateral) to world (lat, lon) given the GNSS pos + heading (rad from north,
@@ -78,12 +115,18 @@ def bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 async def georef_session(session_id: UUID, height_m: float | None = None) -> dict:
-    cfg = get_settings()
+    """Lift this session's lanes and signs into world space, one element per source frame.
+
+    `height_m` overrides the mount height from calibration, for the case where the operator knows the
+    stored extrinsic is wrong. Left as None, every camera uses its own resolved height, which is the
+    right default now that the height is per camera rather than one global constant.
+    """
     if not await session_calibrated(session_id):
         return {"elements": 0, "reason": "session not calibrated (run /api/calibration/validate first)"}
-    height_m = height_m if height_m is not None else cfg.spatial.camera_height_m
-    pitch = math.radians(cfg.spatial.camera_pitch_deg)
 
+    # Resolved once per (camera, image size) rather than per frame: a session is thousands of frames off a
+    # handful of cameras, and the resolver reads the database.
+    cam_cal: dict[tuple, object] = {}
     maker = get_sessionmaker()
     async with maker() as db:
         geom = cast(Frame.gnss, Geometry)
@@ -105,20 +148,34 @@ async def georef_session(session_id: UUID, height_m: float | None = None) -> dic
                 hd = bearing(pts[i - 1][2], pts[i - 1][3], lat, lon)
             else:
                 hd = 0.0
-            lens = cfg.rig.camera_lens.get(cam, "narrow")
-            K = cfg.rig.lenses[lens]
-            # scale nominal intrinsics (defined at ref_width) to this frame's resolution; principal point
-            # at the image centre (real per-camera intrinsics, when ingested, override this).
-            scale = w / cfg.rig.ref_width
-            fx, fy, cx, cy = K.fx * scale, K.fy * scale, w / 2.0, h / 2.0
-            is_fisheye = K.model == "fisheye"
-            cam_yaw = math.radians(cfg.rig.camera_yaw_deg.get(cam, 0.0))
+            # The resolved calibration, not the rig defaults. This module used to scale a nominal lens by
+            # image width and force the principal point to the image centre, with a single global mount
+            # height and zero pitch, while `services/calibration/resolve.py` existed precisely so that
+            # "every 3D consumer reads a single resolved Calibration instead of reaching into the config
+            # rig defaults". This was the consumer that did not.
+            #
+            # It mattered most where the data was best. The one session in this corpus with dataset
+            # calibration has cy at 46% of image height, not 50%, and cy is the parameter that sets the
+            # horizon line: an inverse perspective projection is least forgiving exactly there, so the
+            # error grows without bound towards the far field. It also has a 1.65 m mount against the
+            # configured 1.5 m, which scales every recovered distance by 10%. A further 101 stored
+            # calibrations carry a non-zero mount pitch that was being read as zero.
+            #
+            # Where nothing is stored, `nominal_calibration` reproduces the previous arithmetic exactly,
+            # so an uncalibrated session georeferences as it did before.
+            cal = cam_cal.get((cam, w, h))
+            if cal is None:
+                cal = await resolve_calibration(session_id, cam, w, h)
+                cam_cal[(cam, w, h)] = cal
+            args = ipm_args(cal)
+            if height_m is not None:
+                args["height_m"] = height_m
+            cam_yaw = math.radians(float(cal.rpy_deg[2]))
 
             for lane in (await db.execute(select(Lane).where(Lane.frame_id == fid))).scalars().all():
                 world = []
                 for pt in lane.control_points:
-                    fl = ipm_pixel_to_vehicle(pt[0], pt[1], fx, fy, cx, cy, height_m, pitch,
-                                              dist=K.dist, fisheye=is_fisheye)
+                    fl = ipm_pixel_to_vehicle(pt[0], pt[1], **args)
                     if fl is None:
                         continue
                     wlat, wlon = vehicle_to_world(fl[0], fl[1], lat, lon, hd, cam_yaw_rad=cam_yaw)
@@ -126,28 +183,45 @@ async def georef_session(session_id: UUID, height_m: float | None = None) -> dic
                 if len(world) < 2:
                     continue
                 wkt = "LINESTRING(" + ", ".join(f"{x} {y}" for x, y in world) + ")"
+                # Confidence is the annotation's own times the calibration's. A lane drawn by a human is
+                # still only as well placed as the projection that put it on the earth, and the gap
+                # between a dataset calibration and a rig default is a factor of three in this scale.
                 db.add(MapElement(kind="lane", geometry=WKTElement(wkt, srid=4326),
-                                  attrs={"lane_type": lane.lane_type, "is_ego": lane.is_ego, "source": lane.source},
+                                  attrs={"lane_type": lane.lane_type, "is_ego": lane.is_ego,
+                                         "source": lane.source, "calibration_source": cal.source,
+                                         "calibration_quality": round(float(cal.quality), 3),
+                                         "camera_height_m": round(args["height_m"], 3)},
                                   source_frames=[str(fid)], source_sessions=[str(session_id)],
-                                  calibration_version=CALIB_VERSION, confidence=_LANE_CONF.get(lane.source, 0.6)))
+                                  calibration_version=CALIB_VERSION,
+                                  confidence=_LANE_CONF.get(lane.source, 0.6) * float(cal.quality)))
                 n_lane += 1
 
             for s in (await db.execute(
                     select(Object).where(Object.frame_id == fid, Object.sign_type.isnot(None)))).scalars().all():
                 bb = s.bbox
-                fl = ipm_pixel_to_vehicle((bb[0] + bb[2]) / 2.0, bb[3], fx, fy, cx, cy, height_m, pitch,
-                                          dist=K.dist, fisheye=is_fisheye)
+                fl = ipm_pixel_to_vehicle((bb[0] + bb[2]) / 2.0, bb[3], **args)
                 if fl is None:
                     continue
                 wlat, wlon = vehicle_to_world(fl[0], fl[1], lat, lon, hd, cam_yaw_rad=cam_yaw)
                 db.add(MapElement(kind="sign", geometry=WKTElement(f"POINT({wlon} {wlat})", srid=4326),
-                                  attrs={"sign_type": s.sign_type, "sign_category": s.sign_category, "approx": True},
+                                  attrs={"sign_type": s.sign_type, "sign_category": s.sign_category,
+                                       "approx": True, "calibration_source": cal.source,
+                                       "calibration_quality": round(float(cal.quality), 3)},
                                   source_frames=[str(fid)], source_sessions=[str(session_id)],
-                                  calibration_version=CALIB_VERSION, confidence=float(s.conf or 0.5)))
+                                  calibration_version=CALIB_VERSION,
+                                confidence=float(s.conf or 0.5) * float(cal.quality)))
                 n_sign += 1
         await db.commit()
 
+    # The calibration is reported because it bounds what the geometry can be worth. A caller seeing
+    # "nominal" knows the lanes are placed with a guessed focal length, a principal point assumed to be at
+    # the image centre and an assumed mount height, and should not treat the result as survey data.
+    cals = {f"{c}@{w}x{h}": {"source": c0.source, "quality": round(float(c0.quality), 3),
+                             "height_m": round(abs(float(c0.xyz_m[2])) or 1.5, 3)}
+            for (c, w, h), c0 in cam_cal.items()}
     out = {"session_id": str(session_id), "elements": n_lane + n_sign, "lanes": n_lane, "signs": n_sign,
-           "frames": len(pts)}
-    log.info("hdmap.georef", **{k: out[k] for k in ("elements", "lanes", "signs")})
+           "frames": len(pts), "calibration": cals,
+           "height_override_m": height_m}
+    log.info("hdmap.georef", **{k: out[k] for k in ("elements", "lanes", "signs")},
+             calibration=sorted({v["source"] for v in cals.values()}))
     return out

@@ -22,7 +22,9 @@ from services.api.routers import (
     agent,
     analytics,
     assets,
+    attrsweep,
     autolabel,
+    autonomy,
     billing,
     calibration,
     campaigns,
@@ -38,6 +40,7 @@ from services.api.routers import (
     driving_events,
     dynamics,
     edge,
+    ego,
     errordetect,
     events,
     experiments,
@@ -77,7 +80,9 @@ from services.api.routers import (
     segment_assist,
     segmentation,
     service_accounts,
+    shadow,
     signs,
+    synth,
     track_events,
     tracks,
     training,
@@ -604,11 +609,15 @@ app.include_router(segmentation.router, prefix="/api", tags=["segmentation"])
 app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(imports.router, prefix="/api", tags=["imports"])
 app.include_router(training.router, prefix="/api", tags=["training"])
+app.include_router(synth.router, prefix="/api", tags=["synth"])
+app.include_router(shadow.router, prefix="/api", tags=["shadow"])
+app.include_router(ego.router, prefix="/api", tags=["ego"])
 app.include_router(tracks.router, prefix="/api", tags=["tracks"])
 app.include_router(autolabel.router, prefix="/api", tags=["autolabel"])
 app.include_router(jobs.router, prefix="/api", tags=["jobs"])
 app.include_router(events.router, prefix="/api", tags=["events"])
 app.include_router(labelops.router, prefix="/api", tags=["labelops"])
+app.include_router(attrsweep.router, prefix="/api", tags=["attrsweep"])
 app.include_router(assets.router, prefix="/api", tags=["assets"])
 app.include_router(integrations.router, prefix="/api", tags=["integrations"])
 app.include_router(users.router, prefix="/api", tags=["users"])
@@ -621,6 +630,7 @@ app.include_router(errordetect.router, prefix="/api", tags=["errordetect"])
 app.include_router(relabel.router, prefix="/api", tags=["relabel"])
 app.include_router(collaborate.router, prefix="/api", tags=["collaborate"])
 app.include_router(govern.router, prefix="/api", tags=["govern"])
+app.include_router(autonomy.router, prefix="/api", tags=["autonomy"])
 app.include_router(service_accounts.router, prefix="/api", tags=["service-accounts"])
 app.include_router(multicam.router, prefix="/api", tags=["multicam"])
 app.include_router(mapassist.router, prefix="/api", tags=["mapassist"])

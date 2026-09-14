@@ -258,6 +258,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/agent/frames/{frame_id}/attributes/plan",
                           params=None, json_body=None)
 
+    def post_agent_frames_by_frame_id_cuboid_at(self, frame_id: str, body: Any = None) -> Any:
+        """Cuboid At"""
+        return self._call("POST", f"/api/agent/frames/{frame_id}/cuboid/at",
+                          params=None, json_body=body)
+
     def post_agent_frames_by_frame_id_cuboids(self, frame_id: str, body: Any = None) -> Any:
         """Cuboids Run"""
         return self._call("POST", f"/api/agent/frames/{frame_id}/cuboids",
@@ -336,6 +341,11 @@ class LabeloxClient:
     def post_agent_objects_by_object_id_crosscam_plan(self, object_id: str, body: Any = None) -> Any:
         """Crosscam Plan"""
         return self._call("POST", f"/api/agent/objects/{object_id}/crosscam/plan",
+                          params=None, json_body=body)
+
+    def post_agent_objects_by_object_id_cuboid_fit(self, object_id: str, body: Any = None) -> Any:
+        """Cuboid Fit"""
+        return self._call("POST", f"/api/agent/objects/{object_id}/cuboid/fit",
                           params=None, json_body=body)
 
     def post_agent_objects_by_object_id_propagate(self, object_id: str, body: Any = None) -> Any:
@@ -448,15 +458,25 @@ class LabeloxClient:
         return self._call("GET", f"/api/analytics/dedup-rate",
                           params={"session_id": session_id}, json_body=None)
 
-    def get_analytics_geo(self, session_id: Any | None = None, limit: int | None = 2000) -> Any:
+    def get_analytics_geo(self, session_id: Any | None = None, limit: int | None = 20000, epsilon: Any | None = None) -> Any:
         """Geo"""
         return self._call("GET", f"/api/analytics/geo",
-                          params={"session_id": session_id, "limit": limit}, json_body=None)
+                          params={"session_id": session_id, "limit": limit, "epsilon": epsilon}, json_body=None)
 
     def get_analytics_growth(self) -> Any:
         """Growth"""
         return self._call("GET", f"/api/analytics/growth",
                           params=None, json_body=None)
+
+    def get_analytics_label_value(self, run_id: Any | None = None) -> Any:
+        """Label Value"""
+        return self._call("GET", f"/api/analytics/label-value",
+                          params={"run_id": run_id}, json_body=None)
+
+    def post_analytics_label_value_snapshot(self, run_id: Any | None = None) -> Any:
+        """Label Value Snapshot"""
+        return self._call("POST", f"/api/analytics/label-value/snapshot",
+                          params={"run_id": run_id}, json_body=None)
 
     def get_analytics_overview(self, session_id: Any | None = None) -> Any:
         """Overview"""
@@ -467,6 +487,11 @@ class LabeloxClient:
         """Pii"""
         return self._call("GET", f"/api/analytics/pii",
                           params={"session_id": session_id}, json_body=None)
+
+    def get_analytics_privacy_budget(self) -> Any:
+        """Privacy Budget"""
+        return self._call("GET", f"/api/analytics/privacy-budget",
+                          params=None, json_body=None)
 
     def get_analytics_productivity(self) -> Any:
         """Productivity"""
@@ -533,10 +558,30 @@ class LabeloxClient:
         return self._call("POST", f"/api/assets/{asset_id}/annotations",
                           params=None, json_body=body)
 
+    def get_assets_by_asset_id_media(self, asset_id: str) -> Any:
+        """Asset Media"""
+        return self._call("GET", f"/api/assets/{asset_id}/media",
+                          params=None, json_body=None)
+
     def post_assets_by_asset_id_state(self, asset_id: str, state: str) -> Any:
         """Set Asset State"""
         return self._call("POST", f"/api/assets/{asset_id}/state",
                           params={"state": state}, json_body=None)
+
+    def post_attrsweep_apply(self, body: Any = None) -> Any:
+        """Attr Apply"""
+        return self._call("POST", f"/api/attrsweep/apply",
+                          params=None, json_body=body)
+
+    def get_attrsweep_coverage(self, session_id: Any | None = None) -> Any:
+        """Attr Coverage"""
+        return self._call("GET", f"/api/attrsweep/coverage",
+                          params={"session_id": session_id}, json_body=None)
+
+    def get_attrsweep_queue(self, attr: str, class_name: Any | None = None, session_id: Any | None = None, limit: int | None = 60, unit: str | None = 'auto') -> Any:
+        """Attr Queue"""
+        return self._call("GET", f"/api/attrsweep/queue",
+                          params={"attr": attr, "class_name": class_name, "session_id": session_id, "limit": limit, "unit": unit}, json_body=None)
 
     def post_auth_login(self, body: Any = None) -> Any:
         """Login"""
@@ -641,6 +686,11 @@ class LabeloxClient:
     def get_autolabel_by_job_id(self, job_id: str) -> Any:
         """Status"""
         return self._call("GET", f"/api/autolabel/{job_id}",
+                          params=None, json_body=None)
+
+    def get_autonomy_state(self) -> Any:
+        """Autonomy State"""
+        return self._call("GET", f"/api/autonomy/state",
                           params=None, json_body=None)
 
     def post_billing_certify_by_commit_id(self, commit_id: str, eval_id: str, gold_id: str, model_version: str) -> Any:
@@ -1078,6 +1128,26 @@ class LabeloxClient:
         return self._call("POST", f"/api/edge/telemetry",
                           params=None, json_body=body)
 
+    def get_ego_coverage(self) -> Any:
+        """Ego Coverage"""
+        return self._call("GET", f"/api/ego/coverage",
+                          params=None, json_body=None)
+
+    def get_ego_sessions_by_session_id_pose(self, session_id: str, limit: int | None = 5000) -> Any:
+        """Session Pose"""
+        return self._call("GET", f"/api/ego/sessions/{session_id}/pose",
+                          params={"limit": limit}, json_body=None)
+
+    def post_ego_sessions_by_session_id_pose(self, session_id: str, body: Any = None) -> Any:
+        """Build Pose"""
+        return self._call("POST", f"/api/ego/sessions/{session_id}/pose",
+                          params=None, json_body=body)
+
+    def post_ego_tracks_by_track_id_lift3d(self, track_id: str, dry_run: bool | None = False) -> Any:
+        """Lift Track 3D"""
+        return self._call("POST", f"/api/ego/tracks/{track_id}/lift3d",
+                          params={"dry_run": dry_run}, json_body=None)
+
     def post_embeddings_compute(self, body: Any = None) -> Any:
         """Embeddings Compute"""
         return self._call("POST", f"/api/embeddings/compute",
@@ -1363,6 +1433,16 @@ class LabeloxClient:
         return self._call("GET", f"/api/forgyx/deployments",
                           params={"model_version": model_version}, json_body=None)
 
+    def post_forgyx_distill(self, teacher_version: str, target: str, student_arch: str | None = 'yolo11n') -> Any:
+        """Start Distill"""
+        return self._call("POST", f"/api/forgyx/distill",
+                          params={"teacher_version": teacher_version, "target": target, "student_arch": student_arch}, json_body=None)
+
+    def get_forgyx_distill_by_run_id(self, run_id: str) -> Any:
+        """Distill Run"""
+        return self._call("GET", f"/api/forgyx/distill/{run_id}",
+                          params=None, json_body=None)
+
     def post_forgyx_export_by_model_version(self, model_version: str, body: Any = None) -> Any:
         """Export Model"""
         return self._call("POST", f"/api/forgyx/export/{model_version}",
@@ -1398,6 +1478,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/frames/{frame_id}/adverse",
                           params=None, json_body=body)
 
+    def get_frames_by_frame_id_bev(self, frame_id: str) -> Any:
+        """Frame Bev"""
+        return self._call("GET", f"/api/frames/{frame_id}/bev",
+                          params=None, json_body=None)
+
     def get_frames_by_frame_id_checkpoints(self, frame_id: str, include_auto: bool | None = True, limit: int | None = 50) -> Any:
         """List For Frame"""
         return self._call("GET", f"/api/frames/{frame_id}/checkpoints",
@@ -1417,6 +1502,16 @@ class LabeloxClient:
         """Frame Cuboids"""
         return self._call("GET", f"/api/frames/{frame_id}/cuboids",
                           params=None, json_body=None)
+
+    def get_frames_by_frame_id_depth_order(self, frame_id: str) -> Any:
+        """Frame Depth Order"""
+        return self._call("GET", f"/api/frames/{frame_id}/depth-order",
+                          params=None, json_body=None)
+
+    def post_frames_by_frame_id_describe_label(self, frame_id: str, body: Any = None) -> Any:
+        """Describe Label"""
+        return self._call("POST", f"/api/frames/{frame_id}/describe-label",
+                          params=None, json_body=body)
 
     def get_frames_by_frame_id_drivable(self, frame_id: str) -> Any:
         """Get Drivable"""
@@ -1453,6 +1548,16 @@ class LabeloxClient:
         return self._call("POST", f"/api/frames/{frame_id}/lanes",
                           params=None, json_body=body)
 
+    def get_frames_by_frame_id_lanes_bev(self, frame_id: str) -> Any:
+        """Lanes In Bev"""
+        return self._call("GET", f"/api/frames/{frame_id}/lanes/bev",
+                          params=None, json_body=None)
+
+    def post_frames_by_frame_id_lanes_bev(self, frame_id: str, body: Any = None) -> Any:
+        """Create Lane From Bev"""
+        return self._call("POST", f"/api/frames/{frame_id}/lanes/bev",
+                          params=None, json_body=body)
+
     def post_frames_by_frame_id_lanes_propagate(self, frame_id: str, frames: int | None = 8) -> Any:
         """Propagate"""
         return self._call("POST", f"/api/frames/{frame_id}/lanes/propagate",
@@ -1468,6 +1573,16 @@ class LabeloxClient:
         return self._call("GET", f"/api/frames/{frame_id}/lift_ground",
                           params={"u": u, "v": v}, json_body=None)
 
+    def post_frames_by_frame_id_lint(self, frame_id: str, body: Any = None) -> Any:
+        """Lint Frame Ep"""
+        return self._call("POST", f"/api/frames/{frame_id}/lint",
+                          params=None, json_body=body)
+
+    def get_frames_by_frame_id_next_object(self, frame_id: str, limit: int | None = 5) -> Any:
+        """Next Object"""
+        return self._call("GET", f"/api/frames/{frame_id}/next-object",
+                          params={"limit": limit}, json_body=None)
+
     def get_frames_by_frame_id_objects(self, frame_id: str, job_id: Any | None = None, limit: int | None = 2000) -> Any:
         """Frame Objects"""
         return self._call("GET", f"/api/frames/{frame_id}/objects",
@@ -1477,6 +1592,11 @@ class LabeloxClient:
         """Create Object"""
         return self._call("POST", f"/api/frames/{frame_id}/objects",
                           params=None, json_body=body)
+
+    def post_frames_by_frame_id_occlusion(self, frame_id: str, commit: bool | None = False) -> Any:
+        """Frame Occlusion"""
+        return self._call("POST", f"/api/frames/{frame_id}/occlusion",
+                          params={"commit": commit}, json_body=None)
 
     def get_frames_by_frame_id_relations(self, frame_id: str) -> Any:
         """Relations List"""
@@ -1491,6 +1611,11 @@ class LabeloxClient:
     def get_frames_by_frame_id_relationships(self, frame_id: str) -> Any:
         """Frame Relationships"""
         return self._call("GET", f"/api/frames/{frame_id}/relationships",
+                          params=None, json_body=None)
+
+    def get_frames_by_frame_id_risk(self, frame_id: str) -> Any:
+        """Frame Risk"""
+        return self._call("GET", f"/api/frames/{frame_id}/risk",
                           params=None, json_body=None)
 
     def get_frames_by_frame_id_segment(self, frame_id: str, kind: str | None = 'semantic') -> Any:
@@ -1537,6 +1662,16 @@ class LabeloxClient:
         """Audit"""
         return self._call("GET", f"/api/govern/audit",
                           params={"actor": actor, "limit": limit}, json_body=None)
+
+    def get_govern_autonomy_ladder(self) -> Any:
+        """Autonomy Ladder"""
+        return self._call("GET", f"/api/govern/autonomy/ladder",
+                          params=None, json_body=None)
+
+    def post_govern_autonomy_by_class_name_level(self, class_name: str, level: int, pinned: bool | None = False) -> Any:
+        """Autonomy Set Level"""
+        return self._call("POST", f"/api/govern/autonomy/{class_name}/level",
+                          params={"level": level, "pinned": pinned}, json_body=None)
 
     def post_govern_consent(self, body: Any = None) -> Any:
         """Consent"""
@@ -1647,6 +1782,26 @@ class LabeloxClient:
         """Retention Sweep"""
         return self._call("POST", f"/api/govern/retention/sweep",
                           params=None, json_body=body)
+
+    def get_govern_settlement_lots(self, status: Any | None = None, limit: int | None = 50) -> Any:
+        """Settlement Lots"""
+        return self._call("GET", f"/api/govern/settlement/lots",
+                          params={"status": status, "limit": limit}, json_body=None)
+
+    def post_govern_settlement_plan(self, class_name: str, epoch: Any | None = None) -> Any:
+        """Settlement Plan"""
+        return self._call("POST", f"/api/govern/settlement/plan",
+                          params={"class_name": class_name, "epoch": epoch}, json_body=None)
+
+    def post_govern_settlement_by_lot_id_ack(self, lot_id: str) -> Any:
+        """Settlement Ack"""
+        return self._call("POST", f"/api/govern/settlement/{lot_id}/ack",
+                          params=None, json_body=None)
+
+    def post_govern_settlement_by_lot_id_revert(self, lot_id: str, reason: str | None = 'manual revert') -> Any:
+        """Settlement Revert"""
+        return self._call("POST", f"/api/govern/settlement/{lot_id}/revert",
+                          params={"reason": reason}, json_body=None)
 
     def get_govern_state(self) -> Any:
         """State"""
@@ -2203,6 +2358,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/lidar/objects3d/{object_3d_id}/similar",
                           params={"k": k}, json_body=None)
 
+    def post_lidar_quality3d_bridge(self, cloud_id: Any | None = None, session_id: Any | None = None, commit: bool | None = False) -> Any:
+        """Quality3D Bridge"""
+        return self._call("POST", f"/api/lidar/quality3d/bridge",
+                          params={"cloud_id": cloud_id, "session_id": session_id, "commit": commit}, json_body=None)
+
     def post_lidar_quality3d_by_flag_id_confirm(self, flag_id: str) -> Any:
         """Confirm Quality3D"""
         return self._call("POST", f"/api/lidar/quality3d/{flag_id}/confirm",
@@ -2363,6 +2523,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/multicam/propagate",
                           params={"object_id": object_id, "use_sam": use_sam}, json_body=None)
 
+    def get_multicam_readiness(self, session_id: str) -> Any:
+        """Readiness"""
+        return self._call("GET", f"/api/multicam/readiness",
+                          params={"session_id": session_id}, json_body=None)
+
     def get_multicam_rig_objects(self, session_id: str, group_id: str) -> Any:
         """Rig Objects Ep"""
         return self._call("GET", f"/api/multicam/rig-objects",
@@ -2502,6 +2667,21 @@ class LabeloxClient:
         """Objects Similar"""
         return self._call("GET", f"/api/objects/{object_id}/similar",
                           params={"limit": limit}, json_body=None)
+
+    def get_occupancy_sessions_by_session_id(self, session_id: str, limit: int | None = 500) -> Any:
+        """List Occupancy"""
+        return self._call("GET", f"/api/occupancy/sessions/{session_id}",
+                          params={"limit": limit}, json_body=None)
+
+    def post_occupancy_sessions_by_session_id_build(self, session_id: str, body: Any = None) -> Any:
+        """Build Occupancy"""
+        return self._call("POST", f"/api/occupancy/sessions/{session_id}/build",
+                          params=None, json_body=body)
+
+    def get_occupancy_by_grid_id_voxels(self, grid_id: str, max_voxels: int | None = 60000) -> Any:
+        """Occupancy Voxels"""
+        return self._call("GET", f"/api/occupancy/{grid_id}/voxels",
+                          params={"max_voxels": max_voxels}, json_body=None)
 
     def post_ocr_region(self, body: Any = None) -> Any:
         """Ocr Region"""
@@ -3108,6 +3288,26 @@ class LabeloxClient:
         return self._call("GET", f"/api/sessions/{session_id}/timeline",
                           params=None, json_body=None)
 
+    def get_shadow_disagreements(self, sweep_run_id: Any | None = None, state: Any | None = None, kind: Any | None = None, limit: int | None = 100) -> Any:
+        """List Disagreements"""
+        return self._call("GET", f"/api/shadow/disagreements",
+                          params={"sweep_run_id": sweep_run_id, "state": state, "kind": kind, "limit": limit}, json_body=None)
+
+    def get_shadow_runs(self, limit: int | None = 20) -> Any:
+        """Shadow Runs"""
+        return self._call("GET", f"/api/shadow/runs",
+                          params={"limit": limit}, json_body=None)
+
+    def get_shadow_summary(self, limit: int | None = 5) -> Any:
+        """Shadow Summary"""
+        return self._call("GET", f"/api/shadow/summary",
+                          params={"limit": limit}, json_body=None)
+
+    def post_shadow_sweep(self, body: Any = None) -> Any:
+        """Start Sweep"""
+        return self._call("POST", f"/api/shadow/sweep",
+                          params=None, json_body=body)
+
     def get_sievyx_cliques(self) -> Any:
         """Cliques Report"""
         return self._call("GET", f"/api/sievyx/cliques",
@@ -3163,6 +3363,21 @@ class LabeloxClient:
         return self._call("POST", f"/api/superpixels/{frame_id}",
                           params={"n": n}, json_body=None)
 
+    def post_synth_build(self, body: Any = None) -> Any:
+        """Synth Build"""
+        return self._call("POST", f"/api/synth/build",
+                          params=None, json_body=body)
+
+    def post_synth_plan(self, body: Any = None) -> Any:
+        """Synth Plan"""
+        return self._call("POST", f"/api/synth/plan",
+                          params=None, json_body=body)
+
+    def get_synth_runs(self, limit: int | None = 50) -> Any:
+        """Synth Runs"""
+        return self._call("GET", f"/api/synth/runs",
+                          params={"limit": limit}, json_body=None)
+
     def get_system_resources(self) -> Any:
         """System Resources"""
         return self._call("GET", f"/api/system/resources",
@@ -3208,10 +3423,20 @@ class LabeloxClient:
         return self._call("POST", f"/api/tracklets/{track_id}/derive",
                           params={"method": method, "overwrite_human": overwrite_human}, json_body=None)
 
+    def get_tracklets_by_track_id_drift(self, track_id: str, limit: int | None = 120) -> Any:
+        """Track Drift"""
+        return self._call("GET", f"/api/tracklets/{track_id}/drift",
+                          params={"limit": limit}, json_body=None)
+
     def get_tracklets_by_track_id_suggest_keyframes(self, track_id: str, budget: int | None = 8) -> Any:
         """Suggest Keyframes"""
         return self._call("GET", f"/api/tracklets/{track_id}/suggest-keyframes",
                           params={"budget": budget}, json_body=None)
+
+    def post_tracks_judge_tubes(self, body: Any = None) -> Any:
+        """Judge Tubes"""
+        return self._call("POST", f"/api/tracks/judge-tubes",
+                          params=None, json_body=body)
 
     def post_tracks_retrack(self, session_id: str) -> Any:
         """Retrack"""
@@ -3228,10 +3453,20 @@ class LabeloxClient:
         return self._call("GET", f"/api/tracks/{track_id}",
                           params=None, json_body=None)
 
+    def post_tracks_by_track_id_accept(self, track_id: str, body: Any = None) -> Any:
+        """Accept Track"""
+        return self._call("POST", f"/api/tracks/{track_id}/accept",
+                          params=None, json_body=body)
+
     def get_tracks_by_track_id_attribute_timeline(self, track_id: str, key: str) -> Any:
         """Attribute Timeline"""
         return self._call("GET", f"/api/tracks/{track_id}/attribute-timeline",
                           params={"key": key}, json_body=None)
+
+    def get_tracks_by_track_id_changepoints(self, track_id: str, source: str | None = 'object_speed') -> Any:
+        """Track Changepoints Ep"""
+        return self._call("GET", f"/api/tracks/{track_id}/changepoints",
+                          params={"source": source}, json_body=None)
 
     def get_tracks_by_track_id_driving_events(self, track_id: str) -> Any:
         """Track Events"""
@@ -3298,6 +3533,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/tracks/{track_id}/split",
                           params=None, json_body=body)
 
+    def get_tracks_by_track_id_tube_verdict(self, track_id: str) -> Any:
+        """Tube Verdict"""
+        return self._call("GET", f"/api/tracks/{track_id}/tube-verdict",
+                          params=None, json_body=None)
+
     def get_training(self, limit: int | None = 50) -> Any:
         """List Jobs"""
         return self._call("GET", f"/api/training",
@@ -3348,10 +3588,10 @@ class LabeloxClient:
         return self._call("POST", f"/api/training/{job_id}/cancel",
                           params=None, json_body=None)
 
-    def get_triage(self, states: str | None = 'review,annotate', session_id: Any | None = None, klass: Any | None = None, city: Any | None = None, flywheel: Any | None = None, limit: int | None = 200) -> Any:
+    def get_triage(self, states: str | None = 'review,annotate', session_id: Any | None = None, klass: Any | None = None, city: Any | None = None, flywheel: Any | None = None, control: bool | None = False, limit: int | None = 200) -> Any:
         """Triage"""
         return self._call("GET", f"/api/triage",
-                          params={"states": states, "session_id": session_id, "klass": klass, "city": city, "flywheel": flywheel, "limit": limit}, json_body=None)
+                          params={"states": states, "session_id": session_id, "klass": klass, "city": city, "flywheel": flywheel, "control": control, "limit": limit}, json_body=None)
 
     def post_upload_abort(self, body: Any = None) -> Any:
         """Abort"""
@@ -3433,6 +3673,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/verdyx/blind-audits",
                           params={"run_id": run_id, "limit": limit}, json_body=None)
 
+    def post_verdyx_counterfactual_by_run_id(self, run_id: str, perturbations: Any | None = None, max_frames: int | None = 100, score_thr: float | None = 0.5) -> Any:
+        """Run Counterfactual"""
+        return self._call("POST", f"/api/verdyx/counterfactual/{run_id}",
+                          params={"perturbations": perturbations, "max_frames": max_frames, "score_thr": score_thr}, json_body=None)
+
     def post_verdyx_evaluate(self, body: Any = None) -> Any:
         """Evaluate"""
         return self._call("POST", f"/api/verdyx/evaluate",
@@ -3467,6 +3712,11 @@ class LabeloxClient:
         """Shadow Triage"""
         return self._call("POST", f"/api/verdyx/shadow/triage",
                           params=None, json_body=body)
+
+    def get_verdyx_sim_capability(self) -> Any:
+        """Sim Capability"""
+        return self._call("GET", f"/api/verdyx/sim/capability",
+                          params=None, json_body=None)
 
     def post_verdyx_stats_bootstrap(self, body: Any = None) -> Any:
         """Stats Bootstrap"""
@@ -3536,4 +3786,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 690 routes generated from the server schema.
+# 740 routes generated from the server schema.

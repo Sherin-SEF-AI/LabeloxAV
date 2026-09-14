@@ -1,34 +1,34 @@
 # Indian RTO traffic-sign taxonomy (M2.3). Three categories: mandatory/regulatory, cautionary/warning,
 # informatory/guide. text_bearing routes the sign's text to OCR (M2.4). Prompts are the SigLIP 2
 # zero-shot text queries (no labeled sign data needed). No em-dashes.
-version: signs-in-0.1.0
+version: signs-in-0.2.0
 categories: [mandatory, cautionary, informatory]
 types:
   # mandatory / regulatory
-  - { name: stop, category: mandatory, text_bearing: false, prompt: "a red octagonal STOP traffic sign" }
-  - { name: give_way, category: mandatory, text_bearing: false, prompt: "a give way yield triangle traffic sign" }
-  - { name: no_entry, category: mandatory, text_bearing: false, prompt: "a no entry sign, a red circle with a white horizontal bar" }
-  - { name: speed_limit, category: mandatory, text_bearing: true, prompt: "a speed limit sign with a number in a red circle" }
-  - { name: no_parking, category: mandatory, text_bearing: false, prompt: "a no parking traffic sign" }
-  - { name: no_horn, category: mandatory, text_bearing: false, prompt: "a no horn traffic sign" }
-  - { name: one_way, category: mandatory, text_bearing: false, prompt: "a one way arrow traffic sign" }
-  - { name: compulsory_direction, category: mandatory, text_bearing: false, prompt: "a compulsory turn direction sign, a blue circle with a white arrow" }
+  - { name: stop, category: mandatory, irc_code: R-1, irc_group: mandatory, text_bearing: false, prompt: "a red octagonal STOP traffic sign" }
+  - { name: give_way, category: mandatory, irc_code: R-2, irc_group: mandatory, text_bearing: false, prompt: "a give way yield triangle traffic sign" }
+  - { name: no_entry, category: mandatory, irc_code: R-3, irc_group: mandatory, text_bearing: false, prompt: "a no entry sign, a red circle with a white horizontal bar" }
+  - { name: speed_limit, category: mandatory, irc_code: R-32, irc_group: mandatory, text_bearing: true, prompt: "a speed limit sign with a number in a red circle" }
+  - { name: no_parking, category: mandatory, irc_code: R-27, irc_group: mandatory, text_bearing: false, prompt: "a no parking traffic sign" }
+  - { name: no_horn, category: mandatory, irc_code: R-30, irc_group: mandatory, text_bearing: false, prompt: "a no horn traffic sign" }
+  - { name: one_way, category: mandatory, irc_code: R-8, irc_group: mandatory, text_bearing: false, prompt: "a one way arrow traffic sign" }
+  - { name: compulsory_direction, category: mandatory, irc_code: R-45, irc_group: mandatory, text_bearing: false, prompt: "a compulsory turn direction sign, a blue circle with a white arrow" }
   # cautionary / warning
-  - { name: pedestrian_crossing, category: cautionary, text_bearing: false, prompt: "a pedestrian crossing warning sign" }
-  - { name: school_ahead, category: cautionary, text_bearing: false, prompt: "a school children ahead warning sign" }
-  - { name: speed_breaker, category: cautionary, text_bearing: false, prompt: "a speed breaker hump ahead warning sign" }
-  - { name: right_curve, category: cautionary, text_bearing: false, prompt: "a right hand curve ahead warning sign" }
-  - { name: left_curve, category: cautionary, text_bearing: false, prompt: "a left hand curve ahead warning sign" }
-  - { name: narrow_road, category: cautionary, text_bearing: false, prompt: "a narrow road ahead warning sign" }
-  - { name: junction_ahead, category: cautionary, text_bearing: false, prompt: "a road junction ahead warning sign" }
-  - { name: roundabout, category: cautionary, text_bearing: false, prompt: "a roundabout ahead warning sign" }
+  - { name: pedestrian_crossing, category: cautionary, irc_code: W-15, irc_group: cautionary, text_bearing: false, prompt: "a pedestrian crossing warning sign" }
+  - { name: school_ahead, category: cautionary, irc_code: W-14, irc_group: cautionary, text_bearing: false, prompt: "a school children ahead warning sign" }
+  - { name: speed_breaker, category: cautionary, irc_code: W-30, irc_group: cautionary, text_bearing: false, prompt: "a speed breaker hump ahead warning sign" }
+  - { name: right_curve, category: cautionary, irc_code: W-2, irc_group: cautionary, text_bearing: false, prompt: "a right hand curve ahead warning sign" }
+  - { name: left_curve, category: cautionary, irc_code: W-1, irc_group: cautionary, text_bearing: false, prompt: "a left hand curve ahead warning sign" }
+  - { name: narrow_road, category: cautionary, irc_code: W-7, irc_group: cautionary, text_bearing: false, prompt: "a narrow road ahead warning sign" }
+  - { name: junction_ahead, category: cautionary, irc_code: W-9, irc_group: cautionary, text_bearing: false, prompt: "a road junction ahead warning sign" }
+  - { name: roundabout, category: cautionary, irc_code: W-12, irc_group: cautionary, text_bearing: false, prompt: "a roundabout ahead warning sign" }
   # informatory / guide
-  - { name: destination_board, category: informatory, text_bearing: true, prompt: "a green destination direction board with place names and arrows" }
-  - { name: parking, category: informatory, text_bearing: false, prompt: "a parking information sign with the letter P" }
-  - { name: hospital, category: informatory, text_bearing: false, prompt: "a hospital information sign" }
-  - { name: petrol_pump, category: informatory, text_bearing: true, prompt: "a fuel petrol pump information sign" }
-  - { name: bus_stop, category: informatory, text_bearing: false, prompt: "a bus stop information sign" }
-  - { name: toll_ahead, category: informatory, text_bearing: true, prompt: "a toll plaza ahead information board" }
+  - { name: destination_board, category: informatory, irc_code: I-20, irc_group: informatory, text_bearing: true, prompt: "a green destination direction board with place names and arrows" }
+  - { name: parking, category: informatory, irc_code: I-6, irc_group: informatory, text_bearing: false, prompt: "a parking information sign with the letter P" }
+  - { name: hospital, category: informatory, irc_code: I-3, irc_group: informatory, text_bearing: false, prompt: "a hospital information sign" }
+  - { name: petrol_pump, category: informatory, irc_code: I-4, irc_group: informatory, text_bearing: true, prompt: "a fuel petrol pump information sign" }
+  - { name: bus_stop, category: informatory, irc_code: I-8, irc_group: informatory, text_bearing: false, prompt: "a bus stop information sign" }
+  - { name: toll_ahead, category: informatory, irc_code: I-25, irc_group: informatory, text_bearing: true, prompt: "a toll plaza ahead information board" }
 
 # What a sign is not.
 #

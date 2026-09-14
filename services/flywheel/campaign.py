@@ -528,3 +528,35 @@ def _step_dict(s: CampaignStep) -> dict:
             "awaiting": s.awaiting, "job_id": str(s.job_id) if s.job_id else None,
             "started_at": s.started_at.isoformat() if s.started_at else None,
             "finished_at": s.finished_at.isoformat() if s.finished_at else None}
+
+
+async def maybe_tick_campaigns(db: AsyncSession) -> dict:
+    """Scheduler hook: advance every campaign that can move, one step each per daemon tick.
+
+    The whole state machine above existed and nothing called it on a schedule, so a campaign was
+    autonomous in exactly the moments somebody was watching it - the seam campaigns were built to
+    remove. Cheap by construction: a campaign that is waiting (on a human batch, on the GPU, on an
+    approval) answers in a couple of reads and changes nothing, so ticking every 60 seconds costs a
+    single indexed select when nothing is active.
+
+    `blocked` campaigns (a stage raised; a person should look) are deliberately not re-ticked:
+    retrying a failing stage every minute is a way to write the same failure forever. A manual tick
+    or an operator fix resumes them.
+    """
+    rows = (await db.execute(
+        select(Campaign).where(Campaign.status.in_(("pending", "running")))
+        .order_by(Campaign.created_at))).scalars().all()
+    if not rows:
+        return {"ran": False, "reason": "no active campaigns"}
+
+    ticked = []
+    for c in rows:
+        try:
+            r = await tick(db, str(c.campaign_id))
+            ticked.append({"campaign": c.name, "action": r.get("action") or r.get("stage"),
+                           "status": (r.get("campaign") or {}).get("status")})
+        except Exception as exc:  # noqa: BLE001 - one campaign's failure never stops the others
+            log.error("campaign.auto_tick_failed", name=c.name, error=str(exc))
+            ticked.append({"campaign": c.name, "action": "error", "error": str(exc)[:200]})
+    moved = [t for t in ticked if t.get("action") not in ("waiting", "none", "awaiting_approval")]
+    return {"ran": bool(moved), "ticked": ticked}

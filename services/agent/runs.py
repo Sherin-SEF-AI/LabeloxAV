@@ -45,7 +45,10 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
     # A class merge moved objects wholesale, including human-labelled ones, so undoing it needs its own
     # path: the generic restore below deliberately refuses to touch anything a person owns, which is right
     # for an agent relabel and wrong for reversing an ontology decision.
-    if run.kind == "ontology_merge":
+    # A split reverses through the same path: it records the same `scope.from_id` and per-object
+    # `changes.objects` shape, and it moved only machine-state objects, so putting them back is the same
+    # operation with the same reason for bypassing the generic restore.
+    if run.kind in ("ontology_merge", "ontology_split"):
         from services.agent.ontology_merge import revert_merge
 
         return await revert_merge(db, run)
@@ -61,6 +64,21 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
         from services.agent.cleanup_sweep import revert_cleanup
 
         return await revert_cleanup(db, run)
+
+    # A synthetic batch created frames, not object edits; reverting deletes the frames it composed (their
+    # labels cascade) and the synthetic session once it is empty. The parent build reverts through child_runs.
+    if run.kind == "synth_batch":
+        from services.synth.copy_paste import revert_batch
+
+        return await revert_batch(db, run)
+
+    # A pseudo-LiDAR batch created clouds, not object edits. Reverting deletes the clouds and their
+    # blobs; the cuboids lifted from them cascade with the cloud rather than being left to point at a
+    # cloud that is gone. The parent lift reverts through child_runs like every other chunked run.
+    if run.kind == "pseudo_batch":
+        from services.lidar.pseudo_daemon import revert_batch as revert_pseudo_batch
+
+        return await revert_pseudo_batch(db, run)
 
     # A corpus run (e.g. relabel-all) owns no objects itself; it aggregates one child run per frame.
     # Reverting it reverts each child, so 'undo relabel all' is one click.

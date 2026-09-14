@@ -75,6 +75,15 @@ class AttributeDef:
     # second opinion about `occupant_count`, it is a reading of it, and letting both be set independently
     # produces frames that say three people and not triple riding.
     derived_from: str | None = None
+    # Whether this attribute describes the object rather than the moment, so one answer covers a whole
+    # track. `load_type` is what the truck is carrying and does not change between frames; `occlusion` is
+    # how much of it this camera can see and changes every frame.
+    #
+    # It is a default, not a proof. A rider can take a helmet off mid-sequence and a herd can lose an
+    # animal, so the attribute sweep offers a track-wide answer for these and lets the annotator decline.
+    # The leverage is the point: 262,904 objects are in scope for `load_type` and they sit on far fewer
+    # tracks, so a per-frame sweep would ask the same question about the same truck fifty times.
+    track_constant: bool = False
 
 
 # How each derived attribute is computed from its source. Keyed by the derived attribute's name, matching
@@ -288,6 +297,7 @@ def load_ontology(path: str | Path | None = None) -> Ontology:
         attributes[name] = AttributeDef(
             name=name, type=spec["type"], values=spec.get("values"), range=rng,  # type: ignore[arg-type]
             derived_from=spec.get("derived_from"),
+            track_constant=bool(spec.get("track_constant", False)),
         )
 
     # Integrity checks: unique ids and names in the governed YAML.
@@ -313,6 +323,11 @@ def load_ontology(path: str | Path | None = None) -> Ontology:
     for name, spec in attributes.items():
         if spec.derived_from and spec.derived_from not in attributes:
             raise ValueError(f"attribute '{name}' derives from unknown attribute '{spec.derived_from}'")
+        # A derived attribute is a reading of its source, so it cannot be constant over a track whose
+        # source is not. Declaring them apart would let `triple_riding` be swept track-wide while
+        # `occupant_count`, the only thing it is computed from, was swept per frame.
+        if spec.derived_from and spec.track_constant != attributes[spec.derived_from].track_constant:
+            raise ValueError(f"attribute '{name}' must share track_constant with '{spec.derived_from}'")
 
     # Merge annotator-added custom classes (defensively skipping any id/name already governed, so a stale
     # sidecar can never break loading).

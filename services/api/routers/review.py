@@ -185,6 +185,11 @@ async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = D
         obj.polyline = payload.polyline
     if payload.cuboid_3d is not None:
         obj.cuboid_3d = payload.cuboid_3d
+    if payload.bbox_amodal is not None:
+        # An explicit empty list clears it. "Nobody has said what the whole extent is" and "the object is
+        # fully visible, so the amodal box is the visible one" are different claims, and a client has to
+        # be able to take an amodal box back without deleting the object.
+        obj.bbox_amodal = list(payload.bbox_amodal) or None
     if payload.mask_polygons is not None:
         # Geometry and mask are written in one request rather than through a separate updateMask call, so
         # a client cannot leave them out of sync by making only one of two calls.
@@ -259,5 +264,6 @@ async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = D
         "source": obj.source,
         "version": obj.version,
         "rot_deg": obj.rot_deg or 0.0,
+        "bbox_amodal": list(obj.bbox_amodal) if obj.bbox_amodal else None,
         "keypoints": obj.keypoints,
     }

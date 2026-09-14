@@ -43,6 +43,29 @@ class TrainJobSpec(BaseModel):
     notes: str | None = None
 
 
+def _lineage_for(spec, ds: dict | None, base_weights: str | None = None) -> dict:
+    """The registry's lineage fields for a finished job: architecture, parent, teacher, origin.
+
+    `origin` is `distilled` for a self-trained model because it learned from another model's targets,
+    which is the fact a later reader needs: comparing a student to its own teacher on the teacher's own
+    consensus is not an independent comparison, and nothing else in the row would say so.
+    """
+    from services.govern.registry import _arch_of
+
+    # What was actually loaded, not what the spec happened to name. A job that took the task's default
+    # left `parent_version` null, which reads as "started from nothing" rather than "started from the
+    # shipped YOLO weights".
+    base = spec.base_weights or base_weights
+    ds = ds or {}
+    if spec.task_type == "selftrain":
+        teachers = ds.get("teachers") or []
+        return {"arch": _arch_of(base), "parent_version": base, "origin": "distilled",
+                "teacher_version": (teachers[0] if teachers else None)}
+    if spec.task_type == "pretrain":
+        return {"arch": _arch_of(base), "parent_version": base, "origin": "pretrained"}
+    return {"arch": _arch_of(base), "parent_version": base, "origin": "trained"}
+
+
 async def _promote_run(db, run_id: str, task_type: str) -> dict:
     """Actually promote, rather than recording that promotion was wanted.
 
@@ -261,9 +284,23 @@ async def run_job(job_id) -> dict:
 
                 await record_dataset_commit(db, dataset_commit, build=ds, spec=spec.dataset_spec,
                                             fingerprint=fingerprint)
-                await register(db, run_id, spec.task_type, candidate or {},
+                # Lineage (0110): what the weights came from, recorded at the one point that knows.
+                # A self-trained student was fit against a teacher's consensus, and the registry has to
+                # be able to say which teacher, or the next comparison is between a model and its own
+                # output without anyone being able to tell.
+                lineage = _lineage_for(spec, ds, base_weights)
+                # The registry column is named `gold_metrics` and this path puts the job's own val
+                # metrics in it, which is how a self-trained model registered 0.4975 from a two-image
+                # val split beside a champion's 0.4407 from a 202-frame sealed gold set. The promotion
+                # gate is unaffected because it re-scores both sides on common gold, but a human reading
+                # the registry was comparing two different yardsticks with one name. The basis is
+                # stamped on the dict so the two can be told apart.
+                stamped = {**(candidate or {}),
+                           "basis": f"job_val_split:{ds.get('n_val_images', 0)}_images"}
+                await register(db, run_id, spec.task_type, stamped,
                                dataset_commit=dataset_commit,
-                               weights_uri=weights_uri, notes=f"auto-registered from job {job_id}")
+                               weights_uri=weights_uri, notes=f"auto-registered from job {job_id}",
+                               **lineage)
             except Exception as exc:  # noqa: BLE001
                 log.warning("registry.auto_register_failed", job_id=str(job_id), run_id=run_id, error=str(exc))
 

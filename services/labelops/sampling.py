@@ -162,3 +162,158 @@ def acceptance_decision(defects: int, n: int, *, max_defect_rate: float,
             f"observed {ci['p']:.1%} but the interval spans the {max_defect_rate:.1%} limit "
             f"({ci['lo']:.1%} to {ci['hi']:.1%}); about {need} samples would settle it")
     return {**ci, "verdict": verdict, "reason": reason, "max_defect_rate": max_defect_rate}
+
+
+# ---------------------------------------------------------------------------------------------------
+# Sequential acceptance: Wald's SPRT over a stream of verdicts.
+#
+# A fixed draw asks the same number of questions of a clean class and a hopeless one. The SPRT asks
+# until the evidence is decisive, which for a clean class is sooner than the fixed n and for a bad one
+# is a handful of defects. It tests H0: p = p1 (good, the rate we are happy with) against H1: p = p0
+# (bad, the far bound); every verdict moves a log-likelihood ratio by a fixed step and the decision is
+# the first crossing of a bound. Nothing in here consults the database.
+# ---------------------------------------------------------------------------------------------------
+
+
+def sprt_bounds(*, alpha: float = 0.05, beta: float = 0.10) -> dict:
+    """The two Wald bounds on the log-likelihood ratio of bad over good.
+
+    Crossing `bound_reject` (upper) means the sample looks like the bad rate; crossing `bound_accept`
+    (lower) means it looks like the good rate. Wald's approximations, which are conservative in the
+    direction that matters here (true error rates are at or below alpha and beta)."""
+    if not (0 < alpha < 1 and 0 < beta < 1):
+        raise ValueError("alpha and beta must be in (0, 1)")
+    return {"bound_accept": math.log(beta / (1 - alpha)),
+            "bound_reject": math.log((1 - beta) / alpha)}
+
+
+def sprt_steps(*, p0: float, p1: float) -> dict:
+    """Per-verdict increments of the log-likelihood ratio: one for a defect, one for a clean object."""
+    if not (0 < p1 < p0 < 1):
+        raise ValueError("need 0 < p1 (good) < p0 (bad) < 1")
+    return {"defect": math.log(p0 / p1), "clean": math.log((1 - p0) / (1 - p1))}
+
+
+def sprt_llr(defects: int, n: int, *, p0: float, p1: float) -> float:
+    steps = sprt_steps(p0=p0, p1=p1)
+    return defects * steps["defect"] + (n - defects) * steps["clean"]
+
+
+def sprt_oc(p: float, *, p0: float, p1: float, alpha: float = 0.05, beta: float = 0.10) -> float:
+    """Wald's operating characteristic: the probability the test ends in accept when the true rate is p.
+
+    L(p) = (A^h - 1) / (A^h - B^h) where h solves p*(p0/p1)^h + (1-p)*((1-p0)/(1-p1))^h = 1; h is
+    found by bisection, and the h -> 0 limit at the indifference point is taken analytically. Checks:
+    L(p1) = 1 - alpha, L(p0) = beta."""
+    if not (0 <= p <= 1):
+        raise ValueError("p must be in [0, 1]")
+    b = sprt_bounds(alpha=alpha, beta=beta)
+    ln_a, ln_b = b["bound_reject"], b["bound_accept"]
+    steps = sprt_steps(p0=p0, p1=p1)
+
+    def g(h: float) -> float:
+        # Exponents clamped: past 700 the term overflows a float, and by then the sign is settled.
+        return (p * math.exp(min(700.0, h * steps["defect"]))
+                + (1 - p) * math.exp(min(700.0, h * steps["clean"])) - 1)
+
+    # g(0) = 0 always; the other root is the h we want. Its sign is that of -g'(0), which is the sign
+    # of the expected step: positive expected drift (bad-looking p) gives h < 0. Past |h| = 500 the
+    # root has effectively escaped (p at or beyond an extreme) and L is at its limit.
+    drift = p * steps["defect"] + (1 - p) * steps["clean"]
+    if abs(drift) < 1e-12:
+        # Limit h -> 0: L = ln A / (ln A - ln B).
+        return ln_a / (ln_a - ln_b)
+    if drift < 0:
+        lo, hi = 1e-9, 1.0
+        while g(hi) < 0:
+            hi *= 2
+            if hi > 500:
+                return 1.0
+    else:
+        lo, hi = -1.0, -1e-9
+        while g(lo) < 0:
+            lo *= 2
+            if lo < -500:
+                return 0.0
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if g(mid) < 0:
+            if drift < 0:
+                lo = mid
+            else:
+                hi = mid
+        else:
+            if drift < 0:
+                hi = mid
+            else:
+                lo = mid
+    h = (lo + hi) / 2
+    a_h, b_h = math.exp(min(700.0, ln_a * h)), math.exp(min(700.0, ln_b * h))
+    denom = a_h - b_h
+    if abs(denom) < 1e-300:
+        return ln_a / (ln_a - ln_b)
+    return min(1.0, max(0.0, (a_h - 1) / denom))
+
+
+def sprt_p_hat(defects: int, n: int, *, p0: float, p1: float) -> float:
+    """Observed defect rate smoothed by one pseudo-verdict at the middle of the indifference zone."""
+    return (defects + (p0 + p1) / 2) / (n + 1)
+
+
+def sprt_expected_remaining(defects: int, n: int, *, p0: float, p1: float,
+                            alpha: float = 0.05, beta: float = 0.10,
+                            p_hat: float | None = None) -> float:
+    """Wald's ASN from the current position: verdicts still expected before a bound is crossed.
+
+    The true rate is unknown; the plug-in is the observed rate smoothed by one pseudo-verdict at the
+    midpoint of the indifference zone, `(defects + (p0+p1)/2) / (n+1)`, unless a `p_hat` is given.
+    A Laplace 0.5 pseudo-count would read an unjudged lot as half defective and rank it last on the
+    worklist; the indifference prior reads it as undecided. Zero once a bound is already crossed."""
+    b = sprt_bounds(alpha=alpha, beta=beta)
+    z = sprt_llr(defects, n, p0=p0, p1=p1)
+    if z <= b["bound_accept"] or z >= b["bound_reject"]:
+        return 0.0
+    if p_hat is None:
+        p_hat = sprt_p_hat(defects, n, p0=p0, p1=p1)
+    p_hat = min(1.0, max(0.0, p_hat))
+    steps = sprt_steps(p0=p0, p1=p1)
+    drift = p_hat * steps["defect"] + (1 - p_hat) * steps["clean"]
+    oc = sprt_oc(p_hat, p0=p0, p1=p1, alpha=alpha, beta=beta)
+    if abs(drift) < 1e-12:
+        # Zero-drift ASN: E[Z^2 at stop] / E[step^2].
+        second = p_hat * steps["defect"] ** 2 + (1 - p_hat) * steps["clean"] ** 2
+        end = oc * (b["bound_accept"] - z) ** 2 + (1 - oc) * (b["bound_reject"] - z) ** 2
+        return max(0.0, end / second)
+    expected_end = oc * (b["bound_accept"] - z) + (1 - oc) * (b["bound_reject"] - z)
+    return max(0.0, expected_end / drift)
+
+
+def sprt_decision(defects: int, n: int, *, p0: float, p1: float,
+                  alpha: float = 0.05, beta: float = 0.10) -> dict:
+    """The sequential verdict after `defects` in `n` verdicts.
+
+    `verdict` is `accept` (llr at or below the lower bound), `reject` (at or above the upper bound) or
+    `continue`. `expected_remaining` is the ASN from here at the smoothed observed rate, and `oc` is
+    the acceptance probability at that rate. The caller decides whether an accept is sufficient on its
+    own; settlement requires the fixed-sample Wilson rule to agree."""
+    if n < 0 or defects < 0 or defects > n:
+        raise ValueError("defects must be in [0, n]")
+    b = sprt_bounds(alpha=alpha, beta=beta)
+    z = sprt_llr(defects, n, p0=p0, p1=p1)
+    if z <= b["bound_accept"]:
+        verdict = "accept"
+    elif z >= b["bound_reject"]:
+        verdict = "reject"
+    else:
+        verdict = "continue"
+    p_hat = sprt_p_hat(defects, n, p0=p0, p1=p1)
+    return {"llr": round(z, 4), "bound_accept": round(b["bound_accept"], 4),
+            "bound_reject": round(b["bound_reject"], 4), "verdict": verdict,
+            "p0": p0, "p1": p1, "alpha": alpha, "beta": beta, "n": n, "defects": defects,
+            "p_hat": round(p_hat, 4),
+            "oc": round(sprt_oc(p_hat, p0=p0, p1=p1, alpha=alpha, beta=beta), 4),
+            "expected_remaining": round(sprt_expected_remaining(
+                defects, n, p0=p0, p1=p1, alpha=alpha, beta=beta), 1),
+            "reason": {"accept": f"llr {z:.2f} at or below {b['bound_accept']:.2f} after {n} verdicts",
+                       "reject": f"llr {z:.2f} at or above {b['bound_reject']:.2f} after {n} verdicts",
+                       "continue": f"llr {z:.2f} between the bounds after {n} verdicts"}[verdict]}

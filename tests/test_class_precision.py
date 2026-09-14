@@ -195,7 +195,8 @@ class TestItDoesNotTakeTheMachineDown:
 
         from services.labelops import class_precision
 
-        with patch("services.hardening.resources.gpus", return_value=[]):
+        with patch("services.hardening.resources.gpus", return_value=[]), \
+                patch.object(class_precision, "_free_vram_mb_from_torch", return_value=None):
             assert await class_precision.free_vram_mb() is None
 
     @pytest.mark.asyncio
@@ -204,8 +205,37 @@ class TestItDoesNotTakeTheMachineDown:
 
         from services.labelops import class_precision
 
-        with patch("services.hardening.resources.gpus", side_effect=RuntimeError("nvidia-smi gone")):
+        with patch("services.hardening.resources.gpus", side_effect=RuntimeError("nvidia-smi gone")), \
+                patch.object(class_precision, "_free_vram_mb_from_torch", return_value=None):
             assert await class_precision.free_vram_mb() is None
+
+    @pytest.mark.asyncio
+    async def test_a_card_cuda_can_still_see_is_read_through_cuda(self):
+        """A blind `nvidia-smi` must not be reported as an absent card.
+
+        The driver library and the kernel module can disagree after an update without a reboot, which
+        fails NVML whole while CUDA keeps working. The guard used to return None there, and None is read
+        by `wait_for_headroom` as "nothing to check", so the one situation where a card is present and
+        busy was the situation where the headroom guard stopped guarding.
+        """
+        from unittest.mock import patch
+
+        from services.labelops import class_precision
+
+        with patch("services.hardening.resources.gpus", side_effect=RuntimeError("NVML mismatch")), \
+                patch.object(class_precision, "_free_vram_mb_from_torch", return_value=2048.0):
+            assert await class_precision.free_vram_mb() == pytest.approx(2048.0)
+
+    @pytest.mark.asyncio
+    async def test_the_driver_reading_is_preferred_when_it_works(self):
+        from unittest.mock import patch
+
+        from services.labelops import class_precision
+
+        with patch("services.hardening.resources.gpus",
+                   return_value=[{"memory_total_mb": 16303.0, "memory_used_mb": 9000.0}]), \
+                patch.object(class_precision, "_free_vram_mb_from_torch", return_value=1.0):
+            assert await class_precision.free_vram_mb() == pytest.approx(7303.0)
 
     def test_work_is_batched_rather_than_run_as_one_block(self):
         """So a training job that starts mid-class waits seconds, not the length of the class."""

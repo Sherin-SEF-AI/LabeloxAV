@@ -45,3 +45,93 @@ describe("interface translations", () => {
     expect(t("action.accept")).toBeTruthy();
   });
 });
+
+// ---- Interpolation and the coverage the editor now depends on (WP6) ------------------------------------
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { placeholdersOf } from "./i18n";
+import { EN } from "./locales/en";
+
+describe("interpolation", () => {
+  it("substitutes a named placeholder", () => {
+    expect(t("frame.objects_count", undefined, { n: 7 })).toBe("7 objects");
+  });
+
+  it("leaves an unknown placeholder visible rather than blanking it", () => {
+    // A visible {total} names the bug. An empty gap reads as a missing value in the data, which sends
+    // whoever sees it looking in the wrong place.
+    expect(t("frame.of_session", undefined, { index: 3 })).toContain("{total}");
+  });
+
+  it("returns the string untouched when no vars are given", () => {
+    expect(t("frame.objects_count")).toBe("{n} objects");
+  });
+
+  it("does not interpolate keys that have no placeholders", () => {
+    expect(t("action.accept", undefined, { n: 1 })).toBe("accept");
+  });
+});
+
+describe("every language carries the same message contract", () => {
+  it("declares no key the English dictionary does not have", () => {
+    // The other direction is allowed: a missing key falls through to English, which is a partly
+    // translated interface. A key that exists only in Hindi is a typo nothing would ever surface.
+    for (const { code } of LOCALES) {
+      for (const key of Object.keys(dictFor(code))) {
+        expect(EN[key], `${code} has an orphan key ${key}`).toBeDefined();
+      }
+    }
+  });
+
+  it("keeps every placeholder a translated string is given", () => {
+    // A translation that drops {n} renders a sentence with the number missing and no error anywhere.
+    for (const { code } of LOCALES) {
+      const dict = dictFor(code);
+      for (const [key, english] of Object.entries(EN)) {
+        if (!(key in dict)) continue;
+        expect(placeholdersOf(dict[key]), `${code} ${key}`).toEqual(placeholdersOf(english));
+      }
+    }
+  });
+
+  it("translates the strings an annotator reads while working", () => {
+    // The tool strip, the describe tool, the tube verdict and the next-object hint are what a person
+    // looks at for hours. Governance surfaces stay English on purpose and are not checked here.
+    const worked = Object.keys(EN).filter((k) =>
+      k.startsWith("tool.") || k.startsWith("describe.") || k.startsWith("tube.") ||
+      k.startsWith("next.") || k.startsWith("action.") || k.startsWith("frame."));
+    for (const { code } of LOCALES) {
+      if (code === "en") continue;
+      const dict = dictFor(code);
+      const missing = worked.filter((k) => !(k in dict));
+      expect(missing, `${code} is missing working strings`).toEqual([]);
+    }
+  });
+});
+
+describe("the editor does not hardcode a string it has a translation for", () => {
+  // The failure this catches is silent: somebody adds a label straight into the component, it renders in
+  // English for everyone, and no test or type error notices because the string is perfectly valid code.
+  const FILES = [
+    "app/frame/[id]/page.tsx",
+    "components/shell/ToolStrip.tsx",
+  ];
+  // Only unambiguous, whole-string labels. A word like "class" or "next" appears in code and in prose for
+  // reasons that have nothing to do with a label, and asserting on those would make this test noise.
+  const CHECKED = ["unsaved changes", "pick a label first", "confirm frame", "nothing in the queue"];
+
+  it("renders those labels through t() or not at all", () => {
+    for (const rel of FILES) {
+      const src = readFileSync(join(process.cwd(), rel), "utf8");
+      for (const literal of CHECKED) {
+        const quoted = new RegExp(`["'\`]${literal}["'\`]`);
+        const translated = new RegExp(`t\\(\\s*["'][^"']+["'][^)]*${literal}`);
+        if (quoted.test(src) && !translated.test(src)) {
+          throw new Error(`${rel} hardcodes "${literal}"; render it through t()`);
+        }
+      }
+    }
+  });
+});

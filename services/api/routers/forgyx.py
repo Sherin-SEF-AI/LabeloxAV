@@ -5,13 +5,15 @@ regression gate. Export/quantize/compile run only where the backend exists (capa
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Deployment
-from services.api.deps import db_session
+from services.api.deps import db_session, require_role
 from services.forgyx.capabilities import available_targets
 from services.forgyx.cooptimize import plan_cooptimization
 from services.forgyx.gate import dual_gate
@@ -148,3 +150,33 @@ class RolloutIn(BaseModel):
 async def rollout(payload: RolloutIn):
     """The rollout/rollback transition for a deployment; refuses an illegal jump (e.g. none straight to full)."""
     return plan_rollout(payload.current_state, payload.action)
+
+
+@router.post("/forgyx/distill", dependencies=[Depends(require_role("reviewer"))])
+async def start_distill(teacher_version: str, target: str, student_arch: str = "yolo11n",
+                        db: AsyncSession = Depends(db_session)):
+    """Shrink the teacher until it fits the target's latency budget, and report every round.
+
+    Every round, not only the last: a loop that reported one configuration would hide how many missed the
+    budget, and that is what somebody choosing between two boards needs to see.
+    """
+    from services.forgyx.distill import distill_to_budget
+
+    res = await distill_to_budget(db, teacher_version=teacher_version, target=target,
+                                  student_arch=student_arch)
+    if res.get("reason") and not res.get("rounds"):
+        raise HTTPException(status_code=409, detail=res["reason"])
+    return res
+
+
+@router.get("/forgyx/distill/{run_id}", dependencies=[Depends(require_role("annotator"))])
+async def distill_run(run_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
+    """One distillation run's rounds, its fitted configuration if any, and why it stopped."""
+    from db.models import AgentRun
+    from services.forgyx.distill import KIND
+
+    run = await db.get(AgentRun, run_id)
+    if run is None or run.kind != KIND:
+        raise HTTPException(status_code=404, detail="distillation run not found")
+    return {"run_id": str(run.run_id), "status": run.status, "scope": run.scope,
+            "created_at": run.created_at.isoformat() if run.created_at else None, **(run.counts or {})}

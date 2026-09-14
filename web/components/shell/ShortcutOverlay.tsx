@@ -49,7 +49,10 @@ export const TOOLS: { keys: string; label: string }[] = [
   { keys: "P", label: "brush" },
   { keys: "E", label: "eraser" },
   { keys: "U", label: "superpixels (cells)" },
-  { keys: "K", label: "keypoint (pose)" },
+  // One letter, two modes. Resolved per mode by the registry, which is what makes both reachable: the
+  // whole-extent tool had a button and this shortcut and could not be selected by either, because the old
+  // handler bound K twice in one chain and the first branch won everywhere.
+  { keys: "K", label: "whole extent (Objects) / keypoint (Pose)" },
   { keys: "D", label: "adverse region" },
   { keys: "C", label: "cuboid (3D box on image)" },
   { keys: "R", label: "measure" },

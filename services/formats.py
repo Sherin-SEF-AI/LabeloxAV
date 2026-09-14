@@ -44,7 +44,7 @@ INTERCHANGE = frozenset({
 MIGRATION = frozenset({"labelbox", "scale", "superannotate", "encord"})
 
 # Products of the corpus rather than representations of it. One-way out.
-DERIVED = frozenset({"panoptic", "lanes", "drivable", "hdmap", "masks", "openscenario"})
+DERIVED = frozenset({"panoptic", "lanes", "drivable", "hdmap", "masks", "openscenario", "occupancy"})
 
 # Derived targets served by their own endpoint rather than by the dataset export driver, because their scope
 # is not a slice of objects. A scenario is bounded by an event or a time window, so asking the slice-shaped

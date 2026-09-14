@@ -6,7 +6,7 @@
 
 import { useReducer } from "react";
 
-export type Tool = "select" | "box" | "polygon" | "polyline" | "adverse" | "cuboid" | "keypoint" | "measure" | "sam-point" | "sam-box" | "magic-wand" | "brush" | "eraser" | "superpixel";
+export type Tool = "select" | "box" | "amodal" | "polygon" | "polyline" | "adverse" | "cuboid" | "keypoint" | "measure" | "sam-point" | "sam-box" | "magic-wand" | "brush" | "eraser" | "superpixel";
 
 export type EdObject = {
   id: string; // server object_id, or "tmp-N" for locally-created
@@ -27,9 +27,16 @@ export type EdObject = {
   dirty?: boolean;
   version?: number; // optimistic-lock version from the server; sent back on save to detect stale writes
   rot?: number; // oriented-box rotation in degrees about the box centre (0 = axis-aligned)
+  // The whole extent of a partly hidden object. `bbox` above stays the VISIBLE extent, which is what
+  // every existing consumer means by it. Undefined means nobody has said, and that is different from
+  // "the object is fully visible": a renderer must draw nothing rather than fall back to bbox.
+  bbox_amodal?: number[] | null;
   keypoints?: { skeleton: string; points: number[][] }; // COCO-style pose [[x,y,v],...]
   polyline?: number[][]; // open linear feature (curb/road_edge/barrier) as ordered [[x,y],...]
-  cuboid_3d?: { center: number[]; size: number[]; yaw: number } | null; // ego-frame 3D box (size [w,l,h])
+  // ego-frame 3D box (size [w,l,h]). `yaw_source` records whether the yaw was measured from the road
+  // or inferred from the silhouette, which is a weak signal: a car head-on and one from behind share
+  // nearly the same image box.
+  cuboid_3d?: { center: number[]; size: number[]; yaw: number; yaw_source?: string } | null;
 };
 
 export type Viewport = { scale: number; ox: number; oy: number };
@@ -82,6 +89,7 @@ export type Action =
   | { t: "add"; obj: EdObject }
   | { t: "update"; id: string; patch: Partial<EdObject> }
   | { t: "acceptAll" }
+  | { t: "acceptRest" }
   | { t: "reviewed"; id: string; state: string; version?: number }
   | { t: "delete"; id: string }
   | { t: "undo" }
@@ -269,6 +277,26 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
           o.isNew || !s.touched.includes(o.id) ? o : { ...o, state: "accepted", dirty: true }),
         deleted: s.deleted,
       }, `confirmed ${s.touched.length} reviewed`);
+    case "acceptRest": {
+      // The deliberate opposite of acceptAll, and the reason both exist.
+      //
+      // acceptAll confirms what the annotator looked at. That is right for the two-stage workflow and
+      // wrong for the way a frame is actually worked: the mean frame carries 16.7 objects and the busiest
+      // 187, most of them correct, and the value of a risk order is being able to handle the few that are
+      // not and then say "the rest are fine" once. Without this that sentence takes 180 clicks, so nobody
+      // says it and the frame is never finished.
+      //
+      // Untouched and not new: a box the annotator drew is already human-authored, and one they edited is
+      // covered by acceptAll. Marked dirty so autosave persists it through the same review path, which is
+      // what makes it revertible.
+      const rest = s.objects.filter((o) => !o.isNew && !s.touched.includes(o.id) && o.state !== "accepted");
+      if (!rest.length) return s;
+      const ids = new Set(rest.map((o) => o.id));
+      return mutate(s, {
+        objects: s.objects.map((o) => (ids.has(o.id) ? { ...o, state: "accepted", dirty: true } : o)),
+        deleted: s.deleted,
+      }, `accepted the remaining ${rest.length}`);
+    }
     case "reviewed":
       // A review (accept/reject) already persisted to the server via api.review with an explicit state, so
       // set the object's state and new version WITHOUT marking it dirty (dirty would make autosave re-write

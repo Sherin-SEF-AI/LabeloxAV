@@ -303,6 +303,61 @@ class CuboidIn(BaseModel):
     high: float = 0.60
 
 
+class FitCuboidIn(BaseModel):
+    # Where the object actually meets the road, in image pixels. Optional: without it the box's bottom
+    # centre is assumed, which is right for a vehicle that is fully visible and wrong for a truncated one.
+    contact: list[float] | None = None
+
+
+@router.post("/agent/objects/{object_id}/cuboid/fit", dependencies=[Depends(require_role("annotator"))])
+async def cuboid_fit(object_id: str, body: FitCuboidIn | None = None,
+                     db: AsyncSession = Depends(db_session)):
+    """Fit a cuboid to one object. Read-only: the caller decides whether to keep it.
+
+    The monocular solve has existed since cuboids were added and was reachable only as a frame-wide
+    batch, so the editor's cuboid tool dropped a hardcoded 1.8 x 4.2 x 1.5 box at yaw 0 on whatever it was
+    placed on. This is the same solve, per object, with the class prior, the refined yaw and the lane
+    snap.
+
+    A cuboid of null is a real answer with a reason attached: a box whose base is above the horizon does
+    not meet the ground ahead of the camera and cannot be lifted.
+    """
+    from services.agent.cuboid_agent import fit_object_cuboid
+
+    b = body or FitCuboidIn()
+    contact = None
+    if b.contact is not None:
+        if len(b.contact) != 2:
+            raise HTTPException(400, "contact must be [u, v] in image pixels")
+        contact = (float(b.contact[0]), float(b.contact[1]))
+    try:
+        return await fit_object_cuboid(db, uuid.UUID(object_id), contact=contact)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+class CuboidAtIn(BaseModel):
+    u: float
+    v: float
+    class_name: str
+
+
+@router.post("/agent/frames/{frame_id}/cuboid/at", dependencies=[Depends(require_role("annotator"))])
+async def cuboid_at(frame_id: str, body: CuboidAtIn, db: AsyncSession = Depends(db_session)):
+    """A cuboid for a point clicked on the road, sized from the class and aligned to the lane.
+
+    The editor's cuboid tool had no object to reproject against and so used a hardcoded sedan-sized box at
+    yaw 0 for everything. Two of the three unknowns are answerable without a silhouette: the size from the
+    class prior, the yaw from the road.
+    """
+    from services.agent.cuboid_agent import fit_cuboid_at
+
+    try:
+        return await fit_cuboid_at(db, uuid.UUID(frame_id), body.u, body.v, body.class_name)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 @router.post("/agent/frames/{frame_id}/cuboids/plan", dependencies=[Depends(require_role("annotator"))])
 async def cuboids_plan(frame_id: str, body: CuboidIn | None = None, db: AsyncSession = Depends(db_session)):
     """Dry-run: which 2D vehicle/VRU boxes on this frame lift to a valid 3D cuboid (monocular, reprojection-

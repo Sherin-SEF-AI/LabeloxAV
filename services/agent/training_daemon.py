@@ -87,3 +87,37 @@ async def check_gold_drift(db: AsyncSession, *, tolerance: float = 0.03, task: s
                 "current_map": round(current, 4), "drop": round(drop, 4), "governance": res}
     return {"status": "healthy", "champion": champ.model_version, "baseline_map": round(baseline, 4),
             "current_map": round(current, 4), "drop": round(drop, 4)}
+
+async def maybe_check_gold_drift(db) -> dict:
+    """Off-hours hook for the runtime scheduler: the champion-degradation check, once per calendar day.
+
+    `check_gold_drift` has existed since the daemon work and sat behind `POST /api/agent/gold-drift`,
+    a button nobody presses. It is the only mechanism that catches a promoted champion regressing on the
+    gold yardstick after the fact, and its remedy path (killswitch engage: pause the loop, roll back to
+    the previous champion) already exists and is tested. A safety check that only runs when somebody
+    remembers to ask is a dashboard, not a check.
+
+    Recorded as an AgentRun the same way the other nightly agents are, so the once-per-day guard, the
+    audit trail and the morning digest all come from the shared spine rather than a private marker.
+    """
+    from datetime import UTC, datetime
+
+    from services.agent.runtime.report import finish_run, launch, ran_since
+
+    kind = "gold_drift_check"
+    day_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    if await ran_since(db, kind, day_start):
+        return {"ran": False, "reason": "already ran today"}
+
+    async def worker(run_id):
+        from db.session import get_sessionmaker
+
+        async with get_sessionmaker()() as wdb:
+            res = await check_gold_drift(wdb)
+        # `rolled_back` is the one outcome that must not drown in the nightly noise: the loop just
+        # unpromoted a model on its own. It is already audited and killswitched by check_gold_drift
+        # itself; the run status carries it to the digest.
+        await finish_run(run_id, status="committed" if res.get("status") != "error" else "error",
+                         report=res)
+
+    return {"ran": True, **(await launch(db, kind, worker, created_by="scheduler"))}

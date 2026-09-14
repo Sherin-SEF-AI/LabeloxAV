@@ -97,7 +97,13 @@ async def plan_cross_camera(db: AsyncSession, object_id: uuid.UUID, *, tol_ms: i
         action = "auto_accept" if vis >= high else "review"
         counts[action] += 1
         items.append({"cam_id": tf.cam_id, "frame_id": str(tf.frame_id), "action": action,
-                      "visibility": vis, "box": [round(v, 1) for v in box], "class_name": cname})
+                      "visibility": vis, "box": [round(v, 1) for v in box], "class_name": cname,
+                      # Also as a fraction of the target frame, because the only thing a caller can do
+                      # with a pixel box is draw it, and drawing it needs the frame's size. The projection
+                      # knows it here; a consumer would have to fetch the frame again to find out.
+                      "box_norm": [round(box[0] / max(1, tf.width), 5), round(box[1] / max(1, tf.height), 5),
+                                   round(box[2] / max(1, tf.width), 5), round(box[3] / max(1, tf.height), 5)],
+                      "frame_width": int(tf.width), "frame_height": int(tf.height)})
     return {"object_id": str(object_id), "class_name": cname, "cuboid_source": "existing" if src.cuboid_3d else "fitted",
             "counts": counts, "items": items}
 

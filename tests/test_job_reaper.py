@@ -24,8 +24,16 @@ from services.job_reaper import JOB_KINDS, is_stale, reap_stale_jobs, sweepable_
 
 pytestmark = pytest.mark.db
 
-FRESH = datetime.now(UTC)
-DEAD = datetime.now(UTC) - STALE_AFTER - timedelta(minutes=5)
+# Computed per call, not once at import. These were module constants, and `STALE_AFTER` is ten minutes:
+# on any suite run longer than that, `FRESH` had aged past the window by the time the test read it and
+# three tests failed with nothing wrong. That is a real failure mode rather than a local annoyance,
+# because a loaded CI machine is exactly where a suite takes longer than ten minutes.
+def fresh():
+    return datetime.now(UTC)
+
+
+def dead():
+    return datetime.now(UTC) - STALE_AFTER - timedelta(minutes=5)
 
 
 class _Row:
@@ -38,10 +46,10 @@ class _Row:
 
 class TestStaleness:
     def test_a_row_written_recently_is_alive(self):
-        assert is_stale(_Row(updated_at=FRESH)) is False
+        assert is_stale(_Row(updated_at=fresh())) is False
 
     def test_a_row_untouched_past_the_window_is_dead(self):
-        assert is_stale(_Row(updated_at=DEAD)) is True
+        assert is_stale(_Row(updated_at=dead())) is True
 
     def test_a_row_exactly_inside_the_window_is_left_alone(self):
         # Killing a slow job and letting a second copy start is worse than one more stale row.
@@ -50,15 +58,15 @@ class TestStaleness:
 
     def test_created_at_is_the_fallback_when_nothing_has_been_written(self):
         # A row that predates the mechanism must be judged rather than left running forever.
-        assert is_stale(_Row(updated_at=None, created_at=DEAD)) is True
-        assert is_stale(_Row(updated_at=None, created_at=FRESH)) is False
+        assert is_stale(_Row(updated_at=None, created_at=dead())) is True
+        assert is_stale(_Row(updated_at=None, created_at=fresh())) is False
 
     def test_a_row_with_no_timestamps_at_all_is_dead(self):
         assert is_stale(_Row()) is True
 
     def test_a_naive_timestamp_does_not_raise(self):
         # Postgres hands these back tz-aware, but a fixture or an older row may not.
-        assert is_stale(_Row(updated_at=DEAD.replace(tzinfo=None))) is True
+        assert is_stale(_Row(updated_at=dead().replace(tzinfo=None))) is True
 
 
 class TestWhichStatusesAreSwept:
@@ -99,7 +107,7 @@ class TestTheSweep:
     async def test_the_deadlock_clears(self):
         """The reported failure, end to end: a stale running row no longer blocks the next job."""
         async with get_sessionmaker()() as db:
-            jid = await _autolabel(db, "running", DEAD)
+            jid = await _autolabel(db, "running", dead())
             await reap_stale_jobs(db)
             row = await db.get(AutolabelJob, jid)
             await db.refresh(row)
@@ -109,7 +117,7 @@ class TestTheSweep:
     async def test_a_live_job_is_never_touched(self):
         """A second replica running its own jobs must survive this process starting."""
         async with get_sessionmaker()() as db:
-            jid = await _autolabel(db, "running", FRESH)
+            jid = await _autolabel(db, "running", fresh())
             await reap_stale_jobs(db)
             row = await db.get(AutolabelJob, jid)
             await db.refresh(row)
@@ -118,7 +126,7 @@ class TestTheSweep:
     async def test_a_job_that_never_started_is_reaped(self):
         """The 67-row case: committed, then the process died before the first progress write."""
         async with get_sessionmaker()() as db:
-            jid = await _autolabel(db, "pending", DEAD)
+            jid = await _autolabel(db, "pending", dead())
             await reap_stale_jobs(db)
             row = await db.get(AutolabelJob, jid)
             await db.refresh(row)
@@ -126,7 +134,7 @@ class TestTheSweep:
 
     async def test_a_finished_job_keeps_its_result(self):
         async with get_sessionmaker()() as db:
-            jid = await _autolabel(db, "done", DEAD)
+            jid = await _autolabel(db, "done", dead())
             await reap_stale_jobs(db)
             row = await db.get(AutolabelJob, jid)
             await db.refresh(row)
@@ -135,7 +143,7 @@ class TestTheSweep:
     async def test_an_existing_error_message_is_not_overwritten(self):
         """The original cause is more useful than the fact that the process later went away."""
         async with get_sessionmaker()() as db:
-            jid = await _autolabel(db, "running", DEAD)
+            jid = await _autolabel(db, "running", dead())
             await db.execute(AutolabelJob.__table__.update()
                              .where(AutolabelJob.job_id == jid).values(error="CUDA out of memory"))
             await db.commit()
@@ -151,7 +159,7 @@ class TestTheSweep:
             db.add(RelabelJob(job_id=jid, status="pending", model_version="reaper-test"))
             await db.commit()
             await db.execute(RelabelJob.__table__.update()
-                             .where(RelabelJob.job_id == jid).values(updated_at=DEAD))
+                             .where(RelabelJob.job_id == jid).values(updated_at=dead()))
             await db.commit()
             await reap_stale_jobs(db)
             row = await db.get(RelabelJob, jid)
@@ -165,7 +173,7 @@ class TestTheSweep:
             db.add(TrainingJob(job_id=jid, purpose="reaper-test", status="pending"))
             await db.commit()
             await db.execute(TrainingJob.__table__.update()
-                             .where(TrainingJob.job_id == jid).values(updated_at=DEAD))
+                             .where(TrainingJob.job_id == jid).values(updated_at=dead()))
             await db.commit()
             await reap_stale_jobs(db)
             row = await db.get(TrainingJob, jid)
@@ -181,7 +189,7 @@ class TestTheSweep:
                              spec={"format": "coco"}, checkpoint={"chunks_done": 3}))
             await db.commit()
             await db.execute(ExportJob.__table__.update()
-                             .where(ExportJob.job_id == jid).values(updated_at=DEAD))
+                             .where(ExportJob.job_id == jid).values(updated_at=dead()))
             await db.commit()
             await reap_stale_jobs(db)
             row = await db.get(ExportJob, jid)
@@ -192,7 +200,7 @@ class TestTheSweep:
     async def test_the_sweep_reports_what_it_did(self):
         """Silent recovery is how a recurring crash stays invisible."""
         async with get_sessionmaker()() as db:
-            jid = await _autolabel(db, "running", DEAD)
+            jid = await _autolabel(db, "running", dead())
             reaped = await reap_stale_jobs(db)
         assert str(jid) in reaped.get("autolabel", [])
 
@@ -203,7 +211,7 @@ class TestTheSweep:
                              source_uri="s3://x/y.mp4", target_vehicle="REAP-01"))
             await db.commit()
             await db.execute(ImportJob.__table__.update()
-                             .where(ImportJob.job_id == jid).values(updated_at=DEAD))
+                             .where(ImportJob.job_id == jid).values(updated_at=dead()))
             await db.commit()
             await reap_stale_jobs(db)
             row = await db.get(ImportJob, jid)

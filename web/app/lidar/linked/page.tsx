@@ -15,7 +15,10 @@ import SessionPicker from "@/components/lidar/SessionPicker";
 
 const PointCloudViewer = dynamic(() => import("@/components/lidar/PointCloudViewer"), { ssr: false });
 
-const CAM_W = 1280, CAM_H = 960;
+// The camera overlay's viewBox must be the frame's own pixel size. It was hardcoded to 1280x960, which
+// is right for the Tigor rig and wrong for every dashcam and imported session in the corpus: a 1920x1080
+// frame drew every projected box at two thirds scale and offset, and the boxes still looked like boxes.
+const FALLBACK_W = 1280, FALLBACK_H = 960;
 
 export default function LinkedWorkspacePage() {
   const [sessionId, setSessionId] = useState("");
@@ -30,11 +33,23 @@ export default function LinkedWorkspacePage() {
   const [similar, setSimilar] = useState<{ object_3d_id: string; dims_dist: number }[]>([]);
   const [classes, setClasses] = useState<OntologyClass[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [frameSize, setFrameSize] = useState<{ w: number; h: number } | null>(null);
 
   useEffect(() => { api.ontology().then((o) => setClasses(o.classes)).catch(() => {}); }, []);
 
   const frameId = useMemo(() => cuboids.find((c) => c.frame_id)?.frame_id || null, [cuboids]);
   const selected = useMemo(() => cuboids.find((c) => c.object_3d_id === selectedId) || null, [cuboids, selectedId]);
+
+  // The frame's real pixel size, for the overlay's viewBox. Falls back to the rig default only when the
+  // frame cannot be read, and a wrong size here silently misplaces every projected box.
+  useEffect(() => {
+    if (!frameId) { setFrameSize(null); return; }
+    let live = true;
+    api.frame(frameId)
+      .then((f) => { if (live && f.width && f.height) setFrameSize({ w: f.width, h: f.height }); })
+      .catch(() => { if (live) setFrameSize(null); });
+    return () => { live = false; };
+  }, [frameId]);
 
   const openCloud = useCallback(async (c: LidarCloud) => {
     setCloud(c);
@@ -169,7 +184,8 @@ export default function LinkedWorkspacePage() {
               <div className="relative h-full w-full">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={`/api/frames/${frameId}/image`} alt="cam_f" className="h-full w-full object-contain" />
-                <svg viewBox={`0 0 ${CAM_W} ${CAM_H}`} className="absolute inset-0 h-full w-full"
+                <svg viewBox={`0 0 ${frameSize?.w ?? FALLBACK_W} ${frameSize?.h ?? FALLBACK_H}`}
+                  className="absolute inset-0 h-full w-full"
                   preserveAspectRatio="xMidYMid meet">
                   {cuboids.map((c) => {
                     const b = projections[c.object_3d_id];

@@ -26,6 +26,9 @@ _MEDIA_READ_PATTERNS = (
     re.compile(r"^/api/frames/[^/]+/segment/overlay$"),
     re.compile(r"^/api/objects/[^/]+/crop$"),
     re.compile(r"^/api/predictions/[^/]+/crop$"),
+    # An asset's bytes, for the document and audio editors. Same reason as the frame image above: the
+    # editors render an <img>/<audio> pointing at this, and neither can set a header.
+    re.compile(r"^/api/assets/[^/]+/media$"),
 )
 
 

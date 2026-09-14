@@ -91,6 +91,15 @@ async def propagate_object(object_id: UUID, use_sam: bool = True) -> dict:
         src_calib = await resolve_calibration(session_id, src_cam, frame.width, frame.height)
         x0, y0, x1, y1 = [float(c) for c in src.bbox]
         base_px = ((x0 + x1) / 2.0, y1)
+
+        # Tier 2: when the object already has a lifted cuboid, project the cuboid rather than re-deriving
+        # a box from the ground plane. The ground path infers a 3D position from where the box touches the
+        # road, which fails for anything not standing on it and carries the flat-road assumption into every
+        # target view; a cuboid is already a 3D extent and projecting it is exact geometry.
+        cuboid = await _cuboid_for(db, object_id)
+        if cuboid is not None:
+            return await _propagate_cuboid(db, src, frame, grp, targets, cuboid, session_id, src_cam)
+
         p_base = _lift_ground(*base_px, src_calib)
         if p_base is None:
             return {"error": "the object's ground contact does not meet the road plane (projection needs a ground object)"}
@@ -116,7 +125,8 @@ async def propagate_object(object_id: UUID, use_sam: bool = True) -> dict:
                 continue
             top_uv = _project(p_top, cam, tf.width, tf.height, tcal) or (base_uv[0], base_uv[1] - 1)
             dist_tgt = float(np.linalg.norm(p_base - tcal.t())) or 1.0
-            box_h = abs(base_uv[1] - top_uv[1]) or (real_h * tcal.fy / dist_tgt)
+            # The box height comes from the projected base and top pixels below; a metric fallback was
+            # computed here and never read, so it is gone rather than left looking load-bearing.
             box_w = real_w * tcal.fx / dist_tgt
             uc = base_uv[0]
             box = [uc - box_w / 2.0, min(base_uv[1], top_uv[1]), uc + box_w / 2.0, max(base_uv[1], top_uv[1])]
@@ -198,3 +208,87 @@ def _sam_snap(img_uri: str, box: list[float]) -> list[float] | None:
     except Exception as exc:  # noqa: BLE001 - propagation must survive a missing GPU
         log.info("multicam.sam_snap_skipped", error=str(exc))
     return None
+
+
+async def _cuboid_for(db, object_id: UUID):
+    """The lifted cuboid attached to this 2D object, or None.
+
+    Only a cuboid a person or the gate has not rejected: a `rejected` 3D box is one somebody looked at and
+    said was wrong, and projecting it into four other views would multiply that mistake by four.
+    """
+    from db.models import Object3D
+
+    return (await db.execute(
+        select(Object3D).where(Object3D.object_id == object_id, Object3D.state != "rejected")
+        .order_by(Object3D.conf.desc()).limit(1))).scalars().first()
+
+
+async def _propagate_cuboid(db, src, frame, grp, targets: dict, cuboid, session_id, src_cam: str) -> dict:
+    """Project a cuboid into every other camera of the rig group. Tier 2, exact rather than inferred.
+
+    The box written in each target view is the axis-aligned hull of the cuboid's projected corners, which
+    is what a 2D box in that view means. Corners behind the camera are dropped rather than projected: a
+    point behind the lens maps to a plausible-looking pixel on the wrong side of the image, and a hull
+    including one is a box in the wrong place with nothing marking it as wrong.
+    """
+    from services.lidar.boxes import project_cuboid
+
+    frame_rows = {str(f.frame_id): f for f in (await db.execute(
+        select(Frame).where(Frame.frame_id.in_([UUID(fid) for fid in targets.values()])))).scalars().all()}
+
+    centre = [float(v) for v in cuboid.center]
+    dims = [float(v) for v in cuboid.dims]
+    results, created = [], []
+    for cam, fid in targets.items():
+        tf = frame_rows.get(fid)
+        if tf is None:
+            continue
+        tcal = await resolve_calibration(session_id, cam, tf.width, tf.height)
+        proj = project_cuboid(centre, dims, float(cuboid.yaw), cam, tf.width, tf.height,
+                              pitch=float(cuboid.pitch or 0.0), roll=float(cuboid.roll or 0.0),
+                              calib=tcal)
+        uv = [p for p, front in zip(proj["corners_uv"], proj["in_front"], strict=False) if front]
+        if len(uv) < 4 or not proj["any_in_image"]:
+            results.append({"cam": cam, "in_view": False,
+                            "reason": ("the cuboid is behind this camera" if len(uv) < 4
+                                       else "the cuboid projects outside this camera's image")})
+            continue
+        xs = [p[0] for p in uv]
+        ys = [p[1] for p in uv]
+        box = [max(0.0, min(xs)), max(0.0, min(ys)),
+               min(float(tf.width), max(xs)), min(float(tf.height), max(ys))]
+        if box[2] - box[0] < 2.0 or box[3] - box[1] < 2.0:
+            results.append({"cam": cam, "in_view": False,
+                            "reason": "the projected box is smaller than 2 px, which is not an annotation"})
+            continue
+        results.append({"cam": cam, "in_view": True, "box": [round(c, 1) for c in box],
+                        "corners_in_front": len(uv), "method": "cuboid_project"})
+        created.append({"frame_id": UUID(fid), "cam": cam, "box": box})
+
+    new_ids = []
+    for c in created:
+        o = Object(frame_id=c["frame_id"], class_id=src.class_id, bbox=[float(x) for x in c["box"]],
+                   conf=float(src.conf or 0.5), source="propagated", state="review",
+                   provenance={"from_object_id": str(src.object_id), "method": "cuboid_project",
+                               "object_3d_id": str(cuboid.object_3d_id), "src_cam": src_cam,
+                               # The cuboid's own confidence rides along: a box projected from a cuboid
+                               # the range check halved is not as good as one from a cuboid it did not.
+                               "cuboid_conf": float(cuboid.conf)})
+        db.add(o)
+        await db.flush()
+        new_ids.append((o.object_id, c["cam"]))
+    await db.commit()
+
+    if new_ids:
+        from services.multicam.rigident import link_objects
+
+        for oid, _cam in new_ids:
+            await link_objects(session_id, grp.group_id, [src.object_id, oid], source="cuboid_project")
+
+    out = {"source_object_id": str(src.object_id), "src_cam": src_cam, "tier": 2,
+           "method": "cuboid_project", "object_3d_id": str(cuboid.object_3d_id),
+           "cuboid": {"center": centre, "dims": dims, "yaw": float(cuboid.yaw),
+                      "conf": float(cuboid.conf)},
+           "targets": results, "created": [str(o) for o, _ in new_ids]}
+    log.info("multicam.propagated_cuboid", object_id=str(src.object_id), created=len(new_ids))
+    return out

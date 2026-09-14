@@ -102,6 +102,33 @@ async def _resolve_span(db: AsyncSession, track: Track, start_id: UUID, end_id: 
     return (a, b) if a.ts_ns <= b.ts_ns else (b, a)
 
 
+@router.get("/tracks/{track_id}/changepoints")
+async def track_changepoints_ep(track_id: str, source: str = "object_speed",
+                                db: AsyncSession = Depends(db_session)):
+    """Where this track's motion actually changes, as targets a span edge can snap to.
+
+    There was no changepoint detection anywhere in this repo. The nearest existing things answer a
+    different question: a threshold crossing is where a behaviour got big enough to notice, not where it
+    started.
+
+    `source=ego_speed` is the natural signal and refuses on this corpus, with the count: ego speed is set
+    on 6 frames of 41,752. It refuses rather than falling back, because a snap that silently used a
+    different signal would put span edges where nobody could explain them.
+
+    `source=object_speed` works, on 252,815 samples. Its noise is comparable to the events it is asked to
+    find, so every shift has to clear the series' own scatter and anything a slope explains better is
+    refused. Over 400 real tracks that leaves 86% with no changepoint at all.
+    """
+    import uuid as _uuid
+
+    from services.temporal.changepoint import track_changepoints
+
+    try:
+        return await track_changepoints(db, _uuid.UUID(track_id), source=source)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get("/tracks/{track_id}/events")
 async def list_events(track_id: UUID, db: AsyncSession = Depends(db_session)):
     """Every event on a track, earliest first, with the pack's vocabulary alongside.

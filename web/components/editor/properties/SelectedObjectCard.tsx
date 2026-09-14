@@ -36,7 +36,7 @@ const QUALITY_CLASS = {
 
 export default function SelectedObjectCard({
   object, onto, relationships, linkKind, linkFrom,
-  onLinkKind, onToggleLink, onDeleteRelationship, onSetAttr,
+  onLinkKind, onToggleLink, onDeleteRelationship, onSetAttr, onFitCuboid, onSetYaw, onClearAmodal,
 }: {
   object: EdObject;
   onto: Ontology;
@@ -47,6 +47,12 @@ export default function SelectedObjectCard({
   onToggleLink: () => void;
   onDeleteRelationship: (rid: string) => void;
   onSetAttr: (name: string, val: unknown) => void;
+  /** Fit a cuboid to this object's 2D box, using the monocular solve. */
+  onFitCuboid?: () => void;
+  /** Set the cuboid's yaw, in radians. */
+  onSetYaw?: (yaw: number) => void;
+  /** Take back the whole-extent box. */
+  onClearAmodal?: () => void;
 }) {
   const router = useRouter();
   const [explainOpen, setExplainOpen] = useState(false);
@@ -57,6 +63,7 @@ export default function SelectedObjectCard({
     ["polyline", !!object.polyline?.length],
     ["pose", !!object.keypoints],
     ["3D", !!object.cuboid_3d],
+    ["whole extent", !!object.bbox_amodal?.length],
     ["rotated", !!object.rot],
   ] as [string, boolean][]).filter(([, on]) => on);
 
@@ -114,6 +121,87 @@ export default function SelectedObjectCard({
           </div>
         </div>
       </div>
+
+      {/* The whole extent of a partly hidden object, when somebody has judged one.
+          Shown separately from the geometry chips above because it is the one piece of geometry here
+          that is a claim about what CANNOT be seen, and it is worth being able to take back. */}
+      {object.bbox_amodal?.length === 4 && (
+        <div className="flex items-center gap-2 bg-bg-2 border border-line rounded p-2 mb-1.5 font-mono text-[10px]">
+          <span className="text-ink-3 w-16 shrink-0">extent</span>
+          <span className="text-ink-2 truncate">
+            {Math.round(object.bbox_amodal[2] - object.bbox_amodal[0])} x{" "}
+            {Math.round(object.bbox_amodal[3] - object.bbox_amodal[1])} px
+            {object.bbox?.length === 4 && (
+              <span className="text-ink-3">
+                {" "}({Math.round(
+                  (100 * ((object.bbox_amodal[2] - object.bbox_amodal[0]) *
+                          (object.bbox_amodal[3] - object.bbox_amodal[1]))) /
+                  Math.max(1, (object.bbox[2] - object.bbox[0]) * (object.bbox[3] - object.bbox[1])) - 100,
+                )}% larger than what is visible)
+              </span>
+            )}
+          </span>
+          {onClearAmodal && (
+            <button onClick={onClearAmodal}
+              title="take back the whole-extent box; the visible box is unaffected"
+              className="ml-auto shrink-0 border border-line rounded px-1.5 py-0.5 text-ink-3 hover:border-block hover:text-block">
+              clear
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* The 3D box, and the way to get one.
+          The monocular solve has existed since cuboids were added and was reachable only as a frame-wide
+          agent run, so the one place an annotator works on a single object could not ask for it. */}
+      {(onFitCuboid || object.cuboid_3d) && (
+        <div className="flex flex-col gap-1.5 bg-bg-2 border border-line rounded p-2 mb-1.5 font-mono text-[10px]">
+          <div className="flex items-center gap-2">
+            <span className="text-ink-3 w-16 shrink-0">cuboid</span>
+            {object.cuboid_3d ? (
+              <span className="text-ink-2 truncate">
+                {object.cuboid_3d.size.map((v) => v.toFixed(1)).join(" x ")} m at{" "}
+                {object.cuboid_3d.center[0].toFixed(1)}, {object.cuboid_3d.center[1].toFixed(1)}
+              </span>
+            ) : (
+              <span className="text-ink-3">none</span>
+            )}
+            {onFitCuboid && (
+              <button onClick={onFitCuboid}
+                title="lift this box to a 3D cuboid: ground contact, class size prior, yaw fitted then snapped to the lane"
+                className="ml-auto shrink-0 border border-line rounded px-1.5 py-0.5 text-ink-2 hover:border-accent hover:text-accent">
+                {object.cuboid_3d ? "re-fit" : "fit"}
+              </button>
+            )}
+          </div>
+          {object.cuboid_3d && onSetYaw && (
+            <div className="flex items-center gap-2">
+              <span className="text-ink-3 w-16 shrink-0">yaw</span>
+              <input type="range" min={-Math.PI} max={Math.PI} step={0.01}
+                value={object.cuboid_3d.yaw}
+                onChange={(e) => onSetYaw(Number(e.target.value))}
+                aria-label="cuboid yaw"
+                className="flex-1" />
+              <span className="text-ink-2 tabular-nums w-10 text-right">
+                {Math.round((object.cuboid_3d.yaw * 180) / Math.PI)}&deg;
+              </span>
+            </div>
+          )}
+          {/* Where the yaw came from. A reprojection-fitted yaw is an inference from a silhouette and the
+              image box of a car seen head-on is nearly the box of one seen from behind, so it is worth
+              knowing which yaws were measured from the road instead. */}
+          {object.cuboid_3d?.yaw_source && (
+            <div className="flex items-center">
+              <span className="text-ink-3 w-16 shrink-0">yaw from</span>
+              <span className={object.cuboid_3d.yaw_source === "lane" ? "text-accent" : "text-ink-2"}>
+                {object.cuboid_3d.yaw_source === "lane" ? "the lane direction"
+                  : object.cuboid_3d.yaw_source === "reprojection" ? "reprojection (weak: a head-on and a rear view look alike)"
+                  : "not set"}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* M-F.0: why this label was decided the way it was, from real provenance. A new object has none. */}
       {!object.isNew && (

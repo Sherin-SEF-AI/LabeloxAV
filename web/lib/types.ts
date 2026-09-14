@@ -48,7 +48,7 @@ export type ObjectDetail = {
   rot_deg?: number;
   keypoints?: Keypoints | null;
   polyline?: number[][] | null;
-  cuboid_3d?: { center: number[]; size: number[]; yaw: number } | null;
+  cuboid_3d?: { center: number[]; size: number[]; yaw: number; yaw_source?: string } | null;
   // Sign typing and road text. Read-only: the classifier decides these and a reviewer corrects them by
   // re-running recognition. Absent until a sign has been typed, and null when it was examined and declined.
   sign_type?: string | null;
@@ -76,6 +76,53 @@ export type Ontology = {
   attribute_scope?: Record<string, string[]>;
   // per-class extras, unioned onto the l1 list above, for attributes l1 is too coarse to express
   attribute_scope_class?: Record<string, string[]>;
+};
+
+/** One attribute's coverage: how many objects it applies to, carry it, and are missing it. */
+export type AttrCoverage = {
+  attribute: string;
+  type: string;
+  values: unknown[] | null;
+  range: number[] | null;
+  /** true when the attribute describes the object rather than the moment, so one answer covers a track */
+  track_constant: boolean;
+  in_scope: number;
+  set: number;
+  missing: number;
+  classes: { class_id: number; class_name: string; missing: number }[];
+};
+
+export type AttrQueueItem = {
+  object_id: string;
+  frame_id: string;
+  track_id: string | null;
+  class_id: number;
+  class_name: string;
+  bbox: number[];
+  state: string;
+  source: string;
+  conf: number | null;
+  session_id: string;
+  cam_id: string | null;
+  attrs: Record<string, unknown>;
+  /** how many objects this one answer will land on: the track's members, or 1 */
+  covers: number;
+  crop_url: string;
+};
+
+export type AttrQueue = {
+  attribute: string;
+  type: string;
+  values: unknown[] | null;
+  range: number[] | null;
+  track_constant: boolean;
+  unit: "track" | "object";
+  class_name: string | null;
+  remaining: number;
+  /** objects with no track at all, which a track-unit sweep cannot reach */
+  untracked: number;
+  items: AttrQueueItem[];
+  reason?: string;
 };
 
 export type SessionRow = {
@@ -509,7 +556,9 @@ export type FrameObject = {
   track_id: string | null;
   class_id: number;
   class_name: string;
-  bbox: number[]; // xyxy
+  bbox: number[]; // xyxy, the VISIBLE extent
+  /** The whole extent including the occluded part, where somebody has judged it. Null means nobody has. */
+  bbox_amodal?: number[] | null;
   conf: number;
   quality_score?: number | null;
   state: string;
@@ -518,7 +567,7 @@ export type FrameObject = {
   rot_deg?: number;
   keypoints?: Keypoints | null;
   polyline?: number[][] | null;
-  cuboid_3d?: { center: number[]; size: number[]; yaw: number } | null;
+  cuboid_3d?: { center: number[]; size: number[]; yaw: number; yaw_source?: string } | null;
 };
 
 export type TrackItem = {
@@ -1274,4 +1323,108 @@ export type AgentRunRow = {
   heartbeat_at: string | null;
   fraction: number | null;
   error?: string | null;
+};
+
+// ---- autonomy (phase 3) ----
+export type LadderRung = {
+  class_name: string; class_id: number; level: number; basis: Record<string, unknown>;
+  set_by: string; pinned: boolean; cooldown_until: string | null; explicit: boolean;
+};
+export type SettlementAllocator = {
+  remaining: number; minutes: number; value: number; oc: number | null;
+};
+export type SettlementLotRow = {
+  lot_id: string; class_name: string; epoch: string; tier: string; far_bound: number;
+  population: number; sample_n: number; defects: number; skips: number; topups: number;
+  status: string; decision: Record<string, unknown>; spot_total: number; spot_defects: number;
+  batch_id: string | null; review_at: string | null; spot_review_at: string | null;
+  created_at: string | null; decided_at: string | null;
+  // the sequential rule: 'wilson' for lots planned as one fixed draw, 'sprt' for incremental ones
+  rule: "wilson" | "sprt"; cap_n: number; llr: number | null; sample_drawn: number;
+  sprt: { p0?: number; p1?: number; alpha?: number; beta?: number; bound_accept?: number;
+          bound_reject?: number; expected_remaining?: number; oc?: number;
+          trajectory?: { n: number; defects: number; llr: number; at: string }[] };
+  increments: { at: string; added: number; n_after: number; kind?: string }[];
+  allocator: SettlementAllocator;
+};
+export type SettlementWorkItem = {
+  lot_id: string; class_name: string; batch_id: string | null; tier: string; rule: string;
+  population: number; sample_n: number; defects: number; drawn: number; cap_n: number;
+  llr: number | null; bound_accept: number | null; bound_reject: number | null;
+  remaining_verdicts: number; minutes: number; value: number; oc: number | null;
+  review_at: string | null;
+};
+export type ShadowWinShare = {
+  challenger_run_id: string; n_adjudicated: number; champion_right: number; challenger_right: number;
+  both_right: number; both_wrong: number; discordant: number;
+  // measured is false until people have ruled on a disagreement in one direction or the other. The
+  // share is then absent rather than zero, because nobody having looked is not the same as a loss.
+  measured: boolean; reason?: string; share?: number; lo?: number; hi?: number;
+};
+export type ShadowSummary = {
+  sweeps: { run_id: string; status: string; created_at: string | null;
+            report: Record<string, unknown> }[];
+  disagreements_by_state: Record<string, number>;
+  disagreements_by_kind: Record<string, number>;
+  win_shares: ShadowWinShare[];
+};
+export type AutonomyState = {
+  switches: {
+    loop_enabled: boolean; auto_accept_enabled: boolean; auto_promote_enabled: boolean;
+    settlement_enabled: boolean; paused_reason: string | null; champion_version: string | null;
+  };
+  daemon: { alive: boolean; last_tick_at: string | null; seconds_since: number | null;
+            last_status?: string; detail?: string };
+  ladder: LadderRung[];
+  measurements: {
+    control_precision: { reviewed: number; incorrect: number; precision: number | null;
+                         pending: number; measured_at: string | null;
+                         interval: { p: number | null; lo: number; hi: number } };
+    class_precision: { class_name: string; measured_at: string; age_days: number;
+                       verdicts: number }[];
+    judge_calibration: { measured_at: string | null; verdicts: number; age_days: number | null };
+    active_fitted_thresholds: number;
+  };
+  settlement: { lots_by_status: Record<string, number>; settled_objects: number;
+                settlement_runs: Record<string, number>; revert_rate: number | null;
+                worklist: SettlementWorkItem[]; verdict_minutes_open: number };
+  shadow: ShadowSummary;
+  last_digest: { run_id: string; status: string; created_at: string | null;
+                 report: Record<string, unknown> } | null;
+  journal: { kind: string; status: string; created_at: string | null; run_id: string }[];
+};
+
+
+// Ego trajectory (migration 0112). `measured` is the load-bearing field and is not a grade: true means
+// an instrument observed position, false means it was recovered from the images, which is the only
+// source available for almost this whole corpus. `quality` grades within a source and never replaces it.
+export type EgoPosePoint = {
+  ts_ns: number; frame_id: string | null;
+  x: number; y: number; z: number; qw: number; qz: number;
+  speed_mps: number | null; yaw_rate: number | null;
+  quality: number | null; measured: boolean;
+};
+export type EgoTrajectory = {
+  session_id: string; poses: number; measured: number;
+  source: string | null; points: EgoPosePoint[];
+};
+export type EgoCoverage = {
+  real_selected_frames: number; pseudo_clouds: number; cloud_coverage: number | null;
+  ego_poses: number; ego_poses_measured: number; object_3d: number; track_3d: number;
+};
+
+
+// 4D occupancy (migration 0113). `flow_share` is the load-bearing field: it is how much of the occupied
+// space carries a velocity a track actually spoke for, and the rest is an assumed zero. A viewer drawing
+// arrows from a field that is 3% real and 97% assumption would be drawing confidence nobody has.
+export type OccupancyGridRow = {
+  grid_id: string; ts_ns: number; frame_id: string | null;
+  origin: number[]; voxel_m: number; dims: number[]; source: string;
+  occupied: number; flow_voxels: number; flow_share: number | null;
+  placed_by_pose: boolean;
+};
+export type OccupancyVoxels = {
+  grid_id: string; ts_ns: number; voxel_m: number; origin: number[]; dims: number[];
+  n: number; total: number; truncated: boolean;
+  voxels: number[][]; flow: number[][]; placed_by_pose: boolean;
 };

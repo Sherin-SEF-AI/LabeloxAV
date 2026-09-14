@@ -80,11 +80,34 @@ async def _build_context(db: AsyncSession, frame: Frame, objs: list[Object]) -> 
     )
 
 
-def _obj_decision(obj: Object, critic_ok: bool, th: PolicyThresholds) -> Decision:
+def _obj_decision(obj: Object, critic_ok: bool, th: PolicyThresholds, onto,
+                  fitted: dict[int, float] | None) -> Decision:
     prov = obj.provenance or {}
     agreement = bool(prov.get("agreement"))
     quality_ok = not (prov.get("quality_flags") or [])
-    return decide(float(obj.conf), agreement, quality_ok, critic_ok, th)
+    # Per class, through the gate's own resolution, so a measured ThresholdFit reaches the agent and a
+    # safety class gets its stricter bound here exactly as it would at labelling time.
+    return decide(float(obj.conf), agreement, quality_ok, critic_ok,
+                  th.for_class(int(obj.class_id), onto, fitted))
+
+
+async def _fitted_thresholds(db: AsyncSession) -> dict[int, float]:
+    """The active per-class operating points for the current champion, or empty.
+
+    The same resolution `services/autolabel/runner.py` does at the top of an autolabel run, for the same
+    reason: fitted thresholds live per model, and the agent re-deciding stored objects should hold them
+    to the bar the current champion is held to.
+    """
+    try:
+        from services.govern.registry import get_champion
+        from services.oraclyx.threshold_fit import active_thresholds
+
+        champ = await get_champion(db, "detection")
+        if champ is None:
+            return {}
+        return (await active_thresholds(db, champ.model_version))["by_class"]
+    except Exception:  # noqa: BLE001 - no registry / no fits: the config fallback is the normal case
+        return {}
 
 
 async def plan_frame(db: AsyncSession, frame_id: uuid.UUID, th: PolicyThresholds | None = None,
@@ -100,6 +123,7 @@ async def plan_frame(db: AsyncSession, frame_id: uuid.UUID, th: PolicyThresholds
 
     from services.autolabel.ontology import get_ontology
     onto = get_ontology()
+    fitted = await _fitted_thresholds(db)
 
     items: list[dict] = []
     counts = {"total": len(objs), "auto_accept": 0, "review": 0, "annotate": 0,
@@ -107,7 +131,7 @@ async def plan_frame(db: AsyncSession, frame_id: uuid.UUID, th: PolicyThresholds
     check_tally: dict[str, int] = {}
     for obj in objs:
         v = verdicts[str(obj.object_id)]
-        dec = _obj_decision(obj, v.ok, th)
+        dec = _obj_decision(obj, v.ok, th, onto, fitted)
         counts[dec.action] = counts.get(dec.action, 0) + 1
         if not v.ok:
             counts["demoted_by_critic"] += 1

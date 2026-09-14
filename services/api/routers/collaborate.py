@@ -14,9 +14,22 @@ from versioning import lakefs_store as L
 router = APIRouter()
 
 
+# lakeFS is optional: the assignment, task and merge-request plane is all in Postgres and works without
+# it, and only the per-annotator branch listing needs it. With lakeFS down this route raised a bare 500
+# with no reason on it, found by sweeping every GET route against the live system. Everything else in
+# this codebase that depends on an optional service refuses with the reason instead, so this does too.
+def _lakefs_unavailable(exc: Exception) -> HTTPException:
+    return HTTPException(503, "lakeFS is not reachable, so annotator branches cannot be listed. "
+                              "Assignments, tasks and merge requests do not need it and are unaffected. "
+                              f"({type(exc).__name__})")
+
+
 @router.get("/collaborate/branches")
 async def branches():
-    return {"branches": L.list_branches()}
+    try:
+        return {"branches": L.list_branches()}
+    except Exception as exc:  # noqa: BLE001 - any transport failure is the same answer to the caller
+        raise _lakefs_unavailable(exc) from exc
 
 
 @router.get("/collaborate/assignments")
