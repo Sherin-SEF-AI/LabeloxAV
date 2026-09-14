@@ -1,0 +1,23 @@
+#!/bin/sh
+# On remove, dpkg has already deleted the packaged files. What it leaves behind are the things the
+# install created at runtime: the generated secrets, the admin token, and Python bytecode caches.
+# Removing a package should not destroy someone's configuration, so those survive a plain remove and
+# go only on purge. The containers' data lives in Docker volumes and is never touched here at all;
+# the message says how to remove it, because a package that silently deleted a database would be worse
+# than one that left a stray file.
+set -e
+case "$1" in
+  purge)
+    rm -f /opt/labeloxav/.env /opt/labeloxav/.admin-token
+    find /opt/labeloxav -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
+    rmdir /opt/labeloxav 2>/dev/null || true
+    ;;
+  remove)
+    cat <<MSG
+LabeloxAV's files are removed. Its configuration (/opt/labeloxav/.env) was kept; purge removes it.
+The containers' data is in Docker volumes and was not touched. To remove it as well:
+  docker compose -f /opt/labeloxav/docker-compose.yml -f /opt/labeloxav/docker-compose.app.yml down -v
+MSG
+    ;;
+esac
+exit 0

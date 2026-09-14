@@ -1,0 +1,21 @@
+Package: labeloxav
+Version: @VERSION@
+Section: science
+Priority: optional
+Architecture: all
+Depends: docker.io | docker-ce, docker-compose-v2 | docker-compose-plugin, curl
+Recommends: openssl
+Installed-Size: @INSTALLED_SIZE@
+Maintainer: Sherin Joseph Roy <sherin.srambickal@gmail.com>
+Homepage: https://sherin-sef-ai.github.io/LabeloxAV/
+Description: India-native data engine for autonomous driving
+ LabeloxAV turns dashcam and sensor footage into labelled training data:
+ auto-labelling behind a confidence gate, human review, object tracking,
+ 3D from LiDAR or estimated depth, HD map export, and a governed
+ retraining loop. The ontology is built for Indian roads.
+ .
+ This package installs the source tree under /opt/labeloxav and the
+ `labeloxav` command. The product itself runs as Docker containers built
+ from that tree; run `sudo labeloxav install` once, then open
+ http://localhost:3000. No GPU is required for annotation, review, search
+ and export. Model paths that need CUDA refuse rather than pretend.

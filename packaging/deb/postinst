@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+if [ "$1" = "configure" ]; then
+  cat <<MSG
+
+LabeloxAV is unpacked under /opt/labeloxav. Nothing is running yet.
+
+  Next:   sudo labeloxav install
+  Then:   open http://localhost:3000
+
+The first install builds the container images, which takes a few minutes and needs
+Docker running. Everything after that is: labeloxav up | down | status | logs.
+
+MSG
+fi
+exit 0

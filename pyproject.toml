@@ -2,6 +2,7 @@
 name = "labeloxav"
 version = "0.1.0"
 description = "LabeloxAV: India-specific autonomous-driving data engine (single-box edition)"
+license = {file = "LICENSE"}
 requires-python = ">=3.11,<3.12"
 
 # Base runtime. Heavy ML/GPU wheels live in the [project.optional-dependencies] ml extra
