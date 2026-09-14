@@ -44,7 +44,7 @@ which puts the tree under `/opt/labeloxav` and gives you a `labeloxav` command. 
 the product runs as containers either way.
 
 ```bash
-sudo apt install ./labeloxav_0.1.0_all.deb
+sudo apt install ./labeloxav_0.1.1_all.deb
 sudo labeloxav install
 labeloxav url
 ``` No GPU needed to install: annotation, review, governance, export, and search

@@ -21,7 +21,11 @@ COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
 
 WORKDIR /app
 # Install base deps first (cached until pyproject changes), then the source.
-COPY pyproject.toml README.md ./
+# Everything the package metadata reads has to be here before the first install, because hatchling
+# opens the readme and the licence file while building it. The licence was added to pyproject after this
+# line was written, and the build failed with 'License file does not exist' in a release package that a
+# clean install had otherwise reached. tests/test_dockerfile_metadata_inputs.py keeps the two in step.
+COPY pyproject.toml README.md LICENSE ./
 # --no-cache: uv otherwise leaves its downloaded wheels in /root/.cache, which was 2.3GB of an
 # image that never reads them again.
 RUN uv venv && uv pip install --no-cache -e "."
@@ -48,7 +52,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
 WORKDIR /app
-COPY pyproject.toml README.md ./
+# Everything the package metadata reads has to be here before the first install, because hatchling
+# opens the readme and the licence file while building it. The licence was added to pyproject after this
+# line was written, and the build failed with 'License file does not exist' in a release package that a
+# clean install had otherwise reached. tests/test_dockerfile_metadata_inputs.py keeps the two in step.
+COPY pyproject.toml README.md LICENSE ./
 # The ml extra pins the cu128 wheels this base matches.
 RUN uv venv --python 3.11 && uv pip install --no-cache -e ".[ml]"
 COPY . .

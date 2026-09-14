@@ -225,7 +225,7 @@ tree, so Docker remains a dependency. The package is a predictable way to get th
 and drive it, not a set of native services.
 
 ```bash
-sudo apt install ./labeloxav_0.1.0_all.deb
+sudo apt install ./labeloxav_0.1.1_all.deb
 sudo labeloxav install     # first time only
 labeloxav up | down | status | logs [service] | token <user> | url
 ```
