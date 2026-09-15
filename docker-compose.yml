@@ -27,7 +27,12 @@ services:
     shm_size: 512m
 
   minio:
-    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    # Pulled from quay.io, not Docker Hub. MinIO's Docker Hub repositories were withdrawn, so
+    # `minio/minio` no longer resolves anywhere, and a machine without a cached copy stopped at
+    # "Starting infrastructure" with "pull access denied". Every fresh install failed there, from
+    # the Debian package and from a git clone alike. quay.io serves the same release under the same
+    # tag, and it is the same image: identical image ID and the same MinIO commit.
+    image: quay.io/minio/minio:RELEASE.2024-10-13T13-34-11Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-labelox}
@@ -46,7 +51,7 @@ services:
 
   # One-shot: create the bucket so `docker compose up` leaves a ready store.
   minio-init:
-    image: minio/mc:RELEASE.2024-10-08T09-37-26Z
+    image: quay.io/minio/mc:RELEASE.2024-10-08T09-37-26Z   # quay.io for the same reason as minio above
     depends_on:
       minio:
         condition: service_healthy

@@ -26,6 +26,11 @@ jobs:
           v="v$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)"
           test "$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME but pyproject says $v" >&2; exit 1; }
 
+      # Every image a fresh install pulls has to exist. MinIO withdrew its Docker Hub repositories and
+      # v0.1.0 shipped pointing at them; the machine it was built on had cached copies, so nothing noticed.
+      - name: Every pulled image still resolves
+        run: python3 -m pip install -q pyyaml && python3 scripts/check_images.py
+
       - name: Build and check the package
         run: ./scripts/build_deb.sh --check
 
