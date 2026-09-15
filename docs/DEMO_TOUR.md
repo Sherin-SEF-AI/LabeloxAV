@@ -81,6 +81,52 @@ The pieces:
 - `postprocess.py` runs tracking, embedding, ego pose, the three dimensional lift and occupancy over
   the tour's sessions, so the later chapters narrate features over pages that have something on them.
 
+## The edited cut
+
+`scripts/demo_tour/produce.py` turns the raw recording into a finished film: an animated intro, a card
+for each of the twelve chapters, cross-dissolves between scenes, a progress bar, chapter marks, a music
+bed that ducks under the narration, and an outro. It edits the footage already recorded and never touches
+the running system, so the numbers spoken are still the ones read from the database on the day of
+recording.
+
+```bash
+.venv/bin/python scripts/demo_tour/produce.py plan   # scene list, captions matched, zoom per scene
+.venv/bin/python scripts/demo_tour/produce.py all    # builds .scratch/demo/pro/labeloxav-tour-pro.mp4
+```
+
+The interface sits in a rounded frame on a designed canvas rather than filling the screen. The first cut
+burned captions over the bottom of every page, covering the part being described; here captions live in
+the margin below the frame and the chapter and scene name in the margin above.
+
+About a fifth of the recorded pages put a small panel in one corner of a large empty screen. Each scene
+is sampled at three moments, the region holding content is measured, and where that region is small the
+frame eases in on it after a beat. 24 of the 75 scenes are zoomed. The move interpolates the edges of the
+visible rectangle rather than a centre and a zoom level: the first version did the latter, and the view
+swung sideways part way through, cutting off the panel it was zooming towards.
+
+Titles and cards are HTML rendered frame by frame by headless Chromium, with every animation paused and
+its clock set explicitly per frame, so the timing is exact on every run rather than depending on what a
+screen recorder happened to capture. Type is Space Grotesk, the web app's own typeface; the palette is
+sampled from the logo.
+
+Audio stays lossless until the final encode. The film joins 89 clips, and AAC pads every stream to a whole
+frame, which left compressed would walk the voice out of sync by up to two seconds by the end. Measured on
+the finished film by cross-correlating six narration clips against the soundtrack at their scheduled
+times, from the first scene to the last, the worst offset is 0 ms.
+
+The music is synthesised, so there is no licence to track, and it was levelled by measurement because the
+film was produced without listening to it. Measured as ungated RMS, it sits 14.8 to 19.0 dB under the
+voice while the voice speaks and comes up to carry the intro, cards and outro. Integrated LUFS was the
+wrong instrument for this: its relative gate discards quiet passages, so the harder the music ducked, the
+louder that reading claimed it was.
+
+| | |
+| --- | --- |
+| length | 21 minutes 10 seconds |
+| loudness | -15 LUFS, peak -1.2 dBFS |
+| chapter marks | 14 |
+| size | 108 MB, over GitHub's 100 MB file limit, so the film is not committed |
+
 ## Three decisions worth knowing about
 
 **The browser records itself.** This machine runs a Wayland session, where an X11 grab of `:0` sees
