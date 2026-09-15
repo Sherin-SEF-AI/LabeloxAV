@@ -15,7 +15,7 @@ permissions:
 jobs:
   deb:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,6 +48,29 @@ jobs:
             dpkg -r labeloxav
             test ! -e /usr/bin/labeloxav
           '
+
+      # The test that would have stopped both v0.1.0 defects. Installing the package and running its
+      # launcher, which the step above does, passed for a package that could not finish installing: the
+      # image build failed on a missing licence file, and after that the MinIO images no longer existed
+      # on Docker Hub. Only bringing the whole product up from the package catches either. The runner
+      # has Docker from GitHub's own packages rather than docker.io or docker-ce, so the package's
+      # dependency line is satisfied by what is already installed; apt resolution of that line was
+      # verified separately on a clean Ubuntu 24.04.
+      - name: Install the package on this runner and bring the product up
+        run: |
+          sudo dpkg -i --force-depends dist/*.deb
+          sudo labeloxav install
+          for i in $(seq 1 60); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:8000/api/health)" = 200 ] && break
+            sleep 5
+          done
+          curl -fsS --max-time 10 http://localhost:8000/api/health
+          echo
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 http://localhost:3000/)" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://localhost:8000/api/sessions)" = 401
+          tok="$(sudo grep -o 'lbx2\.[A-Za-z0-9._-]*' /opt/labeloxav/.admin-token | head -1)"
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H "Authorization: Bearer $tok" http://localhost:8000/api/sessions)" = 200
+          sudo labeloxav down
 
       - name: Publish the release
         env:
