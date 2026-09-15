@@ -114,10 +114,17 @@ frame, which left compressed would walk the voice out of sync by up to two secon
 the finished film by cross-correlating six narration clips against the soundtrack at their scheduled
 times, from the first scene to the last, the worst offset is 0 ms.
 
-The music is synthesised, so there is no licence to track, and it was levelled by measurement because the
-film was produced without listening to it. Measured as ungated RMS, it sits 14.8 to 19.0 dB under the
-voice while the voice speaks and comes up to carry the intro, cards and outro. Integrated LUFS was the
-wrong instrument for this: its relative gate discards quiet passages, so the harder the music ducked, the
+The music is three tracks by Kevin MacLeod from incompetech.com: "Beauty Flow" under the intro and the
+closing chapters, "Space Jazz" from Review, and "Sincerely" from Measurement, each change a three second
+crossfade centred on a chapter card. They are licensed under Creative Commons Attribution 4.0, so the
+outro carries the credit, and any upload must repeat it in its description. The pipeline downloads them
+into the work directory on first run and levels each to the same loudness before mixing.
+
+The mix was levelled by measurement because the film was produced without listening to it. Measured as
+ungated RMS, the music sits 14.2 to 17.8 dB under the voice across three different passages, and comes
+up about 4 dB for the intro and outro. The ducking is a gentle 4:1: at 14:1 the bed fell 30 dB under
+dense speech and swelled back in every pause, which is audible pumping. Integrated LUFS was the wrong
+instrument for this: its relative gate discards quiet passages, so the harder the music ducked, the
 louder that reading claimed it was.
 
 | | |

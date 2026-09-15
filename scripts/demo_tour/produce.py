@@ -341,7 +341,8 @@ def render_graphics(scenes: list[SceneClip]) -> None:
                           seconds=CARD_S))
     jobs.append(B.Job(B.intro_html([st("lidar_annotate"), st("frame_editor"), st("discovery"), st("review_grid")]),
                       g / "intro", seconds=INTRO_S))
-    jobs.append(B.Job(B.outro_html([st("lidar_linked"), st("map"), st("analytics")], VERSION), g / "outro", seconds=OUTRO_S))
+    jobs.append(B.Job(B.outro_html([st("lidar_linked"), st("map"), st("analytics")], VERSION, CREDIT), g / "outro",
+                      seconds=OUTRO_S))
     todo = [j for j in jobs if not (j.out.exists() and (j.seconds <= 0 or len(list(j.out.glob("*.jpg"))) == int(round(j.seconds * FPS))))]
     print(f"graphics: {len(jobs) - len(todo)} cached, rendering {len(todo)}")
     if todo:
@@ -441,57 +442,68 @@ def xfade_chain(parts: list[tuple[Path, float]], fades: list[float], out: Path, 
 
 # ------------------------------------------------------------------ music
 
-def synth_music(seconds: float, path: Path) -> None:
-    """A slow ambient bed: four sustained chords with soft attacks, no drums, no melody to compete with speech.
+# Composed tracks by Kevin MacLeod, from incompetech.com under Creative Commons Attribution 4.0, which
+# requires the credit that CREDIT carries onto the outro. Chosen by measurement rather than by ear, since
+# this was produced without listening: steady level (loudness range 1.8 to 4.4 LU), no vocals or novelty
+# instruments, and enough forward motion to carry a product demo without sounding like a meditation app.
+# Tracks that swung 14 dB between quiet passages and swells, or sat bright enough to crowd the voice's
+# frequencies, were measured and left out.
+#
+# Each entry is the chapter whose card the track takes over at, the track, and where in the track to
+# start. Hand-overs happen on chapter cards because nobody is speaking there, so the change is heard as
+# a new section rather than as a cut under a sentence. Beauty Flow returns for the last act from further
+# into the piece, so the film ends on the theme it opened with without repeating its first bars.
+MUSIC_SOURCE = "https://incompetech.com/music/royalty-free/mp3-royaltyfree/"
+MUSIC_PLAN = [("Intro", "Beauty Flow", 0.0), ("Review", "Space Jazz", 0.0),
+              ("Measurement", "Sincerely", 0.0), ("Export and privacy", "Beauty Flow", 150.0)]
+MUSIC_XF = 3.0
+CREDIT = ("Music: \u201cBeauty Flow\u201d, \u201cSpace Jazz\u201d, \u201cSincerely\u201d by Kevin MacLeod (incompetech.com). "
+          "Licensed under Creative Commons: By Attribution 4.0.")
 
-    Generated rather than sourced, so there is no licence to track for a film that is meant to be shared.
-    It is deliberately plain; a composed track can replace `music.wav` without touching anything else.
-    """
+
+def _track(title: str) -> Path:
+    import urllib.parse
+    import urllib.request
+
+    path = WORK / "music" / f"{title}.mp3"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        urllib.request.urlretrieve(MUSIC_SOURCE + urllib.parse.quote(f"{title}.mp3"), path)
+    return path
+
+
+def _loudness(path: Path) -> float:
+    err = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-af", "ebur128", "-f", "null", "-"],
+                         capture_output=True, text=True).stderr
+    return float(next(ln.split(":")[1].split()[0] for ln in reversed(err.splitlines()) if ln.strip().startswith("I:")))
+
+
+def music_bed(items: list[Item], total: float, path: Path) -> None:
+    """Lay the planned tracks end to end, each levelled to the same loudness, crossfading on chapter cards."""
     if path.exists():
         return
-    sr, chord_s, fade = 48000, 8.0, 3.0
-    n = int((seconds + 2) * sr)
-    out = np.zeros((n, 2), np.float32)
-    midi = lambda m: 440.0 * 2 ** ((m - 69) / 12)  # noqa: E731
-    chords = [[45, 52, 60, 64, 71], [41, 48, 57, 64, 67], [48, 55, 62, 64, 67], [43, 50, 59, 62, 69]]
-    step = chord_s
-    k = 0
-    t_start = 0.0
-    while t_start < seconds + 2:
-        notes = chords[k % len(chords)]
-        length = chord_s + fade
-        m = int(length * sr)
-        i0 = int(t_start * sr)
-        m = min(m, n - i0)
-        if m <= 0:
-            break
-        t = np.arange(m, dtype=np.float32) / sr
-        env = np.minimum(1.0, t / fade) * np.minimum(1.0, (length - t) / fade)
-        env = (np.sin(env * np.pi / 2) ** 2).astype(np.float32)
-        bright = 0.5 + 0.5 * np.sin(2 * np.pi * (t_start + t) / 32.0)
-        sig = np.zeros((m, 2), np.float32)
-        for j, note in enumerate(notes):
-            f = midi(note)
-            amp = 0.9 if j == 0 else 0.55
-            for ch, det in ((0, -0.0012), (1, 0.0012)):
-                ff = f * (1 + det)
-                ph = 2 * np.pi * ff * t
-                sig[:, ch] += amp * (np.sin(ph) + (0.22 + 0.12 * bright) * np.sin(2 * ph) + 0.06 * np.sin(3 * ph))
-        root = midi(notes[0] - 12)
-        sig += (0.55 * np.sin(2 * np.pi * root * t))[:, None]
-        out[i0:i0 + m] += sig * env[:, None]
-        t_start += step
-        k += 1
-    out /= np.abs(out).max() + 1e-9
-    out *= 0.5
-    import wave
-
+    starts = []
+    for chapter, title, offset in MUSIC_PLAN:
+        at = 0.0 if chapter == "Intro" else next(it.start for it in items if it.kind == "card" and it.ref == chapter)
+        starts.append((at, title, offset))
+    args, graph = [], []
+    for i, (at, title, offset) in enumerate(starts):
+        end = starts[i + 1][0] if i + 1 < len(starts) else total
+        # Each piece runs past its hand-over by half the crossfade and starts that much early, so the fade
+        # is centred on the card rather than on the scene before it.
+        length = (end - at) + (MUSIC_XF if 0 < i + 1 < len(starts) else MUSIC_XF / 2) + (MUSIC_XF / 2 if i else 0)
+        track = _track(title)
+        gain = -20.0 - _loudness(track)
+        args += ["-ss", f"{offset:.2f}", "-t", f"{length:.2f}", "-i", str(track)]
+        graph.append(f"[{i}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume={gain:.2f}dB[m{i}]")
+    cur = "m0"
+    for i in range(1, len(starts)):
+        graph.append(f"[{cur}][m{i}]acrossfade=d={MUSIC_XF}:c1=qsin:c2=qsin[j{i}]")
+        cur = f"j{i}"
+    graph.append(f"[{cur}]apad,atrim=duration={total:.3f}[out]")
     path.parent.mkdir(parents=True, exist_ok=True)
-    with wave.open(str(path), "wb") as w:
-        w.setnchannels(2)
-        w.setsampwidth(2)
-        w.setframerate(sr)
-        w.writeframes((out[: int(seconds * sr)] * 32767).astype(np.int16).tobytes())
+    run(["ffmpeg", "-y", "-v", "error", *args, "-filter_complex", ";".join(graph), "-map", "[out]",
+         "-c:a", "pcm_s16le", str(path)])
 
 
 # ------------------------------------------------------------------ steps
@@ -558,7 +570,10 @@ def build() -> Path:
         print(f"  chapter {n:02d} {ch}: {len(members) - 1} scenes, {length:.1f}s")
     top.append((clip_paths[len(items) - 1], items[-1].dur))
 
-    synth_music(total, WORK / "music.wav")
+    import hashlib
+
+    bed = WORK / f"music-{hashlib.sha1(repr(MUSIC_PLAN).encode()).hexdigest()[:8]}.wav"
+    music_bed(items, total, bed)
     chapters_meta = WORK / "chapters.txt"
     lines = [";FFMETADATA1", "title=LabeloxAV: a tour of every screen", "artist=Sherin Joseph Roy"]
     marks = [("Intro", 0.0)] + [(ch, next(it.start for it in items if it.kind == "card" and it.ref == ch))
@@ -574,18 +589,24 @@ def build() -> Path:
     m = len(top)
     # Levels were measured rather than set by ear, because this was produced without listening, and measured
     # as ungated RMS: integrated LUFS gates out quiet passages, so the harder the music ducks under speech
-    # the more of it the gate discards, and the reading rises as the music falls. At volume 0.55 with a 9:1
-    # duck the bed sat 9.8 dB under the voice during speech, too close for dense narration from a synthetic
-    # voice. These settings measure 14.8 to 19.0 dB under the voice while it speaks, and about 6 dB under
-    # the voice's level on their own in the intro, the cards and the outro.
-    tail = (f"[{m}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.34,"
+    # the more of it the gate discards, and the reading rises as the music falls.
+    #
+    # The ducking is deliberately gentle. A 14:1 compressor put the bed 16 dB under the voice in one passage
+    # and 30 dB under in a denser one, so the music vanished under long sentences and swelled back in every
+    # pause, which is the pumping that makes a narrated film sound amateur. At 4:1 with a soft knee it sits
+    # 14.2, 17.8 and 16.0 dB under the voice across three quite different passages. The intro and outro get
+    # about 4 dB more, ramped over a second and a half, so the opening carries at close to voice level
+    # (2.4 dB under) without that lift ever sitting under a sentence.
+    outro_at = items[-1].start
+    lift = f"0.5*(1+0.6*clip((9.5-t)/1.5\\,0\\,1)+0.6*clip((t-{outro_at - 0.75:.2f})/1.5\\,0\\,1))"
+    tail = (f"[{m}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume='{lift}':eval=frame,"
             f"afade=t=in:d=2,afade=t=out:st={max(0, total - 3.5):.2f}:d=3.5[mus];"
             f"[{{a}}]asplit=2[nar][key];"
-            f"[mus][key]sidechaincompress=threshold=0.012:ratio=14:attack=20:release=800[duck];"
+            f"[mus][key]sidechaincompress=threshold=0.03:ratio=4:attack=40:release=900:knee=6[duck];"
             f"[nar][duck]amix=inputs=2:duration=first:normalize=0,"
             f"loudnorm=I=-15:TP=-1.5:LRA=11[aout]")
     xfade_chain(top, [XF_CHAPTER] * (m - 1), final, final=True,
-                extra_inputs=["-i", str(WORK / "music.wav"), "-i", str(chapters_meta), "-map_metadata", str(m + 1)],
+                extra_inputs=["-i", str(bed), "-i", str(chapters_meta), "-map_metadata", str(m + 1)],
                 audio_tail=tail)
     return final
 

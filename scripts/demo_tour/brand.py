@@ -157,7 +157,7 @@ def intro_html(stills: list[Path]) -> str:
     </body></html>"""
 
 
-def outro_html(stills: list[Path], version: str) -> str:
+def outro_html(stills: list[Path], version: str, credit: str = "") -> str:
     """End card: where to get it, how to install it, and the one claim the whole tour is built on."""
     imgs = "".join(
         f"""<img class="a" src="file://{p}" style="position:absolute;inset:-60px;width:calc(100% + 120px);height:calc(100% + 120px);object-fit:cover;
@@ -181,6 +181,7 @@ def outro_html(stills: list[Path], version: str) -> str:
       </div>
       <div class="a" style="animation:fade 1.0s 2.6s both;margin-top:70px;font-size:26px;color:#AEB6C5">
         Every number in this tour was read from the live database at the moment it was recorded.</div>
+      {f'<div class="a" style="animation:fade 1.0s 3.0s both;margin-top:26px;font-size:19px;color:{MUTED};max-width:1500px;text-align:center;line-height:1.5">{html.escape(credit)}</div>' if credit else ''}
     </div>
     </body></html>"""
 
