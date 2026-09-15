@@ -26,6 +26,16 @@ Re-running is safe. It never rotates a secret that already exists and never crea
 No GPU is required to install. Without one, the annotation, review, governance, export, and search surfaces
 all work; the model paths that need CUDA refuse rather than producing a fabricated result.
 
+Measured on a clean Ubuntu 24.04 with no GPU available and an empty image cache, installing the v0.1.1
+package: the first install took about six and a half minutes and left about 4.5 GB of images (api 2.7 GB,
+web 1.05 GB, database 794 MB). The API reported Postgres, Redis and MinIO healthy, the web app answered, and
+authentication refused a request without a token and accepted one with the generated admin token. The
+~20 GB above is for the corpus and model weights on top of that.
+
+MinIO images come from quay.io. MinIO withdrew its Docker Hub repositories, so `minio/minio` no longer
+resolves and an install pinned to it fails at "Starting infrastructure" with `pull access denied`.
+`python scripts/check_images.py` checks that every image a fresh install pulls still resolves.
+
 ---
 
 ## What the installer does, and why
@@ -225,7 +235,7 @@ tree, so Docker remains a dependency. The package is a predictable way to get th
 and drive it, not a set of native services.
 
 ```bash
-sudo apt install ./labeloxav_0.1.0_all.deb
+sudo apt install ./labeloxav_0.1.1_all.deb
 sudo labeloxav install     # first time only
 labeloxav up | down | status | logs [service] | token <user> | url
 ```

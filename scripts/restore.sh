@@ -62,10 +62,13 @@ echo "==> MinIO: bucket ${BUCKET}"
 NET="$(docker compose ps --format '{{.Name}}' postgres | head -1 | sed 's/-postgres-1$//')_default"
 # --user: mc runs as root by default; without this the restore container writes as
 # root and a later backup into the same tree cannot be cleaned up.
+# quay.io, pinned to the release docker-compose.yml runs. MinIO withdrew its Docker Hub repositories, and
+# this used to pull `minio/mc:latest` from there, which no longer resolves on a machine without a cached copy.
+MC_IMAGE="quay.io/minio/mc:RELEASE.2024-10-08T09-37-26Z"
 docker run --rm --user "$(id -u):$(id -g)" --network "$NET" \
   -v "$(cd "$SRC" && pwd):/backup:ro" \
   -e MC_HOST_lbx="http://${MINIO_USER}:${MINIO_PASS}@minio:9000" \
-  minio/mc:latest mirror --overwrite --quiet /backup/minio "lbx/${BUCKET}"
+  "${MC_IMAGE}" mirror --overwrite --quiet /backup/minio "lbx/${BUCKET}"
 
 echo "==> verifying"
 # The check that matters is referential, not a row count: an object row whose blob is gone is exactly the

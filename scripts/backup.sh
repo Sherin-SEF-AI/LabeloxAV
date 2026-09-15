@@ -56,11 +56,14 @@ echo "==> MinIO: bucket ${BUCKET}"
 # needs no host-side mc install and no alias the operator has to remember to configure.
 # --user: mc runs as root by default, which leaves a backup directory the operator cannot
 # read, move or delete without sudo. Found the hard way.
+# quay.io, pinned to the release docker-compose.yml runs. MinIO withdrew its Docker Hub repositories, and
+# this used to pull `minio/mc:latest` from there, which no longer resolves on a machine without a cached copy.
+MC_IMAGE="quay.io/minio/mc:RELEASE.2024-10-08T09-37-26Z"
 docker run --rm --user "$(id -u):$(id -g)" \
   --network "$(docker compose ps --format '{{.Name}}' postgres | head -1 | sed 's/-postgres-1$//')_default" \
   -v "$(cd "$DEST" && pwd):/backup" \
   -e MC_HOST_lbx="http://${MINIO_USER}:${MINIO_PASS}@minio:9000" \
-  minio/mc:latest mirror --overwrite --quiet "lbx/${BUCKET}" /backup/minio
+  "${MC_IMAGE}" mirror --overwrite --quiet "lbx/${BUCKET}" /backup/minio
 
 OBJECTS=$(find "$DEST/minio" -type f 2>/dev/null | wc -l)
 echo "==> wrote $DEST"

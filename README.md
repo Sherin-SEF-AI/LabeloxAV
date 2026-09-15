@@ -44,11 +44,15 @@ which puts the tree under `/opt/labeloxav` and gives you a `labeloxav` command. 
 the product runs as containers either way.
 
 ```bash
-sudo apt install ./labeloxav_0.1.0_all.deb
+sudo apt install ./labeloxav_0.1.1_all.deb
 sudo labeloxav install
 labeloxav url
-``` No GPU needed to install: annotation, review, governance, export, and search
-all work without one; the model paths that need CUDA refuse rather than fabricate. GPU, TLS, and backups:
+```
+
+A first install from an empty image cache takes about six and a half minutes and leaves roughly 4.5 GB of
+images (api 2.7 GB, web 1.05 GB, database 794 MB), measured on a clean Ubuntu 24.04. No GPU is needed to
+install: that same install ran with no GPU available, and annotation, review, governance, export and search
+all work without one. The model paths that need CUDA refuse rather than fabricate. GPU, TLS, and backups:
 [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## What actually runs
