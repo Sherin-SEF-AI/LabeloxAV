@@ -7,6 +7,7 @@ import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
@@ -217,7 +218,22 @@ async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = D
         raise HTTPException(400, str(exc)) from exc
     if new_state is not None:
         obj.state = new_state
-    obj.source = "human"
+    if payload.action == "revert":
+        # Taking a verdict back is not a human judgement of the object, so it must not leave the object
+        # marked as one. Every verdict sets source to "human", and the revert used to as well, so a machine
+        # proposal that a reviewer accepted and then undid came out of the undo labelled human: gold, the
+        # blind audit and every other `source == "human"` reader then treated an unjudged detection as a
+        # person's label. The verdict being withdrawn recorded what it overwrote, so that comes back.
+        withdrawn = (await db.execute(
+            select(Review).where(Review.object_id == obj.object_id, Review.action != "revert")
+            .order_by(Review.ts_ns.desc()).limit(1))).scalars().first()
+        prior = (withdrawn.before or {}) if withdrawn is not None else {}
+        if "source" in prior:
+            obj.source = prior["source"]
+            obj.conf = prior.get("conf", obj.conf)
+            obj.provenance = prior.get("provenance", obj.provenance)
+    else:
+        obj.source = "human"
     obj.version = (obj.version or 1) + 1  # advance the optimistic-lock version on every human edit
 
     after = {

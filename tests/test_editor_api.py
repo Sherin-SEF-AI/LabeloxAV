@@ -340,3 +340,58 @@ def test_frame_meta_and_nav():
         assert m1["next_frame_id"] == str(f2) and m1["prev_frame_id"] is None
         m2 = c.get(f"/api/frames/{f2}").json()
         assert m2["prev_frame_id"] == str(f1) and m2["next_frame_id"] is None
+
+
+async def _seed_machine_object(frame_id):
+    """A machine proposal as the auto-labeller writes one: source fused, a confidence, in review."""
+    from db.models import Object
+    from db.session import get_sessionmaker
+
+    oid = uuid.uuid4()
+    async with get_sessionmaker()() as db:
+        db.add(Object(object_id=oid, frame_id=frame_id, class_id=31, bbox=[20, 20, 90, 80], conf=0.41,
+                      source="fused", state="review", provenance={"model": "path_b"}))
+        await db.commit()
+    return oid
+
+
+async def _source_conf(oid):
+    from db.models import Object
+    from db.session import get_sessionmaker
+
+    async with get_sessionmaker()() as db:
+        o = await db.get(Object, oid)
+        return o.source, o.conf, o.state, dict(o.provenance or {})
+
+
+@requires_infra
+def test_revert_restores_the_machine_source():
+    """Undoing a verdict must not leave a machine proposal labelled human.
+
+    Every verdict sets source to "human". The revert, which is what the review pages' undo sends, used to do
+    the same, so an accept that was taken back left the detection passing as a person's label to gold and
+    every other `source == "human"` reader.
+    """
+    sid, f1, f2 = run_async(_seed_two_frames())
+    oid = run_async(_seed_machine_object(f1))
+    with _client() as c:
+        r = c.post(f"/api/objects/{oid}/review", json={"action": "reject", "state": "rejected"})
+        assert r.status_code == 200, r.text
+        assert run_async(_source_conf(oid))[0] == "human"
+        r = c.post(f"/api/objects/{oid}/review", json={"action": "revert", "state": "review"})
+        assert r.status_code == 200, r.text
+    source, conf, state, prov = run_async(_source_conf(oid))
+    assert (source, state) == ("fused", "review")
+    assert abs(conf - 0.41) < 1e-6
+    assert prov.get("model") == "path_b"
+
+
+@requires_infra
+def test_a_verdict_after_a_revert_is_human_again():
+    sid, f1, f2 = run_async(_seed_two_frames())
+    oid = run_async(_seed_machine_object(f1))
+    with _client() as c:
+        c.post(f"/api/objects/{oid}/review", json={"action": "confirm", "state": "accepted"})
+        c.post(f"/api/objects/{oid}/review", json={"action": "revert", "state": "review"})
+        c.post(f"/api/objects/{oid}/review", json={"action": "reject", "state": "rejected"})
+    assert run_async(_source_conf(oid))[:3:2] == ("human", "rejected")
