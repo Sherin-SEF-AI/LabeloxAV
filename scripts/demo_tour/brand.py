@@ -126,7 +126,10 @@ def card_html(number: int, chapter: str, blurb: str, backdrop: Path) -> str:
     </body></html>"""
 
 
-def intro_html(stills: list[Path]) -> str:
+def intro_html(stills: list[Path],
+               tagline: str = "A data engine for autonomous driving, built for Indian roads",
+               chips: tuple = ("Auto-labelling", "Human review", "Tracking", "LiDAR and 3D", "HD maps", "Governance"),
+               footnote: str = "A narrated tour of every screen, recorded live against the running system") -> str:
     """Title sequence: real footage drifting behind the mark, name, promise and what the product covers."""
     n = len(stills)
     slide = 9.5 / n
@@ -135,7 +138,6 @@ def intro_html(stills: list[Path]) -> str:
               <img src="file://{p}" style="position:absolute;inset:-60px;width:calc(100% + 120px);height:calc(100% + 120px);object-fit:cover;
                    filter:blur(10px) brightness(.30) saturate(.8);animation:drift 9.5s linear both"></div>"""
         for i, p in enumerate(stills))
-    chips = ["Auto-labelling", "Human review", "Tracking", "LiDAR and 3D", "HD maps", "Governance"]
     chip_html = "".join(
         f"""<span class="a display" style="animation:pop .7s {3.05 + i * 0.11:.2f}s both;padding:12px 24px;border-radius:999px;font-size:24px;
               background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#DCE1EA">{c}</span>"""
@@ -149,15 +151,16 @@ def intro_html(stills: list[Path]) -> str:
       <div class="a display" style="animation:rise 1.1s .95s both;font-size:132px;font-weight:600;letter-spacing:-.03em;margin-top:28px;line-height:1">
         Labelox<span style="color:{VIOLET_LIGHT}">AV</span></div>
       <div class="a" style="animation:rise 1.0s 1.75s both;font-size:40px;color:#C3C9D6;margin-top:26px">
-        A data engine for autonomous driving, built for Indian roads</div>
+        {html.escape(tagline)}</div>
       <div style="display:flex;gap:14px;margin-top:52px;flex-wrap:wrap;justify-content:center;max-width:1500px">{chip_html}</div>
       <div class="a mono" style="animation:fade 1.0s 4.3s both;font-size:21px;color:{MUTED};margin-top:46px;letter-spacing:.04em">
-        A narrated tour of every screen, recorded live against the running system</div>
+        {html.escape(footnote)}</div>
     </div>
     </body></html>"""
 
 
-def outro_html(stills: list[Path], version: str, credit: str = "") -> str:
+def outro_html(stills: list[Path], version: str, credit: str = "",
+               note: str = "Every number in this tour was read from the live database at the moment it was recorded.") -> str:
     """End card: where to get it, how to install it, and the one claim the whole tour is built on."""
     imgs = "".join(
         f"""<img class="a" src="file://{p}" style="position:absolute;inset:-60px;width:calc(100% + 120px);height:calc(100% + 120px);object-fit:cover;
@@ -180,7 +183,7 @@ def outro_html(stills: list[Path], version: str, credit: str = "") -> str:
         {row("DOCS", '<span class="display" style="font-size:34px">sherin-sef-ai.github.io/LabeloxAV</span>', 1.75)}
       </div>
       <div class="a" style="animation:fade 1.0s 2.6s both;margin-top:70px;font-size:26px;color:#AEB6C5">
-        Every number in this tour was read from the live database at the moment it was recorded.</div>
+        {html.escape(note)}</div>
       {f'<div class="a" style="animation:fade 1.0s 3.0s both;margin-top:26px;font-size:19px;color:{MUTED};max-width:1500px;text-align:center;line-height:1.5">{html.escape(credit)}</div>' if credit else ''}
     </div>
     </body></html>"""
