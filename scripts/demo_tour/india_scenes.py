@@ -546,17 +546,38 @@ async def _originals() -> dict:
     return known
 
 
-async def restore_reviews(d: Demo, i: dict) -> str:
-    """Take back earlier takes' verdicts, through the same revert action the review pages' undo sends."""
-    orig = await _originals()
-    for oid, o in orig.items():
-        body = {"reviewer": d.user.get("name", "demo"), "action": "revert", "state": o["state"],
-                "class_name": o["class_name"], "time_spent_ms": 0}
-        await d.page.evaluate(
-            """async ([p, t, b]) => { await fetch(p, {method: 'POST', body: JSON.stringify(b),
-                 headers: {authorization: 'Bearer ' + t, 'content-type': 'application/json'}}); }""",
-            [f"/api/objects/{oid}/review", d.user["token"], body])
-    return f"restored {len(orig)} objects to their state before the demo"
+async def _scope_ids(scope: str, i: dict) -> list[str]:
+    if scope == "frame":
+        return [v[0] for v in FRAME_VERDICTS]
+    if scope == "rapid":
+        return list(RAPID_VERDICTS)
+    if scope == "grid":
+        return GRID_REJECT + GRID_ACCEPT
+    async with get_engine().connect() as c:
+        return [r[0] for r in (await c.execute(text(
+            "select object_id::text from object where track_id = cast(:t as uuid)"), {"t": i["track"]})).all()]
+
+
+def restore_for(scope: str):
+    """A before-step that takes back earlier takes' verdicts on this scene's objects only.
+
+    Scoped per scene because a shared restore undid the verdicts every earlier scene of the same take had
+    just recorded, leaving the database disagreeing with the film. Goes through the review pages' own
+    revert, which restores the source and confidence the withdrawn verdict overwrote.
+    """
+    async def restore(d: Demo, i: dict) -> str:
+        orig = await _originals()
+        ids_ = [x for x in await _scope_ids(scope, i) if x in orig]
+        for oid in ids_:
+            o = orig[oid]
+            body = {"reviewer": d.user.get("name", "demo"), "action": "revert", "state": o["state"],
+                    "class_name": o["class_name"], "time_spent_ms": 0}
+            await d.page.evaluate(
+                """async ([p, t, b]) => { await fetch(p, {method: 'POST', body: JSON.stringify(b),
+                     headers: {authorization: 'Bearer ' + t, 'content-type': 'application/json'}}); }""",
+                [f"/api/objects/{oid}/review", d.user["token"], body])
+        return f"restored {len(ids_)} {scope} objects to their state before the demo"
+    return restore
 
 
 async def _states(ids_: list[str]) -> dict[str, tuple[str, str]]:
@@ -840,24 +861,24 @@ SCENES = [
           "This Delhi frame was labelled by the models, not by hand. Review mode checks each proposal. The cows "
           "are right, the pedestrian on the right is a reflection in the car window and is rejected, and the "
           "white car is a people carrier, not a sedan, so its class is changed before it is accepted.",
-          ready=EDITOR, run=frame_review, verify=verify_frame_review, before=restore_reviews),
+          ready=EDITOR, run=frame_review, verify=verify_frame_review, before=restore_for("frame")),
     Scene("rapid", "Checking the machine", "Rapid review",
           "/review/rapid?session={delhi}&class=cattle",
           "Rapid review shows one proposal at a time, and one key decides it. Here it is every cattle proposal "
           "in the Delhi clip. Reflections of the herd in the window glass are rejected, and a motorcycle the "
           "model called a cow is reclassified.",
-          ready="img", run=rapid, verify=verify_rapid, before=restore_reviews),
+          ready="img", run=rapid, verify=verify_rapid, before=restore_for("rapid")),
     Scene("grid", "Checking the machine", "Bulk review",
           "/review/grid?session={delhi}&class=pedestrian",
           "The grid shows many proposals at once. Eight of the Delhi pedestrians are the striped bollards on the "
           "traffic island, so they are selected together and rejected with one key. The two crops of the man "
           "walking past are accepted the same way.",
-          ready='button[title^="pedestrian"]', run=grid, verify=verify_grid, before=restore_reviews),
+          ready='button[title^="pedestrian"]', run=grid, verify=verify_grid, before=restore_for("grid")),
     Scene("track", "Across frames", "One fix, every frame",
           "/track/{track}",
           "Detections are linked into tracks. This is one cow, followed through twenty-eight seconds. The model "
           "called it a light goods vehicle in one frame, and relabelling the track fixes every frame at once.",
-          ready="text=relabel entire track", run=track_relabel, verify=verify_track, before=restore_reviews),
+          ready="text=relabel entire track", run=track_relabel, verify=verify_track, before=restore_for("track")),
     Scene("datasets", "Delivering the data", "Export",
           "/datasets",
           "What a person has checked leaves as a sealed, versioned dataset, in the format the training pipeline "
