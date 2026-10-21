@@ -42,13 +42,10 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(ROOT))
 
 import brand as B  # noqa: E402
-import narration  # noqa: E402
 
-TOUR = ROOT / ".scratch/demo/tour"
-WORK = ROOT / ".scratch/demo/pro"
-TRANSCRIPT = ROOT / "docs/demo/transcript/labeloxav-tour.srt"
 VERSION = "0.1.1"
 
 FPS = 30
@@ -66,7 +63,9 @@ MIN_ZOOM, MAX_ZOOM = 1.2, 1.75
 ZOOM_AT, ZOOM_FOR = 1.2, 1.4   # seconds into the scene the move starts, and how long it takes
 CHROME_PX = 124                # app menu, breadcrumb and page title bar, which every page shares
 
-BLURBS = {
+
+
+_TOUR_BLURBS = {
     "Introduction": "One data spine under every platform in the product",
     "Ingest": "Dashcam video, sensor drives, calibration and the vehicle's own motion",
     "Auto-labelling": "Models propose, a confidence gate decides what reaches a person",
@@ -80,6 +79,101 @@ BLURBS = {
     "Edge": "From a trained model to the vehicle, and back",
     "Closing": "What is real today, and what is still thin",
 }
+
+
+@dataclass(frozen=True)
+class Film:
+    """One edited film: where its recordings are, what it is called, and what its titles and music say.
+
+    The editing itself, framing, transitions, captions, the music mix, is the same for every film, so it is
+    written once below and a film is only the part that differs.
+    """
+    name: str
+    title: str                       # container metadata
+    out_name: str
+    tour: Path                       # recordings: segments/<key>.mp4 and audio/<key>.pad.wav
+    work: Path
+    transcript: Path
+    scenes_module: str               # a module with SCENES (key, chapter, title) and CHAPTERS
+    blurbs: dict
+    card_backdrop: dict
+    intro_stills: tuple              # scene keys whose footage drifts behind the title
+    outro_stills: tuple
+    tagline: str
+    chips: tuple
+    footnote: str
+    outro_note: str
+    music_plan: tuple                # (chapter the track takes over at, track, offset into it)
+    credit: str
+
+
+_KM = "by Kevin MacLeod (incompetech.com). Licensed under Creative Commons: By Attribution 4.0."
+
+FILMS = {
+    "tour": Film(
+        name="tour", title="LabeloxAV: a tour of every screen", out_name="labeloxav-tour-pro.mp4",
+        tour=ROOT / ".scratch/demo/tour", work=ROOT / ".scratch/demo/pro",
+        transcript=ROOT / "docs/demo/transcript/labeloxav-tour.srt", scenes_module="narration",
+        blurbs=_TOUR_BLURBS, card_backdrop={"3D and LiDAR": "lidar_linked"},
+        intro_stills=("lidar_annotate", "frame_editor", "discovery", "review_grid"),
+        outro_stills=("lidar_linked", "map", "analytics"),
+        tagline="A data engine for autonomous driving, built for Indian roads",
+        chips=("Auto-labelling", "Human review", "Tracking", "LiDAR and 3D", "HD maps", "Governance"),
+        footnote="A narrated tour of every screen, recorded live against the running system",
+        outro_note="Every number in this tour was read from the live database at the moment it was recorded.",
+        music_plan=(("Intro", "Beauty Flow", 0.0), ("Review", "Space Jazz", 0.0),
+                    ("Measurement", "Sincerely", 0.0), ("Export and privacy", "Beauty Flow", 150.0)),
+        credit=f"Music: \u201cBeauty Flow\u201d, \u201cSpace Jazz\u201d, \u201cSincerely\u201d {_KM}"),
+    "india": Film(
+        name="india", title="LabeloxAV: annotating real Indian roads", out_name="labeloxav-india-annotation.mp4",
+        tour=ROOT / ".scratch/demo/india/tour", work=ROOT / ".scratch/demo/india/pro",
+        transcript=ROOT / ".scratch/demo/india/tour/transcript/demo.srt", scenes_module="india_scenes",
+        blurbs={
+            "Real Indian roads": "A junction in Cuttack and a herd of cattle in Delhi, both Creative Commons",
+            "Manual annotation": "Boxes, polygons and edits, drawn in the editor",
+            "AI assist": "Masks from a click, a box or a wand, then corrected stroke by stroke",
+            "Beyond boxes": "Occlusion, polylines, pose, attributes, measurement and adverse regions",
+            "Checking the machine": "The models' proposals, accepted, rejected or corrected",
+            "Across frames": "One animal followed through time, and fixed once",
+            "Delivering the data": "Sealed datasets in the formats training expects",
+        },
+        card_backdrop={},
+        intro_stills=("box_autos", "frame_review", "polygon", "keypoints"),
+        outro_stills=("confirm", "frame_review", "track"),
+        tagline="Annotating real Indian roads, tool by tool",
+        chips=("Manual annotation", "AI assist", "Pose and polylines", "Review", "Tracks", "Export"),
+        footnote="Recorded live in the running product, on Creative Commons footage from Cuttack and Delhi",
+        outro_note="Every annotation in this film is a row the system now holds, checked after each scene.",
+        music_plan=(("Intro", "Inspired", 0.0), ("Checking the machine", "Wholesome", 0.0),
+                    ("Delivering the data", "Inspired", 150.0)),
+        credit=("Footage: \u201cMoving vehicles in Link road, Cuttack, Odisha\u201d by Psubhashish and "
+                "\u201cStray Cattle in Lutyens Delhi\u201d by Fowler&fowler, Wikimedia Commons, CC BY-SA 3.0. "
+                f"Music: \u201cInspired\u201d, \u201cWholesome\u201d {_KM}")),
+}
+
+# Bound by use_film(). Module globals rather than a parameter threaded through every function, because the
+# editing functions read them in a dozen places and a film is chosen once per run.
+FILM: Film = FILMS["tour"]
+TOUR = WORK = TRANSCRIPT = ROOT
+SCENES: list = []
+CHAPTERS: list = []
+BLURBS: dict = {}
+CARD_BACKDROP: dict = {}
+MUSIC_PLAN: tuple = ()
+CREDIT = ""
+
+
+def use_film(name: str) -> Film:
+    global FILM, TOUR, WORK, TRANSCRIPT, SCENES, CHAPTERS, BLURBS, CARD_BACKDROP, MUSIC_PLAN, CREDIT
+    if name not in FILMS:
+        raise SystemExit(f"unknown film {name!r}; known: {', '.join(FILMS)}")
+    FILM = FILMS[name]
+    mod = __import__(FILM.scenes_module)
+    TOUR, WORK, TRANSCRIPT = FILM.tour, FILM.work, FILM.transcript
+    SCENES, CHAPTERS = list(mod.SCENES), list(mod.CHAPTERS)
+    BLURBS, CARD_BACKDROP = FILM.blurbs, FILM.card_backdrop
+    MUSIC_PLAN, CREDIT = FILM.music_plan, FILM.credit
+    return FILM
 
 
 def q(seconds: float) -> float:
@@ -150,12 +244,12 @@ def _parse_srt(path: Path) -> list[Cue]:
 def load_scenes() -> list[SceneClip]:
     """The recorded scenes in tour order, each with the captions that were spoken over it."""
     scenes, cursor = [], 0.0
-    for s in narration.SCENES:
+    for s in SCENES:
         seg, aud = TOUR / "segments" / f"{s.key}.mp4", TOUR / "audio" / f"{s.key}.pad.wav"
         if not seg.exists() or not aud.exists():
             raise SystemExit(f"missing recording for {s.key}; re-record it with driver.py --only {s.key}")
         d = probe(seg)
-        scenes.append(SceneClip(s.key, s.chapter, narration.CHAPTERS.index(s.chapter) + 1, s.title, seg, aud, d))
+        scenes.append(SceneClip(s.key, s.chapter, CHAPTERS.index(s.chapter) + 1, s.title, seg, aud, d))
         cursor += d
     # Captions are recovered from the transcript by position. The transcript was written from the same
     # per-scene durations, so a cue belongs to the scene whose window its start falls in.
@@ -179,7 +273,7 @@ def load_scenes() -> list[SceneClip]:
 
 def timeline(scenes: list[SceneClip]) -> list[Item]:
     items = [Item("intro", q(INTRO_S))]
-    for ch in narration.CHAPTERS:
+    for ch in CHAPTERS:
         members = [s for s in scenes if s.chapter == ch]
         items.append(Item("card", q(CARD_S), ch, xfade_in=XF_CHAPTER))
         for i, sc in enumerate(members):
@@ -295,9 +389,9 @@ def _still(seg: Path, at: float, out: Path) -> Path:
     return out
 
 
-# Where the scoring picks something colourful but off-topic. The LiDAR chapter scores the street map highest
-# because map tiles are saturated, and a card announcing point clouds should show one.
-CARD_BACKDROP = {"3D and LiDAR": "lidar_linked"}
+# Where the scoring picks something colourful but off-topic, a film pins the card backdrop in
+# Film.card_backdrop. The tour's LiDAR chapter scores the street map highest because map tiles are
+# saturated, and a card announcing point clouds should show one.
 
 
 def _richest(members: list[SceneClip], still) -> str:
@@ -335,14 +429,14 @@ def render_graphics(scenes: list[SceneClip]) -> None:
     jobs = [B.Job(B.canvas_html(), g / "canvas.png"), B.Job(B.mask_html(), g / "mask.png")]
     for sc in scenes:
         jobs.append(B.Job(B.label_html(sc.chapter_no, sc.chapter, sc.title), g / "labels" / f"{sc.key}.png", transparent=True))
-    for n, ch in enumerate(narration.CHAPTERS, 1):
+    for n, ch in enumerate(CHAPTERS, 1):
         members = [s for s in scenes if s.chapter == ch]
         jobs.append(B.Job(B.card_html(n, ch, BLURBS[ch], st(_richest(members, st), 0.55)), g / "cards" / f"{n:02d}",
                           seconds=CARD_S))
-    jobs.append(B.Job(B.intro_html([st("lidar_annotate"), st("frame_editor"), st("discovery"), st("review_grid")]),
+    jobs.append(B.Job(B.intro_html([st(k) for k in FILM.intro_stills], FILM.tagline, FILM.chips, FILM.footnote),
                       g / "intro", seconds=INTRO_S))
-    jobs.append(B.Job(B.outro_html([st("lidar_linked"), st("map"), st("analytics")], VERSION, CREDIT), g / "outro",
-                      seconds=OUTRO_S))
+    jobs.append(B.Job(B.outro_html([st(k) for k in FILM.outro_stills], VERSION, CREDIT, FILM.outro_note),
+                      g / "outro", seconds=OUTRO_S))
     todo = [j for j in jobs if not (j.out.exists() and (j.seconds <= 0 or len(list(j.out.glob("*.jpg"))) == int(round(j.seconds * FPS))))]
     print(f"graphics: {len(jobs) - len(todo)} cached, rendering {len(todo)}")
     if todo:
@@ -454,11 +548,7 @@ def xfade_chain(parts: list[tuple[Path, float]], fades: list[float], out: Path, 
 # a new section rather than as a cut under a sentence. Beauty Flow returns for the last act from further
 # into the piece, so the film ends on the theme it opened with without repeating its first bars.
 MUSIC_SOURCE = "https://incompetech.com/music/royalty-free/mp3-royaltyfree/"
-MUSIC_PLAN = [("Intro", "Beauty Flow", 0.0), ("Review", "Space Jazz", 0.0),
-              ("Measurement", "Sincerely", 0.0), ("Export and privacy", "Beauty Flow", 150.0)]
 MUSIC_XF = 3.0
-CREDIT = ("Music: \u201cBeauty Flow\u201d, \u201cSpace Jazz\u201d, \u201cSincerely\u201d by Kevin MacLeod (incompetech.com). "
-          "Licensed under Creative Commons: By Attribution 4.0.")
 
 
 def _track(title: str) -> Path:
@@ -538,7 +628,7 @@ def build() -> Path:
             if it.kind == "scene":
                 futs[idx] = ex.submit(render_scene, it.ref, it, total)
             elif it.kind == "card":
-                n = narration.CHAPTERS.index(it.ref) + 1
+                n = CHAPTERS.index(it.ref) + 1
                 futs[idx] = ex.submit(render_graphic_clip, f"card{n:02d}", g / "cards" / f"{n:02d}", it.dur)
             else:
                 futs[idx] = ex.submit(render_graphic_clip, it.kind, g / it.kind, it.dur)
@@ -554,7 +644,7 @@ def build() -> Path:
     chapters.mkdir(parents=True, exist_ok=True)
     top: list[tuple[Path, float]] = [(clip_paths[0], items[0].dur)]
     idx = 1
-    for n, ch in enumerate(narration.CHAPTERS, 1):
+    for n, ch in enumerate(CHAPTERS, 1):
         members = [idx]
         idx += 1
         while idx < len(items) and items[idx].kind == "scene" and items[idx].ref.chapter == ch:
@@ -575,9 +665,9 @@ def build() -> Path:
     bed = WORK / f"music-{hashlib.sha1(repr(MUSIC_PLAN).encode()).hexdigest()[:8]}.wav"
     music_bed(items, total, bed)
     chapters_meta = WORK / "chapters.txt"
-    lines = [";FFMETADATA1", "title=LabeloxAV: a tour of every screen", "artist=Sherin Joseph Roy"]
+    lines = [";FFMETADATA1", f"title={FILM.title}", "artist=Sherin Joseph Roy"]
     marks = [("Intro", 0.0)] + [(ch, next(it.start for it in items if it.kind == "card" and it.ref == ch))
-                                for ch in narration.CHAPTERS] + [("Outro", items[-1].start)]
+                                for ch in CHAPTERS] + [("Outro", items[-1].start)]
     for i, (name, st) in enumerate(marks):
         end = marks[i + 1][1] if i + 1 < len(marks) else total
         lines += ["[CHAPTER]", "TIMEBASE=1/1000", f"START={int(st * 1000)}", f"END={int(end * 1000)}", f"title={name}"]
@@ -585,7 +675,7 @@ def build() -> Path:
     yt = [f"{int(st // 60)}:{int(st % 60):02d} {name}" for name, st in marks]
     (WORK / "youtube-chapters.txt").write_text("\n".join(yt) + "\n", encoding="utf-8")
 
-    final = WORK / "labeloxav-tour-pro.mp4"
+    final = WORK / FILM.out_name
     m = len(top)
     # Levels were measured rather than set by ear, because this was produced without listening, and measured
     # as ungated RMS: integrated LUFS gates out quiet passages, so the harder the music ducks under speech
@@ -612,7 +702,10 @@ def build() -> Path:
 
 
 def main() -> None:
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "plan"
+    args = [a for a in sys.argv[1:] if not a.startswith("--film")]
+    film = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--film=")), "tour")
+    use_film(film)
+    cmd = args[0] if args else "plan"
     if cmd == "plan":
         scenes, items = plan()
         for s in scenes:
@@ -625,7 +718,7 @@ def main() -> None:
         out = build()
         print(f"wrote {out} ({out.stat().st_size / 1e6:.1f} MB, {probe(out) / 60:.2f} min)")
     else:
-        raise SystemExit("usage: produce.py plan | all")
+        raise SystemExit("usage: produce.py plan | all [--film=tour|india]")
 
 
 if __name__ == "__main__":

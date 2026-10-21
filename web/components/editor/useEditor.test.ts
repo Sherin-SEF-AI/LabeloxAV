@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { type Action, type EdObject, type EditorState, editorReducer } from "./useEditor";
 
@@ -228,5 +228,76 @@ describe("acceptRest: finishing the frame the risk order left behind", () => {
     const s = editorReducer(state([obj("a"), obj("b")]), { t: "acceptRest" });
     const back = editorReducer(s, { t: "undo" });
     expect(back.objects.every((o) => o.state === "review")).toBe(true);
+  });
+});
+
+describe("tmpId: the idempotency key a new object is saved under", () => {
+  // The save sends this id as idem_key and the server returns the existing object for a repeated key on the
+  // same frame. A counter that restarted per page load made the first box drawn after reopening a frame
+  // collide with one saved on an earlier visit, and the new box was written over the old one.
+  it("does not repeat across page loads", async () => {
+    const first = await import("./useEditor");
+    const a = [first.tmpId(), first.tmpId()];
+    vi.resetModules();
+    const second = await import("./useEditor");
+    const b = [second.tmpId(), second.tmpId()];
+    expect(new Set([...a, ...b]).size).toBe(4);
+    expect(a[0].replace(/\d+$/, "")).not.toBe(b[0].replace(/\d+$/, ""));
+  });
+
+  it("keeps the tmp- prefix that marks an unsaved object", async () => {
+    const m = await import("./useEditor");
+    expect(m.tmpId()).toMatch(/^tmp-[0-9a-f]{12}-\d+$/);
+  });
+});
+
+describe("undo across an autosave", () => {
+  // Autosave writes an edit and the server bumps the object's version. Undo then restores an older
+  // snapshot, and that snapshot must carry the version the server now holds: with the stale one, the next
+  // save was refused as a conflict with the editor's own earlier write, and the undo was never saved.
+  it("restores the old geometry with the server's current version", () => {
+    const s = run(
+      state([obj("a", { version: 3, bbox: [0, 0, 10, 10] })]),
+      { t: "update", id: "a", patch: { bbox: [0, 0, 20, 20] } },
+      { t: "saved", remap: {}, versions: { a: 4 } },
+      { t: "undo" },
+    );
+    const a = s.objects.find((o) => o.id === "a");
+    expect(a?.bbox).toEqual([0, 0, 10, 10]);
+    expect(a?.version).toBe(4);
+  });
+
+  it("gives redo the current version too", () => {
+    const s = run(
+      state([obj("a", { version: 3 })]),
+      { t: "update", id: "a", patch: { bbox: [0, 0, 20, 20] } },
+      { t: "undo" },
+      { t: "saved", remap: {}, versions: { a: 5 } },
+      { t: "redo" },
+    );
+    expect(s.objects.find((o) => o.id === "a")?.version).toBe(5);
+  });
+});
+
+describe("selection across the autosave that renames a new object", () => {
+  // A new object's tmp- id becomes its server id on save. The selection kept the tmp- id, so the object
+  // just drawn or pasted silently stopped being selected and Delete did nothing to it.
+  it("keeps the new object selected", () => {
+    const s = run(
+      state([obj("a")]),
+      { t: "add", obj: obj("tmp-x-1", { isNew: true }) },
+      { t: "saved", remap: { "tmp-x-1": "real-9" }, versions: { "tmp-x-1": 1 } },
+    );
+    expect(s.selectedId).toBe("real-9");
+    expect(s.objects.some((o) => o.id === "real-9")).toBe(true);
+  });
+
+  it("remaps a multi-selection", () => {
+    const s = run(
+      state([obj("a"), obj("tmp-x-2", { isNew: true })], { selectedIds: ["a", "tmp-x-2"], selectedId: "a" }),
+      { t: "saved", remap: { "tmp-x-2": "real-2" } },
+    );
+    expect(s.selectedIds).toEqual(["a", "real-2"]);
+    expect(s.selectedId).toBe("a");
   });
 });

@@ -862,7 +862,10 @@ export default function FrameEditor() {
       setReviewed((n) => n + 1);   // one settled object, for the throughput readout
       setAlItems((s) => s.filter((it) => it.object_id !== o.id)); // drop the handled item so the queue advances
       flash(newState);
-      advanceReview(o.id);
+      // Only review mode walks the value queue. Anywhere else the reviewer picked this object themselves,
+      // from the canvas menu, and advancing sent them to whichever frame the queue ranked next, away from
+      // the frame they were checking, or announced "review queue complete" for a queue they never opened.
+      if (mode === "review") advanceReview(o.id);
     } catch (e) { flash("review failed: " + humanizeError(e)); }
   };
   // Move to the next value-queue item (excluding the one just handled): select it if it is on this frame,

@@ -97,9 +97,21 @@ export type Action =
   | { t: "jump"; at: number }
   | { t: "saved"; remap: Record<string, string>; versions?: Record<string, number> };
 
+// This id is also the idempotency key the save sends (`idem_key: o.id`), and the server dedupes creates
+// per frame on it. A bare counter restarts at 1 on every page load, so after an annotator reopened a frame
+// the first new box reused the key of a box saved on an earlier visit: the server handed back that earlier
+// object, the new box was remapped onto its id, and the next save wrote the new geometry and class over it.
+// The earlier annotation was lost without an error. A random prefix drawn once per page load keeps the
+// ids unique across visits. getRandomValues rather than randomUUID, because the second exists only in a
+// secure context and the editor is also served over plain http on a LAN.
+const _load = (() => {
+  const b = new Uint8Array(6);
+  globalThis.crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+})();
 let _tmp = 0;
 export function tmpId(): string {
-  return `tmp-${++_tmp}`;
+  return `tmp-${_load}-${++_tmp}`;
 }
 
 const snap = (s: EditorState, label = "edit"): HistoryEntry =>
@@ -355,7 +367,12 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
         past: [...s.past, ...redone], future: s.future.slice(iFut + 1) };
     }
     case "saved": {
-      const remap = (o: EdObject): EdObject => ({ ...o, id: a.remap[o.id] ?? o.id, isNew: false });
+      // History snapshots take the new server versions too, not only the live objects. The version is the
+      // one the server now holds, whichever snapshot a copy of the object sits in; left stale, undoing an
+      // edit after an autosave restored the old version number and the next save was refused as a conflict
+      // with the editor's own earlier write ("object changed since you loaded it").
+      const remap = (o: EdObject): EdObject =>
+        ({ ...o, id: a.remap[o.id] ?? o.id, isNew: false, version: a.versions?.[o.id] ?? o.version });
       return {
         ...s,
         deleted: [],
@@ -374,6 +391,12 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
         // tmp- id, so an object the annotator had drawn and edited stopped counting as reviewed the moment
         // the first autosave landed - and Confirm frame quietly skipped it.
         touched: s.touched.map((id) => a.remap[id] ?? id),
+        // The selection holds ids as well. Left unremapped, the object just drawn or pasted stopped being
+        // selected the moment autosave landed, 700 ms later, with nothing on screen to say so: the panel
+        // fell back to "Properties", and Delete, 1 to 9 and every other selection shortcut silently did
+        // nothing to the object the annotator was looking at.
+        selectedId: s.selectedId ? (a.remap[s.selectedId] ?? s.selectedId) : s.selectedId,
+        selectedIds: s.selectedIds.map((id) => a.remap[id] ?? id),
       };
     }
     default:

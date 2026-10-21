@@ -12,6 +12,7 @@ import { objectTag } from "@/lib/canvasTag";
 import { handleIndices } from "@/lib/simplify";
 import { classColor, classFill } from "@/lib/colors";
 import type { EdObject, Tool, Viewport } from "./useEditor";
+import { amodalRectProps } from "./amodal";
 
 type LaneOverlay = { lane_id: string; control_points: number[][]; lane_type: string; is_ego: boolean; source: string };
 export type LayerFlags = { boxes: boolean; masks: boolean; labels: boolean; lanes: boolean; drivable: boolean; adverse: boolean; cuboids: boolean; seg: boolean };
@@ -406,12 +407,7 @@ export default function EditorCanvas(p: Props) {
               what is hidden that nobody made. */}
           {L.boxes && p.objects.map((o: EdObject) => (
             o.visible !== false && o.bbox_amodal?.length === 4 ? (
-              <Rect key={`am:${o.id}`} listening={false}
-                x={o.bbox_amodal[0]} y={o.bbox_amodal[1]}
-                width={o.bbox_amodal[2] - o.bbox_amodal[0]}
-                height={o.bbox_amodal[3] - o.bbox_amodal[1]}
-                stroke={classColor(o.class_id)} strokeWidth={1 / s} opacity={0.55}
-                dash={[8 / s, 5 / s]} fill="transparent" />
+              <Rect key={`am:${o.id}`} {...amodalRectProps(o.bbox_amodal, classColor(o.class_id), s)} />
             ) : null
           ))}
 

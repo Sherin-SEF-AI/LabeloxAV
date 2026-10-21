@@ -34,7 +34,13 @@ export default function AttrControl({ name, spec, value, onChange }: {
   if (spec.type === "enum")
     return (
       <label className="flex items-center gap-2">{label}
-        <select value={String(value ?? "")} onChange={(e) => onChange(e.target.value)}
+        {/* An option's value is always a string, but an enum's values are not: occlusion is declared as the
+            integers 0, 25, 50, 75 and 100. Sending the chosen string back unchanged had the server refuse
+            every save with "'25' not in [0, 25, 50, 75, 100]", so the choice is mapped back to the declared
+            value it came from. */}
+        <select value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value === "" ? e.target.value
+            : (spec.values || []).find((v) => String(v) === e.target.value) ?? e.target.value)}
           className="flex-1 bg-panel border border-line px-1 py-0.5 font-mono text-[11px] text-ink">
           <option value="">-</option>
           {(spec.values || []).map((v) => <option key={String(v)} value={String(v)}>{String(v)}</option>)}

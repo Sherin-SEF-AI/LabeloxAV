@@ -170,8 +170,13 @@ class GroqSettings(BaseModel):
     that protects LabeloxAV, so it is not part of _require_prod_secrets."""
     api_key: str = ""
     base_url: str = "https://api.groq.com/openai/v1"
-    text_model: str = "llama-3.3-70b-versatile"
-    vision_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    # Both earlier defaults (llama-3.3-70b-versatile, llama-4-scout) had left Groq's catalogue by 2026-09-23,
+    # so every call to them failed and quietly fell back to the local model. Measured that day on the same
+    # 246 human-ruled crops the local judges were scored on: qwen3.6-27b reached sensitivity 0.55 and
+    # specificity 0.81, qwen3.8-27b 0.57 and 0.76, at about a second per crop. qwen3.6 is the default for
+    # its specificity, which is what a verifier that can overrule a detector needs most.
+    text_model: str = "openai/gpt-oss-120b"
+    vision_model: str = "qwen/qwen3.6-27b"
     timeout_s: float = 30.0
 
 
