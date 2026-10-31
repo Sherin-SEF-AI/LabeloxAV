@@ -15,7 +15,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-labelox}
       POSTGRES_DB: ${POSTGRES_DB:-labeloxav}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${LBX_BIND_LOCAL:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -38,8 +38,9 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-labelox}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-labelox123}
     ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      # The S3 port is the one infrastructure port a browser needs: presigned downloads go straight to it.
+      - "${LBX_BIND_PUBLIC:-0.0.0.0}:${MINIO_PORT:-9000}:9000"
+      - "${LBX_BIND_LOCAL:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - miniodata:/data
     healthcheck:
@@ -72,7 +73,7 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "--save", "60", "1", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${LBX_BIND_LOCAL:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -96,8 +97,8 @@ services:
       - --kafka-addr=PLAINTEXT://0.0.0.0:29092,EXTERNAL://0.0.0.0:19092
       - --advertise-kafka-addr=PLAINTEXT://redpanda:29092,EXTERNAL://localhost:19092
     ports:
-      - "${REDPANDA_PORT:-19092}:19092"
-      - "${REDPANDA_ADMIN_PORT:-9644}:9644"
+      - "${LBX_BIND_LOCAL:-127.0.0.1}:${REDPANDA_PORT:-19092}:19092"
+      - "${LBX_BIND_LOCAL:-127.0.0.1}:${REDPANDA_ADMIN_PORT:-9644}:9644"
     volumes:
       - redpandadata:/var/lib/redpanda/data
     healthcheck:
@@ -110,7 +111,11 @@ services:
   # lakeFS: git-like branch/commit/merge over the MinIO object store (Phase 4 M4.3). Single node, local
   # metadata KV, blockstore = the existing MinIO. Auto-provisions the admin key on first boot so the
   # Python client can connect with no manual setup.
+  # Optional from here down: dataset branches (lakeFS), the MCAP viewer (Lichtblick) and experiment
+  # tracking (MLflow). The core product runs without them, so a default install does not start them.
+  # Enable with COMPOSE_PROFILES in .env (lakefs, viewer, mlflow, or extras for all three).
   lakefs:
+    profiles: ["lakefs", "extras"]
     image: treeverse/lakefs:1.33.0
     user: root  # so it can create its metadata dir on the root-owned named volume
     depends_on:
@@ -136,7 +141,7 @@ services:
       LAKEFS_BLOCKSTORE_S3_CREDENTIALS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-labelox123}
     command: ["run"]
     ports:
-      - "${LAKEFS_PORT:-8001}:8000"
+      - "${LBX_BIND_LOCAL:-127.0.0.1}:${LAKEFS_PORT:-8001}:8000"
     volumes:
       - lakefsdata:/lakefs
     healthcheck:
@@ -151,9 +156,10 @@ services:
   # in the browser and reads a session's MCAP straight from the object store over presigned HTTP range
   # requests, via a remote-file deep link the backend builds. No proprietary dependency.
   lichtblick:
+    profiles: ["viewer", "extras"]
     image: ghcr.io/lichtblick-suite/lichtblick:latest
     ports:
-      - "${LICHTBLICK_PORT:-8090}:8080"
+      - "${LBX_BIND_LOCAL:-127.0.0.1}:${LICHTBLICK_PORT:-8090}:8080"
     restart: unless-stopped
     mem_limit: 512m
 
@@ -162,6 +168,7 @@ services:
   # its metrics. Backed by the Postgres and MinIO already running rather than a third datastore: the point is
   # somewhere to read the history from, not more infrastructure to keep alive.
   mlflow:
+    profiles: ["mlflow", "extras"]
     image: ghcr.io/mlflow/mlflow:v2.19.0
     depends_on:
       postgres:
@@ -179,7 +186,7 @@ services:
       --backend-store-uri postgresql://${POSTGRES_USER:-labelox}:${POSTGRES_PASSWORD:-labelox}@postgres:5432/mlflow
       --default-artifact-root s3://${MINIO_BUCKET:-labeloxav}/mlflow"
     ports:
-      - "${MLFLOW_PORT:-5500}:5000"
+      - "${LBX_BIND_LOCAL:-127.0.0.1}:${MLFLOW_PORT:-5500}:5000"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:5000/health || exit 1"]
       interval: 10s

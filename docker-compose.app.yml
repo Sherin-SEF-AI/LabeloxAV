@@ -1,4 +1,4 @@
-# LabeloxAV application overlay: the API, the web app, and the one-shot migration.
+# LabeloxAV application overlay: the API, the web app, the GPU worker, and the one-shot migration.
 #
 # Deliberately a separate file from docker-compose.yml rather than a profile inside it. The services below
 # use required-variable interpolation (${VAR:?...}) so a missing secret fails immediately with the name of
@@ -13,6 +13,19 @@
 
 name: labeloxav
 
+# Every Python service runs one image: the ML build (CUDA 12.8, torch, Ultralytics, SAM, the embedding
+# models). The slim `api` target has none of those, and with it this deployment could store frames but not
+# label them: ingest refused for lack of the plate detector, auto-label and embeddings could not load a model,
+# and SAM clicks in the editor failed. The CUDA wheels run on the CPU when no GPU is present, slowly but
+# correctly, so the same image serves a CPU-only host. The NVIDIA device reservations live in
+# docker-compose.gpu.yml, which scripts/install.sh adds only when the Docker NVIDIA runtime is present,
+# because a reservation on a host without it stops compose from starting anything at all.
+x-app-image: &app_image
+  build:
+    context: .
+    target: ${LBX_IMAGE_TARGET:-gpu}
+  image: labeloxav/app:${LBX_VERSION:-latest}
+
 services:
   # Every service reads its credentials from .env. install.sh generates strong values there, because
   # core/config.py refuses the dev defaults on any non-local deployment: a known signing key lets anyone
@@ -22,10 +35,7 @@ services:
   # the API service so a migration failure is visible as a failed container instead of a crash loop, and so
   # two API replicas could never race the same migration.
   migrate:
-    build:
-      context: .
-      target: api
-    image: labeloxav/api:${LBX_VERSION:-latest}
+    <<: *app_image
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,6 +63,13 @@ services:
       LBX_FORGYX__DEPLOY_SIGNING_KEY: ${LBX_FORGYX__DEPLOY_SIGNING_KEY:?set LBX_FORGYX__DEPLOY_SIGNING_KEY in .env}
       LBX_PHASE4__GOVERN__ATTESTATION_KEY: ${LBX_PHASE4__GOVERN__ATTESTATION_KEY:?set LBX_PHASE4__GOVERN__ATTESTATION_KEY in .env}
       LBX_LOG_LEVEL: ${LBX_LOG_LEVEL:-INFO}
+      # The API queues auto-label jobs and the gpu-worker service runs them, so a job survives an API restart
+      # and the API stays responsive while the GPU works.
+      LBX_JOBS__AUTOLABEL_EXECUTOR: worker
+      # Ollama (the vision-language reviewer) runs on the host, outside this stack. From inside a container
+      # `localhost` is the container itself, so the default would never reach it; host.docker.internal is
+      # mapped to the host by extra_hosts on the services that call it.
+      LBX_MODELS__VLM__OLLAMA_URL: ${LBX_MODELS__VLM__OLLAMA_URL:-http://host.docker.internal:11434}
     command: >
       /bin/sh -c "alembic upgrade head && python scripts/seed_ontology.py && echo 'schema ready'"
     restart: "no"
@@ -67,10 +84,7 @@ services:
   # files already present) and exits non-zero if a required weight is missing, so this fails the deploy
   # rather than starting an API that cannot ingest.
   pii-models:
-    build:
-      context: .
-      target: api
-    image: labeloxav/api:${LBX_VERSION:-latest}
+    <<: *app_image
     environment:
       <<: *app_env
       # Optional: the plate mirror is on Hugging Face, which now wants a token even for public files.
@@ -81,10 +95,9 @@ services:
     restart: "no"
 
   api:
-    build:
-      context: .
-      target: api
-    image: labeloxav/api:${LBX_VERSION:-latest}
+    <<: *app_image
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -98,14 +111,23 @@ services:
         condition: service_completed_successfully
     environment: *app_env
     ports:
-      - "${API_PORT:-8000}:8000"
+      # Browsers and the SDK reach the API through the web app's /api proxy, so it only needs to answer on
+      # this host (the installer's readiness check, and `curl` from a shell here).
+      - "${LBX_BIND_LOCAL:-127.0.0.1}:${API_PORT:-8000}:8000"
     volumes:
       # Model weights and scratch survive a container rebuild; re-downloading them on every deploy is slow
       # and, on a metered link, expensive.
       - apimodels:/app/models
       - apiscratch:/app/.scratch
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
     restart: unless-stopped
-    mem_limit: 4g
+    # Ingest blurs faces and plates with models held in this process, and the editor's SAM tools run here.
+    mem_limit: ${API_MEM_LIMIT:-8g}
 
   web:
     build:
@@ -123,7 +145,9 @@ services:
       LBX_API_URL: http://api:8000
       NODE_ENV: production
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      # The one port people open. Bound on every interface so the team can reach it across the LAN; put a
+      # TLS reverse proxy in front before exposing it beyond that (docs/DEPLOY.md).
+      - "${LBX_BIND_PUBLIC:-0.0.0.0}:${WEB_PORT:-3000}:3000"
     restart: unless-stopped
     mem_limit: 1g
 
@@ -133,10 +157,9 @@ services:
   # someone to remember to start a process and notice when it died. It holds a Postgres advisory lock, so
   # a second copy exits cleanly rather than double-ticking; that also makes `restart: unless-stopped` safe.
   govern-daemon:
-    build:
-      context: .
-      target: api
-    image: labeloxav/api:${LBX_VERSION:-latest}
+    <<: *app_image
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -153,10 +176,7 @@ services:
   # bus being healthy: `docker compose --profile workers up -d`.
   embed-worker:
     profiles: ["workers"]
-    build:
-      context: .
-      target: api
-    image: labeloxav/api:${LBX_VERSION:-latest}
+    <<: *app_image
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -168,31 +188,28 @@ services:
     restart: unless-stopped
     mem_limit: 4g
 
-  # Drains local training jobs serially on the GPU. Profiled and built from the `gpu` target, because the
-  # CUDA image is large and a CPU-only host must not be asked to pull it: `docker compose --profile gpu up -d`.
-  # The worker takes a Postgres advisory lock as a global GPU mutex, so one replica is the design.
-  train-worker:
-    profiles: ["gpu"]
-    build:
-      context: .
-      target: gpu
-    image: labeloxav/gpu:${LBX_VERSION:-latest}
+  # Runs every queued GPU job one at a time: auto-label first (somebody is usually waiting on it), then
+  # training. It holds a Postgres advisory lock for its lifetime, so a second copy exits instead of
+  # sharing the card, and on start it requeues whatever a crash left running. Replaces the training-only
+  # worker, which drained one of these two queues under the same lock.
+  gpu-worker:
+    <<: *app_image
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       migrate:
         condition: service_completed_successfully
+      pii-models:
+        condition: service_completed_successfully
     environment: *app_env
-    command: ["python", "-m", "services.training.worker"]
+    command: ["python", "-m", "services.gpu_worker"]
     volumes:
       - apimodels:/app/models
       - apiscratch:/app/.scratch
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # Stopping requeues the running job, which needs a moment to write; the default 10s can cut that off.
+    stop_grace_period: 30s
+    mem_limit: ${GPU_WORKER_MEM_LIMIT:-12g}
 
 volumes:
   apimodels:

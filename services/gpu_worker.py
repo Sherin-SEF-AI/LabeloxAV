@@ -49,6 +49,12 @@ log = get_logger("gpu_worker")
 PAUSE_FLAG = REPO_ROOT / ".scratch" / "watch" / "PAUSE.json"
 
 
+# Set when a stop interrupted a training run whose executor thread is still going. main() then exits without
+# joining it: interpreter shutdown otherwise waits for that thread, which can be hours of epochs, until the
+# container runtime gives up and kills the process anyway.
+_training_abandoned = False
+
+
 def paused(flag: Path = PAUSE_FLAG) -> bool:
     return flag.exists()
 
@@ -99,8 +105,21 @@ async def run_next() -> str | None:
         err = vram_preflight()
         if err:
             await _fail_training(train_id, f"GPU preflight failed: {err}")
-        else:
-            await run_job_guarded(train_id)
+            return "training"
+        task = asyncio.ensure_future(run_job_guarded(train_id))
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # Training runs in executor threads, which a cancel cannot reach. Put the job back exactly as a
+            # crash would (pending, resuming from the last epoch Ultralytics saved) and let main() exit
+            # without joining a thread that may have hours of epochs left.
+            from services.training.worker import reset_training_orphans
+
+            global _training_abandoned
+            _training_abandoned = True
+            await reset_training_orphans()
+            log.info("gpu_worker.requeued_on_stop", kind="training", job_id=train_id)
+            raise
         return "training"
     return None
 
@@ -167,7 +186,15 @@ async def worker_loop(*, once: bool = False) -> int:
 @click.command()
 @click.option("--once", is_flag=True, help="Run whatever is queued, then exit.")
 def main(once: bool) -> None:
-    raise SystemExit(asyncio.run(worker_loop(once=once)))
+    code = asyncio.run(worker_loop(once=once))
+    if _training_abandoned:
+        import os
+        import sys
+
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(code)
+    raise SystemExit(code)
 
 
 if __name__ == "__main__":

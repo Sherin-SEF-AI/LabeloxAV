@@ -15,7 +15,16 @@
 set -Eeuo pipefail
 
 APP_DIR="${LABELOXAV_HOME:-/opt/labeloxav}"
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.app.yml)
+# The installer writes COMPOSE_FILE (and COMPOSE_PROFILES) into .env, and Compose reads both from there, so
+# plain `docker compose` starts exactly what was installed, including the GPU overlay when there is a GPU.
+# An install from before that falls back to the two files it always used.
+compose() {
+  if grep -qE '^COMPOSE_FILE=.+' .env 2>/dev/null; then
+    docker compose "$@"
+  else
+    docker compose -f docker-compose.yml -f docker-compose.app.yml "$@"
+  fi
+}
 
 usage() {
   cat <<USAGE
@@ -27,6 +36,7 @@ labeloxav <command>
   status          show which containers are running
   logs [service]  follow logs, for everything or for one service (api, web, postgres, ...)
   token <user>    mint a sign-in token for a user
+  doctor          check the installation and say what to fix
   url             print the address to open
   version         print the packaged version
 
@@ -62,27 +72,32 @@ case "$cmd" in
   up|start)
     need_app_dir; need_docker
     [ -f .env ] || { echo "labeloxav: no configuration yet. Run: sudo labeloxav install" >&2; exit 1; }
-    exec "${COMPOSE[@]}" up -d "$@"
+    compose up -d "$@"
     ;;
   down|stop)
     need_app_dir; need_docker
-    exec "${COMPOSE[@]}" down "$@"
+    compose down "$@"
     ;;
   status)
     need_app_dir; need_docker
-    exec "${COMPOSE[@]}" ps "$@"
+    compose ps "$@"
     ;;
   logs)
     need_app_dir; need_docker
-    exec "${COMPOSE[@]}" logs -f "$@"
+    compose logs -f "$@"
     ;;
   token)
     need_app_dir; need_docker
     [ $# -ge 1 ] || { echo "usage: labeloxav token <user>" >&2; exit 1; }
-    exec "${COMPOSE[@]}" exec api python -m scripts.mint_token --name "$1"
+    compose exec api python -m scripts.mint_token --name "$1"
+    ;;
+  doctor)
+    need_app_dir; need_docker
+    exec ./scripts/doctor.sh "$@"
     ;;
   url)
-    echo "http://localhost:3000"
+    need_app_dir
+    echo "http://localhost:$(sed -n 's/^WEB_PORT=\(.*\)$/\1/p' .env 2>/dev/null | tail -1 | grep . || echo 3000)"
     ;;
   version)
     if [ -f "${APP_DIR}/pyproject.toml" ]; then

@@ -23,8 +23,10 @@ install-ml: ## Install the ml extra (torch cu128, ultralytics, transformers)
 	$(UV) pip install -e ".[ml]" --index-strategy unsafe-best-match
 
 .PHONY: up
-up: ## Start infra (postgres, minio, redis, redpanda) and wait for healthy
-	docker compose up -d
+up: ## Start infra (postgres, minio, redis, redpanda, plus the optional extras) and wait for healthy
+	@# --profile extras: lakeFS, Lichtblick and MLflow are opt-in for a deployment, but a dev box and the
+	@# suite keep them, since the branch, viewer and experiment tests talk to them.
+	docker compose --profile extras up -d
 	@echo "waiting for services to become healthy..."
 	@# Three things were wrong here and they cancelled out into a silent success.
 	@#
@@ -232,21 +234,29 @@ web: ## Run the Next.js review UI
 install-docker: ## Deploy the whole product with Docker (generates secrets, migrates, creates the admin)
 	./scripts/install.sh
 
+# The deployed app's compose command. scripts/install.sh writes COMPOSE_FILE into .env (adding the GPU overlay
+# when Docker can use the GPU) and Compose reads it from there; an older install falls back to the two files.
+APP_COMPOSE := $(if $(shell grep -s '^COMPOSE_FILE=.' .env),docker compose,docker compose -f docker-compose.yml -f docker-compose.app.yml)
+
+.PHONY: doctor
+doctor: ## Check the deployed installation and say what to fix
+	./scripts/doctor.sh
+
 .PHONY: app-up
 app-up: ## Start the deployed app (infra + api + web)
-	docker compose -f docker-compose.yml -f docker-compose.app.yml up -d
+	$(APP_COMPOSE) up -d
 
 .PHONY: app-down
 app-down: ## Stop the deployed app, keeping all data
-	docker compose -f docker-compose.yml -f docker-compose.app.yml down
+	$(APP_COMPOSE) down
 
 .PHONY: app-logs
 app-logs: ## Follow the API logs
-	docker compose -f docker-compose.yml -f docker-compose.app.yml logs -f api
+	$(APP_COMPOSE) logs -f api
 
 .PHONY: token
 token: ## Mint an API token from the server (recovery when the admin token is lost). NAME=alice
-	docker compose -f docker-compose.yml -f docker-compose.app.yml exec api python -m scripts.mint_token --name $(or $(NAME),admin)
+	$(APP_COMPOSE) exec api python -m scripts.mint_token --name $(or $(NAME),admin)
 
 .PHONY: test
 test: ## Run pytest (full suite; needs infra up)

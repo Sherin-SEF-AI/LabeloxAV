@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy import delete
 
 from core.timebase import now_ns, seconds_to_ns
-from db.models import AutolabelJob
+from db.models import AutolabelJob, TrainingJob
 from db.models import Session as DbSession
 from db.session import get_sessionmaker
 from services.autolabel.jobs import (
@@ -36,6 +36,7 @@ def _empty_worker_queue():
     async def clear():
         async with get_sessionmaker()() as db:
             await db.execute(delete(AutolabelJob).where(AutolabelJob.status.in_(("pending", "running"))))
+            await db.execute(delete(TrainingJob).where(TrainingJob.status.in_(("pending", "running"))))
             await db.commit()
 
     asyncio.run(clear())
@@ -161,6 +162,36 @@ class TestTheWorker:
         row = await _row(jid)
         assert row.status == "pending" and row.attempts == 0
         assert row.params["only_unlabelled"] is True
+
+    async def test_a_stop_during_training_requeues_it_to_resume(self, monkeypatch):
+        """Training runs in executor threads a cancel cannot reach, so the row has to be put back the way a
+        crash would leave it: pending, resuming from the last saved epoch."""
+        import services.gpu_worker as gw
+        import services.training.jobs as tj
+        import services.training.worker as tw
+
+        started = asyncio.Event()
+
+        async def slow_train(job_id):
+            started.set()
+            await asyncio.sleep(60)
+
+        monkeypatch.setattr(tj, "run_job_guarded", slow_train)
+        monkeypatch.setattr(tw, "vram_preflight", lambda: None)
+        monkeypatch.setattr(gw, "_training_abandoned", False)
+        jid = uuid.uuid4()
+        async with get_sessionmaker()() as db:
+            db.add(TrainingJob(job_id=jid, purpose="stop-test", config={"hparams": {"epochs": 3}}))
+            await db.commit()
+        task = asyncio.ensure_future(gw.run_next())
+        await asyncio.wait_for(started.wait(), 10)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        async with get_sessionmaker()() as db:
+            row = await db.get(TrainingJob, jid)
+        assert row.status == "pending"
+        assert gw._training_abandoned is True
 
     async def test_it_claims_nothing_new_while_resources_are_paused(self, tmp_path, monkeypatch):
         import services.gpu_worker as gw
