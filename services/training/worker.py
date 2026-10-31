@@ -85,6 +85,14 @@ def _vram_preflight() -> str | None:
         return str(exc)
 
 
+# Public names for the GPU worker (services/gpu_worker.py), which drains this queue alongside auto-label
+# under the same lifetime lock. The underscored originals stay because this module's own loop and its
+# tests use them.
+reset_training_orphans = _reset_orphans
+claim_training_job = _claim
+vram_preflight = _vram_preflight
+
+
 async def worker_loop() -> None:
     settings = get_settings()
     setup_logging(settings.log_level)

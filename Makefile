@@ -182,6 +182,10 @@ train: ## Close the loop: build trainset + fine-tune + eval-gate. Usage: make tr
 train-worker: ## Run the training worker (drains LOCAL training jobs serially on the GPU)
 	$(RUN) python -m services.training.worker
 
+.PHONY: gpu-worker
+gpu-worker: ## Run the GPU worker (drains queued auto-label and training jobs, one at a time)
+	$(RUN) python -m services.gpu_worker
+
 .PHONY: govern-daemon
 govern-daemon: ## Run the autonomy controller daemon (ticks the closed loop: drift, promotion, retrain)
 	$(RUN) python -m services.govern.daemon
