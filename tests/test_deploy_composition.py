@@ -220,3 +220,26 @@ class TestTheBucketNeedsNoExtraImage:
         svc = _services()["migrate"]
         assert "scripts.ensure_bucket" in svc["command"]
         assert svc["depends_on"]["minio"]["condition"] == "service_healthy"
+
+
+class TestMinioIsBuiltNotPulled:
+    """MinIO withdrew its Docker Hub images and quay.io now refuses anonymous pulls, so any MinIO image
+    named by registry fails on a machine without a cached copy. It is built from source instead."""
+
+    def test_the_server_is_built_from_the_pinned_source(self):
+        svc = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())["services"]["minio"]
+        assert svc["build"]["context"] == "./docker/minio"
+        assert svc["pull_policy"] == "build"
+        dockerfile = (REPO_ROOT / "docker" / "minio" / "Dockerfile").read_text()
+        release = svc["image"].split(":", 1)[1]
+        assert f"ARG MINIO_RELEASE={release}" in dockerfile, "the image tag and the built release must agree"
+
+    def test_nothing_pulls_a_minio_registry_image(self):
+        infra = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())["services"]
+        for name, svc in {**infra, **_services()}.items():
+            image = str(svc.get("image", ""))
+            assert not image.startswith(("quay.io/minio/", "minio/", "docker.io/minio/")), (name, image)
+
+    def test_the_healthcheck_needs_only_what_the_image_has(self):
+        svc = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())["services"]["minio"]
+        assert "mc " not in " ".join(svc["healthcheck"]["test"]) and "curl" in " ".join(svc["healthcheck"]["test"])
