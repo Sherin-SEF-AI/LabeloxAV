@@ -60,15 +60,26 @@ gunzip -c "$SRC/postgres.sql.gz" | docker compose exec -T postgres psql -U "$PG_
 
 echo "==> MinIO: bucket ${BUCKET}"
 NET="$(docker compose ps --format '{{.Name}}' postgres | head -1 | sed 's/-postgres-1$//')_default"
-# --user: mc runs as root by default; without this the restore container writes as
-# root and a later backup into the same tree cannot be cleaned up.
-# quay.io, pinned to the release docker-compose.yml runs. MinIO withdrew its Docker Hub repositories, and
-# this used to pull `minio/mc:latest` from there, which no longer resolves on a machine without a cached copy.
-MC_IMAGE="quay.io/minio/mc:RELEASE.2024-10-08T09-37-26Z"
-docker run --rm --user "$(id -u):$(id -g)" --network "$NET" \
-  -v "$(cd "$SRC" && pwd):/backup:ro" \
-  -e MC_HOST_lbx="http://${MINIO_USER}:${MINIO_PASS}@minio:9000" \
-  "${MC_IMAGE}" mirror --overwrite --quiet /backup/minio "lbx/${BUCKET}"
+# The bucket is mirrored by scripts/bucket_mirror.py, which needs boto3 alone. It used to run MinIO's `mc`
+# image, which MinIO no longer publishes (Docker Hub withdrew it, quay.io refuses anonymous pulls), so this
+# failed on any machine without a cached copy. In a deployment it runs in the app image on the compose
+# network, offline; on a development checkout, from the virtualenv against the published MinIO port.
+# Credentials travel in the environment, never on a command line where the process list would show them.
+# --user: the files belong to whoever runs this, so the operator can move or delete them without sudo.
+export MINIO_ROOT_USER="$MINIO_USER" MINIO_ROOT_PASSWORD="$MINIO_PASS"
+APP_IMAGE="labeloxav/app:${LBX_VERSION:-latest}"
+DIR_ABS="$(cd "$SRC" && pwd)"
+if docker image inspect "$APP_IMAGE" >/dev/null 2>&1; then
+  docker run --rm --user "$(id -u):$(id -g)" --network "$NET" -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 \
+    -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD -v "$DIR_ABS:/backup:ro" --entrypoint python "$APP_IMAGE" \
+    /app/scripts/bucket_mirror.py upload --endpoint http://minio:9000 --bucket "$BUCKET" --dir /backup/minio
+elif [ -x .venv/bin/python ]; then
+  .venv/bin/python scripts/bucket_mirror.py upload --endpoint "http://localhost:${MINIO_PORT:-9000}" \
+    --bucket "$BUCKET" --dir "$DIR_ABS/minio"
+else
+  echo "ERROR: neither the app image ($APP_IMAGE) nor a .venv is here to run scripts/bucket_mirror.py" >&2
+  exit 1
+fi
 
 echo "==> verifying"
 # The check that matters is referential, not a row count: an object row whose blob is gone is exactly the

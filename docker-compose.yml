@@ -27,12 +27,14 @@ services:
     shm_size: 512m
 
   minio:
-    # Pulled from quay.io, not Docker Hub. MinIO's Docker Hub repositories were withdrawn, so
-    # `minio/minio` no longer resolves anywhere, and a machine without a cached copy stopped at
-    # "Starting infrastructure" with "pull access denied". Every fresh install failed there, from
-    # the Debian package and from a git clone alike. quay.io serves the same release under the same
-    # tag, and it is the same image: identical image ID and the same MinIO commit.
-    image: quay.io/minio/minio:RELEASE.2024-10-13T13-34-11Z
+    # Built from source (docker/minio/Dockerfile). MinIO withdrew its Docker Hub repositories first, and then
+    # quay.io began answering 401 to anonymous pulls too, so every fresh install and CI run stopped at
+    # "Starting infrastructure"; only machines with a cached copy kept working. The free edition is now
+    # distributed as source, and this builds the same release with the same /data layout.
+    build:
+      context: ./docker/minio
+    image: labeloxav/minio:RELEASE.2024-10-13T13-34-11Z
+    pull_policy: build
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-labelox}
@@ -44,7 +46,7 @@ services:
     volumes:
       - miniodata:/data
     healthcheck:
-      test: ["CMD-SHELL", "mc ready local || curl -f http://localhost:9000/minio/health/live || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 20
