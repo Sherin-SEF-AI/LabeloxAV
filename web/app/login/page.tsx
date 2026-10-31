@@ -56,7 +56,8 @@ function Shell({ title, subtitle, children }: {
           <div className="font-display font-bold text-lg text-ink">
             Labelox<span className="text-accent">AV</span>
           </div>
-          <div className="text-[12px] text-ink-3">{subtitle ?? title}</div>
+          <h1 className="mt-3 text-[16px] font-semibold text-ink">{title}</h1>
+          {subtitle && subtitle !== title && <p className="mt-0.5 text-[12.5px] text-ink-3">{subtitle}</p>}
         </div>
         {children}
       </div>
@@ -65,9 +66,13 @@ function Shell({ title, subtitle, children }: {
 }
 
 function LoginBody() {
-  const next = useSearchParams().get("next") || "/";
+  const params = useSearchParams();
+  const next = params.get("next") || "/";
+  // A sign-in link from an administrator (Settings > Team) carries its token here, so the person lands on
+  // "choose a password" with nothing to paste.
+  const invite = params.get("invite");
   const [methods, setMethods] = useState<Methods | null>(null);
-  const [stage, setStage] = useState<Stage>("signin");
+  const [stage, setStage] = useState<Stage>(invite ? "reset" : "signin");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -75,7 +80,7 @@ function LoginBody() {
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const [resetToken, setResetToken] = useState("");
+  const [resetToken, setResetToken] = useState(invite ?? "");
   const [mfaHandle, setMfaHandle] = useState("");
   const [enrolUri, setEnrolUri] = useState<string | null>(null);
   const [enrolSecret, setEnrolSecret] = useState<string | null>(null);
@@ -210,12 +215,13 @@ function LoginBody() {
     : stage === "mfa" ? "Two-factor code"
     : stage === "enrol" ? "Set up two-factor authentication"
     : stage === "forgot" ? "Reset your password"
-    : stage === "reset" ? "Choose a new password"
+    : stage === "reset" ? (invite ? "Welcome. Choose a password" : "Choose a new password")
     : "Sign in";
 
   return (
     <Shell title={title} subtitle={stage === "signup" && methods.bootstrap
       ? "this deployment has no accounts yet, so the first one is an administrator"
+      : stage === "reset" && invite ? "at least 12 characters; you will use it to sign in from now on"
       : title}>
       {err && <div className="text-[12px] text-block border border-block px-2 py-1">{err}</div>}
 
@@ -359,7 +365,7 @@ function LoginBody() {
 
       {stage === "reset" && (
         <div className="space-y-2">
-          <Field label="reset token" value={resetToken} onChange={(e) => setResetToken(e.target.value)} />
+          {!invite && <Field label="reset token" value={resetToken} onChange={(e) => setResetToken(e.target.value)} />}
           <Field label="new password" type="password" value={password} autoComplete="new-password"
             onChange={(e) => setPassword(e.target.value)} onKeyDown={onEnter(submitReset)} />
           <button onClick={submitReset} disabled={busy || !resetToken.trim() || !password}

@@ -857,6 +857,10 @@ class AuthSettings(BaseModel):
     # (services/api/auth_token.py) and role floors gate destructive/governance routes. Reads under
     # data-bearing prefixes are gated too. Disable only for unit tests.
     enabled: bool = True
+    # How long a sign-in link from an administrator (Settings > Team: an invite, or a new link for someone
+    # who lost their password) stays valid. Longer than a self-service reset (30 minutes), because it is
+    # handed over by message and opened when the person next looks.
+    invite_ttl_hours: int = 72
     # HMAC key that signs/verifies API tokens. The weak default below is refused on any non-local deployment
     # by _require_prod_secrets: a known signing key lets anyone mint an admin token.
     signing_key: str = "labeloxavauthsigningkey0123456789abcdef"

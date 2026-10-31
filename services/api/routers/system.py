@@ -30,6 +30,9 @@ async def system_features():
         # Whether queued GPU jobs (training, and auto-label in worker mode) will actually run.
         "gpu_worker": await gpu_worker_running(),
         "autolabel_executor": get_settings().jobs.autolabel_executor,
+        # Switching identity in the account menu exists only for a dev server with auth off; with auth on,
+        # who you are is your sign-in.
+        "auth_enabled": get_settings().auth.enabled,
     }
 
 

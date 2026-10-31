@@ -317,6 +317,7 @@ step "Waiting for the API to become ready"
 # /api/readyz is 503 until every dependency answers, unlike /api/health which is 200 with a degraded body.
 # Waiting on the wrong one would declare success while Postgres was still starting.
 api_url="http://localhost:${API_PORT}"
+web_url="http://localhost:${WEB_PORT}"
 for i in $(seq 1 90); do
   if curl -fsS "${api_url}/api/readyz" >/dev/null 2>&1; then
     ok "API ready at ${api_url}"
@@ -380,7 +381,6 @@ fi
 # ---------------------------------------------------------------------------
 # 6. Done
 # ---------------------------------------------------------------------------
-web_url="http://localhost:${WEB_PORT}"
 cat <<EOF
 
 ${G}${B}LabeloxAV is running.${N}
@@ -392,22 +392,25 @@ ${G}${B}LabeloxAV is running.${N}
 
 EOF
 
-if [ -n "$token" ]; then
+# How the administrator signs in: a link that opens "choose a password". The sign-in page takes passwords,
+# not tokens, and the seeded administrator has no password yet, so printing a token here left a fresh
+# install with no visible way in. The token above stays in .admin-token for scripts and the release smoke
+# test; people use the link.
+link="$("${COMPOSE[@]}" exec -T api python -m scripts.sign_in_link --name "${admin_name}" --create --role admin \
+          --url "${web_url}" 2>/dev/null | grep -m1 '/login?invite=' || true)"
+if [ -n "$link" ]; then
   cat <<EOF
-  Sign in with this token (also saved to .admin-token, mode 600):
+  Sign in: open this link, choose the administrator's password, and you are in.
+  It works once and expires in ${LBX_AUTH__INVITE_TTL_HOURS:-72} hours.
 
-    ${B}${token}${N}
+    ${B}${link}${N}
 
-  Open ${web_url}/login and paste it. Tokens expire; the app refreshes yours silently while you use it.
+  Then invite your team from Settings > Team, and create keys for scripts in Settings > API keys.
 
 EOF
 else
-  cat <<EOF
-  To sign in, use an existing token, or mint one for a user with:
-
-    ${COMPOSE_HINT} exec api python -m scripts.mint_token --name <user>
-
-EOF
+  warn "could not create a sign-in link for '${admin_name}'. Make one with:
+       ${COMPOSE_HINT} exec api python -m scripts.sign_in_link --name ${admin_name} --url ${web_url}"
 fi
 
 cat <<EOF

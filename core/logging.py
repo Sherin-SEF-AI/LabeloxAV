@@ -8,10 +8,13 @@ import sys
 import structlog
 
 
-def setup_logging(level: str = "INFO") -> None:
+def setup_logging(level: str = "INFO", stream=None) -> None:
+    """Configure stdlib logging and structlog. `stream` defaults to stdout; a command whose stdout is its
+    output (scripts/sign_in_link.py prints a link a shell script captures) passes stderr instead."""
     log_level = getattr(logging, level.upper(), logging.INFO)
+    out = stream or sys.stdout
 
-    logging.basicConfig(format="%(message)s", stream=sys.stdout, level=log_level)
+    logging.basicConfig(format="%(message)s", stream=out, level=log_level)
 
     structlog.configure(
         processors=[
@@ -23,7 +26,7 @@ def setup_logging(level: str = "INFO") -> None:
             structlog.processors.JSONRenderer(),
         ],
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.PrintLoggerFactory(file=out),
         cache_logger_on_first_use=True,
     )
 

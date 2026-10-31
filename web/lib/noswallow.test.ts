@@ -45,7 +45,6 @@ const ALLOWED: Record<string, number> = {
   "app/sievyx/page.tsx": 1,
   "app/training/page.tsx": 1,
   "app/verdyx/page.tsx": 1,
-  "components/UserPicker.tsx": 1,
   "components/training/RunsPanel.tsx": 1,
   // The shared client's own best-effort paths (token refresh, the 401 announce).
   "lib/api.ts": 1,

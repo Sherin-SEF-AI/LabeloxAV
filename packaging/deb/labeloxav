@@ -35,7 +35,8 @@ labeloxav <command>
   down | stop     stop the containers and keep their data
   status          show which containers are running
   logs [service]  follow logs, for everything or for one service (api, web, postgres, ...)
-  token <user>    mint a sign-in token for a user
+  sign-in-link <user>  a link that lets <user> choose a password and sign in (first login, lost password)
+  token <user>    mint an API token for a user (prefer API keys in Settings for scripts)
   doctor          check the installation and say what to fix
   url             print the address to open
   version         print the packaged version
@@ -90,6 +91,12 @@ case "$cmd" in
     need_app_dir; need_docker
     [ $# -ge 1 ] || { echo "usage: labeloxav token <user>" >&2; exit 1; }
     compose exec api python -m scripts.mint_token --name "$1"
+    ;;
+  sign-in-link)
+    need_app_dir; need_docker
+    [ $# -ge 1 ] || { echo "usage: labeloxav sign-in-link <user>" >&2; exit 1; }
+    port="$(sed -n 's/^WEB_PORT=\(.*\)$/\1/p' .env 2>/dev/null | tail -1)"
+    compose exec -T api python -m scripts.sign_in_link --name "$1" --url "http://$(hostname -f 2>/dev/null || hostname):${port:-3000}"
     ;;
   doctor)
     need_app_dir; need_docker
