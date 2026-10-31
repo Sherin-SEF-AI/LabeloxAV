@@ -73,20 +73,23 @@ case "$compose_file" in
     ;;
 esac
 
+# Frames, models and the database live in Docker volumes, so Docker's data directory is the disk that fills.
+# This folder holds only the source and .env, and matters only when it is nearly full.
 avail_gb=$(df -Pk "$REPO_ROOT" | awk 'NR==2 {print int($4/1048576)}')
 docker_gb=$(df -Pk "$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /)" 2>/dev/null \
             | awk 'NR==2 {print int($4/1048576)}')
-for pair in "this folder:${avail_gb}" "Docker's data directory:${docker_gb:-$avail_gb}"; do
-  where="${pair%%:*}"; gb="${pair##*:}"
-  if [ "${gb:-0}" -lt 10 ]; then
-    fail "${gb} GB free in ${where}; imports and frame storage will fail when it runs out" \
-         "free space, or move Docker's data-root to a larger disk"
-  elif [ "${gb:-0}" -lt 30 ]; then
-    warn "${gb} GB free in ${where}; footage fills this quickly"
-  else
-    pass "${gb} GB free in ${where}"
-  fi
-done
+docker_gb="${docker_gb:-$avail_gb}"
+if [ "$docker_gb" -lt 10 ]; then
+  fail "${docker_gb} GB free where Docker keeps its data; imports and frame storage fail when it runs out" \
+       "free space, or move Docker's data-root to a larger disk"
+elif [ "$docker_gb" -lt 30 ]; then
+  warn "${docker_gb} GB free where Docker keeps its data; footage fills this quickly"
+else
+  pass "${docker_gb} GB free where Docker keeps its data"
+fi
+if [ "${avail_gb:-0}" -lt 1 ]; then
+  warn "under 1 GB free in ${REPO_ROOT}; .env and logs live here" "free some space on that disk"
+fi
 
 mem_gb=$(awk '/MemTotal/ {print int($2/1048576)}' /proc/meminfo 2>/dev/null || echo 0)
 avail_mem_gb=$(awk '/MemAvailable/ {print int($2/1048576)}' /proc/meminfo 2>/dev/null || echo 0)
