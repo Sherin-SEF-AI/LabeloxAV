@@ -93,7 +93,7 @@ def demands(rows: Iterable[tuple[Sequence[float], str, str, str]], w: int, h: in
     return out
 
 
-def inside_fraction(region_bbox: Sequence[float], window: tuple[int, int, int, int]) -> float:
+def inside_fraction(region_bbox: Sequence[float], window: Sequence[float]) -> float:
     """The fraction of the REGION's own area that lies inside the window.
 
     Deliberately asymmetric. A face is a small part of the person carrying it, so the question is "is this
