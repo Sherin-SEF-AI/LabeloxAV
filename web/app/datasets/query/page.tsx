@@ -110,17 +110,17 @@ export default function DatasetQueryPage() {
               {([["scene", vocab.scene], ["group", vocab.group], ["state", vocab.state]] as const).map(
                 ([kind, items]) => (
                   <div key={kind} className="flex flex-wrap items-center gap-1">
-                    <span className="font-mono text-[10px] uppercase text-ink-3 w-14">{kind}</span>
+                    <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 w-14">{kind}</span>
                     {items.map((t) => (
                       <button key={t} onClick={() => addTerm(t)}
-                        className={`font-mono text-[10px] px-1.5 py-0.5 border border-line hover:bg-line/40 ${KIND_TONE[kind]}`}>
+                        className={`text-[11px] px-1.5 py-0.5 border border-line hover:bg-line/40 ${KIND_TONE[kind]}`}>
                         {t}
                       </button>
                     ))}
                   </div>
                 ),
               )}
-              <div className="font-mono text-[10px] text-ink-3">
+              <div className="text-[11px] text-ink-3">
                 plus any of the {vocab.class.length} ontology class names
               </div>
             </div>
@@ -135,11 +135,11 @@ export default function DatasetQueryPage() {
           </div>
         )}
 
-        {busy && !pv && <div className="font-mono text-[11px] text-ink-3">counting...</div>}
+        {busy && !pv && <div className="text-[12px] text-ink-3">counting...</div>}
 
         {pv && !err && (
           <>
-            <div className="flex flex-wrap gap-2 font-mono text-[11px]">
+            <div className="flex flex-wrap gap-2 text-[12px]">
               <Stat label="frames" value={pv.frames.toLocaleString()} />
               <Stat label="objects" value={pv.objects.toLocaleString()} />
               <Stat label="classes" value={String(Object.keys(pv.classes).length)} />
@@ -147,25 +147,25 @@ export default function DatasetQueryPage() {
             </div>
 
             {pv.frames === 0 && (
-              <div className="panel px-3 py-4 font-mono text-[11px] text-ink-3">
+              <div className="panel px-3 py-4 text-[12px] text-ink-3">
                 Nothing matches. That is an answer: this corpus holds no frames meeting all of those terms.
               </div>
             )}
 
             <div className="grid gap-3 md:grid-cols-2">
               <section className="panel">
-                <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
                   what this compiles to
                 </div>
                 <div className="p-3 space-y-2">
                   {/* Shown, not hidden: this is the difference between a dataset somebody can defend and one
                       they can only describe. */}
-                  <pre className="font-mono text-[10px] text-ink-2 whitespace-pre-wrap break-all">
+                  <pre className="text-[11px] text-ink-2 whitespace-pre-wrap break-all">
                     {JSON.stringify(pv.predicate, null, 1)}
                   </pre>
                   <div className="space-y-1">
                     {pv.terms.map((t) => (
-                      <div key={t.term} className="font-mono text-[10px]">
+                      <div key={t.term} className="text-[11px]">
                         <span className={KIND_TONE[t.kind] ?? "text-ink"}>{t.term}</span>
                         <span className="text-ink-3"> is a {t.kind}</span>
                         {t.expands_to && (
@@ -178,14 +178,14 @@ export default function DatasetQueryPage() {
               </section>
 
               <section className="panel">
-                <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
                   class mix
                 </div>
                 <div className="p-3 space-y-1">
                   {Object.entries(pv.classes).slice(0, 14).map(([name, n]) => {
                     const max = Math.max(...Object.values(pv.classes), 1);
                     return (
-                      <div key={name} className="flex items-center gap-2 font-mono text-[10px]">
+                      <div key={name} className="flex items-center gap-2 text-[11px]">
                         <span className="w-32 truncate text-ink-2">{name}</span>
                         <span className="flex-1 bg-line/40 h-2">
                           <span className="block bg-accent h-2" style={{ width: `${(n / max) * 100}%` }} />
@@ -195,14 +195,14 @@ export default function DatasetQueryPage() {
                     );
                   })}
                   {!Object.keys(pv.classes).length && (
-                    <div className="font-mono text-[10px] text-ink-3">no labelled objects in this selection</div>
+                    <div className="text-[11px] text-ink-3">no labelled objects in this selection</div>
                   )}
                 </div>
               </section>
             </div>
 
             <section className="panel">
-              <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2 flex items-center justify-between">
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2 flex items-center justify-between">
                 <span>take it away</span>
                 <button onClick={() => void build()} disabled={building || pv.frames === 0}
                   className="border border-accent text-accent px-2 py-0.5 hover:bg-accent/10 disabled:opacity-30">
@@ -212,9 +212,9 @@ export default function DatasetQueryPage() {
               <div className="p-3 space-y-2">
                 {/* The query is the artifact. A path names where somebody put a zip; this names what the
                     data is, which is what whoever inherits the config actually needs. */}
-                <pre className="font-mono text-[10px] text-ink-2 whitespace-pre-wrap">{snippet}</pre>
+                <pre className="text-[11px] text-ink-2 whitespace-pre-wrap">{snippet}</pre>
                 {built && (
-                  <div className="font-mono text-[10px] text-ink-3 space-y-0.5">
+                  <div className="text-[11px] text-ink-3 space-y-0.5">
                     <div className="text-ink">{built.samples} samples in {built.shards.length} shards</div>
                     {built.shards.slice(0, 3).map((s) => <div key={s}>{s}</div>)}
                     {built.index_uri && <div>index: {built.index_uri}</div>}

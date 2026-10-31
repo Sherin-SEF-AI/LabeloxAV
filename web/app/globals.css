@@ -10,6 +10,8 @@ html,
 body {
   background: #121316;
   color: #e8e9ec;
+  /* Figures line up in every column and counter without each table having to ask for it. */
+  font-variant-numeric: tabular-nums;
 }
 
 /* Surfaces: a panel is one step up from the page, with a hairline and moderate rounding. Depth comes from the

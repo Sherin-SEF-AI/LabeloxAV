@@ -22,8 +22,8 @@ function Section({ title, children, hint }: {
   return (
     <section className="panel">
       <div className="border-b hairline px-3 py-2">
-        <div className="font-mono text-[11px] uppercase text-ink-3">{title}</div>
-        {hint && <div className="font-mono text-[10px] text-ink-3">{hint}</div>}
+        <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{title}</div>
+        {hint && <div className="text-[11px] text-ink-3">{hint}</div>}
       </div>
       <div className="p-3 space-y-2">{children}</div>
     </section>
@@ -33,9 +33,9 @@ function Section({ title, children, hint }: {
 function Field({ label, ...rest }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block space-y-1">
-      <span className="font-mono text-[10px] uppercase text-ink-3">{label}</span>
+      <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</span>
       <input {...rest}
-        className="w-full max-w-sm bg-bg border border-line px-2 py-1 font-mono text-[12px] text-ink
+        className="w-full max-w-sm bg-bg border border-line px-2 py-1 text-[12.5px] text-ink
                    focus:border-accent outline-none" />
     </label>
   );
@@ -137,11 +137,11 @@ export default function ProfilePage() {
           <section className="panel p-3 flex items-center gap-4 flex-wrap">
             <div>
               <div className="font-mono text-[13px] text-ink">{profile.name}</div>
-              <div className="font-mono text-[10px] text-ink-3">
+              <div className="text-[11px] text-ink-3">
                 {profile.role}{profile.email ? ` · ${profile.email}` : ""}
               </div>
             </div>
-            <div className="ml-auto flex gap-2 font-mono text-[10px]">
+            <div className="ml-auto flex gap-2 text-[11px]">
               <span className={profile.has_password ? "text-pass" : "text-ink-3"}>
                 {profile.has_password ? "password set" : "no password"}
               </span>
@@ -155,11 +155,11 @@ export default function ProfilePage() {
 
         {recovery && (
           <Section title="your recovery codes" hint="shown once, never again">
-            <div className="grid grid-cols-2 gap-1 font-mono text-[12px] text-ink select-all max-w-md">
+            <div className="grid grid-cols-2 gap-1 text-[12.5px] text-ink select-all max-w-md">
               {recovery.map((c) => <div key={c} className="border border-line px-2 py-1">{c}</div>)}
             </div>
             <button onClick={() => setRecovery(null)}
-              className="border border-line px-2 py-0.5 font-mono text-[11px] text-ink-2 hover:border-accent">
+              className="border border-line px-2 py-0.5 text-[12px] text-ink-2 hover:border-accent">
               I have saved them
             </button>
           </Section>
@@ -173,11 +173,11 @@ export default function ProfilePage() {
           )}
           <Field label="new password" type="password" value={next} autoComplete="new-password"
             onChange={(e) => setNext(e.target.value)} />
-          <div className="font-mono text-[10px] text-ink-3">
+          <div className="text-[11px] text-ink-3">
             at least 12 characters; length matters more than symbols
           </div>
           <button onClick={changePassword} disabled={busy || !next}
-            className="border border-line px-2 py-0.5 font-mono text-[11px] text-ink-2
+            className="border border-line px-2 py-0.5 text-[12px] text-ink-2
                        hover:border-accent disabled:opacity-40">
             {profile?.has_password ? "change password" : "set a password"}
           </button>
@@ -187,35 +187,35 @@ export default function ProfilePage() {
           hint="an authenticator app code in addition to your password">
           {profile?.mfa_enabled ? (
             <>
-              <div className="font-mono text-[11px] text-pass">enrolled</div>
+              <div className="text-[12px] text-pass">enrolled</div>
               <Field label="password (to remove it)" type="password" value={disablePw}
                 autoComplete="current-password" onChange={(e) => setDisablePw(e.target.value)} />
               <button onClick={disableMfa} disabled={busy || !disablePw}
-                className="border border-line px-2 py-0.5 font-mono text-[11px] text-ink-3
+                className="border border-line px-2 py-0.5 text-[12px] text-ink-3
                            hover:text-block hover:border-block disabled:opacity-40">
                 remove two-factor authentication
               </button>
             </>
           ) : mfaSecret ? (
             <>
-              <div className="font-mono text-[10px] text-ink-3">
+              <div className="text-[11px] text-ink-3">
                 Add this to your authenticator, then enter the code it shows.
               </div>
-              <div className="font-mono text-[12px] text-ink border border-line px-2 py-1 max-w-sm break-all select-all">
+              <div className="text-[12.5px] text-ink border border-line px-2 py-1 max-w-sm break-all select-all">
                 {mfaSecret}
               </div>
-              <div className="font-mono text-[9px] text-ink-3 break-all max-w-lg">{mfaUri}</div>
+              <div className="text-[10.5px] text-ink-3 break-all max-w-lg">{mfaUri}</div>
               <Field label="code" value={mfaCode} inputMode="numeric" autoComplete="one-time-code"
                 onChange={(e) => setMfaCode(e.target.value)} />
               <button onClick={confirmMfa} disabled={busy || mfaCode.trim().length < 6}
-                className="border border-accent px-2 py-0.5 font-mono text-[11px] text-accent
+                className="border border-accent px-2 py-0.5 text-[12px] text-accent
                            hover:bg-accent/10 disabled:opacity-40">
                 activate
               </button>
             </>
           ) : (
             <button onClick={startMfa} disabled={busy}
-              className="border border-line px-2 py-0.5 font-mono text-[11px] text-ink-2
+              className="border border-line px-2 py-0.5 text-[12px] text-ink-2
                          hover:border-accent disabled:opacity-40">
               set up two-factor authentication
             </button>
@@ -225,7 +225,7 @@ export default function ProfilePage() {
         <Section title="sessions"
           hint="a token is stateless, so this is how a lost or stolen one is actually taken away">
           <button onClick={revoke} disabled={busy}
-            className="border border-line px-2 py-0.5 font-mono text-[11px] text-ink-2
+            className="border border-line px-2 py-0.5 text-[12px] text-ink-2
                        hover:border-accent disabled:opacity-40">
             sign out everywhere else
           </button>

@@ -74,10 +74,10 @@ export default function InterruptedRuns({ onResumed }: { onResumed?: () => void 
         {visible.map((r, i) => (
           <div key={r.run_id} className="px-4 py-2.5 fade-up" style={{ ["--d" as string]: `${i * 40}ms` }}>
             <div className="flex items-center gap-3">
-              <span className="font-mono text-[11px] text-ink">{r.kind}</span>
-              <span className="font-mono text-[10px] text-ink-3">{ago(r.heartbeat_at || r.created_at)}</span>
+              <span className="text-[12px] text-ink">{r.kind}</span>
+              <span className="text-[11px] text-ink-3">{ago(r.heartbeat_at || r.created_at)}</span>
               {r.fraction !== null && r.fraction !== undefined && (
-                <span className="font-mono text-[10px] text-ink-2 tabular-nums">
+                <span className="text-[11px] text-ink-2 tabular-nums">
                   {Math.round(r.fraction * 100)}% done
                 </span>
               )}
@@ -88,14 +88,14 @@ export default function InterruptedRuns({ onResumed }: { onResumed?: () => void 
                   title={r.resumable
                     ? "continue this job from its cursor"
                     : "this job recorded no cursor, so it can be started again but not continued"}
-                  className="lift font-mono text-[10px] border border-accent/60 text-accent px-2 py-1 rounded
+                  className="lift text-[11px] border border-accent/60 text-accent px-2 py-1 rounded
                              hover:bg-accent/10 disabled:opacity-40 disabled:cursor-not-allowed">
                   {busy === r.run_id ? "resuming" : r.resumable ? "resume" : "not resumable"}
                 </button>
                 <button
                   onClick={() => setDismissed((d) => new Set(d).add(r.run_id))}
                   aria-label={`dismiss ${r.kind}`}
-                  className="font-mono text-[10px] text-ink-3 hover:text-ink px-1">
+                  className="text-[11px] text-ink-3 hover:text-ink px-1">
                   hide
                 </button>
               </div>
@@ -111,7 +111,7 @@ export default function InterruptedRuns({ onResumed }: { onResumed?: () => void 
             )}
 
             {countSummary(r.counts) && (
-              <div className="mt-1 font-mono text-[10px] text-ink-3">
+              <div className="mt-1 text-[11px] text-ink-3">
                 kept: {countSummary(r.counts)}
               </div>
             )}
@@ -119,7 +119,7 @@ export default function InterruptedRuns({ onResumed }: { onResumed?: () => void 
         ))}
       </div>
 
-      {note && <div className="px-4 py-2 border-t hairline font-mono text-[11px] text-ink-2">{note}</div>}
+      {note && <div className="px-4 py-2 border-t hairline text-[12px] text-ink-2">{note}</div>}
     </div>
   );
 }

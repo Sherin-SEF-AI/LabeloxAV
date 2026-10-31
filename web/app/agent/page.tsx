@@ -411,7 +411,7 @@ export default function AgentConsole() {
   };
 
   return (
-    <PageShell active="AGENT" subtitle="CONSOLE" right={loading ? <Spinner label="loading" /> : <span className="font-mono text-xs text-ink-3">{queue.length} in fix queue</span>}>
+    <PageShell active="AGENT" subtitle="CONSOLE" right={loading ? <Spinner label="loading" /> : <span className="text-[12.5px] text-ink-3">{queue.length} in fix queue</span>}>
       <div className="flex h-full min-h-0">
         <div className="flex-1 min-w-0 overflow-auto">
         <div className="max-w-5xl mx-auto p-6 space-y-5">
@@ -424,10 +424,10 @@ export default function AgentConsole() {
           <div className="panel p-4 border border-accent/30">
             <div className="flex items-start gap-3">
               <div className="flex-1">
-                <div className="text-ink font-medium">Overnight Auditor <span className="font-mono text-[10px] text-accent">morning report</span></div>
+                <div className="text-ink font-medium">Overnight Auditor <span className="text-[11px] text-accent">morning report</span></div>
                 <div className="text-ink-3 text-xs mt-1">Patrols the day&apos;s auto-accepted labels within a token budget: VLM spot-checks + cross-frame consistency + control-sample precision. Suspects are queued to review (reversible). Runs nightly off-hours; run it now below.</div>
                 {audit?.report?.notes ? (
-                  <div className="mt-2 font-mono text-[11px] text-ink-2 space-y-0.5">
+                  <div className="mt-2 text-[12px] text-ink-2 space-y-0.5">
                     {audit.report.notes.map((n, i) => <div key={i}>· {n}</div>)}
                     <div className="text-ink-3 mt-1">
                       sampled {audit.report.sampled ?? 0} · vlm-checked {audit.report.vlm_checked ?? 0} · <span className="text-warn">{audit.report.vlm_disagreements ?? 0} vlm-disagree</span> · budget {audit.report.budget?.used ?? 0}/{audit.report.budget?.max_calls ?? 0}
@@ -437,9 +437,9 @@ export default function AgentConsole() {
                       <div className="text-ink-3">movers: {audit.report.confusion_movers.map((m) => `${m.from}->${m.to} (${m.n})${m.concentrated_in ? ` in ${m.concentrated_in}` : ""}`).join(", ")}</div>
                     )}
                   </div>
-                ) : <div className="mt-2 font-mono text-[11px] text-ink-3">{audit?.status === "running" ? "audit running..." : "no audit yet"}</div>}
+                ) : <div className="mt-2 text-[12px] text-ink-3">{audit?.status === "running" ? "audit running..." : "no audit yet"}</div>}
               </div>
-              <button onClick={runAudit} disabled={!!busy} className="shrink-0 font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "audit" ? "auditing..." : "run audit now"}</button>
+              <button onClick={runAudit} disabled={!!busy} className="shrink-0 text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "audit" ? "auditing..." : "run audit now"}</button>
             </div>
           </div>
 
@@ -447,18 +447,18 @@ export default function AgentConsole() {
           <div className="panel p-4">
             <div className="flex items-center gap-2 mb-2">
               <span className="text-ink font-medium text-sm">Ask the dataset</span>
-              <span className="font-mono text-[10px] text-ink-3">plain-language corpus query</span>
-              <button onClick={doReport} disabled={!!busy} className="ml-auto font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "report" ? "…" : "dataset report"}</button>
+              <span className="text-[11px] text-ink-3">plain-language corpus query</span>
+              <button onClick={doReport} disabled={!!busy} className="ml-auto text-[11px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "report" ? "…" : "dataset report"}</button>
             </div>
             <div className="flex items-center gap-2">
               <input value={ask} onChange={(e) => setAsk(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doAsk(); }}
                 placeholder="e.g. two-wheelers going against traffic at night on the highway"
-                className="flex-1 bg-bg-2 border border-line rounded px-2.5 py-1.5 font-mono text-[11px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
-              <button onClick={doAsk} disabled={!!busy || !ask.trim()} className="font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "ask" ? "…" : "ask"}</button>
+                className="flex-1 bg-bg-2 border border-line rounded px-2.5 py-1.5 text-[12px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
+              <button onClick={doAsk} disabled={!!busy || !ask.trim()} className="text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "ask" ? "…" : "ask"}</button>
             </div>
-            {askResult ? <div className="mt-2 font-mono text-[11px] text-ink-2"><span className="text-pass">{askResult.count} frames</span> · understood as <span className="text-ink-3">{askResult.understood}</span></div> : null}
+            {askResult ? <div className="mt-2 text-[12px] text-ink-2"><span className="text-pass">{askResult.count} frames</span> · understood as <span className="text-ink-3">{askResult.understood}</span></div> : null}
             {report ? (
-              <div className="mt-3 border-t hairline pt-3 grid grid-cols-2 md:grid-cols-4 gap-3 font-mono text-[11px]">
+              <div className="mt-3 border-t hairline pt-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
                 <div><div className="text-ink-3 text-[10px] uppercase">objects</div><div className="text-ink text-base tabular-nums">{report.size.objects.toLocaleString()}</div><div className="text-ink-3">{report.size.human_labeled.toLocaleString()} human</div></div>
                 <div><div className="text-ink-3 text-[10px] uppercase">sessions</div><div className="text-ink text-base tabular-nums">{report.size.sessions.toLocaleString()}</div></div>
                 <div><div className="text-ink-3 text-[10px] uppercase">coverage gaps</div><div className="text-warn text-base tabular-nums">{report.coverage_gaps.length}</div></div>
@@ -471,13 +471,13 @@ export default function AgentConsole() {
           <div className="panel p-4 border border-accent/30">
             <div className="flex items-start gap-3">
               <div className="flex-1">
-                <div className="text-ink font-medium">Relabel all frames <span className="font-mono text-[10px] text-accent">AI reasoning</span></div>
+                <div className="text-ink font-medium">Relabel all frames <span className="text-[11px] text-accent">AI reasoning</span></div>
                 <div className="text-ink-3 text-xs mt-1">Re-read every machine-labelled box with an independent model and correct the class wherever it decisively disagrees with the current label. Decisive corrections are applied and kept; moderate ones are applied but routed to review. One reversible run per frame, so it can be undone wholesale. To relabel a single frame, use the Agent panel in the editor.</div>
               </div>
-              <button onClick={relabelAll} disabled={!!busy} className="shrink-0 font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "relabel" ? "starting..." : "relabel all frames"}</button>
+              <button onClick={relabelAll} disabled={!!busy} className="shrink-0 text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "relabel" ? "starting..." : "relabel all frames"}</button>
             </div>
             {relabel ? (
-              <div className="mt-3 font-mono text-[11px] text-ink-2">
+              <div className="mt-3 text-[12px] text-ink-2">
                 {relabelDone ? "done" : "running"} · scanned {relabel.frames} frames · <span className="text-pass">{relabel.relabel_keep} fixed</span> · <span className="text-warn">{relabel.relabel_review} routed to review</span>
               </div>
             ) : null}
@@ -485,12 +485,12 @@ export default function AgentConsole() {
 
           {/* Corpus re-detection: fix existing frames with the new detection gates */}
           <div className="panel p-4 border border-line">
-            <div className="text-ink font-medium">Corpus re-detection <span className="font-mono text-[10px] text-ink-3">label quality</span></div>
+            <div className="text-ink font-medium">Corpus re-detection <span className="text-[11px] text-ink-3">label quality</span></div>
             <div className="text-ink-3 text-xs mt-1">The detection pipeline now enforces thing/stuff (no boxed trees, barriers, sky), an auto-estimated ego-hood mask (no self-labeling), fusion de-duplication (one object, one box), and an oversize reviewer rule (no frame-spanning boxes). Those shape new labels; run this to fix the frames already in the corpus. Sequential on one GPU, yields to training.</div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <button onClick={estimateEgo} disabled={!!busy} className="font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "ego" ? "estimating..." : "1. estimate ego-hood masks"}</button>
-              <button onClick={backfillPii} disabled={!!busy} className="font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "pii" ? "starting..." : "2. PII backfill (pre-gate frames)"}</button>
-              <button onClick={redetectAll} disabled={!!busy} className="font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "redetect" ? "starting..." : "3. re-detect all frames"}</button>
+              <button onClick={estimateEgo} disabled={!!busy} className="text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "ego" ? "estimating..." : "1. estimate ego-hood masks"}</button>
+              <button onClick={backfillPii} disabled={!!busy} className="text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "pii" ? "starting..." : "2. PII backfill (pre-gate frames)"}</button>
+              <button onClick={redetectAll} disabled={!!busy} className="text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "redetect" ? "starting..." : "3. re-detect all frames"}</button>
             </div>
           </div>
 
@@ -499,97 +499,97 @@ export default function AgentConsole() {
             <div className="panel p-4">
               <div className="text-ink font-medium">Error sweep</div>
               <div className="text-ink-3 text-xs mt-1">Run every detector across the corpus (consistency critic, embedding outliers, near-duplicate divergence, policy violations, confident-wrong) and refresh the ranked fix queue.</div>
-              <button onClick={sweep} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "sweep" ? "sweeping..." : "run error sweep"}</button>
+              <button onClick={sweep} disabled={!!busy} className="mt-3 text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "sweep" ? "sweeping..." : "run error sweep"}</button>
             </div>
             <div className="panel p-4">
               <div className="text-ink font-medium">Temporal auto-repair</div>
               <div className="text-ink-3 text-xs mt-1">Relabel track class-flip outliers to their strong track majority automatically. Corrupt tracks (static-class majority) are left for a human. Reversible.</div>
-              <button onClick={repair} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "repair" ? "repairing..." : "run temporal repair"}</button>
+              <button onClick={repair} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "repair" ? "repairing..." : "run temporal repair"}</button>
             </div>
           </div>
 
           {/* Data intelligence: the system finds what is worth labeling */}
           <div>
-            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Data intelligence: find what matters</h2>
+            <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 mb-2">Data intelligence: find what matters</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="panel p-4">
                 <div className="text-ink font-medium text-sm">Safety scenarios</div>
                 <div className="text-ink-3 text-xs mt-1">Mine near-misses (low TTC), high-risk interactions, and hard-brake events into the scenario queue.</div>
-                <button onClick={() => mine("scenarios")} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "scenarios" ? "mining..." : "mine safety scenarios"}</button>
+                <button onClick={() => mine("scenarios")} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "scenarios" ? "mining..." : "mine safety scenarios"}</button>
               </div>
               <div className="panel p-4">
                 <div className="text-ink font-medium text-sm">Model disagreement</div>
                 <div className="text-ink-3 text-xs mt-1">Surface frames where the champion and challenger detectors voted different classes ,  the highest-value labels + a regression signal.</div>
-                <button onClick={() => mine("disagreements")} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "disagreements" ? "mining..." : "mine disagreements"}</button>
+                <button onClick={() => mine("disagreements")} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "disagreements" ? "mining..." : "mine disagreements"}</button>
               </div>
               <div className="panel p-4">
                 <div className="text-ink font-medium text-sm">Coverage gaps</div>
                 <div className="text-ink-3 text-xs mt-1">Profile the corpus and name the thin cells (rare classes, missing weather/time/road coverage).</div>
-                <button onClick={coverage} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "coverage" ? "analyzing..." : "coverage report"}</button>
+                <button onClick={coverage} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "coverage" ? "analyzing..." : "coverage report"}</button>
               </div>
             </div>
             {gaps ? (
               <div className="panel mt-3 p-4">
-                <div className="font-mono text-[10px] uppercase text-ink-3 mb-1.5">coverage gaps ({gaps.length})</div>
-                <ul className="space-y-0.5">{gaps.slice(0, 10).map((g, i) => <li key={i} className="font-mono text-[11px] text-ink-2">· {g}</li>)}</ul>
+                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1.5">coverage gaps ({gaps.length})</div>
+                <ul className="space-y-0.5">{gaps.slice(0, 10).map((g, i) => <li key={i} className="text-[12px] text-ink-2">· {g}</li>)}</ul>
               </div>
             ) : null}
           </div>
 
           {/* Self-improving loop */}
           <div>
-            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Self-improving loop</h2>
+            <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 mb-2">Self-improving loop</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="panel p-4">
                 <div className="text-ink font-medium text-sm">Flywheel cycle</div>
                 <div className="text-ink-3 text-xs mt-1">One turn of the loop: mine the highest-value frames, auto-accept the sure ones, escalate the rest; retrains when enough corrections accumulate. Dry-run preview.</div>
-                <button onClick={cycle} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "cycle" ? "running..." : "run flywheel cycle"}</button>
+                <button onClick={cycle} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "cycle" ? "running..." : "run flywheel cycle"}</button>
               </div>
               <div className="panel p-4">
                 <div className="text-ink font-medium text-sm">Gold-drift monitor</div>
                 <div className="text-ink-3 text-xs mt-1">Re-evaluate the serving champion on the gold set; if it has regressed beyond tolerance, roll back to the prior champion and pause the loop.</div>
-                <button onClick={drift} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "drift" ? "checking..." : "check gold drift"}</button>
+                <button onClick={drift} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "drift" ? "checking..." : "check gold drift"}</button>
               </div>
               <div className="panel p-4">
                 <div className="text-ink font-medium text-sm">Drift Investigator</div>
                 <div className="text-ink-3 text-xs mt-1">On a drift breach, root-cause it: the affected slice, worst classes/scenes/sessions, a common factor, and a proposed action. Proposes only.</div>
                 {driftDiag?.report ? (
-                  <div className="mt-2 font-mono text-[10.5px] text-ink-2">
+                  <div className="mt-2 text-[11.5px] text-ink-2">
                     <div>{driftDiag.report.hypothesis}</div>
                     <div className="text-ink-3 mt-0.5">proposed: {driftDiag.report.proposed_action.kind}</div>
                   </div>
                 ) : null}
-                <button onClick={investigateDrift} disabled={!!busy} className="mt-3 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "driftinv" ? "investigating..." : "investigate drift"}</button>
+                <button onClick={investigateDrift} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "driftinv" ? "investigating..." : "investigate drift"}</button>
               </div>
             </div>
           </div>
 
           {/* Documentation agent */}
           <div>
-            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Documentation</h2>
+            <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 mb-2">Documentation</h2>
             <div className="panel p-4">
               <div className="flex items-center gap-2">
                 <div className="flex-1 text-ink-3 text-xs">Auto-draft the buyer-diligence artifacts from the platform&apos;s own metrics: dataset datasheet (composition, coverage, known gaps) and the weekly quality report (precision, drift, promotions). Model cards are drafted per model via the API.</div>
-                <button onClick={() => genDoc("datasheet")} disabled={!!busy} className="shrink-0 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "doc" ? "..." : "datasheet"}</button>
-                <button onClick={() => genDoc("weekly")} disabled={!!busy} className="shrink-0 font-mono text-[11px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">weekly report</button>
+                <button onClick={() => genDoc("datasheet")} disabled={!!busy} className="shrink-0 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "doc" ? "..." : "datasheet"}</button>
+                <button onClick={() => genDoc("weekly")} disabled={!!busy} className="shrink-0 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">weekly report</button>
               </div>
-              {doc ? <pre className="mt-3 max-h-64 overflow-auto no-scrollbar bg-bg-2 rounded p-3 font-mono text-[10.5px] text-ink-2 whitespace-pre-wrap">{doc.slice(0, 4000)}</pre> : null}
+              {doc ? <pre className="mt-3 max-h-64 overflow-auto no-scrollbar bg-bg-2 rounded p-3 text-[11.5px] text-ink-2 whitespace-pre-wrap">{doc.slice(0, 4000)}</pre> : null}
             </div>
           </div>
 
           {/* Fleet Dispatch */}
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3">Fleet dispatch: collect what the corpus lacks</h2>
-              <button onClick={planFleet} disabled={!!busy} className="ml-auto font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "fleet" ? "planning..." : "plan collection orders"}</button>
+              <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">Fleet dispatch: collect what the corpus lacks</h2>
+              <button onClick={planFleet} disabled={!!busy} className="ml-auto text-[11px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "fleet" ? "planning..." : "plan collection orders"}</button>
             </div>
             {orders.length ? (
               <div className="panel divide-y divide-line/50">
                 {orders.map((o) => (
                   <div key={o.order_id} className="flex items-center gap-2 px-3 py-2">
-                    <span className="font-mono text-[10px] text-accent w-8">{o.priority.toFixed(1)}</span>
-                    <span className="font-mono text-[10.5px] text-ink-2 flex-1">{o.summary}</span>
-                    <button onClick={() => dispatchOrder(o.order_id)} disabled={!!busy} className="font-mono text-[10px] border border-accent/40 text-accent px-2 py-0.5 rounded disabled:opacity-40">dispatch</button>
+                    <span className="text-[11px] text-accent w-8">{o.priority.toFixed(1)}</span>
+                    <span className="text-[11.5px] text-ink-2 flex-1">{o.summary}</span>
+                    <button onClick={() => dispatchOrder(o.order_id)} disabled={!!busy} className="text-[11px] border border-accent/40 text-accent px-2 py-0.5 rounded disabled:opacity-40">dispatch</button>
                   </div>
                 ))}
               </div>
@@ -598,21 +598,21 @@ export default function AgentConsole() {
 
           {/* Buyer Curation Agent */}
           <div>
-            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Buyer curation: spec to sealed dataset</h2>
+            <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 mb-2">Buyer curation: spec to sealed dataset</h2>
             <div className="panel p-4">
               <div className="flex items-center gap-1.5">
                 <input value={buyer} onChange={(e) => setBuyer(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") askBuyer(false); }}
                   placeholder="e.g. 10k night-rain frames with an autorickshaw and a VRU, balanced across cities"
-                  className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-2 py-1.5 font-mono text-[11px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
-                <button onClick={() => askBuyer(false)} disabled={!!busy || !buyer.trim()} className="font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "buyer" ? "checking..." : "check"}</button>
+                  className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-2 py-1.5 text-[12px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
+                <button onClick={() => askBuyer(false)} disabled={!!busy || !buyer.trim()} className="text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "buyer" ? "checking..." : "check"}</button>
               </div>
               {buyerRes?.fulfillment ? (
-                <div className="mt-3 font-mono text-[11px] text-ink-2">
+                <div className="mt-3 text-[12px] text-ink-2">
                   <div className="text-ink-3">{buyerRes.understood}</div>
                   <div className="mt-1">requested {buyerRes.fulfillment.requested ?? "any"} · <span className="text-pass">{buyerRes.fulfillment.available} available</span>{buyerRes.fulfillment.shortfall ? <span className="text-warn"> · short {buyerRes.fulfillment.shortfall}</span> : <span className="text-pass"> · fully fulfillable</span>}</div>
                   {buyerRes.guidance ? <div className="text-warn mt-1">{buyerRes.guidance}</div> : null}
                   {buyerRes.fulfillment.available > 0 && buyerRes.status === "analyzed" ? (
-                    <button onClick={() => askBuyer(true)} disabled={!!busy} className="mt-2 font-mono text-[10px] border border-accent/40 bg-accent/10 text-accent px-2 py-1 rounded disabled:opacity-40">compose slice &amp; export</button>
+                    <button onClick={() => askBuyer(true)} disabled={!!busy} className="mt-2 text-[11px] border border-accent/40 bg-accent/10 text-accent px-2 py-1 rounded disabled:opacity-40">compose slice &amp; export</button>
                   ) : null}
                   {buyerRes.datasheet_uri ? <div className="text-ink-3 mt-1">datasheet: {buyerRes.datasheet_uri.split("/").slice(-2).join("/")}</div> : null}
                 </div>
@@ -622,16 +622,16 @@ export default function AgentConsole() {
 
           {/* Operations Agent */}
           <div>
-            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3 mb-2">Ask LabeloxAV: operate in sentences</h2>
+            <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 mb-2">Ask LabeloxAV: operate in sentences</h2>
             <div className="panel p-4">
               <div className="flex items-center gap-1.5">
                 <input value={ops} onChange={(e) => setOps(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") askOps(false); }}
                   placeholder="e.g. show coverage gaps · list sessions in BLR · export accepted frames to coco"
-                  className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-2 py-1.5 font-mono text-[11px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
-                <button onClick={() => askOps(false)} disabled={!!busy || !ops.trim()} className="font-mono text-[11px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "ops" ? "planning..." : "ask"}</button>
+                  className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-2 py-1.5 text-[12px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
+                <button onClick={() => askOps(false)} disabled={!!busy || !ops.trim()} className="text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "ops" ? "planning..." : "ask"}</button>
               </div>
               {opsRes ? (
-                <div className="mt-3 font-mono text-[10.5px] text-ink-2">
+                <div className="mt-3 text-[11.5px] text-ink-2">
                   <div className="text-ink-3">plan ({opsRes.plan.source}): {opsRes.plan.steps.map((s) => s.tool).join(" -> ") || "no plan"}</div>
                   {opsRes.results?.map((r, i) => (
                     <pre key={i} className="mt-1 bg-bg-2 rounded p-2 whitespace-pre-wrap max-h-40 overflow-auto no-scrollbar">{r.tool}: {JSON.stringify(r.result).slice(0, 600)}</pre>
@@ -639,7 +639,7 @@ export default function AgentConsole() {
                   {opsRes.pending ? (
                     <div className="mt-2 flex items-center gap-2">
                       <span className="text-warn">step &quot;{opsRes.pending.tool}&quot; mutates data.</span>
-                      <button onClick={() => askOps(true)} disabled={!!busy} className="font-mono text-[10px] border border-warn text-warn px-2 py-1 rounded disabled:opacity-40">confirm &amp; run</button>
+                      <button onClick={() => askOps(true)} disabled={!!busy} className="text-[11px] border border-warn text-warn px-2 py-1 rounded disabled:opacity-40">confirm &amp; run</button>
                     </div>
                   ) : null}
                 </div>
@@ -650,8 +650,8 @@ export default function AgentConsole() {
           {/* Ontology Steward */}
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-3">Ontology Steward: grow the ontology</h2>
-              <button onClick={scanOntology} disabled={!!busy} className="ml-auto font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "ontscan" ? "scanning..." : "scan fallback clusters"}</button>
+              <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">Ontology Steward: grow the ontology</h2>
+              <button onClick={scanOntology} disabled={!!busy} className="ml-auto text-[11px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "ontscan" ? "scanning..." : "scan fallback clusters"}</button>
             </div>
             {props.length ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -663,12 +663,12 @@ export default function AgentConsole() {
                         <img key={oid} src={`/api/objects/${oid}/crop`} alt="" className="w-12 h-12 object-cover rounded bg-bg-2" />
                       ))}
                     </div>
-                    <div className="font-mono text-[10.5px] text-ink-2">{p.member_count} in {p.from_class} · looks like {p.confusion_classes.map((c) => `${c.class} ${Math.round(c.share * 100)}%`).join(", ") || "nothing known"}</div>
+                    <div className="text-[11.5px] text-ink-2">{p.member_count} in {p.from_class} · looks like {p.confusion_classes.map((c) => `${c.class} ${Math.round(c.share * 100)}%`).join(", ") || "nothing known"}</div>
                     <div className="flex items-center gap-1.5 mt-2">
                       <input value={names[p.proposal_id] ?? p.suggested_name ?? ""} onChange={(e) => setNames((s) => ({ ...s, [p.proposal_id]: e.target.value }))}
-                        placeholder="new class name" className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-1.5 py-1 font-mono text-[10.5px] text-ink-2 focus:border-accent outline-none" />
-                      <button onClick={() => decide(p.proposal_id, "approve")} disabled={!!busy} className="font-mono text-[10px] border border-pass text-pass px-2 py-1 rounded disabled:opacity-40">approve</button>
-                      <button onClick={() => decide(p.proposal_id, "reject")} disabled={!!busy} className="font-mono text-[10px] border border-line text-ink-3 px-2 py-1 rounded hover:text-ink disabled:opacity-40">reject</button>
+                        placeholder="new class name" className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-1.5 py-1 text-[11.5px] text-ink-2 focus:border-accent outline-none" />
+                      <button onClick={() => decide(p.proposal_id, "approve")} disabled={!!busy} className="text-[11px] border border-pass text-pass px-2 py-1 rounded disabled:opacity-40">approve</button>
+                      <button onClick={() => decide(p.proposal_id, "reject")} disabled={!!busy} className="text-[11px] border border-line text-ink-3 px-2 py-1 rounded hover:text-ink disabled:opacity-40">reject</button>
                     </div>
                   </div>
                 ))}
@@ -693,11 +693,11 @@ export default function AgentConsole() {
             <div className="flex items-center gap-3 px-4 py-3 border-b hairline">
               <div className="text-ink font-medium">Fix queue</div>
               <div className="text-ink-3 text-xs">likely-wrong labels, worst first</div>
-              <div className="ml-auto font-mono text-[10px] text-ink-3">{Object.entries(summary).map(([k, n]) => `${k}:${n}`).join("  ")}</div>
+              <div className="ml-auto text-[11px] text-ink-3">{Object.entries(summary).map(([k, n]) => `${k}:${n}`).join("  ")}</div>
             </div>
             {loading && !queue.length ? <div className="p-6"><Spinner label="loading" /></div> : queue.length ? (
               <table className="w-full text-sm">
-                <thead className="text-ink-3 font-mono text-[11px] uppercase border-b hairline">
+                <thead className="text-ink-3 text-[10.5px] font-medium uppercase tracking-[0.06em] border-b hairline">
                   <tr><th className="text-left font-normal px-3 py-2 w-28">kind</th><th className="text-left font-normal px-3 py-2 w-16">score</th><th className="text-left font-normal px-3 py-2">why</th><th className="px-3 py-2 w-40"></th></tr>
                 </thead>
                 <tbody>
@@ -705,10 +705,10 @@ export default function AgentConsole() {
                     <tr key={c.candidate_id} onClick={() => open(c, i)}
                       title="show the object this is about"
                       className={`border-b hairline cursor-pointer ${i === cursor ? "bg-accent/10" : "hover:bg-bg-2"}`}>
-                      <td className="px-3 py-2"><span className="font-mono text-[10px] border border-line px-1.5 py-0.5 rounded text-ink-2">{KIND_LABEL[c.kind] || c.kind}</span></td>
+                      <td className="px-3 py-2"><span className="text-[11px] border border-line px-1.5 py-0.5 rounded text-ink-2">{KIND_LABEL[c.kind] || c.kind}</span></td>
                       <td className="px-3 py-2 font-mono text-ink-3">{c.score.toFixed(2)}</td>
                       <td className="px-3 py-2 text-ink-2 text-xs">{reason(c)}{c.proposed_label?.class_name ? <span className="text-pass"> → {c.proposed_label.class_name}</span> : null}</td>
-                      <td className="px-3 py-2 text-right font-mono text-[10px]">
+                      <td className="px-3 py-2 text-right text-[11px]">
                         {/* stopPropagation: acting on a row must not also re-open it, which would refetch
                             the object that just left the queue. */}
                         <button onClick={(e) => { e.stopPropagation(); act(c, "confirm"); }} className="border border-pass text-pass px-1.5 py-0.5 rounded mr-1">confirm</button>
@@ -720,7 +720,7 @@ export default function AgentConsole() {
               </table>
             ) : <div className="px-4 py-10 text-center text-ink-3 text-sm">Fix queue is empty. Run an error sweep to scan the corpus.</div>}
             {queue.length > 0 && (
-              <div className="border-t hairline px-4 py-1.5 font-mono text-[10px] text-ink-3">
+              <div className="border-t hairline px-4 py-1.5 text-[11px] text-ink-3">
                 <span className="text-ink-2">j</span>/<span className="text-ink-2">k</span> move
                 <span className="mx-2">·</span>
                 <span className="text-pass">c</span> confirm

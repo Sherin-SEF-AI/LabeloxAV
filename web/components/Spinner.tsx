@@ -3,7 +3,7 @@
 
 export function Spinner({ label, className = "" }: { label?: string; className?: string }) {
   return (
-    <span className={`inline-flex items-center gap-2 font-mono text-[11px] text-ink-3 ${className}`}>
+    <span className={`inline-flex items-center gap-2 text-[12px] text-ink-3 ${className}`}>
       <span
         className="inline-block w-3.5 h-3.5 rounded-full border-2 border-line border-t-accent animate-spin"
         aria-hidden

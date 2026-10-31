@@ -40,17 +40,17 @@ export default function PredictivePage() {
   return (
     <PageShell active="SANYX" title="Predictive maintenance"
       subtitle="per-component health trends and pre-failure alerts across a vehicle's sessions"
-      right={<span className="font-mono text-[11px] text-ink-3">{vehicles.length} vehicles</span>}>
+      right={<span className="text-[12px] text-ink-3">{vehicles.length} vehicles</span>}>
       <div className="p-4 grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-4 max-w-6xl">
         {/* vehicle picker */}
         <Panel title="vehicles">
           <div className="space-y-0.5">
             {vehicles.map((v) => (
               <button key={v} onClick={() => setVehicle(v)}
-                className={`block w-full text-left font-mono text-[11px] px-1.5 py-1 hover:bg-bg-2 ${
+                className={`block w-full text-left text-[12px] px-1.5 py-1 hover:bg-bg-2 ${
                   v === vehicle ? "text-accent" : "text-ink-2"}`}>{v}</button>
             ))}
-            {!vehicles.length && <div className="font-mono text-[11px] text-ink-3">no vehicles on the board</div>}
+            {!vehicles.length && <div className="text-[12px] text-ink-3">no vehicles on the board</div>}
           </div>
         </Panel>
 
@@ -61,15 +61,15 @@ export default function PredictivePage() {
               <div className="space-y-1">
                 {trends.alerts.map((a, i) => (
                   <div key={i} className={`border p-2 ${a.severity === "critical" ? "border-block/40" : "border-warn/40"}`}>
-                    <div className="flex items-center justify-between font-mono text-[11px]">
+                    <div className="flex items-center justify-between text-[12px]">
                       <span className="text-ink">{a.component} · {a.metric}</span>
                       <span className={a.severity === "critical" ? "text-block" : "text-warn"}>{a.severity}</span>
                     </div>
-                    <div className="font-mono text-[10px] text-ink-3">trend: {a.trend}</div>
+                    <div className="text-[11px] text-ink-3">trend: {a.trend}</div>
                   </div>
                 ))}
               </div>
-            ) : <div className="font-mono text-[11px] text-ink-3 py-2">no components trending toward failure</div>}
+            ) : <div className="text-[12px] text-ink-3 py-2">no components trending toward failure</div>}
           </Panel>
 
           <Panel title="component health series" hint="oldest to newest session">
@@ -77,7 +77,7 @@ export default function PredictivePage() {
               <div className="space-y-2">
                 {Object.entries(trends.series).map(([name, vs]) => (
                   <div key={name}>
-                    <div className="font-mono text-[10px] text-ink-2 mb-1">{name}</div>
+                    <div className="text-[11px] text-ink-2 mb-1">{name}</div>
                     <div className="flex items-end gap-0.5 h-10">
                       {vs.map((v, i) => (
                         <span key={i} title={String(v)}
@@ -88,13 +88,13 @@ export default function PredictivePage() {
                   </div>
                 ))}
               </div>
-            ) : <div className="font-mono text-[11px] text-ink-3 py-2">no SANYX health series for this vehicle yet</div>}
+            ) : <div className="text-[12px] text-ink-3 py-2">no SANYX health series for this vehicle yet</div>}
           </Panel>
 
           <Panel title="recent sessions" hint="ingest board">
             <div className="space-y-0.5">
               {rows.filter((r) => r.vehicle_id === vehicle).slice(0, 12).map((r) => (
-                <div key={r.session_id} className="flex items-center gap-2 font-mono text-[10px]">
+                <div key={r.session_id} className="flex items-center gap-2 text-[11px]">
                   <span className="w-40 shrink-0 truncate text-ink-3">{r.session_id.slice(0, 8)} · {r.city ?? "-"}</span>
                   <Bar frac={r.score ?? 0} tone={(r.score ?? 0) >= 0.8 ? "pass" : (r.score ?? 0) >= 0.6 ? "warn" : "block"} />
                   <span className={`w-20 shrink-0 text-right ${DEC_TONE[r.decision ?? ""] ?? "text-ink-3"}`}>{r.decision ?? "-"}</span>

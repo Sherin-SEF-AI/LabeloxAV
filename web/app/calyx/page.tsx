@@ -36,8 +36,8 @@ export default function CalyxTimeline() {
 
   return (
     <PageShell active="CALYX" title="CALYX rig calibration"
-      right={<span className="font-mono text-[11px] text-ink-3">{timeline.length} sessions · {flagged.length} flagged</span>}>
-      <div className="p-4 max-w-4xl space-y-4 font-mono text-[11px]">
+      right={<span className="text-[12px] text-ink-3">{timeline.length} sessions · {flagged.length} flagged</span>}>
+      <div className="p-4 max-w-4xl space-y-4 text-[12px]">
       {loadErr != null && <LoadState error={loadErr} onRetry={() => void load()} />}
         <div className="flex items-end gap-2">
           <label className="flex flex-col gap-1"><span className="text-ink-3 text-[10px] uppercase">vehicle</span>

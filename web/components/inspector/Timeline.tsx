@@ -64,7 +64,7 @@ export default function Timeline({ topics, gaps, events, onMarkerClick }: {
 
   return (
     <div className="border-t hairline bg-panel px-3 py-2 select-none">
-      <div className="flex items-center gap-3 mb-2 font-mono text-[11px]">
+      <div className="flex items-center gap-3 mb-2 text-[12px]">
         <button onClick={() => clock.step(-1 / 30)} className="border border-line px-1.5 rounded hover:border-accent" title="step back">{"|<"}</button>
         <button onClick={() => clock.toggle()} className="border border-accent/50 bg-accent/10 text-accent px-3 rounded hover:bg-accent/20">{playing ? "pause" : "play"}</button>
         <button onClick={() => clock.step(1 / 30)} className="border border-line px-1.5 rounded hover:border-accent" title="step forward">{">|"}</button>
@@ -94,7 +94,7 @@ export default function Timeline({ topics, gaps, events, onMarkerClick }: {
       <div className="mt-1.5 space-y-0.5">
         {topics.map((t) => (
           <div key={t.name} className="flex items-center gap-2">
-            <span className="w-32 shrink-0 font-mono text-[9.5px] text-ink-3 truncate" title={`${t.name} @ ${t.rate}Hz`}>{t.name}</span>
+            <span className="w-32 shrink-0 text-[10.5px] text-ink-3 truncate" title={`${t.name} @ ${t.rate}Hz`}>{t.name}</span>
             <div className="relative flex-1 h-1.5 rounded bg-pass/30">
               {(gaps[t.name] ?? []).map((g, i) => {
                 const lo = pctOfNs(g[0]);

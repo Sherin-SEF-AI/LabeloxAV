@@ -163,10 +163,10 @@ export default function AdaptiveFlywheel() {
           <Panel title="manual cycle" hint="hand-fed signals">
             <div className="text-[10px] text-ink-3 mb-1">regressions</div>
             <textarea value={reg} placeholder={EXAMPLE_REGRESSIONS} onChange={(e) => setReg(e.target.value)} rows={5}
-              className="w-full field font-mono text-[10px]" />
+              className="w-full field text-[11px]" />
             <div className="text-[10px] text-ink-3 mt-2 mb-1">odd gaps</div>
             <textarea value={gaps} placeholder={EXAMPLE_GAPS} onChange={(e) => setGaps(e.target.value)} rows={3}
-              className="w-full field font-mono text-[10px]" />
+              className="w-full field text-[11px]" />
             <div className="mt-2"><RunButton busy={manual.busy} onClick={runManual} label="run manual" /></div>
             <ErrLine err={manual.err} />
             {manual.out && <div className="text-[11px] text-ink-2 mt-2">{manual.out.rationale}</div>}

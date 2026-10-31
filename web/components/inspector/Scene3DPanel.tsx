@@ -223,11 +223,11 @@ export default function Scene3DPanel() {
       <div ref={hostRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
       {note && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <span className="font-mono text-[11px] text-ink-3">{note}</span>
+          <span className="text-[12px] text-ink-3">{note}</span>
         </div>
       )}
       {meta && (
-        <div className="absolute left-2 bottom-2 font-mono text-[10px] text-ink-3 leading-relaxed pointer-events-none">
+        <div className="absolute left-2 bottom-2 text-[11px] text-ink-3 leading-relaxed pointer-events-none">
           <div>
             {meta.points.toLocaleString()}
             {/* Both counts, always: showing only the drawn total describes our budget as if it were the sensor's. */}
@@ -238,7 +238,7 @@ export default function Scene3DPanel() {
           {meta.deltaMs > 100 && <div className="text-warn">nearest cloud {(meta.deltaMs / 1000).toFixed(1)}s away</div>}
         </div>
       )}
-      <div className="absolute right-2 top-2 font-mono text-[10px] text-ink-3 pointer-events-none">
+      <div className="absolute right-2 top-2 text-[11px] text-ink-3 pointer-events-none">
         drag to orbit &middot; scroll to zoom
       </div>
     </div>

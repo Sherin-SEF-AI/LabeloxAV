@@ -1621,12 +1621,12 @@ export default function FrameEditor() {
     <div className="min-h-screen flex items-center justify-center">
       <div className="panel px-5 py-4 text-center space-y-3 max-w-sm">
         <div className="text-ink font-medium">Couldn&apos;t load this frame</div>
-        <div className="font-mono text-[11px] text-ink-3">{loadError}</div>
+        <div className="text-[12px] text-ink-3">{loadError}</div>
         <div className="flex items-center justify-center gap-2">
           <button onClick={() => setReloadKey((k) => k + 1)}
-            className="border border-accent text-accent px-3 py-1.5 font-mono text-xs hover:bg-accent/10">Retry</button>
+            className="border border-accent text-accent px-3 py-1.5 text-[12.5px] hover:bg-accent/10">Retry</button>
           <button onClick={() => router.push("/")}
-            className="border border-line text-ink-2 px-3 py-1.5 font-mono text-xs hover:border-accent">Home</button>
+            className="border border-line text-ink-2 px-3 py-1.5 text-[12.5px] hover:border-accent">Home</button>
         </div>
       </div>
     </div>
@@ -1714,8 +1714,8 @@ export default function FrameEditor() {
         <MenuBar menus={EDITOR_MENUS} compact fixed />
         <span className="w-px h-5 bg-line" />
         <div className="flex flex-col leading-tight shrink-0">
-          <span className="font-mono text-[11px] text-ink">FRAME {String(id).slice(0, 8)}</span>
-          <span className="font-mono text-[9.5px] text-ink-3">{st.objects.length} objects{meta.is_lidar ? " · lidar" : ""}</span>
+          <span className="text-[12px] text-ink">FRAME {String(id).slice(0, 8)}</span>
+          <span className="text-[10.5px] text-ink-3">{st.objects.length} objects{meta.is_lidar ? " · lidar" : ""}</span>
         </div>
         {/* The drive this frame belongs to. The bar named the frame and not the session, so on a fleet of
             377 there was no way to tell which one you were in, or to reach another without going out to
@@ -1738,7 +1738,7 @@ export default function FrameEditor() {
               + ". Every prediction and existing label on this frame is withheld by the server, not by this "
               + "editor. Label it from scratch: what you draw is one of two independent observations, and "
               + "the gap between them is what says how much the model actually misses."}
-            className="font-mono text-[10px] uppercase tracking-wide px-1.5 py-0.5 border border-accent text-accent whitespace-nowrap"
+            className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide px-1.5 py-0.5 border border-accent text-accent whitespace-nowrap"
           >
             blind audit · label from scratch
           </span>
@@ -1750,7 +1750,7 @@ export default function FrameEditor() {
           <span
             title={"A training job holds the GPU, so SAM, the magic wand and segmentation will refuse "
                    + "until it finishes. Boxes, masks drawn by hand and review all work without it."}
-            className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide px-1.5 py-0.5 border border-warn/60 text-warn whitespace-nowrap">
+            className="flex items-center gap-1.5 text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide px-1.5 py-0.5 border border-warn/60 text-warn whitespace-nowrap">
             <PulseDot tone="warn" size="sm" />
             gpu busy
           </span>
@@ -1764,13 +1764,13 @@ export default function FrameEditor() {
         {selected && !selected.id.startsWith("tmp-") && (
           <button onClick={() => router.push(`/search?object=${selected.id}`)}
             title="find objects that look like this one, and label them together"
-            className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink font-mono text-[11px]">
+            className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink text-[12px]">
             similar
           </button>
         )}
         {meta.has_mcap && (
           <button onClick={() => router.push(`/inspect/${meta.session_id}?ts=${meta.ts_ns}`)} title="inspect this moment in the Session Inspector (MCAP timeline)"
-            className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink font-mono text-[11px]">inspect</button>
+            className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink text-[12px]">inspect</button>
         )}
 
         <div className="ml-auto flex items-center gap-1.5">
@@ -1788,7 +1788,7 @@ export default function FrameEditor() {
           <button onClick={() => setAutosave((v) => !v)} title="autosave: persist edits a moment after you stop"
             className="flex items-center gap-1.5 px-1.5 h-[30px]">
             <span className={`w-1.5 h-1.5 rounded-full ${saving ? "bg-warn" : dirty ? "bg-ink-3" : "bg-pass"}`} />
-            <span className="font-mono text-[10px] text-ink-3">{saving ? "saving" : dirty ? (autosave ? "autosave on" : "unsaved") : "saved"}</span>
+            <span className="text-[11px] text-ink-3">{saving ? "saving" : dirty ? (autosave ? "autosave on" : "unsaved") : "saved"}</span>
           </button>
           {/* The console, over the frame. The editor has its own top bar and so never carried the global
               activity chip, which left the busiest page in the application as the one with no way to ask
@@ -1832,7 +1832,7 @@ export default function FrameEditor() {
               <>
                 {mode === "objects" && st.tool === "adverse" && (
                   <select value={adverseCond} onChange={(e) => setAdverseCond(e.target.value)} title="adverse condition to tag"
-                    className="bg-bg border border-accent text-accent px-1 py-1 font-mono text-[11px]">
+                    className="bg-bg border border-accent text-accent px-1 py-1 text-[12px]">
                     {["glare", "reflection", "shadow", "rain", "fog", "lowlight"].map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 )}
@@ -1841,7 +1841,7 @@ export default function FrameEditor() {
                     onChange={(e) => setBrushRadius(Number(e.target.value))} className="w-20" />
                 )}
                 {mode === "lanes" && (
-                  <div className="flex items-center gap-1 font-mono text-[11px]">
+                  <div className="flex items-center gap-1 text-[12px]">
                     <button onClick={() => setLaneAdding(laneAdding ? null : [])} title="draw a new lane spline (click to add control points)"
                       className={`border px-2 py-1 ${laneAdding ? "border-accent text-accent" : "border-line text-ink-3 hover:border-accent"}`}>+ lane</button>
                     {laneAdding ? (
@@ -1894,22 +1894,22 @@ export default function FrameEditor() {
             <div className="absolute inset-0 overflow-auto bg-bg p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <button onClick={() => void loadFrameEvents()}
-                  className="border border-line text-ink-2 px-2 py-1 font-mono text-[11px] hover:border-accent">
+                  className="border border-line text-ink-2 px-2 py-1 text-[12px] hover:border-accent">
                   load session events
                 </button>
                 <button onClick={() => router.push("/events")}
-                  className="border border-line text-ink-3 px-2 py-1 font-mono text-[11px] hover:border-accent">
+                  className="border border-line text-ink-3 px-2 py-1 text-[12px] hover:border-accent">
                   derive and review &rarr;
                 </button>
-                <span className="font-mono text-[10px] text-ink-3">{frameEvents.length} events</span>
+                <span className="text-[11px] text-ink-3">{frameEvents.length} events</span>
               </div>
-              <p className="font-mono text-[10px] text-ink-3 max-w-[70ch]">
+              <p className="text-[11px] text-ink-3 max-w-[70ch]">
                 Behaviour, not boxes: what an actor did over time. A lane change is a track crossing a lane
                 boundary and staying across it; a signal phase is one contiguous state of one light. Every
                 one is a candidate until somebody rules on it.
               </p>
               {frameEvents.length > 0 && (
-                <table className="w-full font-mono text-[11px]">
+                <table className="w-full text-[12px]">
                   <thead className="text-ink-3 text-left">
                     <tr><th className="py-1">kind</th><th>severity</th><th>start</th><th>conf</th><th>state</th></tr>
                   </thead>
@@ -1936,24 +1936,24 @@ export default function FrameEditor() {
                 onDragAreaPoint={dragAreaPoint}
                 onStageClick={laneStageClick} onSelect={(lid) => { setLaneSel(lid); setAreaSel(null); }}
                 onDragPoint={laneDragPoint} />
-            ) : <div className="absolute inset-0 grid place-items-center font-mono text-[11px] text-ink-3">loading lanes...</div>
+            ) : <div className="absolute inset-0 grid place-items-center text-[12px] text-ink-3">loading lanes...</div>
           ) : mode === "lidar3d" ? (
             pts3d ? (
               <div className="absolute inset-0 flex flex-col">
                 <div className="relative flex-1 min-h-0">
-                  <span className="absolute left-2 top-1 z-10 font-mono text-[10px] text-ink-3 uppercase">3d</span>
+                  <span className="absolute left-2 top-1 z-10 text-[11px] text-ink-3 uppercase">3d</span>
                   <PointCloudViewer points={pts3d.points} count={pts3d.count} colorBy={colorBy3d}
                     intensityRange={[pts3d.intensityMin, pts3d.intensityMax]} source={pts3d.source} mode="perspective"
                     cuboids={cub3d} selectedId={cubSel} onSelectCuboid={setCubSel} />
                 </div>
                 <div className="relative h-2/5 min-h-[200px] border-t hairline">
-                  <span className="absolute left-2 top-1 z-10 font-mono text-[10px] text-ink-3 uppercase">bev (drag to move)</span>
+                  <span className="absolute left-2 top-1 z-10 text-[11px] text-ink-3 uppercase">bev (drag to move)</span>
                   <PointCloudViewer points={pts3d.points} count={pts3d.count} colorBy={colorBy3d}
                     intensityRange={[pts3d.intensityMin, pts3d.intensityMax]} source={pts3d.source} mode="bev" pointSize={0.4}
                     cuboids={cub3d} selectedId={cubSel} onSelectCuboid={setCubSel} onMoveCuboid={moveCub} />
                 </div>
               </div>
-            ) : <div className="absolute inset-0 grid place-items-center font-mono text-[11px] text-ink-3">{lidarMsg ?? "loading point cloud..."}</div>
+            ) : <div className="absolute inset-0 grid place-items-center text-[12px] text-ink-3">{lidarMsg ?? "loading point cloud..."}</div>
           ) : rigView && rigMulti && rigGroup ? (
             <RigView cameras={rigGroup.cameras} focusedCam={meta.cam_id} frameIds={rigGroup.frameIds}
               missingCams={rigGroup.missingCams} layout={rigLayout} onFocus={focusCamOnce}>
@@ -1984,7 +1984,7 @@ export default function FrameEditor() {
             } />}
           {/* Review mode: a quiet bottom-center action bar so the reviewer accepts/rejects without leaving the canvas */}
           {mode === "review" && selected && (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 panel px-3 py-1.5 flex items-center gap-3 font-mono text-[11px]">
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 panel px-3 py-1.5 flex items-center gap-3 text-[12px]">
               <span className="text-ink-2">{selected.class_name}</span>
               <ConfBar conf={selected.conf} />
               <button onClick={() => reviewObject("accept")} className="border border-pass text-pass px-2 py-0.5 hover:bg-pass/10">accept (A)</button>
@@ -1995,7 +1995,7 @@ export default function FrameEditor() {
           {/* Rewritten because the behaviour changed. Clicking again used to commit this mask and start
               a new one; it now refines this one, which is what makes shift-click mean anything. */}
           {st.candidate?.length ? (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 font-mono text-[11px] text-ink-2 flex items-center gap-3">
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 text-[12px] text-ink-2 flex items-center gap-3">
               {samPrompt && samPrompt.points.length > 1 && (
                 <span className="text-ink-3">{describeSamPrompt(samPrompt)}</span>
               )}
@@ -2019,7 +2019,7 @@ export default function FrameEditor() {
               <div className="absolute z-20" style={{ left, top }}>
                 <div className="panel border border-line shadow-xl">
                   {!editOpen ? (
-                    <div className="flex items-center gap-2 px-2 py-1 font-mono text-[11px]">
+                    <div className="flex items-center gap-2 px-2 py-1 text-[12px]">
                       <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(selected.class_id) }} />
                       <span className="text-ink-2 truncate max-w-[120px]" title={selected.class_name}>{selected.class_name}</span>
                       <button onClick={() => { setEditOpen(true); setEditSearch(""); }}
@@ -2030,8 +2030,8 @@ export default function FrameEditor() {
                   ) : (
                     <div className="w-56 p-1.5">
                       <div className="flex items-center justify-between mb-1 px-0.5">
-                        <span className="font-mono text-[10px] uppercase text-ink-3">fix class</span>
-                        <button onClick={() => setEditOpen(false)} className="font-mono text-[10px] text-ink-3 hover:text-ink">close</button>
+                        <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">fix class</span>
+                        <button onClick={() => setEditOpen(false)} className="text-[11px] text-ink-3 hover:text-ink">close</button>
                       </div>
                       <input autoFocus value={editSearch} onChange={(e) => setEditSearch(e.target.value)} placeholder="search or add class..."
                         onKeyDown={(e) => {
@@ -2042,24 +2042,24 @@ export default function FrameEditor() {
                             else if (norm) addAndRelabel(editSearch);
                           } else if (e.key === "Escape") setEditOpen(false);
                         }}
-                        className="w-full bg-panel border border-line px-2 py-1 font-mono text-[11px] text-ink mb-1" />
+                        className="w-full bg-panel border border-line px-2 py-1 text-[12px] text-ink mb-1" />
                       <div className="max-h-40 overflow-auto space-y-0.5">
                         {editSearch.trim() && normClass(editSearch) && !editClasses.some((c) => c.name === normClass(editSearch)) && (
                           <button onClick={() => addAndRelabel(editSearch)}
-                            className="w-full flex items-center gap-1.5 px-1 py-0.5 font-mono text-[11px] text-left text-accent hover:bg-line">
+                            className="w-full flex items-center gap-1.5 px-1 py-0.5 text-[12px] text-left text-accent hover:bg-line">
                             <span className="shrink-0">+</span>
                             <span className="truncate">add &quot;{normClass(editSearch)}&quot;</span>
                           </button>
                         )}
                         {editClasses.slice(0, 50).map((c) => (
                           <button key={c.id} onClick={() => { relabelSelected(c); setEditOpen(false); }}
-                            className={`w-full flex items-center gap-1.5 px-1 py-0.5 font-mono text-[11px] text-left ${c.id === selected.class_id ? "text-ink" : "text-ink-3"} hover:text-ink`}>
+                            className={`w-full flex items-center gap-1.5 px-1 py-0.5 text-[12px] text-left ${c.id === selected.class_id ? "text-ink" : "text-ink-3"} hover:text-ink`}>
                             <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(c.id) }} />
                             <span className="truncate">{c.name}</span>
                             {c.india && <span className="ml-auto text-accent">*</span>}
                           </button>
                         ))}
-                        {!editClasses.length && <div className="text-ink-3 text-center py-2 font-mono text-[10px]">no match</div>}
+                        {!editClasses.length && <div className="text-ink-3 text-center py-2 text-[11px]">no match</div>}
                       </div>
                     </div>
                   )}
@@ -2068,20 +2068,20 @@ export default function FrameEditor() {
             );
           })()}
           {notice && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 font-mono text-[11px] text-warn">{notice}</div>
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 panel px-3 py-1.5 text-[12px] text-warn">{notice}</div>
           )}
           {/* HUD: frame time and camera, a quiet overlay top-left (the design's HUD). Suppressed in events
               mode, where the canvas is a table rather than an image: a frame timestamp and a cursor position
               describe something that is not on screen, and the overlay printed through the controls. */}
           {meta && mode !== "events" && (
             <div className="absolute top-3 left-3 z-10 flex flex-col gap-1 pointer-events-none">
-              <span className="font-mono text-[11px] text-ink-2 bg-bg/60 px-1.5 py-0.5 rounded w-fit">{new Date(Number(meta.ts_ns) / 1e6).toISOString().replace("T", " ").replace("Z", "")}</span>
-              <span className="font-mono text-[11px] text-ink-3 bg-bg/60 px-1.5 py-0.5 rounded w-fit">{camLabel(meta.cam_id)}{meta.is_lidar ? " · lidar" : ""}<CursorReadout /></span>
+              <span className="text-[12px] text-ink-2 bg-bg/60 px-1.5 py-0.5 rounded w-fit">{new Date(Number(meta.ts_ns) / 1e6).toISOString().replace("T", " ").replace("Z", "")}</span>
+              <span className="text-[12px] text-ink-3 bg-bg/60 px-1.5 py-0.5 rounded w-fit">{camLabel(meta.cam_id)}{meta.is_lidar ? " · lidar" : ""}<CursorReadout /></span>
               {/* Throughput, measured rather than asserted. The risk order and the accept-the-rest key
                   are both throughput claims, and the two review grids already show this number; the
                   editor, where most of the work happens, showed nothing. */}
               {perMinute != null && (
-                <span className="font-mono text-[11px] text-accent bg-bg/60 px-1.5 py-0.5 rounded w-fit"
+                <span className="text-[12px] text-accent bg-bg/60 px-1.5 py-0.5 rounded w-fit"
                   title={`${reviewed} objects settled on this frame since it opened`}>
                   {perMinute}/min
                 </span>
@@ -2092,7 +2092,7 @@ export default function FrameEditor() {
           {/* M-MC.1 rig view control: a canvas view-state cluster (NOT a mode or tool). Only when this frame is
               part of a multi-camera group and the current mode uses the annotation canvas. */}
           {rigMulti && rigEditable && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 font-mono text-[10px] panel/80 bg-bg/70 px-1.5 py-1 rounded">
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 text-[11px] panel/80 bg-bg/70 px-1.5 py-1 rounded">
               <button onClick={() => setRigView((v) => !v)} title="toggle the multi-camera rig view (this camera stays focused)"
                 className={`border px-2 py-0.5 rounded ${rigView ? "border-accent text-accent bg-accent/10" : "border-line text-ink-3 hover:border-accent"}`}>
                 rig {rigGroup ? `${Object.keys(rigGroup.frameIds).length}/${rigGroup.cameras.length}` : ""}
@@ -2178,7 +2178,7 @@ export default function FrameEditor() {
               <span className="font-display font-semibold text-[12.5px] text-ink">
                 {mode === "review" ? "Review" : mode === "lanes" ? "Lanes" : "Cuboids"}
               </span>
-              <span className="font-mono text-[10px] text-ink-3">
+              <span className="text-[11px] text-ink-3">
                 {mode === "lanes" ? `${lanes.length} lanes` : mode === "lidar3d" ? `${cub3d.length} cuboids` : `${st.objects.length} objects`}
               </span>
               <button onClick={() => setRightCollapsed(true)} title="collapse panel"
@@ -2187,7 +2187,7 @@ export default function FrameEditor() {
           )}
           {/* Lanes mode: the panel routes to lane content (list + selected lane props) instead of objects */}
           {mode === "lanes" && (
-            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 font-mono text-[11px]">
+            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 text-[12px]">
               <div className="text-ink-3 uppercase text-[10px]">lanes ({lanes.length})</div>
               {lanes.map((l) => (
                 <div key={l.lane_id} onClick={() => setLaneSel(l.lane_id)}
@@ -2278,7 +2278,7 @@ export default function FrameEditor() {
           )}
           {/* 3D and LiDAR mode: the panel routes to the cuboid list plus selected-cuboid geometry */}
           {mode === "lidar3d" && (
-            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 font-mono text-[11px]">
+            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 text-[12px]">
               <div className="flex items-center justify-between">
                 <span className="text-ink-3 uppercase text-[10px]">cuboids ({cub3d.length})</span>
                 <button onClick={addCub} disabled={!cloud3d} className="border border-line text-ink-3 px-1.5 py-0.5 hover:border-accent disabled:opacity-40">+ box</button>
@@ -2344,7 +2344,7 @@ export default function FrameEditor() {
           {/* Review mode: the panel becomes the value queue (highest-value items + error candidates) with
               per-object accept/reject. Canvas stays Konva; reviewer pans/zooms and clicks objects. */}
           {mode === "review" && (
-            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 font-mono text-[11px]">
+            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 text-[12px]">
               {selected ? (
                 <div className="border-b hairline pb-2 space-y-1.5">
                   <div className="flex items-center gap-1.5">
@@ -2446,7 +2446,7 @@ export default function FrameEditor() {
               operation had to go through the natural-language agent bar: there was no way to pick three
               boxes and delete or reclassify them directly. */}
           {st.selectedIds.length > 1 && (
-            <div className="panel px-2 py-1.5 flex items-center gap-2 font-mono text-[11px]" role="toolbar"
+            <div className="panel px-2 py-1.5 flex items-center gap-2 text-[12px]" role="toolbar"
                  aria-label="bulk actions">
               <span className="text-ink-2">{st.selectedIds.length} selected</span>
               <button onClick={() => dispatch({ t: "setVisible", ids: st.selectedIds, visible: false })}
@@ -2479,7 +2479,7 @@ export default function FrameEditor() {
       </div>
 
       {/* BOTTOM BAR: zoom, shortcut hints, counts, save status (the design's 28px bottom bar) */}
-      <footer className="h-7 shrink-0 flex items-center border-t hairline font-mono text-[10.5px] text-ink-3
+      <footer className="h-7 shrink-0 flex items-center border-t hairline text-[11.5px] text-ink-3
                          min-w-0 overflow-x-auto no-scrollbar">
         <div className="flex items-center h-full border-r hairline px-1">
           <button onClick={() => zoomBy(1 / 1.2)} title="zoom out" className="w-6 h-5 flex items-center justify-center rounded text-ink-2 hover:bg-line/50"><Icon name="zoomOut" size={14} /></button>

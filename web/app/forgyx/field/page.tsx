@@ -64,35 +64,35 @@ export default function FieldPage() {
         {fleet && (
           <div className="flex gap-2 flex-wrap">
             <div className="panel px-3 py-2 min-w-[110px]">
-              <div className="font-mono text-[10px] uppercase text-ink-3">devices</div>
-              <div className="font-mono text-[18px] text-ink tabular-nums">{fleet.devices}</div>
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">devices</div>
+              <div className="text-[18px] font-semibold text-ink tabular-nums">{fleet.devices}</div>
             </div>
             <div className="panel px-3 py-2 min-w-[110px]">
-              <div className="font-mono text-[10px] uppercase text-ink-3">silent</div>
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">silent</div>
               {/* Surfaced, because a fleet whose devices have gone quiet looks identical to a healthy one
                   in every average computed over the devices still talking. */}
               <div className={`font-mono text-[18px] tabular-nums ${
                 fleet.silent_devices ? "text-warn" : "text-ink"}`}>{fleet.silent_devices}</div>
             </div>
             <div className="panel px-3 py-2 min-w-[110px]">
-              <div className="font-mono text-[10px] uppercase text-ink-3">artifacts</div>
-              <div className="font-mono text-[18px] text-ink tabular-nums">{fleet.artifacts.length}</div>
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">artifacts</div>
+              <div className="text-[18px] font-semibold text-ink tabular-nums">{fleet.artifacts.length}</div>
             </div>
           </div>
         )}
 
         <section className="panel">
-          <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
             artifacts in the field
           </div>
           {!fleet?.artifacts.length ? (
-            <div className="p-4 font-mono text-[11px] text-ink-3">
+            <div className="p-4 text-[12px] text-ink-3">
               No telemetry yet. A device posts a reporting window rather than every inference: p50, p95 and
               the thermal ceiling reached are properties of a window, and a device posting each inference
               would spend its uplink on telemetry.
             </div>
           ) : (
-            <table className="w-full font-mono text-[11px]">
+            <table className="w-full text-[12px]">
               <thead>
                 <tr className="text-ink-3 text-left border-b hairline">
                   <th className="py-1">artifact</th><th>devices</th><th>windows</th>
@@ -129,7 +129,7 @@ export default function FieldPage() {
 
         {report && (
           <section className="panel">
-            <div className="flex items-center gap-2 font-mono text-[11px] uppercase text-ink-3
+            <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3
                             border-b hairline px-3 py-2">
               <span>{report.artifact_id.slice(0, 20)}</span>
               <span className={`normal-case ${
@@ -142,7 +142,7 @@ export default function FieldPage() {
               <span className="ml-auto normal-case text-ink-3">advisory: a device cannot demote</span>
             </div>
             <div className="p-3 space-y-2">
-              <div className="font-mono text-[11px] text-ink-2">{report.detail}</div>
+              <div className="text-[12px] text-ink-2">{report.detail}</div>
               <div className="flex gap-2 flex-wrap">
                 {[["field p50", report.field.latency_p50_ms, "ms"],
                   ["field p95", report.field.latency_p95_ms, "ms"],
@@ -151,7 +151,7 @@ export default function FieldPage() {
                   ["max temp", report.field.temp_c_max, "C"],
                   ["drift", report.confidence_drift, ""]].map(([label, value, unit]) => (
                     <div key={String(label)} className="panel px-3 py-2 min-w-[110px]">
-                      <div className="font-mono text-[10px] uppercase text-ink-3">{String(label)}</div>
+                      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{String(label)}</div>
                       <div className="font-mono text-[15px] text-ink tabular-nums">
                         {value == null ? "-" : `${value}${unit}`}
                       </div>
@@ -161,7 +161,7 @@ export default function FieldPage() {
               {report.findings.length > 0 && (
                 <ul className="space-y-0.5">
                   {report.findings.map((f, i) => (
-                    <li key={i} className="font-mono text-[11px] text-warn">
+                    <li key={i} className="text-[12px] text-warn">
                       {f.kind.replace(/_/g, " ")}: <span className="text-ink-2">{f.detail}</span>
                     </li>
                   ))}
@@ -172,14 +172,14 @@ export default function FieldPage() {
         )}
 
         <section className="panel">
-          <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
             devices ({devices.length})
           </div>
           <div className="p-3">
             {devices.length === 0 ? (
-              <div className="font-mono text-[11px] text-ink-3">No devices registered.</div>
+              <div className="text-[12px] text-ink-3">No devices registered.</div>
             ) : (
-              <table className="w-full font-mono text-[11px]">
+              <table className="w-full text-[12px]">
                 <thead>
                   <tr className="text-ink-3 text-left border-b hairline">
                     <th className="py-1">device</th><th>hardware</th><th>runtime</th>

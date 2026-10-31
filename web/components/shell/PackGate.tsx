@@ -25,7 +25,7 @@ export default function PackGate({ pack, title, what, children }: {
               {title} is part of an optional package: {what}. It is off unless an administrator installs it.
             </p>
             <p className="mt-3 text-[12.5px] text-ink-3">To install it, add the package in the server&apos;s .env and restart:</p>
-            <code className="mt-1.5 block font-mono text-[12px] text-ink-2 bg-bg-2 border hairline rounded px-3 py-2">
+            <code className="mt-1.5 block text-[12.5px] text-ink-2 bg-bg-2 border hairline rounded px-3 py-2">
               LBX_PACKS__OPTIONAL=[&quot;{pack}&quot;]
             </code>
           </section>

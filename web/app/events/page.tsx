@@ -64,9 +64,9 @@ function Stat({ label, value, hint, tone }: {
 }) {
   return (
     <div className="panel px-3 py-2 min-w-[130px]">
-      <div className="font-mono text-[10px] uppercase text-ink-3">{label}</div>
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</div>
       <div className={`font-mono text-[18px] tabular-nums ${tone ?? "text-ink"}`}>{value}</div>
-      {hint && <div className="font-mono text-[10px] text-ink-3">{hint}</div>}
+      {hint && <div className="text-[11px] text-ink-3">{hint}</div>}
     </div>
   );
 }
@@ -183,9 +183,9 @@ export default function EventsPage() {
       <div className="p-4 space-y-4 max-w-6xl">
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1">
-          <span className="font-mono text-[10px] uppercase text-ink-3">session id</span>
+          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">session id</span>
           <input
-            className="input font-mono text-[11px] w-[340px]"
+            className="input text-[12px] w-[340px]"
             value={sessionId}
             onChange={(e) => setSessionId(e.target.value)}
             onKeyDown={(e) => {
@@ -208,7 +208,7 @@ export default function EventsPage() {
         </button>
       </div>
 
-      <p className="font-mono text-[10px] text-ink-3 max-w-[76ch]">
+      <p className="text-[11px] text-ink-3 max-w-[76ch]">
         Deriving is safe to repeat: a matching candidate updates in place rather than duplicating, anything a
         person has ruled on is left alone, and a candidate the geometry no longer implies is removed. Lane
         linking gives a lane an identity across frames, which is what a crossing is measured against; without
@@ -243,7 +243,7 @@ export default function EventsPage() {
       )}
 
       {typeResult && (
-        <p className="font-mono text-[10px] text-ink-3">
+        <p className="text-[11px] text-ink-3">
           this session: {typeResult.measured ?? 0} lanes typed over{" "}
           {typeResult.frames_decoded ?? 0} frames, {typeResult.changed_type ?? 0} changed type
           {typeResult.unreadable_frames_lanes
@@ -283,9 +283,9 @@ export default function EventsPage() {
 
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1">
-          <span className="font-mono text-[10px] uppercase text-ink-3">severity</span>
+          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">severity</span>
           <select
-            className="input font-mono text-[11px]"
+            className="input text-[12px]"
             value={severity}
             onChange={(e) => setSeverity(e.target.value)}
           >
@@ -298,9 +298,9 @@ export default function EventsPage() {
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="font-mono text-[10px] uppercase text-ink-3">state</span>
+          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">state</span>
           <select
-            className="input font-mono text-[11px]"
+            className="input text-[12px]"
             value={state}
             onChange={(e) => setState(e.target.value)}
           >
@@ -314,7 +314,7 @@ export default function EventsPage() {
 
       {events.length > 0 && (
         <div className="panel overflow-x-auto">
-          <table className="w-full font-mono text-[11px]">
+          <table className="w-full text-[12px]">
             <thead className="text-ink-3">
               <tr className="text-left">
                 <th className="px-2 py-1">kind</th>
@@ -366,7 +366,7 @@ export default function EventsPage() {
       )}
 
       {summary && events.length === 0 && (
-        <p className="font-mono text-[11px] text-ink-3">
+        <p className="text-[12px] text-ink-3">
           No events match. If the session has never been derived, press derive. If deriving finds nothing,
           the session most likely has lanes and tracked objects on different frames, which is the one thing
           that makes a crossing unobservable.
@@ -375,7 +375,7 @@ export default function EventsPage() {
 
       {taxonomy && (
         <details className="panel px-3 py-2">
-          <summary className="font-mono text-[11px] cursor-pointer">
+          <summary className="text-[12px] cursor-pointer">
             vocabulary ({taxonomy.kinds.length} kinds, version {taxonomy.version})
           </summary>
           <div className="mt-2 grid gap-3 md:grid-cols-2">
@@ -387,15 +387,15 @@ export default function EventsPage() {
             />
           </div>
           <div className="mt-3">
-            <div className="font-mono text-[10px] uppercase text-ink-3">signal phase graph</div>
-            <div className="font-mono text-[11px]">
+            <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">signal phase graph</div>
+            <div className="text-[12px]">
               {Object.entries(taxonomy.signal_phase_graph).map(([from, to]) => (
                 <div key={from}>
                   {from} to {to.join(", ")}
                 </div>
               ))}
             </div>
-            <p className="font-mono text-[10px] text-ink-3 mt-1 max-w-[70ch]">
+            <p className="text-[11px] text-ink-3 mt-1 max-w-[70ch]">
               A transition outside this graph is almost never a broken signal. It is a mislabelled frame, and
               it is invisible frame by frame because each label looks reasonable on its own crop.
             </p>
@@ -410,11 +410,11 @@ export default function EventsPage() {
 function KindList({ title, kinds, note }: { title: string; kinds: EventKindSpec[]; note?: string }) {
   return (
     <div>
-      <div className="font-mono text-[10px] uppercase text-ink-3">{title}</div>
-      {note && <div className="font-mono text-[10px] text-ink-3">{note}</div>}
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{title}</div>
+      {note && <div className="text-[11px] text-ink-3">{note}</div>}
       <ul className="mt-1 space-y-1">
         {kinds.map((k) => (
-          <li key={k.kind} className="font-mono text-[11px]">
+          <li key={k.kind} className="text-[12px]">
             <span className={SEVERITY_TONE[k.severity] ?? ""}>{k.kind}</span>{" "}
             <span className="text-ink-3">
               {k.shape} on {k.anchor}

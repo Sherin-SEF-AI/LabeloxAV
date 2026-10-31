@@ -50,9 +50,9 @@ export default function CollaboratePage() {
     <PageShell
       active="COLLABORATE"
       title="Collaboration Console"
-      right={msg ? <span className="font-mono text-[11px] text-warn">{msg}</span> : undefined}
+      right={msg ? <span className="text-[12px] text-warn">{msg}</span> : undefined}
     >
-      <div className="p-4 space-y-4 font-mono text-[11px]">
+      <div className="p-4 space-y-4 text-[12px]">
       {loadErr != null && <LoadState error={loadErr} onRetry={() => void load()} />}
         <div className="flex items-center gap-2 text-ink-3">
           <span>actor: <span className="text-ink-2">{me ? `${me.name} (${me.role})` : "none"}</span></span>

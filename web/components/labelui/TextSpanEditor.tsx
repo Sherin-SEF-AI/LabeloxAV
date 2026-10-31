@@ -96,7 +96,7 @@ export default function TextSpanEditor({
 
   return (
     <div className="p-4">
-      <div className="flex items-center gap-3 font-mono text-[11px] mb-2">
+      <div className="flex items-center gap-3 text-[12px] mb-2">
         {!activeLabel && <span className="text-ink-3">pick a label first, then select text to tag it</span>}
         {onCreateRelation && (
           <button
@@ -135,7 +135,7 @@ export default function TextSpanEditor({
         // Listed rather than drawn as arcs over the text. Arcs are the conventional rendering and become
         // unreadable the moment two of them cross, which in any real sentence is immediately.
         <div className="mt-3 border-t hairline pt-2">
-          <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">
             relations ({relations.length})
           </div>
           <ul className="space-y-0.5">
@@ -143,7 +143,7 @@ export default function TextSpanEditor({
               const from = spanById.get(String(r.payload.from_annotation_id));
               const to = spanById.get(String(r.payload.to_annotation_id));
               return (
-                <li key={r.annotation_id} className="font-mono text-[11px] text-ink-2">
+                <li key={r.annotation_id} className="text-[12px] text-ink-2">
                   <span className="text-ink">{from ? text.slice(from.start, from.end) : "?"}</span>
                   <span className="text-ink-3"> {r.label ?? "relates to"} </span>
                   <span className="text-ink">{to ? text.slice(to.start, to.end) : "?"}</span>

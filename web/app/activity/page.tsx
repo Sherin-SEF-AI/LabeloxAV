@@ -96,7 +96,7 @@ export default function ActivityPage() {
           <section className="panel p-3">
             <div className="flex items-baseline gap-3 flex-wrap">
               <span className="font-mono text-[22px] text-ink tabular-nums">{summary.total}</span>
-              <span className="font-mono text-[11px] text-ink-3">
+              <span className="text-[12px] text-ink-3">
                 {mine ? "things you did" : `things done by ${summary.active_people} people`} in the last
                 {" "}{summary.hours >= 24 ? `${Math.round(summary.hours / 24)}d` : `${summary.hours}h`}
               </span>
@@ -109,7 +109,7 @@ export default function ActivityPage() {
                   .sort((a, b) => b[1] - a[1])
                   .map(([v, n]) => (
                     <button key={v} onClick={() => setVerb(verb === v ? "" : v)}
-                      className={`border px-1.5 py-0.5 font-mono text-[10.5px] ${
+                      className={`border px-1.5 py-0.5 text-[11.5px] ${
                         verb === v ? "border-accent text-ink" : "border-line text-ink-2 hover:text-ink"}`}>
                       {summary.labels[v] ?? v} <span className="text-ink-3">{n}</span>
                     </button>
@@ -120,11 +120,11 @@ export default function ActivityPage() {
         )}
 
         <section className="panel">
-          <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
             timeline ({events.length} of {total})
           </div>
           {events.length === 0 ? (
-            <div className="p-4 font-mono text-[11px] text-ink-3">
+            <div className="p-4 text-[12px] text-ink-3">
               Nothing in this window. Reviews, drawn objects, jobs, exports and sign-ins all land here as
               they happen.
             </div>
@@ -132,7 +132,7 @@ export default function ActivityPage() {
             <ul className="divide-y divide-line/40">
               {events.map((e) => (
                 <li key={e.event_id} className="px-3 py-2 flex items-start gap-3">
-                  <span className="font-mono text-[10px] text-ink-3 w-20 shrink-0 pt-0.5">
+                  <span className="text-[11px] text-ink-3 w-20 shrink-0 pt-0.5">
                     {mounted ? ago(e.created_at) : (e.created_at?.slice(11, 16) ?? "")}
                   </span>
                   <div className="min-w-0 flex-1">
@@ -141,14 +141,14 @@ export default function ActivityPage() {
                       {e.summary || e.label}
                     </div>
                     {e.subject_type && (
-                      <div className="font-mono text-[9.5px] text-ink-3">
+                      <div className="text-[10.5px] text-ink-3">
                         {e.subject_type}
                         {e.subject_id ? ` ${String(e.subject_id).slice(0, 8)}` : ""}
                       </div>
                     )}
                   </div>
                   {e.href && (
-                    <a href={e.href} className="font-mono text-[10px] text-ink-3 hover:text-accent shrink-0">
+                    <a href={e.href} className="text-[11px] text-ink-3 hover:text-accent shrink-0">
                       open
                     </a>
                   )}

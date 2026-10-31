@@ -136,7 +136,7 @@ export default function MenuBar({ menus = MENUS, compact = false, fixed = false 
           </span>
           <span className="flex-1 truncate">{it.label}</span>
           {it.shortcut && (
-            <span className={`font-mono text-[10.5px] shrink-0 ${active && enabled ? "text-bg/70" : "text-ink-3"}`}>
+            <span className={`text-[11.5px] shrink-0 ${active && enabled ? "text-bg/70" : "text-ink-3"}`}>
               {it.shortcut}
             </span>
           )}

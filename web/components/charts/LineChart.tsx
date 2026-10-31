@@ -36,7 +36,7 @@ export default function LineChart({
   const gridY = [0, 0.25, 0.5, 0.75, 1].map((f) => lo + f * span);
 
   if (!n || !series.length) {
-    return <div className="font-mono text-[10px] text-ink-3 py-6 text-center">no curve data</div>;
+    return <div className="text-[11px] text-ink-3 py-6 text-center">no curve data</div>;
   }
 
   return (
@@ -77,7 +77,7 @@ export default function LineChart({
         )}
       </svg>
       {/* legend + hover readout */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 font-mono text-[9px]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-[10.5px]">
         {series.map((s) => (
           <span key={s.key} className="inline-flex items-center gap-1 text-ink-3">
             <span className="inline-block w-2.5 h-0.5" style={{ background: s.color }} />

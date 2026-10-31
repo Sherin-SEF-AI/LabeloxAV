@@ -13,13 +13,13 @@ export function LabelChips({ config, value, onChange, kind }: {
   // will reject.
   const labels = (config.labels ?? []).filter((l) => !kind || !l.kinds.length || l.kinds.includes(kind));
   if (!labels.length) {
-    return <span className="font-mono text-[11px] text-ink-3">no labels declared for this project</span>;
+    return <span className="text-[12px] text-ink-3">no labels declared for this project</span>;
   }
   return (
     <div className="flex items-center gap-1 flex-wrap">
       {labels.map((l) => (
         <button key={l.name} onClick={() => onChange(value === l.name ? null : l.name)}
-          className={`px-1.5 py-0.5 font-mono text-[11px] border ${
+          className={`px-1.5 py-0.5 text-[12px] border ${
             value === l.name ? "border-accent text-ink" : "border-line text-ink-3 hover:text-ink-2"}`}
           style={value === l.name && l.color ? { borderColor: l.color, color: l.color } : undefined}>
           {l.name}
@@ -37,7 +37,7 @@ export function FieldsForm({ fields, value, onChange }: {
   return (
     <div className="space-y-1">
       {fields.map((f) => (
-        <label key={f.name} className="flex items-center gap-2 font-mono text-[11px]">
+        <label key={f.name} className="flex items-center gap-2 text-[12px]">
           <span className="text-ink-3 min-w-[80px]">
             {f.name}{f.required && <span className="text-block">*</span>}
           </span>

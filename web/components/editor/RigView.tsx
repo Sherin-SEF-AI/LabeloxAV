@@ -53,8 +53,8 @@ function ContextTile({ cam, frameId, focused, onFocus }: {
     return (
       <div className="relative h-full w-full grid place-items-center bg-bg-2 border border-dashed border-block/40 rounded">
         <div className="text-center">
-          <div className="font-mono text-[10px] uppercase text-block">{cam}</div>
-          <div className="font-mono text-[9px] text-ink-3 mt-0.5">no frame · dropped</div>
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-block">{cam}</div>
+          <div className="text-[10.5px] text-ink-3 mt-0.5">no frame · dropped</div>
         </div>
       </div>
     );
@@ -66,7 +66,7 @@ function ContextTile({ cam, frameId, focused, onFocus }: {
         // eslint-disable-next-line @next/next/no-img-element
         <img src={meta.image_url} alt={cam} loading="lazy" className="absolute inset-0 h-full w-full object-contain" />
       ) : (
-        <div className="absolute inset-0 grid place-items-center font-mono text-[10px] text-ink-3">{err ? "load failed" : "loading..."}</div>
+        <div className="absolute inset-0 grid place-items-center text-[11px] text-ink-3">{err ? "load failed" : "loading..."}</div>
       )}
       {meta && objs.length > 0 && (
         <svg viewBox={`0 0 ${meta.width} ${meta.height}`} preserveAspectRatio="xMidYMid meet"
@@ -77,8 +77,8 @@ function ContextTile({ cam, frameId, focused, onFocus }: {
           ))}
         </svg>
       )}
-      <span className="absolute left-1 top-1 font-mono text-[9px] uppercase text-ink bg-bg/70 px-1 rounded">{cam}</span>
-      {focused && <span className="absolute right-1 top-1 font-mono text-[9px] uppercase text-accent bg-bg/70 px-1 rounded">focus</span>}
+      <span className="absolute left-1 top-1 text-[10.5px] uppercase text-ink bg-bg/70 px-1 rounded">{cam}</span>
+      {focused && <span className="absolute right-1 top-1 text-[10.5px] uppercase text-accent bg-bg/70 px-1 rounded">focus</span>}
     </button>
   );
 }

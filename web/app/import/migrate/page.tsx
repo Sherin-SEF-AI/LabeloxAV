@@ -85,36 +85,36 @@ export default function MigratePage() {
           <div className="flex flex-wrap items-end gap-2">
             <Field label="from">
               <select value={format} onChange={(e) => setFormat(e.target.value)}
-                className="input font-mono text-[11px]">
+                className="input text-[12px]">
                 {FORMATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </Field>
             <Field label="source (s3:// uri, zip or directory)">
               <input value={source} onChange={(e) => setSource(e.target.value)} spellCheck={false}
                 placeholder="s3://uploads/labelbox-export.ndjson"
-                className="input font-mono text-[11px] w-[26rem]" />
+                className="input text-[12px] w-[26rem]" />
             </Field>
             <Field label="vehicle">
               <input value={vehicle} onChange={(e) => setVehicle(e.target.value)}
-                className="input font-mono text-[11px] w-32" />
+                className="input text-[12px] w-32" />
             </Field>
             <Field label="city">
               <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="optional"
-                className="input font-mono text-[11px] w-28" />
+                className="input text-[12px] w-28" />
             </Field>
             <button onClick={() => void dryRun()} disabled={busy}
-              className="border border-accent text-accent px-3 py-1 hover:bg-accent/10 disabled:opacity-30 font-mono text-[11px]">
+              className="border border-accent text-accent px-3 py-1 hover:bg-accent/10 disabled:opacity-30 text-[12px]">
               {busy ? "reading..." : "dry run"}
             </button>
           </div>
-          <div className="font-mono text-[10px] text-ink-3">
+          <div className="text-[11px] text-ink-3">
             A dry run writes nothing. It parses the export and applies the same remap the import would.
           </div>
         </div>
 
         {rep && (
           <>
-            <div className="flex flex-wrap gap-2 font-mono text-[11px]">
+            <div className="flex flex-wrap gap-2 text-[12px]">
               <Stat label="frames" value={res.frames.toLocaleString()} />
               <Stat label="their classes" value={String(rep.source_classes)} />
               <Stat label="objects" value={rep.objects.toLocaleString()} />
@@ -126,7 +126,7 @@ export default function MigratePage() {
             {lossy && (
               // Said plainly and before the import, because this is the number a customer will care about
               // after it and cannot undo.
-              <div className="panel px-3 py-2 border-l-2 border-block font-mono text-[11px] text-ink-2">
+              <div className="panel px-3 py-2 border-l-2 border-block text-[12px] text-ink-2">
                 {rep.into_fallback.toLocaleString()} of {rep.objects.toLocaleString()} objects
                 ({(rep.fallback_fraction * 100).toFixed(1)}%) would land in a fallback class rather than a
                 real one. Those labels survive the import and lose their meaning. Widening the ontology or
@@ -136,17 +136,17 @@ export default function MigratePage() {
 
             <div className="grid gap-3 md:grid-cols-2">
               <section className="panel">
-                <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
                   distinctions that would be lost
                 </div>
                 <div className="p-3 space-y-1">
                   {rep.merges.length === 0 && (
-                    <div className="font-mono text-[10px] text-ink-3">
+                    <div className="text-[11px] text-ink-3">
                       No two of their classes collapse onto one of ours.
                     </div>
                   )}
                   {rep.merges.slice(0, 12).map((m) => (
-                    <div key={m.ontology_class} className="font-mono text-[10px]">
+                    <div key={m.ontology_class} className="text-[11px]">
                       <span className="text-block">{m.source_classes.join(" + ")}</span>
                       <span className="text-ink-3"> all become </span>
                       <span className="text-ink">{m.ontology_class}</span>
@@ -157,17 +157,17 @@ export default function MigratePage() {
               </section>
 
               <section className="panel">
-                <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
                   classes with nowhere to go
                 </div>
                 <div className="p-3 space-y-1">
                   {rep.unmapped.length === 0 && (
-                    <div className="font-mono text-[10px] text-accent">
+                    <div className="text-[11px] text-accent">
                       Every class maps to a real one. Nothing falls back.
                     </div>
                   )}
                   {rep.unmapped.slice(0, 12).map((u) => (
-                    <div key={u.source_class} className="flex justify-between font-mono text-[10px]">
+                    <div key={u.source_class} className="flex justify-between text-[11px]">
                       <span className="text-warn truncate">{u.source_class}</span>
                       <span className="text-ink-3">
                         {u.falls_back_to} · {u.objects.toLocaleString()}
@@ -179,7 +179,7 @@ export default function MigratePage() {
             </div>
 
             <section className="panel">
-              <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2 flex items-center justify-between">
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2 flex items-center justify-between">
                 <span>the full mapping</span>
                 <button onClick={() => void commit()} disabled={busy}
                   className="border border-accent text-accent px-2 py-0.5 hover:bg-accent/10 disabled:opacity-30">
@@ -187,7 +187,7 @@ export default function MigratePage() {
                 </button>
               </div>
               <div className="p-3 overflow-x-auto">
-                <table className="w-full font-mono text-[10px]">
+                <table className="w-full text-[11px]">
                   <thead className="text-ink-3 text-left">
                     <tr><th className="py-1">their class</th><th>becomes</th><th className="text-right">objects</th></tr>
                   </thead>
@@ -215,7 +215,7 @@ export default function MigratePage() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="font-mono text-[10px] uppercase text-ink-3">{label}</span>
+      <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</span>
       {children}
     </label>
   );

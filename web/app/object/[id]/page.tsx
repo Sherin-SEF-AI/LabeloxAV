@@ -126,7 +126,7 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
             clickPoint={clickPoint}
             onPointClick={onPointClick}
           />
-          <div className="font-mono text-[11px] text-ink-3 mt-2">
+          <div className="text-[12px] text-ink-3 mt-2">
             click-to-segment (SAM) · click the object to propose a mask
           </div>
         </main>
@@ -134,7 +134,7 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
         <Inspector title="object" side="right">
           <div className="p-4 space-y-5">
           <section>
-            <div className="font-mono text-[11px] text-ink-3 uppercase mb-2">class</div>
+            <div className="text-[12px] text-ink-3 uppercase mb-2">class</div>
             <div className="space-y-1">
               {shortlist.map((name, i) => (
                 <button
@@ -163,7 +163,7 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
           </section>
 
           <section>
-            <div className="font-mono text-[11px] text-ink-3 uppercase mb-2">attributes</div>
+            <div className="text-[12px] text-ink-3 uppercase mb-2">attributes</div>
             <div className="space-y-2">
               {Object.entries(onto.attributes).map(([name, spec]) => (
                 <AttrControl
@@ -183,8 +183,8 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
               "no type" and "not looked at" are different facts. */}
           {(obj.sign_type || obj.ocr_text || obj.class_name === "traffic_sign") && (
             <section>
-              <div className="font-mono text-[11px] text-ink-3 uppercase mb-2">sign</div>
-              <div className="font-mono text-[11px] space-y-1">
+              <div className="text-[12px] text-ink-3 uppercase mb-2">sign</div>
+              <div className="text-[12px] space-y-1">
                 <div className="flex justify-between">
                   <span className="text-ink-2">type</span>
                   {obj.sign_type
@@ -229,8 +229,8 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
           )}
 
           <section>
-            <div className="font-mono text-[11px] text-ink-3 uppercase mb-2">provenance</div>
-            <div className="font-mono text-[11px] space-y-1">
+            <div className="text-[12px] text-ink-3 uppercase mb-2">provenance</div>
+            <div className="text-[12px] space-y-1">
               {(obj.provenance?.proposals as { path: string; verdict: string }[] | undefined)?.map(
                 (p, i) => (
                   <div key={i} className="flex justify-between">
@@ -244,10 +244,10 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
 
           <section>
             <div className="flex items-center justify-between mb-2">
-              <span className="font-mono text-[11px] text-ink-3 uppercase">similar (CLIP)</span>
+              <span className="text-[12px] text-ink-3 uppercase">similar (CLIP)</span>
               <button
                 onClick={async () => setSimilar(await api.objectSimilar(obj.object_id).then((r) => r.results))}
-                className="font-mono text-[11px] text-ink-3 hover:text-accent"
+                className="text-[12px] text-ink-3 hover:text-accent"
               >
                 find
               </button>
@@ -263,7 +263,7 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={s.image_url} alt={s.class_name} className="w-full h-full object-cover" />
-                    <span className="absolute bottom-0 right-0 bg-bg/80 font-mono text-[9px] px-0.5">
+                    <span className="absolute bottom-0 right-0 bg-bg/80 text-[10.5px] px-0.5">
                       {s.score.toFixed(2)}
                     </span>
                   </button>
@@ -290,7 +290,7 @@ function AttrControl({
   value: unknown;
   onChange: (v: unknown) => void;
 }) {
-  const label = <span className="font-mono text-xs text-ink-2">{name}</span>;
+  const label = <span className="text-[12.5px] text-ink-2">{name}</span>;
   if (spec.type === "enum") {
     return (
       <label className="flex items-center justify-between gap-2">
@@ -335,7 +335,7 @@ function AttrControl({
   return (
     <div className="flex items-center justify-between gap-2">
       {label}
-      <span className="font-mono text-[11px] text-ink-3">per-rider</span>
+      <span className="text-[12px] text-ink-3">per-rider</span>
     </div>
   );
 }

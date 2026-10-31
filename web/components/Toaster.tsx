@@ -31,7 +31,7 @@ export default function Toaster() {
       className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm pointer-events-none">
       {toasts.map((t) => (
         <div key={t.id}
-          className={`pointer-events-auto bg-bg-2 border ${STYLE[t.kind]} px-3 py-2 font-mono text-[11px] shadow-lg flex items-start gap-2`}>
+          className={`pointer-events-auto bg-bg-2 border ${STYLE[t.kind]} px-3 py-2 text-[12px] shadow-lg flex items-start gap-2`}>
           <span className="flex-1 break-words">{t.message}</span>
           {t.action && (
             <button

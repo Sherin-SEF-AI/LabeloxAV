@@ -61,7 +61,7 @@ export default function RigIdentityPanel({ sessionId, groupId, onClose, onSelect
   const dot = (cid: number | null) => <span className="inline-block w-2 h-2 rounded-full mr-1 align-middle" style={{ background: cid != null ? classColor(cid) : "#6C727A" }} />;
 
   return (
-    <div className="absolute top-3 left-3 z-30 w-64 max-h-[80%] flex flex-col panel bg-bg/95 border border-line rounded shadow-lg font-mono text-[11px]">
+    <div className="absolute top-3 left-3 z-30 w-64 max-h-[80%] flex flex-col panel bg-bg/95 border border-line rounded shadow-lg text-[12px]">
       <div className="flex items-center justify-between px-2 py-1.5 border-b hairline">
         <span className="uppercase text-ink-2 tracking-wide">rig identities</span>
         <button onClick={onClose} title="close" className="text-ink-3 hover:text-ink px-1">×</button>

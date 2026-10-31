@@ -56,7 +56,7 @@ export default function PageShell({ active, title, subtitle, right, primaryActio
       {showBar && <PageHeaderBar title={shownTitle ?? active} parent={nav?.parent} subtitle={subtitle} meta={meta}
         primaryAction={primaryAction} />}
       {filters && (
-        <div className="flex items-center gap-2 px-4 py-2 border-b hairline shrink-0 font-mono text-[11px] overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-2 px-4 py-2 border-b hairline shrink-0 text-[12px] overflow-x-auto no-scrollbar">
           {filters}
         </div>
       )}

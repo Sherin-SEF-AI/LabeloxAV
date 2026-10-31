@@ -129,14 +129,14 @@ export default function ConsoleModal() {
               </div>
             ))}
             {!matches.length && (
-              <div className="px-2 py-6 text-center font-mono text-[11px] text-ink-3">
+              <div className="px-2 py-6 text-center text-[12px] text-ink-3">
                 nothing here matches “{query}”.
               </div>
             )}
           </div>
 
           {/* A console whose numbers freeze looks exactly like a quiet machine, so it says which it is. */}
-          <div className="px-3 py-2 border-t hairline flex items-center gap-2 font-mono text-[10px] text-ink-3">
+          <div className="px-3 py-2 border-t hairline flex items-center gap-2 text-[11px] text-ink-3">
             <span className={`w-1.5 h-1.5 rounded-full ${live ? "bg-pass" : "bg-ink-3"}`} />
             <span>{live ? "live" : "not connected"}</span>
             {sys && <span className="ml-auto">up {uptime(sys.process.uptime_s)}</span>}
@@ -148,7 +148,7 @@ export default function ConsoleModal() {
           <div className="flex items-start gap-3 px-6 pt-5 pb-3">
             <div className="min-w-0">
               <h2 className="font-display font-semibold text-[15px] text-ink">{current?.label ?? "Console"}</h2>
-              <p className="font-mono text-[11px] text-ink-3 mt-0.5 truncate">{headline(jobs, sys)}</p>
+              <p className="text-[12px] text-ink-3 mt-0.5 truncate">{headline(jobs, sys)}</p>
             </div>
             <button onClick={close} aria-label="close"
               className="ml-auto shrink-0 w-7 h-7 flex items-center justify-center rounded
@@ -174,7 +174,7 @@ export default function ConsoleModal() {
             {shown === "machine" && <HostPanel sys={sys} />}
             {shown === "process" && <ProcessPanel sys={sys} waitingTotal={waitingTotal} />}
             {shown === null && (
-              <div className="py-16 text-center font-mono text-[11px] text-ink-3">
+              <div className="py-16 text-center text-[12px] text-ink-3">
                 no section matches “{query}”.
               </div>
             )}

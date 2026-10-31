@@ -50,7 +50,7 @@ export default function RigTrackPanel({ sessionId, onClose, onOpenInstant }: {
   const secs = (a: number | null, b: number | null) => (a != null && b != null ? `${((b - a) / 1e9).toFixed(1)}s` : "");
 
   return (
-    <div className="absolute bottom-3 left-3 z-30 w-[26rem] max-h-[55%] flex flex-col panel bg-bg/95 border border-line rounded shadow-lg font-mono text-[11px]">
+    <div className="absolute bottom-3 left-3 z-30 w-[26rem] max-h-[55%] flex flex-col panel bg-bg/95 border border-line rounded shadow-lg text-[12px]">
       <div className="flex items-center justify-between px-2 py-1.5 border-b hairline">
         <span className="uppercase text-ink-2 tracking-wide">rig tracks {tracks ? `(${tracks.length})` : ""}</span>
         <div className="flex items-center gap-1">

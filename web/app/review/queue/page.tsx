@@ -117,7 +117,7 @@ export default function ReviewQueuePage() {
           {tab === "errors" && <button onClick={runDetect} className="border border-line px-2 py-1 hover:border-accent">re-run detection</button>}
         </>
       }>
-      <div className="p-4 space-y-3 font-mono text-[11px]">
+      <div className="p-4 space-y-3 text-[12px]">
         {/* A failure says so and offers a retry, instead of an empty table that reads as a finished shift. */}
         {err != null && <LoadState error={err} onRetry={() => void load()} />}
 

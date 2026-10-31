@@ -21,7 +21,7 @@ const FALLBACK_FORMATS = ["coco", "yolo", "pascalvoc", "images", "video", "mcap"
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="panel">
-      <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
         {title}
       </div>
       <div className="p-3">{children}</div>
@@ -130,7 +130,7 @@ function ImportBody() {
             onClick={() => inputRef.current?.click()}
             className={`border border-dashed ${
               drag ? "border-accent" : "border-line"
-            } p-8 text-center cursor-pointer font-mono text-xs text-ink-3`}
+            } p-8 text-center cursor-pointer text-[12.5px] text-ink-3`}
           >
             <input
               ref={inputRef}
@@ -159,7 +159,7 @@ function ImportBody() {
             )}
           </div>
 
-          <div className="grid grid-cols-3 gap-3 mt-3 font-mono text-xs">
+          <div className="grid grid-cols-3 gap-3 mt-3 text-[12.5px]">
             <label className="flex flex-col gap-1">
               <span className="text-ink-3 uppercase text-[11px]">format</span>
               <select
@@ -203,7 +203,7 @@ function ImportBody() {
             <button
               onClick={onGo}
               disabled={!files.length || busy}
-              className="font-mono text-xs border border-line px-3 py-1 hover:border-accent disabled:opacity-50"
+              className="btn disabled:opacity-50"
             >
               {phase === "uploading"
                 ? `uploading ${files.length > 1 ? `${batchIdx + 1}/${files.length} · ` : ""}${(uploadFrac * 100).toFixed(0)}%`
@@ -219,9 +219,9 @@ function ImportBody() {
                 />
               </div>
             )}
-            {err && <span className="font-mono text-[11px] text-block">{err}</span>}
+            {err && <span className="text-[12px] text-block">{err}</span>}
           </div>
-          <div className="font-mono text-[11px] text-ink-3 mt-2">
+          <div className="text-[12px] text-ink-3 mt-2">
             PII (faces/plates) is blurred on every imported frame before storage. Objects arrive in
             triage as imported / review.
           </div>
@@ -231,7 +231,7 @@ function ImportBody() {
           {jobs.length ? (
             <div className="space-y-1">
               {jobs.map((j) => (
-                <div key={j.job_id} className="flex items-center gap-2 font-mono text-[11px]">
+                <div key={j.job_id} className="flex items-center gap-2 text-[12px]">
                   <span className="w-16 truncate text-ink-2">{j.format}</span>
                   <StateBadge state={j.status} />
                   <div className="flex-1 flex justify-center">
@@ -277,7 +277,7 @@ function ImportBody() {
               ))}
             </div>
           ) : (
-            <div className="font-mono text-xs text-ink-3 py-4 text-center">no imports yet</div>
+            <div className="text-[12.5px] text-ink-3 py-4 text-center">no imports yet</div>
           )}
         </Section>
       </div>

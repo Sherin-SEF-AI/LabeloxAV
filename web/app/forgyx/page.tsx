@@ -38,8 +38,8 @@ export default function ForgyxPareto() {
 
   return (
     <PageShell active="FORGYX" title="FORGYX edge optimization"
-      right={<span className="font-mono text-[11px] text-ink-3">{benches.length} benchmarks · {deploys.length} artifacts</span>}>
-      <div className="p-4 max-w-5xl space-y-4 font-mono text-[11px]">
+      right={<span className="text-[12px] text-ink-3">{benches.length} benchmarks · {deploys.length} artifacts</span>}>
+      <div className="p-4 max-w-5xl space-y-4 text-[12px]">
         {/* capabilities */}
         <div className="flex flex-wrap gap-2">
           {Object.entries(caps).map(([t, ok]) => (

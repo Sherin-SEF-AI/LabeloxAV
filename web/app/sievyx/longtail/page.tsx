@@ -39,14 +39,14 @@ export default function LongTailPage() {
         <Panel title="ODD coverage gaps" hint="fleet vs target domain" className="lg:col-span-2">
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr_1.4fr] gap-3">
             <div>
-              <div className="font-mono text-[10px] text-ink-3 mb-1">fleet counts</div>
+              <div className="text-[11px] text-ink-3 mb-1">fleet counts</div>
               <textarea value={counts} placeholder={EXAMPLE_COUNTS} onChange={(e) => setCounts(e.target.value)} rows={6}
-                className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
+                className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
             </div>
             <div>
-              <div className="font-mono text-[10px] text-ink-3 mb-1">target ODD fractions</div>
+              <div className="text-[11px] text-ink-3 mb-1">target ODD fractions</div>
               <textarea value={odd} placeholder={EXAMPLE_ODD} onChange={(e) => setOdd(e.target.value)} rows={6}
-                className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
+                className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
               <div className="mt-2"><RunButton busy={gaps.busy}
                 onClick={() => gaps.run(() => runJSON<Gaps>("/api/sievyx/odd/gaps",
                   { fleet_counts: parseInput(counts, "counts"), target_odd: parseInput(odd, "odd") }))} label="report gaps" /></div>
@@ -55,15 +55,15 @@ export default function LongTailPage() {
             <div>
               {gaps.out && (
                 <div className="space-y-1">
-                  <div className="font-mono text-[10px] text-ink-3 mb-1">{gaps.out.n_gaps} gaps of {gaps.out.n_cells} cells</div>
+                  <div className="text-[11px] text-ink-3 mb-1">{gaps.out.n_gaps} gaps of {gaps.out.n_cells} cells</div>
                   {gaps.out.gaps.map((g) => (
-                    <div key={g.cell} className="flex items-center gap-2 font-mono text-[10px]">
+                    <div key={g.cell} className="flex items-center gap-2 text-[11px]">
                       <span className={`w-24 shrink-0 truncate ${g.missing ? "text-block" : "text-ink-2"}`}>{g.cell}</span>
                       <Bar frac={g.gap * 5} tone={g.missing ? "block" : "warn"} />
                       <span className="w-14 shrink-0 text-right text-ink-3">{(g.gap * 100).toFixed(1)}%</span>
                     </div>
                   ))}
-                  {!gaps.out.gaps.length && <div className="font-mono text-[11px] text-pass">fleet covers the target ODD</div>}
+                  {!gaps.out.gaps.length && <div className="text-[12px] text-pass">fleet covers the target ODD</div>}
                 </div>
               )}
             </div>
@@ -81,13 +81,13 @@ export default function LongTailPage() {
               <KV k="clusters" v={disc.out.n_clusters ?? disc.out.clusters.length} tone="ink" />
               <div className="space-y-1 mt-2">
                 {disc.out.clusters.map((c, i) => (
-                  <div key={i} className="flex items-center gap-2 font-mono text-[10px]">
+                  <div key={i} className="flex items-center gap-2 text-[11px]">
                     <span className="w-16 shrink-0 text-ink-2">n={c.size}</span>
                     <Bar frac={c.rarity} tone="accent" />
                     <span className="w-16 shrink-0 text-right text-ink-3">{c.rarity.toFixed(2)}</span>
                   </div>
                 ))}
-                {!disc.out.clusters.length && <div className="font-mono text-[11px] text-ink-3">not enough embedded objects to cluster</div>}
+                {!disc.out.clusters.length && <div className="text-[12px] text-ink-3">not enough embedded objects to cluster</div>}
               </div>
             </div>
           )}
@@ -96,7 +96,7 @@ export default function LongTailPage() {
         {/* maneuver */}
         <Panel title="maneuver recognition" hint="trajectory in ego metres">
           <textarea value={traj} placeholder={EXAMPLE_TRAJ} onChange={(e) => setTraj(e.target.value)} rows={4}
-            className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
+            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
           <div className="mt-2"><RunButton busy={man.busy}
             onClick={() => man.run(() => runJSON<Maneuver>("/api/sievyx/maneuver", { trajectory: parseInput(traj, "traj") }))}
             label="recognize" /></div>

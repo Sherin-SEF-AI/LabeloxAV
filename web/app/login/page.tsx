@@ -29,9 +29,9 @@ type Stage = "signin" | "signup" | "mfa" | "enrol" | "forgot" | "reset";
 function Field({ label, ...rest }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block space-y-1">
-      <span className="font-mono text-[10px] uppercase text-ink-3">{label}</span>
+      <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</span>
       <input {...rest}
-        className="w-full bg-bg border border-line px-2 py-1.5 font-mono text-[12px] text-ink
+        className="w-full bg-bg border border-line px-2 py-1.5 text-[12.5px] text-ink
                    focus:border-accent outline-none" />
     </label>
   );
@@ -39,7 +39,7 @@ function Field({ label, ...rest }: { label: string } & React.InputHTMLAttributes
 
 function Divider({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2 font-mono text-[10px] text-ink-3">
+    <div className="flex items-center gap-2 text-[11px] text-ink-3">
       <h1 className="sr-only">Sign in to LabeloxAV</h1>
       <div className="h-px bg-line flex-1" />{children}<div className="h-px bg-line flex-1" />
     </div>
@@ -56,7 +56,7 @@ function Shell({ title, subtitle, children }: {
           <div className="font-display font-bold text-lg text-ink">
             Labelox<span className="text-accent">AV</span>
           </div>
-          <div className="font-mono text-[11px] text-ink-3">{subtitle ?? title}</div>
+          <div className="text-[12px] text-ink-3">{subtitle ?? title}</div>
         </div>
         {children}
       </div>
@@ -189,15 +189,15 @@ function LoginBody() {
   if (recovery && pending) {
     return (
       <Shell title="Save your recovery codes" subtitle="these are not shown again">
-        <div className="grid grid-cols-2 gap-1 font-mono text-[12px] text-ink select-all">
+        <div className="grid grid-cols-2 gap-1 text-[12.5px] text-ink select-all">
           {recovery.map((c) => <div key={c} className="border border-line px-2 py-1">{c}</div>)}
         </div>
-        <div className="font-mono text-[10px] text-ink-3">
+        <div className="text-[11px] text-ink-3">
           Each works once, and only if you lose your authenticator. Store them somewhere other than the
           device that generates your codes.
         </div>
         <button onClick={() => finish(pending)}
-          className="w-full border border-accent text-accent px-3 py-2 font-mono text-xs hover:bg-accent/10">
+          className="w-full border border-accent text-accent px-3 py-2 text-[12.5px] hover:bg-accent/10">
           I have saved them, continue
         </button>
       </Shell>
@@ -217,7 +217,7 @@ function LoginBody() {
     <Shell title={title} subtitle={stage === "signup" && methods.bootstrap
       ? "this deployment has no accounts yet, so the first one is an administrator"
       : title}>
-      {err && <div className="font-mono text-[11px] text-block border border-block px-2 py-1">{err}</div>}
+      {err && <div className="text-[12px] text-block border border-block px-2 py-1">{err}</div>}
 
       {stage === "signin" && (
         <>
@@ -228,11 +228,11 @@ function LoginBody() {
               <Field label="password" type="password" value={password} autoComplete="current-password"
                 onChange={(e) => setPassword(e.target.value)} onKeyDown={onEnter(submitSignin)} />
               <button onClick={submitSignin} disabled={busy || !name.trim() || !password}
-                className="w-full border border-accent text-accent px-3 py-2 font-mono text-xs
+                className="w-full border border-accent text-accent px-3 py-2 text-[12.5px]
                            hover:bg-accent/10 disabled:opacity-40">
                 {busy ? "signing in..." : "Sign in"}
               </button>
-              <div className="flex justify-between font-mono text-[10px] text-ink-3">
+              <div className="flex justify-between text-[11px] text-ink-3">
                 <button onClick={() => { setErr(null); setStage("forgot"); }} className="hover:text-accent">
                   forgot password
                 </button>
@@ -249,7 +249,7 @@ function LoginBody() {
             <>
               {methods.password && <Divider>or</Divider>}
               <a href={`/api/auth/oidc/start?next=${encodeURIComponent(next)}`}
-                className="block w-full border border-line text-ink-2 px-3 py-2 font-mono text-xs text-center
+                className="block w-full border border-line text-ink-2 px-3 py-2 text-[12.5px] text-center
                            hover:border-accent">
                 Sign in with single sign-on
               </a>
@@ -260,7 +260,7 @@ function LoginBody() {
             <>
               <Divider>local development</Divider>
               <button onClick={devLogin} disabled={busy}
-                className="w-full border border-line text-ink-3 px-3 py-1.5 font-mono text-[11px]
+                className="w-full border border-line text-ink-3 px-3 py-1.5 text-[12px]
                            hover:border-accent disabled:opacity-40">
                 Sign in as the dev administrator
               </button>
@@ -268,7 +268,7 @@ function LoginBody() {
           )}
 
           {!methods.password && !methods.oidc && !methods.dev_login && (
-            <div className="font-mono text-[11px] text-ink-3">
+            <div className="text-[12px] text-ink-3">
               No sign-in method is enabled on this deployment. An administrator issues credentials directly.
             </div>
           )}
@@ -284,30 +284,30 @@ function LoginBody() {
             type="email" value={email} autoComplete="email" onChange={(e) => setEmail(e.target.value)} />
           <Field label="password" type="password" value={password} autoComplete="new-password"
             onChange={(e) => setPassword(e.target.value)} onKeyDown={onEnter(submitSignup)} />
-          <div className="font-mono text-[10px] text-ink-3">
+          <div className="text-[11px] text-ink-3">
             at least 12 characters; length matters more than symbols
           </div>
           <button onClick={submitSignup} disabled={busy || !name.trim() || !password}
-            className="w-full border border-accent text-accent px-3 py-2 font-mono text-xs
+            className="w-full border border-accent text-accent px-3 py-2 text-[12.5px]
                        hover:bg-accent/10 disabled:opacity-40">
             {busy ? "creating..." : "Create account"}
           </button>
           {!methods.bootstrap && (
             <button onClick={() => { setErr(null); setStage("signin"); }}
-              className="w-full font-mono text-[10px] text-ink-3 hover:text-accent">back to sign in</button>
+              className="w-full text-[11px] text-ink-3 hover:text-accent">back to sign in</button>
           )}
         </div>
       )}
 
       {stage === "mfa" && (
         <div className="space-y-2">
-          <div className="font-mono text-[11px] text-ink-3">
+          <div className="text-[12px] text-ink-3">
             Enter the six-digit code from your authenticator, or one of your recovery codes.
           </div>
           <Field label="code" value={code} autoComplete="one-time-code"
             onChange={(e) => setCode(e.target.value)} onKeyDown={onEnter(submitMfa)} />
           <button onClick={submitMfa} disabled={busy || !code.trim()}
-            className="w-full border border-accent text-accent px-3 py-2 font-mono text-xs
+            className="w-full border border-accent text-accent px-3 py-2 text-[12.5px]
                        hover:bg-accent/10 disabled:opacity-40">
             Verify
           </button>
@@ -318,23 +318,23 @@ function LoginBody() {
         <div className="space-y-2">
           {!enrolUri ? (
             <button onClick={startEnrol} disabled={busy}
-              className="w-full border border-accent text-accent px-3 py-2 font-mono text-xs
+              className="w-full border border-accent text-accent px-3 py-2 text-[12.5px]
                          hover:bg-accent/10 disabled:opacity-40">
               Generate my secret
             </button>
           ) : (
             <>
-              <div className="font-mono text-[10px] text-ink-3">
+              <div className="text-[11px] text-ink-3">
                 Add this to your authenticator, then enter the code it shows.
               </div>
-              <div className="font-mono text-[11px] text-ink border border-line px-2 py-1 break-all select-all">
+              <div className="text-[12px] text-ink border border-line px-2 py-1 break-all select-all">
                 {enrolSecret}
               </div>
-              <div className="font-mono text-[9px] text-ink-3 break-all">{enrolUri}</div>
+              <div className="text-[10.5px] text-ink-3 break-all">{enrolUri}</div>
               <Field label="code" value={code} inputMode="numeric" autoComplete="one-time-code"
                 onChange={(e) => setCode(e.target.value)} onKeyDown={onEnter(confirmEnrol)} />
               <button onClick={confirmEnrol} disabled={busy || code.trim().length < 6}
-                className="w-full border border-accent text-accent px-3 py-2 font-mono text-xs
+                className="w-full border border-accent text-accent px-3 py-2 text-[12.5px]
                            hover:bg-accent/10 disabled:opacity-40">
                 Activate
               </button>
@@ -348,12 +348,12 @@ function LoginBody() {
           <Field label="user name" value={name} onChange={(e) => setName(e.target.value)}
             onKeyDown={onEnter(submitForgot)} />
           <button onClick={submitForgot} disabled={busy || !name.trim()}
-            className="w-full border border-accent text-accent px-3 py-2 font-mono text-xs
+            className="w-full border border-accent text-accent px-3 py-2 text-[12.5px]
                        hover:bg-accent/10 disabled:opacity-40">
             Request a reset
           </button>
           <button onClick={() => { setErr(null); setStage("signin"); }}
-            className="w-full font-mono text-[10px] text-ink-3 hover:text-accent">back to sign in</button>
+            className="w-full text-[11px] text-ink-3 hover:text-accent">back to sign in</button>
         </div>
       )}
 
@@ -363,7 +363,7 @@ function LoginBody() {
           <Field label="new password" type="password" value={password} autoComplete="new-password"
             onChange={(e) => setPassword(e.target.value)} onKeyDown={onEnter(submitReset)} />
           <button onClick={submitReset} disabled={busy || !resetToken.trim() || !password}
-            className="w-full border border-accent text-accent px-3 py-2 font-mono text-xs
+            className="w-full border border-accent text-accent px-3 py-2 text-[12.5px]
                        hover:bg-accent/10 disabled:opacity-40">
             Set password and sign in
           </button>

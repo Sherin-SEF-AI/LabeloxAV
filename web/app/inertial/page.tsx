@@ -62,7 +62,7 @@ export default function InertialPage() {
 
   return (
     <PageShell active="INERTIAL" title="Inertial">
-      <div className="p-4 space-y-4 font-mono text-[11px]">
+      <div className="p-4 space-y-4 text-[12px]">
         <div className="flex items-center gap-3">
           <select value={pick} onChange={(e) => setPick(e.target.value)} className="bg-bg border border-line px-2 py-1 text-ink">
             {sessions.map((s) => <option key={s.session_id} value={s.session_id}>{s.vehicle_id} / {s.session_id.slice(0, 8)}</option>)}

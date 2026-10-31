@@ -37,7 +37,7 @@ export default function ReviewGridPage() {
   return (
     <Suspense fallback={
       <PageShell active="REVIEW GRID" title="Crop grid">
-        <div className="p-4 font-mono text-[11px] text-ink-3">loading the grid...</div>
+        <div className="p-4 text-[12px] text-ink-3">loading the grid...</div>
       </PageShell>
     }>
       <Grid />
@@ -191,7 +191,7 @@ function Grid() {
       subtitle={scopeLabel ? `${scopeLabel} · many crops, one keystroke each` : "many crops, one keystroke each"}
     >
       <div className="p-3 space-y-2">
-        <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-ink-3">
+        <div className="flex flex-wrap items-center gap-3 text-[12px] text-ink-3">
           <span className="text-ink">{queue.length} left</span>
           <span>{decided} decided</span>
           {/* The claim this mode makes is a throughput claim, so it is measured on screen rather than
@@ -201,10 +201,10 @@ function Grid() {
           {current && <span className="text-ink-2">{current.class_name} · conf {current.conf?.toFixed(2)}</span>}
         </div>
 
-        {loading && <div className="font-mono text-[11px] text-ink-3">loading the grid...</div>}
+        {loading && <div className="text-[12px] text-ink-3">loading the grid...</div>}
 
         {!loading && !page.length && (
-          <div className="panel px-3 py-6 font-mono text-[11px] text-ink-3 text-center">
+          <div className="panel px-3 py-6 text-[12px] text-ink-3 text-center">
             Nothing left in this queue. A scoped grid ending is the batch finished, not an empty corpus.
           </div>
         )}
@@ -257,7 +257,7 @@ function Grid() {
           </div>
         )}
 
-        <div className="font-mono text-[10px] text-ink-3 flex flex-wrap gap-3">
+        <div className="text-[11px] text-ink-3 flex flex-wrap gap-3">
           <span><b className="text-ink">arrows/hjkl</b> move</span>
           <span><b className="text-ink">shift+move</b> range</span>
           <span><b className="text-ink">space</b> select</span>

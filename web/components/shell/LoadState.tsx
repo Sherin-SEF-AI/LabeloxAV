@@ -23,7 +23,7 @@ export default function LoadState({ loading, error, empty, emptyText, onRetry, c
 }) {
   if (error) {
     return (
-      <div className="panel px-3 py-2 font-mono text-[11px] flex items-start gap-3">
+      <div className="panel px-3 py-2 text-[12px] flex items-start gap-3">
         <span className="text-block shrink-0">could not load</span>
         {/* The message, not a shrug. humanizeError already turns a status code into a sentence. */}
         <span className="text-ink-2 min-w-0 flex-1">{humanizeError(error)}</span>
@@ -38,7 +38,7 @@ export default function LoadState({ loading, error, empty, emptyText, onRetry, c
   }
   if (loading) {
     return (
-      <div className="panel px-3 py-2 font-mono text-[11px] text-ink-3 flex items-center gap-2">
+      <div className="panel px-3 py-2 text-[12px] text-ink-3 flex items-center gap-2">
         <span className="inline-block w-2 h-2 rounded-full bg-accent animate-pulse" />
         loading
       </div>
@@ -46,7 +46,7 @@ export default function LoadState({ loading, error, empty, emptyText, onRetry, c
   }
   if (empty) {
     return (
-      <div className="panel px-3 py-6 font-mono text-[11px] text-ink-3 text-center">
+      <div className="panel px-3 py-6 text-[12px] text-ink-3 text-center">
         {emptyText ?? "nothing here yet"}
       </div>
     );

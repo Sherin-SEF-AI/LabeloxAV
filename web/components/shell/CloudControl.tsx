@@ -132,9 +132,9 @@ export default function CloudControl() {
         <button ref={btnRef} onClick={() => { if (!open) place(); setOpen((o) => !o); }} title="cloud GPU"
           className="flex items-center gap-1.5 h-7 px-2 rounded-md border border-line hover:border-accent">
           <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} />
-          <span className="font-mono text-[11px] text-ink-2">{label}</span>
+          <span className="text-[12px] text-ink-2">{label}</span>
           {st.connected && (
-            <span className="font-mono text-[11px] text-ink">{fmtDur(liveUptime)} <span className="text-accent">{fmtCost(liveCost)}</span></span>
+            <span className="text-[12px] text-ink">{fmtDur(liveUptime)} <span className="text-accent">{fmtCost(liveCost)}</span></span>
           )}
         </button>
 
@@ -142,7 +142,7 @@ export default function CloudControl() {
         {open && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-            <div style={style} className="z-50 w-[300px] panel p-3 font-mono text-[11px]">
+            <div style={style} className="z-50 w-[300px] panel p-3 text-[12px]">
               <div className="flex items-center gap-2 mb-2">
                 <span className="flex text-ink-3"><Icon name="cuboid" size={15} /></span>
                 <span className="font-display font-semibold text-[12.5px] text-ink">Cloud GPU</span>
@@ -225,7 +225,7 @@ export default function CloudControl() {
 
       {/* ORPHAN BANNER */}
       {orphans.length > 0 && (
-        <div className="fixed top-0 left-0 right-0 z-[80] bg-block/15 border-b border-block flex items-center gap-3 px-4 py-2 font-mono text-[11px]">
+        <div className="fixed top-0 left-0 right-0 z-[80] bg-block/15 border-b border-block flex items-center gap-3 px-4 py-2 text-[12px]">
           <span className="flex text-block"><Icon name="flag" size={15} /></span>
           <span className="text-block font-semibold">
             {orphans.length} cloud GPU pod{orphans.length > 1 ? "s" : ""} running with no session, billing{" "}

@@ -45,7 +45,7 @@ function Section({ title, right, children }: {
 }) {
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
         <span>{title}</span>
         {right && <span className="ml-auto normal-case">{right}</span>}
       </div>
@@ -74,11 +74,11 @@ function Row({ item, index, onOpen }: { item: QueueItem; index: number; onOpen: 
       {active
         ? <span className="running-dot shrink-0" />
         : <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT[item.status]}`} />}
-      <span className="font-mono text-[11px] text-ink truncate flex-1 min-w-0" title={item.name}>
+      <span className="text-[12px] text-ink truncate flex-1 min-w-0" title={item.name}>
         {item.name}
       </span>
-      <span className="font-mono text-[10px] text-ink-3 shrink-0">{humanSize(item.size)}</span>
-      <span className="font-mono text-[10px] text-ink-3 w-14 text-right shrink-0">{item.format}</span>
+      <span className="text-[11px] text-ink-3 shrink-0">{humanSize(item.size)}</span>
+      <span className="text-[11px] text-ink-3 w-14 text-right shrink-0">{item.format}</span>
       <span className="w-24 shrink-0">
         {active ? (
           <span className="block h-1 bg-line rounded overflow-hidden">
@@ -86,7 +86,7 @@ function Row({ item, index, onOpen }: { item: QueueItem; index: number; onOpen: 
               style={{ width: `${Math.round(item.progress * 100)}%` }} />
           </span>
         ) : (
-          <span className={`font-mono text-[10px] ${item.status === "error" ? "text-block" : item.status === "done" ? "text-pass" : "text-ink-3"}`}>
+          <span className={`text-[11px] ${item.status === "error" ? "text-block" : item.status === "done" ? "text-pass" : "text-ink-3"}`}>
             {item.status}
           </span>
         )}
@@ -96,12 +96,12 @@ function Row({ item, index, onOpen }: { item: QueueItem; index: number; onOpen: 
         // the page and abandoned every upload still running, which is the same bug the auto-open rule
         // exists to prevent, left in a second place. It opens a panel beside the queue instead.
         <button onClick={() => onOpen(item)}
-          className="font-mono text-[10px] text-accent hover:underline shrink-0">
+          className="text-[11px] text-accent hover:underline shrink-0">
           open
         </button>
       )}
       {item.detail && item.status === "error" && (
-        <span className="font-mono text-[10px] text-block truncate max-w-[14rem]" title={item.detail}>
+        <span className="text-[11px] text-block truncate max-w-[14rem]" title={item.detail}>
           {item.detail}
         </span>
       )}
@@ -178,7 +178,7 @@ export default function NewAnnotationPage() {
 
   const primaryAction = (
     <button onClick={onGo} disabled={!items.length || running}
-      className="font-mono text-xs border border-line px-3 py-1 hover:border-accent disabled:opacity-50 transition-colors">
+      className="btn disabled:opacity-50 transition-colors">
       {running && <span className="running-dot mr-1.5 align-middle" />}
       {label}
     </button>
@@ -193,7 +193,7 @@ export default function NewAnnotationPage() {
             right={items.length ? (
               <button onClick={() => { clearUploads(); setSkipped([]); setDuplicates(0); setOpened(null); }}
                 disabled={running}
-                className="font-mono text-[10px] text-ink-3 hover:text-ink disabled:opacity-40">clear</button>
+                className="text-[11px] text-ink-3 hover:text-ink disabled:opacity-40">clear</button>
             ) : null}
           >
             {/* Outside the dropzone, deliberately. These were inside it, and calling .click() on one
@@ -216,7 +216,7 @@ export default function NewAnnotationPage() {
               onDragLeave={() => setDrag(false)}
               onDrop={(e) => { e.preventDefault(); setDrag(false); if (!running) take(e.dataTransfer.files); }}
               onClick={() => !running && fileRef.current?.click()}
-              className={`border border-dashed rounded p-8 text-center cursor-pointer font-mono text-xs transition-all duration-150
+              className={`border border-dashed rounded p-8 text-center cursor-pointer text-[12.5px] transition-all duration-150
                 ${drag ? "border-accent bg-accent/5 text-ink scale-[1.01]" : "border-line text-ink-3 hover:border-ink-3"}`}>
               {items.length ? (
                 <span className="text-ink">
@@ -230,16 +230,16 @@ export default function NewAnnotationPage() {
 
             <div className="flex items-center gap-3 mt-2">
               <button onClick={() => !running && dirRef.current?.click()} disabled={running}
-                className="font-mono text-[11px] border border-line rounded px-2 py-1 text-ink-2 hover:border-accent hover:text-ink disabled:opacity-40 transition-colors">
+                className="text-[12px] border border-line rounded px-2 py-1 text-ink-2 hover:border-accent hover:text-ink disabled:opacity-40 transition-colors">
                 choose a folder
               </button>
-              <span className="font-mono text-[10px] text-ink-3">
+              <span className="text-[11px] text-ink-3">
                 every clip becomes its own session, imported one at a time
               </span>
             </div>
 
             {(skipped.length > 0 || duplicates > 0) && (
-              <div className="reveal font-mono text-[10px] text-ink-3 mt-2">
+              <div className="reveal text-[11px] text-ink-3 mt-2">
                 {/* Said rather than silent: a folder pick sweeps up sidecars and dotfiles, and uploading
                     those would produce one failed import each and bury the real ones. */}
                 {skipped.length > 0 && <>{skipped.length} non-media file{skipped.length === 1 ? "" : "s"} skipped ({skipped.slice(0, 3).join(", ")}{skipped.length > 3 ? ", ..." : ""}). </>}
@@ -247,7 +247,7 @@ export default function NewAnnotationPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-3 gap-3 mt-3 font-mono text-xs">
+            <div className="grid grid-cols-3 gap-3 mt-3 text-[12.5px]">
               <label className="flex flex-col gap-1">
                 <span className="text-ink-3 uppercase text-[11px]">format</span>
                 <select value={format} onChange={(e) => setFormat(e.target.value)} disabled={running}
@@ -267,9 +267,9 @@ export default function NewAnnotationPage() {
               </label>
             </div>
 
-            {err && <div className="font-mono text-[11px] text-block mt-2">{err}</div>}
+            {err && <div className="text-[12px] text-block mt-2">{err}</div>}
 
-            <div className="font-mono text-[11px] text-ink-3 mt-3 leading-relaxed">
+            <div className="text-[12px] text-ink-3 mt-3 leading-relaxed">
               Each file uploads straight to storage and imports into its own session (PII faces and plates
               are blurred on every frame). One file opens the editor when it finishes. A batch keeps running
               if you move around the app, and notifies you when it is done, so you can carry on working;
@@ -281,7 +281,7 @@ export default function NewAnnotationPage() {
             <Section
               title={`queue - ${summary.done} done, ${summary.failed} failed, ${summary.pending} waiting`}
               right={
-                <span className="font-mono text-[10px] text-ink-3">
+                <span className="text-[11px] text-ink-3">
                   {Math.round(summary.progress * 100)}%
                 </span>
               }
@@ -300,7 +300,7 @@ export default function NewAnnotationPage() {
               </div>
               {summary.finished && !running && (
                 <div className="reveal flex items-center gap-3 mt-2">
-                  <span className="font-mono text-[11px] text-ink-2">
+                  <span className="text-[12px] text-ink-2">
                     {summary.done} session{summary.done === 1 ? "" : "s"} imported
                     {summary.failed > 0 && <span className="text-block"> · {summary.failed} failed</span>}
                   </span>
@@ -309,12 +309,12 @@ export default function NewAnnotationPage() {
                       lose the ordering that makes a batch followable. */}
                   {labelable > 0 && (
                     <button onClick={onAutolabel}
-                      className="font-mono text-[11px] border border-accent/50 text-accent rounded px-2 py-1 hover:bg-accent/10 transition-colors">
+                      className="text-[12px] border border-accent/50 text-accent rounded px-2 py-1 hover:bg-accent/10 transition-colors">
                       autolabel {labelable} session{labelable === 1 ? "" : "s"}
                     </button>
                   )}
                   <button onClick={() => router.push("/annotations")}
-                    className="ml-auto font-mono text-[11px] text-accent hover:underline">
+                    className="ml-auto text-[12px] text-accent hover:underline">
                     browse annotations -&gt;
                   </button>
                 </div>
@@ -322,7 +322,7 @@ export default function NewAnnotationPage() {
             </Section>
           )}
 
-          <div className="font-mono text-[11px] text-ink-3 px-1 flex items-center gap-4">
+          <div className="text-[12px] text-ink-3 px-1 flex items-center gap-4">
             <button onClick={() => router.push("/annotations")} className="text-accent hover:underline">
               browse existing annotations -&gt;
             </button>

@@ -53,7 +53,7 @@ export type EvidenceSubject = {
 function Tile({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
-      <div className="font-mono text-[10px] uppercase tracking-wide text-ink-3">{label}</div>
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">{label}</div>
       {children}
     </div>
   );
@@ -191,7 +191,7 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
 
   if (!subject) {
     return (
-      <div className="p-4 font-mono text-[11px] text-ink-3 leading-relaxed">
+      <div className="p-4 text-[12px] text-ink-3 leading-relaxed">
         Select a row to see the object it is about.
         <div className="mt-2 text-ink-3">
           The crop and the frame it came from appear here, with the tools to act on it.
@@ -218,12 +218,12 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
       {err != null ? (
         <LoadState error={err} onRetry={() => { if (objectId) { setErr(null); setLoading(true); api.object(objectId).then(setObj).catch(setErr).finally(() => setLoading(false)); } }} />
       ) : loading || !obj ? (
-        <div className="font-mono text-[11px] text-ink-3/60 animate-pulse py-6 text-center">loading object...</div>
+        <div className="text-[12px] text-ink-3/60 animate-pulse py-6 text-center">loading object...</div>
       ) : (
         <>
           <Tile label="the object">
             {cropFailed ? (
-              <div className="h-32 grid place-items-center border hairline bg-bg-2 font-mono text-[10px] text-ink-3 text-center px-2">
+              <div className="h-32 grid place-items-center border hairline bg-bg-2 text-[11px] text-ink-3 text-center px-2">
                 the crop could not be loaded
                 <br />
                 <span className="text-ink-3">the image may be missing from storage, or your role may not reach it</span>
@@ -234,7 +234,7 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
                 onError={() => setCropFailed(true)}
                 className="w-full max-h-48 object-contain bg-bg-2 border hairline" />
             )}
-            <div className="flex items-center gap-2 font-mono text-[10px] text-ink-3">
+            <div className="flex items-center gap-2 text-[11px] text-ink-3">
               <span className="text-ink">{obj.class_name}</span>
               <span>conf {Number(obj.conf ?? 0).toFixed(2)}</span>
               <span>{obj.state}</span>
@@ -247,7 +247,7 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
               : "in its frame"}>
             <div className="relative w-full bg-bg-2 border hairline">
               {frameFailed ? (
-                <div className="h-40 grid place-items-center font-mono text-[10px] text-ink-3">
+                <div className="h-40 grid place-items-center text-[11px] text-ink-3">
                   the frame could not be loaded
                 </div>
               ) : (
@@ -296,7 +296,7 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
             <Tile label={subject.kind ? `why (${subject.kind})` : "why"}>
               <p className="text-xs text-ink-2 leading-relaxed">{subject.text}</p>
               {subject.score != null && (
-                <div className="font-mono text-[10px] text-ink-3">score {subject.score.toFixed(2)}</div>
+                <div className="text-[11px] text-ink-3">score {subject.score.toFixed(2)}</div>
               )}
             </Tile>
           )}
@@ -304,7 +304,7 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
           <div className="space-y-1.5 pt-1">
             {subject.suggestion && (
               <button onClick={applySuggestion} disabled={!!busy || obj.class_name === subject.suggestion.class_name}
-                className="w-full border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded font-mono text-[11px] hover:bg-accent/20 disabled:opacity-40">
+                className="w-full border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded text-[12px] hover:bg-accent/20 disabled:opacity-40">
                 {obj.class_name === subject.suggestion.class_name
                   ? `already ${subject.suggestion.class_name}`
                   : busy === "apply" ? "applying..." : `relabel as ${subject.suggestion.class_name}`}
@@ -314,7 +314,7 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
             <div className="flex gap-1.5">
               {actions.map((a) => (
                 <button key={a.key} onClick={() => void runAction(a)} disabled={!!busy} title={a.hint}
-                  className={`flex-1 border px-2 py-1 rounded font-mono text-[11px] disabled:opacity-40 ${
+                  className={`flex-1 border px-2 py-1 rounded text-[12px] disabled:opacity-40 ${
                     a.tone === "accept" ? "border-pass text-pass hover:bg-pass/10"
                       : a.tone === "reject" ? "border-line text-ink-3 hover:border-block hover:text-block"
                         : "border-line text-ink-3 hover:border-accent"}`}>
@@ -327,29 +327,29 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
               {editing ? (
                 <>
                   <button onClick={() => void saveBox()} disabled={!!busy || !draft}
-                    className="flex-1 border border-accent/50 bg-accent/10 text-accent px-2 py-1 rounded font-mono text-[11px] disabled:opacity-40">
+                    className="flex-1 border border-accent/50 bg-accent/10 text-accent px-2 py-1 rounded text-[12px] disabled:opacity-40">
                     {busy === "box" ? "saving..." : "save box"}
                   </button>
                   <button onClick={() => { setEditing(false); setDraft(null); }} disabled={!!busy}
-                    className="flex-1 border border-line text-ink-3 px-2 py-1 rounded font-mono text-[11px] hover:border-accent disabled:opacity-40">
+                    className="flex-1 border border-line text-ink-3 px-2 py-1 rounded text-[12px] hover:border-accent disabled:opacity-40">
                     cancel
                   </button>
                 </>
               ) : (
                 <button onClick={() => setEditing(true)} disabled={!!busy || frameFailed}
-                  className="flex-1 border border-line text-ink-3 px-2 py-1 rounded font-mono text-[11px] hover:border-accent disabled:opacity-40">
+                  className="flex-1 border border-line text-ink-3 px-2 py-1 rounded text-[12px] hover:border-accent disabled:opacity-40">
                   adjust box
                 </button>
               )}
               <button onClick={() => router.push(`/frame/${obj.frame_id}?focus=${obj.object_id}`)}
                 title="everything this panel cannot do"
-                className="flex-1 border border-line text-ink-3 px-2 py-1 rounded font-mono text-[11px] hover:border-accent">
+                className="flex-1 border border-line text-ink-3 px-2 py-1 rounded text-[12px] hover:border-accent">
                 open editor
               </button>
             </div>
           </div>
 
-          <div className="font-mono text-[9px] text-ink-3/70 pt-1 break-all">
+          <div className="text-[10.5px] text-ink-3/70 pt-1 break-all">
             object {obj.object_id.slice(0, 8)} &middot; frame {obj.frame_id.slice(0, 8)} &middot; cam {obj.cam_id}
           </div>
         </>

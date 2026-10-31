@@ -46,7 +46,7 @@ function isNum(v: unknown): v is number {
 function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="border hairline px-2 py-1">
-      <div className="font-mono text-[9px] uppercase tracking-wide text-ink-3 truncate">{label}</div>
+      <div className="text-[10px] font-medium uppercase tracking-[0.06em] text-ink-3 truncate">{label}</div>
       <div className="font-mono text-[13px] text-ink tabular-nums">{value}</div>
     </div>
   );
@@ -60,12 +60,12 @@ function Value({ name, value, depth, onOpen }: {
   if (value === null || value === undefined) {
     // Null is a fact about the result and is drawn as one. Hiding it makes an absent field and an absent
     // measurement look the same.
-    return <div className="font-mono text-[11px] text-ink-3">{`${name}: none`}</div>;
+    return <div className="text-[12px] text-ink-3">{`${name}: none`}</div>;
   }
 
   if (typeof value === "boolean") {
     return (
-      <div className="font-mono text-[11px]">
+      <div className="text-[12px]">
         <span className="text-ink-3">{name}: </span>
         <span className={value ? "text-pass" : "text-ink-3"}>{String(value)}</span>
       </div>
@@ -80,13 +80,13 @@ function Value({ name, value, depth, onOpen }: {
       return (
         <button onClick={() => onOpen(kind, value)}
           title={`show this ${kind}`}
-          className="font-mono text-[11px] text-accent hover:text-accent-2 underline decoration-dotted">
+          className="text-[12px] text-accent hover:text-accent-2 underline decoration-dotted">
           {name}: {value.slice(0, 8)}
         </button>
       );
     }
     return (
-      <div className="font-mono text-[11px] break-words">
+      <div className="text-[12px] break-words">
         <span className="text-ink-3">{name}: </span><span className="text-ink-2">{value}</span>
       </div>
     );
@@ -94,21 +94,21 @@ function Value({ name, value, depth, onOpen }: {
 
   if (Array.isArray(value)) {
     if (value.length === 0) {
-      return <div className="font-mono text-[11px] text-ink-3">{`${name}: empty`}</div>;
+      return <div className="text-[12px] text-ink-3">{`${name}: empty`}</div>;
     }
     const ids = FRAME_KEYS.has(name) ? "frame" : OBJECT_KEYS.has(name) ? "object" : null;
     return (
       <div className="space-y-1">
-        <div className="font-mono text-[10px] uppercase tracking-wide text-ink-3">{name} ({value.length})</div>
+        <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">{name} ({value.length})</div>
         <div className={ids ? "flex flex-wrap gap-1" : "space-y-1"}>
           {value.slice(0, 200).map((v, i) =>
             ids && typeof v === "string" && UUID.test(v) ? (
               <button key={i} onClick={() => onOpen(ids, v)}
-                className="font-mono text-[10px] border border-line px-1.5 py-0.5 text-accent hover:border-accent">
+                className="text-[11px] border border-line px-1.5 py-0.5 text-accent hover:border-accent">
                 {v.slice(0, 8)}
               </button>
             ) : typeof v === "string" ? (
-              <div key={i} className="font-mono text-[11px] text-ink-2">· {v}</div>
+              <div key={i} className="text-[12px] text-ink-2">· {v}</div>
             ) : (
               <div key={i} className="border-l border-line pl-2">
                 <Value name={`#${i + 1}`} value={v} depth={depth + 1} onOpen={onOpen} />
@@ -116,7 +116,7 @@ function Value({ name, value, depth, onOpen }: {
             ))}
         </div>
         {value.length > 200 && (
-          <div className="font-mono text-[10px] text-ink-3">
+          <div className="text-[11px] text-ink-3">
             {(value.length - 200).toLocaleString()} more not drawn
           </div>
         )}
@@ -133,9 +133,9 @@ function Value({ name, value, depth, onOpen }: {
       const max = Math.max(...entries.map(([, v]) => v as number), 1);
       return (
         <div className="space-y-1">
-          <div className="font-mono text-[10px] uppercase tracking-wide text-ink-3">{name}</div>
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">{name}</div>
           {entries.sort((a, b) => (b[1] as number) - (a[1] as number)).map(([k, v]) => (
-            <div key={k} className="flex items-center gap-2 font-mono text-[10.5px]">
+            <div key={k} className="flex items-center gap-2 text-[11.5px]">
               <span className="text-ink-2 w-28 truncate shrink-0" title={k}>{k}</span>
               <div className="flex-1 h-1.5 bg-line min-w-[2rem]">
                 <div className="h-full bg-accent" style={{ width: `${((v as number) / max) * 100}%` }} />
@@ -148,7 +148,7 @@ function Value({ name, value, depth, onOpen }: {
     }
     return (
       <div className={depth > 0 ? "space-y-1.5 border-l border-line pl-2" : "space-y-1.5"}>
-        <div className="font-mono text-[10px] uppercase tracking-wide text-ink-3">{name}</div>
+        <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">{name}</div>
         {entries.map(([k, v]) => (
           <Value key={k} name={k} value={v} depth={depth + 1} onOpen={onOpen} />
         ))}
@@ -168,7 +168,7 @@ export default function ActionResultPanel({ result, onOpenObject, onOpenFrame }:
 
   if (!result) {
     return (
-      <div className="p-4 font-mono text-[11px] text-ink-3 leading-relaxed">
+      <div className="p-4 text-[12px] text-ink-3 leading-relaxed">
         Run an action and its full result appears here.
         <div className="mt-2 text-ink-3">
           Every field it returned, not a summary of it, with anything it names that exists in the corpus
@@ -191,8 +191,8 @@ export default function ActionResultPanel({ result, onOpenObject, onOpenFrame }:
   return (
     <div className="p-3 space-y-3">
       <div>
-        <div className="font-mono text-[11px] text-ink">{result.label}</div>
-        <div className="font-mono text-[10px] text-ink-3">
+        <div className="text-[12px] text-ink">{result.label}</div>
+        <div className="text-[11px] text-ink-3">
           {new Date(result.at).toLocaleTimeString()}
         </div>
       </div>
@@ -201,7 +201,7 @@ export default function ActionResultPanel({ result, onOpenObject, onOpenFrame }:
         // The message used to name the destination in prose. A count plus the word "Scenarios" is not a
         // way to get to them.
         <button onClick={() => router.push(result.destination!.href)}
-          className="w-full border border-accent/50 bg-accent/10 text-accent px-2 py-1 rounded font-mono text-[11px] hover:bg-accent/20">
+          className="w-full border border-accent/50 bg-accent/10 text-accent px-2 py-1 rounded text-[12px] hover:bg-accent/20">
           {result.destination.label}
         </button>
       )}
@@ -220,7 +220,7 @@ export default function ActionResultPanel({ result, onOpenObject, onOpenFrame }:
       </div>
 
       {top.length === 0 && (
-        <div className="font-mono text-[11px] text-ink-3">
+        <div className="text-[12px] text-ink-3">
           The action returned nothing to show. That is the result, not a failure to render one.
         </div>
       )}

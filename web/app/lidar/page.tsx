@@ -137,7 +137,7 @@ export default function LidarViewerPage() {
   return (
     <PageShell
       active="LIDAR"
-      right={<span className="font-mono text-[11px] text-ink-3">Loaded sessions: {clouds.length}</span>}
+      right={<span className="text-[12px] text-ink-3">Loaded sessions: {clouds.length}</span>}
       primaryAction={loadForm}
     >
       <div className="flex h-full bg-[#0a0e14] text-neutral-200">

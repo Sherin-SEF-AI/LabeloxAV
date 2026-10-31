@@ -316,7 +316,7 @@ export default function TrackEditor() {
         <button onClick={() => router.push("/")} className="font-display font-bold" title="Home">
           Labelox<span className="text-accent">AV</span>
         </button>
-        <span className="font-mono text-xs text-ink-3">/ TRACK <span className="text-ink-2">{id.slice(0, 8)}</span></span>
+        <span className="text-[12.5px] text-ink-3">/ TRACK <span className="text-ink-2">{id.slice(0, 8)}</span></span>
       </div>
 
       <PageHeaderBar
@@ -341,13 +341,13 @@ export default function TrackEditor() {
       />
 
       <main className="flex-1 overflow-auto p-4 space-y-4">
-        {msg && <div className="panel px-3 py-1.5 font-mono text-[11px] text-warn">{msg}</div>}
+        {msg && <div className="panel px-3 py-1.5 text-[12px] text-warn">{msg}</div>}
 
         {/* The event lane sits directly under the strip and shares its column geometry, so a span reads
             against the crops it covers rather than against a separate time axis. */}
         {/* tube review strip */}
         <section className="panel">
-          <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2 flex items-center gap-3 flex-wrap">
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2 flex items-center gap-3 flex-wrap">
             <span>timeline ({track.n_frames})</span>
             <span className="text-ink-2 normal-case">
               <b className="text-accent">A</b> accept whole track (or the selection) ·
@@ -409,19 +409,19 @@ export default function TrackEditor() {
                       }}
                     />
                   ) : (
-                    <div className="bg-bg-2 flex items-center justify-center font-mono text-[9px] text-ink-3"
+                    <div className="bg-bg-2 flex items-center justify-center text-[10.5px] text-ink-3"
                       style={{ width: CELL, height: CELL }}>
                       {p ? "no crop" : "..."}
                     </div>
                   )}
-                  <div className="flex items-center gap-1 px-1 py-0.5 font-mono text-[10px]">
+                  <div className="flex items-center gap-1 px-1 py-0.5 text-[11px]">
                     <span className="w-2 h-2 inline-block shrink-0" style={{ background: classColor(it.class_id) }} />
                     <span className={`truncate ${flip ? "text-block" : "text-ink-2"}`}>{it.class_name}</span>
                     <span className="ml-auto text-ink-3">{i + 1}</span>
                   </div>
                   {/* State and source, because "accept the track" is a claim about these and a reviewer
                       should be able to see which frames it will actually move. */}
-                  <div className="px-1 pb-0.5 font-mono text-[9px] flex items-center gap-1">
+                  <div className="px-1 pb-0.5 text-[10.5px] flex items-center gap-1">
                     <span className={it.state === "accepted" ? "text-pass" : it.state === "rejected" ? "text-block" : "text-ink-3"}>
                       {it.state}
                     </span>
@@ -447,14 +447,14 @@ export default function TrackEditor() {
         {/* M-F.2 behavior / intent (track-level, from a closed vocabulary; proposals need human confirmation) */}
         {intentKind && (
           <section className="panel max-w-2xl">
-            <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2 flex items-center justify-between">
+            <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2 flex items-center justify-between">
               <span>behavior / intent ({intentKind})</span>
               <span className="flex items-center gap-2">
                 <button onClick={proposeIntent} disabled={busy} className="border border-line px-1.5 py-0.5 rounded text-ink-3 hover:border-accent disabled:opacity-40">propose from trajectory</button>
                 {intentKind === "vru" && <button onClick={vlmIntent} disabled={busy} className="border border-info/50 text-info px-1.5 py-0.5 rounded hover:bg-info/10 disabled:opacity-40">propose from VLM</button>}
               </span>
             </div>
-            <div className="p-3 space-y-3 font-mono text-[11px]">
+            <div className="p-3 space-y-3 text-[12px]">
               {/* current intents */}
               <div className="flex flex-wrap gap-1.5">
                 {(track.intents || []).length === 0 && <span className="text-ink-3">no intent yet. propose from trajectory or VLM, or set one below.</span>}
@@ -485,16 +485,16 @@ export default function TrackEditor() {
 
         {/* relabel whole track */}
         <section className="panel max-w-md">
-          <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
             relabel entire track (one fix, all {track.n_frames} frames)
           </div>
           <div className="p-3">
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="search class..."
-              className="w-full bg-panel border border-line px-2 py-1 font-mono text-[11px] text-ink mb-2" />
+              className="w-full bg-panel border border-line px-2 py-1 text-[12px] text-ink mb-2" />
             <div className="max-h-48 overflow-auto grid grid-cols-2 gap-1">
               {filtered.slice(0, 40).map((c) => (
                 <button key={c.id} disabled={busy} onClick={() => relabel(c.name)}
-                  className="flex items-center gap-1.5 px-1.5 py-1 border border-line font-mono text-[11px] text-ink-2 text-left hover:border-accent hover:text-ink disabled:opacity-50">
+                  className="flex items-center gap-1.5 px-1.5 py-1 border border-line text-[12px] text-ink-2 text-left hover:border-accent hover:text-ink disabled:opacity-50">
                   <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(c.id) }} />
                   <span className="truncate">{c.name}</span>
                   {c.india && <span className="ml-auto text-accent">*</span>}
@@ -504,16 +504,16 @@ export default function TrackEditor() {
             <div className="mt-3 flex items-center gap-2">
               <button onClick={onInterpolate} disabled={busy}
                 title="fill the gaps between this track's keyframes with interpolated boxes (no drift)"
-                className="font-mono text-[11px] border border-line text-ink-2 px-2 py-1 hover:border-accent disabled:opacity-50">
+                className="text-[12px] border border-line text-ink-2 px-2 py-1 hover:border-accent disabled:opacity-50">
                 interpolate gaps
               </button>
               <button onClick={() => router.push(`/annotate/timeline/${id}`)}
                 title="open the keyframe + interpolation video timeline workspace"
-                className="font-mono text-[11px] border border-accent text-accent px-2 py-1 hover:bg-accent/10">
+                className="text-[12px] border border-accent text-accent px-2 py-1 hover:bg-accent/10">
                 timeline workspace →
               </button>
               <button onClick={onDelete} disabled={busy}
-                className="font-mono text-[11px] border border-line text-ink-3 px-2 py-1 hover:border-block hover:text-block disabled:opacity-50">
+                className="text-[12px] border border-line text-ink-3 px-2 py-1 hover:border-block hover:text-block disabled:opacity-50">
                 delete track
               </button>
             </div>

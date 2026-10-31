@@ -67,16 +67,16 @@ export default function CommandPalette() {
             else if (e.key === "ArrowUp") { e.preventDefault(); setCur((c) => Math.max(c - 1, 0)); }
             else if (e.key === "Enter" && results[cur]) go(results[cur].href);
           }}
-          className="w-full bg-bg border-b hairline px-3 py-2 font-mono text-sm text-ink outline-none" />
+          className="w-full bg-bg border-b hairline px-3 py-2 text-[13.5px] font-medium text-ink outline-none" />
         <div className="max-h-80 overflow-y-auto">
           {results.map((d, i) => (
             <button key={`${d.href}:${d.label}`} onClick={() => go(d.href)} onMouseEnter={() => setCur(i)}
-              className={`w-full text-left px-3 py-1.5 font-mono text-xs flex items-center justify-between gap-3 ${i === cur ? "bg-bg-2 text-ink" : "text-ink-2"}`}>
+              className={`w-full text-left px-3 py-1.5 text-[12.5px] flex items-center justify-between gap-3 ${i === cur ? "bg-bg-2 text-ink" : "text-ink-2"}`}>
               <span>{d.label}</span>
               <span className="text-ink-3 truncate">{d.hint}</span>
             </button>
           ))}
-          {!results.length && <div className="px-3 py-3 font-mono text-xs text-ink-3">no match</div>}
+          {!results.length && <div className="px-3 py-3 text-[12.5px] text-ink-3">no match</div>}
         </div>
       </div>
     </div>

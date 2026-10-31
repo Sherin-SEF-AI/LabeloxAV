@@ -75,19 +75,19 @@ export default function SelectedObjectCard({
   return (
     <div className="p-2">
       <div className="flex items-center justify-between mb-1">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-ink-3">attributes</span>
+        <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">attributes</span>
         {object.track_id && (
           <button onClick={() => router.push(`/track/${object.track_id}`)}
-            className="font-mono text-[10px] text-info hover:text-accent">view track &rarr;</button>
+            className="text-[11px] text-info hover:text-accent">view track &rarr;</button>
         )}
       </div>
 
       <div className="flex items-center gap-2 mb-1.5">
         <span className="w-2.5 h-2.5 inline-block shrink-0 rounded-sm" style={{ background: classColor(object.class_id) }} />
-        <span className="font-mono text-[11px] text-ink truncate flex-1">{object.class_name}</span>
+        <span className="text-[12px] text-ink truncate flex-1">{object.class_name}</span>
         {object.quality_score != null && (
           <span title={`M-F.1 label quality score (0-1): calibrated correctness, penalised for geometric/consistency defects. Good at ${QUALITY_GOOD}, weak at ${QUALITY_WEAK}.`}
-            className={`font-mono text-[10px] px-1 rounded border ${QUALITY_CLASS[qualityTone(object.quality_score)]}`}>
+            className={`text-[11px] px-1 rounded border ${QUALITY_CLASS[qualityTone(object.quality_score)]}`}>
             Q {object.quality_score.toFixed(2)}
           </span>
         )}
@@ -96,7 +96,7 @@ export default function SelectedObjectCard({
       </div>
 
       {/* Real identity, version and geometry. No fabricated detector names: what is not known is not shown. */}
-      <div className="flex flex-col gap-1.5 bg-bg-2 border border-line rounded p-2 mb-1.5 font-mono text-[10px]">
+      <div className="flex flex-col gap-1.5 bg-bg-2 border border-line rounded p-2 mb-1.5 text-[11px]">
         <div className="flex items-center">
           <span className="text-ink-3 w-16 shrink-0">object</span>
           <span className="text-ink-2 truncate">{object.isNew ? "new (unsaved)" : object.id.slice(0, 12)}</span>
@@ -126,7 +126,7 @@ export default function SelectedObjectCard({
           Shown separately from the geometry chips above because it is the one piece of geometry here
           that is a claim about what CANNOT be seen, and it is worth being able to take back. */}
       {object.bbox_amodal?.length === 4 && (
-        <div className="flex items-center gap-2 bg-bg-2 border border-line rounded p-2 mb-1.5 font-mono text-[10px]">
+        <div className="flex items-center gap-2 bg-bg-2 border border-line rounded p-2 mb-1.5 text-[11px]">
           <span className="text-ink-3 w-16 shrink-0">extent</span>
           <span className="text-ink-2 truncate">
             {Math.round(object.bbox_amodal[2] - object.bbox_amodal[0])} x{" "}
@@ -155,7 +155,7 @@ export default function SelectedObjectCard({
           The monocular solve has existed since cuboids were added and was reachable only as a frame-wide
           agent run, so the one place an annotator works on a single object could not ask for it. */}
       {(onFitCuboid || object.cuboid_3d) && (
-        <div className="flex flex-col gap-1.5 bg-bg-2 border border-line rounded p-2 mb-1.5 font-mono text-[10px]">
+        <div className="flex flex-col gap-1.5 bg-bg-2 border border-line rounded p-2 mb-1.5 text-[11px]">
           <div className="flex items-center gap-2">
             <span className="text-ink-3 w-16 shrink-0">cuboid</span>
             {object.cuboid_3d ? (
@@ -207,7 +207,7 @@ export default function SelectedObjectCard({
       {!object.isNew && (
         <div className="mb-1.5">
           <button onClick={() => setExplainOpen((v) => !v)} aria-expanded={explainOpen}
-            className="w-full flex items-center justify-between font-mono text-[10px] uppercase tracking-wide text-ink-3 border border-line rounded px-1.5 py-1 hover:border-accent">
+            className="w-full flex items-center justify-between text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 border border-line rounded px-1.5 py-1 hover:border-accent">
             <span>why this label</span><span aria-hidden>{explainOpen ? "−" : "+"}</span>
           </button>
           {explainOpen && (
@@ -229,7 +229,7 @@ export default function SelectedObjectCard({
             ? `propagated forward ${r.created} frames (track ${r.track_id?.slice(0, 8)}). Open the track to review/confirm.`
             : `could not propagate: ${r.reason || "no motion"}`);
         }}
-        className="w-full mb-1 font-mono text-[10px] border border-line rounded text-ink-2 px-1.5 py-1 hover:border-accent disabled:opacity-40">
+        className="w-full mb-1 text-[11px] border border-line rounded text-ink-2 px-1.5 py-1 hover:border-accent disabled:opacity-40">
         propagate forward 12 frames &rarr;
       </button>
 
@@ -237,18 +237,18 @@ export default function SelectedObjectCard({
       <div className="mb-1 space-y-1">
         <div className="flex items-center gap-1">
           <select value={linkKind} onChange={(e) => onLinkKind(e.target.value)} aria-label="relationship kind"
-            className="flex-1 bg-bg border border-line rounded px-1 py-0.5 font-mono text-[10px] text-ink">
+            className="flex-1 bg-bg border border-line rounded px-1 py-0.5 text-[11px] text-ink">
             {RELATION_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
           </select>
           <button onClick={onToggleLink}
-            className={`font-mono text-[10px] border rounded px-1.5 py-0.5 ${linkFrom === object.id ? "border-accent text-accent" : "border-line text-ink-2 hover:border-accent"}`}>
+            className={`text-[11px] border rounded px-1.5 py-0.5 ${linkFrom === object.id ? "border-accent text-accent" : "border-line text-ink-2 hover:border-accent"}`}>
             {linkFrom === object.id ? "click target" : "link"}
           </button>
         </div>
         {relationships
           .filter((r) => r.from_object_id === object.id || r.to_object_id === object.id)
           .map((r) => (
-            <div key={r.relationship_id} className="flex items-center gap-1 font-mono text-[10px] text-ink-3">
+            <div key={r.relationship_id} className="flex items-center gap-1 text-[11px] text-ink-3">
               <span className="flex-1 truncate">
                 {r.from_object_id === object.id
                   ? `${r.kind} ${r.to_object_id.slice(0, 8)}`

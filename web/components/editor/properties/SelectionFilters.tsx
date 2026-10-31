@@ -37,13 +37,13 @@ export default function SelectionFilters({ dispatch }: { dispatch: Dispatch<Acti
             key={sel.how + String(sel.value ?? "")}
             onClick={() => dispatch({ t: "selectBy", how: sel.how, value: sel.value })}
             title={sel.hint + (sel.key ? ` (${sel.key})` : "")}
-            className="border border-line text-ink-3 px-1.5 py-0.5 rounded hover:border-accent hover:text-ink-2 font-mono text-[10px]"
+            className="border border-line text-ink-3 px-1.5 py-0.5 rounded hover:border-accent hover:text-ink-2 text-[11px]"
           >
             {sel.label}
           </button>
         ))}
       </div>
-      <p className="font-mono text-[10px] text-ink-3 mt-1.5 leading-snug">
+      <p className="text-[11px] text-ink-3 mt-1.5 leading-snug">
         Locked and hidden objects are never picked: a bulk action must not reach the thing somebody
         locked to protect it.
       </p>

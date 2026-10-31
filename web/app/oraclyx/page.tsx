@@ -25,7 +25,7 @@ export default function OraclyxBoard() {
 
   return (
     <PageShell active="ORACLYX" title="ORACLYX consensus board"
-      right={<span className="font-mono text-[11px] text-ink-3">{total} pseudo-labels · {distill ?? 0} in distillation set</span>}>
+      right={<span className="text-[12px] text-ink-3">{total} pseudo-labels · {distill ?? 0} in distillation set</span>}>
       <div className="p-4 max-w-3xl space-y-4">
         <div className="grid grid-cols-3 gap-3 font-mono">
           <div className="border border-line p-4">
@@ -45,21 +45,21 @@ export default function OraclyxBoard() {
         </div>
 
         <div className="border border-line p-3">
-          <div className="font-mono text-[10px] uppercase text-ink-3 mb-2">
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-2">
             consensus split · auto-accept rate {((b?.auto_accept_rate ?? 0) * 100).toFixed(1)}%
           </div>
-          <div className="h-5 bg-line/40 relative flex font-mono text-[9px]">
+          <div className="h-5 bg-line/40 relative flex text-[10.5px]">
             <span className="h-full bg-pass flex items-center justify-center text-bg"
               style={{ width: `${total ? (auto / total) * 100 : 0}%` }}>{auto || ""}</span>
             <span className="h-full bg-warn flex items-center justify-center text-bg"
               style={{ width: `${total ? (human / total) * 100 : 0}%` }}>{human || ""}</span>
           </div>
-          <div className="mt-2 font-mono text-[9px] text-ink-3">
+          <div className="mt-2 text-[10.5px] text-ink-3">
             the fusion path auto-truths the easy majority so humans only ever touch the disagreements
           </div>
         </div>
 
-        {!total && <div className="font-mono text-[11px] text-ink-3 text-center py-6">
+        {!total && <div className="text-[12px] text-ink-3 text-center py-6">
           no pseudo-labels yet; ORACLYX records them as fusion runs over sessions
         </div>}
       </div>

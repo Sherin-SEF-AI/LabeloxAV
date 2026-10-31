@@ -55,12 +55,12 @@ export default function PseudoGtPage() {
           <ErrLine err={unc.err} />
           {unc.out && (
             <div className="mt-3">
-              <div className="flex items-center gap-2 font-mono text-[10px] mb-1">
+              <div className="flex items-center gap-2 text-[11px] mb-1">
                 <span className="w-20 text-ink-3">uncertainty</span>
                 <Bar frac={unc.out.uncertainty} tone={unc.out.uncertainty > 0.5 ? "block" : "warn"} />
                 <span className="w-10 text-right text-ink-2">{unc.out.uncertainty}</span>
               </div>
-              <div className="flex items-center gap-2 font-mono text-[10px]">
+              <div className="flex items-center gap-2 text-[11px]">
                 <span className="w-20 text-ink-3">soft target</span>
                 <Bar frac={unc.out.soft_target} tone="pass" />
                 <span className="w-10 text-right text-ink-2">{unc.out.soft_target}</span>
@@ -84,7 +84,7 @@ export default function PseudoGtPage() {
           {depth.out && (
             <div className="mt-3">
               {depth.out.depth_m === null
-                ? <div className="font-mono text-[11px] text-block">refused: {depth.out.reason}</div>
+                ? <div className="text-[12px] text-block">refused: {depth.out.reason}</div>
                 : (<>
                     <KV k="depth" v={`${depth.out.depth_m} m`} tone="pass" />
                     <KV k="uncertainty" v={depth.out.uncertainty} tone="ink-3" />
@@ -97,7 +97,7 @@ export default function PseudoGtPage() {
         {/* info-gain ranking */}
         <Panel title="disagreement review queue" hint="ranked by info gain">
           <textarea value={queue} placeholder={EXAMPLE_QUEUE} onChange={(e) => setQueue(e.target.value)} rows={8}
-            className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
+            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
           <div className="mt-2"><RunButton busy={rank.busy}
             onClick={() => rank.run(() => runJSON<Ranked>("/api/oraclyx/disagreements/rank", { items: parseInput(queue, "queue") }))}
             label="rank" /></div>
@@ -107,7 +107,7 @@ export default function PseudoGtPage() {
               {rank.out.ranked.map((r, i) => {
                 const max = Math.max(0.0001, ...rank.out!.ranked.map((x) => x.info_gain));
                 return (
-                  <div key={r.id ?? i} className="flex items-center gap-2 font-mono text-[10px]">
+                  <div key={r.id ?? i} className="flex items-center gap-2 text-[11px]">
                     <span className="w-16 shrink-0 truncate text-ink-2">{r.id ?? `#${i}`}</span>
                     <Bar frac={r.info_gain / max} tone="accent" />
                     <span className="w-12 shrink-0 text-right text-ink-3">{r.info_gain}</span>

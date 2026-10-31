@@ -51,7 +51,7 @@ export default function BulkEditBar({ frameId, sessionId, onApplied, embedded = 
   const canApply = preview && preview.count > 0 && op !== "select" && !(op === "reclassify" && preview.plan.to_class_id == null);
 
   return (
-    <div className={`space-y-1.5 font-mono text-[10px] ${embedded ? "" : "border-t hairline p-2"}`}>
+    <div className={`space-y-1.5 text-[11px] ${embedded ? "" : "border-t hairline p-2"}`}>
       {!embedded && <div className="uppercase text-ink-3">natural-language bulk edit</div>}
       <div className="flex gap-1">
         <input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === "Enter" && doPreview()}

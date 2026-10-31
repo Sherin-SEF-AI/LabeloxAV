@@ -106,19 +106,19 @@ export default function CanvasMenu({ at, target, classes, onClose, onAction }: C
                 const exact = classes.find((c) => c.name === norm) ?? shown[0];
                 if (exact) { onAction("class", exact); onClose(); }
               }}
-              className="w-full bg-bg-2 border border-line rounded px-1.5 py-1 font-mono text-[11px] text-ink placeholder:text-ink-3/70 focus:border-accent outline-none" />
+              className="w-full bg-bg-2 border border-line rounded px-1.5 py-1 text-[12px] text-ink placeholder:text-ink-3/70 focus:border-accent outline-none" />
           </div>
           <div className="max-h-64 overflow-auto">
             {shown.map((c) => (
               <button key={c.id} role="menuitem"
                 onClick={() => { onAction("class", c); onClose(); }}
-                className="w-full flex items-center gap-1.5 px-2 py-1 text-left font-mono text-[11px] text-ink-2 hover:bg-line/50 hover:text-ink">
+                className="w-full flex items-center gap-1.5 px-2 py-1 text-left text-[12px] text-ink-2 hover:bg-line/50 hover:text-ink">
                 <span className="w-2.5 h-2.5 shrink-0 rounded-sm" style={{ background: classColor(c.id) }} />
                 <span className="truncate">{c.name}</span>
                 {c.india && <span className="text-accent shrink-0">*</span>}
               </button>
             ))}
-            {!shown.length && <div className="px-2 py-2 font-mono text-[11px] text-ink-3">no class matches that.</div>}
+            {!shown.length && <div className="px-2 py-2 text-[12px] text-ink-3">no class matches that.</div>}
           </div>
         </>
       ) : (
@@ -132,7 +132,7 @@ export default function CanvasMenu({ at, target, classes, onClose, onAction }: C
                   title={it.why}
                   onMouseEnter={() => { if (!it.disabled) setCursor(idx); }}
                   onClick={() => fire(it.key)}
-                  className={`w-full flex items-center gap-2 px-2 py-1 text-left font-mono text-[11px]
+                  className={`w-full flex items-center gap-2 px-2 py-1 text-left text-[12px]
                     ${it.disabled ? "text-ink-3/50 cursor-not-allowed"
                       : it.danger ? "text-block hover:bg-block/15"
                       : "text-ink-2 hover:bg-line/50 hover:text-ink"}

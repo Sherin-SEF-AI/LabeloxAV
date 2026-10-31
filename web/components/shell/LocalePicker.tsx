@@ -25,7 +25,7 @@ export default function LocalePicker() {
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <label htmlFor="locale" className="font-mono text-[10px] uppercase text-ink-3">
+      <label htmlFor="locale" className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">
         interface language
       </label>
       <select
@@ -33,7 +33,7 @@ export default function LocalePicker() {
         value={ready ? locale : "en"}
         disabled={!ready}
         onChange={(e) => setLocale(e.target.value as Locale)}
-        className="bg-bg border border-line px-1.5 py-0.5 text-ink font-mono text-[12px]"
+        className="bg-bg border border-line px-1.5 py-0.5 text-ink text-[12.5px]"
       >
         {LOCALES.map((l) => (
           <option key={l.code} value={l.code}>
@@ -41,7 +41,7 @@ export default function LocalePicker() {
           </option>
         ))}
       </select>
-      <span className="font-mono text-[10px] text-ink-3">
+      <span className="text-[11px] text-ink-3">
         the page reloads; class names and ids are never translated
       </span>
     </div>

@@ -43,22 +43,22 @@ export default function OpsPage() {
       <div className="p-4 grid grid-cols-1 xl:grid-cols-2 gap-4 max-w-6xl">
         {/* SLO board */}
         <Panel title="per-plane SLO board" hint="unobserved counts as a breach" className="xl:col-span-2">
-          {!board?.planes.length && <div className="text-ink-3 font-mono text-[11px] py-4 text-center">
+          {!board?.planes.length && <div className="text-ink-3 text-[12px] py-4 text-center">
             no SLO ticks recorded yet (POST /api/hardening/slo to feed the board)</div>}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
             {board?.planes.map((p) => (
               <div key={p.plane} className={`border p-2 ${p.met ? "border-pass/30" : "border-block/40"}`}>
                 <div className="flex items-center justify-between mb-1">
-                  <span className="font-mono text-[11px] uppercase text-ink">{p.plane}</span>
+                  <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink">{p.plane}</span>
                   <Verdict ok={p.met} yes="met" no="breach" />
                 </div>
                 {p.breaches.map((b) => (
-                  <div key={b.metric} className="font-mono text-[10px] text-block flex justify-between">
+                  <div key={b.metric} className="text-[11px] text-block flex justify-between">
                     <span>{b.metric}</span>
                     <span>{b.reason === "unobserved" ? "unobserved" : `${b.value} ${b.op} ${b.threshold}`}</span>
                   </div>
                 ))}
-                {p.met && <div className="font-mono text-[10px] text-ink-3">all objectives within budget</div>}
+                {p.met && <div className="text-[11px] text-ink-3">all objectives within budget</div>}
               </div>
             ))}
           </div>
@@ -67,21 +67,21 @@ export default function OpsPage() {
         {/* efficiency */}
         <Panel title="label-budget efficiency">
           <textarea value={effIn} placeholder={EXAMPLE_EFF} onChange={(e) => setEffIn(e.target.value)} rows={8}
-            className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
+            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
           <div className="mt-2"><RunButton busy={eff.busy}
             onClick={() => eff.run(() => runJSON<EffReport>("/api/hardening/efficiency", { entries: parseInput(effIn, "effIn") }))}
             label="report" /></div>
           <ErrLine err={eff.err} />
           {eff.out && (
             <div className="mt-3">
-              <div className="font-mono text-[10px] text-ink-3 mb-1">
+              <div className="text-[11px] text-ink-3 mb-1">
                 best {eff.out.best_slice ?? "-"} · overall {eff.out.overall_gain_per_1k}/1k · {eff.out.total_labels} labels
               </div>
               <div className="space-y-1">
                 {eff.out.per_slice.map((r) => {
                   const max = Math.max(0.0001, ...eff.out!.per_slice.map((x) => Math.abs(x.gain_per_1k)));
                   return (
-                    <div key={r.slice} className="flex items-center gap-2 font-mono text-[10px]">
+                    <div key={r.slice} className="flex items-center gap-2 text-[11px]">
                       <span className={`w-24 shrink-0 truncate ${r.negative_roi ? "text-block" : "text-ink-2"}`}>{r.slice}</span>
                       <Bar frac={Math.abs(r.gain_per_1k) / max} tone={r.negative_roi ? "block" : "pass"} />
                       <span className="w-24 shrink-0 text-right text-ink-3">{r.gain_per_1k}/1k · {r.labels}</span>
@@ -90,19 +90,19 @@ export default function OpsPage() {
                 })}
               </div>
               {eff.out.wasted_spend_slices.length > 0 && (
-                <div className="font-mono text-[10px] text-block mt-2">wasted spend: {eff.out.wasted_spend_slices.join(", ")}</div>)}
+                <div className="text-[11px] text-block mt-2">wasted spend: {eff.out.wasted_spend_slices.join(", ")}</div>)}
             </div>
           )}
         </Panel>
 
         {/* reproducibility */}
         <Panel title="byte-stable reproducibility">
-          <div className="font-mono text-[10px] text-ink-3 mb-1">build A</div>
+          <div className="text-[11px] text-ink-3 mb-1">build A</div>
           <textarea value={runA} placeholder={EXAMPLE_A} onChange={(e) => setRunA(e.target.value)} rows={4}
-            className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
-          <div className="font-mono text-[10px] text-ink-3 mt-2 mb-1">build B (rebuild)</div>
+            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
+          <div className="text-[11px] text-ink-3 mt-2 mb-1">build B (rebuild)</div>
           <textarea value={runB} placeholder={EXAMPLE_A} onChange={(e) => setRunB(e.target.value)} rows={4}
-            className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
+            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
           <div className="mt-2"><RunButton busy={repro.busy}
             onClick={() => repro.run(() => runJSON<Repro>("/api/hardening/reproducible", { run_a: parseInput(runA, "runA"), run_b: parseInput(runB, "runB") }))}
             label="compare" /></div>
@@ -110,9 +110,9 @@ export default function OpsPage() {
           {repro.out && (
             <div className="mt-3 space-y-1">
               <Verdict ok={repro.out.reproducible} yes="byte-stable" no="diverged" />
-              <div className="font-mono text-[10px] text-ink-3 break-all">A {repro.out.hash_a.slice(0, 24)}</div>
-              <div className="font-mono text-[10px] text-ink-3 break-all">B {repro.out.hash_b.slice(0, 24)}</div>
-              {repro.out.first_divergence && <div className="font-mono text-[10px] text-block">first divergence: {repro.out.first_divergence}</div>}
+              <div className="text-[11px] text-ink-3 break-all">A {repro.out.hash_a.slice(0, 24)}</div>
+              <div className="text-[11px] text-ink-3 break-all">B {repro.out.hash_b.slice(0, 24)}</div>
+              {repro.out.first_divergence && <div className="text-[11px] text-block">first divergence: {repro.out.first_divergence}</div>}
             </div>
           )}
         </Panel>

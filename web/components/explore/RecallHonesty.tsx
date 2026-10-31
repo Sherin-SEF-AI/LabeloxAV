@@ -63,7 +63,7 @@ const pct = (v: number | null | undefined) => (v == null ? "n/a" : `${(v * 100).
 function Bar({ label, value, tone }: { label: string; value: number | null; tone: string }) {
   return (
     <div className="space-y-0.5">
-      <div className="flex justify-between font-mono text-[10px] text-ink-3">
+      <div className="flex justify-between text-[11px] text-ink-3">
         <span>{label}</span>
         <span className="text-ink tabular-nums">{pct(value)}</span>
       </div>
@@ -110,12 +110,12 @@ export default function RecallHonesty() {
 
   if (err != null) return <LoadState error={err} onRetry={() => void load()} />;
   if (audits == null) {
-    return <div className="font-mono text-xs text-ink-3/50 animate-pulse py-4 text-center">loading...</div>;
+    return <div className="text-[12.5px] text-ink-3/50 animate-pulse py-4 text-center">loading...</div>;
   }
 
   if (audits.length === 0) {
     return (
-      <div className="space-y-2 font-mono text-[11px] text-ink-3">
+      <div className="space-y-2 text-[12px] text-ink-3">
         <div className="text-ink">gold recall on this page has never been checked against an independent observer.</div>
         <p className="leading-relaxed">
           Gold recall counts the objects somebody already found. Confirming a machine box takes one click and
@@ -138,7 +138,7 @@ export default function RecallHonesty() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
+      <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
         {audits.map((a) => (
           <button
             key={a.audit_id}
@@ -154,14 +154,14 @@ export default function RecallHonesty() {
       </div>
 
       {pooled == null ? (
-        <div className="font-mono text-[11px] text-ink-3 py-3">
+        <div className="text-[12px] text-ink-3 py-3">
           {est == null
             ? "loading estimate..."
             : "this audit has not been scored yet, so there is no estimate to show. Nothing here is a "
               + "statement about the model until the frames are labelled and scored."}
         </div>
       ) : !pooled.measured ? (
-        <div className="space-y-1.5 font-mono text-[11px]">
+        <div className="space-y-1.5 text-[12px]">
           <div className="text-warn">the audit ran and could not conclude</div>
           <div className="text-ink-3 leading-relaxed">{pooled.reason}</div>
           <div className="text-ink-3">
@@ -178,13 +178,13 @@ export default function RecallHonesty() {
           </div>
 
           {pooled.overstatement != null && (
-            <div className={`font-mono text-[11px] px-2 py-1.5 border hairline ${pooled.overstatement > 0.15 ? "text-block" : "text-ink"}`}>
+            <div className={`text-[12px] px-2 py-1.5 border hairline ${pooled.overstatement > 0.15 ? "text-block" : "text-ink"}`}>
               gold recall overstates measured recall by {(pooled.overstatement * 100).toFixed(1)} points
               {pooled.overstatement > 0.15 && " - past the promotion tolerance, so the gate refuses on it"}
             </div>
           )}
 
-          <div className="font-mono text-[11px] text-ink-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="text-[12px] text-ink-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div>
               <div className="text-ink-3 uppercase text-[10px]">estimated population</div>
               <div className="text-ink tabular-nums">{pooled.population?.toFixed(1)}</div>
@@ -208,9 +208,9 @@ export default function RecallHonesty() {
 
           {strata.length > 0 && (
             <div className="space-y-1">
-              <div className="font-mono text-[10px] uppercase text-ink-3">by scene density</div>
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">by scene density</div>
               <div className="overflow-x-auto">
-                <table className="w-full font-mono text-[11px]">
+                <table className="w-full text-[12px]">
                   <thead className="text-ink-3">
                     <tr className="text-left">
                       <th className="py-1 pr-3 font-normal">stratum</th>
@@ -242,7 +242,7 @@ export default function RecallHonesty() {
 
           {classes.length > 0 && (
             <div className="space-y-1">
-              <div className="font-mono text-[10px] uppercase text-ink-3">by class</div>
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">by class</div>
               <div className="flex flex-wrap gap-1">
                 {classes.map((s) => (
                   <span
@@ -250,13 +250,13 @@ export default function RecallHonesty() {
                     title={s.measured
                       ? `${s.n_both} found by both, ${s.n_model_only} model only, ${s.n_human_only} auditor only`
                       : (s.reason ?? "not measurable")}
-                    className={`border hairline px-1.5 py-0.5 font-mono text-[10px] ${s.measured ? "text-ink" : "text-ink-3"}`}
+                    className={`border hairline px-1.5 py-0.5 text-[11px] ${s.measured ? "text-ink" : "text-ink-3"}`}
                   >
                     {s.class_name ?? s.class_id} {s.measured ? pct(s.model_recall) : "n/a"}
                   </span>
                 ))}
               </div>
-              <div className="font-mono text-[10px] text-ink-3">
+              <div className="text-[11px] text-ink-3">
                 class rows are class-aware (a box found under the wrong name is a miss for that class), so
                 they deliberately do not sum to the pooled figure above
               </div>
@@ -266,7 +266,7 @@ export default function RecallHonesty() {
       )}
 
       {est?.caveat && (
-        <div className="font-mono text-[10px] text-ink-3 leading-relaxed border-t hairline pt-2">
+        <div className="text-[11px] text-ink-3 leading-relaxed border-t hairline pt-2">
           {est.caveat}
         </div>
       )}

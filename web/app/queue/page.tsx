@@ -281,7 +281,7 @@ export default function HomePage() {
                   <span className="inline-block w-3.5 h-3.5 rounded-full border-2 border-line border-t-accent animate-spin" aria-hidden />
                   <span className="text-ink font-medium">Ingesting dashcam videos</span>
                 </div>
-                <span className="font-mono text-[11px] text-ink-3 tabular-nums">
+                <span className="text-[12px] text-ink-3 tabular-nums">
                   {ingest.done}/{ingest.total} videos &middot; {ingest.frames.toLocaleString()} frames
                 </span>
               </div>
@@ -290,7 +290,7 @@ export default function HomePage() {
                   style={{ width: `${ingest.total ? Math.round((ingest.done / ingest.total) * 100) : 0}%` }} />
               </div>
               {ingest.current ? (
-                <div className="font-mono text-[10px] text-ink-3 mt-1 truncate">now: {ingest.current}</div>
+                <div className="text-[11px] text-ink-3 mt-1 truncate">now: {ingest.current}</div>
               ) : null}
             </div>
           ) : ingest?.finished && ingest.frames > 0 ? (
@@ -315,7 +315,7 @@ export default function HomePage() {
             </h1>
             {/* Frames and drives rather than a session total: sessions count LiDAR-only records with no
                 frames in them, so one number would mean two different things. */}
-            <div className="font-mono text-[11px] text-ink-3 tabular-nums flex items-center gap-2">
+            <div className="text-[12px] text-ink-3 tabular-nums flex items-center gap-2">
               <span>{loading ? "..." : rows.length.toLocaleString()} objects</span>
               {ingest?.frames ? <><span className="text-line">/</span>
                 <span>{ingest.frames.toLocaleString()} frames</span></> : null}
@@ -343,7 +343,7 @@ export default function HomePage() {
               {/* The title moved to the command row above. Repeating it here is the same duplication this
                   change set out to remove, so what stays is only the band's own description. */}
               <div className="text-ink-3 text-xs">{activeBand?.hint}</div>
-              <div className="flex items-center gap-0.5 ml-auto font-mono text-[11px] bg-bg-2 rounded p-0.5">
+              <div className="flex items-center gap-0.5 ml-auto text-[12px] bg-bg-2 rounded p-0.5">
                 {BANDS.map((b) => (
                   <button key={b.key} onClick={() => setStates(b.key)} title={b.hint}
                     className={`px-2.5 py-1 rounded transition-colors ${states === b.key ? "bg-accent text-bg font-medium" : "text-ink-3 hover:text-ink"}`}>
@@ -368,7 +368,7 @@ export default function HomePage() {
             </div>
 
             {/* Source filter: separate imported public-dataset labels from your own work */}
-            <div className="px-4 py-2 border-b hairline flex flex-wrap items-center gap-2 font-mono text-[11px]">
+            <div className="px-4 py-2 border-b hairline flex flex-wrap items-center gap-2 text-[12px]">
               <span className="text-ink-3 uppercase text-[10px]">source</span>
               {SRC_FILTERS.map((sf) => (
                 <button key={sf.key} onClick={() => setSrcFilter(sf.key)}
@@ -383,7 +383,7 @@ export default function HomePage() {
 
             {/* AI helpers for the selected session (secondary, tucked away) */}
             {session ? (
-              <div className="px-4 py-2 border-b hairline flex flex-wrap items-center gap-2 font-mono text-[11px]">
+              <div className="px-4 py-2 border-b hairline flex flex-wrap items-center gap-2 text-[12px]">
                 <button onClick={() => setShowActions((v) => !v)} className="text-ink-3 hover:text-ink">
                   {showActions ? "▾" : "▸"} AI helpers for this session
                 </button>
@@ -397,11 +397,11 @@ export default function HomePage() {
               </div>
             ) : null}
 
-            {msg ? <div className="px-4 py-1.5 font-mono text-[11px] text-warn border-b hairline">{msg}</div> : null}
+            {msg ? <div className="px-4 py-1.5 text-[12px] text-warn border-b hairline">{msg}</div> : null}
 
             {/* Bulk action bar */}
             {sel.size > 0 && (
-              <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 px-4 py-1.5 bg-panel border-b hairline font-mono text-[11px]">
+              <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 px-4 py-1.5 bg-panel border-b hairline text-[12px]">
                 <span className="text-ink">{sel.size} selected</span>
                 <button onClick={() => bulk("accept", undefined, acceptState(role))} className="border border-pass text-pass px-2 py-0.5"
                   title={role === "annotator" ? "submit for QA" : "approve (accept)"}>
@@ -442,7 +442,7 @@ export default function HomePage() {
                   <col style={{ width: 150 }} />
                   <col style={{ width: 120 }} />
                 </colgroup>
-                <thead className="text-ink-3 font-mono text-[11px] uppercase border-b hairline sticky top-0 bg-panel z-10">
+                <thead className="text-ink-3 text-[10.5px] font-medium uppercase tracking-[0.06em] border-b hairline sticky top-0 bg-panel z-10">
                   <tr>
                     <th className="px-3 py-2 w-8"><input type="checkbox" checked={allSelected} onChange={selectAll} /></th>
                     <th className="text-left font-normal px-2 py-2 w-[76px]">frame</th>
@@ -502,7 +502,7 @@ export default function HomePage() {
             </div>
 
             {/* Thin footer with the keyboard hint, pinned inside the panel */}
-            <div className="shrink-0 border-t hairline px-4 py-1.5 font-mono text-[10px] text-ink-3 flex items-center gap-3">
+            <div className="shrink-0 border-t hairline px-4 py-1.5 text-[11px] text-ink-3 flex items-center gap-3">
               <span><span className="text-ink-2">J / K</span> move</span>
               <span><span className="text-ink-2">Enter</span> open</span>
               <span><span className="text-pass">A</span> accept</span>
