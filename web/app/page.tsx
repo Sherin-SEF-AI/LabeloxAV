@@ -329,7 +329,7 @@ export default function HomePage() {
               <button
                 onClick={() => open(shownRows[0] ?? rows[0])}
                 disabled={!rows.length}
-                className="flex items-center gap-2 bg-accent hover:bg-accent-2 text-white font-medium text-[13px] px-4 py-1.5 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                className="btn btn-primary text-[13px] px-4 py-1.5 disabled:cursor-not-allowed"
               >
                 <Icon name="confirm" size={14} />
                 {rows.length ? "Review next" : err != null ? "Queue unavailable" : loading ? "Loading" : "Queue is clear"}
@@ -346,7 +346,7 @@ export default function HomePage() {
               <div className="flex items-center gap-0.5 ml-auto font-mono text-[11px] bg-bg-2 rounded p-0.5">
                 {BANDS.map((b) => (
                   <button key={b.key} onClick={() => setStates(b.key)} title={b.hint}
-                    className={`px-2.5 py-1 rounded transition-colors ${states === b.key ? "bg-accent text-white" : "text-ink-3 hover:text-ink"}`}>
+                    className={`px-2.5 py-1 rounded transition-colors ${states === b.key ? "bg-accent text-bg font-medium" : "text-ink-3 hover:text-ink"}`}>
                     {b.label}
                   </button>
                 ))}

@@ -2,22 +2,18 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import UserPicker from "./UserPicker";
-import PlatformSwitcher from "./shell/PlatformSwitcher";
 import CommandPalette from "./shell/CommandPalette";
 import ShortcutOverlay from "./shell/ShortcutOverlay";
 import CloudControl from "./shell/CloudControl";
 import UploadIndicator from "./shell/UploadIndicator";
-import MenuBar from "./shell/MenuBar";
 import Icon from "./shell/Icon";
 import NotificationBell from "./shell/NotificationBell";
 import { MENU_DESTINATIONS } from "@/lib/menus";
+import { NAV_DESTINATIONS, activeKey } from "@/lib/sidebar";
 
-// The application header, Blender-style: a menu bar carrying every destination, then a quiet breadcrumb, then
-// the session controls on the right.
-//
-// A menu bar rather than a row of buttons because the header must not grow with the app. Buttons compete for
-// horizontal space and eventually force a scroll or an overflow chevron; menus stay one row at any number of
-// destinations, which is the same reason the editor's tool strip groups its tools into flyouts.
+// The top bar over every page: where you are, then search and the session controls. Navigation itself lives
+// in the sidebar (components/shell/Sidebar.tsx); below the tablet breakpoint the sidebar is a drawer and the
+// menu button here opens it.
 //
 // The {active, right} interface is unchanged, so every page keeps working.
 
@@ -25,14 +21,10 @@ function Crumb({ active }: { active: string }) {
   const pathname = usePathname();
   // Prefer the real destination label for the current path, so the crumb matches what the menu called it
   // rather than whatever string each page happened to pass.
-  const match = MENU_DESTINATIONS.find((d) => d.href === pathname);
-  const label = match?.label ?? active;
-  return (
-    <span className="flex items-center gap-1.5 min-w-0 pl-1 text-[11.5px] text-ink-3">
-      <span className="opacity-50">/</span>
-      <span className="truncate text-ink-2">{label}</span>
-    </span>
-  );
+  const key = activeKey(pathname ?? "/");
+  const label = NAV_DESTINATIONS.find((d) => d.key === key && d.href === pathname)?.label
+    ?? MENU_DESTINATIONS.find((d) => d.href === pathname)?.label ?? active;
+  return <span className="truncate text-[13px] font-medium text-ink">{label}</span>;
 }
 
 export default function TopNav({ active, right, showCrumb = true }: {
@@ -40,27 +32,18 @@ export default function TopNav({ active, right, showCrumb = true }: {
 }) {
   const router = useRouter();
   return (
-    <header className="flex items-center gap-2 pr-3 h-11 bg-head border-b border-[#262626] shrink-0">
-      {/* brand + back */}
-      <div className="flex items-center gap-1 pl-2 shrink-0">
-        <button
-          onClick={() => { if (typeof window !== "undefined" && window.history.length > 1) router.back(); else router.push("/"); }}
-          data-tip="Back (Alt+Left)"
-          className="w-6 h-6 flex items-center justify-center rounded text-ink-3 hover:text-ink hover:bg-panel"
-        >
-          <Icon name="chevL" size={14} />
-        </button>
-        <button onClick={() => router.push("/platforms")}
-          data-tip="Platform launcher: pick a plane of the data engine"
-          className="font-display font-bold px-1 text-[13px] text-ink">
-          Labelox<span className="text-accent-2">AV</span>
-        </button>
-      </div>
-
-      {/* The menu bar: every destination lives here, so the header never grows. Hidden below the tablet
-          breakpoint, where nine top-level menus would wrap the header onto three lines; the command
-          palette beside it reaches every one of the same destinations by name. */}
-      <div className="hidden md:contents"><MenuBar /></div>
+    <header className="flex items-center gap-2 px-3 h-12 bg-bg border-b hairline shrink-0">
+      {/* Below the tablet breakpoint the sidebar is a drawer; this opens it. */}
+      <button onClick={() => window.dispatchEvent(new Event("lbx:sidebar"))}
+        aria-label="Open navigation" className="side-icon-btn flex md:hidden">
+        <Icon name="list" size={16} />
+      </button>
+      <button
+        onClick={() => { if (typeof window !== "undefined" && window.history.length > 1) router.back(); else router.push("/"); }}
+        data-tip="Back (Alt+Left)" aria-label="Back"
+        className="side-icon-btn hidden md:flex">
+        <Icon name="chevL" size={15} />
+      </button>
 
       {showCrumb && <Crumb active={active} />}
 
@@ -73,15 +56,19 @@ export default function TopNav({ active, right, showCrumb = true }: {
         {right && <div className="min-w-0 truncate hidden lg:block">{right}</div>}
         <div className="flex items-center gap-2 shrink-0">
         <button onClick={() => window.dispatchEvent(new Event("lbx:palette"))}
-          data-tip="Command palette: jump to any page"
-          className="btn text-[11px] gap-1.5 h-7">
-          <Icon name="search" size={12} />
-          <kbd className="text-ink-3 hidden sm:inline">Cmd K</kbd>
+          data-tip="Jump to any page"
+          className="hidden sm:flex items-center gap-2 h-8 w-56 lg:w-64 px-2.5 rounded-md bg-bg-2 border hairline text-[12px] text-ink-3 hover:border-[#383b42] hover:text-ink-2 transition-colors">
+          <Icon name="search" size={13} />
+          <span className="flex-1 text-left">Go to...</span>
+          <kbd className="font-mono text-[10.5px] px-1.5 py-0.5 rounded border hairline text-ink-3">Ctrl K</kbd>
+        </button>
+        <button onClick={() => window.dispatchEvent(new Event("lbx:palette"))}
+          aria-label="Jump to any page" className="side-icon-btn flex sm:hidden">
+          <Icon name="search" size={15} />
         </button>
         {/* Before the cloud chip: an upload is something the user started and is waiting on, so it
             outranks a standing status light. Renders nothing when nothing is running. */}
         <UploadIndicator />
-        <PlatformSwitcher />
         <CloudControl />
         <NotificationBell />
         <UserPicker />

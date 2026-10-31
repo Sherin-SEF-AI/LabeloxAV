@@ -70,6 +70,17 @@ const ICONS: Record<string, Prim[]> = {
   // already means "alternates within this group" one level down and reusing it would conflate the two.
   more: [["circle", { cx: 5, cy: 12, r: 1.6 }], ["circle", { cx: 12, cy: 12, r: 1.6 }],
          ["circle", { cx: 19, cy: 12, r: 1.6 }]],
+  // Application navigation (the sidebar and settings), same lucide geometry as the rest.
+  home: [["path", { d: "M3 10.5 12 3l9 7.5" }], ["path", { d: "M5 9.5V21h5v-6h4v6h5V9.5" }]],
+  upload: [["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }], ["path", { d: "m17 8-5-5-5 5M12 3v12" }]],
+  database: [["ellipse", { cx: 12, cy: 5, rx: 8, ry: 3 }], ["path", { d: "M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5" }], ["path", { d: "M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3" }]],
+  gear: [["circle", { cx: 12, cy: 12, r: 3 }], ["path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" }]],
+  flask: [["path", { d: "M9 3h6M10 3v6.5L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9.5V3" }], ["path", { d: "M7 15h10" }]],
+  chart: [["path", { d: "M3 3v18h18" }], ["path", { d: "M7 15l4-4 3 3 5-6" }]],
+  folder: [["path", { d: "M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" }]],
+  sidebar: [["rect", { x: 3, y: 3, width: 18, height: 18, rx: 2 }], ["path", { d: "M9 3v18" }]],
+  help: [["circle", { cx: 12, cy: 12, r: 9 }], ["path", { d: "M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4.5" }], ["path", { d: "M12 17.5h.01" }]],
+  cube: [["path", { d: "M12 2 3 7v10l9 5 9-5V7z" }], ["path", { d: "M3 7l9 5 9-5M12 12v10" }]],
 };
 
 export type IconName = keyof typeof ICONS;
