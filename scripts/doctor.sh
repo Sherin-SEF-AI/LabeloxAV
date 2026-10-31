@@ -124,7 +124,7 @@ if [ -z "$states" ]; then
 else
   while IFS='|' read -r svc state health code; do
     case "$svc" in
-      migrate|pii-models|minio-init)
+      migrate|pii-models)
         if [ "$state" = "exited" ] && [ "$code" = "0" ]; then
           pass "${svc}: finished"
         elif [ "$state" = "exited" ]; then
