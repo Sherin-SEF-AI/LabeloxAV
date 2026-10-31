@@ -205,3 +205,18 @@ class TestCorsIsConfigurable:
             "CORS credentials are no longer conditioned on the origin list being specific")
         assert "*" in CorsSettings(origins="*").origin_list()
         assert "*" not in CorsSettings(origins="https://a.example.com").origin_list()
+
+
+class TestTheBucketNeedsNoExtraImage:
+    """MinIO stopped publishing its `mc` client image, which a one-shot service used only to create the
+    bucket. The app creates its own bucket in the migrate step instead."""
+
+    def test_no_service_runs_the_minio_client_image(self):
+        infra = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())["services"]
+        for name, svc in {**infra, **_services()}.items():
+            assert "minio/mc" not in str(svc.get("image", "")), name
+
+    def test_migrate_creates_the_bucket_once_storage_is_up(self):
+        svc = _services()["migrate"]
+        assert "scripts.ensure_bucket" in svc["command"]
+        assert svc["depends_on"]["minio"]["condition"] == "service_healthy"

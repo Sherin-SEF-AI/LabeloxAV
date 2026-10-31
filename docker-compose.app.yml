@@ -45,6 +45,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     environment: &app_env
       LBX_ENV: ${LBX_ENV:-production}
       LBX_POSTGRES__HOST: postgres
@@ -76,8 +78,10 @@ services:
       # `localhost` is the container itself, so the default would never reach it; host.docker.internal is
       # mapped to the host by extra_hosts on the services that call it.
       LBX_MODELS__VLM__OLLAMA_URL: ${LBX_MODELS__VLM__OLLAMA_URL:-http://host.docker.internal:11434}
+    # The bucket is created here too, by the app's own storage client. It used to be a separate one-shot on
+    # MinIO's `mc` image, which MinIO no longer publishes; the app already knew how to create its bucket.
     command: >
-      /bin/sh -c "alembic upgrade head && python scripts/seed_ontology.py && echo 'schema ready'"
+      /bin/sh -c "alembic upgrade head && python scripts/seed_ontology.py && python -m scripts.ensure_bucket && echo 'schema ready'"
     restart: "no"
 
   # One-shot: fetch the PII detector weights before anything can ingest.
