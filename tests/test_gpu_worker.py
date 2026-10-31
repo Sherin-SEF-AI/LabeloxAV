@@ -310,3 +310,37 @@ class TestStartingAJob:
         with _client() as c:
             r = c.post("/api/autolabel/start", json={"session_id": sid})
             assert r.status_code == 409
+
+
+class TestTheLockOutlivingItsSession:
+    async def test_a_worker_whose_lock_session_ends_exits_to_take_it_again(self, monkeypatch):
+        """A Postgres restart or a restore ends the session holding the lock while the process lives on. The
+        worker used to keep claiming jobs with no lock held; it now exits so its restart policy brings it
+        back holding the lock again."""
+        from sqlalchemy import text
+
+        import services.gpu_worker as gw
+        from core.config import get_settings
+        from db.session import get_engine
+
+        monkeypatch.setenv("LBX_TRAINING__WORKER_POLL_S", "0.2")
+        monkeypatch.setenv("LBX_TRAINING__ADVISORY_LOCK_KEY", "991771")   # this test's own key
+        get_settings.cache_clear()
+        task = asyncio.ensure_future(gw.worker_loop())
+
+        async def lock_pid():
+            async with get_engine().connect() as c:
+                return (await c.execute(text(
+                    "SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted "
+                    "AND ((classid::bigint << 32) | objid::bigint) = 991771"))).scalar()
+
+        pid = None
+        for _ in range(50):
+            pid = await lock_pid()
+            if pid:
+                break
+            await asyncio.sleep(0.1)
+        assert pid, "the worker never took its lock"
+        async with get_engine().connect() as c:
+            await c.execute(text("SELECT pg_terminate_backend(:p)"), {"p": pid})
+        assert await asyncio.wait_for(task, 10) == 1

@@ -32,9 +32,13 @@ web 1.05 GB, database 794 MB). The API reported Postgres, Redis and MinIO health
 authentication refused a request without a token and accepted one with the generated admin token. The
 ~20 GB above is for the corpus and model weights on top of that.
 
-MinIO images come from quay.io. MinIO withdrew its Docker Hub repositories, so `minio/minio` no longer
-resolves and an install pinned to it fails at "Starting infrastructure" with `pull access denied`.
-`python scripts/check_images.py` checks that every image a fresh install pulls still resolves.
+MinIO is built from source (`docker/minio/Dockerfile`, pinned to the release the stack has always run).
+MinIO no longer publishes images: its Docker Hub repositories were withdrawn and quay.io refuses anonymous
+pulls, so an install that pulled one failed at "Starting infrastructure". The first install compiles it
+(about two minutes); later ones use the cached image. Backups no longer need MinIO's client image either:
+`make backup` and `make restore` mirror the bucket with `scripts/bucket_mirror.py`.
+`python scripts/check_images.py` checks that every image a fresh install still pulls resolves; CI runs it
+on every pull request.
 
 ---
 

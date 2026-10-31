@@ -79,6 +79,22 @@ async def _fail_training(job_id: str, message: str) -> None:
             await db.commit()
 
 
+async def _lock_alive(lock_conn) -> bool:
+    """Whether the connection holding the lifetime lock is still open.
+
+    An advisory lock lives exactly as long as its database session. A Postgres restart, or a restore that
+    drops and recreates the database (scripts/restore.sh terminates every session), ends that session while
+    this process keeps running and polling on fresh pooled connections. Found exactly that way: after a
+    restore the worker carried on claiming jobs with no lock held, so a second worker could have started
+    beside it and the one-job-on-the-card guarantee was silently gone.
+    """
+    try:
+        await lock_conn.execute(text("SELECT 1"))
+        return True
+    except Exception:  # noqa: BLE001 - any failure here means the session, and so the lock, is gone
+        return False
+
+
 async def run_next() -> str | None:
     """Claim and run one job. Returns what ran ("autolabel" / "training"), or None if both queues are empty."""
     from services.training.jobs import run_job_guarded
@@ -146,12 +162,20 @@ async def worker_loop(*, once: bool = False) -> int:
             return 1
         log.info("gpu_worker.start", poll_s=poll_s, advisory_lock=key,
                  autolabel_executor=settings.jobs.autolabel_executor)
+        exit_code = 0
         try:
             async with get_sessionmaker()() as db:
                 await requeue_orphans(db, settings.jobs.max_attempts)
             await reset_training_orphans()
             was_paused = False
             while not stop.is_set():
+                if not await _lock_alive(lock_conn):
+                    # Exit rather than carry on unguarded: the container's restart policy brings the worker
+                    # back, and it takes the lock afresh (or finds another worker already has it).
+                    log.error("gpu_worker.lock_lost",
+                              note="the database session holding the GPU lock ended; exiting to re-acquire it")
+                    exit_code = 1
+                    break
                 if paused():
                     if not was_paused:
                         log.warning("gpu_worker.paused", flag=str(PAUSE_FLAG))
@@ -177,10 +201,13 @@ async def worker_loop(*, once: bool = False) -> int:
                     with contextlib.suppress(asyncio.TimeoutError):
                         await asyncio.wait_for(stop.wait(), timeout=poll_s)
         finally:
-            await lock_conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
-            await lock_conn.commit()
-            log.info("gpu_worker.stopped")
-    return 0
+            # A lost session has already released the lock, and unlocking through it would raise over the
+            # real reason this loop ended.
+            with contextlib.suppress(Exception):
+                await lock_conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
+                await lock_conn.commit()
+            log.info("gpu_worker.stopped", exit_code=exit_code)
+    return exit_code
 
 
 @click.command()

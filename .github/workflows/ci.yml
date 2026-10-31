@@ -34,6 +34,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Every image a fresh install pulls has to exist. This ran only at release time, so when quay.io began
+      # refusing anonymous pulls of MinIO every pull request's test job failed before a test ran, and nothing
+      # said why. Built images (MinIO, Postgres, the app) are not checked: they come from this repository.
+      - name: Every pulled image still resolves (blocking)
+        run: .venv/bin/python scripts/check_images.py
+
       - name: Import contract (import-linter, blocking)
         # The engine core (core, services, db) must not statically import a concrete domain pack; the only
         # bridge is packs.registry. This is a structural invariant of the multi-domain refactor, so it gates.
