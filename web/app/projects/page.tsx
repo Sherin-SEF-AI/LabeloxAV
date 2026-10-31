@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api , humanizeError } from "@/lib/api";
 import type { AssetRow, BoardCell, LabelJobRow, LabelProjectRow, ScorecardRow, UserRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
+import SessionSelect from "@/components/shell/SessionSelect";
 import LoadState from "@/components/shell/LoadState";
 import { useQueryFlag } from "@/lib/useQueryParam";
 import { getUser } from "@/lib/user";
@@ -261,8 +262,7 @@ function ProjectsBody() {
           <div className="flex items-center gap-2 text-[12px] flex-wrap">
             <input value={tName} onChange={(e) => setTName(e.target.value)} placeholder="task name"
               className="bg-bg border border-line px-1.5 py-0.5 text-ink" />
-            <input value={tSession} onChange={(e) => setTSession(e.target.value)} placeholder="session id"
-              className="bg-bg border border-line px-1.5 py-0.5 text-ink min-w-[280px]" />
+            <SessionSelect value={tSession} onChange={setTSession} className="min-w-[320px]" />
             <label className="text-ink-3">frames per job</label>
             <input type="number" min="1" value={jobsOf} onChange={(e) => setJobsOf(Number(e.target.value))}
               className="bg-bg border border-line px-1.5 py-0.5 text-ink w-20" />

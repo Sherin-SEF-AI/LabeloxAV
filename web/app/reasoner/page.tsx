@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
+import SessionSelect from "@/components/shell/SessionSelect";
 import Inspector from "@/components/shell/Inspector";
 import EvidencePanel, { type EvidenceSubject } from "@/components/inspect/EvidencePanel";
 import { toast } from "@/lib/toast";
@@ -283,9 +284,7 @@ export default function ReasonerPage() {
           </div>
           <div className="p-3 space-y-2">
             <div className="flex items-center gap-2 text-[12px] flex-wrap">
-              <input value={sessionId} onChange={(e) => setSessionId(e.target.value)}
-                placeholder="session id"
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink w-80" />
+              <SessionSelect value={sessionId} onChange={setSessionId} className="w-80" />
               <button onClick={doRerun(false)} disabled={busy}
                 className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
                 {busy ? "reasoning..." : "dry run"}

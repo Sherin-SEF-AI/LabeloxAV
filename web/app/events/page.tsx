@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
+import SessionSelect from "@/components/shell/SessionSelect";
 import { toast } from "@/lib/toast";
 import type {
   DrivingEvent,
@@ -183,16 +184,8 @@ export default function EventsPage() {
       <div className="p-4 space-y-4 max-w-6xl">
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1">
-          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">session id</span>
-          <input
-            className="input text-[12px] w-[340px]"
-            value={sessionId}
-            onChange={(e) => setSessionId(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void load();
-            }}
-            placeholder="paste a session uuid"
-          />
+          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">session</span>
+          <SessionSelect value={sessionId} onChange={setSessionId} className="w-[340px]" />
         </label>
         <button className="btn" onClick={() => void load()} disabled={busy || !sessionId.trim()}>
           load
