@@ -107,6 +107,12 @@ port_owner() {
   fi
 }
 
+# The compose project whose containers count as this install's own when a port is checked. Compose takes it
+# from the environment or from .env, so this does too.
+if [ -z "${COMPOSE_PROJECT_NAME:-}" ] && [ -f "$ENV_FILE" ]; then
+  COMPOSE_PROJECT_NAME="$(sed -n 's/^COMPOSE_PROJECT_NAME=\(.*\)$/\1/p' "$ENV_FILE" | tail -1)"
+fi
+
 # Ports already handed out in this run, so two services never get the same free port.
 CLAIMED_PORTS=" "
 
@@ -119,7 +125,7 @@ pick_port() {
   current="$(sed -n "s/^${key}=\(.*\)$/\1/p" "$ENV_FILE" 2>/dev/null | tail -1)"
   if [ -n "$current" ]; then
     owner="$(port_owner "$current")"
-    if [ -n "$owner" ] && [ "${owner%%|*}" != "labeloxav" ]; then
+    if [ -n "$owner" ] && [ "${owner%%|*}" != "${COMPOSE_PROJECT_NAME:-labeloxav}" ]; then
       die "port ${current} (${key} in .env) is in use by ${owner#*|}.
        Stop that, or give LabeloxAV a different port by editing ${key} in .env, then re-run."
     fi
@@ -132,7 +138,7 @@ pick_port() {
     # Already handed to another setting in this run. Checked over the owner, because the owner may be this
     # deployment's own container, which would otherwise make the port look free for a second service too.
     case "$CLAIMED_PORTS" in *" ${p} "*) owner="|${key%_PORT} sharing a port already given out above";; esac
-    if [ -z "$owner" ] || [ "${owner%%|*}" = "labeloxav" ]; then
+    if [ -z "$owner" ] || [ "${owner%%|*}" = "${COMPOSE_PROJECT_NAME:-labeloxav}" ]; then
       break
     fi
     [ "$p" = "$default" ] && warn "port ${default} is in use by ${owner#*|}; looking for a free one for ${key}"

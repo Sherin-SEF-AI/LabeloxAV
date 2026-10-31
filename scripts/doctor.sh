@@ -45,6 +45,8 @@ if [ ! -f .env ]; then
   exit 1
 fi
 compose_file="$(env_get COMPOSE_FILE)"
+# Containers are matched to this install by their compose project, which .env may name.
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(env_get COMPOSE_PROJECT_NAME)}"
 if [ -z "$compose_file" ]; then
   warn ".env has no COMPOSE_FILE, so plain 'docker compose' starts only the infrastructure" \
        "re-run ./scripts/install.sh, which adds it without touching existing secrets"
@@ -105,7 +107,7 @@ for key in WEB_PORT API_PORT POSTGRES_PORT MINIO_PORT MINIO_CONSOLE_PORT REDIS_P
     else
       warn "${key}=${port} is not listening: its service is not running" "docker compose up -d"
     fi
-  elif [ "${owner%%|*}" = "labeloxav" ]; then
+  elif [ "${owner%%|*}" = "${COMPOSE_PROJECT_NAME:-labeloxav}" ]; then
     pass "${key}=${port} (${owner#*|})"
   else
     fail "${key}=${port} is held by ${owner#*|}, not LabeloxAV" "stop it, or change ${key} in .env"
