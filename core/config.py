@@ -635,6 +635,13 @@ class PacksSettings(BaseModel):
     # Defaults to 'av' so every legacy path resolves to the AV pack exactly as before. See packs/ and
     # docs/PACK_INTERFACE.md.
     default_pack: str = "av"
+    # Optional packs this deployment installs. A pack whose pack.yaml says `optional: true` is not imported,
+    # its API routes are not mounted, and the web app does not show it unless its id is listed here.
+    #   "sec": LabeloxSec, the security / CCTV domain (registration-plate reading, watchlists, zones, person
+    #          re-identification across cameras). Lawful for an authorised security deployment and exactly what
+    #          an AV research install must never do with dashcam footage, so it is off unless chosen.
+    # Set as JSON in the environment: LBX_PACKS__OPTIONAL='["sec"]'.
+    optional: list[str] = []
 
 
 class PathsSettings(BaseModel):

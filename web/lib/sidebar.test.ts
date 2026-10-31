@@ -2,7 +2,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { NAV, NAV_DESTINATIONS, NAV_FOOTER, NAV_HREFS, activeKey, isLabsPath, titleFor } from "./sidebar";
+import { NAV, NAV_DESTINATIONS, NAV_FOOTER, NAV_HREFS, PACK_SECTIONS, activeKey, isLabsPath, packOf, sectionsFor,
+  titleFor } from "./sidebar";
 
 const APP = join(__dirname, "..", "app");
 
@@ -64,7 +65,7 @@ describe("sidebar navigation", () => {
     const inSidebar = new Set(NAV_HREFS.map((h) => h.split("?")[0]));
     // Sign-in; the old platform launcher, kept so links into it still land; and the security pack, which is
     // a separate optional package with its own entry when it is installed.
-    const exempt = new Set(["/login", "/platforms", "/labeloxsec", "/labeloxsec/incidents", ...SETTINGS_PAGES]);
+    const exempt = new Set(["/login", "/platforms", ...SETTINGS_PAGES]);
     const missing = staticRoutes().filter((r) => !inSidebar.has(r) && !exempt.has(r));
     expect(missing).toEqual([]);
   });
@@ -138,5 +139,23 @@ describe("titleFor", () => {
 
   it("a page outside the sidebar keeps its own title", () => {
     expect(titleFor("/object/abc")).toBeNull();
+  });
+});
+
+describe("optional packs", () => {
+  it("the security section appears only when the security pack is installed", () => {
+    expect(sectionsFor(() => false).map((x) => x.key)).not.toContain("security");
+    expect(sectionsFor((p) => p === "sec").map((x) => x.key)).toContain("security");
+  });
+
+  it("security pages belong to the security pack and product pages to none", () => {
+    expect(packOf("/labeloxsec")).toBe("sec");
+    expect(packOf("/labeloxsec/incidents")).toBe("sec");
+    expect(packOf("/labeloxsec?hits=1")).toBe("sec");
+    expect(packOf("/training")).toBeNull();
+  });
+
+  it("every optional section names its pack", () => {
+    for (const s of PACK_SECTIONS) expect(s.pack, s.key).toBeTruthy();
   });
 });

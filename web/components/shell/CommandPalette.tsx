@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 // export format, saved views...) from lib/menus.ts. Sidebar labels come first so a page is found by the name
 // the sidebar shows; a duplicate href+label pair from the older catalogue is dropped.
 import { MENU_DESTINATIONS, type Destination } from "@/lib/menus";
-import { NAV_DESTINATIONS } from "@/lib/sidebar";
+import { NAV_DESTINATIONS, packOf } from "@/lib/sidebar";
+import { packEnabled, useFeatures } from "@/lib/features";
 
 const DESTINATIONS: Destination[] = (() => {
   const seen = new Set<string>();
@@ -29,6 +30,7 @@ export default function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [cur, setCur] = useState(0);
+  const features = useFeatures();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -50,7 +52,9 @@ export default function CommandPalette() {
   if (!open) return null;
   // Ranked, not just filtered. Matching label and hint as one string put Projects above Jobs for the query
   // "jobs", because Projects is described as "assign jobs, stages, scorecards" and comes first in the menu.
-  const results = rankDestinations(DESTINATIONS, q);
+  // An optional pack's pages are offered only where that pack is installed; elsewhere their routes do not exist.
+  const offered = DESTINATIONS.filter((d) => { const p = packOf(d.href); return !p || packEnabled(features, p); });
+  const results = rankDestinations(offered, q);
   const go = (href: string) => { setOpen(false); router.push(href); };
 
   return (

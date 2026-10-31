@@ -30,6 +30,9 @@ export type NavSection = {
   // Labs sections are hidden until someone switches Labs on (Settings > Preferences), or opens one of their
   // pages directly, in which case the section shows so the page is never orphaned from the navigation.
   labs?: boolean;
+  // Belongs to an optional pack (settings.packs.optional on the server); shown only when that pack is
+  // installed, because its routes do not exist otherwise.
+  pack?: string;
 };
 
 export const NAV: NavSection[] = [
@@ -156,6 +159,27 @@ export const NAV: NavSection[] = [
   },
 ];
 
+// Added to NAV only when the pack is installed (see sectionsFor). LabeloxSec is a separate optional package for
+// authorised security deployments; an AV research install never shows it.
+export const PACK_SECTIONS: NavSection[] = [
+  {
+    key: "security",
+    label: "Security",
+    pack: "sec",
+    items: [
+      { key: "sec-console", label: "Security console", href: "/labeloxsec", icon: "shield",
+        hint: "plate reads, watchlist hits and static-camera sessions" },
+      { key: "sec-incidents", label: "Incidents", href: "/labeloxsec/incidents", icon: "flag",
+        hint: "zones, line crossings and cross-camera sightings" },
+    ],
+  },
+];
+
+/** The sections to show for an installation: the product, plus each installed optional pack's section. */
+export function sectionsFor(enabledPacks: (pack: string) => boolean): NavSection[] {
+  return [...NAV, ...PACK_SECTIONS.filter((s) => s.pack && enabledPacks(s.pack))];
+}
+
 // Pinned to the bottom of the sidebar rather than in a section: they are about the installation and the
 // person, not about the data.
 export const NAV_FOOTER: NavItem[] = [
@@ -174,7 +198,8 @@ function under(pathname: string, prefix: string): boolean {
 }
 
 /** The entry a path belongs to: the one whose href or match prefix is the longest match. */
-export function activeKey(pathname: string, sections: NavSection[] = NAV, footer: NavItem[] = NAV_FOOTER): string | null {
+export function activeKey(pathname: string, sections: NavSection[] = [...NAV, ...PACK_SECTIONS],
+                          footer: NavItem[] = NAV_FOOTER): string | null {
   let bestKey: string | null = null;
   let bestLen = -1;
   for (const item of [...sections.flatMap((s) => s.items), ...footer]) {
@@ -194,8 +219,18 @@ export function isLabsPath(pathname: string): boolean {
   return NAV.some((s) => s.labs && s.items.some((i) => i.key === key));
 }
 
-/** Every sidebar entry, flat, for the command palette and for tests. */
-export const NAV_DESTINATIONS: NavItem[] = [...NAV.flatMap((s) => s.items), ...NAV_FOOTER];
+/** Every sidebar entry, flat, for the command palette and for tests. Optional packs' entries included. */
+export const NAV_DESTINATIONS: NavItem[] = [...NAV.flatMap((s) => s.items), ...PACK_SECTIONS.flatMap((s) => s.items),
+  ...NAV_FOOTER];
+
+/** The optional pack a path belongs to, or null for a product page. */
+export function packOf(href: string): string | null {
+  const path = href.split("?")[0];
+  for (const s of PACK_SECTIONS) {
+    if (s.items.some((i) => path === i.href || path.startsWith(`${i.href}/`))) return s.pack ?? null;
+  }
+  return null;
+}
 
 /** The sidebar's name for a path, as the page header shows it: the entry, and the sub-page when there is one. */
 export function titleFor(pathname: string): { title: string; parent?: string } | null {

@@ -2,6 +2,8 @@
 # registry checks the two agree). India CCTV / security footage. See docs/PACK_INTERFACE.md.
 id: sec
 display_name: "Security / CCTV (India)"
+# An add-on, not part of the AV product: loaded only when the deployment lists it in LBX_PACKS__OPTIONAL.
+optional: true
 version: "0.1.0"
 default_scene_model: static_camera
 capabilities:

@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import Icon from "./Icon";
-import { NAV, NAV_FOOTER, activeKey, isLabsPath, type NavItem } from "@/lib/sidebar";
+import { NAV_FOOTER, activeKey, isLabsPath, sectionsFor, type NavItem } from "@/lib/sidebar";
+import { packEnabled, useFeatures } from "@/lib/features";
 import { readPref, writePref, LABS_PREF, SIDEBAR_COLLAPSED_PREF, LABS_EVENT } from "@/lib/prefs";
 
 // The application sidebar: where a person on the team goes next. Sections come from lib/sidebar.ts.
@@ -61,6 +62,7 @@ export default function Sidebar() {
   const [labsOn, setLabsOn] = useState(false);
   const [labsOpen, setLabsOpen] = useState(true);
   const [drawer, setDrawer] = useState(false);
+  const features = useFeatures();
 
   // Read after mount, never during render: the server has no browser storage, and reading it in render would
   // make the first client render disagree with the server's HTML.
@@ -88,7 +90,7 @@ export default function Sidebar() {
   }, []);
 
   const onLabsPage = isLabsPath(pathname);
-  const sections = NAV.filter((s) => !s.labs || labsOn || onLabsPage);
+  const sections = sectionsFor((p) => packEnabled(features, p)).filter((s) => !s.labs || labsOn || onLabsPage);
 
   const body = (narrow: boolean) => (
     <>

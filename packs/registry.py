@@ -28,6 +28,24 @@ def _pack_dirs() -> list[Path]:
     return sorted(p.parent for p in PACKS_DIR.glob("*/pack.yaml"))
 
 
+def is_optional(pack_dir: Path) -> bool:
+    """Whether a pack is an add-on (`optional: true` in its pack.yaml) rather than part of the product."""
+    meta = yaml.safe_load((pack_dir / "pack.yaml").read_text()) or {}
+    return bool(meta.get("optional"))
+
+
+def enabled_optional() -> frozenset[str]:
+    """The optional packs this deployment installs (settings.packs.optional)."""
+    from core.config import get_settings
+
+    return frozenset(get_settings().packs.optional)
+
+
+def optional_pack_ids() -> list[str]:
+    """Every add-on pack present on disk, enabled or not."""
+    return sorted(d.name for d in _pack_dirs() if is_optional(d))
+
+
 def _load_one(pack_dir: Path) -> DomainPack:
     pack_id = pack_dir.name
     module_name = f"packs.{pack_id}"
@@ -58,7 +76,12 @@ def _load_one(pack_dir: Path) -> DomainPack:
 def load_packs() -> dict[str, DomainPack]:
     """Discover, import, and validate every pack under packs/. Cached for the process."""
     packs: dict[str, DomainPack] = {}
+    enabled = enabled_optional()
     for d in _pack_dirs():
+        # Not imported at all unless enabled: an add-on that is switched off should not run a line of its code,
+        # and a broken optional pack must not stop the product it is not part of from starting.
+        if is_optional(d) and d.name not in enabled:
+            continue
         pack = _load_one(d)
         packs[pack.manifest.id] = pack
     log.info("packs.loaded", packs=sorted(packs))
@@ -69,6 +92,10 @@ def get_pack(pack_id: str) -> DomainPack:
     """The pack with this id, or KeyError naming the ids that do exist."""
     packs = load_packs()
     if pack_id not in packs:
+        if pack_id in optional_pack_ids():
+            raise KeyError(f"domain pack '{pack_id}' is an optional package that this deployment has not enabled; "
+                           f"add it to LBX_PACKS__OPTIONAL (for example LBX_PACKS__OPTIONAL='[\"{pack_id}\"]') "
+                           "and restart")
         raise KeyError(f"no domain pack '{pack_id}'; known packs: {sorted(packs)}")
     return packs[pack_id]
 

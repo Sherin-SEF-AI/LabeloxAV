@@ -33,6 +33,9 @@ os.environ.setdefault("LBX_POSTGRES__DB", "labeloxav_test")
 # deliberately hammer one endpoint to prove a behaviour. Off by default here; the tests that exercise the
 # limiter turn it back on for their own duration, the same way the webhook tests re-enable the SSRF guard.
 os.environ.setdefault("LBX_RATELIMIT__ENABLED", "false")
+# The security pack is an optional add-on, off in a default install. The suite enables it so its own tests run;
+# tests/test_optional_packs.py checks the default, where it is neither loaded nor routed.
+os.environ.setdefault("LBX_PACKS__OPTIONAL", '["sec"]')
 
 
 def pytest_sessionfinish(session, exitstatus):
