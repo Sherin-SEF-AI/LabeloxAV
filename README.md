@@ -36,8 +36,13 @@ cd LabeloxAV
 ./scripts/install.sh
 ```
 
-Generates secrets, migrates the schema, seeds the ontology, creates the first admin, and prints the token.
-Open `http://localhost:3000`.
+It picks free ports (and says which program held any that were taken), generates secrets, builds the
+images, migrates the schema, seeds the ontology, starts everything, and ends with a sign-in link: open it,
+choose the administrator's password, and you are in. The home page then walks a new team through five
+steps, from data in to a trained model, and offers two Creative Commons sample drives for teams with no
+footage yet. Invite teammates from **Settings > Team**; create keys for scripts in **Settings > API keys**.
+
+`./scripts/doctor.sh` (or `labeloxav doctor`) checks the installation and says how to fix anything wrong.
 
 Or install the Debian package from the [latest release](https://github.com/Sherin-SEF-AI/LabeloxAV/releases/latest),
 which puts the tree under `/opt/labeloxav` and gives you a `labeloxav` command. It needs Docker too;
@@ -105,7 +110,7 @@ is the [engineering log](docs/ENGINEERING_LOG.md).
 ## Develop
 
 ```bash
-make up            # infrastructure: Postgres, MinIO, Redis, Redpanda, lakeFS
+make up            # infrastructure: Postgres, MinIO, Redis, Redpanda, plus the optional extras
 make install       # deps + migrations + ontology seed
 make api           # FastAPI backend on :8000
 make web           # Next.js frontend on :3000
