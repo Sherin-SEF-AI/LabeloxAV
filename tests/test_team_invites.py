@@ -17,7 +17,7 @@ from db.session import get_sessionmaker
 
 pytestmark = pytest.mark.db
 
-PASSWORD = "correct-horse-battery-staple-91"
+PASSWORD = "correct-horse-battery-staple-91"  # gitleaks:allow (a test-database password, guards nothing)
 
 
 def _client():
