@@ -54,7 +54,7 @@ const ALLOWED: Record<string, number> = {
   "components/agent/AgentPanel.tsx": 2,
   "components/CorrectionModal.tsx": 2,
   "app/frame/[id]/page.tsx": 2,
-  "app/page.tsx": 3,
+  "app/queue/page.tsx": 3,
   "app/annotate/lane/[frameId]/page.tsx": 1,
   "app/flywheel/adaptive/page.tsx": 1,
   "app/ops/page.tsx": 1,

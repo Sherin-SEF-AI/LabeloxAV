@@ -313,7 +313,7 @@ export default function TrackEditor() {
     <div className="min-h-screen flex flex-col">
       <div className="flex items-center gap-3 px-4 h-11 border-b hairline shrink-0">
         <BackButton />
-        <button onClick={() => router.push("/")} className="font-display font-bold" title="home (triage)">
+        <button onClick={() => router.push("/")} className="font-display font-bold" title="Home">
           Labelox<span className="text-accent">AV</span>
         </button>
         <span className="font-mono text-xs text-ink-3">/ TRACK <span className="text-ink-2">{id.slice(0, 8)}</span></span>

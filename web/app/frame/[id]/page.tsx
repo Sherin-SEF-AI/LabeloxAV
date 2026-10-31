@@ -1703,7 +1703,7 @@ export default function FrameEditor() {
       <header className="flex items-center gap-3 px-3 h-[46px] border-b hairline shrink-0
                          min-w-0 overflow-x-auto no-scrollbar">
         <BackButton />
-        <button onClick={() => router.push("/")} className="flex items-baseline gap-px" title="home (triage)">
+        <button onClick={() => router.push("/")} className="flex items-baseline gap-px" title="Home">
           <span className="font-display font-bold text-[15px] tracking-tight text-ink">Labelox</span>
           <span className="font-mono font-semibold text-[12px] text-accent tracking-tight">AV</span>
         </button>

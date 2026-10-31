@@ -103,7 +103,7 @@ export const MENUS: Menu[] = [
     items: [
       { key: "platforms", label: "Platform launcher", icon: "grid", href: "/platforms",
         hint: "the seven planes of the data engine" },
-      { key: "triage", label: "Triage queue", icon: "target", href: "/",
+      { key: "triage", label: "Triage queue", icon: "target", href: "/queue",
         hint: "objects ranked by value" },
       { key: "explore", label: "Explore", icon: "scan", href: "/explore", separatorBefore: true,
         hint: "embeddings map, facets, tags" },
