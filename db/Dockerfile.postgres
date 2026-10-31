@@ -1,8 +1,16 @@
 # PostGIS 16 + pgvector. The base postgis image does not bundle pgvector, so install it from the PGDG
-# apt repo (already configured in the postgis image). Adds the `vector` extension for the Data
-# Intelligence Layer (SigLIP 2 + DINOv3 embeddings on HNSW indexes). Data lives in the pgdata volume, so
-# rebuilding this image and recreating the container preserves the corpus.
+# apt repo. Adds the `vector` extension for the Data Intelligence Layer (SigLIP 2 + DINOv3 embeddings on
+# HNSW indexes). Data lives in the pgdata volume, so rebuilding this image and recreating the container
+# preserves the corpus.
 FROM postgis/postgis:16-3.4
-RUN apt-get update \
+# This base is Debian bullseye, which the live PGDG repository no longer serves: its Release file is a 404,
+# so `apt-get update` fails and a fresh install could not build this image at all (a machine that built it
+# before the move kept working from its cache, which is how it went unnoticed). PGDG keeps every retired
+# distribution on apt-archive.postgresql.org, signed with the same key. Pointing the existing source there
+# keeps PostGIS at the 3.4 an existing corpus was created with, rather than moving the database to a new
+# base image and extension version as a side effect of a build fix.
+RUN sed -i 's|http://apt.postgresql.org/pub/repos/apt/|https://apt-archive.postgresql.org/pub/repos/apt/|' \
+        /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
     && apt-get install -y --no-install-recommends postgresql-16-pgvector \
     && rm -rf /var/lib/apt/lists/*

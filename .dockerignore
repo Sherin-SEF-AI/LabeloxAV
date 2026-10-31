@@ -32,8 +32,9 @@ web/.next/
 web/out/
 node_modules/
 
-# Model weights. Ultralytics fetches what it needs on first use, and the compose file mounts a named volume
-# at /app/models so they persist across rebuilds instead of being baked into every image layer.
+# Model weights. Never copied from the host: the gpu target downloads the auto-label weights itself during the
+# build (scripts/download_models.py), so the image is the same wherever it is built, and the compose file
+# mounts a named volume at /app/models for the ones fetched later.
 *.pt
 *.onnx
 *.engine
@@ -49,8 +50,13 @@ runs/
 # Media and documentation that no runtime path reads.
 demos/
 docs/screenshots/
-*.mp4
-*.gif
+docs/demo/
+site/
+# Recursive: a bare `*.mp4` only matches the top of the context, and a demo video under docs/demo was
+# streamed into every build.
+**/*.mp4
+**/*.gif
+**/*.webm
 
 # Python and tooling caches.
 __pycache__/
