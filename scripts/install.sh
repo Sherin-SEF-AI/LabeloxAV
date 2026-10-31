@@ -250,7 +250,7 @@ step "Building images (first run takes a few minutes)"
 ok "images built"
 
 step "Starting infrastructure"
-"${COMPOSE[@]}" up -d postgres minio minio-init redis redpanda
+"${COMPOSE[@]}" up -d postgres minio redis redpanda
 ok "infrastructure starting"
 
 step "Checking the database accepts the configured credentials"
