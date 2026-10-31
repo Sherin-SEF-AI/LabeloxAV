@@ -1348,6 +1348,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/exports/{job_id}/resume",
                           params=None, json_body=None)
 
+    def get_find(self, q: str) -> Any:
+        """Find"""
+        return self._call("GET", f"/api/find",
+                          params={"q": q}, json_body=None)
+
     def post_flywheel_adaptive_auto(self, total_label_budget: int | None = 2000, safety_floor: int | None = 200, min_share: float | None = 0.003) -> Any:
         """Adaptive Auto"""
         return self._call("POST", f"/api/flywheel/adaptive/auto",
@@ -2983,6 +2988,16 @@ class LabeloxClient:
         return self._call("GET", f"/api/release/{commit_id}/verify",
                           params=None, json_body=None)
 
+    def get_samples(self) -> Any:
+        """List Samples"""
+        return self._call("GET", f"/api/samples",
+                          params=None, json_body=None)
+
+    def post_samples_by_sample_id_load(self, sample_id: str) -> Any:
+        """Load"""
+        return self._call("POST", f"/api/samples/{sample_id}/load",
+                          params=None, json_body=None)
+
     def get_sanyx_board(self, limit: int | None = 100) -> Any:
         """Board"""
         return self._call("GET", f"/api/sanyx/board",
@@ -3643,6 +3658,11 @@ class LabeloxClient:
         return self._call("POST", f"/api/users",
                           params=None, json_body=body)
 
+    def post_users_invite(self, body: Any = None) -> Any:
+        """Invite"""
+        return self._call("POST", f"/api/users/invite",
+                          params=None, json_body=body)
+
     def get_users_me(self) -> Any:
         """Whoami"""
         return self._call("GET", f"/api/users/me",
@@ -3651,6 +3671,11 @@ class LabeloxClient:
     def post_users_by_user_id_revoke_tokens(self, user_id: str) -> Any:
         """Revoke Tokens"""
         return self._call("POST", f"/api/users/{user_id}/revoke-tokens",
+                          params=None, json_body=None)
+
+    def post_users_by_user_id_sign_in_link(self, user_id: str) -> Any:
+        """Sign In Link"""
+        return self._call("POST", f"/api/users/{user_id}/sign-in-link",
                           params=None, json_body=None)
 
     def post_users_by_user_id_token(self, user_id: str) -> Any:
@@ -3801,4 +3826,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 743 routes generated from the server schema.
+# 748 routes generated from the server schema.

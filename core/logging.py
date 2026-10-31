@@ -12,9 +12,8 @@ def setup_logging(level: str = "INFO", stream=None) -> None:
     """Configure stdlib logging and structlog. `stream` defaults to stdout; a command whose stdout is its
     output (scripts/sign_in_link.py prints a link a shell script captures) passes stderr instead."""
     log_level = getattr(logging, level.upper(), logging.INFO)
-    out = stream or sys.stdout
 
-    logging.basicConfig(format="%(message)s", stream=out, level=log_level)
+    logging.basicConfig(format="%(message)s", stream=stream or sys.stdout, level=log_level)
 
     structlog.configure(
         processors=[
@@ -26,7 +25,10 @@ def setup_logging(level: str = "INFO", stream=None) -> None:
             structlog.processors.JSONRenderer(),
         ],
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
-        logger_factory=structlog.PrintLoggerFactory(file=out),
+        # Without an explicit stream the factory resolves stdout when each logger is made, not now. Binding the
+        # stdout of this moment instead broke every later log line wherever stdout is swapped out, as pytest
+        # does per test: 57 tests failed on "I/O operation on closed file" once the API's startup ran.
+        logger_factory=structlog.PrintLoggerFactory(file=stream) if stream else structlog.PrintLoggerFactory(),
         cache_logger_on_first_use=True,
     )
 
