@@ -20,11 +20,14 @@ name: labeloxav
 # correctly, so the same image serves a CPU-only host. The NVIDIA device reservations live in
 # docker-compose.gpu.yml, which scripts/install.sh adds only when the Docker NVIDIA runtime is present,
 # because a reservation on a host without it stops compose from starting anything at all.
+#
+# Built once, by the `migrate` service. Every other Python service names the same image and never pulls it
+# (there is no registry copy). With Docker's classic builder, which is what compose falls back to when the
+# buildx plugin is missing, each service carrying its own `build:` built this 7 GB image separately, six at
+# once, and the builds then raced to tag it: the install failed with the image existing and its tag missing.
 x-app-image: &app_image
-  build:
-    context: .
-    target: ${LBX_IMAGE_TARGET:-gpu}
   image: labeloxav/app:${LBX_VERSION:-latest}
+  pull_policy: never
 
 services:
   # Every service reads its credentials from .env. install.sh generates strong values there, because
@@ -36,6 +39,9 @@ services:
   # two API replicas could never race the same migration.
   migrate:
     <<: *app_image
+    build:
+      context: .
+      target: ${LBX_IMAGE_TARGET:-gpu}
     depends_on:
       postgres:
         condition: service_healthy

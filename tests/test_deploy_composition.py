@@ -85,9 +85,18 @@ class TestTheModelsCanRunInTheDeployment:
     def test_every_python_service_runs_the_ml_image(self):
         services = _services()
         for name in self.PYTHON_SERVICES:
-            svc = services[name]
-            assert svc["image"].startswith("labeloxav/app:"), name
-            assert svc["build"]["target"] == "${LBX_IMAGE_TARGET:-gpu}", name
+            assert services[name]["image"].startswith("labeloxav/app:"), name
+        assert services["migrate"]["build"]["target"] == "${LBX_IMAGE_TARGET:-gpu}"
+
+    def test_the_image_is_built_by_one_service_only(self):
+        """Without buildx, compose builds once per service that declares `build:`. Six parallel builds of one
+        7 GB image raced to tag it and the install failed with the tag missing."""
+        services = _services()
+        builders = [n for n in self.PYTHON_SERVICES if "build" in services[n]]
+        assert builders == ["migrate"]
+        for name in self.PYTHON_SERVICES:
+            if name != "migrate":
+                assert services[name]["pull_policy"] == "never", name
 
     def test_the_gpu_worker_runs_by_default(self):
         svc = _services()["gpu-worker"]
