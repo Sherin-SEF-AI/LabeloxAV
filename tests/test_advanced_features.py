@@ -492,16 +492,16 @@ def test_the_sdk_is_current_with_the_api_schema():
     from services.api.main import app
 
     expected = generate(app.openapi())
-    on_disk = Path("sdk/generated_client.py").read_text()
+    on_disk = Path("sdk/labelox/generated.py").read_text()
     assert on_disk.strip() == expected.strip(), (
-        "sdk/generated_client.py is out of date; run `python -m scripts.generate_sdk`")
+        "sdk/labelox/generated.py is out of date; run `python -m scripts.generate_sdk`")
 
 
 def test_the_generated_client_parses_and_refuses_without_a_token():
     import ast
     from pathlib import Path
 
-    source = Path("sdk/generated_client.py").read_text()
+    source = Path("sdk/labelox/generated.py").read_text()
     ast.parse(source)   # required arguments before defaulted ones, among everything else
 
     from sdk.generated_client import LabeloxClient, LabeloxError

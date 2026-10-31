@@ -12,7 +12,7 @@ Deliberately not openapi-generator or datamodel-code-generator. Both would add a
 toolchain to the build for a client that needs one file, and both produce a package nobody reads. This
 emits a single module in the same idiom as the rest of the codebase, with the route table visible in it.
 
-    python -m scripts.generate_sdk --out sdk/generated_client.py
+    python -m scripts.generate_sdk --out sdk/labelox/generated.py
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ HEADER = '''"""LabeloxAV Python client, generated from the API's OpenAPI schema.
 
 Do not edit by hand. Regenerate with:
 
-    python -m scripts.generate_sdk --out sdk/generated_client.py
+    python -m scripts.generate_sdk --out sdk/labelox/generated.py
 
 Every method here corresponds to one route on the server, with its real path, method and parameters. The
 hand-written client in `labelox_client.py` remains for the ergonomic helpers that compose several calls;
@@ -229,6 +229,16 @@ def load_schema(source: str) -> dict:
     API to be up would generate a stale client whenever it was not.
     """
     if source == "app":
+        # Every optional pack's routes too, whatever this machine has enabled: the client describes the whole
+        # API, and its contents must not depend on who ran the generator (an install without the security
+        # pack would otherwise emit a client with those methods missing).
+        import os
+
+        from core.config import get_settings
+        from packs.registry import optional_pack_ids
+
+        os.environ["LBX_PACKS__OPTIONAL"] = json.dumps(optional_pack_ids())
+        get_settings.cache_clear()
         from services.api.main import app
 
         return app.openapi()
@@ -243,7 +253,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--schema", default="app",
                     help="'app' (in-process, the default), a URL, or a path to openapi.json")
-    ap.add_argument("--out", default="sdk/generated_client.py")
+    ap.add_argument("--out", default="sdk/labelox/generated.py")
     ap.add_argument("--check", action="store_true",
                     help="fail if the generated client differs from the file on disk")
     args = ap.parse_args()

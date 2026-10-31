@@ -119,6 +119,33 @@ docker compose exec api python -m scripts.mint_token --name alice --role reviewe
 
 Roles are `annotator`, `reviewer`, `admin`, and a higher role satisfies any floor below it.
 
+### Scripts, notebooks and CI: API keys and the Python client
+
+Sign-in tokens expire after hours and belong to a person, so nothing automated should borrow one. An
+administrator creates a long-lived key per script or pipeline in **Settings > API keys** (or
+`POST /api/service-accounts`), with a role and an optional expiry. The key is shown once; the server keeps
+only a hash. Rotate it to replace a leaked key without changing what it is allowed to do, or revoke it to
+stop it immediately.
+
+The Python client is its own small package (httpx and click only, no server code):
+
+```bash
+pip install ./sdk                      # from a checkout; the package is labelox-client
+export LBX_URL=http://labelox.lab:3000 # the web app's address; it proxies /api
+export LBX_API_KEY=lbxk_...
+labelox health
+labelox facets --predicate '{"states":["accepted"]}'
+```
+
+```python
+from labelox import Client
+lbx = Client()                        # reads LBX_URL and LBX_API_KEY
+lbx.health()
+```
+
+Every endpoint is also available as a method on `labelox.generated.LabeloxClient`, generated from the API's
+own schema by `python -m scripts.generate_sdk` (CI fails if it falls behind the API).
+
 ---
 
 ## Serving to more than one machine
