@@ -76,6 +76,7 @@ from services.api.routers import (
     recall,
     relabel,
     review,
+    samples,
     search,
     security,
     secv2,
@@ -593,6 +594,7 @@ app.include_router(meta.router, prefix="/api", tags=["meta"])
 app.include_router(system.router, prefix="/api", tags=["system"])
 app.include_router(home.router, prefix="/api", tags=["home"])
 app.include_router(find.router, prefix="/api", tags=["find"])
+app.include_router(samples.router, prefix="/api", tags=["samples"])
 app.include_router(triage.router, prefix="/api", tags=["triage"])
 app.include_router(objects.router, prefix="/api", tags=["objects"])
 app.include_router(predictions.router, prefix="/api", tags=["predictions"])

@@ -10,6 +10,7 @@ import LoadState from "@/components/shell/LoadState";
 import { api, apiGet, humanizeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useCurrentUser } from "@/lib/user";
+import SampleDrives from "@/components/SampleDrives";
 
 // Home: what is waiting, what is running, where work was last happening, and, for a new team, the five steps
 // from an empty install to a trained model. Every number comes from GET /api/home, which counts the tables
@@ -80,7 +81,35 @@ function Card({ title, action, children }: { title: string; action?: React.React
   );
 }
 
-function Setup({ steps }: { steps: Home["steps"] }) {
+function AutolabelNow({ session, onChange }: { session: Home["recent_sessions"][number]; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [queued, setQueued] = useState<string | null>(null);
+  const start = async () => {
+    setBusy(true);
+    try {
+      const r = await api.startAutolabel(session.session_id);
+      setQueued(r.job_id);
+      toast(`Auto-label started on ${session.vehicle_id}`, "success");
+      onChange();
+    } catch (e) {
+      toast(humanizeError(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (queued) {
+    return <Link href="/jobs" className="btn">Follow it in Jobs</Link>;
+  }
+  return (
+    <button className="btn btn-primary" onClick={() => void start()} disabled={busy}>
+      {busy ? "Starting" : `Auto-label ${session.vehicle_id}`}
+    </button>
+  );
+}
+
+function Setup({ steps, recent, onChange }: { steps: Home["steps"]; recent: Home["recent_sessions"]; onChange: () => void }) {
+  // The session a newcomer most likely wants labelled: the newest one with frames and no objects yet.
+  const unlabelled = recent.find((r) => r.frames > 0 && r.objects === 0);
   const done = STEPS.filter((s) => steps[s.key]).length;
   const next = STEPS.find((s) => !steps[s.key]);
   return (
@@ -107,11 +136,19 @@ function Setup({ steps }: { steps: Home["steps"] }) {
               <div className="flex-1 min-w-0">
                 <div className={`text-[13.5px] ${isDone ? "text-ink-3 line-through decoration-ink-3/40" : "text-ink"}`}>{s.title}</div>
                 {isNext && <p className="mt-0.5 text-[12.5px] text-ink-2 max-w-[70ch]">{s.body}</p>}
+                {isNext && s.key === "data" && (
+                  <div className="mt-3">
+                    <div className="mb-1.5 text-[12px] text-ink-3">No footage yet? Load a sample drive to try the whole loop:</div>
+                    <SampleDrives onLoaded={onChange} />
+                  </div>
+                )}
               </div>
               {isNext && (
                 <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+                  {s.key === "autolabel" && unlabelled && <AutolabelNow session={unlabelled} onChange={onChange} />}
                   {s.actions.map((a, j) => (
-                    <Link key={a.href} href={a.href} className={`btn ${j === 0 ? "btn-primary" : ""}`}>{a.label}</Link>
+                    <Link key={a.href} href={a.href}
+                      className={`btn ${j === 0 && !(s.key === "autolabel" && unlabelled) ? "btn-primary" : ""}`}>{a.label}</Link>
                   ))}
                 </div>
               )}
@@ -182,7 +219,7 @@ export default function HomePage() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 flex flex-col gap-5">
         <LoadState loading={!data && !error} error={error} onRetry={() => void load()} />
 
-        {data && !setupDone && <Setup steps={data.steps} />}
+        {data && !setupDone && <Setup steps={data.steps} recent={data.recent_sessions} onChange={() => void load()} />}
 
         {data && c && (
           <>

@@ -34,7 +34,7 @@ import ImportedPanel from "@/components/annotate/ImportedPanel";
 const FORMATS = [
   { value: "auto", label: "auto (detect per file)" },
   { value: "images", label: "images (zip / folder of images)" },
-  { value: "video", label: "video (.mp4 / .mov / .mkv / .avi)" },
+  { value: "video", label: "video (.mp4 / .mov / .mkv / .avi / .webm / .m4v)" },
   { value: "mcap", label: "mcap (robotics log)" },
 ];
 

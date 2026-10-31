@@ -73,6 +73,10 @@ ADAPTERS = {
     "encord": adapter_encord.parse,
 }
 RAW_FORMATS = {"video", "mcap", "images"}
+# Every container the upload page accepts as video and OpenCV's FFmpeg backend decodes. The upload page
+# offered .webm and .m4v while this list stopped at .avi, so those uploads were stored and then failed with
+# "no video file found"; the two lists must match (tests/test_video_import_formats.py).
+VIDEO_EXTENSIONS = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v")
 ALL_FORMATS = sorted(set(ADAPTERS) | RAW_FORMATS)
 
 
@@ -147,7 +151,7 @@ async def _import_raw(spec: ImportSpec, job_id, root: Path) -> dict:
         frame_iter = read_image_folder(root)
         raw_uri, mcap_uri = spec.source_uri, None
     elif spec.format == "video":
-        vid = next((p for p in root.rglob("*") if p.suffix.lower() in (".mp4", ".mov", ".mkv", ".avi")), None)
+        vid = next((p for p in root.rglob("*") if p.suffix.lower() in VIDEO_EXTENSIONS), None)
         if vid is None:
             raise FileNotFoundError("no video file found in the source")
         frame_iter = read_video(str(vid), "cam_front", now_ns(), get_settings().ingest.target_fps)
