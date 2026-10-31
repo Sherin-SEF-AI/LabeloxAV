@@ -8,7 +8,7 @@
 import { useState } from "react";
 import PageShell from "@/components/shell/PageShell";
 import { Panel, KV, Verdict, RunButton, useRun, ErrLine, NumField } from "@/components/engine/prim";
-import { getJSON, runJSON } from "@/lib/engine";
+import { getJSON, runJSON, parseInput } from "@/lib/engine";
 
 type Proof = { proof_id: string; verdict: string; manifest: { coverage: number; n_frames: number; n_covered: number };
   uncovered: string[] };
@@ -19,8 +19,8 @@ type Lineage = { subject: string;
   redaction_proofs: { proof_id: string; verdict: string; coverage: number; n_frames: number }[] };
 
 export default function CompliancePage() {
-  const [release, setRelease] = useState("rel-demo-1");
-  const [frameIds, setFrameIds] = useState('["f1","f2","f3"]');
+  const [release, setRelease] = useState("");
+  const [frameIds, setFrameIds] = useState("");
   const proof = useRun<Proof>();
 
   const [status, setStatus] = useState("granted");
@@ -31,7 +31,7 @@ export default function CompliancePage() {
   const [spent, setSpent] = useState(0);
   const cost = useRun<Cost>();
 
-  const [subject, setSubject] = useState("rel-demo-1");
+  const [subject, setSubject] = useState("");
   const lineage = useRun<Lineage>();
 
   return (
@@ -42,15 +42,15 @@ export default function CompliancePage() {
         <Panel title="release redaction proof" hint="PII coverage must be complete">
           <label className="flex items-center gap-2 font-mono text-[11px] mb-2">
             <span className="text-ink-3">release</span>
-            <input value={release} onChange={(e) => setRelease(e.target.value)}
+            <input value={release} placeholder="release id" onChange={(e) => setRelease(e.target.value)}
               className="flex-1 bg-bg-2 border border-line px-1.5 py-0.5 text-ink outline-none focus:border-accent" />
           </label>
           <div className="font-mono text-[10px] text-ink-3 mb-1">frame ids in the release</div>
-          <textarea value={frameIds} onChange={(e) => setFrameIds(e.target.value)} rows={3}
+          <textarea value={frameIds} placeholder={'frame ids as JSON, e.g. ["0b6f...", "4c21..."]'} onChange={(e) => setFrameIds(e.target.value)} rows={3}
             className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
           <div className="mt-2"><RunButton busy={proof.busy}
             onClick={() => proof.run(() => runJSON<Proof>("/api/govern/redaction/proof",
-              { release_commit: release, frame_ids: JSON.parse(frameIds), method_version: "pii-v3" }))}
+              { release_commit: release, frame_ids: parseInput(frameIds, "frame ids"), method_version: "pii-v3" }))}
             label="build proof" /></div>
           <ErrLine err={proof.err} />
           {proof.out && (
@@ -110,7 +110,7 @@ export default function CompliancePage() {
         <Panel title="governance lineage" hint="audit + proofs for a subject">
           <label className="flex items-center gap-2 font-mono text-[11px] mb-2">
             <span className="text-ink-3">subject</span>
-            <input value={subject} onChange={(e) => setSubject(e.target.value)}
+            <input value={subject} placeholder="release id, model version or session id" onChange={(e) => setSubject(e.target.value)}
               className="flex-1 bg-bg-2 border border-line px-1.5 py-0.5 text-ink outline-none focus:border-accent" />
           </label>
           <RunButton busy={lineage.busy}

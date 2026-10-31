@@ -9,7 +9,7 @@ import { useState } from "react";
 import PageShell from "@/components/shell/PageShell";
 import OntologyRepair from "@/components/labelui/OntologyRepair";
 import { Panel, KV, Verdict, RunButton, useRun, ErrLine, NumField } from "@/components/engine/prim";
-import { runJSON } from "@/lib/engine";
+import { runJSON, parseInput } from "@/lib/engine";
 
 type Audit = { n: number; n_pass: number; n_fail: number; missed_gold: number;
   verdicts: { object_id: string; verdict: string; iou: number }[] };
@@ -17,15 +17,15 @@ type Parity = { promote: boolean; delta: number; learned: number; heuristic: num
 type Prop = { track_id: string; n_frames: number; identities: number; healed_gaps: number;
   boxes: { frame: number; source: string }[] };
 
-const DEMO_PRED = JSON.stringify([
+const EXAMPLE_PRED = JSON.stringify([
   { object_id: "a", class_id: 6, bbox: [10, 10, 50, 50] },
   { object_id: "b", class_id: 6, bbox: [500, 500, 540, 540] },
 ], null, 2);
-const DEMO_GOLD = JSON.stringify([{ class_id: 6, bbox: [11, 11, 51, 51] }], null, 2);
+const EXAMPLE_GOLD = JSON.stringify([{ class_id: 6, bbox: [11, 11, 51, 51] }], null, 2);
 
 export default function QualityPage() {
-  const [pred, setPred] = useState(DEMO_PRED);
-  const [gold, setGold] = useState(DEMO_GOLD);
+  const [pred, setPred] = useState("");
+  const [gold, setGold] = useState("");
   const audit = useRun<Audit>();
 
   const [learned, setLearned] = useState(0.56);
@@ -49,14 +49,14 @@ export default function QualityPage() {
         {/* gold audit */}
         <Panel title="gold-set audit" hint="catches bad labels">
           <div className="font-mono text-[10px] text-ink-3 mb-1">predicted annotations</div>
-          <textarea value={pred} onChange={(e) => setPred(e.target.value)} rows={5}
+          <textarea value={pred} placeholder={EXAMPLE_PRED} onChange={(e) => setPred(e.target.value)} rows={5}
             className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
           <div className="font-mono text-[10px] text-ink-3 mt-2 mb-1">gold</div>
-          <textarea value={gold} onChange={(e) => setGold(e.target.value)} rows={3}
+          <textarea value={gold} placeholder={EXAMPLE_GOLD} onChange={(e) => setGold(e.target.value)} rows={3}
             className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
           <div className="mt-2"><RunButton busy={audit.busy}
             onClick={() => audit.run(() => runJSON<Audit>("/api/labelox/quality/audit",
-              { predicted: JSON.parse(pred), gold: JSON.parse(gold) }))} label="audit" /></div>
+              { predicted: parseInput(pred, "pred"), gold: parseInput(gold, "gold") }))} label="audit" /></div>
           <ErrLine err={audit.err} />
           {audit.out && (
             <div className="mt-3">

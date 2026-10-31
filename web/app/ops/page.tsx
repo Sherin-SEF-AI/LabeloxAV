@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
 import { Panel, Bar, Verdict, RunButton, useRun, ErrLine } from "@/components/engine/prim";
-import { getJSON, runJSON } from "@/lib/engine";
+import { getJSON, runJSON, parseInput } from "@/lib/engine";
 
 type PlaneSlo = { plane: string; met: boolean;
   breaches: { metric: string; value: number | null; threshold: number; op: string; reason: string }[];
@@ -19,18 +19,18 @@ type EffRow = { slice: string; labels: number; gain: number; gain_per_1k: number
 type EffReport = { per_slice: EffRow[]; total_labels: number; total_gain: number; overall_gain_per_1k: number;
   best_slice: string | null; wasted_spend_slices: string[] };
 
-const DEMO_EFF = JSON.stringify([
+const EXAMPLE_EFF = JSON.stringify([
   { slice: "vru_night", labels: 500, map_before: 0.40, map_after: 0.55 },
   { slice: "car_day", labels: 2000, map_before: 0.80, map_after: 0.805 },
   { slice: "sign_rain", labels: 300, map_before: 0.60, map_after: 0.58 },
 ], null, 2);
-const DEMO_A = JSON.stringify({ commit: "c1", samples: 1000, metrics: { map50: 0.612 } }, null, 2);
+const EXAMPLE_A = JSON.stringify({ commit: "c1", samples: 1000, metrics: { map50: 0.612 } }, null, 2);
 
 export default function OpsPage() {
   const [board, setBoard] = useState<Board | null>(null);
-  const [effIn, setEffIn] = useState(DEMO_EFF);
-  const [runA, setRunA] = useState(DEMO_A);
-  const [runB, setRunB] = useState(DEMO_A);
+  const [effIn, setEffIn] = useState("");
+  const [runA, setRunA] = useState("");
+  const [runB, setRunB] = useState("");
   const eff = useRun<EffReport>();
   const repro = useRun<Repro>();
 
@@ -66,10 +66,10 @@ export default function OpsPage() {
 
         {/* efficiency */}
         <Panel title="label-budget efficiency">
-          <textarea value={effIn} onChange={(e) => setEffIn(e.target.value)} rows={8}
+          <textarea value={effIn} placeholder={EXAMPLE_EFF} onChange={(e) => setEffIn(e.target.value)} rows={8}
             className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
           <div className="mt-2"><RunButton busy={eff.busy}
-            onClick={() => eff.run(() => runJSON<EffReport>("/api/hardening/efficiency", { entries: JSON.parse(effIn) }))}
+            onClick={() => eff.run(() => runJSON<EffReport>("/api/hardening/efficiency", { entries: parseInput(effIn, "effIn") }))}
             label="report" /></div>
           <ErrLine err={eff.err} />
           {eff.out && (
@@ -98,13 +98,13 @@ export default function OpsPage() {
         {/* reproducibility */}
         <Panel title="byte-stable reproducibility">
           <div className="font-mono text-[10px] text-ink-3 mb-1">build A</div>
-          <textarea value={runA} onChange={(e) => setRunA(e.target.value)} rows={4}
+          <textarea value={runA} placeholder={EXAMPLE_A} onChange={(e) => setRunA(e.target.value)} rows={4}
             className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
           <div className="font-mono text-[10px] text-ink-3 mt-2 mb-1">build B (rebuild)</div>
-          <textarea value={runB} onChange={(e) => setRunB(e.target.value)} rows={4}
+          <textarea value={runB} placeholder={EXAMPLE_A} onChange={(e) => setRunB(e.target.value)} rows={4}
             className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
           <div className="mt-2"><RunButton busy={repro.busy}
-            onClick={() => repro.run(() => runJSON<Repro>("/api/hardening/reproducible", { run_a: JSON.parse(runA), run_b: JSON.parse(runB) }))}
+            onClick={() => repro.run(() => runJSON<Repro>("/api/hardening/reproducible", { run_a: parseInput(runA, "runA"), run_b: parseInput(runB, "runB") }))}
             label="compare" /></div>
           <ErrLine err={repro.err} />
           {repro.out && (

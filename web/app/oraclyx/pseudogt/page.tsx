@@ -9,13 +9,13 @@
 import { useState } from "react";
 import PageShell from "@/components/shell/PageShell";
 import { Panel, KV, Bar, RunButton, useRun, ErrLine, NumField } from "@/components/engine/prim";
-import { runJSON } from "@/lib/engine";
+import { runJSON, parseInput } from "@/lib/engine";
 
 type Unc = { uncertainty: number; soft_target: number };
 type Depth = { depth_m: number | null; uncertainty?: number; priors?: string[]; reason?: string };
 type Ranked = { ranked: { id?: string; uncertainty: number; info_gain: number; rarity?: number; disagreement?: number }[] };
 
-const DEMO_QUEUE = JSON.stringify([
+const EXAMPLE_QUEUE = JSON.stringify([
   { id: "obj-a", uncertainty: 0.8, rarity: 0.9, disagreement: 0.7, safety_weight: 2.0 },
   { id: "obj-b", uncertainty: 0.4, rarity: 0.2, disagreement: 0.3 },
   { id: "obj-c", uncertainty: 0.05, rarity: 0.0, disagreement: 0.0 },
@@ -34,7 +34,7 @@ export default function PseudoGtPage() {
   const [camH, setCamH] = useState(1.4);
   const depth = useRun<Depth>();
 
-  const [queue, setQueue] = useState(DEMO_QUEUE);
+  const [queue, setQueue] = useState("");
   const rank = useRun<Ranked>();
 
   return (
@@ -96,10 +96,10 @@ export default function PseudoGtPage() {
 
         {/* info-gain ranking */}
         <Panel title="disagreement review queue" hint="ranked by info gain">
-          <textarea value={queue} onChange={(e) => setQueue(e.target.value)} rows={8}
+          <textarea value={queue} placeholder={EXAMPLE_QUEUE} onChange={(e) => setQueue(e.target.value)} rows={8}
             className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
           <div className="mt-2"><RunButton busy={rank.busy}
-            onClick={() => rank.run(() => runJSON<Ranked>("/api/oraclyx/disagreements/rank", { items: JSON.parse(queue) }))}
+            onClick={() => rank.run(() => runJSON<Ranked>("/api/oraclyx/disagreements/rank", { items: parseInput(queue, "queue") }))}
             label="rank" /></div>
           <ErrLine err={rank.err} />
           {rank.out && (

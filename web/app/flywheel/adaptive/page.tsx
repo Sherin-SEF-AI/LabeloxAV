@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
 import { Panel, KV, Bar, RunButton, useRun, ErrLine, NumField } from "@/components/engine/prim";
 import { HintBar } from "@/components/ui/kit";
-import { getJSON, runJSON } from "@/lib/engine";
+import { getJSON, runJSON, parseInput } from "@/lib/engine";
 
 type Alloc = { slice: string; labels: number; weight: number; reason: string };
 type Task = { cell: string; priority: number; target_count: number; missing: boolean; reason: string };
@@ -26,11 +26,11 @@ type AutoPlan = Plan & {
   work_order: WorkItem[];
 };
 
-const DEMO_REGRESSIONS = JSON.stringify([
+const EXAMPLE_REGRESSIONS = JSON.stringify([
   { slice: "vru_night", delta: -0.10, protected: true },
   { slice: "car_day", delta: -0.03, protected: false },
 ], null, 2);
-const DEMO_GAPS = JSON.stringify([{ cell: "night_rain_junction", gap: 0.04, missing: true }], null, 2);
+const EXAMPLE_GAPS = JSON.stringify([{ cell: "night_rain_junction", gap: 0.04, missing: true }], null, 2);
 
 export default function AdaptiveFlywheel() {
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -41,8 +41,8 @@ export default function AdaptiveFlywheel() {
   const orders = useRun<{ cycle_id: string; orders: number; scene: number; classes: number }>();
 
   // manual tool
-  const [reg, setReg] = useState(DEMO_REGRESSIONS);
-  const [gaps, setGaps] = useState(DEMO_GAPS);
+  const [reg, setReg] = useState("");
+  const [gaps, setGaps] = useState("");
   const manual = useRun<Plan>();
 
   const load = () => getJSON<{ cycles: Cycle[] }>("/api/flywheel/adaptive/cycles?limit=15")
@@ -56,9 +56,9 @@ export default function AdaptiveFlywheel() {
     return p;
   });
   const runManual = () => manual.run(async () => {
-    const rg = JSON.parse(reg);
+    const rg = parseInput<{ slice: string; protected?: boolean }[]>(reg, "the regressions");
     const p = await runJSON<Plan>("/api/flywheel/adaptive/cycle", {
-      regressions: rg, odd_gaps: JSON.parse(gaps), total_label_budget: budget, total_fleet_samples: 100000,
+      regressions: rg, odd_gaps: parseInput(gaps, "the coverage gaps"), total_label_budget: budget, total_fleet_samples: 100000,
       safety_slices: rg.filter((r: { protected?: boolean }) => r.protected).map((r: { slice: string }) => r.slice),
       safety_floor: floor,
     });
@@ -162,10 +162,10 @@ export default function AdaptiveFlywheel() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Panel title="manual cycle" hint="hand-fed signals">
             <div className="text-[10px] text-ink-3 mb-1">regressions</div>
-            <textarea value={reg} onChange={(e) => setReg(e.target.value)} rows={5}
+            <textarea value={reg} placeholder={EXAMPLE_REGRESSIONS} onChange={(e) => setReg(e.target.value)} rows={5}
               className="w-full field font-mono text-[10px]" />
             <div className="text-[10px] text-ink-3 mt-2 mb-1">odd gaps</div>
-            <textarea value={gaps} onChange={(e) => setGaps(e.target.value)} rows={3}
+            <textarea value={gaps} placeholder={EXAMPLE_GAPS} onChange={(e) => setGaps(e.target.value)} rows={3}
               className="w-full field font-mono text-[10px]" />
             <div className="mt-2"><RunButton busy={manual.busy} onClick={runManual} label="run manual" /></div>
             <ErrLine err={manual.err} />
