@@ -149,6 +149,34 @@ FILMS = {
         credit=("Footage: \u201cMoving vehicles in Link road, Cuttack, Odisha\u201d by Psubhashish and "
                 "\u201cStray Cattle in Lutyens Delhi\u201d by Fowler&fowler, Wikimedia Commons, CC BY-SA 3.0. "
                 f"Music: \u201cInspired\u201d, \u201cWholesome\u201d {_KM}")),
+    "youtube": Film(
+        name="youtube", title="LabeloxAV: a data engine for Indian roads",
+        out_name="labeloxav-youtube-2026.mp4",
+        tour=ROOT / ".scratch/demo/yt/tour", work=ROOT / ".scratch/demo/yt/pro",
+        transcript=ROOT / ".scratch/demo/yt/tour/transcript/tour.srt", scenes_module="youtube_2026",
+        blurbs={
+            "Introduction": "One data spine under every platform in the product",
+            "Getting data in": "Dashcam video, datasets, recordings, and where the vehicle actually was",
+            "Labelling": "Models propose every box; the editor is where a person corrects them",
+            "Review": "Human time spent where it changes the most",
+            "Search and curation": "Finding the frames worth labelling, in plain language",
+            "3D and LiDAR": "Real laser points, cuboids, and the camera checking both",
+            "Models and measurement": "A champion, its challengers, and a gate between them",
+            "The assistant and automation": "Proposes its own work, and cannot approve it",
+            "Privacy and governance": "Blurred before storage, logged when viewed, gated before export",
+            "The labs": "Research tools beyond the everyday workflow",
+            "Closing": "Drives in, models out, measured all the way",
+        },
+        card_backdrop={"3D and LiDAR": "lidar", "Labelling": "editor", "Search and curation": "explore"},
+        intro_stills=("editor", "explore", "track", "lidar"),
+        outro_stills=("editor", "scenarios", "lidar"),
+        tagline="A data engine for autonomous driving, built for Indian roads",
+        chips=("Auto-labelling", "Human review", "Tracking", "LiDAR and 3D", "Search", "Privacy"),
+        footnote="Recorded live against the running system, on real drives from Bengaluru",
+        outro_note="Every number in this film was read from the live database at the moment it was recorded.",
+        music_plan=(("Intro", "Inspired", 0.0), ("Review", "New Direction", 0.0),
+                    ("Models and measurement", "Beauty Flow", 0.0), ("Privacy and governance", "Inspired", 120.0)),
+        credit=f"Music: \u201cInspired\u201d, \u201cNew Direction\u201d, \u201cBeauty Flow\u201d {_KM}"),
 }
 
 # Bound by use_film(). Module globals rather than a parameter threaded through every function, because the

@@ -25,15 +25,19 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import shutil
 import subprocess
 import wave
 from pathlib import Path
 
-OUT = Path(".scratch/demo/tour")
+OUT = Path(os.environ.get("LBX_TOUR_OUT", ".scratch/demo/tour"))
 VOICE = Path(".scratch/demo/voices/en_US-lessac-medium.onnx")
-WEB = "http://localhost:3000"
-API = "http://localhost:8000"
+WEB = os.environ.get("LBX_TOUR_WEB", "http://localhost:3000")
+API = os.environ.get("LBX_TOUR_API", "http://localhost:8000")
+# "kokoro:<voice>" speaks with Kokoro through scripts/demo_tour/kokoro_say.py, which needs its own
+# environment (LBX_TOUR_KOKORO_PY) and model directory (LBX_TOUR_KOKORO_DIR). Unset, the piper voice above.
+TTS = os.environ.get("LBX_TOUR_TTS", "piper")
 # 1920x1080, which is what the browser is told to render, so nothing is rescaled. 15 fps because a tour
 # of a web application is mostly still pages: the rate that matters for legibility is the resolution, and
 # doubling the frame rate would double the file for footage that barely moves. Segment duration is pinned
@@ -41,8 +45,24 @@ API = "http://localhost:8000"
 W, H, FPS = 1920, 1080, 15
 
 
+# How a word should sound, where the voice's own reading is wrong. Applied to what is spoken only: the
+# captions keep the product's spelling, since they come from the same text before this is applied.
+SAY = {"LabeloxAV": "Label-ox A V", "MCAP": "M-CAP"}
+
+
+def spoken(text: str) -> str:
+    import re
+
+    for word, say in SAY.items():
+        text = re.sub(rf"\b{re.escape(word)}\b", say, text)
+    return text
+
+
 def synth(text: str, path: Path) -> float:
     """Speak one scene and return how long it takes, which is what drives the segment length."""
+    text = spoken(text)
+    if TTS.startswith("kokoro"):
+        return _kokoro(text, path)
     voice = _voice()
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as w:
@@ -52,6 +72,28 @@ def synth(text: str, path: Path) -> float:
 
 
 _VOICE = None
+_KOKORO = None
+
+
+def _kokoro(text: str, path: Path) -> float:
+    """Speak through the long-lived Kokoro helper; started on first use, one model load per run."""
+    global _KOKORO
+    if _KOKORO is None:
+        voice = TTS.split(":", 1)[1] if ":" in TTS else "af_heart"
+        py = os.environ.get("LBX_TOUR_KOKORO_PY", ".scratch/demo/kokoro-venv/bin/python")
+        model = os.environ.get("LBX_TOUR_KOKORO_DIR", ".scratch/demo/voices/kokoro")
+        # Kokoro takes every core it is given; capped so the browser being recorded keeps up.
+        env = {**os.environ, "OMP_NUM_THREADS": "8", "ORT_NUM_THREADS": "8"}
+        _KOKORO = subprocess.Popen(
+            [py, str(Path(__file__).parent / "kokoro_say.py"), "--model", model, "--voice", voice],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env)
+        ready = json.loads(_KOKORO.stdout.readline())
+        if not ready.get("ready"):
+            raise RuntimeError("kokoro helper did not start")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _KOKORO.stdin.write(json.dumps({"text": text, "path": str(path)}) + "\n")
+    _KOKORO.stdin.flush()
+    return float(json.loads(_KOKORO.stdout.readline())["seconds"])
 
 
 def _voice():
