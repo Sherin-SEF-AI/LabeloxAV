@@ -2351,12 +2351,10 @@ class EgoPose(Base):
     can deliver.
 
     `measured` separates an instrument reading from an inference and is not a grade. True means a device
-    observed position; false means it was recovered from the images, which is the only source available
-    for almost this whole corpus. `quality` grades within a source and never stands in for it, because a
+    observed position; false means it was recovered from the images. `quality` grades within a source and never stands in for it, because a
     confident visual estimate is still not a measurement.
 
-    The absence of a row means the pose is unknown at that timestamp, which is the honest state for a
-    corpus carrying GNSS on 3 frames of 41,752.
+    The absence of a row means the pose is unknown at that timestamp.
     """
 
     __tablename__ = "ego_pose"

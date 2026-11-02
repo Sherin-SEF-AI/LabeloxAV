@@ -1,14 +1,14 @@
 """Recovering where the vehicle was, from whatever the session actually carries.
 
-`calyx/ego_propagate.ego_transform` refuses on every session in this corpus, and correctly: with GNSS on
-3 frames of 41,752 there is nothing to derive a rigid transform from. This module is what fills the gap,
-and it fills it honestly rather than by pretending.
+`calyx/ego_propagate.ego_transform` needs a rigid transform between two frames, and a frame without a pose
+has none. This module fills the table, and it fills it honestly rather than by pretending.
 
 Two sources, and the table records which one answered.
 
 **GNSS and speed** (`source='gnss_imu'`, `measured=True`). Where fixes exist, position comes from the
 fixes in a session-local ENU frame and heading from `derive_ego_state`. This is an instrument observing
-position, so it is a measurement, and on this corpus it will answer for almost nothing.
+position, so it is a measurement. On this corpus most of it comes from the stamp a dashcam burns into its
+video (`services/ingest/overlay_telemetry.py`), which covers 215 of 255 drives.
 
 **Monocular visual odometry** (`source='visual'`, `measured=False`). ORB features between consecutive
 frames, an essential matrix against the resolved intrinsics, and `recoverPose` for rotation and a unit
@@ -247,14 +247,25 @@ async def _gnss_rows(db: AsyncSession, session_id: uuid.UUID) -> list[dict]:
         return []
     lat0, lon0 = fixes[0][2], fixes[0][3]
     derived = derive_ego_state([(ts, lat, lon, sp) for _f, ts, lat, lon, sp in fixes])
+    # derive_ego_state reports a compass bearing in degrees (clockwise from north). The pose frame is ENU,
+    # where yaw is counter-clockwise from east, so both the zero and the sign differ. These keys were once
+    # read as "heading" and "speed", which do not exist, and every GNSS pose came out facing east.
+    yaws = [math.pi / 2 - math.radians(d["heading_deg"]) if d.get("heading_deg") is not None else None
+            for d in derived]
+    # A fix that did not move has no bearing of its own; it keeps the heading it was driving on, and the
+    # fixes before the first move take the first heading there is.
+    first = next((y for y in yaws if y is not None), 0.0)
     out = []
-    for (fid, ts, lat, lon, _sp), d in zip(fixes, derived, strict=False):
+    last = first
+    for (fid, ts, lat, lon, _sp), d, yaw in zip(fixes, derived, yaws, strict=True):
         east, north = enu_offset(lat0, lon0, lat, lon)
-        heading = d.get("heading")
-        qw, qx, qy, qz = yaw_to_quat(float(heading) if heading is not None else 0.0)
+        last = yaw if yaw is not None else last
+        qw, qx, qy, qz = yaw_to_quat(last)
+        yaw_rate = d.get("yaw_rate")
         out.append({"frame_id": fid, "ts_ns": ts, "x": east, "y": north, "z": 0.0,
                     "qw": qw, "qx": qx, "qy": qy, "qz": qz,
-                    "speed_mps": d.get("speed"), "yaw_rate": d.get("yaw_rate"),
+                    "speed_mps": d.get("speed_mps"),
+                    "yaw_rate": -yaw_rate if yaw_rate is not None else None,
                     "source": GNSS, "quality": 0.9, "measured": True})
     return out
 
