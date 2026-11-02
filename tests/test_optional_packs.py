@@ -15,6 +15,8 @@ from fastapi import FastAPI
 from core.config import PacksSettings, get_settings
 from packs import registry
 
+pytestmark = pytest.mark.db
+
 
 @pytest.fixture
 def default_install(monkeypatch):
