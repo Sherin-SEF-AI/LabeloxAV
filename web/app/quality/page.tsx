@@ -85,7 +85,9 @@ export default function QualityPage() {
     setBusy("fit");
     try {
       const r = await api.fitCalibration({ gold_id: selected ?? undefined });
-      toast(`Fitted isotonic: ${r.n_train} pairs, ECE ${r.report.ece ?? "n/a"}\n${r.uri}`);
+      toast(r.trustworthy
+        ? `Fitted isotonic: ${r.n_train} pairs (${r.negatives} rejected), in-sample ECE ${r.report.ece ?? "n/a"}\n${r.uri}`
+        : `Fitted, but not usable: ${r.warning}`, r.trustworthy ? "success" : "error");
     } catch (e) {
       toast(humanizeError(e));
     } finally {

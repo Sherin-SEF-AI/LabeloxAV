@@ -74,10 +74,12 @@ nav:
       - Workflows: guide/workflows.md
       - The frame editor: guide/editor.md
       - Keyboard shortcuts: guide/shortcuts.md
+      - Running it as a team: guide/team.md
   - Concepts:
       - Architecture: ARCHITECTURE.md
       - Domain packs: PACK_INTERFACE.md
       - Measurement: MEASUREMENT.md
+      - Engines - one default per job: ENGINES.md
       - AV assumptions: AV_ASSUMPTIONS.md
   - API:
       - REST API: api/rest.md
@@ -90,6 +92,7 @@ nav:
       - Testing: TESTING.md
       - Verification pass: VERIFICATION.md
       - Data retention: DATA_RETENTION.md
+      - Licensing: LICENSING.md
   - Reference:
       - Engineering log: ENGINEERING_LOG.md
       - Remediation status: REMEDIATION_STATUS.md

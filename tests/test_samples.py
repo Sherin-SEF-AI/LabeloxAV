@@ -125,3 +125,44 @@ def test_listing_and_loading_through_the_api():
         assert r == {"status": "already_loaded", "session_id": str(sid)}
         assert c.post("/api/samples/nope/load", headers=h).status_code == 404
         assert c.get("/api/samples").status_code == 401
+
+
+def test_an_import_in_flight_is_reported_and_not_started_twice():
+    """A page reloaded mid-import offered "Load sample" again, and a second click started a second download."""
+    import asyncio
+
+    from _authutil import auth_headers
+    from fastapi.testclient import TestClient
+
+    from db.models import ImportJob
+    from db.session import get_engine
+    from services.api.main import app
+
+    s = SAMPLES[1]
+    jid = uuid.uuid4()
+
+    async def seed():
+        async with get_sessionmaker()() as db:
+            from sqlalchemy import delete
+            await db.execute(delete(DbSession).where(DbSession.route == f"sample:{s.id}"))
+            db.add(ImportJob(job_id=jid, status="running", format="video", source_uri=s.url,
+                             target_vehicle=s.vehicle_id, city=s.city, progress=0.3, counts={"stage": "importing"}))
+            await db.commit()
+
+    async def jobs_for_sample() -> int:
+        from sqlalchemy import func, select
+        async with get_sessionmaker()() as db:
+            return (await db.execute(select(func.count()).select_from(ImportJob)
+                                     .where(ImportJob.source_uri == s.url))).scalar_one()
+
+    asyncio.run(seed())
+    get_engine.cache_clear()
+    get_sessionmaker.cache_clear()
+    with TestClient(app) as c:
+        h = auth_headers("annotator")
+        listed = {x["id"]: x for x in c.get("/api/samples", headers=h).json()["samples"]}
+        assert listed[s.id]["session_id"] is None and listed[s.id]["job_id"] == str(jid)
+        assert c.post(f"/api/samples/{s.id}/load", headers=h).json() == {"status": "pending", "job_id": str(jid)}
+    get_engine.cache_clear()
+    get_sessionmaker.cache_clear()
+    assert asyncio.run(jobs_for_sample()) == 1

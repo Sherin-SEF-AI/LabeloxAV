@@ -7,7 +7,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from services.temporal.sam_propagate import flow_box, flow_track
+from services.temporal.flow import flow_box, flow_track
 
 _BG = 30
 

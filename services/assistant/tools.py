@@ -15,10 +15,22 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import AssistantProposal, ErrorCandidate, Frame, LabelProject, Object
+from db.models import (
+    AssistantProposal,
+    AutolabelJob,
+    DatasetCommit,
+    ErrorCandidate,
+    ExportJob,
+    Frame,
+    ImportJob,
+    LabelProject,
+    ModelRegistry,
+    Object,
+    TrainingJob,
+)
 from db.models import Session as DbSession
 from services.autolabel.ontology import get_ontology
 from services.project_access import scope_visible_sessions
@@ -152,7 +164,8 @@ async def find_sessions(ctx: Context, a: dict) -> dict:
     q = scope_visible_sessions(select(DbSession), ctx.hidden)
     if text := (a.get("query") or "").strip():
         like = f"%{text}%"
-        match = [DbSession.vehicle_id.ilike(like), DbSession.city.ilike(like), DbSession.route.ilike(like)]
+        match: list[ColumnElement[bool]] = [DbSession.vehicle_id.ilike(like), DbSession.city.ilike(like),
+                                            DbSession.route.ilike(like)]
         if code := CITY_CODES.get(text.lower()):
             match += [DbSession.city == code, DbSession.vehicle_id.ilike(f"%-{code}-%")]
         q = q.where(or_(*match))
@@ -212,6 +225,52 @@ async def error_overview(ctx: Context, a: dict) -> dict:
                                  .where(ErrorCandidate.status == "pending").group_by(ErrorCandidate.kind))).all()
     return {"pending_by_detector": {k: int(n) for k, n in rows},
             "note": "Track consistency and confident learning are the detectors measured to catch wrong classes."}
+
+
+async def list_datasets(ctx: Context, a: dict) -> dict:
+    rows = (await ctx.db.execute(select(DatasetCommit).order_by(DatasetCommit.created_at.desc())
+                                 .limit(int(a.get("limit") or 10)))).scalars().all()
+    return {"datasets": [{"name": (d.slice_spec or {}).get("name"), "commit_id": d.commit_id,
+                          "objects": d.object_count, "formats": (d.slice_spec or {}).get("formats", []),
+                          "created": d.created_at.date().isoformat() if d.created_at else None} for d in rows]}
+
+
+async def model_status(ctx: Context, a: dict) -> dict:
+    champs = (await ctx.db.execute(select(ModelRegistry).where(ModelRegistry.is_champion.is_(True)))).scalars().all()
+    jobs = (await ctx.db.execute(select(TrainingJob).order_by(TrainingJob.created_at.desc()).limit(5))).scalars().all()
+    return {
+        "champions": [{"model": m.model_version, "task": m.task,
+                       "gold_map50": (m.gold_metrics or {}).get("map50"), "promoted_from": m.promoted_from}
+                      for m in champs],
+        "recent_training": [{"job_id": str(j.job_id), "status": j.status, "stage": j.stage,
+                             "purpose": j.purpose, "map50": (j.metrics or {}).get("map50"),
+                             "promoted": (j.result or {}).get("promoted"), "error": j.error,
+                             "started": j.created_at.date().isoformat() if j.created_at else None} for j in jobs],
+    }
+
+
+async def list_projects(ctx: Context, a: dict) -> dict:
+    from services.project_classes import describe
+
+    counts = {pid: int(n) for pid, n in (await ctx.db.execute(
+        select(DbSession.project_id, func.count()).group_by(DbSession.project_id))).all()}
+    rows = (await ctx.db.execute(select(LabelProject).order_by(LabelProject.name))).scalars().all()
+    return {"projects": [{"project_id": str(p.project_id), "name": p.name, "sessions": counts.get(p.project_id, 0),
+                          "visible_to": "members only" if p.visibility == "members" else "whole team",
+                          "classes": describe(p.class_ids)["class_set"]}
+                         for p in rows if p.project_id not in ctx.hidden]}
+
+
+async def job_overview(ctx: Context, a: dict) -> dict:
+    out: dict = {}
+    for kind, model in (("autolabel", AutolabelJob), ("import", ImportJob), ("training", TrainingJob),
+                        ("export", ExportJob)):
+        by = {st: int(n) for st, n in (await ctx.db.execute(
+            select(model.status, func.count()).group_by(model.status))).all()}
+        failed = (await ctx.db.execute(select(model.error).where(model.status == "error")
+                                       .order_by(model.created_at.desc()).limit(3))).scalars().all()
+        out[kind] = {"by_status": by, "recent_errors": [e for e in failed if e]}
+    return out
 
 
 # ---- proposing --------------------------------------------------------------------------------------------
@@ -304,6 +363,62 @@ async def propose_error_detection(ctx: Context, a: dict) -> dict:
                         summary, {"count": None})
 
 
+async def _visible_project(ctx: Context, a: dict) -> LabelProject | None:
+    raw = a.get("project_id") or a.get("project_name")
+    if not raw:
+        return None
+    try:
+        p = await ctx.db.get(LabelProject, uuid.UUID(str(raw)))
+    except ValueError:
+        p = (await ctx.db.execute(select(LabelProject).where(LabelProject.name.ilike(str(raw))))).scalars().first()
+    if p is None or p.project_id in ctx.hidden:
+        raise ToolError(f"no project {raw!r}; call list_projects")
+    return p
+
+
+async def propose_export(ctx: Context, a: dict) -> dict:
+    from services.export.dataset import SUPPORTED_EXPORT_FORMATS
+
+    formats = [f.lower() for f in (a.get("formats") or ["coco"])]
+    bad = [f for f in formats if f not in SUPPORTED_EXPORT_FORMATS]
+    if bad:
+        raise ToolError(f"unknown format(s) {bad}; one of {sorted(SUPPORTED_EXPORT_FORMATS)}")
+    sid = await _visible_session(ctx, a.get("session_id") or ctx.session_id)
+    q = (select(func.count()).select_from(Object).join(Frame, Frame.frame_id == Object.frame_id)
+         .join(DbSession, DbSession.session_id == Frame.session_id).where(Object.state != "rejected"))
+    q = scope_visible_sessions(q, ctx.hidden)
+    if sid:
+        q = q.where(Frame.session_id == sid)
+    n = int((await ctx.db.execute(q)).scalar_one())
+    name = (a.get("name") or (f"session-{str(sid)[:8]}" if sid else "dataset")).strip()[:120]
+    summary = f"Export {n:,} labels as {', '.join(formats)} to a dataset named {name!r}" \
+              + (f" from session {sid}" if sid else " from every session you can see")
+    return await _store(ctx, "propose_export", {"name": name, "formats": formats,
+                                                "session_id": str(sid) if sid else None},
+                        summary, {"count": n, "unit": "labels"})
+
+
+async def propose_training(ctx: Context, a: dict) -> dict:
+    project = await _visible_project(ctx, a)
+    classes = [c.name for c in (get_ontology().by_id(i) for i in _class_ids(a.get("class_names")))]
+    epochs = max(1, min(int(a.get("epochs") or 20), 200))
+    q = (select(func.count()).select_from(Object).join(Frame, Frame.frame_id == Object.frame_id)
+         .join(DbSession, DbSession.session_id == Frame.session_id).where(Object.state != "rejected"))
+    q = scope_visible_sessions(q, ctx.hidden)
+    if project is not None:
+        q = q.where(DbSession.project_id == project.project_id)
+    n = int((await ctx.db.execute(q)).scalar_one())
+    spec: dict = {}
+    if project is not None:
+        spec["project_id"] = str(project.project_id)
+    if classes:
+        spec["include_classes"] = classes
+    summary = f"Train a detector for {epochs} epochs on " + (f"project {project.name}" if project else "every project") \
+              + (f", classes {', '.join(classes)}" if classes else "") + f" (up to {n:,} labels). It is not promoted automatically."
+    return await _store(ctx, "propose_training", {"dataset_spec": spec, "epochs": epochs}, summary,
+                        {"count": n, "unit": "labels"})
+
+
 TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("list_classes", "Find ontology class names by a word, a group (e.g. two_wheeler, vru) or an alias. Use "
          "it before naming a class you are not sure of.", _schema({"query": _STR}), "read", list_classes),
@@ -318,6 +433,21 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("queue_overview", "How many labels wait for review, by class, overall or for one session, optionally "
          "for some classes only.", _schema({"session_id": _STR, "class_names": _STRS}), "read", queue_overview),
     Tool("error_overview", "Pending likely-label-error candidates, by detector.", _schema({}), "read", error_overview),
+    Tool("list_datasets", "Recently exported datasets: name, how many labels, formats.",
+         _schema({"limit": {"type": "integer"}}), "read", list_datasets),
+    Tool("model_status", "The current champion detector and the most recent training runs with their results.",
+         _schema({}), "read", model_status),
+    Tool("list_projects", "Projects, how many sessions each holds, who can see it and which classes it labels.",
+         _schema({}), "read", list_projects),
+    Tool("job_overview", "Import, auto-label, training and export jobs by status, with recent errors.",
+         _schema({}), "read", job_overview),
+    Tool("propose_export", "Propose exporting a dataset (formats such as coco, yolo, parquet), of one session or of "
+         "everything. Creates a proposal; exports nothing.",
+         _schema({"name": _STR, "formats": _STRS, "session_id": _STR}), "propose", propose_export),
+    Tool("propose_training", "Propose training a detector, optionally on one project (project_id or project_name) "
+         "and some classes. Creates a proposal; starts nothing. Never promotes the result.",
+         _schema({"project_id": _STR, "project_name": _STR, "class_names": _STRS, "epochs": {"type": "integer"}}),
+         "propose", propose_training),
     Tool("propose_reclassify", "Propose changing machine labels of some classes to another class, in one session "
          "or frame. Creates a proposal for a reviewer; changes nothing itself. Human labels are never changed.",
          _schema({"from_classes": _STRS, "to_class": _STR, "session_id": _STR, "frame_id": _STR, "states": _STRS},
@@ -357,6 +487,21 @@ async def execute(db: AsyncSession, p: AssistantProposal, user: Any) -> dict:
         from services.errordetect.queue import run_detection
 
         return await run_detection(db, p.args.get("session_id"))
+    if p.tool == "propose_export":
+        from services.api.deps import ExportIn
+        from services.api.routers.datasets import start_export
+
+        return await start_export(ExportIn(name=p.args["name"], formats=p.args["formats"],
+                                           session_id=p.args.get("session_id")), db)
+    if p.tool == "propose_training":
+        from services.api.deps import TrainingStartIn
+        from services.api.routers.training import start as start_training
+
+        return await start_training(TrainingStartIn(purpose="perception", task_type="detection",
+                                                    dataset_spec=p.args["dataset_spec"],
+                                                    hparams={"epochs": p.args["epochs"]}, promote=False,
+                                                    notes="proposed by the assistant"),
+                                    user=user, hidden=frozenset())
     raise ToolError(f"unknown proposal tool {p.tool}")
 
 

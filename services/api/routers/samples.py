@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -16,6 +17,9 @@ from services.samples import ROUTE_PREFIX, SAMPLES, get_sample, load_sample, pub
 
 router = APIRouter()
 
+# An import that has not reported progress for this long is treated as dead.
+STALE_IMPORT_MINUTES = 30
+
 
 @router.get("/samples", dependencies=[Depends(require_role("annotator"))])
 async def list_samples(db: AsyncSession = Depends(db_session)):
@@ -23,8 +27,21 @@ async def list_samples(db: AsyncSession = Depends(db_session)):
     rows = (await db.execute(
         select(DbSession.route, DbSession.session_id).where(DbSession.route.like(f"{ROUTE_PREFIX}%")))).all()
     loaded: dict[str, uuid.UUID] = {str(route): sid for route, sid in rows if route}
-    return {"samples": [{**public(s), "session_id": str(loaded[f"{ROUTE_PREFIX}{s.id}"])
-                         if f"{ROUTE_PREFIX}{s.id}" in loaded else None} for s in SAMPLES]}
+    running = await _running_jobs(db)
+    return {"samples": [{**public(s),
+                         "session_id": str(loaded[f"{ROUTE_PREFIX}{s.id}"]) if f"{ROUTE_PREFIX}{s.id}" in loaded else None,
+                         "job_id": str(running[s.url]) if s.url in running else None} for s in SAMPLES]}
+
+
+async def _running_jobs(db: AsyncSession) -> dict[str, uuid.UUID]:
+    """Imports of a sample still in flight, by source url. A page reloaded mid-import otherwise offered "Load
+    sample" again, and a second click started a second download of the same drive."""
+    # Recent only: an import whose process died stays "running" forever, and must not block the sample.
+    fresh = datetime.now(UTC) - timedelta(minutes=STALE_IMPORT_MINUTES)
+    rows = (await db.execute(select(ImportJob.source_uri, ImportJob.job_id).where(
+        ImportJob.source_uri.in_([s.url for s in SAMPLES]), ImportJob.status.in_(("pending", "running")),
+        ImportJob.updated_at >= fresh).order_by(ImportJob.created_at))).all()
+    return {str(uri): jid for uri, jid in rows}
 
 
 @router.post("/samples/{sample_id}/load", dependencies=[Depends(require_role("annotator"))])
@@ -38,6 +55,8 @@ async def load(sample_id: str, db: AsyncSession = Depends(db_session)):
                                  .where(DbSession.route == f"{ROUTE_PREFIX}{s.id}").limit(1))).scalar_one_or_none()
     if existing:
         return {"status": "already_loaded", "session_id": str(existing)}
+    if (in_flight := (await _running_jobs(db)).get(s.url)) is not None:
+        return {"status": "pending", "job_id": str(in_flight)}
     job_id = uuid.uuid4()
     db.add(ImportJob(job_id=job_id, status="pending", format="video", source_uri=s.url,
                      target_vehicle=s.vehicle_id, city=s.city, progress=0.0, counts={"stage": "queued"}))

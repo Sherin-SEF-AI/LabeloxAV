@@ -94,6 +94,10 @@ def reliability_report(xs: np.ndarray, ys: np.ndarray, knot_x: np.ndarray, knot_
     return {"ece": round(ece, 4), "n": int(len(xs)), "bins": out_bins}
 
 
+# The fewest accepted and the fewest rejected labels a review-trail curve needs before it can mean anything.
+MIN_EACH_SIDE = 30
+
+
 async def fit_isotonic(gold_id: str | None = None, session_id: str | None = None) -> dict:
     from sklearn.isotonic import IsotonicRegression
 
@@ -118,7 +122,20 @@ async def fit_isotonic(gold_id: str | None = None, session_id: str | None = None
     key = f"calibration/{gold_id or 'corpus'}/isotonic.json"
     uri = get_object_store().put_bytes(key, json.dumps(payload).encode(), "application/json")
     log.info("isotonic.fitted", uri=uri, n=len(xs), ece=report["ece"], knots=len(knot_x))
-    return {"uri": uri, "n_train": int(len(xs)), "report": report, "knots": len(knot_x)}
+    # Said in the answer, not only in a docstring: this curve is fit on the review trail, where reviewers
+    # accept almost everything (223 accepts to 6 rejects when this was measured), and its ECE is measured on
+    # the same pairs it was fit on. A curve with few rejects collapses toward a constant and would wave
+    # low-confidence detections through. The held-out fit in services/autolabel/gold_calibrate.py is the one
+    # to activate; this one is a quick look.
+    positives = int(np.sum(ys))
+    negatives = int(len(ys) - positives)
+    trustworthy = min(positives, negatives) >= MIN_EACH_SIDE
+    return {"uri": uri, "n_train": int(len(xs)), "report": report, "knots": len(knot_x),
+            "positives": positives, "negatives": negatives, "in_sample": True, "trustworthy": trustworthy,
+            "warning": None if trustworthy else (
+                f"only {negatives} rejected and {positives} accepted labels: too lopsided to calibrate on, and the "
+                f"ECE above is measured on the same labels it was fit on. Do not activate this curve; use the "
+                f"held-out gold fit (services/autolabel/gold_calibrate.py) instead.")}
 
 
 @lru_cache(maxsize=8)

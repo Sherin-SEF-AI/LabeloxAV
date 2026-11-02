@@ -78,6 +78,10 @@ e2e: ## Browser smoke over the golden path (needs the app running: make app-up, 
 	@# teaches people to ignore red. Start the stack first for it to actually assert anything.
 	cd web && npx playwright test
 
+.PHONY: e2e-first-run
+e2e-first-run: ## A new team's first hour on a throwaway install: sign in, sample, auto-label, review, export (slow, needs GPU)
+	./scripts/e2e_first_run.sh
+
 .PHONY: migrate
 migrate: ## Apply Alembic migrations
 	$(RUN) alembic upgrade head

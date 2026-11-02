@@ -9,6 +9,7 @@ cached or estimated, so the numbers on screen are the numbers in the tables.
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -16,7 +17,15 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import AutolabelJob, ExportJob, Frame, ImportJob, ModelRegistry, Object, TrainingJob
+from db.models import (
+    AutolabelJob,
+    DatasetCommit,
+    Frame,
+    ImportJob,
+    ModelRegistry,
+    Object,
+    TrainingJob,
+)
 from db.models import Session as DbSession
 from services.api.deps import db_session, require_role
 from services.api.project_guard import caller_hidden_projects
@@ -83,7 +92,9 @@ async def home(db: AsyncSession = Depends(db_session), hidden=Depends(caller_hid
                        "start_ts_ns": s.start_ts_ns, "frames": n_frames, "objects": sum(states.values()),
                        "waiting": states.get(WAITING, 0)})
 
-    exports = await _count(db, select(func.count()).select_from(ExportJob).where(ExportJob.status == "done"))
+    # Every export, from the Datasets page or the API and SDK, leaves a dataset commit; only the page's path
+    # records an ExportJob, so counting jobs alone left the step unticked for a team that exports by script.
+    exports = await _count(db, select(func.count()).select_from(DatasetCommit))
     models = await _count(db, select(func.count()).select_from(ModelRegistry))
     autolabelled = await _count(db, select(func.count()).select_from(AutolabelJob)
                                 .where(AutolabelJob.status == "done"))
@@ -95,6 +106,7 @@ async def home(db: AsyncSession = Depends(db_session), hidden=Depends(caller_hid
         "jobs": {"active": active, "active_total": sum(active.values()), "running": running,
                  "failed": failed[:5], "failed_window_days": ATTENTION_DAYS},
         "recent_sessions": recent,
+        "waiting_for_people": await _waiting_for_people(db),
         # The first-run path, in order. Each is a fact about the database, not a box somebody ticked.
         "steps": {
             "data": sessions > 0,
@@ -104,3 +116,30 @@ async def home(db: AsyncSession = Depends(db_session), hidden=Depends(caller_hid
             "model": models > 0,
         },
     }
+
+
+async def _waiting_for_people(db: AsyncSession) -> list[dict]:
+    """Measurements that cannot finish without a person: blind audits not yet labelled.
+
+    A blind audit is the only instrument that says whether gold recall is real or a small gold set flattering
+    the model, and it waits on someone labelling its frames from scratch. Nothing in the app said so, so the
+    first one sat seeded and untouched for months. Each row names the first frame still to label, which the
+    project filter also uses to keep a hidden project's audit off the page.
+    """
+    from db.models import BlindAuditFrame
+    from services.verdyx.blind_audit import list_audits
+
+    out = []
+    for a in await list_audits(db, limit=20):
+        if not a["job_id"] or a["status"] == "scored" or a["n_labeled"] >= a["n_frames"]:
+            continue
+        first = (await db.execute(
+            select(BlindAuditFrame.frame_id).where(BlindAuditFrame.audit_id == uuid.UUID(a["audit_id"]),
+                                                   BlindAuditFrame.labeled_at.is_(None))
+            .order_by(BlindAuditFrame.audit_frame_id).limit(1))).scalar()
+        if first is None:
+            continue
+        out.append({"kind": "blind_audit", "audit_id": a["audit_id"], "job_id": a["job_id"],
+                    "frame_id": str(first), "n_frames": a["n_frames"], "n_labeled": a["n_labeled"],
+                    "created_at": a["created_at"]})
+    return out

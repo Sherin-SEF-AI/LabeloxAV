@@ -66,6 +66,20 @@ async def test_steps_follow_the_data():
     assert body["steps"]["data"] and body["steps"]["autolabel"] and body["steps"]["review"]
 
 
+async def test_an_export_by_script_ticks_the_export_step():
+    """The SDK and CLI export through /api/export, which leaves a dataset commit and no ExportJob."""
+    from db.models import DatasetCommit
+    from services.api.routers.home import home
+    from services.autolabel.ontology import get_ontology
+
+    async with get_sessionmaker()() as db:
+        # No ExportJob is written here, only the commit an /api/export leaves behind.
+        db.add(DatasetCommit(commit_id=f"test-{uuid.uuid4().hex[:12]}", slice_spec={"name": "by-script"},
+                             object_count=1, ontology_version=get_ontology().version))
+        await db.commit()
+        assert (await home(db))["steps"]["export"] is True
+
+
 async def test_a_failed_job_is_listed_with_its_reason():
     from services.api.routers.home import home
 

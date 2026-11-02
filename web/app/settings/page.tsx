@@ -169,6 +169,7 @@ const LINKS: { href: string; label: string; hint: string; icon: string }[] = [
   { href: "/integrations", label: "Integrations", hint: "storage buckets and webhooks", icon: "link" },
   { href: "/activity", label: "Activity", hint: "what you and the team have done", icon: "activity" },
   { href: "/govern/pii-access", label: "Personal data access log", hint: "who viewed unblurred data (administrators)", icon: "shield" },
+  { href: "/settings/about", label: "About", hint: "version, where the source is, and the licences that apply", icon: "info" },
   { href: "/console", label: "Resource console", hint: "GPU, memory, disk and everything running now", icon: "server" },
 ];
 

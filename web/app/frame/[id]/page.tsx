@@ -30,8 +30,7 @@ import AgentPanel from "@/components/agent/AgentPanel";
 import BulkEditBar from "@/components/agent/BulkEditBar";
 import SceneGraphPanel from "@/components/editor/SceneGraphPanel";
 import PanelSection from "@/components/editor/PanelSection";
-import { StateBadge, ConfBar } from "@/components/StateBadge";
-import ScoreBar from "@/components/shell/ScoreBar";
+import { ConfBar } from "@/components/StateBadge";
 import Icon, { MODE_ICON } from "@/components/shell/Icon";
 import ShortcutOverlay from "@/components/shell/ShortcutOverlay";
 import MenuBar from "@/components/shell/MenuBar";
@@ -46,6 +45,9 @@ import Filmstrip from "@/components/editor/Filmstrip";
 import HistoryPanel from "@/components/editor/HistoryPanel";
 import SessionPicker from "@/components/editor/SessionPicker";
 import PropertiesPanel from "@/components/editor/properties/PropertiesPanel";
+import CuboidPanel from "@/components/editor/panels/CuboidPanel";
+import LanePanel from "@/components/editor/panels/LanePanel";
+import ReviewPanel from "@/components/editor/panels/ReviewPanel";
 import CursorReadout from "@/components/editor/CursorReadout";
 import { camLabel } from "@/lib/editor/camLabel";
 import { IS_DEMO_BUILD } from "@/lib/demoFlag";
@@ -65,20 +67,11 @@ const RigTrackPanel = dynamic(() => import("@/components/editor/RigTrackPanel"),
 const LaneCanvas = dynamic(() => import("@/components/lane/LaneCanvas"), { ssr: false });
 // 3D and LiDAR mode swaps to the three.js point cloud (the folded-in cuboid workspace). Loaded once, ssr off.
 const PointCloudViewer = dynamic(() => import("@/components/lidar/PointCloudViewer"), { ssr: false });
-const LANE_TYPES = ["solid", "dashed", "double", "road_edge", "implicit", "fallback"];
 const CUBOID_DIMS: Record<string, number[]> = {
   sedan: [4.2, 1.8, 1.5], suv: [4.6, 1.9, 1.7], truck: [7.0, 2.5, 3.0], bus: [11.0, 2.6, 3.2],
   motorcycle: [2.0, 0.8, 1.4], pedestrian: [0.6, 0.6, 1.7], autorickshaw: [2.6, 1.4, 1.8],
 };
-const LANE_COLOR: Record<string, string> = { proposed: "#58A6FF", human: "#FF7A2F", propagated: "#E3B341" };
 
-// The three surface classes the ternary drivable mask carries. Fallback is the unpaved shoulder India
-// actually drives on, which is why it is a first-class surface rather than a kind of non-drivable.
-const SURFACE_CLASSES = [
-  { key: "drivable", label: "drivable", tone: "border-pass text-pass" },
-  { key: "fallback", label: "fallback", tone: "border-warn text-warn" },
-  { key: "non_drivable", label: "non-drv", tone: "border-block text-block" },
-];
 
 
 // ray-casting point-in-polygon for a flattened [x,y,x,y,...] polygon, used to pick a clicked superpixel
@@ -2195,216 +2188,30 @@ export default function FrameEditor() {
           )}
           {/* Lanes mode: the panel routes to lane content (list + selected lane props) instead of objects */}
           {mode === "lanes" && (
-            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 text-[12px]">
-              <div className="text-ink-3 uppercase text-[10px]">lanes ({lanes.length})</div>
-              {lanes.map((l) => (
-                <div key={l.lane_id} onClick={() => setLaneSel(l.lane_id)}
-                  className={`flex items-center gap-1.5 cursor-pointer ${l.lane_id === laneSel ? "text-ink" : "text-ink-3 hover:text-ink-2"}`}>
-                  <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: l.is_ego ? "#56D364" : (LANE_COLOR[l.source] || "#A0A6AD") }} />
-                  <span className="truncate flex-1">{l.lane_type}{l.is_ego ? " (ego)" : ""}</span>
-                  <span className="text-ink-3">{l.source[0]}</span>
-                </div>
-              ))}
-              {!lanes.length && <div className="text-ink-3 py-4 text-center">no lanes. propose, or + lane to draw.</div>}
-              {(() => {
-                const sl = lanes.find((l) => l.lane_id === laneSel);
-                if (!sl) return null;
-                return (
-                  <div className="border-t hairline pt-2 space-y-2">
-                    <div className="text-ink-3 uppercase text-[10px]">selected lane</div>
-                    <select value={sl.lane_type} onChange={(e) => setLaneType(e.target.value)} className="w-full bg-bg border border-line px-1 py-0.5 text-ink">
-                      {LANE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                    <button onClick={toggleLaneEgo} className={`w-full border px-2 py-1 ${sl.is_ego ? "border-pass text-pass" : "border-line text-ink-3"}`}>{sl.is_ego ? "ego lane set" : "mark ego"}</button>
-                    <button onClick={delLane} className="w-full border border-line text-ink-3 px-2 py-1 hover:border-block hover:text-block">delete lane</button>
-                  </div>
-                );
-              })()}
-
-              {/* Drivable surface. The PUT behind this has existed since M2.2 and nothing could reach it,
-                  so `source` was `proposed` on 2,478 of 2,479 masks: the layer was machine output a person
-                  could look at and not correct. */}
-              <div className="border-t hairline pt-2 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-ink-3 uppercase text-[10px]">drivable surface</span>
-                  <span className="text-ink-3">
-                    {drivable
-                      ? `${Object.values(drivable).reduce((n, ps) => n + ps.length, 0)} regions`
-                      : "none"}
-                  </span>
-                </div>
-
-                {areaAdding ? (
-                  <>
-                    <div className="text-ink-2">
-                      click to add points ({areaAdding.length}), then close the region
-                    </div>
-                    <div className="grid grid-cols-2 gap-1">
-                      <button onClick={finishArea} disabled={areaAdding.length < 3}
-                        className="border border-pass text-pass px-2 py-1 disabled:opacity-40">close region</button>
-                      <button onClick={() => setAreaAdding(null)}
-                        className="border border-line text-ink-3 px-2 py-1 hover:border-block">cancel</button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-3 gap-1">
-                      {SURFACE_CLASSES.map((c) => (
-                        <button key={c.key}
-                          onClick={() => { setAreaClass(c.key); setAreaAdding([]); setAreaSel(null); }}
-                          title={`draw a ${c.label} region`}
-                          className={`border px-1 py-1 text-[10px] ${c.tone}`}>
-                          + {c.label}
-                        </button>
-                      ))}
-                    </div>
-                    <button onClick={segRoad}
-                      className="w-full border border-line text-ink-3 px-2 py-1 hover:border-accent">
-                      re-run the model
-                    </button>
-                  </>
-                )}
-
-                {areaSel && (
-                  <div className="border-t hairline pt-2 space-y-1">
-                    <div className="text-ink-3 uppercase text-[10px]">
-                      selected {areaSel.split(":")[0].replace("_", " ")} region
-                    </div>
-                    <div className="text-ink-3 text-[10px]">
-                      drag a handle to pull the boundary onto the kerb, then save
-                    </div>
-                    <div className="grid grid-cols-2 gap-1">
-                      <button onClick={() => drivable && void saveDrivable(drivable)}
-                        className="border border-pass text-pass px-2 py-1">save edits</button>
-                      <button onClick={deleteArea}
-                        className="border border-line text-ink-3 px-2 py-1 hover:border-block hover:text-block">delete</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+            <LanePanel lanes={lanes} laneSel={laneSel} drivable={drivable} areaAdding={areaAdding} areaSel={areaSel}
+              onSelectLane={setLaneSel} onSetLaneType={setLaneType} onToggleEgo={toggleLaneEgo}
+              onDeleteLane={() => void delLane()}
+              onStartArea={(surface) => { setAreaClass(surface); setAreaAdding([]); setAreaSel(null); }}
+              onFinishArea={() => void finishArea()} onCancelArea={() => setAreaAdding(null)}
+              onRerunModel={() => void segRoad()} onSaveDrivable={() => drivable && void saveDrivable(drivable)}
+              onDeleteArea={() => void deleteArea()} />
           )}
           {/* 3D and LiDAR mode: the panel routes to the cuboid list plus selected-cuboid geometry */}
           {mode === "lidar3d" && (
-            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 text-[12px]">
-              <div className="flex items-center justify-between">
-                <span className="text-ink-3 uppercase text-[10px]">cuboids ({cub3d.length})</span>
-                <button onClick={addCub} disabled={!cloud3d} className="border border-line text-ink-3 px-1.5 py-0.5 hover:border-accent disabled:opacity-40">+ box</button>
-              </div>
-              <button onClick={aiLift3d} disabled={!cloud3d} className="w-full border border-line text-ink-2 px-2 py-1 hover:border-accent disabled:opacity-40">AI lift 2D to 3D</button>
-              {cub3d.map((c) => (
-                <div key={c.object_3d_id} onClick={() => setCubSel(c.object_3d_id)}
-                  className={`flex items-center justify-between gap-1.5 cursor-pointer ${c.object_3d_id === cubSel ? "text-ink" : "text-ink-3 hover:text-ink-2"}`}>
-                  <span className="truncate flex-1">{c.class_name}</span>
-                  <span className="text-ink-3">{c.state} {c.box_source}</span>
-                </div>
-              ))}
-              {!cub3d.length && <div className="text-ink-3 py-4 text-center">{lidarMsg ?? "no cuboids. lift or + box."}</div>}
-              {cubSelected && (
-                <div className="border-t hairline pt-2 space-y-2">
-                  <div className="text-ink-3 uppercase text-[10px]">selected ({cubSelected.source})</div>
-                  <select value={cubSelected.class_id}
-                    onChange={(e) => { const cid = Number(e.target.value); patchCub(cubSelected.object_3d_id, { class_id: cid, class_name: onto?.classes.find((x) => x.id === cid)?.name }); saveCub(cubSelected.object_3d_id, { class_id: cid }); }}
-                    className="w-full bg-bg border border-line px-1 py-0.5 text-ink">
-                    {pickOnto?.classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                  {["L", "W", "H"].map((lab, i) => (
-                    <label key={lab} className="flex items-center gap-2">
-                      <span className="w-3 text-ink-3">{lab}</span>
-                      <input type="range" min={0.3} max={14} step={0.1} value={cubSelected.dims[i]}
-                        onChange={(e) => patchCub(cubSelected.object_3d_id, { dims: cubSelected.dims.map((d, j) => (j === i ? Number(e.target.value) : d)) })}
-                        onMouseUp={() => saveCub(cubSelected.object_3d_id, { dims: cubSelected.dims })} className="flex-1" />
-                      <span className="w-9 text-right text-ink-3">{cubSelected.dims[i].toFixed(1)}</span>
-                    </label>
-                  ))}
-                  <label className="flex items-center gap-2">
-                    <span className="w-3 text-ink-3">yaw</span>
-                    <input type="range" min={-3.14159} max={3.14159} step={0.01} value={cubSelected.yaw}
-                      onChange={(e) => patchCub(cubSelected.object_3d_id, { yaw: Number(e.target.value) })}
-                      onMouseUp={() => saveCub(cubSelected.object_3d_id, { yaw: cubSelected.yaw })} className="flex-1" />
-                    <span className="w-9 text-right text-ink-3">{(cubSelected.yaw * 57.3).toFixed(0)}</span>
-                  </label>
-                  {/* 9-DOF: pitch (up/down a ramp) and roll (side bank). Auto-estimated from the ground on
-                      lift; editable here for slopes the estimator clamped or missed. */}
-                  {([["pitch", cubSelected.pitch ?? 0], ["roll", cubSelected.roll ?? 0]] as const).map(([axis, val]) => (
-                    <label key={axis} className="flex items-center gap-2">
-                      <span className="w-3 text-ink-3" title={axis === "pitch" ? "tilt up/down a ramp" : "side bank"}>{axis === "pitch" ? "pit" : "rol"}</span>
-                      <input type="range" min={-0.6} max={0.6} step={0.01} value={val}
-                        onChange={(e) => patchCub(cubSelected.object_3d_id, { [axis]: Number(e.target.value) })}
-                        onMouseUp={() => saveCub(cubSelected.object_3d_id, { [axis]: axis === "pitch" ? cubSelected.pitch : cubSelected.roll })} className="flex-1" />
-                      <span className="w-9 text-right text-ink-3">{(val * 57.3).toFixed(0)}</span>
-                    </label>
-                  ))}
-                  <div className="flex items-center gap-1 pt-0.5">
-                    {(["height", "intensity", "source", "segment"] as ColorBy[]).map((kb) => (
-                      <button key={kb} onClick={() => setColorBy3d(kb)} className={`px-1.5 py-0.5 border ${colorBy3d === kb ? "border-accent text-accent" : "border-line text-ink-3"}`}>{kb}</button>
-                    ))}
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => saveCub(cubSelected.object_3d_id, { attrs: { ground_snap: true } })} className="flex-1 border border-line text-ink-2 px-2 py-1 hover:border-accent">ground snap</button>
-                    <button onClick={() => delCub(cubSelected.object_3d_id)} className="border border-line text-ink-3 px-2 py-1 hover:border-block hover:text-block">delete</button>
-                  </div>
-                  <div className="text-ink-3">drag the box in the BEV view to move it.</div>
-                </div>
-              )}
-            </div>
+            <CuboidPanel cuboids={cub3d} selectedId={cubSel} sel={cubSelected} hasCloud={!!cloud3d} message={lidarMsg}
+              classes={pickOnto?.classes ?? []} allClasses={onto?.classes ?? []} colorBy={colorBy3d}
+              onAdd={() => void addCub()} onAiLift={() => void aiLift3d()} onSelect={setCubSel}
+              onPatch={patchCub} onSave={(cid, fields) => void saveCub(cid, fields)}
+              onDelete={(cid) => void delCub(cid)} onColorBy={setColorBy3d} />
           )}
           {/* Review mode: the panel becomes the value queue (highest-value items + error candidates) with
               per-object accept/reject. Canvas stays Konva; reviewer pans/zooms and clicks objects. */}
           {mode === "review" && (
-            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 text-[12px]">
-              {selected ? (
-                <div className="border-b hairline pb-2 space-y-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(selected.class_id) }} />
-                    <span className="truncate flex-1">{selected.class_name}</span>
-                    <StateBadge state={selected.state} />
-                  </div>
-                  <ConfBar conf={selected.conf} />
-                  <div className="flex gap-1">
-                    <button onClick={() => reviewObject("accept")} className="flex-1 border border-pass text-pass px-2 py-1 hover:bg-pass/10">accept (A)</button>
-                    <button onClick={() => reviewObject("reject")} className="flex-1 border border-block text-block px-2 py-1 hover:bg-block/10">reject (X)</button>
-                  </div>
-                </div>
-              ) : <div className="text-ink-3 border-b hairline pb-2">click an object on the canvas to accept or reject it.</div>}
-              <div className="text-ink-3 uppercase text-[10px]">value queue ({alItems.length})</div>
-              {alItems.slice(0, 60).map((it) => (
-                <button key={it.object_id} onClick={() => (it.frame_id === id ? doSelect(it.object_id) : gotoFrame(it.frame_id))}
-                  className={`block w-full text-left border-b hairline pb-1.5 ${it.object_id === st.selectedId ? "text-ink" : "text-ink-3 hover:text-ink-2"}`}>
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate flex-1">{it.class_name}</span>
-                    {it.frame_id !== id && <span className="text-info text-[10px]">other frame</span>}
-                    <span className="text-accent">{it.value.toFixed(3)}</span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
-                    <ConfBar conf={it.conf} />
-                    <ScoreBar label="u" value={it.scores.uncertainty} showValue={false} />
-                    <ScoreBar label="d" value={it.scores.diversity} showValue={false} />
-                    <ScoreBar label="r" value={it.scores.rarity} showValue={false} />
-                    <ScoreBar label="e" value={it.scores.error_prone} showValue={false} tone="warn" />
-                  </div>
-                </button>
-              ))}
-              {!alItems.length && <div className="text-ink-3 py-2 text-center">{reviewLoaded ? "value queue empty" : "loading value queue..."}</div>}
-              {errItems.length > 0 && (
-                <>
-                  <div className="text-ink-3 uppercase text-[10px] pt-1">error candidates ({errItems.length})</div>
-                  {errItems.slice(0, 40).map((ec) => (
-                    <div key={ec.candidate_id} className="border-b hairline pb-1.5 space-y-0.5">
-                      <div className="flex items-center gap-1.5">
-                        <span className="truncate flex-1">{ec.kind}</span>
-                        <span className="text-info">{ec.proposed_label?.class_name || "(review)"}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <ScoreBar value={ec.score} tone="warn" />
-                        <button onClick={async () => { await api.errorConfirm(ec.candidate_id); setErrItems((s) => s.filter((x) => x.candidate_id !== ec.candidate_id)); flash("confirmed error"); }} className="text-block hover:text-accent">confirm</button>
-                        <button onClick={async () => { await api.errorDismiss(ec.candidate_id); setErrItems((s) => s.filter((x) => x.candidate_id !== ec.candidate_id)); }} className="text-ink-3 hover:text-ink">dismiss</button>
-                      </div>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
+            <ReviewPanel selected={selected} selectedId={st.selectedId} frameId={id} alItems={alItems} errItems={errItems}
+              reviewLoaded={reviewLoaded} onReview={(verdict) => void reviewObject(verdict)}
+              onPickItem={(it) => (it.frame_id === id ? doSelect(it.object_id) : void gotoFrame(it.frame_id))}
+              onConfirmError={async (cid) => { await api.errorConfirm(cid); setErrItems((s) => s.filter((x) => x.candidate_id !== cid)); flash("confirmed error"); }}
+              onDismissError={async (cid) => { await api.errorDismiss(cid); setErrItems((s) => s.filter((x) => x.candidate_id !== cid)); }} />
           )}
           {mode !== "lanes" && mode !== "lidar3d" && mode !== "review" && onto && meta && (
             <PropertiesPanel
