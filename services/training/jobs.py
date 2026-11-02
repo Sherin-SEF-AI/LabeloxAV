@@ -43,6 +43,24 @@ class TrainJobSpec(BaseModel):
     notes: str | None = None
 
 
+async def local_base_weights(weights: str | None) -> str | None:
+    """A file the trainer can open, for base weights that may be a registry address.
+
+    A registered model's weights live in the object store (s3://...), and the trainer only reads local
+    files, so starting a run from the champion failed at once with "No such file". A bare model name such
+    as "yolo11l.pt" is left alone: the trainer resolves those itself. The fetch is the auto-labeller's,
+    which caches by address and verifies the bytes on every hit.
+    """
+    if not weights or "://" not in weights:
+        return weights
+    from services.autolabel.runner import _local_champion_weights
+
+    local = await asyncio.to_thread(_local_champion_weights, weights)
+    if local is None:
+        raise RuntimeError(f"base weights {weights} could not be fetched from the object store")
+    return local
+
+
 def _lineage_for(spec, ds: dict | None, base_weights: str | None = None) -> dict:
     """The registry's lineage fields for a finished job: architecture, parent, teacher, origin.
 
@@ -217,6 +235,9 @@ async def run_job(job_id) -> dict:
         task = get_task(spec.task_type)
         name = _safe_name(spec.purpose, job_id)
         base_weights = spec.base_weights or task.default_base_weights()
+        # What the run is recorded as starting from: the registry's own address, not wherever it was cached.
+        base_ref = base_weights
+        base_weights = await local_base_weights(base_weights)
         imgsz = int(spec.hparams.get("imgsz", settings.training.default_imgsz))
 
         ds = await task.build_dataset({"name": name, "dataset_spec": spec.dataset_spec}, progress)
@@ -270,7 +291,7 @@ async def run_job(job_id) -> dict:
         promotion: dict | None = None
         async with get_sessionmaker()() as db:
             await db.merge(ModelRun(
-                run_id=run_id, base_weights=base_weights, weights_uri=weights_uri, dataset_name=name,
+                run_id=run_id, base_weights=base_ref, weights_uri=weights_uri, dataset_name=name,
                 n_train=ds["n_train_images"], n_val=ds["n_val_images"], epochs=epochs,
                 metrics=candidate, baseline_metrics=baseline, gate=gate, promoted=False,
                 ontology_version=onto.version, purpose=spec.purpose, task_type=spec.task_type,
