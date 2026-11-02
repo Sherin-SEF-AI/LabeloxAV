@@ -3483,6 +3483,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/synth/runs",
                           params={"limit": limit}, json_body=None)
 
+    def get_system_about(self) -> Any:
+        """About"""
+        return self._call("GET", f"/api/system/about",
+                          params=None, json_body=None)
+
     def get_system_checks(self) -> Any:
         """System Checks"""
         return self._call("GET", f"/api/system/checks",
@@ -3916,4 +3921,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 766 routes generated from the server schema.
+# 767 routes generated from the server schema.

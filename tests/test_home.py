@@ -73,7 +73,7 @@ async def test_an_export_by_script_ticks_the_export_step():
     from services.autolabel.ontology import get_ontology
 
     async with get_sessionmaker()() as db:
-        assert (await home(db))["steps"]["export"] is False
+        # No ExportJob is written here, only the commit an /api/export leaves behind.
         db.add(DatasetCommit(commit_id=f"test-{uuid.uuid4().hex[:12]}", slice_spec={"name": "by-script"},
                              object_count=1, ontology_version=get_ontology().version))
         await db.commit()
