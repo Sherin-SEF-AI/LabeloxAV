@@ -1,14 +1,14 @@
-"""Ego-compensated propagation, and the guard that refuses it on every session in this corpus.
+"""Ego-compensated propagation, and the guard that refuses it when the motion is unknown.
 
 Copying a box to the next frame assumes the camera stood still. On a moving vehicle that is wrong for
 everything, and most wrong for the roadside furniture propagation should be best at: a parked car sweeps
 across the image as the ego passes it.
 
-Correcting for that needs a rigid transform between two frames. This corpus has GNSS on 3 frames of
-41,752, ego_speed on 6, no heading or IMU attitude and no per-frame 6-DOF pose table. So the acceptance
-test for this feature cannot be run, and what is tested instead is the geometry against hand-checkable
-fixtures plus the refusal on real data. The refusal is not a placeholder: assuming a transform that is not
-there would place boxes confidently and wrongly.
+Correcting for that needs a rigid transform between two frames, from the ego_pose table. The geometry is
+tested against hand-checkable fixtures, the conversion from vehicle axes to camera axes against the
+primitive it feeds, and the guard both ways on real rows. The pass path went untested while no session
+could satisfy the guard, and it carried two bugs that only a real pose exposes: a calibration call with
+missing arguments, and vehicle-frame motion passed as camera-frame motion.
 """
 
 from __future__ import annotations
@@ -24,7 +24,8 @@ from db.models import Frame
 from db.models import Session as DbSession
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
-from services.calyx.ego_propagate import coverage_report, propagate_frame
+from services.calibration.resolve import nominal_calibration
+from services.calyx.ego_propagate import camera_motion, coverage_report, propagate_frame
 
 # A plain pinhole: 1000 px focal, principal point at the centre of a 1920x1080 frame.
 _K = np.array([[1000.0, 0.0, 960.0], [0.0, 1000.0, 540.0], [0.0, 0.0, 1.0]])
@@ -147,6 +148,38 @@ class TestTheMotionModelComesFromThePack:
         assert spec.static_ground & spec.static_elevated == frozenset()
 
 
+def _yaw(a):
+    c, s_ = np.cos(a), np.sin(a)
+    return np.array([[c, -s_, 0.0], [s_, c, 0.0], [0.0, 0.0, 1.0]])
+
+
+class TestVehicleAxesBecomeCameraAxes:
+    """The pose is in the vehicle frame (x forward, y left, z up); the homography is in optical axes."""
+
+    def _H(self, R, t):
+        cal = nominal_calibration("cam_f", 1920, 1080)
+        R_c, t_c, n, h = camera_motion({"R": R, "t": t}, cal)
+        return cal, ground_homography(cal.K(), R_c, t_c, n, h)
+
+    def test_driving_forward_is_the_primitives_forward(self):
+        cal, H = self._H(np.eye(3), [2.0, 0.0, 0.0])
+        h = abs(cal.xyz_m[2])
+        ref = ground_homography(cal.K(), np.eye(3), [0.0, 0.0, 2.0], [0.0, 1.0, 0.0], h)
+        assert np.allclose(H, ref)
+
+    def test_a_left_turn_moves_the_scene_right(self):
+        """Turning left, everything ahead slides right in the image; the old pass-through went left."""
+        _cal, H = self._H(_yaw(np.radians(5.0)), [0.0, 0.0, 0.0])
+        x, _y, w = H @ np.array([960.0, 800.0, 1.0])
+        assert x / w > 960.0 + 50.0
+
+    def test_a_mount_pitched_down_tilts_the_ground_normal_toward_the_lens(self):
+        cal = nominal_calibration("cam_f", 1920, 1080)
+        cal.rpy_deg = (0.0, 5.0, 0.0)
+        _R, _t, n, _h = camera_motion({"R": np.eye(3), "t": [1.0, 0.0, 0.0]}, cal)
+        assert abs(n[1]) > 0.99 and abs(n[2]) > 0.05
+
+
 class TestTheGuardOnRealData:
     pytestmark = pytest.mark.db
 
@@ -187,9 +220,44 @@ class TestTheGuardOnRealData:
             res = await propagate_frame(db, from_frame_id=fids[0], to_frame_id=fids[1])
             assert res["measured"] is False and "different sessions" in res["reason"]
 
-    async def test_the_coverage_report_states_the_blocker_rather_than_a_percentage(self):
+    async def _with_poses(self, db, cls_name: str = "cone"):
+        """Two frames 1/3 s apart, a measured pose on each 4 m apart heading north, and one box."""
+        from db.models import EgoPose, Object
+        from services.intelligence.ego_pose import yaw_to_quat
+
+        onto = get_ontology()
+        sid = uuid.uuid4()
+        db.add(DbSession(session_id=sid, vehicle_id="EGO", start_ts_ns=0, end_ts_ns=1,
+                         ontology_version=onto.version))
+        await db.flush()
+        t0 = now_ns()
+        frames = []
+        for i in range(2):
+            f = Frame(frame_id=uuid.uuid4(), session_id=sid, ts_ns=t0 + i * 333_333_333, cam_id="cam_f",
+                      width=1920, height=1080, img_uri=f"s3://x/p{i}.jpg")
+            db.add(f)
+            frames.append(f)
+        await db.flush()
+        qw, qx, qy, qz = yaw_to_quat(np.pi / 2)
+        for i, f in enumerate(frames):
+            db.add(EgoPose(session_id=sid, ts_ns=f.ts_ns, frame_id=f.frame_id, x=0.0, y=4.0 * i, z=0.0,
+                           qw=qw, qx=qx, qy=qy, qz=qz, source="gnss_imu", quality=0.9, measured=True))
+        db.add(Object(frame_id=frames[0].frame_id, class_id=onto.by_name(cls_name).id,
+                      bbox=[900.0, 700.0, 960.0, 760.0], conf=0.9, source="fused", state="review"))
+        await db.commit()
+        return [str(f.frame_id) for f in frames]
+
+    async def test_a_measured_pose_pair_passes_the_guard_and_moves_a_ground_box(self):
         async with get_sessionmaker()() as db:
+            fids = await self._with_poses(db)
+            res = await propagate_frame(db, from_frame_id=fids[0], to_frame_id=fids[1])
+            assert res["measured"] is True, res
+            assert res["n_propagated"] == 1 and res["dry_run"] is True
+
+    async def test_the_coverage_report_counts_pairs_with_a_pose_on_both_ends(self):
+        async with get_sessionmaker()() as db:
+            before = (await coverage_report(db))["n_propagatable_pairs"]
+            await self._with_poses(db)
             rep = await coverage_report(db)
-            assert rep["propagatable"] is False
-            assert "attitude" in rep["reason"]
-            assert rep["n_frames"] >= 0
+            assert rep["n_propagatable_pairs"] == before + 1
+            assert rep["propagatable"] is True and rep["reason"] is None

@@ -307,6 +307,8 @@ class Track(Base):
     trajectory: Mapped[dict | None] = mapped_column(JSONB)  # per-frame centroids (image + ego frame)
     id_switch_flags: Mapped[dict | None] = mapped_column(JSONB)  # M2.0: flagged re-id/occlusion events
     tracker_version: Mapped[str | None] = mapped_column(String(48))  # M2.0: tracker backend + version
+    # Temporal coherence over the track's span (services/temporal/tube.py); NULL is not measured.
+    tube_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     # M-F.2 track-level typed intents (proposed/confirmed). The same idea as TrackEvent below without a
     # time extent, and empty: 0 rows across 11,406 tracks. TrackEvent is what an annotator writes; this is
     # kept because services/intelligence/intent.py and the VLM dataset generator still read it, and its
@@ -2349,12 +2351,10 @@ class EgoPose(Base):
     can deliver.
 
     `measured` separates an instrument reading from an inference and is not a grade. True means a device
-    observed position; false means it was recovered from the images, which is the only source available
-    for almost this whole corpus. `quality` grades within a source and never stands in for it, because a
+    observed position; false means it was recovered from the images. `quality` grades within a source and never stands in for it, because a
     confident visual estimate is still not a measurement.
 
-    The absence of a row means the pose is unknown at that timestamp, which is the honest state for a
-    corpus carrying GNSS on 3 frames of 41,752.
+    The absence of a row means the pose is unknown at that timestamp.
     """
 
     __tablename__ = "ego_pose"

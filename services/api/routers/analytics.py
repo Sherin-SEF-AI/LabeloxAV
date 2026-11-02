@@ -10,8 +10,17 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from services.analytics import dashboards
 from services.api.deps import current_user, require_role
+from services.api.project_guard import caller_hidden_projects
+from services.project_access import as_hidden
 
-router = APIRouter()
+
+async def _scope_to_caller(hidden=Depends(caller_hidden_projects)) -> None:
+    """Every chart here counts only the sessions the caller may see (services/analytics/dashboards.py).
+    Async, so it runs in the request's own context and the endpoint sees what it sets."""
+    dashboards.hide_projects(as_hidden(hidden))
+
+
+router = APIRouter(dependencies=[Depends(_scope_to_caller)])
 
 
 @router.get("/analytics/overview")

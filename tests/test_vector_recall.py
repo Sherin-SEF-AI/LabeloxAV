@@ -128,8 +128,28 @@ class TestTheSettings:
         async with get_sessionmaker()() as db:
             await tune_recall(db)
             await db.rollback()
+            # The next statement may run on a different backend, where the setting exists only once the
+            # library has loaded.
+            await db.execute(text("SELECT '[1]'::vector"))
             got = (await db.execute(text("SHOW hnsw.iterative_scan"))).scalar()
         assert got != HNSW_ITERATIVE_SCAN or got == "off"
+
+    async def test_the_first_search_on_a_fresh_connection_still_finds_the_settings(self):
+        """pgvector lists its hnsw.* settings only after its library loads into the backend. The settings
+        were read once per process from whatever backend asked first, so a fresh server whose first search
+        ran on a fresh connection cached "none" and never tuned again."""
+        import core.embeddings as emb
+
+        original = emb._HNSW_GUCS
+        emb._HNSW_GUCS = None
+        try:
+            async with get_sessionmaker()() as db:
+                await tune_recall(db)
+                assert "hnsw.iterative_scan" in (emb._HNSW_GUCS or set())
+                got = (await db.execute(text("SHOW hnsw.iterative_scan"))).scalar()
+            assert got == HNSW_ITERATIVE_SCAN
+        finally:
+            emb._HNSW_GUCS = original
 
     async def test_a_missing_setting_does_not_poison_the_transaction(self):
         """The first attempt at this issued every SET inside its own try. A failed SET aborts the surrounding

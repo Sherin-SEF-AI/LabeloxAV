@@ -10,7 +10,7 @@ import type { AlItem, ErrorCandidateRow } from "@/lib/types";
 // error candidates. Presentational: the frame editor owns the queues and passes the actions in.
 
 export default function ReviewPanel({
-  selected, selectedId, frameId, alItems, errItems, reviewLoaded,
+  selected, selectedId, frameId, alItems, errItems, reviewLoaded, reviewError = null,
   onReview, onPickItem, onConfirmError, onDismissError,
 }: {
   selected: EdObject | null;
@@ -19,6 +19,7 @@ export default function ReviewPanel({
   alItems: AlItem[];
   errItems: ErrorCandidateRow[];
   reviewLoaded: boolean;
+  reviewError?: string | null;
   onReview: (verdict: "accept" | "reject") => void;
   onPickItem: (item: AlItem) => void;
   onConfirmError: (candidateId: string) => void;
@@ -58,7 +59,8 @@ export default function ReviewPanel({
           </div>
         </button>
       ))}
-      {!alItems.length && <div className="text-ink-3 py-2 text-center">{reviewLoaded ? "value queue empty" : "loading value queue..."}</div>}
+      {reviewError && <div className="text-block py-2">{reviewError}</div>}
+      {!alItems.length && !reviewError && <div className="text-ink-3 py-2 text-center">{reviewLoaded ? "value queue empty" : "loading value queue..."}</div>}
       {errItems.length > 0 && (
         <>
           <div className="text-ink-3 uppercase text-[10px] pt-1">error candidates ({errItems.length})</div>

@@ -1,12 +1,11 @@
 """Propagating a label to the next frame with the ego motion, and refusing when the pose is not there.
 
-The guard is the important part of this module and it fires on every session in this corpus.
-
-Ego-compensated propagation needs a rigid transform between two frames: how the camera moved. This engine
-has `Frame.gnss` on 3 frames and `Frame.ego_speed` on 6, across one session of 377, and no per-frame 6-DOF
-pose table at all. So for essentially the whole corpus the honest answer is that the motion is unknown,
-and this refuses rather than assuming the camera stood still, which is what an uncompensated copy assumes
-and is wrong for every static object.
+Ego-compensated propagation needs a rigid transform between two frames: how the camera moved. Until
+2026-11-02 this corpus had GNSS on 3 frames of 41,752 and the guard below refused on every session. The
+dashcam stamp reader (`services/ingest/overlay_telemetry.py`) now gives most drives a measured trajectory,
+so the guard passes there, and the first measurement of what that buys is in docs/MEASUREMENT.md (row 5):
+on these uncalibrated dashcams a warped box lands on the object less often than a plain copy does, so this
+stays an explicit, dry-run-by-default tool rather than a step in any default path.
 
 Two ways of moving a box, and they check each other:
 
@@ -53,13 +52,12 @@ class PoseUnavailable(Exception):
 async def ego_transform(db: AsyncSession, from_frame: Frame, to_frame: Frame) -> dict[str, Any]:
     """The camera motion between two frames, or a refusal naming what is missing.
 
-    Returns {"measured", "R", "t", "reason"}. This is where the corpus blocks: with GNSS on 3 frames and
-    no pose table, there is nothing to derive a rigid transform from for any real pair, and the module
-    says which of the two frames lacked what rather than reporting a generic failure.
+    Returns {"measured", "R", "t", "reason"}, in the vehicle frame of `from_frame`. Where a frame has no
+    pose the module says which of the two lacked what rather than reporting a generic failure.
     """
-    # The pose table (0112) is asked first, because it is the only source that can answer for this corpus
-    # at all: GNSS is on 3 frames of 41,752, and `services/intelligence/ego_pose` fills the rest from the
-    # images. A pose pair gives both rotation and translation, which is what propagation actually needs.
+    # The pose table (0112) is asked first: `services/intelligence/ego_pose` builds it from GNSS where a
+    # drive has it and from the images where it does not. A pose pair gives both rotation and translation,
+    # which is what propagation actually needs.
     poses = await _pose_pair(db, from_frame, to_frame)
     if poses is not None:
         a, b = poses
@@ -75,8 +73,8 @@ async def ego_transform(db: AsyncSession, from_frame: Frame, to_frame: Frame) ->
                           "between the two frames, and neither frame has a row in the ego_pose table "
                           "either, so the motion between them is unknown"}
 
-    # With both fixes present the translation is derivable; rotation needs a heading source this corpus
-    # also lacks, so the honest transform is translation-only and is declared as such.
+    # With both fixes present but no pose rows the translation is derivable and the rotation is not, and a
+    # translation-only transform is not offered.
     return {"measured": False, "R": None, "t": None,
             "reason": "both frames carry GNSS but no heading or IMU attitude, so the rotation between "
                       "them is unknown; a translation-only transform would place a rotated scene wrongly"}
@@ -121,6 +119,31 @@ def _transform_from_poses(a, b) -> dict[str, Any]:
                        f"(quality {quality:.2f}); the transform is usable but is not a measurement")}
 
 
+def camera_motion(motion: dict[str, Any], calib) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    """The pose change as `ground_homography` wants it: in the source camera's optical axes.
+
+    The pose transform is in the vehicle frame (x forward, y left, z up) and describes how the VEHICLE
+    moved; the homography wants rotation of the scene seen by the camera and the plane in optical axes
+    (x right, y down, z forward). Passing the vehicle-frame values straight through reads forward motion as
+    sideways and turns the wrong way, which is what this module did before it had ever run on a real pose.
+
+    Returns (R, t, normal, height) where `t` is already premultiplied by R, so that the primitive's
+    `R - t n^T / h` equals the exact `R (I - t_c n^T / h)` for a camera that both turned and moved.
+    """
+    from services.calibration.resolve import ipm_args
+
+    R_ego = np.asarray(motion["R"], dtype=np.float64)
+    t_ego = np.asarray(motion["t"], dtype=np.float64).reshape(3)
+    M = np.asarray(calib.R(), dtype=np.float64).T          # vehicle column vector -> optical
+    mount = np.asarray(calib.xyz_m, dtype=np.float64)
+    # The camera centre moves with the vehicle plus the swing of its mount about the vehicle origin.
+    t_cam = M @ (t_ego + (R_ego - np.eye(3)) @ mount)
+    # Scene points rotate opposite to the vehicle.
+    R_cam = M @ R_ego.T @ M.T
+    normal = M @ np.array([0.0, 0.0, -1.0])
+    return R_cam, R_cam @ t_cam, normal, float(ipm_args(calib)["height_m"])
+
+
 def _agreement(geometry_box: tuple[float, ...], tracker_box: list[float]) -> float:
     a = np.asarray([list(geometry_box)], dtype=float)
     b = np.asarray([list(tracker_box)], dtype=float)
@@ -132,8 +155,8 @@ async def propagate_frame(db: AsyncSession, *, from_frame_id: str, to_frame_id: 
                           dry_run: bool = True) -> dict[str, Any]:
     """Propagate every eligible label from one frame to the next, or refuse and say why.
 
-    `dry_run` defaults True: this writes labels into the corpus, and the guard below has never been
-    satisfied on any real session, so the first time it is it should be a person's decision.
+    `dry_run` defaults True: this writes labels into the corpus, and on the one corpus it has been measured
+    against a copy did better (docs/MEASUREMENT.md, row 5), so writing is a person's decision.
     """
     src = await db.get(Frame, UUID(from_frame_id))
     dst = await db.get(Frame, UUID(to_frame_id))
@@ -146,28 +169,24 @@ async def propagate_frame(db: AsyncSession, *, from_frame_id: str, to_frame_id: 
 
     motion = await ego_transform(db, src, dst)
     if not motion["measured"]:
-        # The guard. It fires on every session in this corpus and that is the correct outcome: an
-        # uncompensated copy assumes the camera stood still, which is wrong for every static object and
-        # most wrong for the roadside furniture propagation should be best at.
+        # The guard: an uncompensated copy assumes the camera stood still, which is wrong for every static
+        # object and most wrong for the roadside furniture propagation should be best at.
         log.info("ego_propagate.refused", from_frame=from_frame_id, to_frame=to_frame_id,
                  reason=motion["reason"])
         return {"measured": False, "from_frame_id": from_frame_id, "to_frame_id": to_frame_id,
                 "reason": motion["reason"], "n_propagated": 0, "n_conflicts": 0}
 
-    # Unreachable on this corpus: the guard above has never been satisfied on a real session.
     from packs.registry import default_pack_id, get_pack
     from services.autolabel.ontology import get_ontology
     from services.calibration.resolve import resolve_calibration
 
     spec = get_pack(default_pack_id()).motion_models
     onto = get_ontology()
-    calib = await resolve_calibration(src.session_id, src.cam_id)
-    if calib is None or spec is None:
-        return {"measured": False, "reason": "no calibration for this camera, or the pack defines no "
-                                             "motion models, so no box can be warped"}
-
-    H = ground_homography(calib.K(), motion["R"], motion["t"],
-                          normal=[0.0, 1.0, 0.0], height=getattr(calib, "height_m", 1.5))
+    if spec is None:
+        return {"measured": False, "reason": "the pack defines no motion models, so no box can be warped"}
+    calib = await resolve_calibration(src.session_id, src.cam_id, int(src.width), int(src.height))
+    R_cam, t_cam, normal, height = camera_motion(motion, calib)
+    H = ground_homography(calib.K(), R_cam, t_cam, normal=normal, height=height)
     src_objs = (await db.execute(select(Object).where(Object.frame_id == src.frame_id))).scalars().all()
     dst_objs = (await db.execute(select(Object).where(Object.frame_id == dst.frame_id))).scalars().all()
     by_track = {o.track_id: o for o in dst_objs if o.track_id is not None}
@@ -214,24 +233,34 @@ async def propagate_frame(db: AsyncSession, *, from_frame_id: str, to_frame_id: 
 
 
 async def coverage_report(db: AsyncSession) -> dict[str, Any]:
-    """How much of the corpus could be propagated at all, which is the honest headline for this feature.
+    """How much of the corpus could be propagated at all, read from the data rather than assumed.
 
-    Reported rather than assumed, because "ego propagation is built" and "ego propagation can run" are
-    different claims and only the first is currently true.
+    A frame is propagatable when it and the next frame from the same camera both have a measured pose,
+    because only then does the guard in `propagate_frame` pass.
     """
-    from sqlalchemy import func
+    from sqlalchemy import func, text
 
     total = (await db.execute(select(func.count()).select_from(Frame))).scalar_one()
     with_gnss = (await db.execute(select(func.count()).select_from(Frame).where(
         Frame.gnss.is_not(None)))).scalar_one()
     with_speed = (await db.execute(select(func.count()).select_from(Frame).where(
         Frame.ego_speed.is_not(None)))).scalar_one()
+    pairs = (await db.execute(text("""
+        with f as (select session_id, ts_ns,
+                          lead(ts_ns) over (partition by session_id, cam_id order by ts_ns) as nts
+                   from frame)
+        select count(*) from f
+        join ego_pose a on a.session_id = f.session_id and a.ts_ns = f.ts_ns and a.measured
+        join ego_pose b on b.session_id = f.session_id and b.ts_ns = f.nts and b.measured
+    """))).scalar_one()
     return {"n_frames": int(total), "n_with_gnss": int(with_gnss), "n_with_ego_speed": int(with_speed),
             "pct_with_gnss": round(100.0 * with_gnss / total, 4) if total else 0.0,
-            "propagatable": False,
-            "reason": ("a rigid camera transform needs position AND attitude between two frames; this "
-                       "corpus has GNSS on a handful of frames, no heading or IMU attitude, and no "
-                       "per-frame 6-DOF pose table, so no pair of frames yields a usable transform")}
+            "n_propagatable_pairs": int(pairs),
+            "propagatable": bool(pairs),
+            "reason": None if pairs else
+                      ("a rigid camera transform needs a measured pose on both frames of a pair, and no "
+                       "pair of consecutive frames has one; GNSS (or a dashcam's burned-in stamp) is "
+                       "what provides it")}
 
 
-__all__ = ["ego_transform", "propagate_frame", "coverage_report", "PoseUnavailable", "AGREE_IOU"]
+__all__ = ["camera_motion", "ego_transform", "propagate_frame", "coverage_report", "PoseUnavailable", "AGREE_IOU"]

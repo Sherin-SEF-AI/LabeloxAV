@@ -33,7 +33,7 @@ from typing import Any
 from uuid import UUID
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
@@ -314,4 +314,74 @@ async def fit_from_run(db: AsyncSession, *, run_id: str, tube_by_track: dict[str
     return out
 
 
-__all__ = ["JointSurface", "fit_surface", "fit_from_run", "N_BINS", "MIN_SUPPORT", "MIN_CELL"]
+async def tube_by_prediction(db: AsyncSession, *, run_id: str, min_conf: float = 0.1,
+                             match_iou: float = 0.5) -> dict[str, Any]:
+    """Tube scores for a run's scored predictions, from the corpus tracks they land on.
+
+    A gold set's frames are scattered across sessions, so its predictions cannot form tubes of their own.
+    The corpus can: every object on those frames sits on a BoT-SORT track over the session's consecutive
+    frames. A prediction that overlaps an object (IoU >= match_iou) takes that object's track, and the
+    track's tube score (core/accel/tube_score.py) over its whole span is the prediction's. A prediction that
+    overlaps nothing on a track gets no score, which fit_surface treats as excluded, not as zero.
+
+    Returns {"rows": [(conf, tube, correct, frame_id)], "n_scored", "n_matched", "n_tracks"}. One outcome per
+    prediction: repeated evaluations of a run leave several patches per prediction, and counting each would
+    weight a prediction by how often it was evaluated.
+    """
+    from db.models import Object
+
+    run = await db.get(InferenceRun, UUID(run_id))
+    if run is None:
+        return {"rows": [], "n_scored": 0, "n_matched": 0, "n_tracks": 0, "reason": "inference run not found"}
+    preds = (await db.execute(
+        select(Prediction.prediction_id, Prediction.frame_id, Prediction.bbox, Prediction.conf,
+               Prediction.conf_calibrated, func.bool_or(EvalPatch.outcome == "tp"))
+        .join(EvalPatch, EvalPatch.prediction_id == Prediction.prediction_id)
+        .where(Prediction.run_id == run.run_id, Prediction.conf >= min_conf)
+        .group_by(Prediction.prediction_id))).all()
+    frames = {p[1] for p in preds}
+    objs = (await db.execute(select(Object.frame_id, Object.bbox, Object.track_id).where(
+        Object.frame_id.in_(frames), Object.track_id.is_not(None)))).all()
+    by_frame: dict = {}
+    for fid, bbox, tid in objs:
+        by_frame.setdefault(fid, []).append((bbox, tid))
+
+    def _iou(a, b) -> float:
+        ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+        iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+        inter = ix * iy
+        u = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+        return inter / u if u > 0 else 0.0
+
+    track_of: dict = {}
+    for pid, fid, pbox, *_ in preds:
+        best, tid = 0.0, None
+        for obox, otid in by_frame.get(fid, []):
+            v = _iou(pbox, obox)
+            if v > best:
+                best, tid = v, otid
+        if tid is not None and best >= match_iou:
+            track_of[pid] = tid
+
+    from services.temporal.tube import score_track
+
+    tube: dict = {}
+    for tid in set(track_of.values()):
+        score = await score_track(db, tid)
+        if score is not None:
+            tube[tid] = score
+
+    out = []
+    for pid, fid, _b, conf, cal, tp in preds:
+        tid = track_of.get(pid)
+        if tid is None or tid not in tube:
+            continue
+        score = cal if cal is not None else conf
+        if score is None:
+            continue
+        out.append((float(score), tube[tid], bool(tp), fid))
+    return {"rows": out, "n_scored": len(preds), "n_matched": len(track_of), "n_tracks": len(tube)}
+
+
+__all__ = ["JointSurface", "fit_surface", "fit_from_run", "tube_by_prediction", "N_BINS", "MIN_SUPPORT",
+           "MIN_CELL"]

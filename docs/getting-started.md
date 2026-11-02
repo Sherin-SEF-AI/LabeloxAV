@@ -87,8 +87,8 @@ link (the server answers 404, so nothing confirms they exist). Administrators se
 import can name its project (`project_id`); without one it goes to the default project.
 
 Any list the server returns leaves out rows that name a hidden session, frame, object or track, including
-pages that were never written with projects in mind. What is not scoped are aggregate numbers: the charts
-on analytics and similar overview pages still count across every project.
+pages that were never written with projects in mind, and the analytics charts count only the sessions the
+viewer may see. The corpus-wide engines in Labs read across projects and are for administrators.
 
 ## Which classes a project labels
 

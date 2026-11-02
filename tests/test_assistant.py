@@ -306,3 +306,14 @@ def test_export_and_training_proposals_apply_through_the_normal_paths(monkeypatc
     assert e is not None and e.spec["session_id"] == s["session_id"]
     assert t is not None and t.config["dataset_spec"]["project_id"] == s["project_id"]
     assert t.config["promote"] is False and t.config["hparams"]["epochs"] == 5
+
+
+def test_training_on_everything_must_be_asked_for_not_fallen_into():
+    _seed()
+    _seed()  # two projects at least
+    model = Scripted(call("propose_training", epochs=5), call("propose_training", epochs=5, all_projects=True),
+                     Reply(content="done"))
+    out = _turn(model, "train a model")
+    assert out["trace"][0]["error"] and "all_projects" in out["trace"][0]["error"]
+    (p,) = out["proposals"]
+    assert "every project" in p["summary"]

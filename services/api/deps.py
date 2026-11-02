@@ -83,7 +83,12 @@ async def current_user(
         return None
     try:
         user = await db.get(User, UUID(uid))
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        from db.session import database_unavailable
+
+        if database_unavailable(exc):
+            raise HTTPException(status_code=503, detail="the database is not answering; try again in a moment",
+                                headers={"Retry-After": "5"}) from exc
         return None
     if user is None:
         return None

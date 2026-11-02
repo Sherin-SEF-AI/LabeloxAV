@@ -72,7 +72,7 @@ def priority_sql(rare_ids: list[int]):
     mask_box = case((prov["mask_box_disagree"].astext == "true", 0.5), else_=0.0)
     # Nested rather than one AND: Postgres does not promise to evaluate AND left to right, and
     # jsonb_array_length raises on anything that is not an array. CASE does promise its order.
-    overruled = literal_column("""'$.proposals[*] ? (@.verdict == "overruled")'::jsonpath""")
+    overruled: Any = literal_column("""'$.proposals[*] ? (@.verdict == "overruled")'::jsonpath""")
     conflict = case((func.jsonb_typeof(proposals) == "array",
                      case((and_(func.jsonb_array_length(proposals) > 1, func.jsonb_path_exists(prov, overruled)), 0.5),
                           else_=0.0)),
@@ -145,9 +145,26 @@ async def evaluate_orderings(db: AsyncSession, gold_id: str, *, seeds: int = 200
     rare = frozenset(rare_class_ids(get_ontology()))
     al = await score_candidates(db, object_ids=[m.object_id for m, _ in pool], pool_limit=len(pool))
     value = {it["object_id"]: it["value"] for it in al}
+    # Tube coherence of each pool object's track (services/temporal/tube.py); None when unmeasured, which
+    # these orderings treat as the pool's median rather than as a strong signal either way.
+    from db.models import Track
+
+    tids = {m.track_id for m, _ in pool if m.track_id is not None}
+    tube = {t: s for t, s in (await db.execute(select(Track.track_id, Track.tube_score).where(
+        Track.track_id.in_(tids), Track.tube_score.is_not(None)))).all()} if tids else {}
+    median_tube = float(np.median(list(tube.values()))) if tube else 0.5
+
+    def _tube(m) -> float:
+        return float(tube.get(m.track_id, median_tube))
+
+    def _formula(m) -> float:
+        return priority_of(m.conf, m.class_id, m.provenance, rare)
+
     orders = {
-        "queue_formula": sorted(pool, key=lambda t: (-priority_of(t[0].conf, t[0].class_id, t[0].provenance, rare),
-                                                     str(t[0].object_id))),
+        "queue_formula": sorted(pool, key=lambda t: (-_formula(t[0]), str(t[0].object_id))),
+        "queue_formula_with_tube": sorted(pool, key=lambda t: (-_formula(t[0]) * (2.0 - _tube(t[0])),
+                                                               str(t[0].object_id))),
+        "lowest_tube": sorted(pool, key=lambda t: (_tube(t[0]), str(t[0].object_id))),
         "al_value": sorted(pool, key=lambda t: (-value.get(str(t[0].object_id), -1.0), str(t[0].object_id))),
         "lowest_confidence": sorted(pool, key=lambda t: (t[0].conf, str(t[0].object_id))),
     }

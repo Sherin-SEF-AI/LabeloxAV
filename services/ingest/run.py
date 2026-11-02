@@ -125,6 +125,11 @@ async def ingest(
 
                 # PII anonymization in place, before encode: no clean frame ever reaches storage.
                 pii = anon.anonymize(rf.image_bgr) if anon else None
+                if pii is not None and pii.withheld:
+                    # Plate-like text survived both blur passes (services/anonymize/text_regions.py): this
+                    # frame would leak, so it is never stored, rather than stored with a flag nobody reads.
+                    log.warning("frame.withheld_redaction_failed", reason=pii.redaction_reason)
+                    continue
 
                 ok, buf = cv2.imencode(".jpg", rf.image_bgr, [cv2.IMWRITE_JPEG_QUALITY, 92])
                 if not ok:
@@ -243,6 +248,11 @@ async def ingest(
     except Exception as exc:  # noqa: BLE001
         log.warning("ingest.frame_groups_schedule_failed", error=str(exc))
 
+    # Dashcam telemetry burned into the video: position and speed for footage that carries no GNSS of its
+    # own, then the session's ego poses. Off the critical path, like the two above.
+    if settings.ingest.overlay_telemetry and n_frames:
+        spawn(_overlay_telemetry(session_id), name="overlay_telemetry")
+
     result = {
         "session_id": str(session_id),
         "n_frames": n_frames,
@@ -253,6 +263,23 @@ async def ingest(
     }
     log.info("ingest.done", **result)
     return result
+
+
+async def _overlay_telemetry(session_id: uuid.UUID) -> None:
+    from sqlalchemy import func, select
+
+    from services.ingest.overlay_telemetry import backfill_session
+    from services.intelligence.ego_pose import build_ego_pose
+
+    try:
+        async with get_sessionmaker()() as db:
+            if (await db.execute(select(func.count(Frame.gnss)).where(Frame.session_id == session_id))).scalar():
+                return
+            res = await backfill_session(db, get_object_store(), session_id)
+        if res.get("written"):
+            await build_ego_pose(session_id)
+    except Exception as exc:  # noqa: BLE001 - telemetry is a bonus; it never fails an ingest
+        log.warning("ingest.overlay_telemetry_failed", session=str(session_id), error=str(exc))
 
 
 def _upload_raw(path: Path, vehicle: str) -> str:

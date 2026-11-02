@@ -248,15 +248,23 @@ def new_regions(candidates: list[Candidate], existing: list[dict]) -> list[Candi
     return fresh
 
 
-async def recheck_frame(db: AsyncSession, store, anonymizer, frame: Frame, *, apply: bool = True) -> dict:
+async def recheck_frame(db: AsyncSession, store, anonymizer, frame: Frame, *, apply: bool = True,
+                        types: frozenset[str] | None = None,
+                        min_scores: dict[str, float] | None = None) -> dict:
     """Look again at one frame, blur what the first pass missed, and record it. Returns counts.
 
     With `apply=False` nothing is written and nothing is blurred, which is what the plan endpoint serves: a
     blur cannot be undone, so the operation has to be inspectable before it is taken.
+
+    `types` limits the pass to some redaction targets (e.g. plates only), and `min_scores` raises the score a
+    new region of a type must reach. A pass that leaves a target out has not looked at the frame properly,
+    so it does not stamp the audit as re-checked: only a full pass does, which is what the export gate reads.
     """
     from services.domain import redaction_targets
 
-    targets_by_detector = {t.detector: t.name for t in redaction_targets()}
+    all_targets = {t.detector: t.name for t in redaction_targets()}
+    targets_by_detector = {d: n for d, n in all_targets.items() if types is None or n in types}
+    full_pass = set(all_targets.values()) <= set(targets_by_detector.values()) and not min_scores
     existing = await _audit_of(db, frame.frame_id)
     prior_regions: list[dict] = list(existing.regions or []) if existing is not None else []
 
@@ -286,11 +294,16 @@ async def recheck_frame(db: AsyncSession, store, anonymizer, frame: Frame, *, ap
                                          anchors=[b for b, _wants in boxes]))
 
     fresh = new_regions(_dedup(candidates), prior_regions)
+    if min_scores:
+        fresh = [c for c in fresh if c.score >= min_scores.get(c.type, 0.0)]
     counts = {"face": 0, "plate": 0}
     for c in fresh:
         counts[c.type] = counts.get(c.type, 0) + 1
 
-    method_version = f"{anonymizer.method_version}{ROI_SUFFIX}"
+    if full_pass:
+        method_version = f"{anonymizer.method_version}{ROI_SUFFIX}"
+    else:
+        method_version = existing.method_version if existing is not None else anonymizer.method_version
     result = {
         "status": "planned" if not apply else "applied",
         "faces_added": counts.get("face", 0),
@@ -304,9 +317,9 @@ async def recheck_frame(db: AsyncSession, store, anonymizer, frame: Frame, *, ap
         # Finding nothing still means the frame has now been looked at properly, so the audit records the
         # method that looked. Otherwise every sweep would re-examine the same clean frames forever, and a
         # frame that had no audit at all would stay outside the DPDPA gate despite having been checked.
-        if apply and existing is not None:
+        if apply and full_pass and existing is not None:
             existing.method_version = method_version
-        elif apply:
+        elif apply and full_pass:
             db.add(PiiAudit(frame_id=frame.frame_id, session_id=frame.session_id, n_faces=0, n_plates=0,
                             regions=[], method_version=method_version, ts_ns=frame.ts_ns))
         return result

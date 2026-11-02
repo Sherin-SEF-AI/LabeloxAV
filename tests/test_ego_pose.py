@@ -286,6 +286,50 @@ class TestGnssRowsReadGeography:
                 xs = [r["x"] for r in rows]
                 assert xs == sorted(xs) and xs[-1] > xs[0] + 1.0, "eastward motion should show in x"
                 assert max(abs(r["y"]) for r in rows) < 1.0, "a straight eastward drive has no northing"
+                # East is yaw 0 in ENU, which a missing heading also produces; the north test below is the
+                # one that tells them apart.
+                assert all(abs(quat_yaw(r["qw"], r["qz"])) < 0.01 for r in rows)
+                assert all(r["speed_mps"] == pytest.approx(10.0) for r in rows[1:])
+            finally:
+                await db.execute(text("delete from frame where session_id = :s"), {"s": sid})
+                await db.execute(text("delete from session where session_id = :s"), {"s": sid})
+                await db.commit()
+
+    @pytest.mark.db
+    @pytest.mark.asyncio
+    async def test_a_drive_north_faces_north_and_a_held_fix_keeps_its_heading(self):
+        import uuid as _uuid
+
+        from sqlalchemy import text
+
+        from core.timebase import now_ns, seconds_to_ns
+        from db.models import Frame
+        from db.models import Session as DbSession
+        from db.session import get_sessionmaker
+        from services.autolabel.ontology import get_ontology
+        from services.intelligence.ego_pose import _gnss_rows
+
+        t0 = now_ns()
+        sid = _uuid.uuid4()
+        onto = get_ontology()
+        # North, then the fix is held for one frame, the way a dashcam stamp updates.
+        lats = [12.9716, 12.9717, 12.9718, 12.9718, 12.9719]
+        async with get_sessionmaker()() as db:
+            db.add(DbSession(session_id=sid, vehicle_id="TEST-EGO", city="BLR", route="ego-pose-north",
+                             start_ts_ns=t0, end_ts_ns=t0 + seconds_to_ns(6), sensors={},
+                             ontology_version=onto.version))
+            await db.flush()
+            for i, lat in enumerate(lats):
+                db.add(Frame(frame_id=_uuid.uuid4(), session_id=sid, cam_id="cam_f",
+                             ts_ns=t0 + seconds_to_ns(i), width=1920, height=1080, quality=0.9,
+                             scene={}, img_uri=f"s3://test/egon/{i}.jpg",
+                             gnss=f"SRID=4326;POINT(77.5946 {lat})"))
+            await db.commit()
+            try:
+                rows = await _gnss_rows(db, sid)
+                yaws = [quat_yaw(r["qw"], r["qz"]) for r in rows]
+                assert all(y == pytest.approx(math.pi / 2, abs=0.01) for y in yaws), yaws
+                assert all(r["speed_mps"] is not None for r in rows[1:3])
             finally:
                 await db.execute(text("delete from frame where session_id = :s"), {"s": sid})
                 await db.execute(text("delete from session where session_id = :s"), {"s": sid})

@@ -117,3 +117,25 @@ async def test_an_old_failure_is_history_not_attention():
         await db.commit()
         body = await home(db)
     assert str(jid) not in {f["job_id"] for f in body["jobs"]["failed"]}
+
+
+async def test_control_samples_and_judging_lots_are_named_as_waiting_for_a_person():
+    """Their verdicts are the gate's only measured precision and a lot's acceptance; nothing in the app said
+    they were waiting, and 609 controls and two lots sat unjudged."""
+    from db.models import ControlSample, Object, SettlementLot
+    from services.api.routers.home import _waiting_for_people
+
+    await _seed(["auto_accept"])
+    async with get_sessionmaker()() as db:
+        obj = (await db.execute(select(Object).order_by(Object.created_at.desc()).limit(1))).scalars().first()
+        db.add(ControlSample(object_id=obj.object_id, was_auto_accepted=True))
+        lot = SettlementLot(class_id=obj.class_id, model_epoch="test", population=1000, tier="default",
+                            far_bound=0.05, sample_object_ids=[str(obj.object_id)], batch_id="settle-test-lot",
+                            status="judging", created_by="test")
+        db.add(lot)
+        await db.commit()
+        waiting = await _waiting_for_people(db)
+    kinds = {w["kind"]: w for w in waiting if w["kind"] != "settlement_lot" or w["lot_id"] == str(lot.lot_id)}
+    assert kinds["control_samples"]["count"] >= 1 and kinds["control_samples"]["href"] == "/review/rapid?control=1"
+    assert kinds["settlement_lot"]["href"] == "/queue?flywheel=settle-test-lot"
+    assert kinds["settlement_lot"]["of"] == 1 and kinds["settlement_lot"]["judged"] == 0

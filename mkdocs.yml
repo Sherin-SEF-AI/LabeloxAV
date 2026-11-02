@@ -93,6 +93,7 @@ nav:
       - Verification pass: VERIFICATION.md
       - Data retention: DATA_RETENTION.md
       - Licensing: LICENSING.md
+      - Releasing: RELEASE.md
   - Reference:
       - Engineering log: ENGINEERING_LOG.md
       - Remediation status: REMEDIATION_STATUS.md

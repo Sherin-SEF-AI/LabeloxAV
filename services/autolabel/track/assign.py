@@ -85,6 +85,11 @@ async def retrack_session(session_id: UUID) -> dict:
         await db.flush()
         for oid, tid in assignment.items():
             objects_by_id[oid].track_id = tid
+        await db.flush()
+        # How coherent each new track is over time; the review queue ranks on it (services/queue_order.py).
+        from services.temporal.tube import score_session_tracks
+
+        await score_session_tracks(db, session_id)
         await db.commit()
 
     out = {"session_id": str(session_id), "tracks": len(all_tracks),

@@ -29,6 +29,7 @@ from db.models import (
 from db.models import Session as DbSession
 from services.api.deps import db_session, require_role
 from services.api.project_guard import caller_hidden_projects
+from services.autolabel.ontology import get_ontology
 from services.project_access import as_hidden, scope_visible_sessions, visible_session_ids
 
 router = APIRouter()
@@ -106,7 +107,7 @@ async def home(db: AsyncSession = Depends(db_session), hidden=Depends(caller_hid
         "jobs": {"active": active, "active_total": sum(active.values()), "running": running,
                  "failed": failed[:5], "failed_window_days": ATTENTION_DAYS},
         "recent_sessions": recent,
-        "waiting_for_people": await _waiting_for_people(db),
+        "waiting_for_people": await _waiting_for_people(db, hidden),
         # The first-run path, in order. Each is a fact about the database, not a box somebody ticked.
         "steps": {
             "data": sessions > 0,
@@ -118,7 +119,7 @@ async def home(db: AsyncSession = Depends(db_session), hidden=Depends(caller_hid
     }
 
 
-async def _waiting_for_people(db: AsyncSession) -> list[dict]:
+async def _waiting_for_people(db: AsyncSession, hidden: frozenset = frozenset()) -> list[dict]:
     """Measurements that cannot finish without a person: blind audits not yet labelled.
 
     A blind audit is the only instrument that says whether gold recall is real or a small gold set flattering
@@ -142,4 +143,27 @@ async def _waiting_for_people(db: AsyncSession) -> list[dict]:
         out.append({"kind": "blind_audit", "audit_id": a["audit_id"], "job_id": a["job_id"],
                     "frame_id": str(first), "n_frames": a["n_frames"], "n_labeled": a["n_labeled"],
                     "created_at": a["created_at"]})
+
+    # Control samples: auto-accepted labels drawn at random for a person to check. Their verdicts are the only
+    # measured precision the auto-accept gate has, so an unjudged pile means the gate runs on an assumption.
+    from db.models import ControlSample, SettlementLot
+
+    cq = (select(func.count()).select_from(ControlSample).join(Object, Object.object_id == ControlSample.object_id)
+          .join(Frame, Frame.frame_id == Object.frame_id).where(ControlSample.human_verdict.is_(None)))
+    if hidden:
+        cq = cq.where(Frame.session_id.in_(visible_session_ids(hidden)))
+    controls = int((await db.execute(cq)).scalar_one())
+    if controls:
+        out.append({"kind": "control_samples", "count": controls, "href": "/review/rapid?control=1"})
+
+    # Settlement lots being judged: a sample whose verdicts decide whether a whole lot of labels is accepted.
+    onto = get_ontology()
+    for lot in (await db.execute(select(SettlementLot).where(SettlementLot.status == "judging")
+                                 .order_by(SettlementLot.created_at))).scalars().all():
+        if not lot.batch_id:
+            continue
+        total = len(lot.sample_object_ids or [])
+        out.append({"kind": "settlement_lot", "lot_id": str(lot.lot_id), "class_name": onto.by_id(lot.class_id).name,
+                    "judged": int(lot.sample_n or 0), "of": total, "population": int(lot.population),
+                    "href": f"/queue?flywheel={lot.batch_id}"})
     return out

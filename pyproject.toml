@@ -62,6 +62,9 @@ docs = [
 # GPU/perception. Install with: uv pip install -e ".[ml]" --index-strategy unsafe-best-match
 # torch cu128 wheels are required for RTX 5080 (Blackwell, sm_120).
 ml = [
+    # Reads the date/speed/GNSS stamp dashcams burn into their video (services/ingest/overlay_telemetry.py).
+    # Apache-2.0; recognition-only on CPU, about 0.1 s a frame.
+    "rapidocr-onnxruntime==1.4.4",
     "torch==2.7.1",
     "torchvision==0.22.1",
     "ultralytics==8.3.0",

@@ -9,6 +9,7 @@ label). Nothing here mutates state.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from uuid import UUID
 
 from geoalchemy2 import Geometry
@@ -32,6 +33,27 @@ def _sid(session_id: str | None) -> UUID | None:
     return UUID(session_id) if session_id else None
 
 
+# The projects hidden from whoever is asking (services/project_access.py). The analytics router sets it per
+# request; anything else calling these functions (a report, a script) gets the default, nothing hidden.
+# Without it the charts counted members-only projects for everyone: no item named, but the numbers said
+# what was in them.
+_HIDDEN: ContextVar[frozenset] = ContextVar("analytics_hidden_projects", default=frozenset())
+
+
+def hide_projects(hidden: frozenset) -> None:
+    _HIDDEN.set(hidden)
+
+
+def _vis(session_col):
+    """A filter keeping rows of sessions the caller may see, or None when nothing is hidden."""
+    hidden = _HIDDEN.get()
+    if not hidden:
+        return None
+    from services.project_access import visible_session_ids
+
+    return session_col.in_(visible_session_ids(hidden))
+
+
 async def class_distribution(session_id: str | None = None) -> list[dict]:
     """Per-class object counts joined to ontology, sorted desc, with long-tail coverage.
 
@@ -45,6 +67,8 @@ async def class_distribution(session_id: str | None = None) -> list[dict]:
     stmt = select(Object.class_id, func.count().label("count")).group_by(Object.class_id)
     if sid is not None:
         stmt = stmt.join(Frame, Object.frame_id == Frame.frame_id).where(Frame.session_id == sid)
+    elif (v := _vis(Frame.session_id)) is not None:
+        stmt = stmt.join(Frame, Object.frame_id == Frame.frame_id).where(v)
 
     async with maker() as db:
         rows = (await db.execute(stmt)).all()
@@ -75,6 +99,8 @@ async def label_source_mix(session_id: str | None = None) -> dict:
         s = select(col, func.count().label("count")).group_by(col)
         if sid is not None:
             s = s.join(Frame, Object.frame_id == Frame.frame_id).where(Frame.session_id == sid)
+        elif (v := _vis(Frame.session_id)) is not None:
+            s = s.join(Frame, Object.frame_id == Frame.frame_id).where(v)
         return s
 
     # Human-touched is a per-object OR (state settled by a reviewer OR sourced from a human), so it
@@ -85,6 +111,8 @@ async def label_source_mix(session_id: str | None = None) -> dict:
         human_stmt = human_stmt.join(Frame, Object.frame_id == Frame.frame_id).where(
             Frame.session_id == sid
         )
+    elif (v := _vis(Frame.session_id)) is not None:
+        human_stmt = human_stmt.join(Frame, Object.frame_id == Frame.frame_id).where(v)
     human_stmt = human_stmt.where(human_pred)
 
     async with maker() as db:
@@ -129,6 +157,8 @@ async def scenario_coverage(session_id: str | None = None) -> list[dict]:
     )
     if sid is not None:
         stmt = stmt.where(Scenario.session_id == sid)
+    elif (v := _vis(Scenario.session_id)) is not None:
+        stmt = stmt.where(v)
 
     async with maker() as db:
         rows = (await db.execute(stmt)).all()
@@ -156,6 +186,8 @@ async def geo_points(session_id: str | None = None, limit: int = 2000) -> list[d
     )
     if sid is not None:
         stmt = stmt.where(Frame.session_id == sid)
+    elif (v := _vis(Frame.session_id)) is not None:
+        stmt = stmt.where(v)
 
     async with maker() as db:
         rows = (await db.execute(stmt)).all()
@@ -173,7 +205,11 @@ async def review_agreement() -> dict:
     maker = get_sessionmaker()
 
     async with maker() as db:
-        rows = (await db.execute(select(Review.before, Review.after, Review.time_spent_ms))).all()
+        stmt = select(Review.before, Review.after, Review.time_spent_ms)
+        if (v := _vis(Frame.session_id)) is not None:
+            stmt = (stmt.join(Object, Object.object_id == Review.object_id)
+                    .join(Frame, Frame.frame_id == Object.frame_id).where(v))
+        rows = (await db.execute(stmt)).all()
 
     total = 0
     confirmed = 0
@@ -270,18 +306,25 @@ async def overview(session_id: str | None = None) -> dict:
                 )
             ).scalar_one()
         else:
-            sessions = (
-                await db.execute(select(func.count()).select_from(DbSession))
-            ).scalar_one()
-            frames = (await db.execute(select(func.count()).select_from(Frame))).scalar_one()
-            objects = (await db.execute(select(func.count()).select_from(Object))).scalar_one()
-            tracks = (await db.execute(select(func.count()).select_from(Track))).scalar_one()
-            scenarios = (
-                await db.execute(select(func.count()).select_from(Scenario))
-            ).scalar_one()
-            distinct_classes = (
-                await db.execute(select(func.count(func.distinct(Object.class_id))))
-            ).scalar_one()
+            s_q = select(func.count()).select_from(DbSession)
+            f_q = select(func.count()).select_from(Frame)
+            o_q = select(func.count()).select_from(Object)
+            t_q = select(func.count()).select_from(Track)
+            sc_q = select(func.count()).select_from(Scenario)
+            c_q = select(func.count(func.distinct(Object.class_id))).select_from(Object)
+            if _HIDDEN.get():
+                s_q = s_q.where(_vis(DbSession.session_id))
+                f_q = f_q.where(_vis(Frame.session_id))
+                o_q = o_q.join(Frame, Object.frame_id == Frame.frame_id).where(_vis(Frame.session_id))
+                t_q = t_q.where(_vis(Track.session_id))
+                sc_q = sc_q.where(_vis(Scenario.session_id))
+                c_q = c_q.join(Frame, Object.frame_id == Frame.frame_id).where(_vis(Frame.session_id))
+            sessions = (await db.execute(s_q)).scalar_one()
+            frames = (await db.execute(f_q)).scalar_one()
+            objects = (await db.execute(o_q)).scalar_one()
+            tracks = (await db.execute(t_q)).scalar_one()
+            scenarios = (await db.execute(sc_q)).scalar_one()
+            distinct_classes = (await db.execute(c_q)).scalar_one()
 
     total_classes = len(onto.classes)
     mix = await label_source_mix(session_id)
@@ -315,6 +358,8 @@ async def pii_coverage(session_id: str | None = None) -> dict:
         fstmt = select(func.count()).select_from(Frame)
         if sid is not None:
             fstmt = fstmt.where(Frame.session_id == sid)
+        elif (v := _vis(Frame.session_id)) is not None:
+            fstmt = fstmt.where(v)
         total_frames = (await db.execute(fstmt)).scalar_one()
 
         astmt = select(
@@ -324,11 +369,15 @@ async def pii_coverage(session_id: str | None = None) -> dict:
         )
         if sid is not None:
             astmt = astmt.where(PiiAudit.session_id == sid)
+        elif (v := _vis(PiiAudit.session_id)) is not None:
+            astmt = astmt.where(v)
         n_audited, n_faces, n_plates = (await db.execute(astmt)).one()
 
         mstmt = select(PiiAudit.method_version, func.count()).group_by(PiiAudit.method_version)
         if sid is not None:
             mstmt = mstmt.where(PiiAudit.session_id == sid)
+        elif (v := _vis(PiiAudit.session_id)) is not None:
+            mstmt = mstmt.where(v)
         methods = {m: c for m, c in (await db.execute(mstmt)).all()}
 
     return {
@@ -351,6 +400,8 @@ async def scene_splits(session_id: str | None = None) -> dict:
         stmt = select(Frame.scene).where(Frame.scene.isnot(None))
         if session_id:
             stmt = stmt.where(Frame.session_id == UUID(session_id))
+        elif (v := _vis(Frame.session_id)) is not None:
+            stmt = stmt.where(v)
         rows = (await db.execute(stmt)).all()
     axes = {ax: Counter() for ax in ("weather", "time_of_day", "road_type", "density")}
     for (scene,) in rows:
@@ -374,6 +425,8 @@ async def dedup_rate(session_id: str | None = None) -> dict:
             base = base.where(Frame.session_id == sid)
             red = red.where(Frame.session_id == sid)
             grp = grp.where(Frame.session_id == sid)
+        elif (v := _vis(Frame.session_id)) is not None:
+            base, red, grp = base.where(v), red.where(v), grp.where(v)
         total = (await db.execute(base)).scalar_one()
         redundant = (await db.execute(red)).scalar_one()
         groups = (await db.execute(grp)).scalar_one()
@@ -385,9 +438,10 @@ async def dataset_growth() -> list[dict]:
     """Frames ingested per day (cumulative), from frame.created_at."""
     maker = get_sessionmaker()
     async with maker() as db:
-        rows = (await db.execute(
-            select(func.date_trunc("day", Frame.created_at).label("d"), func.count())
-            .group_by("d").order_by("d"))).all()
+        q = select(func.date_trunc("day", Frame.created_at).label("d"), func.count())
+        if (v := _vis(Frame.session_id)) is not None:
+            q = q.where(v)
+        rows = (await db.execute(q.group_by("d").order_by("d"))).all()
     out, cum = [], 0
     for d, n in rows:
         cum += int(n)
@@ -407,7 +461,8 @@ async def cluster_map(limit: int = 1500) -> dict:
         rows = (await db.execute(
             select(Frame.frame_id, FrameEmbedding.dino_vec, Frame.scene)
             .join(FrameEmbedding, FrameEmbedding.frame_id == Frame.frame_id)
-            .where(FrameEmbedding.dino_vec.isnot(None)).limit(limit))).all()
+            .where(FrameEmbedding.dino_vec.isnot(None), *([v] if (v := _vis(Frame.session_id)) is not None else []))
+            .limit(limit))).all()
     if len(rows) < 10:
         return {"points": [], "n": len(rows)}
     mat = np.asarray([r[1] for r in rows], dtype=np.float32)

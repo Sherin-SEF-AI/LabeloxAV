@@ -29,6 +29,11 @@ class PostgresSettings(BaseModel):
     user: str = "labelox"
     password: str = "labelox"
     db: str = "labeloxav"
+    # "queue" keeps a pool per process (the server, the workers). "null" opens a connection per session and
+    # closes it after: the test suite runs every test in a fresh event loop and drops the cached engine
+    # between them, so a pool there only strands connections until garbage collection, and enough of them
+    # reach the server's connection limit partway through the run.
+    pool: str = "queue"
 
     @property
     def async_dsn(self) -> str:
@@ -67,6 +72,10 @@ class RedpandaSettings(BaseModel):
 
 class IngestSettings(BaseModel):
     target_fps: float = 3.0
+    # Read the date/speed/GNSS stamp a dashcam burns into its video into Frame.gnss and ego_speed, then build
+    # the session's ego poses (services/ingest/overlay_telemetry.py). Only runs on a session with no GNSS of
+    # its own, and gives up after a few frames on footage without a stamp.
+    overlay_telemetry: bool = True
     blur_threshold: float = 60.0
     # Upper bound on variance-of-Laplacian: a real image is sharp at hundreds to low thousands; random noise
     # (a corrupted/garbage frame) is tens of thousands. Above this the frame is rejected as noise, not kept
@@ -527,9 +536,13 @@ class PiiSettings(BaseModel):
     # The DB text detector that backs the "text" redaction target: the plate the plate detector missed.
     # Empty means not installed, and the anonymizer then refuses the frame rather than passing it, because
     # a privacy detector that quietly does nothing is worse than one that is absent.
-    text_weights: str = ""
-    text_url: str = ("https://github.com/opencv/opencv_extra/raw/master/testdata/dnn/"
-                     "onnx/models/DB_TD500_resnet50.onnx")
+    text_weights: str = ".scratch/models/pii/text_db_td500_resnet50.onnx"
+    # OpenCV's DB_TD500_resnet50 text detector. The URL OpenCV's own tutorial gives is a Google Drive link
+    # that needs a browser; this mirror serves the same file, and text_sha1 is the hash OpenCV publishes for
+    # it, so the download is checked rather than trusted. (The old opencv_extra URL had been a 404.)
+    text_url: str = ("https://github.com/cocoa-xu/evision-misc/releases/download/v20240216/"
+                     "text_detection_DB_TD500_resnet50.onnx")
+    text_sha1: str = "1b4dd21a6baa5e3523156776970895bd3db6960a"
     text_min_score: float = 0.3
     # Source for `make pii-models` to fetch a license-plate detector to plate_weights. Override with
     # LBX_PII__PLATE_URL if this mirror moves; an Ultralytics-loadable .pt is expected. Hugging Face now

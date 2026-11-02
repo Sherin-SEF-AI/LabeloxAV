@@ -141,6 +141,11 @@ async def mine_session(session_id: UUID) -> dict:
         await db.flush()
         for object_id, track_id in assignment.items():
             objects_by_id[object_id].track_id = track_id
+        if not reused:
+            await db.flush()
+            from services.temporal.tube import score_session_tracks
+
+            await score_session_tracks(db, session_id)
 
         # Scenarios are derived from the tracks and nothing refers to one, so a re-mine replaces them rather
         # than adding a second copy of every event.

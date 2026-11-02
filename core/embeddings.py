@@ -55,6 +55,14 @@ async def _hnsw_settings(db: AsyncSession) -> set[str]:
     global _HNSW_GUCS
     if _HNSW_GUCS is None:
         try:
+            installed = (await db.execute(text(
+                "SELECT 1 FROM pg_extension WHERE extname = 'vector'"))).first() is not None
+            if installed:
+                # pgvector registers its hnsw.* settings when its library loads into the backend, which is
+                # on first use of the type. On a fresh connection pg_settings does not list them yet, and
+                # caching that empty answer switched tuning off for the life of the process; pooled
+                # connections in the test suite had always been warmed by an earlier test, which hid it.
+                await db.execute(text("SELECT '[1]'::vector"))
             rows = await db.execute(text("SELECT name FROM pg_settings WHERE name LIKE 'hnsw.%'"))
             _HNSW_GUCS = {r[0] for r in rows}
         except Exception:  # noqa: BLE001 -- not Postgres, or pgvector absent
