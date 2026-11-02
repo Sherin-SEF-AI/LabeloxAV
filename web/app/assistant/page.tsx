@@ -35,6 +35,8 @@ const TOOL_LABEL: Record<string, string> = {
   session_overview: "read the session", queue_overview: "read the review queue", error_overview: "read error candidates",
   propose_reclassify: "proposed a class change", propose_flag_for_review: "proposed a review",
   propose_autolabel: "proposed auto-labelling", propose_error_detection: "proposed error detection",
+  list_datasets: "read datasets", model_status: "read models and training", list_projects: "read projects",
+  job_overview: "read jobs", propose_export: "proposed an export", propose_training: "proposed training",
 };
 
 const STATUS_TONE: Record<string, string> = {
