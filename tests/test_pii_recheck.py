@@ -125,15 +125,62 @@ class TestMappingBackToTheFrame:
         assert _detect_in_windows(_Anon(face=weak), img, [(window, frozenset({"face"}))], _TARGETS) == []
         assert len(_detect_in_windows(_Anon(face=strong), img, [(window, frozenset({"face"}))], _TARGETS)) == 1
 
-    def test_a_plate_keeps_its_configured_floor(self):
-        """Sampled the same way, plate boxes sat on real registration plates from 0.36 upward, one of them
-        legible on a frame whose whole-frame pass found no plate at all. Holding plates to the face's bar
-        would discard the half of this the corpus most needs."""
+    def test_a_plate_in_a_crop_is_held_to_0_55(self):
+        """The small sample that set no plate floor looked fine at 0.36 upward. Run on every auto-labelled
+        frame and measured on 91 raw dashcam frames with each region judged by eye, the window pass at 0.35
+        blurred 31 regions that were not plates (barricade lettering, bus route displays, railings); at 0.55
+        it blurred 7 and still covered 105 of the 112 readable plates it covered at 0.35."""
         img = np.zeros((1080, 1920, 3), dtype=np.uint8)
-        plate = _Stub([(10.0, 10.0, 90.0, 40.0, 0.40)])
-        found = _detect_in_windows(_Anon(plate=plate), img, [((500, 400, 900, 800), frozenset({"plate"}))],
-                                   _TARGETS)
-        assert len(found) == 1
+        window = ((500, 400, 900, 800), frozenset({"plate"}))
+        weak = _Stub([(10.0, 10.0, 90.0, 40.0, 0.40)])
+        strong = _Stub([(10.0, 10.0, 90.0, 40.0, 0.60)])
+        assert _detect_in_windows(_Anon(plate=weak), img, [window], _TARGETS) == []
+        assert len(_detect_in_windows(_Anon(plate=strong), img, [window], _TARGETS)) == 1
+
+    def test_a_plate_in_a_crop_must_lie_on_an_annotated_box(self):
+        """On an elevated junction view every plate the crops found at 0.55 was the same roadside railing,
+        in a car's margin and on nothing anyone had annotated. A plate is on a vehicle, so a find that is on
+        no annotated box at all is not blurred."""
+        img = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        car = [500.0, 400.0, 900.0, 800.0]
+        window = ((440, 340, 960, 860), frozenset({"plate"}))   # the car's margined crop, already past 320
+        in_margin = _Stub([(470.0, 200.0, 505.0, 230.0, 0.9)])  # x 910..945: right of the car, inside the crop
+        on_car = _Stub([(200.0, 400.0, 260.0, 420.0, 0.9)])     # x 640..700, y 740..760: on the car
+        assert _detect_in_windows(_Anon(plate=in_margin), img, [window], _TARGETS, anchors=[car]) == []
+        assert len(_detect_in_windows(_Anon(plate=on_car), img, [window], _TARGETS, anchors=[car])) == 1
+
+    def test_the_plate_may_lie_on_a_box_other_than_its_windows_own(self):
+        """Tied to the window's own vehicle, the rule lost a readable two-line plate: a scooter annotated only
+        as its rider, whose plate was found in the margin of the bus beside it."""
+        img = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        bus = [1314.0, 187.0, 1920.0, 740.0]
+        rider = [1308.0, 576.0, 1476.0, 781.0]
+        window = ((1223, 104, 1920, 823), frozenset({"plate"}))
+        plate = _Stub([(209.0, 644.0, 253.0, 671.0, 0.9)])     # 1432..1476, 748..775: below the bus, on the rider
+        assert _detect_in_windows(_Anon(plate=plate), img, [window], _TARGETS, anchors=[bus]) == []
+        assert len(_detect_in_windows(_Anon(plate=plate), img, [window], _TARGETS, anchors=[bus, rider])) == 1
+
+    def test_a_plate_only_touching_an_annotated_box_is_not_enough(self):
+        """Any overlap let 4 of the 7 railing hits back in. Half of the plate has to be on the box."""
+        img = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        car = [500.0, 400.0, 900.0, 800.0]
+        window = ((440, 340, 960, 860), frozenset({"plate"}))
+        grazing = _Stub([(450.0, 400.0, 490.0, 420.0, 0.9)])  # x 890..930: a quarter on the car
+        assert _detect_in_windows(_Anon(plate=grazing), img, [window], _TARGETS, anchors=[car]) == []
+
+    def test_the_placement_rule_is_for_plates_only(self):
+        """A face sits at the top of a person's box and routinely above it; the face floor is its own guard."""
+        img = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        person = [500.0, 400.0, 600.0, 700.0]
+        window = ((485, 355, 615, 745), frozenset({"face"}))
+        above = _Stub([(10.0, 0.0, 60.0, 50.0, 0.9)])
+        assert len(_detect_in_windows(_Anon(face=above), img, [window], _TARGETS, anchors=[person])) == 1
+
+    def test_the_plate_floor_applies_only_inside_crops(self):
+        """The whole-frame pass keeps the configured threshold: the floor is for what the crops add."""
+        from core.config import PiiSettings
+
+        assert PiiSettings().plate_conf == 0.35
 
     def test_an_unavailable_detector_contributes_nothing(self):
         img = np.zeros((1080, 1920, 3), dtype=np.uint8)
