@@ -1554,7 +1554,8 @@ export const api = {
   sealGold: (body: { name: string; cities?: string[]; session_id?: string; limit?: number }) =>
     post<{ gold_id: string; n_objects: number; n_frames: number }>("/api/quality/gold/seal", body),
   fitCalibration: (body: { gold_id?: string; session_id?: string }) =>
-    post<{ uri: string; n_train: number; report: { ece: number | null } }>(
+    post<{ uri: string; n_train: number; report: { ece: number | null }; positives: number; negatives: number;
+           in_sample: boolean; trustworthy: boolean; warning: string | null }>(
       "/api/quality/calibrate/fit",
       body,
     ),

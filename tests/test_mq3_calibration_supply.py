@@ -58,6 +58,8 @@ async def test_collector_finds_reviewed_detections_and_fit_is_monotone():
 
         res = await fit_isotonic()
         assert res["n_train"] >= 12
+        # A dozen reviewed labels is a quick look, not a curve to activate, and the answer says so.
+        assert res["in_sample"] is True and res["trustworthy"] is False and "Do not activate" in res["warning"]
         # the fitted isotonic curve is monotone non-decreasing in confidence
         from services.autolabel.isotonic import apply_isotonic
         assert apply_isotonic(res["uri"], 0.2) <= apply_isotonic(res["uri"], 0.9)
