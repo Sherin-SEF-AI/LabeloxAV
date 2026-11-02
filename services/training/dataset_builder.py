@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import random
 import shutil
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -55,6 +56,9 @@ class BuildSpec:
     seed: int = 7
     route_prefix: str | None = None  # scope to a capture batch, e.g. "202606"
     cities: list[str] = field(default_factory=list)        # per-domain scoping (e.g. ["BLR"])
+    # One project's sessions only. When that project labels a subset of the ontology and no include_classes
+    # is given, the detector is trained on that subset, so it learns what the project labels.
+    project_id: str | None = None
     include_classes: list[str] = field(default_factory=list)  # specialized detector: ONLY these classes
     idd_dir: str | None = None       # external YOLO dataset to merge as the IDD anchor
     drop_classes: list[str] = field(default_factory=list)
@@ -90,6 +94,12 @@ async def _select(spec: BuildSpec):
 
     maker = get_sessionmaker()
     async with maker() as db:
+        if spec.project_id and not include_ids:
+            from services.project_classes import project_class_ids
+
+            project_classes = await project_class_ids(db, uuid.UUID(str(spec.project_id)))
+            if project_classes is not None:
+                include_ids = {c for c in project_classes if onto.is_thing(c)}
         stmt = (
             select(Object, Frame.frame_id, Frame.img_uri, Frame.width, Frame.height, Frame.session_id,
                    Frame.origin, Frame.source_frame_id)
@@ -110,6 +120,8 @@ async def _select(spec: BuildSpec):
             stmt = stmt.where(DbSession.route.like(f"{spec.route_prefix}%"))
         if spec.cities:
             stmt = stmt.where(DbSession.city.in_(spec.cities))
+        if spec.project_id:
+            stmt = stmt.where(DbSession.project_id == uuid.UUID(str(spec.project_id)))
         rows = (await db.execute(stmt)).all()
 
     cand = []

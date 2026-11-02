@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useJobStream } from "@/lib/useEventStream";
-import { api, type ModelLine, type TrainingJob , humanizeError } from "@/lib/api";
+import { api, apiGet, type ModelLine, type TrainingJob, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import RunsPanel from "@/components/training/RunsPanel";
@@ -38,6 +38,8 @@ export default function TrainingPage() {
   const [taskType, setTaskType] = useState("detection");
   const [computeTarget, setComputeTarget] = useState("local");
   const [includeClasses, setIncludeClasses] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [projects, setProjects] = useState<{ project_id: string; name: string; sessions: number; class_set: string; class_count: number }[]>([]);
   const [cities, setCities] = useState("");
   const [routePrefix, setRoutePrefix] = useState("");
   const [limit, setLimit] = useState("");
@@ -60,6 +62,8 @@ export default function TrainingPage() {
   const jobStream = useJobStream();
   useEffect(() => {
     api.trainingTasks().then(setTasks).catch(() => {});
+    apiGet<{ projects: typeof projects }>("/api/projects")
+      .then((r) => setProjects(r.projects.filter((p) => p.sessions > 0))).catch(() => {});
     refresh();
   }, []);
   useEffect(() => { if (jobStream.data) refresh(); }, [jobStream.data]);
@@ -72,6 +76,7 @@ export default function TrainingPage() {
     setErr(null);
     const dataset_spec: Record<string, unknown> = {};
     if (includeClasses.trim()) dataset_spec.include_classes = listFrom(includeClasses);
+    if (projectId) dataset_spec.project_id = projectId;
     if (cities.trim()) dataset_spec.cities = listFrom(cities);
     if (routePrefix.trim()) dataset_spec.route_prefix = routePrefix.trim();
     if (limit.trim()) dataset_spec.limit = Number(limit);
@@ -130,6 +135,18 @@ export default function TrainingPage() {
             <label className="flex items-center gap-2 mt-5">
               <input type="checkbox" checked={promote} onChange={(e) => setPromote(e.target.checked)} />
               <span className="text-ink-2">promote if gate passes</span>
+            </label>
+            <label className="flex flex-col gap-1 md:col-span-2">
+              <span className="text-ink-3 uppercase text-[11px]">project</span>
+              <select value={projectId} onChange={(e) => setProjectId(e.target.value)}
+                className="bg-panel border border-line px-2 py-1 text-ink">
+                <option value="">Every project</option>
+                {projects.map((p) => (
+                  <option key={p.project_id} value={p.project_id}>
+                    {p.name} ({p.sessions} sessions{p.class_set !== "india" ? `, its ${p.class_count} classes` : ""})
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="flex flex-col gap-1 md:col-span-2">
               <span className="text-ink-3 uppercase text-[11px]">include classes (specialized; blank = all)</span>

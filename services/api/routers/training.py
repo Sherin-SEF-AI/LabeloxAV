@@ -16,6 +16,8 @@ from core.config import get_settings
 from db.models import ModelRun, TrainingJob
 from db.session import get_sessionmaker
 from services.api.deps import TrainingStartIn, current_user, role_rank
+from services.api.project_guard import caller_hidden_projects
+from services.project_access import as_hidden
 from services.training.jobs import TrainJobSpec, enqueue_job
 from services.training.tasks import get_task, list_tasks
 
@@ -107,12 +109,21 @@ async def sweep_status(name: str, metric: str = "map50"):
 
 
 @router.post("/training/start")
-async def start(payload: TrainingStartIn, user=Depends(current_user)):
+async def start(payload: TrainingStartIn, user=Depends(current_user), hidden=Depends(caller_hidden_projects)):
     try:
         get_task(payload.task_type)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     spec = payload.model_dump()
+    # A project named in the body is not seen by the by-id guard, which reads the path and query string.
+    project_id = (payload.dataset_spec or {}).get("project_id")
+    if project_id:
+        try:
+            pid = uuid.UUID(str(project_id))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid project id") from None
+        if pid in as_hidden(hidden):
+            raise HTTPException(status_code=404, detail="project not found")
     # C7: auto-promotion is a governance action (equivalent to /govern/promote, which is admin-only). A
     # reviewer may enqueue training, but only an admin may request that its result promote a champion.
     if spec.get("promote") and role_rank(getattr(user, "role", None)) < role_rank("admin"):
