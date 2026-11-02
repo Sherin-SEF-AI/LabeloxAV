@@ -120,23 +120,23 @@ export default function JobWatcher({ limit = 12 }: { limit?: number }) {
             <div key={r.run_id} className={`px-4 py-2 fade-up ${live ? "running" : ""}`}
               style={{ ["--d" as string]: `${Math.min(i, 8) * 35}ms` }}>
               <div className="flex items-center gap-2.5 flex-wrap">
-                <span className={`font-mono text-[9px] uppercase border px-1.5 rounded ${TONE[r.status] || "border-line text-ink-3"}`}>
+                <span className={`text-[10.5px] uppercase border px-1.5 rounded ${TONE[r.status] || "border-line text-ink-3"}`}>
                   {r.status}
                 </span>
-                <span className="font-mono text-[11px] text-ink">{r.kind}</span>
-                {took && <span className="font-mono text-[10px] text-ink-3 tabular-nums">{took}</span>}
+                <span className="text-[12px] text-ink">{r.kind}</span>
+                {took && <span className="text-[11px] text-ink-3 tabular-nums">{took}</span>}
                 {r.fraction !== null && r.fraction !== undefined && (
-                  <span className="font-mono text-[10px] text-accent tabular-nums">
+                  <span className="text-[11px] text-accent tabular-nums">
                     {Math.round(r.fraction * 100)}%
                   </span>
                 )}
                 {r.changed > 0 && (
-                  <span className="font-mono text-[10px] text-ink-3">{r.changed} objects changed</span>
+                  <span className="text-[11px] text-ink-3">{r.changed} objects changed</span>
                 )}
                 {r.status === "committed" && r.changed > 0 && (
                   <button onClick={() => revert(r)} disabled={busy !== null}
                     title="restore every object this run touched, unless a person has since"
-                    className="lift ml-auto font-mono text-[10px] border border-line text-ink-3 px-2 py-0.5
+                    className="lift ml-auto text-[11px] border border-line text-ink-3 px-2 py-0.5
                                rounded hover:text-ink hover:border-block disabled:opacity-40">
                     {busy === r.run_id ? "reverting" : "revert"}
                   </button>
@@ -151,7 +151,7 @@ export default function JobWatcher({ limit = 12 }: { limit?: number }) {
               )}
 
               {rs.length > 0 && (
-                <div className="mt-1 flex gap-3 flex-wrap font-mono text-[10px] text-ink-3">
+                <div className="mt-1 flex gap-3 flex-wrap text-[11px] text-ink-3">
                   {rs.map(([k, v]) => (
                     <span key={k}><span className="text-ink-2 tabular-nums">{v.toLocaleString()}</span> {k}</span>
                   ))}
@@ -159,14 +159,14 @@ export default function JobWatcher({ limit = 12 }: { limit?: number }) {
               )}
 
               {r.error && (
-                <div className="mt-1 font-mono text-[10px] text-block break-words">{r.error}</div>
+                <div className="mt-1 text-[11px] text-block break-words">{r.error}</div>
               )}
             </div>
           );
         })}
       </div>
 
-      {note && <div className="px-4 py-2 border-t hairline font-mono text-[11px] text-ink-2">{note}</div>}
+      {note && <div className="px-4 py-2 border-t hairline text-[12px] text-ink-2">{note}</div>}
     </div>
   );
 }

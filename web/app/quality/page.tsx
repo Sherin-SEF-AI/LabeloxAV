@@ -14,9 +14,9 @@ import { StateBadge } from "@/components/StateBadge";
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="panel px-3 py-3">
-      <div className="font-mono text-[11px] uppercase text-ink-3">{label}</div>
-      <div className="font-mono text-2xl text-ink mt-1">{value}</div>
-      {sub && <div className="font-mono text-[11px] text-ink-3 mt-0.5">{sub}</div>}
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</div>
+      <div className="text-2xl font-semibold text-ink mt-1">{value}</div>
+      {sub && <div className="text-[12px] text-ink-3 mt-0.5">{sub}</div>}
     </div>
   );
 }
@@ -24,7 +24,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="panel">
-      <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
         {title}
       </div>
       <div className="p-3">{children}</div>
@@ -85,7 +85,9 @@ export default function QualityPage() {
     setBusy("fit");
     try {
       const r = await api.fitCalibration({ gold_id: selected ?? undefined });
-      toast(`Fitted isotonic: ${r.n_train} pairs, ECE ${r.report.ece ?? "n/a"}\n${r.uri}`);
+      toast(r.trustworthy
+        ? `Fitted isotonic: ${r.n_train} pairs (${r.negatives} rejected), in-sample ECE ${r.report.ece ?? "n/a"}\n${r.uri}`
+        : `Fitted, but not usable: ${r.warning}`, r.trustworthy ? "success" : "error");
     } catch (e) {
       toast(humanizeError(e));
     } finally {
@@ -121,7 +123,7 @@ export default function QualityPage() {
                 <button
                   key={g.gold_id}
                   onClick={() => setSelected(g.gold_id)}
-                  className={`font-mono text-[11px] border px-2 py-1 ${
+                  className={`text-[12px] border px-2 py-1 ${
                     selected === g.gold_id ? "border-accent text-ink" : "border-line text-ink-3"
                   }`}
                   title={g.gold_id}
@@ -147,7 +149,7 @@ export default function QualityPage() {
               ))}
             </div>
           ) : (
-            <div className="font-mono text-xs text-ink-3 py-4 text-center">
+            <div className="text-[12.5px] text-ink-3 py-4 text-center">
               no gold sets sealed yet — click &quot;seal gold&quot;
             </div>
           )}
@@ -176,24 +178,24 @@ export default function QualityPage() {
               <div className="space-y-1">
                 {prRows.map(([name, v]) => (
                   <div key={name} className="flex items-center gap-2">
-                    <div className="w-32 shrink-0 font-mono text-[11px] text-ink-2 truncate" title={name}>
+                    <div className="w-32 shrink-0 text-[12px] text-ink-2 truncate" title={name}>
                       {name}
                     </div>
                     <div className="flex-1 h-3 bg-line relative" title={`P ${v.precision}`}>
                       <div className="absolute left-0 top-0 h-full bg-info" style={{ width: `${v.precision * 100}%` }} />
                     </div>
-                    <div className="w-10 text-right font-mono text-[11px] text-ink-3">{v.precision.toFixed(2)}</div>
+                    <div className="w-10 text-right text-[12px] text-ink-3">{v.precision.toFixed(2)}</div>
                     <div className="flex-1 h-3 bg-line relative" title={`R ${v.recall}`}>
                       <div className="absolute left-0 top-0 h-full bg-accent" style={{ width: `${v.recall * 100}%` }} />
                     </div>
-                    <div className="w-10 text-right font-mono text-[11px] text-ink-3">{v.recall.toFixed(2)}</div>
+                    <div className="w-10 text-right text-[12px] text-ink-3">{v.recall.toFixed(2)}</div>
                   </div>
                 ))}
                 {!prRows.length && (
-                  <div className="font-mono text-xs text-ink-3 py-4 text-center">no per-class metrics</div>
+                  <div className="text-[12.5px] text-ink-3 py-4 text-center">no per-class metrics</div>
                 )}
               </div>
-              <div className="flex gap-4 mt-2 font-mono text-[11px] text-ink-3">
+              <div className="flex gap-4 mt-2 text-[12px] text-ink-3">
                 <span className="flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 bg-info inline-block" /> precision
                 </span>
@@ -205,7 +207,7 @@ export default function QualityPage() {
             </Section>
           </>
         ) : (
-          <div className="font-mono text-xs text-ink-3 py-8 text-center panel space-y-2">
+          <div className="text-[12.5px] text-ink-3 py-8 text-center panel space-y-2">
             {sheet?.found ? (
               <>
                 <div>this gold set is sealed but has never been scored.</div>

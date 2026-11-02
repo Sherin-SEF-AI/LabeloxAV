@@ -41,12 +41,12 @@ export default function PanelHost({ panel, onRemove, onFrame, onCycleSpan, onGro
           their own gestures, and making the body draggable would take orbit and zoom away from them. */}
       <div draggable onDragStart={onDragStart}
         className="flex items-center gap-2 px-2 py-1 border-b hairline cursor-grab active:cursor-grabbing">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 truncate">{title}</span>
+        <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wider text-ink-3 truncate">{title}</span>
         <span className="ml-auto flex items-center gap-0.5">
-          <button onClick={onShrink} className="font-mono text-[10px] text-ink-3 hover:text-ink px-1" title="shorter">&minus;</button>
-          <button onClick={onGrow} className="font-mono text-[10px] text-ink-3 hover:text-ink px-1" title="taller">+</button>
-          <button onClick={onCycleSpan} className="font-mono text-[10px] text-ink-3 hover:text-ink px-1" title="toggle full width">&harr;</button>
-          <button onClick={onRemove} className="font-mono text-[10px] text-ink-3 hover:text-block px-1" title="remove panel">x</button>
+          <button onClick={onShrink} className="text-[11px] text-ink-3 hover:text-ink px-1" title="shorter">&minus;</button>
+          <button onClick={onGrow} className="text-[11px] text-ink-3 hover:text-ink px-1" title="taller">+</button>
+          <button onClick={onCycleSpan} className="text-[11px] text-ink-3 hover:text-ink px-1" title="toggle full width">&harr;</button>
+          <button onClick={onRemove} className="text-[11px] text-ink-3 hover:text-block px-1" title="remove panel">x</button>
         </span>
       </div>
       <div className="flex-1 min-h-0">
@@ -57,7 +57,7 @@ export default function PanelHost({ panel, onRemove, onFrame, onCycleSpan, onGro
         {panel.type === "can_table" && <CanPanel />}
         {panel.type === "audio" && panel.topic && <AudioPanel topic={panel.topic} />}
         {panel.type === "scene3d" && <Scene3DPanel />}
-        {!known.includes(panel.type) && <div className="p-3 font-mono text-[11px] text-ink-3">unknown panel type: {panel.type}</div>}
+        {!known.includes(panel.type) && <div className="p-3 text-[12px] text-ink-3">unknown panel type: {panel.type}</div>}
       </div>
     </div>
   );

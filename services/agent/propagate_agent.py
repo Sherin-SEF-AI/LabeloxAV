@@ -21,46 +21,20 @@ from __future__ import annotations
 
 import uuid
 
-import cv2
-import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from core.storage import get_object_store
 from db.models import AgentRun, Frame, Object, Track
-from services.intelligence.propagate import _clip_box, _gray
 from services.temporal import drift
+from services.temporal.flow import flow_box
+from services.temporal.flow import gray as _gray
 
 log = get_logger("agent.propagate")
 
-_LK = dict(winSize=(21, 21), maxLevel=3,
-          criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.03))
-
-
-def _flow_box(prev_gray, cur_gray, box) -> list | None:
-    """Move a box from prev to cur frame with LK optical flow + a partial-affine fit. None if flow fails."""
-    h, w = cur_gray.shape
-    x1, y1, x2, y2 = (int(v) for v in box)
-    if x2 - x1 < 4 or y2 - y1 < 4:
-        return None
-    roi = prev_gray[y1:y2, x1:x2]
-    pts = cv2.goodFeaturesToTrack(roi, maxCorners=60, qualityLevel=0.01, minDistance=4)
-    if pts is None or len(pts) < 4:
-        return None
-    pts = pts.reshape(-1, 2) + np.float32([x1, y1])
-    nxt, st, _ = cv2.calcOpticalFlowPyrLK(prev_gray, cur_gray, pts, None, **_LK)
-    st = st.reshape(-1).astype(bool)
-    if st.sum() < 4:
-        return None
-    p0, p1 = pts[st], nxt.reshape(-1, 2)[st]
-    M, _ = cv2.estimateAffinePartial2D(p0, p1, method=cv2.RANSAC)
-    if M is None:
-        return None
-    corners = np.float32([[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]]])
-    moved = cv2.transform(corners.reshape(-1, 1, 2), M).reshape(-1, 2)
-    b = _clip_box([moved[:, 0].min(), moved[:, 1].min(), moved[:, 0].max(), moved[:, 1].max()], w, h)
-    return b if (b[2] - b[0] >= 4 and b[3] - b[1] >= 4) else None
+# The shared, guarded flow step (services/temporal/flow.py), under the name the walk below uses.
+_flow_box = flow_box
 
 
 # The appearance primitives live in services/temporal/drift.py now, because this check is also what says
@@ -72,8 +46,11 @@ _appearance = drift.cosine_to
 _source_vec = drift.encode_crop
 
 
-async def _neighbors(db, session_id, ts_ns, *, forward: bool, span: int):
+async def _neighbors(db, session_id, ts_ns, *, forward: bool, span: int, cam_id: str | None = None):
     q = select(Frame).where(Frame.session_id == session_id)
+    if cam_id is not None:
+        # The source camera only: flow from one view into another walks the box onto something else.
+        q = q.where(Frame.cam_id == cam_id)
     if forward:
         q = q.where(Frame.ts_ns > ts_ns).order_by(Frame.ts_ns.asc())
     else:
@@ -83,7 +60,8 @@ async def _neighbors(db, session_id, ts_ns, *, forward: bool, span: int):
 
 async def _walk(db, store, src, src_frame, ref_vec, *, forward, span, drift, high, size_tol):
     """Walk one direction from the keyframe, producing a step per frame until drift/flow-loss. Read-only."""
-    frames = await _neighbors(db, src_frame.session_id, src_frame.ts_ns, forward=forward, span=span)
+    frames = await _neighbors(db, src_frame.session_id, src_frame.ts_ns, forward=forward, span=span,
+                              cam_id=src_frame.cam_id)
     steps: list[dict] = []
     prev_gray = _gray(store, src_frame.img_uri)
     box = list(src.bbox)

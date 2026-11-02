@@ -78,6 +78,10 @@ e2e: ## Browser smoke over the golden path (needs the app running: make app-up, 
 	@# teaches people to ignore red. Start the stack first for it to actually assert anything.
 	cd web && npx playwright test
 
+.PHONY: e2e-first-run
+e2e-first-run: ## A new team's first hour on a throwaway install: sign in, sample, auto-label, review, export (slow, needs GPU)
+	./scripts/e2e_first_run.sh
+
 .PHONY: migrate
 migrate: ## Apply Alembic migrations
 	$(RUN) alembic upgrade head
@@ -237,6 +241,10 @@ install-docker: ## Deploy the whole product with Docker (generates secrets, migr
 # The deployed app's compose command. scripts/install.sh writes COMPOSE_FILE into .env (adding the GPU overlay
 # when Docker can use the GPU) and Compose reads it from there; an older install falls back to the two files.
 APP_COMPOSE := $(if $(shell grep -s '^COMPOSE_FILE=.' .env),docker compose,docker compose -f docker-compose.yml -f docker-compose.app.yml)
+
+.PHONY: sign-in-link
+sign-in-link: ## A link that lets NAME (default admin) choose a password and sign in
+	$(APP_COMPOSE) exec -T api python -m scripts.sign_in_link --name $(or $(NAME),admin) --url http://localhost:$(or $(WEB_PORT),3000)
 
 .PHONY: doctor
 doctor: ## Check the deployed installation and say what to fix

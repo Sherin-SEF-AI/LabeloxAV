@@ -24,7 +24,7 @@ export default function Inspector({ title, side = "right", defaultOpen = true, w
     return (
       <div className={`${border} hairline shrink-0 w-8 flex flex-col items-center py-2`}>
         <button onClick={() => setOpen(true)} title={`show ${title}`}
-          className="font-mono text-[10px] uppercase tracking-wide text-ink-3 hover:text-accent [writing-mode:vertical-rl]">
+          className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 hover:text-accent [writing-mode:vertical-rl]">
           {title}
         </button>
       </div>
@@ -34,11 +34,11 @@ export default function Inspector({ title, side = "right", defaultOpen = true, w
   return (
     <aside className={`${border} hairline shrink-0 ${width} flex flex-col min-h-0`}>
       <div className="flex items-center justify-between gap-2 px-2 h-9 border-b hairline shrink-0">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-ink-3 truncate">{title}</span>
+        <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 truncate">{title}</span>
         <div className="flex items-center gap-2 shrink-0">
-          {meta && <span className="font-mono text-[10px] text-ink-3">{meta}</span>}
+          {meta && <span className="text-[11px] text-ink-3">{meta}</span>}
           <button onClick={() => setOpen(false)} title="collapse"
-            className="font-mono text-[11px] text-ink-3 hover:text-accent">{side === "right" ? ">" : "<"}</button>
+            className="text-[12px] text-ink-3 hover:text-accent">{side === "right" ? ">" : "<"}</button>
         </div>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto">{children}</div>

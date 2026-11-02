@@ -64,6 +64,9 @@ export type OntologyClass = {
   aliases?: string[];
 };
 export type Ontology = {
+  /** The classes the project labels (pickers offer only these); null when it labels every class. */
+  active_class_ids?: number[] | null;
+  class_set?: "india" | "generic" | "custom";
   version: string;
   hierarchy_levels: number;
   attributes: Record<string, {

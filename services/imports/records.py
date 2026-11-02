@@ -52,3 +52,4 @@ class ImportSpec:
     city: str | None = None
     route: str | None = None
     options: dict = field(default_factory=dict)
+    project_id: str | None = None      # the project the new session joins; None means the default project

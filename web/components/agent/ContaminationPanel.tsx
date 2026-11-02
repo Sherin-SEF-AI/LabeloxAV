@@ -91,7 +91,7 @@ export default function ContaminationPanel({ onInspect, inspecting }: {
       <div className="flex items-center gap-3 px-4 py-3 border-b hairline">
         <div className="text-ink font-medium">Relabel lineages</div>
         <div className="text-ink-3 text-xs">what a past run changed, grouped by the decision</div>
-        <label className="ml-auto flex items-center gap-1.5 font-mono text-[11px] text-ink-3 cursor-pointer">
+        <label className="ml-auto flex items-center gap-1.5 text-[12px] text-ink-3 cursor-pointer">
           <input type="checkbox" checked={refusedOnly} className="accent-accent"
             onChange={(e) => setRefusedOnly(e.target.checked)} />
           only ones refused today
@@ -99,7 +99,7 @@ export default function ContaminationPanel({ onInspect, inspecting }: {
       </div>
 
       {summary && (
-        <div className="px-4 py-2 border-b hairline font-mono text-[11px] text-ink-3">
+        <div className="px-4 py-2 border-b hairline text-[12px] text-ink-3">
           {/* The work first, the history second. Leading with what the run once did meant the board still
               read 3,057 outstanding immediately after 3,010 of them had been put right. */}
           {summary.refused_outstanding > 0 ? (
@@ -127,7 +127,7 @@ export default function ContaminationPanel({ onInspect, inspecting }: {
         : loading ? <div className="px-4 py-6 text-center text-ink-3 text-xs font-mono">loading...</div>
         : rows.length ? (
           <table className="w-full text-sm">
-            <thead className="text-ink-3 font-mono text-[11px] uppercase border-b hairline">
+            <thead className="text-ink-3 text-[10.5px] font-medium uppercase tracking-[0.06em] border-b hairline">
               <tr>
                 <th className="text-left font-normal px-3 py-2 w-28">still wrong</th>
                 <th className="text-left font-normal px-3 py-2">move</th>
@@ -148,13 +148,13 @@ export default function ContaminationPanel({ onInspect, inspecting }: {
                     </span>
                     <span className="text-ink-3/60"> / {l.count.toLocaleString()}</span>
                   </td>
-                  <td className="px-3 py-2 font-mono text-[11px]">
+                  <td className="px-3 py-2 text-[12px]">
                     <span className="text-ink-3">{l.from_name}</span>
                     <span className="text-ink-3"> → </span>
                     <span className={l.refused_now ? "text-block" : "text-ink-2"}>{l.to_name}</span>
                   </td>
                   <td className="px-3 py-2 text-ink-3 text-xs">{l.reason ?? "-"}</td>
-                  <td className="px-3 py-2 text-right font-mono text-[10px] whitespace-nowrap">
+                  <td className="px-3 py-2 text-right text-[11px] whitespace-nowrap">
                     {l.examples[0] && (
                       <button onClick={(e) => { e.stopPropagation(); open(l); }}
                         title="open an example, where one correction can be applied to the rest"

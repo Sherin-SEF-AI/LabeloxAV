@@ -280,7 +280,8 @@ async def propagate(frame_id: UUID, frames: int = 8, db: AsyncSession = Depends(
     if not lanes:
         return {"created": 0, "reason": "no lanes on the source frame"}
     nexts = (await db.execute(
-        select(Frame).where(Frame.session_id == frame.session_id, Frame.ts_ns > frame.ts_ns)
+        select(Frame).where(Frame.session_id == frame.session_id, Frame.cam_id == frame.cam_id,
+                            Frame.ts_ns > frame.ts_ns)
         .order_by(Frame.ts_ns).limit(frames))).scalars().all()
     prev_gray = cv2.cvtColor(_decode(store, frame.img_uri), cv2.COLOR_BGR2GRAY)
     cur = {lane.lane_id: lane.control_points for lane in lanes}

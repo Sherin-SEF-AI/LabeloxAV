@@ -84,7 +84,7 @@ export default function CanvasConsole() {
         // `reveal` is the app's existing motion primitive: 150ms, and already disabled under
         // prefers-reduced-motion in globals.css, so this respects that setting without repeating it.
         <div className="reveal pointer-events-auto w-[320px] bg-bg-2/95 border border-line backdrop-blur-sm
-                        shadow-lg font-mono text-[11px]">
+                        shadow-lg text-[12px]">
           <div className="flex items-center gap-2 px-2.5 py-1.5 border-b hairline">
             <span className="text-ink-2">canvas</span>
             <span className="text-ink-3">{summary.label}</span>
@@ -139,7 +139,7 @@ export default function CanvasConsole() {
       {/* The toggle says enough to make opening it a decision rather than a habit. */}
       <button onClick={toggle}
         title="what the canvas is doing (\\)"
-        className={`pointer-events-auto flex items-center gap-1.5 px-2 h-6 border font-mono text-[10px]
+        className={`pointer-events-auto flex items-center gap-1.5 px-2 h-6 border text-[11px]
                     bg-bg-2/90 backdrop-blur-sm transition-colors
                     ${summary.failed ? "border-block text-block"
                       : summary.running ? "border-accent text-accent" : "border-line text-ink-3"}`}>

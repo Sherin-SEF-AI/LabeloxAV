@@ -181,6 +181,27 @@ class GroqSettings(BaseModel):
     timeout_s: float = 30.0
 
 
+class AboutSettings(BaseModel):
+    """What the app says about itself in Settings > About. `source_url` is where the people using this
+    deployment can get its source: the AGPL components (docs/LICENSING.md) require offering it to anyone who
+    uses a modified version over a network. A fork that changes the code points this at its own repository."""
+    source_url: str = "https://github.com/Sherin-SEF-AI/LabeloxAV"
+    # Whether this deployment runs modified code. Unmodified: the link names the exact upstream commit.
+    modified: bool = False
+
+
+class AssistantSettings(BaseModel):
+    """The tool-calling assistant (services/assistant). Local by default: the conversation, the tool calls and
+    their results are text (counts, class names, ids), never an image, and with `ollama` none of it leaves
+    the machine. groq and anthropic reuse those providers' keys and endpoints."""
+    provider: str = "ollama"            # ollama | groq | anthropic
+    ollama_model: str = "qwen2.5:7b"    # a text model with tool calling; reached at models.vlm.ollama_url
+    groq_model: str = ""                # empty: groq.text_model
+    anthropic_model: str = "claude-sonnet-5-5"
+    max_steps: int = 6                  # tool rounds per message before it must answer
+    timeout_s: float = 90.0
+
+
 class AnthropicSettings(BaseModel):
     """Anthropic cloud inference (Messages API). Optional in exactly the way Groq is: an empty api_key means
     "not configured" and the router falls back to the local provider, so nothing here is a hard dependency.
@@ -646,6 +667,13 @@ class PacksSettings(BaseModel):
     # Defaults to 'av' so every legacy path resolves to the AV pack exactly as before. See packs/ and
     # docs/PACK_INTERFACE.md.
     default_pack: str = "av"
+    # Optional packs this deployment installs. A pack whose pack.yaml says `optional: true` is not imported,
+    # its API routes are not mounted, and the web app does not show it unless its id is listed here.
+    #   "sec": LabeloxSec, the security / CCTV domain (registration-plate reading, watchlists, zones, person
+    #          re-identification across cameras). Lawful for an authorised security deployment and exactly what
+    #          an AV research install must never do with dashcam footage, so it is off unless chosen.
+    # Set as JSON in the environment: LBX_PACKS__OPTIONAL='["sec"]'.
+    optional: list[str] = []
 
 
 class PathsSettings(BaseModel):
@@ -861,6 +889,10 @@ class AuthSettings(BaseModel):
     # (services/api/auth_token.py) and role floors gate destructive/governance routes. Reads under
     # data-bearing prefixes are gated too. Disable only for unit tests.
     enabled: bool = True
+    # How long a sign-in link from an administrator (Settings > Team: an invite, or a new link for someone
+    # who lost their password) stays valid. Longer than a self-service reset (30 minutes), because it is
+    # handed over by message and opened when the person next looks.
+    invite_ttl_hours: int = 72
     # HMAC key that signs/verifies API tokens. The weak default below is refused on any non-local deployment
     # by _require_prod_secrets: a known signing key lets anyone mint an admin token.
     signing_key: str = "labeloxavauthsigningkey0123456789abcdef"
@@ -1161,6 +1193,8 @@ class Settings(BaseSettings):
     anpr: AnprSettings = AnprSettings()        # ANPR-India (security domain; pack-gated on 'anpr')
     groq: GroqSettings = GroqSettings()        # optional Groq cloud inference (text + vision), ollama fallback
     anthropic: AnthropicSettings = AnthropicSettings()  # optional frontier judge (text + vision), same fallback
+    assistant: AssistantSettings = AssistantSettings()  # the tool-calling assistant; local unless configured
+    about: AboutSettings = AboutSettings()  # Settings > About: version, licences, where the source is
     billing: BillingSettings = BillingSettings()  # metered delivery pricing (0 by default; metering still records)
 
     @model_validator(mode="after")

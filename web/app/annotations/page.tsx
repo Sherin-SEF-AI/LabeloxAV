@@ -42,7 +42,7 @@ function ProgressBar({ progress }: { progress: number }) {
       <div className="h-1.5 bg-line rounded">
         <div className="h-1.5 bg-pass rounded" style={{ width: progress * 100 + "%" }} />
       </div>
-      <div className="font-mono text-[11px] text-ink-3">{Math.round(progress * 100)}% reviewed</div>
+      <div className="text-[12px] text-ink-3">{Math.round(progress * 100)}% reviewed</div>
     </div>
   );
 }
@@ -76,13 +76,13 @@ function SessionCard({
           title="select for batch autolabel"
           className="shrink-0 accent-accent"
         />
-        <div className="font-mono text-sm text-ink truncate flex-1 min-w-0" title={session.vehicle_id}>
+        <div className="text-[13.5px] font-medium text-ink truncate flex-1 min-w-0" title={session.vehicle_id}>
           {session.vehicle_id}
         </div>
-        <div className="font-mono text-xs text-ink-3 truncate">{session.city ?? ""}</div>
+        <div className="text-[12.5px] text-ink-3 truncate">{session.city ?? ""}</div>
       </div>
 
-      <div className="font-mono text-[11px] text-ink-3 flex items-center gap-3">
+      <div className="text-[12px] text-ink-3 flex items-center gap-3">
         <span>{stats ? `${stats.frames} frames` : "..."}</span>
         <span>{stats ? `${stats.objects} objects` : ""}</span>
       </div>
@@ -90,7 +90,7 @@ function SessionCard({
       {stats ? (
         <ProgressBar progress={stats.progress} />
       ) : (
-        <div className="font-mono text-[11px] text-ink-3">...</div>
+        <div className="text-[12px] text-ink-3">...</div>
       )}
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -98,7 +98,7 @@ function SessionCard({
           CHIPS.filter((c) => (stats.by_state[c.key] ?? 0) > 0).map((c) => (
             <span key={c.key} className="inline-flex items-center gap-1">
               <StateBadge state={c.key} />
-              <span className="font-mono text-[10px] text-ink-3">{stats.by_state[c.key]}</span>
+              <span className="text-[11px] text-ink-3">{stats.by_state[c.key]}</span>
             </span>
           ))}
       </div>
@@ -106,20 +106,20 @@ function SessionCard({
       <div className="flex items-center gap-2 pt-1">
         <button
           onClick={() => onOpen(session)}
-          className="font-mono text-xs border border-line px-2 py-0.5 hover:border-accent"
+          className="btn"
         >
           open
         </button>
         <button
           onClick={() => onResume(session)}
-          className="font-mono text-xs border border-line px-2 py-0.5 hover:border-accent"
+          className="btn"
         >
           resume queue
         </button>
         {rigMode && (
           <Link
             href={`/annotate/multicam/${session.session_id}`}
-            className="font-mono text-xs border border-accent text-accent px-2 py-0.5 hover:bg-accent/10"
+            className="btn btn-on"
           >
             rig view
           </Link>
@@ -248,7 +248,7 @@ function AnnotationsBody() {
       meta={total > 0 ? <Pager offset={offset} limit={limit} total={total} onOffset={setOffset} /> : undefined}
       right={
         msg ? (
-          <span className="panel px-3 py-1.5 font-mono text-[11px] text-warn">{msg}</span>
+          <span className="panel px-3 py-1.5 text-[12px] text-warn">{msg}</span>
         ) : undefined
       }
       primaryAction={
@@ -257,7 +257,7 @@ function AnnotationsBody() {
             <button
               onClick={onAutolabelSelected}
               disabled={labelBusy}
-              className="reveal font-mono text-xs border border-accent/50 text-accent px-3 py-1 rounded hover:bg-accent/10 disabled:opacity-50 transition-colors"
+              className="reveal text-[12.5px] border border-accent/50 text-accent px-3 py-1 rounded hover:bg-accent/10 disabled:opacity-50 transition-colors"
             >
               {labelBusy && <span className="running-dot mr-1.5 align-middle" />}
               autolabel {sel.size} session{sel.size === 1 ? "" : "s"}
@@ -265,7 +265,7 @@ function AnnotationsBody() {
           )}
           <Link
             href="/annotate/new"
-            className="font-mono text-xs border border-accent text-accent px-3 py-1 hover:bg-accent/10"
+            className="btn btn-on"
           >
             + new annotation
           </Link>
@@ -275,13 +275,13 @@ function AnnotationsBody() {
       <div className="p-4 space-y-4">
         {sessions.length === 0 ? (
           <div className="panel px-3 py-10 text-center space-y-3">
-            <div className="font-mono text-xs text-ink-3">
+            <div className="text-[12.5px] text-ink-3">
               {loading ? "loading sessions..." : "no annotation sessions yet"}
             </div>
             {!loading && (
               <Link
                 href="/annotate/new"
-                className="inline-block font-mono text-xs border border-accent text-accent px-3 py-1 hover:bg-accent/10"
+                className="inline-block btn btn-on"
               >
                 + new annotation
               </Link>

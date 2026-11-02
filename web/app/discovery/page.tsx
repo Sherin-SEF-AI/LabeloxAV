@@ -49,7 +49,7 @@ export default function DiscoveryPage() {
   };
 
   const primaryAction = (
-    <div className="flex items-center gap-2 font-mono text-[11px]">
+    <div className="flex items-center gap-2 text-[12px]">
       <span className="text-ink-3">run discovery on</span>
       <select value={session} onChange={(e) => setSession(e.target.value)}
         className="bg-bg border border-line px-2 py-1 text-ink max-w-xs">
@@ -62,9 +62,9 @@ export default function DiscoveryPage() {
 
   return (
     <PageShell active="DISCOVERY" title="Discovery" primaryAction={primaryAction}
-      right={<span className="font-mono text-[11px] text-ink-3">{items.length} pending</span>}>
+      right={<span className="text-[12px] text-ink-3">{items.length} pending</span>}>
       <div className="p-4 space-y-4">
-        {msg && <div className="panel p-2 font-mono text-[11px] text-warn">{msg}</div>}
+        {msg && <div className="panel p-2 text-[12px] text-warn">{msg}</div>}
 
         {items.length ? (
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
@@ -73,7 +73,7 @@ export default function DiscoveryPage() {
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={c.image_url} alt="" onClick={() => router.push(`/frame/${c.frame_id}`)}
                   className="w-full h-28 object-cover bg-bg-2 cursor-pointer" />
-                <div className="p-2 space-y-1 font-mono text-[10px]">
+                <div className="p-2 space-y-1 text-[11px]">
                   <div className="flex items-center justify-between gap-1">
                     <StateBadge state={c.kind.replace("_", " ")} />
                     <ScoreBar value={c.score} tone="info" />
@@ -91,7 +91,7 @@ export default function DiscoveryPage() {
             ))}
           </div>
         ) : (
-          <div className="panel px-3 py-10 text-center font-mono text-xs text-ink-3">
+          <div className="panel px-3 py-10 text-center text-[12.5px] text-ink-3">
             no pending candidates. Pick a session and click run to surface unusual frames.
           </div>
         )}

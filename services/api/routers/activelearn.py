@@ -13,6 +13,7 @@ from services.activelearn.budget import select_batch
 from services.activelearn.loop import maybe_retrain, new_signal_count
 from services.activelearn.selector import score_candidates
 from services.api.deps import db_session, require_role
+from services.api.project_guard import caller_hidden_projects
 
 router = APIRouter()
 
@@ -24,8 +25,14 @@ class SelectIn(BaseModel):
 
 
 @router.get("/activelearn/score")
-async def score(session_id: str | None = None, limit: int = 50, db: AsyncSession = Depends(db_session)):
+async def score(session_id: str | None = None, limit: int = 50, db: AsyncSession = Depends(db_session),
+                hidden=Depends(caller_hidden_projects)):
+    from services.project_access import as_hidden, drop_hidden
+
+    hidden = as_hidden(hidden)
     items = await score_candidates(db, session_id)
+    if hidden:
+        items = await drop_hidden(db, hidden, [i if isinstance(i, dict) else dict(i) for i in items], "frame_id")
     return {"pool": len(items), "items": items[:limit]}
 
 

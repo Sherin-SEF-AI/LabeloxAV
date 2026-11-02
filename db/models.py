@@ -1270,8 +1270,27 @@ class LabelProject(Base):
     min_honeypot_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.9,
                                                          server_default="0.9")
     gold_id: Mapped[str | None] = mapped_column(String(128))   # the sealed gold set honeypots are drawn from
+    # Who may see its sessions: "team" (everyone signed in) or "members" (its members and administrators).
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="team", server_default="team")
+    # The classes this project labels, as ontology ids; NULL is the whole ontology (services/project_classes.py).
+    class_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProjectMember(Base):
+    """A person in a project. Only matters for a "members" project, whose sessions only members (and
+    administrators) can see (migration 0118)."""
+
+    __tablename__ = "project_member"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("label_project.project_id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.user_id", ondelete="CASCADE"), primary_key=True)
+    added_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_project_member_user", "user_id"),)
 
 
 class LabelTask(Base):
@@ -3691,3 +3710,24 @@ class EdgeTelemetry(Base):
                                                  server_default=func.now(), index=True)
 
     __table_args__ = (Index("ix_edge_telemetry_artifact_time", "artifact_id", "created_at"),)
+
+
+class AssistantProposal(Base):
+    """A change the assistant proposed and a person approves or rejects (services/assistant, migration 0120)."""
+
+    __tablename__ = "assistant_proposal"
+
+    proposal_id: Mapped[uuid.UUID] = _uuid_pk()
+    tool: Mapped[str] = mapped_column(String(64), nullable=False)
+    args: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    preview: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
+    result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    request: Mapped[str | None] = mapped_column(Text, nullable=True)   # what the person asked, verbatim
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("ix_assistant_proposal_status", "status", "created_at"),)

@@ -44,7 +44,7 @@ export default function SceneGraphPanel({ frameId, embedded = false }: { frameId
   };
 
   return (
-    <div className={`space-y-2 font-mono text-[10px] ${embedded ? "" : "border-t hairline p-2"}`}>
+    <div className={`space-y-2 text-[11px] ${embedded ? "" : "border-t hairline p-2"}`}>
       <div className="flex items-center justify-between">
         {!embedded && <span className="uppercase text-ink-3">scene graph + vlm dataset</span>}
         <div className={`flex gap-1 ${embedded ? "ml-auto" : ""}`}>

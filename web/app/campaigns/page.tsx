@@ -104,14 +104,14 @@ export default function CampaignsPage() {
       subtitle="the improvement loop, run by the system"
       primaryAction={
         <button onClick={() => setCreating((c) => !c)}
-          className="border border-accent px-2 py-1 font-mono text-[11px] text-accent hover:bg-accent/10">
+          className="border border-accent px-2 py-1 text-[12px] text-accent hover:bg-accent/10">
           {creating ? "cancel" : "new campaign"}
         </button>
       }>
       <div className="p-4 space-y-4 max-w-6xl">
         {creating && (
           <section className="panel p-3 space-y-2">
-            <div className="flex items-center gap-2 font-mono text-[11px] flex-wrap">
+            <div className="flex items-center gap-2 text-[12px] flex-wrap">
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="campaign name"
                 className="bg-bg border border-line px-1.5 py-0.5 text-ink w-44" />
               <input value={className} onChange={(e) => setClassName(e.target.value)}
@@ -134,7 +134,7 @@ export default function CampaignsPage() {
                 create
               </button>
             </div>
-            <div className="font-mono text-[10px] text-ink-3">
+            <div className="text-[11px] text-ink-3">
               The budget is in labels, not hours: the batches a campaign builds are human time, and no
               wall-clock limit constrains that. Every stage waits for approval until you put it on autopilot.
             </div>
@@ -142,17 +142,17 @@ export default function CampaignsPage() {
         )}
 
         <section className="panel">
-          <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
             campaigns ({rows.length})
           </div>
           {rows.length === 0 ? (
-            <div className="p-4 font-mono text-[11px] text-ink-3">
+            <div className="p-4 text-[12px] text-ink-3">
               No campaigns. One picks a class the gate keeps blocking on, then chains mining, judging,
               review, retraining and a promotion attempt until it hits the target, spends its budget, or
               stops improving.
             </div>
           ) : (
-            <table className="w-full font-mono text-[11px]">
+            <table className="w-full text-[12px]">
               <thead>
                 <tr className="text-ink-3 text-left border-b hairline">
                   <th className="py-1">name</th><th>class</th><th>status</th><th>iter</th>
@@ -202,7 +202,7 @@ export default function CampaignsPage() {
 
         {detail && (
           <section className="panel">
-            <div className="flex items-center gap-2 font-mono text-[11px] uppercase text-ink-3
+            <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3
                             border-b hairline px-3 py-2">
               <span>{detail.name}</span>
               <span className="normal-case text-ink-3">
@@ -224,15 +224,15 @@ export default function CampaignsPage() {
                     : "border-accent text-accent";
                   return (
                     <div key={stage} className={`border px-2 py-1 ${tone}`}>
-                      <div className="font-mono text-[11px]">{stage}</div>
+                      <div className="text-[12px]">{stage}</div>
                       {last?.awaiting && (
-                        <div className="font-mono text-[9.5px] text-ink-3 max-w-[14rem]">
+                        <div className="text-[10.5px] text-ink-3 max-w-[14rem]">
                           {last.awaiting}
                         </div>
                       )}
                       {last?.status === "waiting" && last.awaiting?.startsWith("approval") && (
                         <button onClick={approve(detail.campaign_id, stage)} disabled={busy}
-                          className="mt-1 font-mono text-[10px] text-accent hover:underline">
+                          className="mt-1 text-[11px] text-accent hover:underline">
                           approve and run
                         </button>
                       )}
@@ -241,7 +241,7 @@ export default function CampaignsPage() {
                 })}
               </div>
 
-              <table className="w-full font-mono text-[11px]">
+              <table className="w-full text-[12px]">
                 <thead>
                   <tr className="text-ink-3 text-left border-b hairline">
                     <th className="py-1">iter</th><th>stage</th><th>status</th><th>detail</th>

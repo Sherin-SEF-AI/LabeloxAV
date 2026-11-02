@@ -77,8 +77,8 @@ export default function PiiAccessPage() {
       <div className="p-4 space-y-4 max-w-6xl">
         {denied ? (
           <div className="panel border border-block p-3 space-y-1">
-            <div className="font-mono text-[11px] text-block">this log is administrator-only</div>
-            <div className="font-mono text-[10.5px] text-ink-3">
+            <div className="text-[12px] text-block">this log is administrator-only</div>
+            <div className="text-[11.5px] text-ink-3">
               It records who viewed personal data, which makes it a record about people who work here as much
               as about the subjects in the corpus. Browsing a colleague&apos;s viewing history is surveillance
               rather than compliance, so the floor is deliberately high.
@@ -89,21 +89,21 @@ export default function PiiAccessPage() {
             {summary && (
               <div className="flex gap-2 flex-wrap">
                 <div className="panel px-3 py-2 min-w-[120px]">
-                  <div className="font-mono text-[10px] uppercase text-ink-3">accesses</div>
-                  <div className="font-mono text-[18px] text-ink tabular-nums">{summary.accesses}</div>
+                  <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">accesses</div>
+                  <div className="text-[18px] font-semibold text-ink tabular-nums">{summary.accesses}</div>
                 </div>
                 <div className="panel px-3 py-2 min-w-[120px]">
-                  <div className="font-mono text-[10px] uppercase text-ink-3">unredacted</div>
+                  <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">unredacted</div>
                   {/* The number a policy is actually written about: viewing a blurred frame is ordinary
                       work, viewing the original is the governed act. */}
                   <div className={`font-mono text-[18px] tabular-nums ${
                     summary.unredacted ? "text-warn" : "text-ink"}`}>{summary.unredacted}</div>
-                  <div className="font-mono text-[10px] text-ink-3">the governed act</div>
+                  <div className="text-[11px] text-ink-3">the governed act</div>
                 </div>
                 {Object.entries(summary.by_action).map(([a, n]) => (
                   <div key={a} className="panel px-3 py-2 min-w-[110px]">
-                    <div className="font-mono text-[10px] uppercase text-ink-3">{a}</div>
-                    <div className="font-mono text-[18px] text-ink tabular-nums">{n}</div>
+                    <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{a}</div>
+                    <div className="text-[18px] font-semibold text-ink tabular-nums">{n}</div>
                   </div>
                 ))}
               </div>
@@ -111,12 +111,12 @@ export default function PiiAccessPage() {
 
             {summary && Object.keys(summary.by_user).length > 0 && (
               <section className="panel">
-                <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
                   by person
                 </div>
                 <div className="p-3 flex gap-1 flex-wrap">
                   {Object.entries(summary.by_user).sort((a, b) => b[1] - a[1]).map(([u, n]) => (
-                    <span key={u} className="border border-line px-1.5 py-0.5 font-mono text-[10.5px] text-ink-2">
+                    <span key={u} className="border border-line px-1.5 py-0.5 text-[11.5px] text-ink-2">
                       {u} <span className="text-ink-3">{n}</span>
                     </span>
                   ))}
@@ -125,17 +125,17 @@ export default function PiiAccessPage() {
             )}
 
             <section className="panel">
-              <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
                 accesses ({rows.length} of {total})
               </div>
               <div className="p-3">
                 {rows.length === 0 ? (
-                  <div className="font-mono text-[11px] text-ink-3">
+                  <div className="text-[12px] text-ink-3">
                     Nothing recorded in this window. An access is written when a frame known to contain a
                     face or a plate is served, and when the security console reads a registration mark.
                   </div>
                 ) : (
-                  <table className="w-full font-mono text-[11px]">
+                  <table className="w-full text-[12px]">
                     <thead>
                       <tr className="text-ink-3 text-left border-b hairline">
                         <th className="py-1">when</th><th>who</th><th>action</th>

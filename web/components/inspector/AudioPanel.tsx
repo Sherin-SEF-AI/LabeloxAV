@@ -63,7 +63,7 @@ export default function AudioPanel({ topic }: { topic: string }) {
     <div className="relative h-full w-full">
       <canvas ref={hostRef} className="absolute inset-0 w-full h-full" />
       <div ref={headRef} className="absolute top-0 bottom-0 w-[1px] bg-accent pointer-events-none" style={{ left: 0 }} />
-      {note && <div className="absolute inset-0 flex items-center justify-center font-mono text-[10px] text-ink-3 pointer-events-none">{note}</div>}
+      {note && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-ink-3 pointer-events-none">{note}</div>}
     </div>
   );
 }

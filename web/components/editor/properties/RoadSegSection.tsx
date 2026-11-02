@@ -12,7 +12,7 @@ export default function RoadSegSection({ frameId, onSegRoad, onProposeLanes }: {
 }) {
   const router = useRouter();
   return (
-    <div className="grid grid-cols-2 gap-1 font-mono text-[10px]">
+    <div className="grid grid-cols-2 gap-1 text-[11px]">
       <button onClick={onSegRoad}
         className="border border-line rounded text-ink-2 px-1.5 py-1 hover:border-accent">segment road</button>
       <button onClick={onProposeLanes}

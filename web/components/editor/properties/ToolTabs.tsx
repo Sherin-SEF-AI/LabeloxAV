@@ -37,7 +37,7 @@ export default function ToolTabs<T extends string>({ tabs, value, onChange, idPr
 
   return (
     <div ref={ref} role="tablist" aria-label={label}
-      className="flex shrink-0 border-b hairline font-mono text-[10px] uppercase tracking-wide"
+      className="flex shrink-0 border-b hairline text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide"
       onKeyDown={(e) => {
         if (e.key === "ArrowRight") { e.preventDefault(); move(1); }
         else if (e.key === "ArrowLeft") { e.preventDefault(); move(-1); }

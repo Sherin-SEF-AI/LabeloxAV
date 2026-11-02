@@ -52,14 +52,14 @@ export default function RecoveryPage() {
                     <KV k="pitch deg" v={tl.out.pitch_deg?.toFixed(2)} tone="ink" />
                     <KV k="confidence" v={tl.out.confidence?.toFixed(3)} tone="ink-3" />
                   </>)
-                : <div className="font-mono text-[11px] text-block">refused: {tl.out.reason}</div>}
+                : <div className="text-[12px] text-block">refused: {tl.out.reason}</div>}
             </div>
           )}
         </Panel>
 
         {/* rig consensus */}
         <Panel title="rig consensus prior" hint="fuse per-session overrides">
-          <label className="flex items-center gap-2 font-mono text-[11px] mb-2">
+          <label className="flex items-center gap-2 text-[12px] mb-2">
             <span className="text-ink-3">vehicle</span>
             <input value={vehicle} onChange={(e) => setVehicle(e.target.value)}
               className="flex-1 bg-bg-2 border border-line px-1.5 py-0.5 text-ink outline-none focus:border-accent" />
@@ -76,7 +76,7 @@ export default function RecoveryPage() {
               <KV k="confidence" v={cons.out.prior.confidence.toFixed(3)}
                 tone={cons.out.prior.confidence >= 0.7 ? "pass" : cons.out.prior.confidence > 0 ? "warn" : "ink-3"} />
               {cons.out.n_overrides === 0 &&
-                <div className="font-mono text-[10px] text-ink-3 mt-1">no overrides recorded for this vehicle yet</div>}
+                <div className="text-[11px] text-ink-3 mt-1">no overrides recorded for this vehicle yet</div>}
             </div>
           )}
         </Panel>

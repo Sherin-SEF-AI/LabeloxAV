@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import RecallCandidate
 from services.api.deps import current_user, db_session, require_role
+from services.api.project_guard import caller_hidden_projects
 from services.recall.recover import run_recall
 
 router = APIRouter()
@@ -61,14 +62,17 @@ async def progress(db: AsyncSession = Depends(db_session)):
 
 @router.get("/recall/candidates")
 async def candidates(status: str = "pending", session_id: str | None = None, limit: int = 200,
-                     db: AsyncSession = Depends(db_session)):
+                     db: AsyncSession = Depends(db_session), hidden=Depends(caller_hidden_projects)):
     q = select(RecallCandidate).where(RecallCandidate.status == status)
     if session_id:
         from db.models import Frame
 
         q = q.join(Frame, Frame.frame_id == RecallCandidate.frame_id).where(Frame.session_id == session_id)
     rows = (await db.execute(q.order_by(RecallCandidate.fn_value.desc()).limit(limit))).scalars().all()
-    return {"status": status, "count": len(rows), "candidates": [
+    from services.project_access import drop_hidden
+
+    out = await drop_hidden(db, hidden, [
         {"candidate_id": str(c.candidate_id), "object_id": str(c.object_id), "frame_id": str(c.frame_id),
          "channels": c.channels, "fn_value": c.fn_value, "class_id": c.class_id, "status": c.status}
-        for c in rows]}
+        for c in rows], "frame_id")
+    return {"status": status, "count": len(out), "candidates": out}

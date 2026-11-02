@@ -21,13 +21,13 @@ export default function TopicBrowser({ topics, onAdd }: {
 }) {
   return (
     <div className="h-full overflow-auto no-scrollbar">
-      <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3 px-2 py-1.5 sticky top-0 bg-panel">topics ({topics.length})</div>
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wider text-ink-3 px-2 py-1.5 sticky top-0 bg-panel">topics ({topics.length})</div>
       {topics.map((t) => (
         <button key={t.name} onClick={() => onAdd(panelTypeFor(t), t.name)}
           title={`add a ${panelTypeFor(t)} panel for ${t.name}`}
           className="w-full text-left px-2 py-1 hover:bg-bg-2 border-b hairline/50">
-          <div className="font-mono text-[11px] text-ink-2 truncate">{t.name}</div>
-          <div className="font-mono text-[9px] text-ink-3 flex gap-2">
+          <div className="text-[12px] text-ink-2 truncate">{t.name}</div>
+          <div className="text-[10.5px] text-ink-3 flex gap-2">
             <span className="truncate">{t.schema || "unknown"}</span>
             <span className="ml-auto shrink-0">{t.rate}Hz · {t.count}</span>
           </div>

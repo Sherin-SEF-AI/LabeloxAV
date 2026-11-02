@@ -91,7 +91,7 @@ export default function MapPage() {
       <div className="flex h-full min-h-0">
         <div ref={wrap} className="flex-1" />
         <Inspector title="element provenance" side="right">
-          <div className="p-3 font-mono text-[11px]">
+          <div className="p-3 text-[12px]">
             {loadErr != null && <LoadState error={loadErr} onRetry={() => window.location.reload()} />}
             {prov?.found ? (
               <div className="space-y-1.5">

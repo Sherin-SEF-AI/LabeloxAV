@@ -203,7 +203,7 @@ target-version = "py311"
 # integrations/ holds git submodules: other repositories, vendored at a pinned commit. Linting them reports
 # 321 findings nobody here can act on, and `make fmt` runs `ruff check --fix` over the tree, which would
 # rewrite another project's source in place and leave its submodule permanently dirty.
-extend-exclude = ["sdk/generated_client.py", "integrations/"]
+extend-exclude = ["sdk/labelox/generated.py", "integrations/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

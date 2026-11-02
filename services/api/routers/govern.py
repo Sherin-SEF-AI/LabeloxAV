@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.api.deps import current_user, db_session, require_role
+from services.api.project_guard import caller_hidden_projects
 from services.govern import killswitch as K
 from services.govern.audit import list_audit
 from services.govern.champion import evaluate_and_promote
@@ -210,7 +211,8 @@ async def control_verdict(sample_id: str, payload: VerdictIn, db: AsyncSession =
 
 
 @router.get("/govern/control/pending", dependencies=[Depends(require_role("annotator"))])
-async def control_pending(limit: int = 100, db: AsyncSession = Depends(db_session)):
+async def control_pending(limit: int = 100, db: AsyncSession = Depends(db_session),
+                          hidden=Depends(caller_hidden_projects)):
     """The control samples awaiting a verdict.
 
     This corpus holds 601 of them, every one unjudged, because there was no way to list what needed judging
@@ -218,8 +220,14 @@ async def control_pending(limit: int = 100, db: AsyncSession = Depends(db_sessio
     meant to be the number a buyer trusts over a self-reported one, has been null since the feature shipped.
     """
     from services.govern.control_sample import pending_samples
+    from services.project_access import as_hidden, drop_hidden
 
-    return await pending_samples(db, limit)
+    hidden = as_hidden(hidden)
+    out = await pending_samples(db, limit)
+    if hidden and isinstance(out, dict) and isinstance(out.get("samples"), list):
+        out["samples"] = await drop_hidden(db, hidden, out["samples"], "object_id")
+        out["count"] = len(out["samples"])
+    return out
 
 
 @router.get("/govern/control/precision", dependencies=[Depends(require_role("annotator"))])

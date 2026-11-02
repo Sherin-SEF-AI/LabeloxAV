@@ -18,7 +18,7 @@ export default function ScoreBar({ label, value, tone = "neutral", showValue = t
 }) {
   const w = Math.max(0, Math.min(1, value)) * 100;
   return (
-    <span className="inline-flex items-center gap-2 font-mono text-[11px]">
+    <span className="inline-flex items-center gap-2 text-[12px]">
       {label && <span className="text-ink-3 shrink-0">{label}</span>}
       <span className="w-14 h-1.5 bg-line relative inline-block">
         <span className={`absolute left-0 top-0 h-full ${TONE[tone]}`} style={{ width: `${w}%` }} />

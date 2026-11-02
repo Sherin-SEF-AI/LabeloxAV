@@ -79,14 +79,14 @@ export default function CalibrationPage() {
   const open = async (sid: string) => setDetail(await api.calibrationDetail(sid));
 
   const validateAction = (
-    <button onClick={validate} disabled={busy || !pick} className="border border-accent text-accent px-2 py-1 font-mono text-[11px] hover:bg-accent/10 disabled:opacity-50">{busy ? "..." : "validate"}</button>
+    <button onClick={validate} disabled={busy || !pick} className="border border-accent text-accent px-2 py-1 text-[12px] hover:bg-accent/10 disabled:opacity-50">{busy ? "..." : "validate"}</button>
   );
 
   return (
     <PageShell active="CALIBRATION" title="Calibration" primaryAction={validateAction}>
       <div className="flex h-full min-h-0">
         <Inspector side="left" title="Sessions">
-          <div className="p-2 space-y-3 font-mono text-[11px]">
+          <div className="p-2 space-y-3 text-[12px]">
             <div className="space-y-1">
               <span className="block text-ink-3">validate calibration on</span>
               <select value={pick} onChange={(e) => setPick(e.target.value)} className="w-full bg-bg border border-line px-2 py-1 text-ink">
@@ -109,11 +109,11 @@ export default function CalibrationPage() {
 
         <section className="flex-1 min-h-0 overflow-auto p-4">
           <div className="panel">
-            <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2 flex items-center gap-2">
+            <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2 flex items-center gap-2">
               report {detail && <StateBadge state={detail.overall} />}
             </div>
             {detail ? (
-              <table className="w-full font-mono text-[11px]">
+              <table className="w-full text-[12px]">
                 <thead><tr className="text-ink-3 text-left border-b hairline"><th className="px-3 py-1">camera</th><th>model</th><th>reproj px</th><th>implied FOV</th><th>expected</th><th>time offset</th><th className="text-right pr-3">status</th></tr></thead>
                 <tbody>
                   {(detail.validations ?? []).map((c) => (
@@ -130,13 +130,13 @@ export default function CalibrationPage() {
                 </tbody>
               </table>
             ) : (
-              <div className="font-mono text-xs text-ink-3 py-10 text-center">validate a session, or pick one from the list.</div>
+              <div className="text-[12.5px] text-ink-3 py-10 text-center">validate a session, or pick one from the list.</div>
             )}
           </div>
         </section>
 
         <Inspector side="right" title="Real calibration">
-          <div className="p-2 space-y-3 font-mono text-[11px]">
+          <div className="p-2 space-y-3 text-[12px]">
             {resolved && (
               <div className="flex items-center gap-2">
                 <span className="text-ink-3">trust</span>

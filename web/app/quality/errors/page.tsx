@@ -4,12 +4,14 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useRouter, useSearchParams } from "next/navigation";
 
 import PageShell from "@/components/shell/PageShell";
+import DetectorBenchmark from "@/components/quality/DetectorBenchmark";
 import { api, humanizeError } from "@/lib/api";
 import {
   cursorAfterRemoval, moveCursor, rangeBetween, targetIndices, toggle,
 } from "@/lib/gridSelection";
 import { toast } from "@/lib/toast";
 import type { ErrorCandidateRow } from "@/lib/types";
+import { useCurrentUser } from "@/lib/user";
 
 // Ruling on error candidates the way review rules on labels: many crops on screen, one keystroke each.
 //
@@ -33,7 +35,7 @@ export default function ErrorGridPage() {
   return (
     <Suspense fallback={
       <PageShell active="ERROR QUEUE" title="Error candidates">
-        <div className="p-4 font-mono text-[11px] text-ink-3">loading the queue...</div>
+        <div className="p-4 text-[12px] text-ink-3">loading the queue...</div>
       </PageShell>
     }>
       <ErrorGrid />
@@ -44,6 +46,7 @@ export default function ErrorGridPage() {
 type Precision = Awaited<ReturnType<typeof api.errorPrecision>>;
 
 function ErrorGrid() {
+  const me = useCurrentUser();
   const params = useSearchParams();
   const router = useRouter();
   const kind = params.get("kind") || "";
@@ -194,19 +197,20 @@ function ErrorGrid() {
       subtitle={kind ? `${kind} · confirm or dismiss, one keystroke each` : "confirm or dismiss, one keystroke each"}
     >
       <div className="p-3 space-y-2">
+        {me?.role === "admin" && <DetectorBenchmark />}
         {/* The detector scoreboard. Shown above the grid because which detector you are judging is the
             decision that matters most, and because a detector nobody has ruled on should say so rather
             than showing an interval that looks like a bad score. */}
         {precision && (
           <div className="panel p-2 overflow-x-auto">
-            <div className="font-mono text-[10px] text-ink-3 mb-1">
+            <div className="text-[11px] text-ink-3 mb-1">
               detector precision, from human verdicts
               {precision.caveat && <span className="text-warn"> · {precision.caveat}</span>}
             </div>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => router.push("/quality/errors")}
-                className={`px-2 py-1 font-mono text-[10px] ring-1 ${kind ? "ring-line text-ink-3" : "ring-accent text-accent"}`}
+                className={`px-2 py-1 text-[11px] ring-1 ${kind ? "ring-line text-ink-3" : "ring-accent text-accent"}`}
               >
                 all detectors
               </button>
@@ -217,7 +221,7 @@ function ErrorGrid() {
                     key={k}
                     onClick={() => router.push(`/quality/errors?kind=${encodeURIComponent(k)}`)}
                     title={d.note || `${d.decided} verdicts`}
-                    className={`px-2 py-1 font-mono text-[10px] ring-1 ${k === kind ? "ring-accent text-accent" : "ring-line text-ink-2"}`}
+                    className={`px-2 py-1 text-[11px] ring-1 ${k === kind ? "ring-accent text-accent" : "ring-line text-ink-2"}`}
                   >
                     {k} <span className="text-ink-3">{d.pending}</span>{" "}
                     {d.usable
@@ -230,7 +234,7 @@ function ErrorGrid() {
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-ink-3">
+        <div className="flex flex-wrap items-center gap-3 text-[12px] text-ink-3">
           <span className="text-ink">{queue.length} left</span>
           <span>{decided} decided</span>
           {perMin != null && <span className="text-accent">{perMin}/min</span>}
@@ -242,13 +246,13 @@ function ErrorGrid() {
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="why (recorded on every candidate in the batch, e.g. 'scores frame similarity, not the object')"
-          className="w-full bg-bg-2 px-2 py-1 font-mono text-[11px] text-ink ring-1 ring-line"
+          className="w-full bg-bg-2 px-2 py-1 text-[12px] text-ink ring-1 ring-line"
         />
 
-        {loading && <div className="font-mono text-[11px] text-ink-3">loading the queue...</div>}
+        {loading && <div className="text-[12px] text-ink-3">loading the queue...</div>}
 
         {!loading && !page.length && (
-          <div className="panel px-3 py-6 font-mono text-[11px] text-ink-3 text-center">
+          <div className="panel px-3 py-6 text-[12px] text-ink-3 text-center">
             Nothing pending{kind ? ` for ${kind}` : ""}. Every candidate here has been ruled on.
           </div>
         )}
@@ -304,7 +308,7 @@ function ErrorGrid() {
           </div>
         )}
 
-        <div className="font-mono text-[10px] text-ink-3 flex flex-wrap gap-3">
+        <div className="text-[11px] text-ink-3 flex flex-wrap gap-3">
           <span><b className="text-ink">arrows/hjkl</b> move</span>
           <span><b className="text-ink">shift+move</b> range</span>
           <span><b className="text-ink">space</b> select</span>

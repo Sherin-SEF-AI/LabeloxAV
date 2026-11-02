@@ -71,7 +71,7 @@ export default function JobsPage() {
   };
 
   const filters = (
-    <div className="flex items-center gap-1 font-mono text-[11px]">
+    <div className="flex items-center gap-1 text-[12px]">
       {kinds.map((k) => (
         <button key={k} onClick={() => setKind(k)}
           className={`px-2 py-1 border ${kind === k ? "border-accent text-ink" : "border-line text-ink-3"}`}>
@@ -111,11 +111,11 @@ export default function JobsPage() {
               fixed-width bar held a full 1fr while the only explanation of a failure was squeezed into
               140px and truncated, so the one column that matters when something breaks was the one you
               could not read. */}
-          <div className="grid grid-cols-[80px_minmax(0,14rem)_100px_120px_minmax(0,1fr)_112px] gap-2 px-3 py-2 border-b hairline font-mono text-[10px] uppercase text-ink-3">
+          <div className="grid grid-cols-[80px_minmax(0,14rem)_100px_120px_minmax(0,1fr)_112px] gap-2 px-3 py-2 border-b hairline text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">
             <span>kind</span><span>label</span><span>status</span><span>progress</span><span>detail</span><span></span>
           </div>
           {shown.map((j) => (
-            <div key={j.job_id} className="grid grid-cols-[80px_minmax(0,14rem)_100px_120px_minmax(0,1fr)_112px] gap-2 px-3 py-2 border-b hairline items-center font-mono text-[11px]">
+            <div key={j.job_id} className="grid grid-cols-[80px_minmax(0,14rem)_100px_120px_minmax(0,1fr)_112px] gap-2 px-3 py-2 border-b hairline items-center text-[12px]">
               <span><StateBadge state={j.kind} /></span>
               <span className="text-ink-2 truncate" title={j.label}>{j.label}</span>
               <span><StateBadge state={j.status} /></span>
@@ -142,7 +142,7 @@ export default function JobsPage() {
           ))}
           {loading && !shown.length
             ? <SkeletonRows rows={8} cols="grid-cols-[80px_1fr_90px_1fr_140px_70px]" />
-            : !shown.length && <div className="px-3 py-6 text-center font-mono text-xs text-ink-3">no jobs</div>}
+            : !shown.length && <div className="px-3 py-6 text-center text-[12.5px] text-ink-3">no jobs</div>}
         </div>
       </div>
     </PageShell>

@@ -16,7 +16,7 @@ const FORMATS = ["coco", "yolo", "parquet", "openlabel", "nuscenes"];
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="panel">
-      <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">{title}</div>
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">{title}</div>
       <div className="p-3">{children}</div>
     </section>
   );
@@ -90,7 +90,7 @@ function DatasetsBody() {
     >
       <div className="p-4 space-y-4 max-w-4xl w-full mx-auto">
         <Section title="new export (seal a versioned dataset)">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 font-mono text-xs">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-[12.5px]">
             <label className="flex flex-col gap-1">
               <span className="text-ink-3 uppercase text-[11px]">name</span>
               <input value={name} onChange={(e) => setName(e.target.value)} className="bg-panel border border-line px-2 py-1 text-ink" />
@@ -118,15 +118,15 @@ function DatasetsBody() {
               <span className="text-ink-3 uppercase text-[11px]">val %</span>
               <input type="number" min={0} max={90} step={5} value={Math.round(valFrac * 100)}
                 onChange={(e) => setValFrac(Math.max(0, Math.min(90, Number(e.target.value))) / 100)}
-                className="bg-panel border border-line px-2 py-1 text-ink w-20 font-mono text-xs" />
+                className="bg-panel border border-line px-2 py-1 text-ink w-20 text-[12.5px]" />
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-ink-3 uppercase text-[11px]">test %</span>
               <input type="number" min={0} max={90} step={5} value={Math.round(testFrac * 100)}
                 onChange={(e) => setTestFrac(Math.max(0, Math.min(90, Number(e.target.value))) / 100)}
-                className="bg-panel border border-line px-2 py-1 text-ink w-20 font-mono text-xs" />
+                className="bg-panel border border-line px-2 py-1 text-ink w-20 text-[12.5px]" />
             </label>
-            <span className="font-mono text-[10px] text-ink-3 max-w-[260px]">
+            <span className="text-[11px] text-ink-3 max-w-[260px]">
               {valFrac || testFrac
                 ? "held out by session, so no drive appears in two splits"
                 : "no split: the whole slice is delivered as train"}
@@ -134,11 +134,11 @@ function DatasetsBody() {
           </div>
           <div className="flex items-center gap-3 mt-3">
             <button onClick={runExport} disabled={!fmts.length}
-              className="font-mono text-xs border border-pass text-pass px-3 py-1 hover:bg-pass/10 disabled:opacity-50">
+              className="text-[12.5px] border border-pass text-pass px-3 py-1 hover:bg-pass/10 disabled:opacity-50">
               export
             </button>
-            {msg && <span className="font-mono text-[11px] text-warn">{msg}</span>}
-            <span className="font-mono text-[10px] text-ink-3 ml-auto">parquet sidecar is always included (lossless)</span>
+            {msg && <span className="text-[12px] text-warn">{msg}</span>}
+            <span className="text-[11px] text-ink-3 ml-auto">parquet sidecar is always included (lossless)</span>
           </div>
         </Section>
 
@@ -148,7 +148,7 @@ function DatasetsBody() {
               {rows.map((d) => (
                 <div key={d.commit_id} className="border-b hairline pb-1">
                   <button onClick={() => setOpen(open === d.commit_id ? null : d.commit_id)}
-                    className="w-full flex items-center gap-3 px-1 py-1 font-mono text-[11px] text-left hover:text-ink">
+                    className="w-full flex items-center gap-3 px-1 py-1 text-[12px] text-left hover:text-ink">
                     <span className="text-ink-2 w-40 truncate">{d.name ?? "?"}</span>
                     <span className="text-ink-3">{d.commit_id.slice(0, 14)}</span>
                     <span className="text-ink-3">{d.object_count} obj</span>
@@ -156,7 +156,7 @@ function DatasetsBody() {
                     <span className="ml-auto text-ink-3">{d.n_files} files {open === d.commit_id ? "▾" : "▸"}</span>
                   </button>
                   {open === d.commit_id && detail && (
-                    <div className="pl-2 pb-2 grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-0.5 font-mono text-[10px]">
+                    <div className="pl-2 pb-2 grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-0.5 text-[11px]">
                       {detail.files.map((f) => (
                         f.url ? (
                           <a key={f.path} href={f.url} className="text-info hover:text-accent truncate" title={f.path} download>
@@ -177,7 +177,7 @@ function DatasetsBody() {
           ) : loading ? (
             <SkeletonRows rows={6} cols="grid-cols-[160px_1fr_80px_120px]" />
           ) : (
-            <div className="font-mono text-xs text-ink-3 py-6 text-center">
+            <div className="text-[12.5px] text-ink-3 py-6 text-center">
               No datasets sealed yet. Seal one above to export your labeled data.
             </div>
           )}

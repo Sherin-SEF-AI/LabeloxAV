@@ -45,6 +45,12 @@ The domain is a pack, not the engine. `packs/sec` serves physical security from 
 ingest, same review, same gate, different ontology and different safety definitions. If your domain is not
 driving, this is the seam to read: [Domain packs](../PACK_INTERFACE.md).
 
+### Working as a small team
+
+People and roles, projects that only some of the team can see, which classes each project labels, and the
+assistant that answers questions and proposes changes for a reviewer to approve: [Running it as a
+team](team.md).
+
 ## What it is not
 
 - **Not a crowdsourcing platform.** There is no task marketplace, no worker payment, no consensus across

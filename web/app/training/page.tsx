@@ -3,20 +3,21 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useJobStream } from "@/lib/useEventStream";
-import { api, type ModelLine, type TrainingJob , humanizeError } from "@/lib/api";
+import { api, apiGet, type ModelLine, type TrainingJob, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import RunsPanel from "@/components/training/RunsPanel";
+import { useFeatures } from "@/lib/features";
 
 // In-app training platform: submit a training job (a "purpose" = dataset filters + hparams), watch it
 // run on the GPU worker (status / stage / epoch / map50), and browse the model registry. The API only
-// enqueues; the worker (make train-worker) executes, so the UI never blocks training.
+// enqueues; the GPU worker (services/gpu_worker.py) executes, so the UI never blocks training.
 
 function Section({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="panel">
       <div className="flex items-center justify-between border-b hairline px-3 py-2">
-        <div className="font-mono text-[11px] uppercase text-ink-3">{title}</div>
+        <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{title}</div>
         {right}
       </div>
       <div className="p-3">{children}</div>
@@ -25,6 +26,7 @@ function Section({ title, right, children }: { title: string; right?: React.Reac
 }
 
 export default function TrainingPage() {
+  const features = useFeatures();
   const router = useRouter();
   const [tasks, setTasks] = useState<{ task_type: string; default_base_weights: string }[]>([]);
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
@@ -32,10 +34,12 @@ export default function TrainingPage() {
   const [err, setErr] = useState<string | null>(null);
 
   // form
-  const [purpose, setPurpose] = useState("vru-detector");
+  const [purpose, setPurpose] = useState("");
   const [taskType, setTaskType] = useState("detection");
   const [computeTarget, setComputeTarget] = useState("local");
-  const [includeClasses, setIncludeClasses] = useState("pedestrian, rider, cycle, motorcycle");
+  const [includeClasses, setIncludeClasses] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [projects, setProjects] = useState<{ project_id: string; name: string; sessions: number; class_set: string; class_count: number }[]>([]);
   const [cities, setCities] = useState("");
   const [routePrefix, setRoutePrefix] = useState("");
   const [limit, setLimit] = useState("");
@@ -58,6 +62,9 @@ export default function TrainingPage() {
   const jobStream = useJobStream();
   useEffect(() => {
     api.trainingTasks().then(setTasks).catch(() => {});
+    apiGet<{ projects: typeof projects }>("/api/projects")
+      .then((r) => setProjects(r.projects.filter((p) => p.sessions > 0)))
+      .catch((e) => setErr(`Could not load projects, so training covers every project: ${humanizeError(e)}`));
     refresh();
   }, []);
   useEffect(() => { if (jobStream.data) refresh(); }, [jobStream.data]);
@@ -70,6 +77,7 @@ export default function TrainingPage() {
     setErr(null);
     const dataset_spec: Record<string, unknown> = {};
     if (includeClasses.trim()) dataset_spec.include_classes = listFrom(includeClasses);
+    if (projectId) dataset_spec.project_id = projectId;
     if (cities.trim()) dataset_spec.cities = listFrom(cities);
     if (routePrefix.trim()) dataset_spec.route_prefix = routePrefix.trim();
     if (limit.trim()) dataset_spec.limit = Number(limit);
@@ -92,15 +100,17 @@ export default function TrainingPage() {
     <PageShell
       active="TRAINING"
       title="Training"
-      right={<span className="text-ink-3">worker: <span className="text-ink-2">make train-worker</span></span>}
+      right={features.gpu_worker === undefined ? undefined : features.gpu_worker
+        ? <span className="text-pass">GPU worker running</span>
+        : <span className="text-warn" title="Queued jobs wait until it starts: docker compose up -d gpu-worker, or make gpu-worker on a dev box">GPU worker not running: queued jobs wait</span>}
 
     >
       <div className="p-4 space-y-4 max-w-5xl w-full mx-auto">
         <Section title="new training job">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 font-mono text-xs">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[12.5px]">
             <label className="flex flex-col gap-1">
               <span className="text-ink-3 uppercase text-[11px]">purpose (model line)</span>
-              <input value={purpose} onChange={(e) => setPurpose(e.target.value)}
+              <input value={purpose} placeholder="a name for this model line, e.g. vehicle-detector" onChange={(e) => setPurpose(e.target.value)}
                 className="bg-panel border border-line px-2 py-1 text-ink" />
             </label>
             <label className="flex flex-col gap-1">
@@ -128,9 +138,21 @@ export default function TrainingPage() {
               <span className="text-ink-2">promote if gate passes</span>
             </label>
             <label className="flex flex-col gap-1 md:col-span-2">
+              <span className="text-ink-3 uppercase text-[11px]">project</span>
+              <select value={projectId} onChange={(e) => setProjectId(e.target.value)}
+                className="bg-panel border border-line px-2 py-1 text-ink">
+                <option value="">Every project</option>
+                {projects.map((p) => (
+                  <option key={p.project_id} value={p.project_id}>
+                    {p.name} ({p.sessions} sessions{p.class_set !== "india" ? `, its ${p.class_count} classes` : ""})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 md:col-span-2">
               <span className="text-ink-3 uppercase text-[11px]">include classes (specialized; blank = all)</span>
-              <input value={includeClasses} onChange={(e) => setIncludeClasses(e.target.value)}
-                placeholder="pedestrian, rider, cycle" className="bg-panel border border-line px-2 py-1 text-ink" />
+              <input value={includeClasses} placeholder="blank trains on every class; or e.g. pedestrian, rider, motorcycle" onChange={(e) => setIncludeClasses(e.target.value)}
+                className="bg-panel border border-line px-2 py-1 text-ink" />
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-ink-3 uppercase text-[11px]">cities (per-domain)</span>
@@ -148,11 +170,12 @@ export default function TrainingPage() {
             </label>
           </div>
           <div className="flex items-center gap-3 mt-3">
-            <button onClick={onSubmit}
-              className="font-mono text-xs border border-line px-3 py-1 hover:border-accent">
-              queue training job
+            <button onClick={onSubmit} disabled={!purpose.trim()}
+              title={purpose.trim() ? undefined : "name the model line first"}
+              className="btn btn-primary">
+              Queue training job
             </button>
-            {err && <span className="font-mono text-[11px] text-block">{err}</span>}
+            {err && <span className="text-[12px] text-block">{err}</span>}
           </div>
         </Section>
 
@@ -165,7 +188,7 @@ export default function TrainingPage() {
                 const tot = j.counts?.total_epochs ?? 0;
                 const failed = j.status === "error" || j.status === "failed";
                 return (
-                  <div key={j.job_id} className="font-mono text-[11px] py-1">
+                  <div key={j.job_id} className="text-[12px] py-1">
                   <div className="flex items-center gap-2">
                     <span className="w-28 truncate text-ink-2" title={j.purpose}>{j.purpose}</span>
                     <span className={`w-12 ${j.compute_target === "cloud" ? "text-info" : "text-ink-3"}`}>
@@ -200,7 +223,7 @@ export default function TrainingPage() {
               })}
             </div>
           ) : (
-            <div className="font-mono text-xs text-ink-3 py-4 text-center">no training jobs yet</div>
+            <div className="text-[12.5px] text-ink-3 py-4 text-center">no training jobs yet</div>
           )}
         </Section>
 
@@ -213,7 +236,7 @@ export default function TrainingPage() {
             <div className="space-y-2">
               {registry.map((line) => (
                 <div key={line.purpose} className="border-b hairline pb-2">
-                  <div className="flex items-center gap-2 font-mono text-xs">
+                  <div className="flex items-center gap-2 text-[12.5px]">
                     <span className="text-ink">{line.purpose}</span>
                     <span className="text-ink-3">{line.task_type}</span>
                     {line.promoted && (
@@ -221,7 +244,7 @@ export default function TrainingPage() {
                     )}
                     <span className="ml-auto text-ink-3">{line.runs.length} runs</span>
                   </div>
-                  <div className="font-mono text-[11px] text-ink-3 mt-1 space-y-0.5">
+                  <div className="text-[12px] text-ink-3 mt-1 space-y-0.5">
                     {line.runs.slice(0, 4).map((r) => (
                       <div key={r.run_id} className="flex justify-between">
                         <span className="truncate">{r.run_id}</span>
@@ -233,7 +256,7 @@ export default function TrainingPage() {
               ))}
             </div>
           ) : (
-            <div className="font-mono text-xs text-ink-3 py-4 text-center">no models trained yet</div>
+            <div className="text-[12.5px] text-ink-3 py-4 text-center">no models trained yet</div>
           )}
         </Section>
       </div>

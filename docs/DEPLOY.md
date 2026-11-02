@@ -98,30 +98,55 @@ container (database and schema version, storage, event bus, torch and the GPU, m
 GPU worker is running). Every problem it reports comes with the command or setting that fixes it. An
 administrator sees the same application checks in the web app.
 
-### Signing in when the token is lost
+### Signing in, inviting the team, and recovering an account
 
-Every credential is issued through the API, issuing one needs an admin token, and the bootstrap that let the
-first user be created without one closes as soon as that user exists. The recovery path runs on the server,
-where possession of the signing key is the authority:
+The installer ends by printing a sign-in link for the administrator: open it, choose a password, and you
+are in. People sign in with a name and password from then on; nobody pastes tokens.
 
-```bash
-make token                       # mints one for `admin`
-make token NAME=alice            # or for anyone else
+**Adding people.** An administrator opens **Settings > Team**, enters a name and a role, and gets a link to
+send. It opens "choose a password", works once, and expires after `LBX_AUTH__INVITE_TTL_HOURS` (72 by
+default). Nothing is emailed: the link is handed over however the team talks, which also keeps this working
+on an offline lab network.
 
-# the same thing without make, plus the two other modes
-docker compose exec api python -m scripts.mint_token --list
+**A lost password.** On the Team page, **New sign-in link** issues a fresh link for that person. Their old
+password keeps working until the link is used; **Sign out everywhere** ends every session they have open.
 
-# a token leaked: invalidate every one already issued to that user, then mint a fresh one
-docker compose exec api python -m scripts.mint_token --name admin --revoke-existing
-```
-
-### Adding people
+**A locked-out administrator.** On the server, where database access is the authority:
 
 ```bash
-docker compose exec api python -m scripts.mint_token --name alice --role reviewer --create
+labeloxav sign-in-link admin                    # packaged install
+make sign-in-link NAME=admin                    # from a checkout
+docker compose exec api python -m scripts.sign_in_link --name admin --url http://<host>:3000
 ```
 
 Roles are `annotator`, `reviewer`, `admin`, and a higher role satisfies any floor below it.
+
+### Scripts, notebooks and CI: API keys and the Python client
+
+Sign-in tokens expire after hours and belong to a person, so nothing automated should borrow one. An
+administrator creates a long-lived key per script or pipeline in **Settings > API keys** (or
+`POST /api/service-accounts`), with a role and an optional expiry. The key is shown once; the server keeps
+only a hash. Rotate it to replace a leaked key without changing what it is allowed to do, or revoke it to
+stop it immediately.
+
+The Python client is its own small package (httpx and click only, no server code):
+
+```bash
+pip install ./sdk                      # from a checkout; the package is labelox-client
+export LBX_URL=http://labelox.lab:3000 # the web app's address; it proxies /api
+export LBX_API_KEY=lbxk_...
+labelox health
+labelox facets --predicate '{"states":["accepted"]}'
+```
+
+```python
+from labelox import Client
+lbx = Client()                        # reads LBX_URL and LBX_API_KEY
+lbx.health()
+```
+
+Every endpoint is also available as a method on `labelox.generated.LabeloxClient`, generated from the API's
+own schema by `python -m scripts.generate_sdk` (CI fails if it falls behind the API).
 
 ---
 

@@ -54,14 +54,14 @@ export default function SanyxBoard() {
       active="SANYX"
       title="SANYX ingest QA"
       right={
-        <span className="font-mono text-[11px] text-ink-3">
+        <span className="text-[12px] text-ink-3">
           <span className="text-pass">{counts.pass ?? 0} pass</span> ·{" "}
           <span className="text-warn">{counts.degraded ?? 0} degraded</span> ·{" "}
           <span className="text-block">{counts.quarantine ?? 0} quarantine</span> · {counts.unrun ?? 0} unrun
         </span>
       }
     >
-      <div className="p-4 font-mono text-[11px]">
+      <div className="p-4 text-[12px]">
         <table className="w-full">
           <thead>
             <tr className="text-ink-3 text-left border-b hairline">

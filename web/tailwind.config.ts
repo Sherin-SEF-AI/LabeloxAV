@@ -1,42 +1,40 @@
 import type { Config } from "tailwindcss";
 
-// Blender-style dark theme. Neutral greys for surfaces, the signature Blender blue for active/accent state,
-// rounded controls, and state colors (pass/warn/block) kept for status. The palette maps the old token names
-// so the whole app re-themes without per-page edits: bg = editor background, panel = a panel surface, head =
-// a raised header/tab strip, bg-2 = a recessed input field, line = panel outlines, ink* = text tiers.
+// Graphite dark theme for a labelling workstation. Imagery is judged against the interface around it, so the
+// surfaces are near-neutral (a slight cool bias, nothing saturated) and colour is reserved for meaning: one
+// blue for selection and action, and the pass / warn / block / info states. Controls are flat; depth comes from
+// three surface steps (rail < bg < panel < head) and hairlines, not gradients.
+//
+// The token names are the ones every page already uses, so the whole app re-themes from here. Text tokens are
+// held to WCAG AA (4.5:1) on every surface they sit on, measured rather than eyeballed:
+//   ink 13.4-15.9, ink-2 8.2-9.7, ink-3 5.3-6.3, accent 5.8-6.9, accent-2 7.7-9.1,
+//   pass 7.0-8.3, warn 7.6-9.0, block 5.1-6.0, info 6.5-7.7   (range over rail, bg, panel and head)
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        bg: "#1d1d1d",         // editor / window background
-        "bg-2": "#161616",     // recessed input / number field (reads inset)
-        panel: "#2d2d2d",      // panel surface (card)
-        head: "#383838",       // raised header / tab strip / toolbar
-        line: "#3c3c3c",       // panel outline / separator
-        "line-2": "#242424",   // darker inset separator
-        ink: "#e6e6e6",        // primary text
-        "ink-2": "#b0b0b0",    // secondary text
-        // 4.88:1 on the bg. Was #808080 at 4.27, which fails WCAG AA and carried most of the body copy
-        // in the app: 201 elements at 14px on the home page alone. The lift is four values per channel
-        // and is not visible side by side, which is the point.
-        "ink-3": "#8a8a8a",    // tertiary / dim text
-        // 4.56:1. Was #4772b3 at 3.47, below AA for normal text, and this is the colour on links, state
-        // badges and quality flags: over a hundred elements at 10 and 11px. accent-2 moves up with it so
-        // hover is still a visible change rather than the two collapsing into one blue.
-        accent: "#5b86c7",     // Blender blue: active, selection, primary action
-        "accent-2": "#7ea9e0", // brighter blue: hover / focus (6.93:1)
-        pass: "#62c25a",       // healthy / accept
-        warn: "#e0a63f",       // degraded / caution
-        // 4.52:1. Was #e0524b at 4.40, a hair under AA, and it is the colour on every error badge and
-        // failure message: 102 elements at 10px. pass, warn and info were already comfortably over.
-        block: "#e3564f",      // quarantine / fail
-        info: "#6a9ee0",       // informational blue
-        btn: "#4a4a4a",        // tool-button base
-        "btn-2": "#565656",    // tool-button hover
+        rail: "#0f1013",       // sidebar
+        bg: "#121316",         // page background
+        "bg-2": "#0d0e10",     // recessed: input fields, wells
+        panel: "#18191d",      // card / panel surface
+        head: "#1f2025",       // raised: panel headers, hovered rows, active nav item
+        line: "#2a2c32",       // hairline borders and separators
+        "line-2": "#1a1b1f",   // faint inner separator
+        ink: "#e8e9ec",        // primary text
+        "ink-2": "#b4b8c0",    // secondary text
+        "ink-3": "#8e939c",    // tertiary text, labels, captions
+        accent: "#5f9bf5",     // selection, links, active state
+        "accent-2": "#86b4fa", // hover and focus
+        pass: "#4fbf7a",       // accepted / healthy
+        warn: "#e2a640",       // degraded / needs a look
+        block: "#ee6259",      // failed / rejected
+        info: "#6aa6f0",       // informational
+        btn: "#24262c",        // button surface
+        "btn-2": "#2c2f36",    // button hover
       },
       borderRadius: {
-        DEFAULT: "4px",        // Blender's moderate control rounding
+        DEFAULT: "6px",
       },
       fontFamily: {
         display: ["var(--font-display)", "system-ui", "sans-serif"],

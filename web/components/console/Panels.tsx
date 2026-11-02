@@ -20,7 +20,7 @@ export function Meter({ label, frac, detail }: { label: string; frac: number | n
   const tone = level(frac);
   return (
     <div className="space-y-1">
-      <div className="flex items-baseline justify-between font-mono text-[11px]">
+      <div className="flex items-baseline justify-between text-[12px]">
         <span className="text-ink-3">{label}</span>
         <span className={TEXT[tone]}>{detail}</span>
       </div>
@@ -36,19 +36,19 @@ export function GpuPanel({ sys }: { sys: SystemStream | null }) {
   const gpu = sys?.gpus?.[0];
   if (!gpu) {
     return (
-      <div className="font-mono text-[11px] text-ink-3">
+      <div className="text-[12px] text-ink-3">
         no GPU visible to this process. Auto-labelling and training refuse without one.
       </div>
     );
   }
   return (
     <div className="space-y-3">
-      <div className="font-mono text-[11px] text-ink-3">{gpu.name}</div>
+      <div className="text-[12px] text-ink-3">{gpu.name}</div>
       <Meter label="memory" frac={gpu.memory_used_frac}
         detail={`${mb(gpu.memory_used_mb)} / ${mb(gpu.memory_total_mb)}`} />
       <Meter label="utilisation" frac={(gpu.utilization_pct ?? 0) / 100}
         detail={`${Math.round(gpu.utilization_pct ?? 0)}%`} />
-      <div className="font-mono text-[11px] text-ink-3">
+      <div className="text-[12px] text-ink-3">
         {gpu.temperature_c != null && <span>{Math.round(gpu.temperature_c)}°C</span>}
         {gpu.power_w != null && <span> · {Math.round(gpu.power_w)} W</span>}
       </div>
@@ -57,7 +57,7 @@ export function GpuPanel({ sys }: { sys: SystemStream | null }) {
       {gpu.processes.length > 0 && (
         <div className="pt-2 border-t hairline space-y-0.5">
           {gpu.processes.map((p) => (
-            <div key={`${p.pid}-${p.name}`} className="flex justify-between font-mono text-[10px]">
+            <div key={`${p.pid}-${p.name}`} className="flex justify-between text-[11px]">
               <span className="text-ink-3 truncate" title={p.name}>{p.name.split("/").pop()}</span>
               <span className="text-ink-2 shrink-0 ml-2">{mb(p.used_mb)}</span>
             </div>
@@ -70,10 +70,10 @@ export function GpuPanel({ sys }: { sys: SystemStream | null }) {
 
 export function HostPanel({ sys }: { sys: SystemStream | null }) {
   const host = sys?.host;
-  if (!host) return <div className="font-mono text-[11px] text-ink-3">no reading</div>;
+  if (!host) return <div className="text-[12px] text-ink-3">no reading</div>;
   return (
     <div className="space-y-3">
-      <div className="font-mono text-[11px] text-ink-3">
+      <div className="text-[12px] text-ink-3">
         load {host.load["1m"]} over {host.cpu_count} cores
       </div>
       <Meter label="memory" frac={host.memory_used_frac}
@@ -81,15 +81,15 @@ export function HostPanel({ sys }: { sys: SystemStream | null }) {
       <Meter label="cpu" frac={(host.cpu_pct ?? 0) / 100} detail={`${Math.round(host.cpu_pct)}%`} />
       <Meter label="disk" frac={host.disk.used_frac}
         detail={`${mb(host.disk.used_mb)} / ${mb(host.disk.total_mb)}`} />
-      <div className="font-mono text-[10px] text-ink-3 truncate" title={host.disk.path}>{host.disk.path}</div>
+      <div className="text-[11px] text-ink-3 truncate" title={host.disk.path}>{host.disk.path}</div>
     </div>
   );
 }
 
 export function ProcessPanel({ sys, waitingTotal }: { sys: SystemStream | null; waitingTotal: number }) {
-  if (!sys) return <div className="font-mono text-[11px] text-ink-3">no reading</div>;
+  if (!sys) return <div className="text-[12px] text-ink-3">no reading</div>;
   return (
-    <div className="font-mono text-[11px] space-y-1 text-ink-3">
+    <div className="text-[12px] space-y-1 text-ink-3">
       {/* Its own share, so "the machine is busy" can be told from "we are busy". */}
       <div className="flex justify-between"><span>pid</span><span className="text-ink-2">{sys.process.pid}</span></div>
       <div className="flex justify-between"><span>resident</span>
@@ -108,7 +108,7 @@ export function RunningNowPanel({ jobs }: { jobs: JobStream | null }) {
   const { running, waitingTotal } = workInFlight(jobs);
   if (!running.length) {
     return (
-      <div className="py-6 text-center font-mono text-[11px] text-ink-3">
+      <div className="py-6 text-center text-[12px] text-ink-3">
         {waitingTotal
           ? `nothing running. ${waitingTotal} queued, mostly parked for hardware that is not here.`
           : "nothing running."}
@@ -118,7 +118,7 @@ export function RunningNowPanel({ jobs }: { jobs: JobStream | null }) {
   return (
     <div className="divide-y divide-line">
       {running.map((w) => (
-        <div key={w.id} className="flex items-center gap-3 py-2 font-mono text-[11px]">
+        <div key={w.id} className="flex items-center gap-3 py-2 text-[12px]">
           <span className="text-ink-2 w-20">{w.kind}</span>
           <span className="text-ink-3 w-20 truncate">{w.id.slice(0, 8)}</span>
           <span className="flex-1 h-1.5 bg-line rounded overflow-hidden">
@@ -151,9 +151,9 @@ export function GatePanel() {
   useEffect(() => {
     api.governPrecision().then(setP).catch(() => {});
   }, []);
-  if (!p) return <div className="font-mono text-[11px] text-ink-3">no reading</div>;
+  if (!p) return <div className="text-[12px] text-ink-3">no reading</div>;
   return (
-    <div className="font-mono text-[11px] space-y-1 text-ink-3">
+    <div className="text-[12px] space-y-1 text-ink-3">
       <div className="flex justify-between">
         <span>gate precision</span>
         {p.precision == null
@@ -206,12 +206,12 @@ export function countText(k: string, v: unknown): string {
 
 export function BackgroundPanel({ runs }: { runs: AgentRunRow[] }) {
   if (!runs.length) {
-    return <div className="py-6 text-center font-mono text-[11px] text-ink-3">no agent runs recorded.</div>;
+    return <div className="py-6 text-center text-[12px] text-ink-3">no agent runs recorded.</div>;
   }
   return (
     <div className="divide-y divide-line">
       {runs.slice(0, 10).map((r) => (
-        <div key={r.run_id} className="flex items-center gap-3 py-1.5 font-mono text-[11px]">
+        <div key={r.run_id} className="flex items-center gap-3 py-1.5 text-[12px]">
           <span className="text-ink-2 w-32 truncate">{r.kind}</span>
           <span className={`w-24 ${r.status === "running" ? "text-accent"
             : r.status === "error" || r.status === "interrupted" ? "text-block" : "text-ink-3"}`}>
@@ -234,7 +234,7 @@ export function CanvasPanel() {
   useEffect(() => subscribeOps(setOps), []);
   if (!ops.length) {
     return (
-      <div className="py-6 text-center font-mono text-[11px] text-ink-3">
+      <div className="py-6 text-center text-[12px] text-ink-3">
         nothing from the canvas. Open a frame and segment, propagate or save.
       </div>
     );
@@ -242,7 +242,7 @@ export function CanvasPanel() {
   return (
     <div className="divide-y divide-line">
       {ops.slice().reverse().map((op) => (
-        <div key={op.id} className="flex items-center gap-2 py-1.5 font-mono text-[11px]">
+        <div key={op.id} className="flex items-center gap-2 py-1.5 text-[12px]">
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT[op.status]}
                             ${op.status === "running" ? "running-dot" : ""}`} />
           <span className="text-ink-2 truncate">{op.label}</span>

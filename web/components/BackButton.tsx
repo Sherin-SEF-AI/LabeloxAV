@@ -15,7 +15,7 @@ export default function BackButton({ fallback = "/", label = "back" }: { fallbac
     <button
       onClick={goBack}
       title="back (Alt+Left)"
-      className="font-mono text-[11px] text-ink-3 hover:text-accent border border-line hover:border-accent px-2 py-1 shrink-0"
+      className="text-[12px] text-ink-3 hover:text-accent border border-line hover:border-accent px-2 py-1 shrink-0"
     >
       &larr; {label}
     </button>

@@ -69,22 +69,22 @@ export default function LintCard({ lint, selectedIds, onSelect, onOpenIssues }: 
         className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-line/30 group transition-colors">
         <span aria-hidden
           className={`text-ink-3 group-hover:text-ink w-3 text-center text-[9px] leading-none transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▸</span>
-        <span className="font-mono text-[10px] uppercase tracking-wide text-ink-2">checks</span>
+        <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-2">checks</span>
         {!lint ? (
-          <span className="font-mono text-[10px] text-ink-3">running...</span>
+          <span className="text-[11px] text-ink-3">running...</span>
         ) : findings.length ? (
-          <span className={`font-mono text-[10px] rounded px-1.5 ${high ? "bg-block/20 text-block" : "bg-warn/20 text-warn"}`}>
+          <span className={`text-[11px] rounded px-1.5 ${high ? "bg-block/20 text-block" : "bg-warn/20 text-warn"}`}>
             {findings.length}
           </span>
         ) : systemic.length ? (
           // Not clean. A rule that objected to every object on the frame found something; it just found
           // one thing rather than a hundred, and the count below says what.
-          <span className="font-mono text-[10px] text-warn">frame-wide</span>
+          <span className="text-[11px] text-warn">frame-wide</span>
         ) : (
-          <span className="font-mono text-[10px] text-pass">clean</span>
+          <span className="text-[11px] text-pass">clean</span>
         )}
         {systemic.length > 0 && (
-          <span className="ml-auto font-mono text-[10px] text-ink-3"
+          <span className="ml-auto text-[11px] text-ink-3"
             title="a rule that objected to most of the frame, counted once instead of queued per object">
             {systemic.length} frame-wide
           </span>
@@ -94,7 +94,7 @@ export default function LintCard({ lint, selectedIds, onSelect, onOpenIssues }: 
       {open && (
         <div className="reveal">
           {lint && !findings.length && !systemic.length && (
-            <div className="px-3 py-2 font-mono text-[11px] text-ink-3">
+            <div className="px-3 py-2 text-[12px] text-ink-3">
               Nothing breaks a guideline on this frame.
             </div>
           )}
@@ -104,7 +104,7 @@ export default function LintCard({ lint, selectedIds, onSelect, onOpenIssues }: 
               {findings.map((f, i) => (
                 <button key={`${f.object_id}-${f.rule}-${i}`} onClick={() => onSelect(f.object_id)}
                   title={`${f.reason} (${f.rule})`}
-                  className={`w-full text-left flex items-start gap-1.5 pl-3 pr-1.5 py-1 font-mono text-[11px] border-l-2 ${
+                  className={`w-full text-left flex items-start gap-1.5 pl-3 pr-1.5 py-1 text-[12px] border-l-2 ${
                     selectedIds.includes(f.object_id)
                       ? "bg-line text-ink border-accent"
                       : "text-ink-3 hover:text-ink-2 hover:bg-line/25 border-transparent"}`}>
@@ -121,7 +121,7 @@ export default function LintCard({ lint, selectedIds, onSelect, onOpenIssues }: 
           {/* Counted, not listed. Same guard the reanalysis pass applies at 80%: a rule that fires on the
               whole frame is describing the pipeline, and one line saying so is worth more than fifty rows. */}
           {systemic.map(([rule, n]) => (
-            <div key={rule} className="px-3 py-1.5 font-mono text-[10px] text-ink-3 border-t hairline">
+            <div key={rule} className="px-3 py-1.5 text-[11px] text-ink-3 border-t hairline">
               <span className="text-warn">{rule.replace(/_/g, " ")}</span> objected to {n} of{" "}
               {lint?.n_objects ?? n} objects on this frame, so it is describing the pipeline rather than
               any one box. Counted, not queued.
@@ -131,11 +131,11 @@ export default function LintCard({ lint, selectedIds, onSelect, onOpenIssues }: 
           {dormant.length > 0 && (
             <div className="border-t hairline">
               <button onClick={() => setShowDormant((v) => !v)}
-                className="w-full text-left px-3 py-1 font-mono text-[10px] text-ink-3 hover:text-ink-2">
+                className="w-full text-left px-3 py-1 text-[11px] text-ink-3 hover:text-ink-2">
                 {showDormant ? "−" : "+"} {dormant.length} check{dormant.length === 1 ? "" : "s"} could not run
               </button>
               {showDormant && dormant.map((d) => (
-                <div key={d.rule} className="px-3 pb-1.5 font-mono text-[10px] text-ink-3">
+                <div key={d.rule} className="px-3 pb-1.5 text-[11px] text-ink-3">
                   <span className="text-ink-2">{d.label}</span>: {d.reason}
                 </div>
               ))}
@@ -146,11 +146,11 @@ export default function LintCard({ lint, selectedIds, onSelect, onOpenIssues }: 
             <div className="px-3 py-1.5 border-t hairline">
               <button onClick={onOpenIssues}
                 title="open these as issue threads in the panel below, so they survive leaving this frame"
-                className="font-mono text-[10px] border border-line rounded px-2 py-1 text-ink-2 hover:border-accent hover:text-accent">
+                className="text-[11px] border border-line rounded px-2 py-1 text-ink-2 hover:border-accent hover:text-accent">
                 open {findings.length} as issue{findings.length === 1 ? "" : "s"}
               </button>
               {lint?.issues && (
-                <span className="ml-2 font-mono text-[10px] text-pass">
+                <span className="ml-2 text-[11px] text-pass">
                   {lint.issues.opened} opened
                 </span>
               )}

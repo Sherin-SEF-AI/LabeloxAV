@@ -1,5 +1,6 @@
 "use client";
 
+import PackGate from "@/components/shell/PackGate";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
@@ -30,7 +31,7 @@ const SEV_CLASS: Record<string, string> = {
 function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
         <span>{title}</span>
         {right && <span className="ml-auto normal-case">{right}</span>}
       </div>
@@ -42,14 +43,14 @@ function Section({ title, children, right }: { title: string; children: React.Re
 function Stat({ label, value, hint }: { label: string; value: number | string; hint?: string }) {
   return (
     <div className="panel px-3 py-2 min-w-[120px]">
-      <div className="font-mono text-[10px] uppercase text-ink-3">{label}</div>
-      <div className="font-mono text-[18px] text-ink tabular-nums">{value}</div>
-      {hint && <div className="font-mono text-[10px] text-ink-3">{hint}</div>}
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</div>
+      <div className="text-[18px] font-semibold text-ink tabular-nums">{value}</div>
+      {hint && <div className="text-[11px] text-ink-3">{hint}</div>}
     </div>
   );
 }
 
-export default function LabeloxSecPage() {
+function LabeloxSecPage() {
   // useSearchParams forces a client-side-render bailout, which Next requires be under a Suspense boundary or
   // the static prerender of this route fails the build. Match the pattern used by integrations and search.
   return <Suspense fallback={null}><LabeloxSecBody /></Suspense>;
@@ -163,7 +164,7 @@ function LabeloxSecBody() {
       title="LabeloxSec"
       subtitle="security domain: plate reads, watchlist, static-camera sessions"
       right={pack ? (
-        <span className="font-mono text-[11px] text-ink-3">
+        <span className="text-[12px] text-ink-3">
           pack <span className={authorised ? "text-pass" : "text-block"}>{pack.pack_id}</span>
         </span>
       ) : null}
@@ -171,14 +172,14 @@ function LabeloxSecBody() {
       <div className="p-4 space-y-4 max-w-6xl">
         {/* the pack gate */}
         {packErr && (
-          <div className="panel border border-block p-3 font-mono text-[11px] text-block">{packErr}</div>
+          <div className="panel border border-block p-3 text-[12px] text-block">{packErr}</div>
         )}
         {pack && !authorised && (
           <div className="panel border border-block p-3 space-y-1">
-            <div className="font-mono text-[11px] text-block">
+            <div className="text-[12px] text-block">
               ANPR is not authorised under the {pack.pack_id} pack
             </div>
-            <div className="font-mono text-[10.5px] text-ink-3">
+            <div className="text-[11.5px] text-ink-3">
               Reading a registration mark is a security-domain capability. Under the AV pack a plate is personal
               data that the privacy plane blurs and never reads, so every action below would be refused by the
               server. Packs available on this deployment: {pack.available_packs.join(", ")}.
@@ -188,15 +189,15 @@ function LabeloxSecBody() {
         {pack && authorised && (
           <div className="panel p-3 flex items-start gap-4 flex-wrap">
             <div>
-              <div className="font-mono text-[11px] text-ink">{pack.name}</div>
-              <div className="font-mono text-[10px] text-ink-3">
+              <div className="text-[12px] text-ink">{pack.name}</div>
+              <div className="text-[11px] text-ink-3">
                 capabilities: {pack.capabilities.join(", ")}
               </div>
             </div>
             {pack.safety_classes.length > 0 && (
               <div className="ml-auto">
-                <div className="font-mono text-[10px] uppercase text-ink-3">safety-critical classes</div>
-                <div className="font-mono text-[10.5px] text-ink-2">{pack.safety_classes.join(", ")}</div>
+                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">safety-critical classes</div>
+                <div className="text-[11.5px] text-ink-2">{pack.safety_classes.join(", ")}</div>
               </div>
             )}
           </div>
@@ -223,14 +224,14 @@ function LabeloxSecBody() {
               {Object.entries(stats.top_states).map(([code, n]) => (
                 <button key={code}
                   onClick={() => setStateFilter((s) => (s === code ? "" : code))}
-                  className={`border px-1.5 py-0.5 font-mono text-[10.5px] ${
+                  className={`border px-1.5 py-0.5 text-[11.5px] ${
                     stateFilter === code ? "border-accent text-ink" : "border-line text-ink-2 hover:text-ink"}`}>
                   {code} <span className="text-ink-3">{n}</span>
                 </button>
               ))}
               {stateFilter && (
                 <button onClick={() => setStateFilter("")}
-                  className="px-1.5 py-0.5 font-mono text-[10.5px] text-ink-3 hover:text-ink">clear</button>
+                  className="px-1.5 py-0.5 text-[11.5px] text-ink-3 hover:text-ink">clear</button>
               )}
             </div>
           </Section>
@@ -238,7 +239,7 @@ function LabeloxSecBody() {
 
         <Section title={`watchlist (${watchlist.length} active)`}>
           <div className="space-y-2">
-            <div className="flex items-center gap-2 font-mono text-[11px] flex-wrap">
+            <div className="flex items-center gap-2 text-[12px] flex-wrap">
               <input value={newPlate} onChange={(e) => setNewPlate(e.target.value)}
                 placeholder="KA 01 AB 1234"
                 className="bg-bg border border-line px-1.5 py-0.5 text-ink w-40" />
@@ -254,12 +255,12 @@ function LabeloxSecBody() {
                 watch
               </button>
             </div>
-            <div className="font-mono text-[10px] text-ink-3">
+            <div className="text-[11px] text-ink-3">
               stored on the normalised mark, so KA 01 AB 1234, ka-01-ab-1234 and KA01AB1234 are one entry
             </div>
 
             {watchlist.length > 0 && (
-              <table className="w-full font-mono text-[11px] mt-2">
+              <table className="w-full text-[12px] mt-2">
                 <thead>
                   <tr className="text-ink-3 text-left border-b hairline">
                     <th className="py-1">plate</th><th>severity</th><th>reason</th><th>added by</th><th></th>
@@ -287,7 +288,7 @@ function LabeloxSecBody() {
 
         <Section title={`plate reads (${reads.length} of ${readTotal})`}
           right={
-            <span className="flex items-center gap-2 font-mono text-[11px]">
+            <span className="flex items-center gap-2 text-[12px]">
               <input value={plateFilter} onChange={(e) => setPlateFilter(e.target.value)}
                 placeholder="plate"
                 className="bg-bg border border-line px-1.5 py-0.5 text-ink w-32" />
@@ -301,13 +302,13 @@ function LabeloxSecBody() {
             </span>
           }>
           {reads.length === 0 ? (
-            <div className="font-mono text-[11px] text-ink-3">
+            <div className="text-[12px] text-ink-3">
               no reads recorded. A read is produced by POST /api/security/recognize over a frame and its plate
               regions, and every one is stored against its session so an erasure request takes the plate text
               with it.
             </div>
           ) : (
-            <table className="w-full font-mono text-[11px]">
+            <table className="w-full text-[12px]">
               <thead>
                 <tr className="text-ink-3 text-left border-b hairline">
                   <th className="py-1">plate</th><th>type</th><th>state</th><th>camera</th>
@@ -348,12 +349,12 @@ function LabeloxSecBody() {
 
         <Section title={`security sessions (${sessions.length})`}>
           {sessions.length === 0 ? (
-            <div className="font-mono text-[11px] text-ink-3">
+            <div className="text-[12px] text-ink-3">
               no sessions are routed to the sec pack. A session records the pack it belongs to at ingest, which
               is what keeps a dashcam drive out of this list and out of the ANPR path.
             </div>
           ) : (
-            <table className="w-full font-mono text-[11px]">
+            <table className="w-full text-[12px]">
               <thead>
                 <tr className="text-ink-3 text-left border-b hairline">
                   <th className="py-1">session</th><th>camera</th><th>city</th><th>reads</th>
@@ -377,5 +378,15 @@ function LabeloxSecBody() {
         </Section>
       </div>
     </PageShell>
+  );
+}
+
+// LabeloxSec is an optional package (settings.packs.optional on the server); without it these routes do not exist.
+export default function LabeloxSecPageRoute() {
+  return (
+    <PackGate pack="sec" title="Security console"
+      what="LabeloxSec, for authorised security deployments: registration-plate reading, watchlists, zones and cross-camera re-identification">
+      <LabeloxSecPage />
+    </PackGate>
   );
 }

@@ -23,8 +23,8 @@ export default function ReviewProgress({ counts }: { counts: ReviewCounts }) {
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-baseline gap-2">
-        <span className="font-mono text-[9.5px] uppercase tracking-wider text-ink-3">review progress</span>
-        <span className="ml-auto font-mono text-[10px] text-ink-2 tabular-nums">
+        <span className="text-[10.5px] uppercase tracking-wider text-ink-3">review progress</span>
+        <span className="ml-auto text-[11px] text-ink-2 tabular-nums">
           {counts.confirmed} / {counts.total}
         </span>
       </div>
@@ -32,7 +32,7 @@ export default function ReviewProgress({ counts }: { counts: ReviewCounts }) {
         aria-label={`${counts.confirmed} confirmed, ${counts.auto} auto-accepted, ${counts.open} open, of ${counts.total}`}>
         {seg.map((s) => <div key={s.k} className={s.bar} style={{ width: `${s.pct}%` }} />)}
       </div>
-      <div className="flex gap-3 font-mono text-[9.5px] text-ink-3">
+      <div className="flex gap-3 text-[10.5px] text-ink-3">
         {seg.map((s) => (
           <span key={s.k} className="flex items-center gap-1.5" title={s.tip}>
             <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />

@@ -240,7 +240,7 @@ def consume_recovery(cred: UserCredential, code: str) -> bool:
 
 # ---------------------------------------------------------------- password reset
 
-async def create_reset(db: AsyncSession, user: User) -> str:
+async def create_reset(db: AsyncSession, user: User, *, ttl: timedelta | None = None) -> str:
     """Issue a single-use reset token and return the plaintext, which is never stored.
 
     The caller delivers it out of band. Nothing here emails: a deployment's mail path is its own, and
@@ -248,7 +248,7 @@ async def create_reset(db: AsyncSession, user: User) -> str:
     """
     token = secrets.token_urlsafe(32)
     db.add(PasswordReset(user_id=user.user_id, token_hash=hashlib.sha256(token.encode()).hexdigest(),
-                         expires_at=datetime.now(UTC) + timedelta(minutes=RESET_TTL_MINUTES)))
+                         expires_at=datetime.now(UTC) + (ttl or timedelta(minutes=RESET_TTL_MINUTES))))
     await db.commit()
     log.info("identity.reset_issued", user=str(user.user_id))
     return token

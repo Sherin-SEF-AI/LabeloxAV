@@ -191,7 +191,7 @@ export default function EmbeddingMap({ points, colorBy, tagFilter, selected, onS
         onMouseLeave={() => { drawing.current = false; setLasso([]); onHover?.(null); }}
       />
       {!points.length && (
-        <div className="absolute inset-0 flex items-center justify-center font-mono text-[11px] text-ink-3">
+        <div className="absolute inset-0 flex items-center justify-center text-[12px] text-ink-3">
           no projection loaded. fit one to see the corpus laid out by similarity.
         </div>
       )}

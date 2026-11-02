@@ -5,6 +5,7 @@
 // height, intensity (road markings light up), or source. Large clouds decimate for interactivity, with full
 // resolution on demand. Click two points to measure.
 
+import SessionSelect from "@/components/shell/SessionSelect";
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { api, lidarCloudPoints, type LidarCloud, type LidarPoints , humanizeError } from "@/lib/api";
@@ -116,18 +117,13 @@ export default function LidarViewerPage() {
       onSubmit={(e) => { e.preventDefault(); loadClouds(sessionId); }}
       className="flex gap-2"
     >
-      <input
-        value={sessionId}
-        onChange={(e) => setSessionId(e.target.value)}
-        placeholder="session id"
-        className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
-      />
-      <button className="rounded bg-cyan-700 px-3 py-1 text-xs font-medium hover:bg-cyan-600">Load</button>
+      <SessionSelect value={sessionId} onChange={setSessionId} className="min-w-0 flex-1" />
+      <button className="rounded bg-[#2f6fd6] text-white px-3 py-1 text-xs font-medium hover:bg-[#3a7ae0]">Load</button>
       <button
         type="button"
         onClick={build}
         disabled={busy || !sessionId.trim()}
-        className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs hover:border-cyan-700 disabled:opacity-40"
+        className="rounded border border-line bg-bg-2 px-3 py-1 text-xs hover:border-accent/60 disabled:opacity-40"
       >
         Build pseudo-LiDAR
       </button>
@@ -137,20 +133,20 @@ export default function LidarViewerPage() {
   return (
     <PageShell
       active="LIDAR"
-      right={<span className="font-mono text-[11px] text-ink-3">Loaded sessions: {clouds.length}</span>}
+      right={<span className="text-[12px] text-ink-3">Loaded sessions: {clouds.length}</span>}
       primaryAction={loadForm}
     >
-      <div className="flex h-full bg-[#0a0e14] text-neutral-200">
+      <div className="flex h-full bg-[#0a0e14] text-ink">
       <Inspector title="Clouds" side="left" width="w-80">
       <div className="flex flex-col gap-4 p-4">
         <div>
-          <div className="text-xs uppercase tracking-wider text-neutral-500">LiDAR viewer</div>
-          <div className="mt-1 text-sm text-neutral-400">3D point clouds, real or pseudo-LiDAR.</div>
+          <div className="text-xs uppercase tracking-wider text-ink-3">LiDAR viewer</div>
+          <div className="mt-1 text-sm text-ink-2">3D point clouds, real or pseudo-LiDAR.</div>
         </div>
 
         {clouds.length > 0 && (
           <div>
-            <div className="mb-1 text-xs uppercase tracking-wider text-neutral-500">Clouds ({clouds.length})</div>
+            <div className="mb-1 text-xs uppercase tracking-wider text-ink-3">Clouds ({clouds.length})</div>
             <div className="flex max-h-44 flex-col gap-1 overflow-y-auto">
               {clouds.map((c) => (
                 <button
@@ -158,15 +154,15 @@ export default function LidarViewerPage() {
                   onClick={() => pickCloud(c)}
                   className={`rounded border px-2 py-1 text-left text-xs ${
                     selected?.cloud_id === c.cloud_id
-                      ? "border-cyan-600 bg-cyan-950"
-                      : "border-neutral-800 bg-neutral-900 hover:border-neutral-700"
+                      ? "border-accent/60 bg-accent/15"
+                      : "border-line bg-bg-2 hover:border-line"
                   }`}
                 >
                   <div className="flex justify-between">
                     <span className="font-medium uppercase">{c.source}</span>
-                    <span className="text-neutral-500">{c.point_count.toLocaleString()} pts</span>
+                    <span className="text-ink-3">{c.point_count.toLocaleString()} pts</span>
                   </div>
-                  <div className="truncate text-neutral-600">{c.cloud_id.slice(0, 8)} | ts {c.ts_ns}</div>
+                  <div className="truncate text-ink-3">{c.cloud_id.slice(0, 8)} | ts {c.ts_ns}</div>
                 </button>
               ))}
             </div>
@@ -176,14 +172,14 @@ export default function LidarViewerPage() {
         {selected && (
           <>
             <div>
-              <div className="mb-1 text-xs uppercase tracking-wider text-neutral-500">Variant</div>
+              <div className="mb-1 text-xs uppercase tracking-wider text-ink-3">Variant</div>
               <div className="flex flex-wrap gap-1">
                 {selected.variants.map((v) => (
                   <button
                     key={v}
                     onClick={() => setVariant(v)}
                     className={`rounded px-2 py-1 text-xs ${
-                      variant === v ? "bg-cyan-700" : "bg-neutral-800 hover:bg-neutral-700"
+                      variant === v ? "bg-[#2f6fd6] text-white" : "bg-head hover:bg-btn-2"
                     }`}
                   >
                     {v.replace("_", " ")}
@@ -193,7 +189,7 @@ export default function LidarViewerPage() {
             </div>
 
             <div>
-              <div className="mb-1 text-xs uppercase tracking-wider text-neutral-500">Colour by</div>
+              <div className="mb-1 text-xs uppercase tracking-wider text-ink-3">Colour by</div>
               <div className="flex gap-1">
                 {COLOR_OPTIONS.map((o) => (
                   <button
@@ -201,7 +197,7 @@ export default function LidarViewerPage() {
                     title={o.hint}
                     onClick={() => setColorBy(o.key)}
                     className={`flex-1 rounded px-2 py-1 text-xs ${
-                      colorBy === o.key ? "bg-cyan-700" : "bg-neutral-800 hover:bg-neutral-700"
+                      colorBy === o.key ? "bg-[#2f6fd6] text-white" : "bg-head hover:bg-btn-2"
                     }`}
                   >
                     {o.label}
@@ -212,7 +208,7 @@ export default function LidarViewerPage() {
 
             <div className="flex items-center gap-2">
               <button onClick={runSegment} disabled={busy}
-                className="flex-1 rounded bg-violet-800 px-2 py-1 text-xs hover:bg-violet-700 disabled:opacity-40">
+                className="flex-1 rounded bg-accent/25 px-2 py-1 text-xs hover:bg-accent/35 disabled:opacity-40">
                 Segment overlay
               </button>
               {segData && (
@@ -220,15 +216,15 @@ export default function LidarViewerPage() {
               )}
             </div>
 
-            <label className="flex items-center gap-2 text-xs text-neutral-400">
+            <label className="flex items-center gap-2 text-xs text-ink-2">
               <input type="checkbox" checked={showEgo} onChange={(e) => setShowEgo(e.target.checked)} />
               Ego, sensors, trajectory ({trajectory.length} GNSS pts)
             </label>
 
             <div>
-              <div className="mb-1 flex justify-between text-xs uppercase tracking-wider text-neutral-500">
+              <div className="mb-1 flex justify-between text-xs uppercase tracking-wider text-ink-3">
                 <span>Point budget</span>
-                <span className="text-neutral-400">{full ? "full" : budget.toLocaleString()}</span>
+                <span className="text-ink-2">{full ? "full" : budget.toLocaleString()}</span>
               </div>
               <input
                 type="range"
@@ -240,24 +236,24 @@ export default function LidarViewerPage() {
                 onChange={(e) => setBudget(Number(e.target.value))}
                 className="w-full"
               />
-              <label className="mt-1 flex items-center gap-2 text-xs text-neutral-400">
+              <label className="mt-1 flex items-center gap-2 text-xs text-ink-2">
                 <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} />
                 Full resolution ({selected.point_count.toLocaleString()} pts)
               </label>
             </div>
 
-            <div className="rounded border border-neutral-800 bg-neutral-900 p-2 text-xs text-neutral-400">
+            <div className="rounded border border-line bg-bg-2 p-2 text-xs text-ink-2">
               <div className="flex justify-between"><span>rendered</span><span>{data?.count.toLocaleString() ?? "-"}</span></div>
               <div className="flex justify-between"><span>decimated</span><span>{data?.decimated ? "yes" : "no"}</span></div>
               <div className="flex justify-between">
                 <span>measure</span>
-                <span className="text-amber-300">{measure != null ? `${measure.toFixed(2)} m` : "click 2 pts"}</span>
+                <span className="text-warn">{measure != null ? `${measure.toFixed(2)} m` : "click 2 pts"}</span>
               </div>
             </div>
           </>
         )}
 
-        {err && <div className="rounded border border-red-900 bg-red-950 p-2 text-xs text-red-300">{err}</div>}
+        {err && <div className="rounded border border-block/40 bg-block/10 p-2 text-xs text-block">{err}</div>}
       </div>
       </Inspector>
 
@@ -267,8 +263,8 @@ export default function LidarViewerPage() {
             loading points...
           </div>
         )}
-        <div className="relative flex-1 border-b border-neutral-800">
-          <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-neutral-500">3D</div>
+        <div className="relative flex-1 border-b border-line">
+          <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-ink-3">3D</div>
           {data && (
             <PointCloudViewer
               points={colorBy === "segment" && segData ? segData.points : data.points}
@@ -283,13 +279,13 @@ export default function LidarViewerPage() {
             />
           )}
           {!data && !busy && (
-            <div className="flex h-full items-center justify-center text-sm text-neutral-600">
+            <div className="flex h-full items-center justify-center text-sm text-ink-3">
               Load a session and pick a cloud.
             </div>
           )}
         </div>
         <div className="relative h-1/3 min-h-[180px]">
-          <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-neutral-500">BEV</div>
+          <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-ink-3">BEV</div>
           {data && (
             <PointCloudViewer
               points={colorBy === "segment" && segData ? segData.points : data.points}

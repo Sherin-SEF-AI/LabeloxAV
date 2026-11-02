@@ -16,12 +16,14 @@ from core.logging import get_logger, setup_logging
 from core.observability import spawn
 from services.api.deps import role_rank
 from services.api.media import MEDIA_COOKIE, is_media_read
+from services.api.project_guard import PROJECT_GUARD
 from services.api.routers import (
     activelearn,
     adverse,
     agent,
     analytics,
     assets,
+    assistant,
     attrsweep,
     autolabel,
     autonomy,
@@ -46,8 +48,10 @@ from services.api.routers import (
     experiments,
     explore,
     export,
+    find,
     govern,
     hdmap,
+    home,
     identity_routes,
     imports,
     inbox,
@@ -69,11 +73,13 @@ from services.api.routers import (
     ocr,
     op_eval,
     predictions,
+    project_settings,
     quality,
     reasoner,
     recall,
     relabel,
     review,
+    samples,
     search,
     security,
     secv2,
@@ -450,8 +456,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
 # the Next proxy that is one address for the entire application, so one person opening a frame exhausted
 # the budget for everybody. The editor issues forty-odd requests to open a single frame, so this is not a
 # theoretical collapse: it took the whole app down on the first page load.
+#
+# Innermost of all is the project filter: it reads the hidden-project set the route's guard dependency left
+# on request.state (services/api/project_filter.py).
+from services.api.project_filter import filter_hidden_rows  # noqa: E402
 from services.api.ratelimit_middleware import RateLimitMiddleware  # noqa: E402
 
+app.middleware("http")(filter_hidden_rows)
 app.middleware("http")(RateLimitMiddleware())
 
 # Order matters: add auth next so CORS (added last) is the outermost layer and a 401/403 still
@@ -586,88 +597,109 @@ async def metrics():
     }
 
 
-app.include_router(agent.router, prefix="/api", tags=["agent"])
-app.include_router(meta.router, prefix="/api", tags=["meta"])
-app.include_router(system.router, prefix="/api", tags=["system"])
-app.include_router(triage.router, prefix="/api", tags=["triage"])
-app.include_router(objects.router, prefix="/api", tags=["objects"])
-app.include_router(predictions.router, prefix="/api", tags=["predictions"])
-app.include_router(dataset_query.router, prefix="/api", tags=["datasets"])
-app.include_router(review.router, prefix="/api", tags=["review"])
-app.include_router(intelligence.router, prefix="/api", tags=["intelligence"])
-app.include_router(search.router, prefix="/api", tags=["search"])
-app.include_router(analytics.router, prefix="/api", tags=["analytics"])
-app.include_router(cloud.router, prefix="/api", tags=["cloud"])
-app.include_router(models.router, prefix="/api", tags=["models"])
-app.include_router(export.router, prefix="/api", tags=["export"])
-app.include_router(billing.router, prefix="/api", tags=["billing"])
-app.include_router(workforce.router, prefix="/api", tags=["workforce"])
-app.include_router(explore.router, prefix="/api", tags=["explore"])
-app.include_router(quality.router, prefix="/api", tags=["quality"])
-app.include_router(recall.router, prefix="/api", tags=["recall"])
-app.include_router(adverse.router, prefix="/api", tags=["adverse"])
-app.include_router(segment_assist.router, prefix="/api", tags=["segment"])
-app.include_router(segmentation.router, prefix="/api", tags=["segmentation"])
-app.include_router(upload.router, prefix="/api", tags=["upload"])
-app.include_router(imports.router, prefix="/api", tags=["imports"])
-app.include_router(training.router, prefix="/api", tags=["training"])
-app.include_router(synth.router, prefix="/api", tags=["synth"])
-app.include_router(shadow.router, prefix="/api", tags=["shadow"])
-app.include_router(ego.router, prefix="/api", tags=["ego"])
-app.include_router(tracks.router, prefix="/api", tags=["tracks"])
-app.include_router(autolabel.router, prefix="/api", tags=["autolabel"])
-app.include_router(jobs.router, prefix="/api", tags=["jobs"])
-app.include_router(events.router, prefix="/api", tags=["events"])
-app.include_router(labelops.router, prefix="/api", tags=["labelops"])
-app.include_router(attrsweep.router, prefix="/api", tags=["attrsweep"])
-app.include_router(assets.router, prefix="/api", tags=["assets"])
-app.include_router(integrations.router, prefix="/api", tags=["integrations"])
-app.include_router(users.router, prefix="/api", tags=["users"])
-app.include_router(datasets.router, prefix="/api", tags=["datasets"])
-app.include_router(curation.router, prefix="/api", tags=["curation"])
-app.include_router(corrections.router, prefix="/api", tags=["corrections"])
-app.include_router(calibration.router, prefix="/api", tags=["calibration"])
-app.include_router(activelearn.router, prefix="/api", tags=["activelearn"])
-app.include_router(errordetect.router, prefix="/api", tags=["errordetect"])
-app.include_router(relabel.router, prefix="/api", tags=["relabel"])
-app.include_router(collaborate.router, prefix="/api", tags=["collaborate"])
-app.include_router(govern.router, prefix="/api", tags=["govern"])
-app.include_router(autonomy.router, prefix="/api", tags=["autonomy"])
-app.include_router(service_accounts.router, prefix="/api", tags=["service-accounts"])
-app.include_router(multicam.router, prefix="/api", tags=["multicam"])
-app.include_router(mapassist.router, prefix="/api", tags=["mapassist"])
-app.include_router(hdmap.router, prefix="/api", tags=["hdmap"])
-app.include_router(dynamics.router, prefix="/api", tags=["dynamics"])
-app.include_router(discovery.router, prefix="/api", tags=["discovery"])
-app.include_router(lanes.router, prefix="/api", tags=["lanes"])
-app.include_router(lidar.router, prefix="/api", tags=["lidar"])
-app.include_router(objects3d.router, prefix="/api", tags=["lidar"])
-app.include_router(lidar_scene.router, prefix="/api", tags=["lidar"])
-app.include_router(drivable.router, prefix="/api", tags=["drivable"])
-app.include_router(inertial.router, prefix="/api", tags=["inertial"])
-app.include_router(driving_events.router, prefix="/api", tags=["driving-events"])
-app.include_router(checkpoints.router, prefix="/api", tags=["checkpoints"])
-app.include_router(inspector.router, prefix="/api", tags=["inspector"])
-app.include_router(sanyx_router.router, prefix="/api", tags=["sanyx"])
-app.include_router(calyx_router.router, prefix="/api", tags=["calyx"])
-app.include_router(sievyx_router.router, prefix="/api", tags=["sievyx"])
-app.include_router(labelox_router.router, prefix="/api", tags=["labelox"])
-app.include_router(oraclyx_router.router, prefix="/api", tags=["oraclyx"])
-app.include_router(release_router.router, prefix="/api", tags=["release"])
-app.include_router(verdyx_router.router, prefix="/api", tags=["verdyx"])
-app.include_router(forgyx_router.router, prefix="/api", tags=["forgyx"])
-app.include_router(auth_router.router, prefix="/api", tags=["auth"])
-app.include_router(flywheel_router.router, prefix="/api", tags=["flywheel"])
-app.include_router(hardening_router.router, prefix="/api", tags=["hardening"])
-app.include_router(campaigns.router, prefix="/api", tags=["campaigns"])
-app.include_router(reasoner.router, prefix="/api", tags=["reasoner"])
-app.include_router(edge.router, prefix="/api", tags=["edge"])
-app.include_router(experiments.router, prefix="/api", tags=["experiments"])
-app.include_router(op_eval.router, prefix="/api", tags=["eval"])
-app.include_router(secv2.router, prefix="/api", tags=["security"])
-app.include_router(identity_routes.router, prefix="/api", tags=["identity"])
-app.include_router(inbox.router, prefix="/api", tags=["inbox"])
-app.include_router(security.router, prefix="/api", tags=["security"])
-app.include_router(signs.router, prefix="/api", tags=["signs"])
-app.include_router(ocr.router, prefix="/api", tags=["ocr"])
-app.include_router(track_events.router, prefix="/api", tags=["tracks"])
+app.include_router(agent.router, prefix="/api", tags=["agent"], dependencies=PROJECT_GUARD)
+app.include_router(meta.router, prefix="/api", tags=["meta"], dependencies=PROJECT_GUARD)
+app.include_router(system.router, prefix="/api", tags=["system"], dependencies=PROJECT_GUARD)
+app.include_router(home.router, prefix="/api", tags=["home"], dependencies=PROJECT_GUARD)
+app.include_router(find.router, prefix="/api", tags=["find"], dependencies=PROJECT_GUARD)
+app.include_router(samples.router, prefix="/api", tags=["samples"], dependencies=PROJECT_GUARD)
+app.include_router(project_settings.router, prefix="/api", tags=["projects"], dependencies=PROJECT_GUARD)
+app.include_router(assistant.router, prefix="/api", tags=["assistant"], dependencies=PROJECT_GUARD)
+app.include_router(triage.router, prefix="/api", tags=["triage"], dependencies=PROJECT_GUARD)
+app.include_router(objects.router, prefix="/api", tags=["objects"], dependencies=PROJECT_GUARD)
+app.include_router(predictions.router, prefix="/api", tags=["predictions"], dependencies=PROJECT_GUARD)
+app.include_router(dataset_query.router, prefix="/api", tags=["datasets"], dependencies=PROJECT_GUARD)
+app.include_router(review.router, prefix="/api", tags=["review"], dependencies=PROJECT_GUARD)
+app.include_router(intelligence.router, prefix="/api", tags=["intelligence"], dependencies=PROJECT_GUARD)
+app.include_router(search.router, prefix="/api", tags=["search"], dependencies=PROJECT_GUARD)
+app.include_router(analytics.router, prefix="/api", tags=["analytics"], dependencies=PROJECT_GUARD)
+app.include_router(cloud.router, prefix="/api", tags=["cloud"], dependencies=PROJECT_GUARD)
+app.include_router(models.router, prefix="/api", tags=["models"], dependencies=PROJECT_GUARD)
+app.include_router(export.router, prefix="/api", tags=["export"], dependencies=PROJECT_GUARD)
+app.include_router(billing.router, prefix="/api", tags=["billing"], dependencies=PROJECT_GUARD)
+app.include_router(workforce.router, prefix="/api", tags=["workforce"], dependencies=PROJECT_GUARD)
+app.include_router(explore.router, prefix="/api", tags=["explore"], dependencies=PROJECT_GUARD)
+app.include_router(quality.router, prefix="/api", tags=["quality"], dependencies=PROJECT_GUARD)
+app.include_router(recall.router, prefix="/api", tags=["recall"], dependencies=PROJECT_GUARD)
+app.include_router(adverse.router, prefix="/api", tags=["adverse"], dependencies=PROJECT_GUARD)
+app.include_router(segment_assist.router, prefix="/api", tags=["segment"], dependencies=PROJECT_GUARD)
+app.include_router(segmentation.router, prefix="/api", tags=["segmentation"], dependencies=PROJECT_GUARD)
+app.include_router(upload.router, prefix="/api", tags=["upload"], dependencies=PROJECT_GUARD)
+app.include_router(imports.router, prefix="/api", tags=["imports"], dependencies=PROJECT_GUARD)
+app.include_router(training.router, prefix="/api", tags=["training"], dependencies=PROJECT_GUARD)
+app.include_router(synth.router, prefix="/api", tags=["synth"], dependencies=PROJECT_GUARD)
+app.include_router(shadow.router, prefix="/api", tags=["shadow"], dependencies=PROJECT_GUARD)
+app.include_router(ego.router, prefix="/api", tags=["ego"], dependencies=PROJECT_GUARD)
+app.include_router(tracks.router, prefix="/api", tags=["tracks"], dependencies=PROJECT_GUARD)
+app.include_router(autolabel.router, prefix="/api", tags=["autolabel"], dependencies=PROJECT_GUARD)
+app.include_router(jobs.router, prefix="/api", tags=["jobs"], dependencies=PROJECT_GUARD)
+app.include_router(events.router, prefix="/api", tags=["events"], dependencies=PROJECT_GUARD)
+app.include_router(labelops.router, prefix="/api", tags=["labelops"], dependencies=PROJECT_GUARD)
+app.include_router(attrsweep.router, prefix="/api", tags=["attrsweep"], dependencies=PROJECT_GUARD)
+app.include_router(assets.router, prefix="/api", tags=["assets"], dependencies=PROJECT_GUARD)
+app.include_router(integrations.router, prefix="/api", tags=["integrations"], dependencies=PROJECT_GUARD)
+app.include_router(users.router, prefix="/api", tags=["users"], dependencies=PROJECT_GUARD)
+app.include_router(datasets.router, prefix="/api", tags=["datasets"], dependencies=PROJECT_GUARD)
+app.include_router(curation.router, prefix="/api", tags=["curation"], dependencies=PROJECT_GUARD)
+app.include_router(corrections.router, prefix="/api", tags=["corrections"], dependencies=PROJECT_GUARD)
+app.include_router(calibration.router, prefix="/api", tags=["calibration"], dependencies=PROJECT_GUARD)
+app.include_router(activelearn.router, prefix="/api", tags=["activelearn"], dependencies=PROJECT_GUARD)
+app.include_router(errordetect.router, prefix="/api", tags=["errordetect"], dependencies=PROJECT_GUARD)
+app.include_router(relabel.router, prefix="/api", tags=["relabel"], dependencies=PROJECT_GUARD)
+app.include_router(collaborate.router, prefix="/api", tags=["collaborate"], dependencies=PROJECT_GUARD)
+app.include_router(govern.router, prefix="/api", tags=["govern"], dependencies=PROJECT_GUARD)
+app.include_router(autonomy.router, prefix="/api", tags=["autonomy"], dependencies=PROJECT_GUARD)
+app.include_router(service_accounts.router, prefix="/api", tags=["service-accounts"], dependencies=PROJECT_GUARD)
+app.include_router(multicam.router, prefix="/api", tags=["multicam"], dependencies=PROJECT_GUARD)
+app.include_router(mapassist.router, prefix="/api", tags=["mapassist"], dependencies=PROJECT_GUARD)
+app.include_router(hdmap.router, prefix="/api", tags=["hdmap"], dependencies=PROJECT_GUARD)
+app.include_router(dynamics.router, prefix="/api", tags=["dynamics"], dependencies=PROJECT_GUARD)
+app.include_router(discovery.router, prefix="/api", tags=["discovery"], dependencies=PROJECT_GUARD)
+app.include_router(lanes.router, prefix="/api", tags=["lanes"], dependencies=PROJECT_GUARD)
+app.include_router(lidar.router, prefix="/api", tags=["lidar"], dependencies=PROJECT_GUARD)
+app.include_router(objects3d.router, prefix="/api", tags=["lidar"], dependencies=PROJECT_GUARD)
+app.include_router(lidar_scene.router, prefix="/api", tags=["lidar"], dependencies=PROJECT_GUARD)
+app.include_router(drivable.router, prefix="/api", tags=["drivable"], dependencies=PROJECT_GUARD)
+app.include_router(inertial.router, prefix="/api", tags=["inertial"], dependencies=PROJECT_GUARD)
+app.include_router(driving_events.router, prefix="/api", tags=["driving-events"], dependencies=PROJECT_GUARD)
+app.include_router(checkpoints.router, prefix="/api", tags=["checkpoints"], dependencies=PROJECT_GUARD)
+app.include_router(inspector.router, prefix="/api", tags=["inspector"], dependencies=PROJECT_GUARD)
+app.include_router(sanyx_router.router, prefix="/api", tags=["sanyx"], dependencies=PROJECT_GUARD)
+app.include_router(calyx_router.router, prefix="/api", tags=["calyx"], dependencies=PROJECT_GUARD)
+app.include_router(sievyx_router.router, prefix="/api", tags=["sievyx"], dependencies=PROJECT_GUARD)
+app.include_router(labelox_router.router, prefix="/api", tags=["labelox"], dependencies=PROJECT_GUARD)
+app.include_router(oraclyx_router.router, prefix="/api", tags=["oraclyx"], dependencies=PROJECT_GUARD)
+app.include_router(release_router.router, prefix="/api", tags=["release"], dependencies=PROJECT_GUARD)
+app.include_router(verdyx_router.router, prefix="/api", tags=["verdyx"], dependencies=PROJECT_GUARD)
+app.include_router(forgyx_router.router, prefix="/api", tags=["forgyx"], dependencies=PROJECT_GUARD)
+app.include_router(auth_router.router, prefix="/api", tags=["auth"], dependencies=PROJECT_GUARD)
+app.include_router(flywheel_router.router, prefix="/api", tags=["flywheel"], dependencies=PROJECT_GUARD)
+app.include_router(hardening_router.router, prefix="/api", tags=["hardening"], dependencies=PROJECT_GUARD)
+app.include_router(campaigns.router, prefix="/api", tags=["campaigns"], dependencies=PROJECT_GUARD)
+app.include_router(reasoner.router, prefix="/api", tags=["reasoner"], dependencies=PROJECT_GUARD)
+app.include_router(edge.router, prefix="/api", tags=["edge"], dependencies=PROJECT_GUARD)
+app.include_router(experiments.router, prefix="/api", tags=["experiments"], dependencies=PROJECT_GUARD)
+app.include_router(op_eval.router, prefix="/api", tags=["eval"], dependencies=PROJECT_GUARD)
+app.include_router(identity_routes.router, prefix="/api", tags=["identity"], dependencies=PROJECT_GUARD)
+app.include_router(inbox.router, prefix="/api", tags=["inbox"], dependencies=PROJECT_GUARD)
+app.include_router(signs.router, prefix="/api", tags=["signs"], dependencies=PROJECT_GUARD)
+
+# Routes that belong to an optional pack, mounted only when the deployment enables that pack
+# (settings.packs.optional). LabeloxSec reads registration plates and follows people between cameras; on an
+# AV install those routes do not exist at all, rather than existing and refusing.
+OPTIONAL_PACK_ROUTERS = {"sec": [secv2.router, security.router]}
+
+
+def mount_optional_routers(target, enabled) -> list[str]:
+    mounted = []
+    for pack_id, routers in OPTIONAL_PACK_ROUTERS.items():
+        if pack_id in enabled:
+            for r in routers:
+                target.include_router(r, prefix="/api", tags=["security"], dependencies=PROJECT_GUARD)
+            mounted.append(pack_id)
+    return mounted
+
+
+mount_optional_routers(app, set(get_settings().packs.optional))
+app.include_router(ocr.router, prefix="/api", tags=["ocr"], dependencies=PROJECT_GUARD)
+app.include_router(track_events.router, prefix="/api", tags=["tracks"], dependencies=PROJECT_GUARD)

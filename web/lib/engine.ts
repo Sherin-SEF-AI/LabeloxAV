@@ -19,3 +19,13 @@ export async function runJSON<T>(path: string, body: unknown): Promise<T> {
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
   return r.json();
 }
+
+/** Parse a pasted JSON field, with an error a person can act on instead of "Unexpected end of JSON input". */
+export function parseInput<T = unknown>(text: string, what = "this field"): T {
+  if (!text.trim()) throw new Error(`Paste ${what} as JSON first. The greyed example shows the expected shape.`);
+  try {
+    return JSON.parse(text) as T;
+  } catch (e) {
+    throw new Error(`${what} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}

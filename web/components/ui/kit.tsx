@@ -111,7 +111,7 @@ export function TextArea({ value, onChange, rows = 5, className = "w-full" }: {
 }) {
   return (
     <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={rows}
-      className={`field font-mono text-[11px] ${className}`} />
+      className={`field text-[12px] ${className}`} />
   );
 }
 

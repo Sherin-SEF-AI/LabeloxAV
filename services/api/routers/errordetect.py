@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.api.deps import current_user, db_session
+from services.api.deps import current_user, db_session, require_role
+from services.api.project_guard import caller_hidden_projects
 from services.errordetect.queue import (
     bulk_verdict,
     confirm_error,
@@ -33,7 +34,7 @@ async def run(payload: DetectIn, db: AsyncSession = Depends(db_session)):
 
 @router.get("/errordetect/candidates")
 async def candidates(status: str = "pending", limit: int = 100, kind: str | None = None,
-                     db: AsyncSession = Depends(db_session)):
+                     db: AsyncSession = Depends(db_session), hidden=Depends(caller_hidden_projects)):
     """The ranked queue, optionally one detector at a time.
 
     Filtering by kind matters more than it looks. The queue ranks across detectors by score, and the
@@ -41,7 +42,9 @@ async def candidates(status: str = "pending", limit: int = 100, kind: str | None
     largest numbers. Reviewing one detector at a time is also the only way to judge that detector, which is
     what the verdicts are for.
     """
-    return await list_candidates(db, status, limit, kind=kind)
+    from services.project_access import drop_hidden
+
+    return await drop_hidden(db, hidden, await list_candidates(db, status, limit, kind=kind), "object_id")
 
 
 @router.get("/errordetect/summary")
@@ -102,3 +105,27 @@ async def precision(db: AsyncSession = Depends(db_session)):
     interval and count so a detector with three verdicts is not compared against one with three hundred.
     """
     return await detector_precision(db)
+
+
+class BenchmarkIn(BaseModel):
+    session_ids: list[str] | None = None
+    rate: float = 0.1
+
+
+@router.post("/errordetect/benchmark")
+async def benchmark(payload: BenchmarkIn, db: AsyncSession = Depends(db_session),
+                    _admin=Depends(require_role("admin"))):
+    """How well the class-error detectors find errors, measured by planting them (services/errordetect/
+    benchmark.py). Runs in one transaction that is rolled back: no label changes. Without session ids, the
+    three sessions with the most accepted, embedded labels. Administrators only, since it reads across
+    projects."""
+    from fastapi import HTTPException
+
+    from services.errordetect.benchmark import benchmark_sessions, default_sessions
+
+    if not 0.01 <= payload.rate <= 0.5:
+        raise HTTPException(400, "rate is the share of labels to plant errors in, between 0.01 and 0.5")
+    sessions = payload.session_ids or await default_sessions(db, 3)
+    if not sessions:
+        raise HTTPException(404, "no session has accepted labels with embeddings yet")
+    return await benchmark_sessions(db, sessions[:10], rate=payload.rate)

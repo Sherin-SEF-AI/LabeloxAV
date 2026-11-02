@@ -156,7 +156,7 @@ export default function LaneEditor() {
   return (
     <div className="min-h-screen flex flex-col">
       <h1 className="sr-only">Lane and drivable annotation</h1>
-      <header className="flex items-center gap-3 px-3 h-11 border-b hairline shrink-0 font-mono text-[11px]">
+      <header className="flex items-center gap-3 px-3 h-11 border-b hairline shrink-0 text-[12px]">
         <BackButton />
         <span className="text-ink-3">/ LANES <span className="text-ink-2">{frameId.slice(0, 8)}</span></span>
         <button onClick={propose} className="border border-line px-2 py-1 hover:border-accent">propose lanes</button>
@@ -227,7 +227,7 @@ export default function LaneEditor() {
               })}
             </svg>
           </div>
-          <div className="font-mono text-[11px] space-y-2 min-w-[16rem]">
+          <div className="text-[12px] space-y-2 min-w-[16rem]">
             <div className="text-ink-3 uppercase text-[10px]">bird&apos;s-eye</div>
             <div className="text-ink-3">
               {bev.view.near_m}&ndash;{bev.view.far_m} m ahead, &plusmn;{bev.view.half_width_m} m across,
@@ -268,7 +268,7 @@ export default function LaneEditor() {
           )}
         </div>
 
-        <aside className="w-56 border-l hairline p-3 space-y-3 font-mono text-[11px]">
+        <aside className="w-56 border-l hairline p-3 space-y-3 text-[12px]">
           <div className="text-ink-3 uppercase text-[10px]">lanes ({lanes.length})</div>
           {lanes.map((l) => (
             <div key={l.lane_id} onClick={() => setSel(l.lane_id)} className={`flex items-center gap-1.5 cursor-pointer ${l.lane_id === sel ? "text-ink" : "text-ink-3"}`}>

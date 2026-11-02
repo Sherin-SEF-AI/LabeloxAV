@@ -1,0 +1,24 @@
+# The LabeloxAV Python client as its own distribution, so a training script, a notebook or a CI job can
+# install the client without the server and its GPU stack:
+#
+#   pip install ./sdk            (from a checkout)
+#   pip install labelox-client   (once published)
+#
+# It depends on httpx and click only. The server's own package is the repository root's pyproject.toml.
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "labelox-client"
+version = "0.1.1"
+description = "Python client and command line for a LabeloxAV server: REST API, datasets as shards."
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = ["httpx>=0.27", "click>=8.1"]
+
+[project.scripts]
+labelox = "labelox.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["labelox"]

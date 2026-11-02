@@ -1,5 +1,6 @@
 "use client";
 
+import PackGate from "@/components/shell/PackGate";
 import { useCallback, useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
@@ -27,7 +28,7 @@ function when(ns: number): string {
   return new Date(ns / 1e6).toISOString().slice(0, 19).replace("T", " ");
 }
 
-export default function IncidentsPage() {
+function IncidentsPage() {
   const [incidents, setIncidents] = useState<SecurityIncident[]>([]);
   const [zones, setZones] = useState<CameraZone[]>([]);
   const [identities, setIdentities] = useState<PersonIdentityRow[]>([]);
@@ -96,10 +97,10 @@ export default function IncidentsPage() {
       <div className="p-4 space-y-4 max-w-6xl">
         {denied ? (
           <div className="panel border border-block p-3 space-y-1">
-            <div className="font-mono text-[11px] text-block">
+            <div className="text-[12px] text-block">
               scene analytics is not authorised under this pack
             </div>
-            <div className="font-mono text-[10.5px] text-ink-3">
+            <div className="text-[11.5px] text-ink-3">
               Drawing a tripwire on a camera and following a person between cameras are security-domain
               capabilities. Under the AV pack they are exactly what the privacy plane exists to prevent, so
               the server refuses rather than this page showing an empty list.
@@ -108,16 +109,16 @@ export default function IncidentsPage() {
         ) : (
           <>
             <section className="panel">
-              <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
                 incidents ({incidents.length})
               </div>
               {incidents.length === 0 ? (
-                <div className="p-4 font-mono text-[11px] text-ink-3">
+                <div className="p-4 text-[12px] text-ink-3">
                   Nothing in this window. An incident is raised when a zone rule fires, a watched plate is
                   read, or the same person is seen on a second camera.
                 </div>
               ) : (
-                <table className="w-full font-mono text-[11px]">
+                <table className="w-full text-[12px]">
                   <thead>
                     <tr className="text-ink-3 text-left border-b hairline">
                       <th className="py-1">when</th><th>kind</th><th>what</th>
@@ -161,18 +162,18 @@ export default function IncidentsPage() {
             </section>
 
             <section className="panel">
-              <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
                 zones ({zones.length})
               </div>
               <div className="p-3">
                 {zones.length === 0 ? (
-                  <div className="font-mono text-[11px] text-ink-3">
+                  <div className="text-[12px] text-ink-3">
                     No zones. A fixed camera&apos;s frame does not move, which makes a polygon on it a
                     permanent statement about the world: this quadrilateral is the loading bay, this
                     segment is the gate line.
                   </div>
                 ) : (
-                  <table className="w-full font-mono text-[11px]">
+                  <table className="w-full text-[12px]">
                     <thead>
                       <tr className="text-ink-3 text-left border-b hairline">
                         <th className="py-1">name</th><th>camera</th><th>kind</th>
@@ -206,20 +207,20 @@ export default function IncidentsPage() {
             </section>
 
             <section className="panel">
-              <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
                 cross-camera sightings ({identities.length})
               </div>
               <div className="p-3 space-y-2">
-                <div className="font-mono text-[10px] text-ink-3">
+                <div className="text-[11px] text-ink-3">
                   Appearance signatures, never names. This can say the same person appeared at two gates
                   and can never say who they are: there is nowhere in the record to put a name.
                 </div>
                 {identities.length === 0 ? (
-                  <div className="font-mono text-[11px] text-ink-3">
+                  <div className="text-[12px] text-ink-3">
                     Nobody has been seen on more than one camera.
                   </div>
                 ) : (
-                  <table className="w-full font-mono text-[11px]">
+                  <table className="w-full text-[12px]">
                     <thead>
                       <tr className="text-ink-3 text-left border-b hairline">
                         <th className="py-1">signature</th><th>cameras</th><th>tracks</th><th></th>
@@ -248,5 +249,15 @@ export default function IncidentsPage() {
         )}
       </div>
     </PageShell>
+  );
+}
+
+// LabeloxSec is an optional package (settings.packs.optional on the server); without it these routes do not exist.
+export default function IncidentsPageRoute() {
+  return (
+    <PackGate pack="sec" title="Incidents"
+      what="LabeloxSec, for authorised security deployments: registration-plate reading, watchlists, zones and cross-camera re-identification">
+      <IncidentsPage />
+    </PackGate>
   );
 }

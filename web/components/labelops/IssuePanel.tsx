@@ -77,7 +77,7 @@ export default function IssuePanel({ frameId, objectId }: { frameId: string; obj
   };
 
   return (
-    <div className="p-2 space-y-2 font-mono text-[11px]">
+    <div className="p-2 space-y-2 text-[12px]">
       <div className="flex items-center gap-2">
         <span className="uppercase text-[10px] text-ink-3">issues</span>
         <label className="ml-auto flex items-center gap-1 text-ink-3 cursor-pointer">

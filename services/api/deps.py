@@ -341,6 +341,7 @@ class ImportStartIn(BaseModel):
     target_vehicle: str = "IMPORT-01"
     city: str | None = None
     options: dict = {}
+    project_id: str | None = None   # the project the new session joins; the default project when omitted
 
 
 class TrainingStartIn(BaseModel):

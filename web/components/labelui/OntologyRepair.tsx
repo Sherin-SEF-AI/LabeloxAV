@@ -128,7 +128,7 @@ export default function OntologyRepair() {
 
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
         <span>repair the vocabulary</span>
         <span className="ml-auto normal-case text-ink-3">admin only</span>
       </div>
@@ -136,12 +136,12 @@ export default function OntologyRepair() {
         {err != null ? (
           <LoadState error={err} onRetry={() => void load()} />
         ) : loading ? (
-          <div className="font-mono text-xs text-ink-3/50 animate-pulse py-3 text-center">loading...</div>
+          <div className="text-[12.5px] text-ink-3/50 animate-pulse py-3 text-center">loading...</div>
         ) : (
           <>
             <div className="space-y-1">
-              <div className="font-mono text-[10px] uppercase text-ink-3">merge</div>
-              <div className="flex items-center gap-2 flex-wrap font-mono text-[12px]">
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">merge</div>
+              <div className="flex items-center gap-2 flex-wrap text-[12.5px]">
                 <select value={fromId} onChange={(e) => setFromId(e.target.value)}
                   aria-label="class to merge from"
                   className="bg-bg border border-line px-1.5 py-0.5 text-ink min-w-[160px]">
@@ -161,14 +161,14 @@ export default function OntologyRepair() {
                 </button>
                 {lastMerge && <span className="text-ink-3">last run {lastMerge.slice(0, 8)}</span>}
               </div>
-              <div className="font-mono text-[10px] text-ink-3">
+              <div className="text-[11px] text-ink-3">
                 rewrites every object and track carrying the class; refused across an l0 boundary
               </div>
             </div>
 
             <div className="space-y-1">
-              <div className="font-mono text-[10px] uppercase text-ink-3">rename</div>
-              <div className="flex items-center gap-2 flex-wrap font-mono text-[12px]">
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">rename</div>
+              <div className="flex items-center gap-2 flex-wrap text-[12.5px]">
                 <select value={renameId} onChange={(e) => setRenameId(e.target.value)}
                   aria-label="class to rename"
                   className="bg-bg border border-line px-1.5 py-0.5 text-ink min-w-[160px]">
@@ -183,26 +183,26 @@ export default function OntologyRepair() {
                   rename
                 </button>
               </div>
-              <div className="font-mono text-[10px] text-ink-3">
+              <div className="text-[11px] text-ink-3">
                 custom classes only; the governed vocabulary is versioned in its file, not edited here
               </div>
             </div>
 
             <div className="space-y-1">
-              <div className="font-mono text-[10px] uppercase text-ink-3">retire</div>
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">retire</div>
               {custom.length === 0 ? (
-                <div className="font-mono text-[11px] text-ink-3">no custom classes to retire</div>
+                <div className="text-[12px] text-ink-3">no custom classes to retire</div>
               ) : (
                 <div className="flex flex-wrap gap-1">
                   {custom.map((c) => (
                     <button key={c.id} onClick={() => doRetire(c.id, c.name)} disabled={busy}
-                      className="font-mono text-[11px] border border-line px-2 py-0.5 hover:border-accent disabled:opacity-40">
+                      className="text-[12px] border border-line px-2 py-0.5 hover:border-accent disabled:opacity-40">
                       {c.name} ✕
                     </button>
                   ))}
                 </div>
               )}
-              <div className="font-mono text-[10px] text-ink-3">
+              <div className="text-[11px] text-ink-3">
                 stops it being offered; deletes nothing, because prediction history still points at it
               </div>
             </div>

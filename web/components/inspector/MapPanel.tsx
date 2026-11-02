@@ -78,7 +78,7 @@ export default function MapPanel() {
   return (
     <div className="relative h-full w-full">
       <div ref={hostRef} className="absolute inset-0" />
-      {note && <div className="absolute inset-0 flex items-center justify-center font-mono text-[10px] text-ink-3 pointer-events-none">{note}</div>}
+      {note && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-ink-3 pointer-events-none">{note}</div>}
     </div>
   );
 }

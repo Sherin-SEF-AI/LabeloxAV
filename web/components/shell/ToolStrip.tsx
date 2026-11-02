@@ -124,7 +124,7 @@ export default function ToolStrip({ groups, tool, onSelect, options, modeIcon, m
                   single ? toolLabel(g.tools[0].key, g.tools[0].label)
                     : active ? toolLabel(active.key, active.label)
                       : groupLabel(g.key, g.label)}</span>
-                <span className={`hidden lg:inline-block font-mono text-[9px] leading-none px-1 py-0.5 rounded border ${on ? "border-accent/30" : "border-line text-ink-3"}`}>{shown.hotkey}</span>
+                <span className={`hidden lg:inline-block text-[10.5px] leading-none px-1 py-0.5 rounded border ${on ? "border-accent/30" : "border-line text-ink-3"}`}>{shown.hotkey}</span>
               </button>
               {!single && (
                 <button
@@ -147,7 +147,7 @@ export default function ToolStrip({ groups, tool, onSelect, options, modeIcon, m
             // tool selected anywhere while one plainly is.
             className={`flex items-center gap-0.5 h-8 px-1.5 shrink-0 rounded-md border ${hiddenHoldsActive || open?.key === OVERFLOW_KEY ? "border-accent/40 bg-accent/10 text-accent" : "border-transparent text-ink-3 hover:bg-line/40 hover:text-ink-2"}`}>
             <Icon name="more" size={16} />
-            <span className="font-mono text-[9px] leading-none">{hidden.length}</span>
+            <span className="text-[10.5px] leading-none">{hidden.length}</span>
           </button>
         )}
       </div>
@@ -158,14 +158,14 @@ export default function ToolStrip({ groups, tool, onSelect, options, modeIcon, m
           <div className="fixed z-[61] min-w-[204px] panel p-1.5" style={{ left: open.x, top: open.y }}>
             <div className="flex items-center gap-1.5 px-2 pt-1 pb-1.5">
               <span className="font-display text-[10px] font-semibold uppercase tracking-wider text-ink-3">{flyoutLabel}</span>
-              <span className="ml-auto font-mono text-[9px] text-ink-3/70">cycle</span>
+              <span className="ml-auto text-[10.5px] text-ink-3/70">cycle</span>
             </div>
             {flyoutTools.map((t) => (
               <button key={t.key} onClick={() => { onSelect(t.key); setOpen(null); }}
                 className={`flex w-full items-center gap-2 px-2 py-1.5 rounded ${t.key === tool ? "text-accent bg-accent/10" : "text-ink-2 hover:bg-line/50"}`}>
                 <span className="flex"><Icon name={TOOL_ICON[t.key] ?? "dot"} size={15} /></span>
                 <span className="flex-1 text-left font-body text-[12px]">{toolLabel(t.key, t.label)}</span>
-                <span className="font-mono text-[10px] text-ink-3 min-w-[14px] text-center px-1 py-0.5 rounded border border-line bg-bg-2">{t.hotkey}</span>
+                <span className="text-[11px] text-ink-3 min-w-[14px] text-center px-1 py-0.5 rounded border border-line bg-bg-2">{t.hotkey}</span>
               </button>
             ))}
           </div>

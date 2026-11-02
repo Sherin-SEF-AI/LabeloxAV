@@ -90,18 +90,18 @@ export default function ShortcutOverlay() {
     <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[12vh] bg-bg/70" onClick={() => setOpen(false)}>
       <div className="panel w-[34rem] max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 px-3 h-10 border-b hairline shrink-0">
-          <span className="font-mono text-[11px] uppercase tracking-wide text-ink-3">keyboard shortcuts</span>
+          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">keyboard shortcuts</span>
           <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="search shortcuts..."
-            className="ml-auto w-48 bg-bg border border-line px-2 py-1 font-mono text-[11px] text-ink" />
-          <button onClick={() => setOpen(false)} className="font-mono text-[11px] text-ink-3 hover:text-accent">esc</button>
+            className="ml-auto w-48 bg-bg border border-line px-2 py-1 text-[12px] text-ink" />
+          <button onClick={() => setOpen(false)} className="text-[12px] text-ink-3 hover:text-accent">esc</button>
         </div>
         <div className="overflow-y-auto p-3 space-y-3">
           {sections.map((s) => (
             <div key={s.title}>
-              <div className="font-mono text-[10px] uppercase tracking-wide text-ink-3 mb-1">{s.title}</div>
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 mb-1">{s.title}</div>
               <div className="space-y-0.5">
                 {s.rows.map((r, i) => (
-                  <div key={`${r.keys}-${i}`} className="flex items-center justify-between gap-4 font-mono text-[11px]">
+                  <div key={`${r.keys}-${i}`} className="flex items-center justify-between gap-4 text-[12px]">
                     <span className="text-ink-2 truncate">{r.label}</span>
                     <span className="text-accent shrink-0">{r.keys}</span>
                   </div>
@@ -109,7 +109,7 @@ export default function ShortcutOverlay() {
               </div>
             </div>
           ))}
-          {!sections.length && <div className="font-mono text-[11px] text-ink-3 text-center py-4">no shortcuts match</div>}
+          {!sections.length && <div className="text-[12px] text-ink-3 text-center py-4">no shortcuts match</div>}
         </div>
       </div>
     </div>

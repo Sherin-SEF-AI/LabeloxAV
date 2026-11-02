@@ -556,7 +556,9 @@ export const api = {
   // the instant it returns, so nothing decides from it - it exists so an annotator can see that SAM will
   // refuse before spending a click finding out.
   gpuSlot: () => get<{ free: boolean; cuda: Record<string, unknown>; detail: string }>("/api/gpu/slot"),
-  ontology: () => get<Ontology>("/api/ontology"),
+  /** With a frame, `active_class_ids` is the set that frame's project labels (null: every class). */
+  ontology: (frameId?: string) =>
+    get<Ontology>(frameId ? `/api/ontology?frame_id=${encodeURIComponent(frameId)}` : "/api/ontology"),
   // Attribute sweep: what is unanswered, a page of crops to answer it on, and the write.
   attrCoverage: (session_id?: string) =>
     get<{ session_id: string | null; attributes: AttrCoverage[] }>(
@@ -940,6 +942,10 @@ export const api = {
   propagateObject: (object_id: string, frames = 12) =>
     post<{ created: number; track_id?: string; object_ids?: string[]; reason?: string }>(
       `/api/objects/${object_id}/propagate?frames=${frames}`, {}),
+  /** Both directions along the clip, each box tightened by SAM and given a mask (services/temporal/sam_propagate.py). */
+  samPropagateObject: (object_id: string, frames = 12) =>
+    post<{ created: number; track_id: string; by_direction: Record<string, string[]>; refined: boolean }>(
+      `/api/objects/${object_id}/sam_propagate?frames=${frames}&direction=both`, {}),
   interpolateTrack: (track_id: string) =>
     post<{ created: number; track_id: string }>(`/api/tracks/${track_id}/interpolate`, {}),
   // Track (tracklet) editor
@@ -1548,7 +1554,8 @@ export const api = {
   sealGold: (body: { name: string; cities?: string[]; session_id?: string; limit?: number }) =>
     post<{ gold_id: string; n_objects: number; n_frames: number }>("/api/quality/gold/seal", body),
   fitCalibration: (body: { gold_id?: string; session_id?: string }) =>
-    post<{ uri: string; n_train: number; report: { ece: number | null } }>(
+    post<{ uri: string; n_train: number; report: { ece: number | null }; positives: number; negatives: number;
+           in_sample: boolean; trustworthy: boolean; warning: string | null }>(
       "/api/quality/calibrate/fit",
       body,
     ),

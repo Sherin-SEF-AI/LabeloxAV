@@ -92,7 +92,7 @@ export function OpPrecisionChip({ opType }: { opType: string }) {
       <span title={s.reason
         ? `no measurement backs this operation (${s.reason}); it will dry-run and route results to review`
         : "no measurement backs this operation; it will dry-run and route results to review"}
-        className="font-mono text-[9px] uppercase tracking-wide border border-line text-ink-3 rounded px-1 leading-tight">
+        className="text-[10px] font-medium uppercase tracking-[0.06em] border border-line text-ink-3 rounded px-1 leading-tight">
         unmeasured
       </span>
     );
@@ -107,7 +107,7 @@ export function OpPrecisionChip({ opType }: { opType: string }) {
     : "";
   return (
     <span title={`measured over ${s.n} reviewed outcomes; review is not a random sample${scope}`}
-      className={`font-mono text-[9px] tracking-wide border ${tone} rounded px-1 leading-tight`}>
+      className={`text-[10.5px] tracking-wide border ${tone} rounded px-1 leading-tight`}>
       {(p * 100).toFixed(0)}%
     </span>
   );

@@ -217,7 +217,7 @@ function SearchBody() {
 
   const Chip = ({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) => (
     <button onClick={onClick}
-      className={`border px-2 py-0.5 font-mono text-[11px] ${on ? "border-accent text-accent" : "border-line text-ink-3 hover:text-ink-2"}`}>
+      className={`border px-2 py-0.5 text-[12px] ${on ? "border-accent text-accent" : "border-line text-ink-3 hover:text-ink-2"}`}>
       {children}
     </button>
   );
@@ -229,20 +229,20 @@ function SearchBody() {
         <input value={q} onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && q.trim() && run({ kind: "text", q })}
           placeholder='natural language, e.g. "night rain autorickshaw" or "dense urban traffic"'
-          className="flex-1 min-w-[18rem] bg-bg border border-line px-3 py-1.5 font-mono text-xs text-ink" />
+          className="flex-1 min-w-[18rem] bg-bg border border-line px-3 py-1.5 text-[12.5px] text-ink" />
         <button onClick={() => q.trim() && run({ kind: "text", q })} disabled={busy}
-          className="border border-accent text-accent px-3 py-1.5 font-mono text-xs hover:bg-accent/10 disabled:opacity-50">search</button>
-        <label className="border border-line px-2 py-1.5 font-mono text-xs text-ink-3 hover:border-accent cursor-pointer">
+          className="border border-accent text-accent px-3 py-1.5 text-[12.5px] hover:bg-accent/10 disabled:opacity-50">search</button>
+        <label className="border border-line px-2 py-1.5 text-[12.5px] text-ink-3 hover:border-accent cursor-pointer">
           upload image
           <input type="file" accept="image/*" className="hidden"
             onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
         </label>
-        <span className="font-mono text-[10px] text-ink-3">space:</span>
+        <span className="text-[11px] text-ink-3">space:</span>
         {(["visual", "semantic", "fused"] as const).map((m) => <Chip key={m} on={mode === m} onClick={() => setMode(m)}>{m}</Chip>)}
       </div>
 
       {/* row 2: the rerank controls */}
-      <div className="flex items-center gap-3 flex-wrap font-mono text-[11px] text-ink-3">
+      <div className="flex items-center gap-3 flex-wrap text-[12px] text-ink-3">
         <Chip on={diversity} onClick={() => setDiversity((v) => !v)}>diverse</Chip>
         {isObject && <Chip on={sameClass} onClick={() => setSameClass((v) => !v)}>same class</Chip>}
         {isObject && <Chip on={excludeTrack} onClick={() => setExcludeTrack((v) => !v)}>exclude self</Chip>}
@@ -265,7 +265,7 @@ function SearchBody() {
       </div>
 
       {parsed && (parsed.classes.length > 0 || Object.keys(parsed.filters).length > 0) && (
-        <div className="font-mono text-[10px] text-ink-3">
+        <div className="text-[11px] text-ink-3">
           parsed:{" "}
           {Object.entries(parsed.filters).map(([a, v]) => <span key={a} className="text-info mr-2">{a}={v}</span>)}
           {parsed.classes.map((c) => <span key={c} className="text-pass mr-2">class={c}</span>)}
@@ -279,7 +279,7 @@ function SearchBody() {
       <div className="p-4 space-y-4">
         {results.length > 0 ? (
           <div className="panel p-3">
-            <div className="font-mono text-[11px] text-ink-3 mb-2 flex items-center gap-3 flex-wrap">
+            <div className="text-[12px] text-ink-3 mb-2 flex items-center gap-3 flex-wrap">
               <span>{results.length} {res!.kind}s</span>
               <span className="text-ink-3">{res!.mode} · DINOv3/SigLIP2</span>
               {diversity && <span className="text-info">deduped</span>}
@@ -354,14 +354,14 @@ function SearchBody() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={r.image_url || r.crop_url} alt="" className="w-full h-20 object-cover bg-bg-2" />
                   <div className="flex items-center justify-between px-1 py-0.5">
-                    <span className="font-mono text-[9px] text-ink-3 truncate">{r.class_name ?? ""}</span>
-                    <span className="font-mono text-[9px] text-accent">{r.score.toFixed(2)}</span>
+                    <span className="text-[10.5px] text-ink-3 truncate">{r.class_name ?? ""}</span>
+                    <span className="text-[10.5px] text-accent">{r.score.toFixed(2)}</span>
                   </div>
                 </button>
               ))}
             </div>
             {isObject && (
-              <div className="mt-2 font-mono text-[10px] text-ink-3 flex flex-wrap gap-3">
+              <div className="mt-2 text-[11px] text-ink-3 flex flex-wrap gap-3">
                 <span><b className="text-ink">arrows</b> move</span>
                 <span><b className="text-ink">shift+move</b> range</span>
                 <span><b className="text-ink">space</b> select</span>
@@ -375,7 +375,7 @@ function SearchBody() {
           </div>
         ) : (
           !busy && (
-            <div className="panel px-3 py-10 text-center font-mono text-xs text-ink-3">
+            <div className="panel px-3 py-10 text-center text-[12.5px] text-ink-3">
               {res
                 ? kind === "object"
                   ? "no similar objects above the threshold. lower min sim, or the object may not be embedded yet."

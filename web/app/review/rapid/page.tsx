@@ -152,7 +152,7 @@ function RapidBody() {
   }, [done]);
 
   if (loading) {
-    return <PageShell active="RAPID REVIEW" title="Rapid review"><div className="p-4 font-mono text-[11px] text-ink-3">loading the queue...</div></PageShell>;
+    return <PageShell active="RAPID REVIEW" title="Rapid review"><div className="p-4 text-[12px] text-ink-3">loading the queue...</div></PageShell>;
   }
 
   return (
@@ -163,7 +163,7 @@ function RapidBody() {
       // batch is finished" and "the corpus looks empty and something is broken".
       subtitle={scopeLabel ? `${scopeLabel} · one crop, one keystroke` : "one crop, one keystroke"}
       right={
-        <span className="font-mono text-[11px] text-ink-3">
+        <span className="text-[12px] text-ink-3">
           {index}/{queue.length} · <span className="text-pass">{counts.accept}a</span>
           {" "}<span className="text-block">{counts.reject}r</span>
           {" "}<span className="text-warn">{counts.reclass}c</span>
@@ -177,12 +177,12 @@ function RapidBody() {
             <div className="font-mono text-[13px] text-ink">
               {queue.length ? "queue cleared" : "nothing in the queue"}
             </div>
-            <div className="font-mono text-[11px] text-ink-3">
+            <div className="text-[12px] text-ink-3">
               {done.length} decided · {counts.accept} accepted, {counts.reject} rejected,
               {" "}{counts.reclass} reclassified, {counts.skip} skipped
             </div>
             <button onClick={() => router.push("/review/queue")}
-              className="border border-line px-3 py-1 font-mono text-[11px] text-ink-2 hover:border-accent">
+              className="border border-line px-3 py-1 text-[12px] text-ink-2 hover:border-accent">
               back to the review queue
             </button>
           </div>
@@ -202,19 +202,19 @@ function RapidBody() {
 
               <div className="absolute top-3 left-3 panel px-3 py-2 space-y-0.5">
                 <div className="font-mono text-[14px] text-ink">{current.class_name}</div>
-                <div className="font-mono text-[10.5px] text-ink-3">
+                <div className="text-[11.5px] text-ink-3">
                   conf {current.conf.toFixed(2)} · {current.source}
                   {current.import_format ? ` · ${current.import_format}` : ""}
                 </div>
                 {current.why && (
-                  <div className="font-mono text-[10.5px] text-warn max-w-[22rem]">{current.why}</div>
+                  <div className="text-[11.5px] text-warn max-w-[22rem]">{current.why}</div>
                 )}
               </div>
 
               {reclassOpen && (
                 <div className="absolute inset-0 bg-bg/80 flex items-center justify-center">
                   <div className="panel p-3 w-[min(22rem,90vw)] space-y-2">
-                    <div className="font-mono text-[11px] uppercase text-ink-3">reclassify as</div>
+                    <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">reclassify as</div>
                     <input autoFocus value={classQuery} onChange={(e) => setClassQuery(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && matches[0]) {
@@ -223,7 +223,7 @@ function RapidBody() {
                         }
                       }}
                       placeholder="type a class name"
-                      className="w-full bg-bg border border-line px-2 py-1 font-mono text-[12px] text-ink" />
+                      className="w-full bg-bg border border-line px-2 py-1 text-[12.5px] text-ink" />
                     <div className="space-y-0.5">
                       {matches.map((c, i) => (
                         <button key={c}
@@ -239,7 +239,7 @@ function RapidBody() {
               )}
             </div>
 
-            <div className="shrink-0 border-t hairline px-4 py-2 flex items-center gap-4 font-mono text-[11px]">
+            <div className="shrink-0 border-t hairline px-4 py-2 flex items-center gap-4 text-[12px]">
               {/* The verdict row, in the reviewer's own language. i18n shipped with four locales and one
                   consumer (the onboarding tour), so the surface an annotator spends a whole shift on -
                   this one - was English-only in a product built for Indian roads. The hotkeys stay Latin

@@ -40,8 +40,8 @@ export default function CanPanel() {
 
   return (
     <div className="h-full overflow-auto no-scrollbar p-2">
-      {note ? <div className="font-mono text-[10px] text-ink-3">{note}</div> : (
-        <table className="w-full font-mono text-[10.5px]">
+      {note ? <div className="text-[11px] text-ink-3">{note}</div> : (
+        <table className="w-full text-[11.5px]">
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className="border-b hairline/40">

@@ -75,7 +75,7 @@ export default function ImagePanel({ panel, onFrame }: { panel: InspectorPanel; 
         // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt="" className="max-h-full max-w-full object-contain" />
       ) : (
-        <div className="font-mono text-[10px] text-ink-3">{note || (loaded ? "no frame at this time" : "loading frame...")}</div>
+        <div className="text-[11px] text-ink-3">{note || (loaded ? "no frame at this time" : "loading frame...")}</div>
       )}
       {overlays && ann && ann.objects.length > 0 && (
         <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${ann.width} ${ann.height}`} preserveAspectRatio="xMidYMid meet">
@@ -89,7 +89,7 @@ export default function ImagePanel({ panel, onFrame }: { panel: InspectorPanel; 
         </svg>
       )}
       <button onClick={() => setOverlays((v) => !v)} title="toggle annotation overlays"
-        className={`absolute top-1 right-1 font-mono text-[9px] border px-1 rounded ${overlays ? "border-accent/50 text-accent bg-accent/10" : "border-line text-ink-3"}`}>
+        className={`absolute top-1 right-1 text-[10.5px] border px-1 rounded ${overlays ? "border-accent/50 text-accent bg-accent/10" : "border-line text-ink-3"}`}>
         overlays {overlays ? "on" : "off"}
       </button>
     </div>

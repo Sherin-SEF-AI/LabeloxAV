@@ -20,7 +20,7 @@ __all__ = ["Dataset", "Labelox", "configure", "load"]
 
 def __getattr__(name: str) -> Any:
     if name in __all__:
-        from sdk import dataset
+        from sdk.labelox import dataset
 
         return getattr(dataset, name)
     raise AttributeError(f"module 'sdk' has no attribute '{name}'")

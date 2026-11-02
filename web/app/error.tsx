@@ -15,24 +15,24 @@ export default function RouteError({ error, reset }: { error: Error & { digest?:
   return (
     <div className="p-8 max-w-2xl mx-auto space-y-4" role="alert">
       <h1 className="font-display text-lg text-ink">Something broke on this page</h1>
-      <p className="font-mono text-[12px] text-ink-3">
+      <p className="text-[12.5px] text-ink-3">
         The rest of the app is fine. Retrying re-renders just this page; if it keeps failing, the message below
         is what to report.
       </p>
-      <pre className="panel p-3 font-mono text-[11px] text-warn overflow-x-auto whitespace-pre-wrap">
+      <pre className="panel p-3 text-[12px] text-warn overflow-x-auto whitespace-pre-wrap">
         {error.message || "unknown error"}
         {error.digest ? `\n\ndigest: ${error.digest}` : ""}
       </pre>
       <div className="flex items-center gap-2">
         <button
           onClick={reset}
-          className="font-mono text-xs border border-accent text-accent px-3 py-1 hover:bg-accent/10"
+          className="btn btn-on"
         >
           retry
         </button>
         <a
           href="/"
-          className="font-mono text-xs border border-line text-ink-2 px-3 py-1 hover:border-accent"
+          className="text-[12.5px] border border-line text-ink-2 px-3 py-1 hover:border-accent"
         >
           back to triage
         </a>

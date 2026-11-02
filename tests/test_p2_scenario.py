@@ -197,6 +197,16 @@ async def test_mine_session_persists_tracks_and_scenarios():
         )).scalar_one()
         assert tracks >= 1 and scen >= 1 and tracked >= 4
 
+    # Mining again reuses the stored tracks (replacing them would cascade away people's track events) and
+    # replaces the scenarios instead of adding a second copy of each.
+    again = await mine_session(sid)
+    assert again["tracks_reused"] is True and again["tracks"] == summary["tracks"]
+    async with maker() as db:
+        assert (await db.execute(select(func.count()).select_from(Track)
+                                 .where(Track.session_id == sid))).scalar_one() == tracks
+        assert (await db.execute(select(func.count()).select_from(Scenario)
+                                 .where(Scenario.session_id == sid))).scalar_one() == scen
+
     # NL search finds the mined scenario
     from services.intelligence.nlsearch import search_scenarios
 

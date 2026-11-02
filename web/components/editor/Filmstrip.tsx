@@ -90,7 +90,7 @@ export default function Filmstrip({
             <img src={t.image_url} alt="" width={72} height={48}
                  className={`w-[72px] h-[48px] object-cover bg-bg-2 ${
                    p.state === "done" && !t.current ? "opacity-55" : ""}`} loading="lazy" />
-            <span className="absolute bottom-1 right-0 px-1 bg-bg/80 font-mono text-[9px] text-ink-3">
+            <span className="absolute bottom-1 right-0 px-1 bg-bg/80 text-[10.5px] text-ink-3">
               {p.state === "done" ? "done" : t.n_objects}
             </span>
             {/* Length is the confirmed fraction, so a frame left halfway is visibly halfway. */}

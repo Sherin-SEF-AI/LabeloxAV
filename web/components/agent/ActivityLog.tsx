@@ -42,7 +42,7 @@ export default function ActivityLog({ log, onClear }: { log: Log; onClear: () =>
           {running > 0 ? `${running} running` : `${log.entries.length} recent`}
         </div>
         <button onClick={onClear}
-          className="ml-auto font-mono text-[10px] border border-line text-ink-3 px-2 py-0.5 rounded hover:text-ink">
+          className="ml-auto text-[11px] border border-line text-ink-3 px-2 py-0.5 rounded hover:text-ink">
           clear
         </button>
       </div>
@@ -52,7 +52,7 @@ export default function ActivityLog({ log, onClear }: { log: Log; onClear: () =>
         {log.entries.map((e) => {
           const took = elapsed(e);
           return (
-            <div key={e.id} className="px-4 py-1.5 flex items-start gap-2 font-mono text-[11px]">
+            <div key={e.id} className="px-4 py-1.5 flex items-start gap-2 text-[12px]">
               <span className={`${DOT[e.status]} shrink-0`} aria-hidden>{MARK[e.status]}</span>
               <span className="text-ink-3 shrink-0 tabular-nums">{clockOf(e.startedAt)}</span>
               <span className="text-ink-2 shrink-0">{e.action}</span>

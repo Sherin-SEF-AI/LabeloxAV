@@ -76,7 +76,7 @@ export default function PlotPanel({ panel }: { panel: InspectorPanel }) {
     <div className="relative h-full w-full">
       <div ref={hostRef} className="absolute inset-0" />
       <div ref={cursorRef} className="absolute top-0 bottom-0 w-[1px] bg-accent/80 pointer-events-none" style={{ left: 0 }} />
-      {status && <div className="absolute inset-0 flex items-center justify-center font-mono text-[10px] text-ink-3 pointer-events-none">{status}</div>}
+      {status && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-ink-3 pointer-events-none">{status}</div>}
     </div>
   );
 }
