@@ -9,7 +9,7 @@ import {
   type ClassRow,
   type ClusterMap,
   type DedupRate,
-  type GeoPoint,
+  type GeoRelease,
   type GrowthPoint,
   type Overview,
   type PiiCoverage,
@@ -21,7 +21,7 @@ import LoadState from "@/components/shell/LoadState";
 import EvalDrilldown from "@/components/explore/EvalDrilldown";
 import RecallHonesty from "@/components/explore/RecallHonesty";
 import ScoreBar from "@/components/shell/ScoreBar";
-import { api } from "@/lib/api";
+import { api, humanizeError } from "@/lib/api";
 import type { ProductivityReport } from "@/lib/types";
 import type { Confusions } from "@/lib/types";
 import { apiGet } from "@/lib/api";
@@ -70,8 +70,11 @@ export default function AnalyticsPage() {
   const [classes, setClasses] = useState<ClassRow[]>([]);
   const [scenarios, setScenarios] = useState<ScenarioCoverage[]>([]);
   const [agreement, setAgreement] = useState<ReviewAgreement | null>(null);
-  const [geo, setGeo] = useState<GeoPoint[]>([]);
+  const [geo, setGeo] = useState<GeoRelease | null>(null);
+  const [geoBusy, setGeoBusy] = useState(false);
+  const [geoErr, setGeoErr] = useState<string | null>(null);
   const [pii, setPii] = useState<PiiCoverage | null>(null);
+  const [piiFailed, setPiiFailed] = useState(false);
   const [confusions, setConfusions] = useState<Confusions | null>(null);
   const [confBy, setConfBy] = useState<"class" | "camera" | "city">("class");
   const [scenes, setScenes] = useState<Record<string, Record<string, number>> | null>(null);
@@ -107,19 +110,20 @@ export default function AnalyticsPage() {
     setLoading(true);
     setErr(null);
     try {
-      const [ov, cls, scn, agr, gp, pi] = await Promise.all([
+      // Capture density is not fetched here. Every release of it is charged against the privacy budget, so
+      // loading it with the page spent the whole budget on ten visits to a dashboard, after which the panel
+      // said "no gnss fixes" over a corpus with tens of thousands of them. It is released on a click below.
+      const [ov, cls, scn, agr, pi] = await Promise.all([
         analyticsApi.overview(),
         analyticsApi.classes(),
         analyticsApi.scenarios(),
         analyticsApi.reviewAgreement(),
-        analyticsApi.geo(),
-        analyticsApi.pii().catch(() => null),
+        analyticsApi.pii().catch(() => { setPiiFailed(true); return null; }),
       ]);
       setOverview(ov);
       setClasses(cls);
       setScenarios(scn);
       setAgreement(agr);
-      setGeo(gp);
       setPii(pi);
     } catch (e) {
       // Without this the page had no error state at all: if any of the five required calls rejected, none
@@ -132,6 +136,19 @@ export default function AnalyticsPage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  const releaseGeo = async () => {
+    setGeoBusy(true);
+    setGeoErr(null);
+    try {
+      setGeo(await analyticsApi.geo());
+    } catch (e) {
+      // A spent budget arrives as a 429 whose detail says so; that sentence is the panel's content.
+      setGeoErr(humanizeError(e));
+    } finally {
+      setGeoBusy(false);
+    }
+  };
 
   const present = classes.filter((c) => c.count > 0);
   const maxCount = present.reduce((m, c) => Math.max(m, c.count), 1);
@@ -437,24 +454,41 @@ export default function AnalyticsPage() {
             </div>
           ) : (
             <div className="text-[12.5px] text-ink-3 py-4 text-center">
-              no anonymized frames yet
+              {loading ? "loading..." : piiFailed ? "could not read the anonymization audit" : "no anonymized frames yet"}
             </div>
           )}
         </Section>
 
-        {/* Geo capture density */}
-        <Section title={`geo capture density (${geo.length} points)`}>
-          {geo.length > 0 ? (
-            <div className="text-[12px] text-ink-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-0.5 max-h-48 overflow-auto">
-              {geo.slice(0, 200).map((p, i) => (
-                <div key={i} className="flex justify-between">
-                  <span className="text-ink-2">{p.lat.toFixed(5)}</span>
-                  <span>{p.lon.toFixed(5)}</span>
-                </div>
-              ))}
+        {/* Geo capture density: released as noised 250 m cells, on request, against a privacy budget */}
+        <Section title={geo ? `geo capture density (${geo.n_cells} cells)` : "geo capture density"}>
+          {geo ? (
+            <div className="space-y-2">
+              <div className="text-[12px] text-ink-3">
+                {geo.n_cells} cells of {geo.cell_m} m released, {geo.suppressed_cells} thin cells
+                ({geo.suppressed_points} fixes) withheld under k={geo.k_anonymity}; this release cost
+                epsilon {geo.epsilon}, {geo.budget.remaining} of {geo.budget.epsilon_total} left.
+              </div>
+              <div className="text-[12px] text-ink-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-0.5 max-h-48 overflow-auto">
+                {geo.cells.slice(0, 200).map((c) => (
+                  <div key={c.cell_id} className="flex justify-between gap-2">
+                    <span className="text-ink-2">{c.lat.toFixed(3)}, {c.lon.toFixed(3)}</span>
+                    <span>{Math.round(c.count)}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : (
-            <div className="text-[12.5px] text-ink-3 py-4 text-center">no gnss fixes</div>
+            <div className="flex flex-col items-center gap-2 py-3 text-[12.5px] text-ink-3">
+              <span>
+                {geoErr ?? "Where the corpus was collected, as noised 250 m cells. Each release is charged against the privacy budget."}
+              </span>
+              {!geoErr && (
+                <button onClick={releaseGeo} disabled={geoBusy}
+                  className="border border-line px-2 py-0.5 hover:border-accent disabled:opacity-50">
+                  {geoBusy ? "releasing..." : "release capture density"}
+                </button>
+              )}
+            </div>
           )}
         </Section>
 

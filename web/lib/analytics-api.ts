@@ -32,7 +32,18 @@ export type SourceMix = {
 
 export type ScenarioCoverage = { type: string; count: number; mean_criticality: number };
 
-export type GeoPoint = { lat: number; lon: number };
+// What /api/analytics/geo releases: 250 m cells with Laplace noise, never raw fixes. Each call is charged
+// against the scope's privacy budget, which is why the page asks for it on a click and not on load.
+export type GeoRelease = {
+  cells: { cell_id: string; lat: number; lon: number; count: number }[];
+  n_cells: number;
+  suppressed_cells: number;
+  suppressed_points: number;
+  cell_m: number;
+  k_anonymity: number;
+  epsilon: number;
+  budget: { remaining: number; epsilon_total: number };
+};
 
 export type ReviewAgreement = {
   total_reviews: number;
@@ -78,7 +89,7 @@ export const analyticsApi = {
   sourceMix: (session_id?: string) => get<SourceMix>("/api/analytics/source-mix" + qs(session_id)),
   scenarios: (session_id?: string) =>
     get<ScenarioCoverage[]>("/api/analytics/scenarios" + qs(session_id)),
-  geo: (session_id?: string) => get<GeoPoint[]>("/api/analytics/geo" + qs(session_id)),
+  geo: (session_id?: string) => get<GeoRelease>("/api/analytics/geo" + qs(session_id)),
   reviewAgreement: () => get<ReviewAgreement>("/api/analytics/review-agreement"),
   pii: (session_id?: string) => get<PiiCoverage>("/api/analytics/pii" + qs(session_id)),
   sceneSplits: (session_id?: string) => get<Record<string, Record<string, number>>>("/api/analytics/scene-splits" + qs(session_id)),
