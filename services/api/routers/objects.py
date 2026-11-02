@@ -1289,3 +1289,16 @@ async def next_object(frame_id: UUID, limit: int = 5, db: AsyncSession = Depends
             "next": here[: max(1, min(limit, 25))],
             "reason": (None if here else
                        "nothing on this frame is unconfirmed, so there is no next object to go to")}
+
+
+@router.get("/propagation/eval", dependencies=[Depends(require_role("reviewer"))])
+async def propagation_eval(steps: int = 3, tracks: int = 30, refine: bool = True,
+                           db: AsyncSession = Depends(db_session)):
+    """How closely propagation follows tracks people have accepted, flow alone against flow + SAM, step by
+    step (services/temporal/propagation_eval.py). Reads only. The sample is whatever accepted tracks have
+    consecutive frames, and says how many that was."""
+    from services.temporal.propagation_eval import evaluate_propagation
+
+    if not 1 <= steps <= 24 or not 1 <= tracks <= 200:
+        raise HTTPException(400, "steps must be 1-24 and tracks 1-200")
+    return await evaluate_propagation(db, steps=steps, n_tracks=tracks, refine=refine)

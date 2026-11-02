@@ -43,7 +43,7 @@ export const NAV: NavSection[] = [
       { key: "home", label: "Home", href: "/", icon: "home",
         hint: "what is waiting, what is running, and where to start" },
       { key: "queue", label: "My queue", href: "/queue", icon: "target",
-        hint: "objects waiting for a decision, most valuable first" },
+        hint: "objects waiting for a decision, likeliest wrong first" },
       { key: "review", label: "Review", href: "/review/queue", icon: "check", match: ["/review"],
         hint: "auto-labels and likely mistakes waiting for a person",
         children: [{ label: "Queue", href: "/review/queue" }, { label: "Rapid review", href: "/review/rapid" },
@@ -52,6 +52,8 @@ export const NAV: NavSection[] = [
         hint: "labelling projects, assignments and stages" },
       { key: "errors", label: "Label errors", href: "/quality/errors", icon: "flag",
         hint: "labels the models think are wrong, to confirm or dismiss" },
+      { key: "assistant", label: "Assistant", href: "/assistant", icon: "comment",
+        hint: "ask about the data in words; changes it proposes wait for a reviewer" },
     ],
   },
   {

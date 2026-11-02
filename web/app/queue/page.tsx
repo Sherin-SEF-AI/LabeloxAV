@@ -8,6 +8,7 @@ import { toast, toastError, toastSuccess } from "@/lib/toast";
 import type { SessionRow, TriageFlag, TriageRow, TriageSeverity } from "@/lib/types";
 import { ConfBar, StateBadge } from "@/components/StateBadge";
 import PageShell from "@/components/shell/PageShell";
+import QueueOrdering from "@/components/queue/QueueOrdering";
 import LoadState from "@/components/shell/LoadState";
 import CorrectionModal from "@/components/CorrectionModal";
 import { SkeletonRows, Spinner } from "@/components/Spinner";
@@ -268,8 +269,11 @@ export default function HomePage() {
   return (
     <PageShell
       active="My queue"
-      subtitle="objects waiting for a decision, most valuable first"
-      right={loading ? <Spinner label="loading" /> : <span className="border border-line px-2 py-0.5">{rows.length} in queue</span>}
+      subtitle="objects waiting for a decision, likeliest wrong first"
+      right={<span className="flex items-center gap-3">
+        <QueueOrdering />
+        {loading ? <Spinner label="loading" /> : <span className="border border-line px-2 py-0.5">{rows.length} in queue</span>}
+      </span>}
     >
       <div className="h-full flex flex-col">
         <div className="max-w-6xl mx-auto w-full px-6 py-4 flex flex-col gap-3 flex-1 min-h-0">

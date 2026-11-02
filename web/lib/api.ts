@@ -942,6 +942,10 @@ export const api = {
   propagateObject: (object_id: string, frames = 12) =>
     post<{ created: number; track_id?: string; object_ids?: string[]; reason?: string }>(
       `/api/objects/${object_id}/propagate?frames=${frames}`, {}),
+  /** Both directions along the clip, each box tightened by SAM and given a mask (services/temporal/sam_propagate.py). */
+  samPropagateObject: (object_id: string, frames = 12) =>
+    post<{ created: number; track_id: string; by_direction: Record<string, string[]>; refined: boolean }>(
+      `/api/objects/${object_id}/sam_propagate?frames=${frames}&direction=both`, {}),
   interpolateTrack: (track_id: string) =>
     post<{ created: number; track_id: string }>(`/api/tracks/${track_id}/interpolate`, {}),
   // Track (tracklet) editor

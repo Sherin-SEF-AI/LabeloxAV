@@ -23,6 +23,7 @@ from services.api.routers import (
     agent,
     analytics,
     assets,
+    assistant,
     attrsweep,
     autolabel,
     autonomy,
@@ -603,6 +604,7 @@ app.include_router(home.router, prefix="/api", tags=["home"], dependencies=PROJE
 app.include_router(find.router, prefix="/api", tags=["find"], dependencies=PROJECT_GUARD)
 app.include_router(samples.router, prefix="/api", tags=["samples"], dependencies=PROJECT_GUARD)
 app.include_router(project_settings.router, prefix="/api", tags=["projects"], dependencies=PROJECT_GUARD)
+app.include_router(assistant.router, prefix="/api", tags=["assistant"], dependencies=PROJECT_GUARD)
 app.include_router(triage.router, prefix="/api", tags=["triage"], dependencies=PROJECT_GUARD)
 app.include_router(objects.router, prefix="/api", tags=["objects"], dependencies=PROJECT_GUARD)
 app.include_router(predictions.router, prefix="/api", tags=["predictions"], dependencies=PROJECT_GUARD)

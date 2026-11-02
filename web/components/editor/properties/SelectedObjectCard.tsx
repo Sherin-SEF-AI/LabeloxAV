@@ -232,6 +232,24 @@ export default function SelectedObjectCard({
         className="w-full mb-1 text-[11px] border border-line rounded text-ink-2 px-1.5 py-1 hover:border-accent disabled:opacity-40">
         propagate forward 12 frames &rarr;
       </button>
+      {/* Same flow tracking, both directions, with a SAM mask on every frame. On accepted tracks the boxes come
+          out no better than flow alone (docs/MEASUREMENT.md); what it adds is the masks and the frames before
+          this one. Slower: one SAM call per frame. */}
+      <button
+        disabled={object.isNew}
+        title={object.isNew
+          ? "save the frame first, then propagate"
+          : "carry this box 12 frames back and 12 forward, with a SAM mask on each, as a track to confirm"}
+        onClick={async () => {
+          const r = await trackOp("propagate", "propagate with masks", () => api.samPropagateObject(object.id, 12));
+          const back = r.by_direction?.backward?.length ?? 0, fwd = r.by_direction?.forward?.length ?? 0;
+          toast(r.created
+            ? `propagated ${back} back and ${fwd} forward with masks (track ${r.track_id.slice(0, 8)}). Open the track to review/confirm.`
+            : "could not propagate: no trackable motion");
+        }}
+        className="w-full mb-1 text-[11px] border border-line rounded text-ink-2 px-1.5 py-1 hover:border-accent disabled:opacity-40">
+        &larr; propagate both ways, with masks &rarr;
+      </button>
 
       {/* Relationships: pick a kind, press link, then click the target object on the canvas. */}
       <div className="mb-1 space-y-1">

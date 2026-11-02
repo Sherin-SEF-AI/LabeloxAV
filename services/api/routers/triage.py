@@ -15,6 +15,14 @@ from services.api.deps import TriageRow, db_session
 from services.api.project_guard import caller_hidden_projects
 from services.autolabel.ontology import get_ontology
 from services.project_access import scope_visible_sessions
+from services.queue_order import (
+    LOW_CONF_FLOOR,
+    class_conflict,
+    mask_box_disagrees,
+    priority_of,
+    priority_sql,
+    rare_class_ids,
+)
 
 router = APIRouter()
 
@@ -67,18 +75,14 @@ FLAG_PROSE = {
 
 _SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
-# The score below which a detection counts as unconfident. Strictly below: 0.6 is the floor and is not itself
-# low, which is the sort of boundary a later `<=` moves without anybody noticing.
-LOW_CONF_FLOOR = 0.6
-
 
 def _why_and_priority(obj: Object, onto) -> tuple[str, float, list[dict]]:
     """The reasons this object is in the queue, its rank, and those reasons as sorted structured flags."""
     c = onto.by_id(obj.class_id)
     prov = obj.provenance or {}
     rare = c.india or c.l1 == "fallback"
-    mask_box = bool(prov.get("mask_box_disagree"))
-    conflict = sum(1 for p in prov.get("proposals", []) if p.get("verdict") == "overruled") > 0 and len(prov.get("proposals", [])) > 1
+    mask_box = mask_box_disagrees(prov)
+    conflict = class_conflict(prov)
 
     codes = []
     if mask_box:
@@ -98,10 +102,8 @@ def _why_and_priority(obj: Object, onto) -> tuple[str, float, list[dict]]:
     flags = [{"code": code, "label": FLAG_LABEL[code], "severity": FLAG_SEVERITY[code]} for code in codes]
     why = ", ".join(FLAG_PROSE[code] for code in codes)
 
-    uncertainty = 1.0 - obj.conf
-    rarity = 2.0 if rare else 1.0
-    boost = 1.0 + (0.5 if mask_box else 0.0) + (0.5 if conflict else 0.0)
-    return why, round(uncertainty * rarity * boost, 4), flags
+    # The rank itself lives in services/queue_order.py, beside its SQL twin and the gold measurement behind it.
+    return why, priority_of(obj.conf, obj.class_id, prov, rare_class_ids(onto)), flags
 
 
 @router.get("/triage", response_model=list[TriageRow])
@@ -159,7 +161,9 @@ async def triage(
             if lot is not None:
                 draw_order = {oid: i for i, oid in enumerate(lot.sample_object_ids or [])}
     if draw_order is None:
-        stmt = stmt.limit(max(limit * 3, limit))  # over-fetch, rank, then trim
+        # Ranked in the database across every matching object, then the page taken. Over-fetching an
+        # unordered 3x and ranking that served the top of whatever Postgres happened to read first.
+        stmt = stmt.order_by(priority_sql(rare_class_ids(onto)).desc(), Object.object_id).limit(limit)
 
     rows = (await db.execute(stmt)).all()
     out: list[TriageRow] = []
@@ -198,3 +202,23 @@ async def triage(
         )
     out.sort(key=lambda r: r.priority, reverse=True)
     return out[:limit]
+
+
+@router.get("/triage/ordering")
+async def triage_ordering(gold_id: str | None = None, db: AsyncSession = Depends(db_session)):
+    """Why the queue is in this order: each candidate ordering, measured on a gold set by how many of the
+    wrong labels a reviewer meets in the first 10, 25 and 50% of the queue (services/queue_order.py).
+    Without a gold id, the newest gold set. Recomputed on each call; it takes a few seconds."""
+    from fastapi import HTTPException
+
+    from db.models import GoldSet
+    from services.queue_order import evaluate_orderings
+
+    if gold_id is None:
+        gold_id = (await db.execute(select(GoldSet.gold_id).order_by(GoldSet.created_at.desc()).limit(1))).scalar()
+        if gold_id is None:
+            raise HTTPException(404, "no gold set yet: seal one in Evaluation to measure the queue order")
+    try:
+        return await evaluate_orderings(db, gold_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from None
