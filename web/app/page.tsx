@@ -24,8 +24,13 @@ type Home = {
   recent_sessions: { session_id: string; vehicle_id: string; city: string | null; start_ts_ns: number;
                      frames: number; objects: number; waiting: number }[];
   steps: { data: boolean; autolabel: boolean; review: boolean; export: boolean; model: boolean };
-  waiting_for_people: { kind: "blind_audit"; audit_id: string; job_id: string; frame_id: string;
-                        n_frames: number; n_labeled: number; created_at: string | null }[];
+  waiting_for_people: (
+    | { kind: "blind_audit"; audit_id: string; job_id: string; frame_id: string;
+        n_frames: number; n_labeled: number; created_at: string | null }
+    | { kind: "control_samples"; count: number; href: string }
+    | { kind: "settlement_lot"; lot_id: string; class_name: string; judged: number; of: number;
+        population: number; href: string }
+  )[];
 };
 type Check = { name: string; status: "ok" | "warn" | "fail" | "info"; detail: string; fix: string };
 
@@ -226,23 +231,33 @@ export default function HomePage() {
         {data && (data.waiting_for_people ?? []).length > 0 && (
           <section className="panel p-4 flex flex-col gap-2.5" aria-label="Waiting for a person">
             <h2 className="text-[14px] font-semibold text-ink">Waiting for a person</h2>
-            {data.waiting_for_people.map((w) => (
-              <div key={w.audit_id} className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <div className="flex-1 min-w-[260px]">
-                  <div className="text-[13px] text-ink">
-                    Blind audit: label {w.n_frames - w.n_labeled} of {w.n_frames} frames from scratch
+            {data.waiting_for_people.map((w) => {
+              const row = (key: string, title: string, why: string, href: string, label: string) => (
+                <div key={key} className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <div className="flex-1 min-w-[260px]">
+                    <div className="text-[13px] text-ink">{title}</div>
+                    <div className="text-[12px] text-ink-3 max-w-[80ch]">{why}</div>
                   </div>
-                  <div className="text-[12px] text-ink-3 max-w-[80ch]">
-                    The model&apos;s detections are hidden while you label, on purpose. Comparing the two afterwards is the only
-                    measurement that says whether recall on gold is real or the gold set is missing most of what is there.
-                    It can be split across people and sittings{w.n_labeled ? `; ${w.n_labeled} done so far` : ""}.
-                  </div>
+                  <Link href={href} className="btn btn-primary shrink-0">{label}</Link>
                 </div>
-                <Link href={`/frame/${w.frame_id}?job=${w.job_id}`} className="btn btn-primary shrink-0">
-                  {w.n_labeled ? "Continue labelling" : "Start labelling"}
-                </Link>
-              </div>
-            ))}
+              );
+              if (w.kind === "blind_audit") {
+                return row(w.audit_id, `Blind audit: label ${w.n_frames - w.n_labeled} of ${w.n_frames} frames from scratch`,
+                  "The model's detections are hidden while you label, on purpose. Comparing the two afterwards is the only " +
+                  "measurement that says whether recall on gold is real or the gold set is missing most of what is there. " +
+                  `It can be split across people and sittings${w.n_labeled ? `; ${w.n_labeled} done so far` : ""}.`,
+                  `/frame/${w.frame_id}?job=${w.job_id}`, w.n_labeled ? "Continue labelling" : "Start labelling");
+              }
+              if (w.kind === "control_samples") {
+                return row("controls", `Check ${n(w.count)} auto-accepted labels`,
+                  "A random sample of what the gate accepted without a person. Your verdicts are the only measured " +
+                  "precision the auto-accept gate has; until they exist it runs on an assumption. One key per label.",
+                  w.href, "Check them");
+              }
+              return row(w.lot_id, `Settle a lot of ${n(w.population)} ${w.class_name} labels: ${w.judged} of ${w.of} sample verdicts`,
+                "A random sample from the lot. Its verdicts decide whether the whole lot is accepted or sent back, " +
+                "so the sample is served in draw order.", w.href, w.judged ? "Continue" : "Start");
+            })}
           </section>
         )}
 
