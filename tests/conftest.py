@@ -20,6 +20,11 @@ os.environ.setdefault("LBX_AUTH__ENABLED", "true")
 # is relaxed here. test_pii_gate.py constructs PiiSettings(plate_mandatory=True) explicitly to verify it.
 os.environ.setdefault("LBX_PII__PLATE_MANDATORY", "false")
 
+# Every test runs in its own event loop and the engine cache is dropped between tests, so pooled connections
+# would only be stranded until garbage collection; enough of them reached the connection limit partway
+# through the full run. See PostgresSettings.pool.
+os.environ.setdefault("LBX_POSTGRES__POOL", "null")
+
 # Webhook receivers in the suite are on localhost, which the SSRF guard refuses by default (a webhook URL is
 # attacker-controlled input the server fetches with its own network position). Opt in for tests only.
 os.environ.setdefault("LBX_INTEGRATIONS__ALLOW_PRIVATE_WEBHOOK_TARGETS", "true")

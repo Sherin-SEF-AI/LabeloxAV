@@ -412,7 +412,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 # Published for the rate limiter, which runs outside this middleware and would otherwise
                 # resolve identity a third time (this gate, the route dependency, and then the limiter).
                 request.state.principal_id = uid
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                from db.session import database_unavailable
+
+                if database_unavailable(exc):
+                    # Not a 401: the client signs the person out on a 401, and the token may be fine.
+                    return JSONResponse({"detail": "the database is not answering; try again in a moment"},
+                                        status_code=503, headers={"Retry-After": "5"})
                 role = None
         elif authz:
             # A machine credential. This gate resolves identity independently of the route dependency, so a

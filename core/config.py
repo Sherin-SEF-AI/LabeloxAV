@@ -29,6 +29,11 @@ class PostgresSettings(BaseModel):
     user: str = "labelox"
     password: str = "labelox"
     db: str = "labeloxav"
+    # "queue" keeps a pool per process (the server, the workers). "null" opens a connection per session and
+    # closes it after: the test suite runs every test in a fresh event loop and drops the cached engine
+    # between them, so a pool there only strands connections until garbage collection, and enough of them
+    # reach the server's connection limit partway through the run.
+    pool: str = "queue"
 
     @property
     def async_dsn(self) -> str:
