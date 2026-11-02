@@ -16,7 +16,15 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import AutolabelJob, ExportJob, Frame, ImportJob, ModelRegistry, Object, TrainingJob
+from db.models import (
+    AutolabelJob,
+    DatasetCommit,
+    Frame,
+    ImportJob,
+    ModelRegistry,
+    Object,
+    TrainingJob,
+)
 from db.models import Session as DbSession
 from services.api.deps import db_session, require_role
 from services.api.project_guard import caller_hidden_projects
@@ -83,7 +91,9 @@ async def home(db: AsyncSession = Depends(db_session), hidden=Depends(caller_hid
                        "start_ts_ns": s.start_ts_ns, "frames": n_frames, "objects": sum(states.values()),
                        "waiting": states.get(WAITING, 0)})
 
-    exports = await _count(db, select(func.count()).select_from(ExportJob).where(ExportJob.status == "done"))
+    # Every export, from the Datasets page or the API and SDK, leaves a dataset commit; only the page's path
+    # records an ExportJob, so counting jobs alone left the step unticked for a team that exports by script.
+    exports = await _count(db, select(func.count()).select_from(DatasetCommit))
     models = await _count(db, select(func.count()).select_from(ModelRegistry))
     autolabelled = await _count(db, select(func.count()).select_from(AutolabelJob)
                                 .where(AutolabelJob.status == "done"))
