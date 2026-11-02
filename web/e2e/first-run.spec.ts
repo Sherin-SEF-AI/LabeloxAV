@@ -56,13 +56,18 @@ test("from the installer's sign-in link to an exported dataset", async ({ page }
   expect(await stepsDone(page)).toBe(0);
   await expect(page.getByText("Bring in data")).toBeVisible();
 
-  // 3. Load a sample drive and wait for its import to finish.
+  // 3. Load a sample drive and wait for its import to finish: the sample has a session and nothing in flight.
+  const auth = { Authorization: `Bearer ${await token(page)}` };
   await page.getByRole("button", { name: "Load sample" }).first().click();
-  await expect(page.getByRole("button", { name: "Open" }).first()).toBeVisible({ timeout: 15 * 60_000 });
+  await waitFor("the sample import to finish", async () => {
+    const r = await page.request.get("/api/samples", { headers: auth });
+    if (!r.ok()) return null;
+    const samples = (await r.json()).samples as { session_id: string | null; job_id: string | null }[];
+    return samples.some((x) => x.session_id && !x.job_id) ? true : null;
+  }, 15 * 60_000);
   expect(await stepsDone(page)).toBe(1);
 
   // 4. Auto-label it from the home page, and wait for the GPU worker to finish the job.
-  const auth = { Authorization: `Bearer ${await token(page)}` };
   await page.getByRole("button", { name: /^Auto-label / }).click();
   await waitFor("auto-labelling to finish", async () => {
     const home = await (await page.request.get("/api/home", { headers: auth })).json();

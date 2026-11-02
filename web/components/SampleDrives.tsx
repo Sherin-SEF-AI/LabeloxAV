@@ -15,13 +15,14 @@ import { api, apiGet, apiPost, humanizeError } from "@/lib/api";
 type Sample = {
   id: string; title: string; description: string; size_bytes: number; license: string; license_url: string;
   author: string; source_page: string; credit: string; session_id: string | null;
+  job_id: string | null;   // an import of this sample still running, so a reloaded page picks it back up
 };
 type ImportJob = { status: string; progress: number; error: string | null; session_id: string | null;
                    counts: Record<string, unknown> };
 
 function SampleCard({ s, onLoaded }: { s: Sample; onLoaded: () => void }) {
   const router = useRouter();
-  const [job, setJob] = useState<string | null>(null);
+  const [job, setJob] = useState<string | null>(s.session_id ? null : s.job_id);
   const [state, setState] = useState<ImportJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(s.session_id);
