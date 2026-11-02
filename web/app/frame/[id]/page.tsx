@@ -5,7 +5,7 @@ import { toast } from "@/lib/toast";
 import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
-import type { AdverseRegion, AlItem, DrivingEvent, ErrorCandidateRow, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, ProjectedCuboid, Relationship } from "@/lib/types";
+import type { AdverseRegion, DrivingEvent, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, ProjectedCuboid, Relationship } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
 import { beginOp, endOp, resetOps, trackOp } from "@/lib/canvasOps";
@@ -45,6 +45,7 @@ import HistoryPanel from "@/components/editor/HistoryPanel";
 import SessionPicker from "@/components/editor/SessionPicker";
 import PropertiesPanel from "@/components/editor/properties/PropertiesPanel";
 import { useCuboidLayer } from "@/components/editor/useCuboidLayer";
+import { useReviewQueue } from "@/components/editor/useReviewQueue";
 import { useLaneLayer } from "@/components/editor/useLaneLayer";
 import CuboidPanel from "@/components/editor/panels/CuboidPanel";
 import LanePanel from "@/components/editor/panels/LanePanel";
@@ -147,10 +148,6 @@ export default function FrameEditor() {
   // Lanes-mode canvas: the raster image + fit scale (the lane and surface edit state is in useLaneLayer)
   const [laneImg, setLaneImg] = useState<HTMLImageElement | null>(null);
   const [laneScale, setLaneScale] = useState(1);
-  // Review mode (canvas stays Konva, the rail becomes the value queue): highest-value items + error candidates
-  const [alItems, setAlItems] = useState<AlItem[]>([]);
-  const [errItems, setErrItems] = useState<ErrorCandidateRow[]>([]);
-  const [reviewLoaded, setReviewLoaded] = useState(false);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [linkFrom, setLinkFrom] = useState<string | null>(null); // active "relate" mode: the source object id
   const [linkKind, setLinkKind] = useState("rider_of");
@@ -671,20 +668,9 @@ export default function FrameEditor() {
     cubSelected, patchCub, saveCub, moveCub, addCub, delCub, aiLift3d,
   } = useCuboidLayer({ mode, meta, onto, confirm });
 
-  // Review mode: lazily load the value queue (this frame's items ranked first) and the error candidates.
-  useEffect(() => {
-    if (mode !== "review" || !meta || reviewLoaded) return;
-    setReviewLoaded(true);
-    (async () => {
-      const [al, ec] = await Promise.all([
-        api.alScore(meta.session_id, 80).then((r) => r.items).catch(() => [] as AlItem[]),
-        api.errorCandidates("pending", 80).catch(() => [] as ErrorCandidateRow[]),
-      ]);
-      al.sort((a, b) => (a.frame_id === id ? 0 : 1) - (b.frame_id === id ? 0 : 1) || b.value - a.value);
-      setAlItems(al);
-      setErrItems(ec);
-    })();
-  }, [mode, meta, reviewLoaded, id]);
+  // Review mode (canvas stays Konva, the rail becomes the value queue): highest-value items + error candidates
+  const { alItems, setAlItems, errItems, setErrItems, reviewLoaded, reviewError } =
+    useReviewQueue({ mode, meta, frameId: id });
 
   // Accept or reject the selected object (persisted directly with an explicit state), then advance the queue.
   //
@@ -2071,7 +2057,7 @@ export default function FrameEditor() {
               per-object accept/reject. Canvas stays Konva; reviewer pans/zooms and clicks objects. */}
           {mode === "review" && (
             <ReviewPanel selected={selected} selectedId={st.selectedId} frameId={id} alItems={alItems} errItems={errItems}
-              reviewLoaded={reviewLoaded} onReview={(verdict) => void reviewObject(verdict)}
+              reviewLoaded={reviewLoaded} reviewError={reviewError} onReview={(verdict) => void reviewObject(verdict)}
               onPickItem={(it) => (it.frame_id === id ? doSelect(it.object_id) : void gotoFrame(it.frame_id))}
               onConfirmError={async (cid) => { await api.errorConfirm(cid); setErrItems((s) => s.filter((x) => x.candidate_id !== cid)); flash("confirmed error"); }}
               onDismissError={async (cid) => { await api.errorDismiss(cid); setErrItems((s) => s.filter((x) => x.candidate_id !== cid)); }} />
