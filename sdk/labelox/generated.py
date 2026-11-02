@@ -568,6 +568,36 @@ class LabeloxClient:
         return self._call("POST", f"/api/assets/{asset_id}/state",
                           params={"state": state}, json_body=None)
 
+    def post_assistant_chat(self, body: Any = None) -> Any:
+        """Chat"""
+        return self._call("POST", f"/api/assistant/chat",
+                          params=None, json_body=body)
+
+    def post_assistant_eval(self) -> Any:
+        """Evaluate Assistant"""
+        return self._call("POST", f"/api/assistant/eval",
+                          params=None, json_body=None)
+
+    def get_assistant_proposals(self, status: str | None = 'pending', limit: int | None = 50) -> Any:
+        """Proposals"""
+        return self._call("GET", f"/api/assistant/proposals",
+                          params={"status": status, "limit": limit}, json_body=None)
+
+    def post_assistant_proposals_by_proposal_id_approve(self, proposal_id: str) -> Any:
+        """Approve"""
+        return self._call("POST", f"/api/assistant/proposals/{proposal_id}/approve",
+                          params=None, json_body=None)
+
+    def post_assistant_proposals_by_proposal_id_reject(self, proposal_id: str) -> Any:
+        """Reject"""
+        return self._call("POST", f"/api/assistant/proposals/{proposal_id}/reject",
+                          params=None, json_body=None)
+
+    def get_assistant_status(self) -> Any:
+        """Status"""
+        return self._call("GET", f"/api/assistant/status",
+                          params=None, json_body=None)
+
     def post_attrsweep_apply(self, body: Any = None) -> Any:
         """Attr Apply"""
         return self._call("POST", f"/api/attrsweep/apply",
@@ -1151,6 +1181,11 @@ class LabeloxClient:
     def post_embeddings_compute(self, body: Any = None) -> Any:
         """Embeddings Compute"""
         return self._call("POST", f"/api/embeddings/compute",
+                          params=None, json_body=body)
+
+    def post_errordetect_benchmark(self, body: Any = None) -> Any:
+        """Benchmark"""
+        return self._call("POST", f"/api/errordetect/benchmark",
                           params=None, json_body=body)
 
     def get_errordetect_candidates(self, status: str | None = 'pending', limit: int | None = 100, kind: Any | None = None) -> Any:
@@ -2863,6 +2898,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/projects/{project_id}/stats",
                           params=None, json_body=None)
 
+    def get_propagation_eval(self, steps: int | None = 3, tracks: int | None = 30, refine: bool | None = True) -> Any:
+        """Propagation Eval"""
+        return self._call("GET", f"/api/propagation/eval",
+                          params={"steps": steps, "tracks": tracks, "refine": refine}, json_body=None)
+
     def post_qa_vlm(self, session_id: str, limit: int | None = 40) -> Any:
         """Qa Vlm"""
         return self._call("POST", f"/api/qa/vlm",
@@ -3668,6 +3708,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/triage",
                           params={"states": states, "session_id": session_id, "klass": klass, "city": city, "flywheel": flywheel, "control": control, "limit": limit}, json_body=None)
 
+    def get_triage_ordering(self, gold_id: Any | None = None) -> Any:
+        """Triage Ordering"""
+        return self._call("GET", f"/api/triage/ordering",
+                          params={"gold_id": gold_id}, json_body=None)
+
     def post_upload_abort(self, body: Any = None) -> Any:
         """Abort"""
         return self._call("POST", f"/api/upload/abort",
@@ -3871,4 +3916,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 757 routes generated from the server schema.
+# 766 routes generated from the server schema.
