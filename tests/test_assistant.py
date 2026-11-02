@@ -30,8 +30,8 @@ class Scripted:
         return self.replies.pop(0) if self.replies else Reply(content="done")
 
 
-def call(name: str, **args) -> Reply:
-    return Reply(tool_calls=[ToolCall(id=f"c{uuid.uuid4().hex[:6]}", name=name, arguments=args)])
+def call(tool: str, /, **args) -> Reply:
+    return Reply(tool_calls=[ToolCall(id=f"c{uuid.uuid4().hex[:6]}", name=tool, arguments=args)])
 
 
 def _run(coro):
@@ -244,3 +244,65 @@ def test_the_eval_scores_tool_choice_and_arguments(monkeypatch):
     assert out["cases"] == len(by_text)
     assert out["tool_accuracy"] == 1.0
     assert 0 < out["full_accuracy"] < 1.0
+
+
+def test_the_newer_reading_tools_answer_within_what_the_caller_may_see():
+    s = _seed(visibility="members")
+    hidden = frozenset({uuid.UUID(s["project_id"])})
+    model = Scripted(call("list_projects"), call("model_status"), call("job_overview"), call("list_datasets"),
+                     Reply(content="ok"))
+    out = _turn(model, "status of everything", hidden=hidden)
+    assert [t["tool"] for t in out["trace"]] == ["list_projects", "model_status", "job_overview", "list_datasets"]
+    assert all(t["error"] is None for t in out["trace"])
+    results = [json.loads(m["content"]) for m in model.seen[-1] if m["role"] == "tool"]
+    assert s["project_id"] not in {p["project_id"] for p in results[0]["projects"]}, "a hidden project was listed"
+    assert set(results[1]) == {"champions", "recent_training"}
+    assert {"autolabel", "import", "training", "export"} <= set(results[2])
+
+
+def test_an_unknown_export_format_goes_back_to_the_model():
+    s = _seed()
+    model = Scripted(call("propose_export", session_id=s["session_id"], formats=["tiff"]), Reply(content="?"))
+    out = _turn(model, "export as tiff")
+    assert out["proposals"] == [] and "unknown format" in (out["trace"][0]["error"] or "")
+
+
+def test_export_and_training_proposals_apply_through_the_normal_paths(monkeypatch):
+    from _authutil import auth_headers
+    from sqlalchemy import select
+
+    from db.models import ExportJob, LabelProject, TrainingJob
+    from db.session import get_sessionmaker
+    from services.api.main import app
+
+    s = _seed()
+
+    async def _project_name() -> str:
+        async with get_sessionmaker()() as db:
+            return (await db.get(LabelProject, uuid.UUID(s["project_id"]))).name
+
+    pname = _run(_project_name())
+    model = Scripted(call("propose_export", session_id=s["session_id"], formats=["coco"], name="assist-export"),
+                     call("propose_training", project_name=pname, epochs=5), Reply(content="Proposed both."))
+    monkeypatch.setattr("services.assistant.loop.make_model", lambda: model)
+    with TestClient(app) as c:
+        r = c.post("/api/assistant/chat", json={"messages": [{"role": "user", "content": "export and train"}]},
+                   headers=auth_headers("annotator"))
+        assert r.status_code == 200, r.text
+        export, training = r.json()["proposals"]
+        assert export["preview"]["count"] == 5 and "assist-export" in export["summary"]
+        assert "not promoted" in training["summary"]
+        for p in (export, training):
+            d = c.post(f"/api/assistant/proposals/{p['proposal_id']}/approve", headers=auth_headers("reviewer"))
+            assert d.status_code == 200 and d.json()["status"] == "approved", d.text
+
+    async def _jobs():
+        async with get_sessionmaker()() as db:
+            e = (await db.execute(select(ExportJob).where(ExportJob.name == "assist-export"))).scalars().first()
+            t = (await db.execute(select(TrainingJob).order_by(TrainingJob.created_at.desc()))).scalars().first()
+            return e, t
+
+    e, t = _run(_jobs())
+    assert e is not None and e.spec["session_id"] == s["session_id"]
+    assert t is not None and t.config["dataset_spec"]["project_id"] == s["project_id"]
+    assert t.config["promote"] is False and t.config["hparams"]["epochs"] == 5

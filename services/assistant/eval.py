@@ -94,6 +94,22 @@ def cases(sid: str, fid: str) -> list[Case]:
              {"propose_error_detection": lambda a: a.get("session_id") == sid}),
         Case("Start auto-labelling the Delhi drive.", {"find_sessions": lambda a: _has(a, "query", "del")}),
         Case("Is bus a class?", {"list_classes": _any}),
+        Case("Which datasets have we exported so far?", {"list_datasets": _any}),
+        Case("What is the current champion model, and how good is it on gold?", {"model_status": _any}),
+        Case("Did the last training run finish?", {"model_status": _any, "job_overview": _any}),
+        Case("Which projects do we have?", {"list_projects": _any}),
+        Case("Has any import or auto-label job failed recently?", {"job_overview": _any}),
+        Case(f"Export session {sid} as YOLO.",
+             {"propose_export": lambda a: a.get("session_id") == sid and _has(a, "formats", "yolo")}),
+        Case("Export this session as a COCO dataset.",
+             {"propose_export": lambda a: a.get("session_id", sid) == sid and _has(a, "formats", "coco")},
+             in_session=True),
+        Case("Train a detector for 30 epochs on the default project.",
+             {"propose_training": lambda a: int(a.get("epochs") or 0) == 30
+              and (_has(a, "project_name", "default") or _has(a, "project_id", "default")),
+              "list_projects": _any}),
+        Case("Fine-tune the model on autorickshaws and cattle only.",
+             {"propose_training": lambda a: _classes(a, "class_names", "autorickshaw", "cattle")}),
     ]
 
 
@@ -132,8 +148,8 @@ async def evaluate(db: AsyncSession, model: ChatModel | None = None) -> dict:
                         "expected": sorted(case.accept)})
     n = len(results)
     return {"model": model.name, "cases": n,
-            "tool_accuracy": round(sum(r["tool_ok"] for r in results) / n, 4),
-            "full_accuracy": round(sum(r["args_ok"] for r in results) / n, 4),
+            "tool_accuracy": round(sum(bool(r["tool_ok"]) for r in results) / n, 4),
+            "full_accuracy": round(sum(bool(r["args_ok"]) for r in results) / n, 4),
             "results": results}
 
 

@@ -48,8 +48,12 @@ regions and your team's own custom classes are in every set.
 drive", "which drives do we have from Pune", "look for label mistakes in this session". It answers from the
 data and shows which lookups it made.
 
+It also knows the exported datasets, the current champion model and recent training runs, the projects,
+and which jobs are running or have failed.
+
 It cannot change anything itself. When you ask for a change (reclassify, send labels back to review,
-auto-label a session, run the error detectors), it creates a **proposal** with exactly what it would touch.
+auto-label a session, run the error detectors, export a dataset, train a detector), it creates a
+**proposal** with exactly what it would touch.
 A reviewer approves or rejects it on the same page. Approving runs the change the way a person would: class
 changes go back to review and can be reverted, human labels are never touched, and auto-labelling waits its
 turn for the GPU like any other job.
