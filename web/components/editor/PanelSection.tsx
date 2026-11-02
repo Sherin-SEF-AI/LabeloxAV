@@ -24,9 +24,9 @@ export default function PanelSection({ title, badge, defaultOpen = false, accent
     <div className="border-b hairline">
       <button onClick={() => setOpen(!open)} aria-expanded={open}
         className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-line/30 group transition-colors">
-        <span className={`font-mono text-[10px] uppercase tracking-wide ${accent ? "text-ink-2" : "text-ink-3"}`}>{title}</span>
+        <span className={`text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide ${accent ? "text-ink-2" : "text-ink-3"}`}>{title}</span>
         <span className="flex items-center gap-2">
-          {badge != null && <span className="font-mono text-[10px] text-ink-3">{badge}</span>}
+          {badge != null && <span className="text-[11px] text-ink-3">{badge}</span>}
           <span className={`text-ink-3 group-hover:text-ink w-3 text-center text-[9px] leading-none transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▸</span>
         </span>
       </button>

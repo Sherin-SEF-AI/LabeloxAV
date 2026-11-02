@@ -16,7 +16,7 @@ export default function AttrControl({ name, spec, value, onChange }: {
   value: unknown;
   onChange: (v: unknown) => void;
 }) {
-  const label = <span className="w-24 shrink-0 font-mono text-[11px] text-ink-3 truncate">{name}</span>;
+  const label = <span className="w-24 shrink-0 text-[12px] text-ink-3 truncate">{name}</span>;
 
   // Read-only rather than absent. An annotator who set occupant_count to three wants to see that
   // triple_riding followed; hiding it makes the derivation invisible and the number look unrecorded.
@@ -24,7 +24,7 @@ export default function AttrControl({ name, spec, value, onChange }: {
     return (
       <label className="flex items-center gap-2" title={`${DERIVED_HINT} (${spec.derived_from})`}>
         {label}
-        <span className="flex-1 font-mono text-[11px] text-ink-3">
+        <span className="flex-1 text-[12px] text-ink-3">
           {value == null ? "-" : String(value)}
           <span className="ml-1.5 text-[9px] uppercase tracking-wide text-ink-3/70">derived</span>
         </span>
@@ -41,7 +41,7 @@ export default function AttrControl({ name, spec, value, onChange }: {
         <select value={String(value ?? "")}
           onChange={(e) => onChange(e.target.value === "" ? e.target.value
             : (spec.values || []).find((v) => String(v) === e.target.value) ?? e.target.value)}
-          className="flex-1 bg-panel border border-line px-1 py-0.5 font-mono text-[11px] text-ink">
+          className="flex-1 bg-panel border border-line px-1 py-0.5 text-[12px] text-ink">
           <option value="">-</option>
           {(spec.values || []).map((v) => <option key={String(v)} value={String(v)}>{String(v)}</option>)}
         </select>
@@ -68,15 +68,15 @@ export default function AttrControl({ name, spec, value, onChange }: {
             <label key={i} className="flex items-center gap-0.5" title={`occupant ${i + 1}`}>
               <input type="checkbox" checked={on} onChange={(e) => set(i, e.target.checked)}
                 aria-label={`${name} occupant ${i + 1}`} />
-              <span className="font-mono text-[10px] text-ink-3">{i + 1}</span>
+              <span className="text-[11px] text-ink-3">{i + 1}</span>
             </label>
           ))}
-          {!arr.length && <span className="font-mono text-[10px] text-ink-3">none</span>}
+          {!arr.length && <span className="text-[11px] text-ink-3">none</span>}
           <button type="button" aria-label={`add ${name} entry`} onClick={() => onChange([...arr, false])}
-            className="ml-auto px-1 font-mono text-[11px] text-ink-3 hover:text-ink">+</button>
+            className="ml-auto px-1 text-[12px] text-ink-3 hover:text-ink">+</button>
           <button type="button" aria-label={`remove ${name} entry`} disabled={!arr.length}
             onClick={() => onChange(arr.slice(0, -1))}
-            className={`px-1 font-mono text-[11px] ${arr.length ? "text-ink-3 hover:text-ink" : "text-line cursor-not-allowed"}`}>
+            className={`px-1 text-[12px] ${arr.length ? "text-ink-3 hover:text-ink" : "text-line cursor-not-allowed"}`}>
             &minus;
           </button>
         </div>
@@ -98,7 +98,7 @@ export default function AttrControl({ name, spec, value, onChange }: {
             const on = chosen.includes(k);
             return (
               <button key={k} type="button" onClick={() => toggle(k)} aria-pressed={on}
-                className={`border px-1.5 py-0.5 font-mono text-[10px] ${
+                className={`border px-1.5 py-0.5 text-[11px] ${
                   on ? "border-accent text-ink bg-accent/20" : "border-line text-ink-3 hover:text-ink-2"}`}>
                 {k}
               </button>
@@ -121,8 +121,8 @@ export default function AttrControl({ name, spec, value, onChange }: {
         aria-invalid={bad || undefined}
         title={spec.range ? `${lo} to ${hi}` : undefined}
         onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-        className={`flex-1 bg-panel border px-1 py-0.5 font-mono text-[11px] text-ink ${bad ? "border-block" : "border-line"}`} />
-      {bad && <span className="font-mono text-[10px] text-block shrink-0">{lo}-{hi}</span>}
+        className={`flex-1 bg-panel border px-1 py-0.5 text-[12px] text-ink ${bad ? "border-block" : "border-line"}`} />
+      {bad && <span className="text-[11px] text-block shrink-0">{lo}-{hi}</span>}
     </label>
   );
 }

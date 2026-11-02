@@ -163,7 +163,7 @@ export default function EventLane({ trackId, items, onChanged }: {
 
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
         <span>events ({events.length})</span>
         <span className="text-ink-3/70 normal-case">drag across the lane to mark a span</span>
         {!applicable.length && (
@@ -177,7 +177,7 @@ export default function EventLane({ trackId, items, onChanged }: {
         {/* Off is a real choice: 86% of tracks have no changepoint at all, and on the rest an annotator
             may be marking something the speed does not show. */}
         {cps.length > 0 && (
-          <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-3 cursor-pointer">
+          <label className="flex items-center gap-1.5 text-[11px] text-ink-3 cursor-pointer">
             <input type="checkbox" checked={snapOn} onChange={(e) => setSnapOn(e.target.checked)} />
             snap span edges to the {cps.length} point{cps.length === 1 ? "" : "s"} where this
             track&apos;s speed changes
@@ -215,12 +215,12 @@ export default function EventLane({ trackId, items, onChanged }: {
               aria-label={`${e.event_type}, ${e.state}`}
               title={`${e.event_type} - ${e.state}${e.source === "heuristic" ? " (heuristic proposal)" : ""}`}
               style={{ width: widthFor(span), ...(e.state === "proposed" ? HATCH : {}) }}
-              className={`shrink-0 h-6 border px-1.5 text-left font-mono text-[10px] text-ink truncate ${STATE_TONE[e.state] ?? "bg-line border-line"}`}>
+              className={`shrink-0 h-6 border px-1.5 text-left text-[11px] text-ink truncate ${STATE_TONE[e.state] ?? "bg-line border-line"}`}>
               {e.event_type}
               {e.confidence != null && <span className="ml-1 text-ink-3">{e.confidence.toFixed(2)}</span>}
             </button>
             {selected === e.event_id && (
-              <div className="shrink-0 flex items-center gap-1.5 pl-2 font-mono text-[10px]">
+              <div className="shrink-0 flex items-center gap-1.5 pl-2 text-[11px]">
                 {e.state !== "accepted" && (
                   <button onClick={() => setState(e.event_id, "accepted")}
                     className="text-pass hover:underline">accept</button>
@@ -245,22 +245,22 @@ export default function EventLane({ trackId, items, onChanged }: {
 
         {pending && (
           <div className="border border-line bg-bg-2 p-2 space-y-1">
-            <div className="font-mono text-[10px] uppercase tracking-wide text-ink-3">
+            <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">
               frames {pending[0] + 1} to {pending[1] + 1} - what happened?
             </div>
             <div className="flex flex-wrap gap-1 items-center">
               {applicable.map((t) => (
                 <button key={t.name} onClick={() => create(t.name)} title={t.definition}
-                  className="border border-line px-1.5 py-0.5 font-mono text-[10px] text-ink-2 hover:border-accent hover:text-ink">
+                  className="border border-line px-1.5 py-0.5 text-[11px] text-ink-2 hover:border-accent hover:text-ink">
                   {t.name}
                 </button>
               ))}
               <button onClick={() => setPending(null)}
-                className="ml-auto font-mono text-[10px] text-ink-3 hover:text-ink">cancel</button>
+                className="ml-auto text-[11px] text-ink-3 hover:text-ink">cancel</button>
             </div>
             {/* The definition is the interface, so it is on hover of every choice rather than something an
                 annotator has to go and look up while deciding. */}
-            <div className="font-mono text-[10px] text-ink-3">hover a type for its labeling definition</div>
+            <div className="text-[11px] text-ink-3">hover a type for its labeling definition</div>
           </div>
         )}
       </div>

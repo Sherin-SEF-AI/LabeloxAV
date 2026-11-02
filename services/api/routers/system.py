@@ -20,10 +20,20 @@ async def system_features():
 
     Any signed-in person may read it: it says which pages to offer, nothing about hosts or files.
     """
+    from core.config import get_settings
     from packs.registry import enabled_optional, optional_pack_ids
+    from services.doctor import gpu_worker_running
 
     enabled = enabled_optional()
-    return {"optional_packs": {pid: pid in enabled for pid in optional_pack_ids()}}
+    return {
+        "optional_packs": {pid: pid in enabled for pid in optional_pack_ids()},
+        # Whether queued GPU jobs (training, and auto-label in worker mode) will actually run.
+        "gpu_worker": await gpu_worker_running(),
+        "autolabel_executor": get_settings().jobs.autolabel_executor,
+        # Switching identity in the account menu exists only for a dev server with auth off; with auth on,
+        # who you are is your sign-in.
+        "auth_enabled": get_settings().auth.enabled,
+    }
 
 
 @router.get("/system/checks", dependencies=[Depends(require_role("admin"))])

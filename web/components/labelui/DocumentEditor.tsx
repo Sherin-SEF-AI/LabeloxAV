@@ -110,7 +110,7 @@ export default function DocumentEditor({
             className="absolute border-2 border-accent bg-accent/10 pointer-events-none" />
         )}
       </div>
-      <div className="font-mono text-[11px] text-ink-3 mt-2 flex items-center gap-3 flex-wrap">
+      <div className="text-[12px] text-ink-3 mt-2 flex items-center gap-3 flex-wrap">
         <span>
           {boxes.length} regions{nat.w ? ` - page ${nat.w}x${nat.h}` : ""}
           {!activeLabel && " - pick a label, then drag a region"}

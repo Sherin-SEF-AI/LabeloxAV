@@ -35,7 +35,7 @@ import { apiGet } from "@/lib/api";
 function Blank({ p }: { p: Placeholder }) {
   if (!p) return null;
   return (
-    <div className={`font-mono text-xs py-4 text-center ${p.kind === "loading" ? "text-ink-3/50 animate-pulse" : "text-ink-3"}`}>
+    <div className={`text-[12.5px] py-4 text-center ${p.kind === "loading" ? "text-ink-3/50 animate-pulse" : "text-ink-3"}`}>
       {p.text}
     </div>
   );
@@ -44,9 +44,9 @@ function Blank({ p }: { p: Placeholder }) {
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="panel px-3 py-3">
-      <div className="font-mono text-[11px] uppercase text-ink-3">{label}</div>
-      <div className="font-mono text-2xl text-ink mt-1">{value}</div>
-      {sub && <div className="font-mono text-[11px] text-ink-3 mt-0.5">{sub}</div>}
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</div>
+      <div className="text-2xl font-semibold text-ink mt-1">{value}</div>
+      {sub && <div className="text-[12px] text-ink-3 mt-0.5">{sub}</div>}
     </div>
   );
 }
@@ -54,7 +54,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="panel">
-      <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
         {title}
       </div>
       <div className="p-3">{children}</div>
@@ -183,7 +183,7 @@ export default function AnalyticsPage() {
               {present.map((c) => (
                 <div key={c.class_id} className="flex items-center gap-2">
                   <div
-                    className={`w-32 shrink-0 font-mono text-[11px] truncate ${
+                    className={`w-32 shrink-0 text-[12px] truncate ${
                       c.india ? "text-accent" : "text-ink-2"
                     }`}
                     title={`${c.name}${c.india ? " (india)" : ""}`}
@@ -199,7 +199,7 @@ export default function AnalyticsPage() {
                       style={{ width: `${(c.count / maxCount) * 100}%` }}
                     />
                   </div>
-                  <div className="w-12 text-right font-mono text-[11px] text-ink-2">{c.count}</div>
+                  <div className="w-12 text-right text-[12px] text-ink-2">{c.count}</div>
                 </div>
               ))}
               <Blank p={placeholder(loading, present.length, "no objects yet")} />
@@ -226,7 +226,7 @@ export default function AnalyticsPage() {
                   <ScoreBar label="auto-accepted" value={mix.auto_accepted_pct / 100} tone="info" />
                   <ScoreBar label="human-touched" value={mix.human_touched_pct / 100} tone="warn" />
                 </div>
-                <div className="font-mono text-[11px] text-ink-3 grid grid-cols-2 gap-x-6 gap-y-0.5">
+                <div className="text-[12px] text-ink-3 grid grid-cols-2 gap-x-6 gap-y-0.5">
                   {Object.entries(mix.by_state).map(([k, v]) => (
                     <div key={k} className="flex justify-between">
                       <span>state: {k}</span>
@@ -251,7 +251,7 @@ export default function AnalyticsPage() {
             <div className="space-y-1">
               {scenarios.map((s) => (
                 <div key={s.type} className="flex items-center gap-2">
-                  <div className="w-32 shrink-0 font-mono text-[11px] text-ink-2 truncate">
+                  <div className="w-32 shrink-0 text-[12px] text-ink-2 truncate">
                     {s.type}
                   </div>
                   <div className="flex-1 h-3 bg-line relative">
@@ -260,8 +260,8 @@ export default function AnalyticsPage() {
                       style={{ width: `${(s.count / maxScenario) * 100}%` }}
                     />
                   </div>
-                  <div className="w-12 text-right font-mono text-[11px] text-ink-2">{s.count}</div>
-                  <div className="w-16 text-right font-mono text-[11px] text-ink-3">
+                  <div className="w-12 text-right text-[12px] text-ink-2">{s.count}</div>
+                  <div className="w-16 text-right text-[12px] text-ink-3">
                     crit {s.mean_criticality.toFixed(2)}
                   </div>
                 </div>
@@ -290,11 +290,11 @@ export default function AnalyticsPage() {
                   <ScoreBar label="confirmed" value={agreement.confirmed_pct / 100} tone="info" />
                   <ScoreBar label="reclassified" value={agreement.reclassified_pct / 100} tone="warn" />
                 </div>
-                <div className="font-mono text-[11px] text-ink-3">
+                <div className="text-[12px] text-ink-3">
                   {agreement.total_reviews} reviews, mean {agreement.mean_time_spent_ms}ms each
                 </div>
                 {agreement.per_class.length > 0 && (
-                  <div className="font-mono text-[11px] text-ink-3 space-y-0.5 pt-1 border-t hairline">
+                  <div className="text-[12px] text-ink-3 space-y-0.5 pt-1 border-t hairline">
                     {agreement.per_class.slice(0, 8).map((p) => (
                       <div key={p.class_id} className="flex justify-between">
                         <span className="text-ink-2">{p.name}</span>
@@ -320,7 +320,7 @@ export default function AnalyticsPage() {
                 <Stat label="cost / frame" value={prod.cost.cost_per_frame_usd != null ? `$${prod.cost.cost_per_frame_usd}` : "-"} sub={prod.cost.cost_per_object_usd != null ? `$${prod.cost.cost_per_object_usd}/obj` : undefined} />
                 <Stat label="auto-accept saved" value={`$${prod.cost.auto_accept_saved_usd}`} sub={`${prod.cost.n_auto_accept} objects`} />
               </div>
-              <div className="font-mono text-[11px] text-ink-3 mb-2">
+              <div className="text-[12px] text-ink-3 mb-2">
                 inter-annotator agreement: {prod.interannotator.agreement_rate != null
                   ? <span className="text-pass">{(prod.interannotator.agreement_rate * 100).toFixed(0)}%</span>
                   : "-"} over {prod.interannotator.shared_objects} shared objects
@@ -330,7 +330,7 @@ export default function AnalyticsPage() {
                 const maxR = Math.max(...prod.trend.map((d) => d.reviews), 1);
                 return (
                   <div className="mb-3">
-                    <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">throughput trend (reviews/day, bar height; agreement, green tint)</div>
+                    <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">throughput trend (reviews/day, bar height; agreement, green tint)</div>
                     <div className="flex items-end gap-0.5 h-12">
                       {prod.trend.map((d) => (
                         <div key={d.day} title={`${d.reviews} reviews, agreement ${d.agreement != null ? (d.agreement * 100).toFixed(0) + "%" : "-"}`}
@@ -340,7 +340,7 @@ export default function AnalyticsPage() {
                   </div>
                 );
               })()}
-              <table className="w-full font-mono text-[11px]">
+              <table className="w-full text-[12px]">
                 <thead><tr className="text-ink-3 text-left border-b hairline"><th className="py-1">reviewer</th><th>reviews</th><th>correction rate</th><th>agreement</th><th>obj/hr</th></tr></thead>
                 <tbody>
                   {prod.reviewers.filter((r) => r.reviews >= 5).slice(0, 12).map((r) => (
@@ -354,12 +354,12 @@ export default function AnalyticsPage() {
                   ))}
                 </tbody>
               </table>
-              <div className="font-mono text-[10px] text-ink-3 mt-2 leading-snug">{prod.note}</div>
+              <div className="text-[11px] text-ink-3 mt-2 leading-snug">{prod.note}</div>
             </Section>
           )}
 
           <Section title={`model confusions - learn from corrections (${confusions?.total_corrections ?? 0} total)`}>
-            <div className="flex items-center gap-2 mb-2 font-mono text-[11px]">
+            <div className="flex items-center gap-2 mb-2 text-[12px]">
               <span className="text-ink-3">group by:</span>
               {(["class", "camera", "city"] as const).map((b) => (
                 <button key={b} onClick={() => setConfBy(b)}
@@ -367,7 +367,7 @@ export default function AnalyticsPage() {
               ))}
             </div>
             {confusions && confusions.confusions.length ? (
-              <table className="w-full font-mono text-[11px]">
+              <table className="w-full text-[12px]">
                 <thead>
                   <tr className="text-ink-3 text-left border-b hairline">
                     <th className="py-1">model said</th><th>human corrected to</th>
@@ -386,7 +386,7 @@ export default function AnalyticsPage() {
                 </tbody>
               </table>
             ) : (
-              <div className="font-mono text-xs text-ink-3 py-4 text-center">no corrections recorded yet</div>
+              <div className="text-[12.5px] text-ink-3 py-4 text-center">no corrections recorded yet</div>
             )}
           </Section>
 
@@ -420,13 +420,13 @@ export default function AnalyticsPage() {
                   title={`unprotected ${(100 - pii.coverage_pct).toFixed(1)}%`}
                 />
               </div>
-              <div className="flex flex-wrap items-center gap-4 font-mono text-xs">
+              <div className="flex flex-wrap items-center gap-4 text-[12.5px]">
                 <ScoreBar label="anonymized" value={pii.coverage_pct / 100} tone="info" />
                 <span className="text-ink-3">
                   {pii.frames_anonymized}/{pii.total_frames} frames, {pii.faces_blurred} faces, {pii.plates_blurred} plates blurred
                 </span>
               </div>
-              <div className="font-mono text-[11px] text-ink-3 space-y-0.5 pt-1 border-t hairline">
+              <div className="text-[12px] text-ink-3 space-y-0.5 pt-1 border-t hairline">
                 {Object.entries(pii.method_versions).map(([k, v]) => (
                   <div key={k} className="flex justify-between">
                     <span className="text-ink-2 truncate">{k}</span>
@@ -436,7 +436,7 @@ export default function AnalyticsPage() {
               </div>
             </div>
           ) : (
-            <div className="font-mono text-xs text-ink-3 py-4 text-center">
+            <div className="text-[12.5px] text-ink-3 py-4 text-center">
               no anonymized frames yet
             </div>
           )}
@@ -445,7 +445,7 @@ export default function AnalyticsPage() {
         {/* Geo capture density */}
         <Section title={`geo capture density (${geo.length} points)`}>
           {geo.length > 0 ? (
-            <div className="font-mono text-[11px] text-ink-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-0.5 max-h-48 overflow-auto">
+            <div className="text-[12px] text-ink-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-0.5 max-h-48 overflow-auto">
               {geo.slice(0, 200).map((p, i) => (
                 <div key={i} className="flex justify-between">
                   <span className="text-ink-2">{p.lat.toFixed(5)}</span>
@@ -454,7 +454,7 @@ export default function AnalyticsPage() {
               ))}
             </div>
           ) : (
-            <div className="font-mono text-xs text-ink-3 py-4 text-center">no gnss fixes</div>
+            <div className="text-[12.5px] text-ink-3 py-4 text-center">no gnss fixes</div>
           )}
         </Section>
 
@@ -465,9 +465,9 @@ export default function AnalyticsPage() {
               const tot = Object.values(vals).reduce((a, b) => a + b, 0) || 1;
               return (
                 <div key={axis}>
-                  <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">{axis.replace("_", " ")}</div>
+                  <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">{axis.replace("_", " ")}</div>
                   {Object.entries(vals).map(([v, n]) => (
-                    <div key={v} className="font-mono text-[11px] flex items-center gap-1.5 mb-0.5">
+                    <div key={v} className="text-[12px] flex items-center gap-1.5 mb-0.5">
                       <span className="w-16 text-ink-2 truncate">{v}</span>
                       <div className="flex-1 h-2 bg-bg-2"><div className="h-2 bg-accent" style={{ width: `${(100 * n) / tot}%` }} /></div>
                       <span className="text-ink-3 w-8 text-right">{n}</span>
@@ -493,10 +493,10 @@ export default function AnalyticsPage() {
                 return <div key={i} title={`${g.date}: ${g.frames}`} className="flex-1 bg-info/70 min-w-[2px]" style={{ height: `${(100 * g.frames) / max}%` }} />;
               })}
             </div>
-            <div className="font-mono text-[10px] text-ink-3 px-2">{growth.length ? `${growth[growth.length - 1].cumulative} frames total` : ""}</div>
+            <div className="text-[11px] text-ink-3 px-2">{growth.length ? `${growth[growth.length - 1].cumulative} frames total` : ""}</div>
           </Section>
           <Section title="long-tail (rare classes)">
-            <div className="p-2 font-mono text-[11px] text-ink-3">
+            <div className="p-2 text-[12px] text-ink-3">
               {overview ? <span>{overview.long_tail.coverage_pct}% coverage ({overview.long_tail.covered_classes}/{overview.long_tail.total_classes} classes)</span> : "-"}
             </div>
           </Section>
@@ -506,7 +506,7 @@ export default function AnalyticsPage() {
           {cluster && cluster.points.length ? (
             <ClusterScatter cluster={cluster} onPick={(fid) => router.push(`/frame/${fid}`)} />
           ) : (
-            <div className="font-mono text-xs text-ink-3 py-8 text-center">computing projection…</div>
+            <div className="text-[12.5px] text-ink-3 py-8 text-center">computing projection…</div>
           )}
         </Section>
       </div>

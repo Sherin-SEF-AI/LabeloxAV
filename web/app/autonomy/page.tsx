@@ -205,7 +205,7 @@ export default function AutonomyPage() {
   return (
     <PageShell active="AUTONOMY" title="AUTONOMY"
       subtitle="what the machine may do right now, per class, and the evidence behind it">
-      <div className="p-4 space-y-4 font-mono text-[11px]">
+      <div className="p-4 space-y-4 text-[12px]">
         {err != null && <LoadState error={err} onRetry={() => void load()} />}
 
         {/* the switches and the heartbeat */}

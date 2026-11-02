@@ -8,7 +8,7 @@ import { NAV, NAV_DESTINATIONS, NAV_FOOTER, NAV_HREFS, PACK_SECTIONS, activeKey,
 const APP = join(__dirname, "..", "app");
 
 // Settings' own pages, linked from the settings page instead of the pinned sidebar footer.
-const SETTINGS_PAGES = ["/profile", "/integrations", "/activity", "/console"];
+const SETTINGS_PAGES = ["/profile", "/integrations", "/activity", "/console", "/settings/keys", "/settings/team", "/settings/projects"];
 
 // Every static route the app serves: app/**/page.tsx without a dynamic [segment] anywhere in its path.
 function staticRoutes(dir = APP): string[] {

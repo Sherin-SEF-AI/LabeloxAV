@@ -16,7 +16,7 @@ export default function Pager({ offset, limit, total, onOffset }: {
   const atEnd = offset + limit >= total;
 
   return (
-    <div className="flex items-center gap-3 font-mono text-[11px] text-ink-3">
+    <div className="flex items-center gap-3 text-[12px] text-ink-3">
       <span>{from.toLocaleString()}-{to.toLocaleString()} of {total.toLocaleString()}</span>
       <div className="flex items-center gap-1">
         <button onClick={() => onOffset(0)} disabled={atStart} aria-label="first page"

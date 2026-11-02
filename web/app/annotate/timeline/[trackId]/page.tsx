@@ -157,7 +157,7 @@ export default function TimelineWorkspace() {
         <main className="flex-1 overflow-auto p-4 space-y-4 min-w-0">
           {/* scrubber */}
           <div className="panel p-3">
-          <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">source</div>
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">source</div>
           <div className="flex items-end gap-px h-12 overflow-x-auto">
             {track?.items.map((x, i) => (
               <button key={x.object_id} onClick={() => setSel(i)}
@@ -173,7 +173,7 @@ export default function TimelineWorkspace() {
               </button>
             ))}
           </div>
-          <div className="flex gap-4 mt-2 font-mono text-[10px] text-ink-3">
+          <div className="flex gap-4 mt-2 text-[11px] text-ink-3">
             <span><span className="inline-block w-2 h-2 mr-1" style={{ background: "#56D364" }} />human keyframe</span>
             <span><span className="inline-block w-2 h-2 mr-1" style={{ background: "#E3B341" }} />interpolated</span>
             <span><span className="inline-block w-2 h-2 mr-1" style={{ background: "#58A6FF" }} />propagated</span>
@@ -184,7 +184,7 @@ export default function TimelineWorkspace() {
           {/* drift lane: a second view over the same columns, answering a different question */}
           {drift && (
             <div className="mt-3 pt-3 border-t hairline">
-              <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">
+              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">
                 still on the object?
               </div>
               <div className="flex items-end gap-px h-4 overflow-x-auto">
@@ -199,7 +199,7 @@ export default function TimelineWorkspace() {
                   );
                 })}
               </div>
-              <div className="flex gap-4 mt-2 font-mono text-[10px] text-ink-3">
+              <div className="flex gap-4 mt-2 text-[11px] text-ink-3">
                 <span><span className="inline-block w-2 h-2 mr-1" style={{ background: DRIFT_COLOR.drifted }} />drifted{driftCounts ? ` (${driftCounts.drifted})` : ""}</span>
                 <span><span className="inline-block w-2 h-2 mr-1" style={{ background: DRIFT_COLOR.ok }} />still on it{driftCounts ? ` (${driftCounts.ok})` : ""}</span>
                 {/* Never folded into "drifted". Unmeasurable is a different answer from wrong, and
@@ -218,7 +218,7 @@ export default function TimelineWorkspace() {
             <div className="p-3 flex flex-col gap-4">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={it.crop_url} alt="" className="w-full h-32 object-cover bg-bg-2 border border-line cursor-pointer" onClick={() => router.push(`/frame/${it.frame_id}?focus=${it.object_id}`)} />
-              <div className="font-mono text-[11px] space-y-1">
+              <div className="text-[12px] space-y-1">
                 <div className="text-ink-2">{it.class_name} <span className="text-ink-3">frame {sel + 1}/{track?.n_frames}</span></div>
                 <div className="text-ink-3">source: <span style={{ color: cellColor(it) }}>{it.source}{it.interp_source ? ` (${it.interp_source})` : ""}</span></div>
                 <div className="text-ink-3">state: <StateBadge state={it.state} /></div>

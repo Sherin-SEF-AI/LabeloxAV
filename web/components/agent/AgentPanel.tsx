@@ -245,9 +245,9 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
     <div className={embedded ? "" : "border-t hairline pt-2 mt-2"}>
       <div className="flex items-center gap-2 px-1 pb-1.5">
         {!embedded && <span className="font-display text-[10px] font-semibold uppercase tracking-wider text-ink-3">Agent</span>}
-        <span className="font-mono text-[9px] text-ink-3/70">auto-accept the sure ones</span>
+        <span className="text-[10.5px] text-ink-3/70">auto-accept the sure ones</span>
         <button onClick={doPlan} disabled={!!busy}
-          className={`ml-auto flex items-center gap-1.5 font-mono text-[10px] border px-2 py-1 rounded hover:border-accent disabled:opacity-50 ${busy === "plan" ? "running border-accent/40" : "border-line"}`}>
+          className={`ml-auto flex items-center gap-1.5 text-[11px] border px-2 py-1 rounded hover:border-accent disabled:opacity-50 ${busy === "plan" ? "running border-accent/40" : "border-line"}`}>
           {busy === "plan" && <Busy />}{busy === "plan" ? "planning..." : "dry-run"}
         </button>
       </div>
@@ -255,28 +255,28 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
       <div className="px-1 pb-1.5 grid grid-cols-2 gap-1">
         <button onClick={doCuboids} disabled={!!busy}
           title="lift every 2D vehicle/VRU box on this frame to a 3D cuboid (monocular, reprojection-validated)"
-          className="font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+          className="text-[11px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
           {busy === "cuboids" ? "fitting..." : "fit 3D boxes"} <OpPrecisionChip opType="cuboid" />
         </button>
         <button onClick={doAttributes} disabled={!!busy}
           title="auto-fill the derivable attributes (occlusion, truncation, static, direction)"
-          className="font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+          className="text-[11px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
           {busy === "attrs" ? "filling..." : "fill attributes"} <OpPrecisionChip opType="attribute" />
         </button>
         <button onClick={doRelabel} disabled={!!busy}
           title="an independent model re-reads every box and corrects the class where it decisively disagrees (reversible)"
-          className={`col-span-2 flex items-center justify-center gap-1.5 font-mono text-[10px] border px-2 py-1 rounded hover:border-accent disabled:opacity-40 ${busy === "relabel" ? "running border-accent/40" : "border-line"}`}>
+          className={`col-span-2 flex items-center justify-center gap-1.5 text-[11px] border px-2 py-1 rounded hover:border-accent disabled:opacity-40 ${busy === "relabel" ? "running border-accent/40" : "border-line"}`}>
           {busy === "relabel" && <Busy />}{busy === "relabel" ? "re-reading labels..." : "relabel this frame (AI reasoning)"} <OpPrecisionChip opType="relabel" />
         </button>
         <button onClick={doReanalyzePlan} disabled={!!busy}
           title="look again at this frame: re-check the face/plate redaction inside every annotated person and vehicle, and re-run every label check at once"
-          className={`${sessionId ? "" : "col-span-2 "}flex items-center justify-center gap-1.5 font-mono text-[10px] border px-2 py-1 rounded hover:border-accent disabled:opacity-40 ${busy === "reanalyze" ? "running border-accent/40" : "border-line"}`}>
+          className={`${sessionId ? "" : "col-span-2 "}flex items-center justify-center gap-1.5 text-[11px] border px-2 py-1 rounded hover:border-accent disabled:opacity-40 ${busy === "reanalyze" ? "running border-accent/40" : "border-line"}`}>
           {busy === "reanalyze" && <Busy />}{busy === "reanalyze" ? "reanalysing..." : "reanalyse this frame"}
         </button>
         {sessionId && (
           <button onClick={doReanalyzeSession} disabled={!!busy}
             title="reanalyse every frame in this session in the background; progress shows in the console"
-            className="font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+            className="text-[11px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
             {busy === "reanalyze-all" ? "starting..." : "reanalyse session"}
           </button>
         )}
@@ -287,17 +287,17 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
           {/* Shown before anything is written, because the redaction half cannot be undone: the unredacted
               original is deliberately never stored. Every other action on this panel is reversible. */}
           <div className="border border-warn/40 rounded p-2 space-y-1.5">
-            <div className="font-mono text-[10px] text-ink-2">
+            <div className="text-[11px] text-ink-2">
               checked {reanalysis.redaction.windows} annotated {reanalysis.redaction.windows === 1 ? "person/vehicle" : "people and vehicles"}
               {reanalysis.redaction.already_covered > 0 && `, ${reanalysis.redaction.already_covered} region(s) already redacted`}
             </div>
-            <div className="font-mono text-[10px] text-ink">
+            <div className="text-[11px] text-ink">
               would blur <span className="text-warn">{reanalysis.redaction.faces_added}</span> missed face
               {reanalysis.redaction.faces_added === 1 ? "" : "s"} and{" "}
               <span className="text-warn">{reanalysis.redaction.plates_added}</span> missed plate
               {reanalysis.redaction.plates_added === 1 ? "" : "s"} (permanent)
             </div>
-            <div className="font-mono text-[10px] text-ink">
+            <div className="text-[11px] text-ink">
               and queue <span className="text-accent">{reanalysis.findings.length}</span> label finding
               {reanalysis.findings.length === 1 ? "" : "s"} for review (nothing is relabelled)
               {reanalysis.findings_dropped > 0 && (
@@ -305,7 +305,7 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
               )}
             </div>
             {Object.keys(reanalysis.systemic).length > 0 && (
-              <div className="font-mono text-[9px] text-ink-3 border-t hairline pt-1.5">
+              <div className="text-[10.5px] text-ink-3 border-t hairline pt-1.5">
                 fires on the whole frame, so counted rather than queued:{" "}
                 {Object.entries(reanalysis.systemic).map(([rule, n]) => `${rule} (${n})`).join(", ")}
                 <div className="text-ink-3/70">a rule that objects to every object is describing the pipeline, not the labels</div>
@@ -314,7 +314,7 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
             {reanalysis.findings.length > 0 && (
               <ul className="space-y-0.5 max-h-24 overflow-auto">
                 {reanalysis.findings.slice(0, 6).map((f, i) => (
-                  <li key={`${f.object_id}-${i}`} className="font-mono text-[9px] text-ink-3 truncate">
+                  <li key={`${f.object_id}-${i}`} className="text-[10.5px] text-ink-3 truncate">
                     <span className="text-ink-2">{f.detail.rule}</span> · {f.detail.reason}
                   </li>
                 ))}
@@ -322,11 +322,11 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
             )}
             <div className="flex gap-1.5">
               <button onClick={doReanalyzeApply} disabled={!!busy}
-                className="flex-1 font-mono text-[10px] border border-warn/60 text-warn px-2 py-1 rounded hover:bg-warn/10 disabled:opacity-40">
+                className="flex-1 text-[11px] border border-warn/60 text-warn px-2 py-1 rounded hover:bg-warn/10 disabled:opacity-40">
                 apply
               </button>
               <button onClick={() => setReanalysis(null)} disabled={!!busy}
-                className="font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+                className="text-[11px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
                 discard
               </button>
             </div>
@@ -337,11 +337,11 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
       {copilot?.pattern && copilot.candidates.length > 0 && (
         <div className="px-1 pb-1.5">
           <div className="border border-accent/40 bg-accent/5 rounded p-1.5">
-            <div className="font-mono text-[9.5px] text-ink-2">
+            <div className="text-[10.5px] text-ink-2">
               you relabeled <span className="text-accent">{copilot.pattern.from_name} → {copilot.pattern.to_name}</span> {copilot.pattern.count}x
             </div>
             <button onClick={doBatchFix} disabled={!!busy}
-              className="w-full mt-1 font-mono text-[10px] border border-accent/40 bg-accent/10 text-accent px-2 py-1 rounded hover:bg-accent/20 disabled:opacity-40">
+              className="w-full mt-1 text-[11px] border border-accent/40 bg-accent/10 text-accent px-2 py-1 rounded hover:bg-accent/20 disabled:opacity-40">
               {busy === "batch" ? "fixing..." : `batch-fix ${copilot.candidates.length} similar → review`}
             </button>
           </div>
@@ -350,9 +350,9 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
 
       {suggestions.length > 0 && (
         <div className="px-1 pb-1.5">
-          <div className="font-mono text-[9px] uppercase tracking-wider text-ink-3/70 mb-0.5">suggested</div>
+          <div className="text-[10px] font-medium uppercase tracking-[0.06em]r text-ink-3/70 mb-0.5">suggested</div>
           {suggestions.map((s, i) => (
-            <div key={i} className="flex items-center gap-1.5 font-mono text-[9.5px] text-ink-3">
+            <div key={i} className="flex items-center gap-1.5 text-[10.5px] text-ink-3">
               <span className="text-accent">›</span><span className="truncate">{s.label}</span>
             </div>
           ))}
@@ -363,12 +363,12 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
         <div className="px-1 pb-1.5">
           <button onClick={doPropagate} disabled={!!busy}
             title="label once, carry this object across the clip both ways; stops where it drifts"
-            className="w-full font-mono text-[10px] border border-accent/40 bg-accent/5 text-accent px-2 py-1 rounded hover:bg-accent/15 disabled:opacity-40">
+            className="w-full text-[11px] border border-accent/40 bg-accent/5 text-accent px-2 py-1 rounded hover:bg-accent/15 disabled:opacity-40">
             {busy === "track" ? "auto-tracking..." : "auto-track selected object →"}
           </button>
           <button onClick={doCrossCam} disabled={!!busy}
             title="project this object's 3D box into the other synchronized cameras and label it there"
-            className="w-full mt-1 font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+            className="w-full mt-1 text-[11px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
             {busy === "xcam" ? "projecting..." : "propagate to other cameras →"}
           </button>
         </div>
@@ -376,13 +376,13 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
 
       {c && (
         <div className="px-1 space-y-1.5">
-          <div className="grid grid-cols-3 gap-1 font-mono text-[10px]">
+          <div className="grid grid-cols-3 gap-1 text-[11px]">
             <span className="text-pass">accept {c.auto_accept}</span>
             <span className="text-warn">review {c.review}</span>
             <span className="text-ink-3">annotate {c.annotate}</span>
           </div>
           {(c.demoted_by_critic > 0 || Object.keys(plan!.critic_flags).length > 0) && (
-            <div className="font-mono text-[9px] text-ink-3">
+            <div className="text-[10.5px] text-ink-3">
               critic vetoed {c.demoted_by_critic}
               {Object.keys(plan!.critic_flags).length > 0 && (
                 <span className="text-ink-3/70"> ({Object.entries(plan!.critic_flags).map(([k, n]) => `${k}:${n}`).join(", ")})</span>
@@ -391,7 +391,7 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
           )}
           <div className="max-h-32 overflow-auto no-scrollbar space-y-0.5">
             {plan!.items.filter((i) => i.changes_state).slice(0, 40).map((i) => (
-              <div key={i.object_id} title={i.reason} className="flex items-center gap-1.5 font-mono text-[9.5px]">
+              <div key={i.object_id} title={i.reason} className="flex items-center gap-1.5 text-[10.5px]">
                 <span className={i.action === "auto_accept" ? "text-pass" : i.action === "review" ? "text-warn" : "text-ink-3"}>
                   {i.action === "auto_accept" ? "✓" : i.action === "review" ? "○" : "✎"}
                 </span>
@@ -401,11 +401,11 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
               </div>
             ))}
             {plan!.items.filter((i) => i.changes_state).length === 0 && (
-              <div className="font-mono text-[9.5px] text-ink-3">no changes, already settled</div>
+              <div className="text-[10.5px] text-ink-3">no changes, already settled</div>
             )}
           </div>
           <button onClick={doCommit} disabled={!!busy || c.auto_accept + c.review + c.annotate === c.unchanged}
-            className="w-full font-mono text-[10px] border border-accent/40 bg-accent/10 text-accent px-2 py-1 rounded hover:bg-accent/20 disabled:opacity-40">
+            className="w-full text-[11px] border border-accent/40 bg-accent/10 text-accent px-2 py-1 rounded hover:bg-accent/20 disabled:opacity-40">
             {busy === "commit" ? "committing..." : "commit (reversible)"}
           </button>
         </div>
@@ -415,9 +415,9 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
         <input value={cmd} onChange={(e) => setCmd(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") doCommand(); }}
           placeholder="tell the agent, e.g. accept two-wheelers above 0.9"
-          className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-1.5 py-1 font-mono text-[10px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
+          className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-1.5 py-1 text-[11px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
         <button onClick={doCommand} disabled={!!busy || !cmd.trim()}
-          className="font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
+          className="text-[11px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">
           {busy === "cmd" ? "…" : "ask"}
         </button>
       </div>
@@ -425,14 +425,14 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
       {runId && (
         <div className="px-1 pt-1.5">
           <button onClick={doRevert} disabled={!!busy}
-            className="w-full font-mono text-[10px] border border-line px-2 py-1 rounded hover:border-block hover:text-block disabled:opacity-50">
+            className="w-full text-[11px] border border-line px-2 py-1 rounded hover:border-block hover:text-block disabled:opacity-50">
             {busy === "revert" ? "reverting..." : "revert last run"}
           </button>
         </div>
       )}
-      {msg && <div className="px-1 pt-1 font-mono text-[9.5px] text-ink-3">{msg}</div>}
+      {msg && <div className="px-1 pt-1 text-[10.5px] text-ink-3">{msg}</div>}
       {intent && (
-        <div className="px-1 pt-0.5 font-mono text-[9.5px] text-ink-3">
+        <div className="px-1 pt-0.5 text-[10.5px] text-ink-3">
           understood as{" "}
           <span className="text-accent">{intent.action}</span>
           {Array.isArray(intent.classes) && intent.classes.length > 0 && (

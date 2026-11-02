@@ -26,7 +26,7 @@ type Source = {
 function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
         <span>{title}</span>
         {right && <span className="ml-auto normal-case">{right}</span>}
       </div>
@@ -115,31 +115,31 @@ function IntegrationsBody() {
       active="INTEGRATIONS"
       title="Integrations"
       subtitle="outbound webhooks and registered storage buckets"
-      right={msg ? <span className="font-mono text-[11px] text-accent">{msg}</span> : null}
+      right={msg ? <span className="text-[12px] text-accent">{msg}</span> : null}
     >
       <div className="p-4 space-y-4 max-w-5xl">
         {/* the one-time secret */}
         {freshSecret && (
           <div className="panel border border-accent p-3 space-y-1">
-            <div className="font-mono text-[11px] text-accent">
+            <div className="text-[12px] text-accent">
               copy this signing secret now, it is not shown again
             </div>
-            <div className="font-mono text-[11px] text-ink-3">{freshSecret.url}</div>
-            <div className="font-mono text-[12px] text-ink break-all select-all">{freshSecret.secret}</div>
-            <div className="font-mono text-[10px] text-ink-3">
+            <div className="text-[12px] text-ink-3">{freshSecret.url}</div>
+            <div className="text-[12.5px] text-ink break-all select-all">{freshSecret.secret}</div>
+            <div className="text-[11px] text-ink-3">
               verify each delivery: X-Labelox-Signature = sha256=HMAC(secret, raw body)
             </div>
             <button onClick={() => setFreshSecret(null)}
-              className="mt-1 border border-line px-2 py-0.5 font-mono text-[11px] text-ink-2 hover:border-accent">
+              className="mt-1 border border-line px-2 py-0.5 text-[12px] text-ink-2 hover:border-accent">
               dismiss
             </button>
           </div>
         )}
 
         <Section title={`webhooks (${hooks.length})`}
-          right={highlight ? <span className="font-mono text-[11px] text-accent">from the menu</span> : null}>
+          right={highlight ? <span className="text-[12px] text-accent">from the menu</span> : null}>
           <div className="space-y-2">
-            <div className="flex items-center gap-2 font-mono text-[11px] flex-wrap">
+            <div className="flex items-center gap-2 text-[12px] flex-wrap">
               <input value={url} onChange={(e) => setUrl(e.target.value)}
                 placeholder="https://your-pipeline/hook"
                 className="flex-1 min-w-[260px] bg-bg border border-line px-1.5 py-0.5 text-ink" />
@@ -149,22 +149,22 @@ function IntegrationsBody() {
               </button>
             </div>
             <div className="flex items-center gap-1 flex-wrap">
-              <span className="font-mono text-[10px] uppercase text-ink-3 mr-1">events</span>
+              <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mr-1">events</span>
               {events.map((e) => (
                 <button key={e}
                   onClick={() => setPicked((p) => p.includes(e) ? p.filter((x) => x !== e) : [...p, e])}
-                  className={`px-1.5 py-0.5 font-mono text-[10.5px] border ${
+                  className={`px-1.5 py-0.5 text-[11.5px] border ${
                     picked.includes(e) ? "border-accent text-ink" : "border-line text-ink-3 hover:text-ink-2"}`}>
                   {e}
                 </button>
               ))}
-              <span className="font-mono text-[10px] text-ink-3 ml-1">
+              <span className="text-[11px] text-ink-3 ml-1">
                 {picked.length ? "" : "none picked = every event"}
               </span>
             </div>
 
             {hooks.length > 0 && (
-              <table className="w-full font-mono text-[11px] mt-2">
+              <table className="w-full text-[12px] mt-2">
                 <thead>
                   <tr className="text-ink-3 text-left border-b hairline">
                     <th className="py-1">url</th><th>events</th><th>state</th><th>last</th><th></th>
@@ -193,7 +193,7 @@ function IntegrationsBody() {
 
         <Section title={`storage sources (${sources.length})`}>
           <div className="space-y-2">
-            <div className="flex items-center gap-2 font-mono text-[11px] flex-wrap">
+            <div className="flex items-center gap-2 text-[12px] flex-wrap">
               <input value={sName} onChange={(e) => setSName(e.target.value)} placeholder="name"
                 className="bg-bg border border-line px-1.5 py-0.5 text-ink w-32" />
               <select value={sProvider} onChange={(e) => setSProvider(e.target.value)}
@@ -212,12 +212,12 @@ function IntegrationsBody() {
                 register
               </button>
             </div>
-            <div className="font-mono text-[10px] text-ink-3">
+            <div className="text-[11px] text-ink-3">
               credentials are never stored here: the profile names a key held in the server environment
             </div>
 
             {sources.length > 0 && (
-              <table className="w-full font-mono text-[11px] mt-2">
+              <table className="w-full text-[12px] mt-2">
                 <thead>
                   <tr className="text-ink-3 text-left border-b hairline">
                     <th className="py-1">name</th><th>uri</th><th>profile</th><th>objects</th><th></th>

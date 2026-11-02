@@ -209,6 +209,20 @@ async def check_vlm() -> Check:
                  group="models")
 
 
+async def gpu_worker_running() -> bool:
+    """Whether a GPU worker holds its lifetime lock right now. Cheap: one row count in pg_locks."""
+    from sqlalchemy import text
+
+    from db.session import get_sessionmaker
+
+    key = get_settings().training.advisory_lock_key
+    async with get_sessionmaker()() as db:
+        held = (await db.execute(text(
+            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted "
+            "AND ((classid::bigint << 32) | objid::bigint) = :k"), {"k": key})).scalar_one()
+    return bool(held)
+
+
 async def check_gpu_worker() -> list[Check]:
     """Whether anything will run queued jobs. The worker holds its advisory lock for as long as it lives, so
     the lock being held is the liveness signal, with no heartbeat table to keep."""

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api , humanizeError } from "@/lib/api";
 import type { AssetRow, BoardCell, LabelJobRow, LabelProjectRow, ScorecardRow, UserRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
+import SessionSelect from "@/components/shell/SessionSelect";
 import LoadState from "@/components/shell/LoadState";
 import { useQueryFlag } from "@/lib/useQueryParam";
 import { getUser } from "@/lib/user";
@@ -27,7 +28,7 @@ const STATE_TONE: Record<string, string> = {
 function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
         <span>{title}</span>
         {right && <span className="ml-auto normal-case">{right}</span>}
       </div>
@@ -190,18 +191,18 @@ function ProjectsBody() {
       title="Projects"
       subtitle="assign work, watch it move through the stages, and measure who is producing good labels"
       meta={project ? (
-        <span className="font-mono text-[11px] text-ink-3">
+        <span className="text-[12px] text-ink-3">
           {project.honeypot_frac > 0
             ? `${Math.round(project.honeypot_frac * 100)}% honeypots, floor ${project.min_honeypot_accuracy}`
             : "no honeypot QA configured"}
         </span>
       ) : null}
-      right={msg ? <span className="font-mono text-[11px] text-accent">{msg}</span> : null}
+      right={msg ? <span className="text-[12px] text-accent">{msg}</span> : null}
     >
       <div className="p-4 space-y-4">
         {/* Ahead of the selector, because an empty project list and an unreachable one look identical in it. */}
         {bootErr != null && <LoadState error={bootErr} onRetry={() => window.location.reload()} />}
-        <div className="flex items-center gap-2 font-mono text-[11px] flex-wrap">
+        <div className="flex items-center gap-2 text-[12px] flex-wrap">
           <span className="text-ink-3">project</span>
           <select value={projectId} onChange={(e) => setProjectId(e.target.value)}
             className="bg-bg border border-line px-1.5 py-0.5 text-ink min-w-[200px]">
@@ -226,7 +227,7 @@ function ProjectsBody() {
 
         {/* board */}
         <Section title="board - jobs by stage and state">
-          <table className="font-mono text-[11px] w-full max-w-2xl">
+          <table className="text-[12px] w-full max-w-2xl">
             <thead>
               <tr className="text-ink-3 text-left border-b hairline">
                 <th className="py-1">stage</th>
@@ -250,7 +251,7 @@ function ProjectsBody() {
             </tbody>
           </table>
           {load.length > 0 && (
-            <div className="mt-3 font-mono text-[11px] text-ink-3">
+            <div className="mt-3 text-[12px] text-ink-3">
               open load: {load.map((l) => `${l.assignee} (${l.open_jobs})`).join(", ")}
             </div>
           )}
@@ -258,11 +259,10 @@ function ProjectsBody() {
 
         {/* task creation */}
         <Section title="new task - split a session into jobs">
-          <div className="flex items-center gap-2 font-mono text-[11px] flex-wrap">
+          <div className="flex items-center gap-2 text-[12px] flex-wrap">
             <input value={tName} onChange={(e) => setTName(e.target.value)} placeholder="task name"
               className="bg-bg border border-line px-1.5 py-0.5 text-ink" />
-            <input value={tSession} onChange={(e) => setTSession(e.target.value)} placeholder="session id"
-              className="bg-bg border border-line px-1.5 py-0.5 text-ink min-w-[280px]" />
+            <SessionSelect value={tSession} onChange={setTSession} className="min-w-[320px]" />
             <label className="text-ink-3">frames per job</label>
             <input type="number" min="1" value={jobsOf} onChange={(e) => setJobsOf(Number(e.target.value))}
               className="bg-bg border border-line px-1.5 py-0.5 text-ink w-20" />
@@ -276,10 +276,10 @@ function ProjectsBody() {
         {/* jobs */}
         <Section title={`jobs (${jobs.length})`}>
           {jobs.length === 0 ? (
-            <div className="font-mono text-[11px] text-ink-3 py-3">no jobs yet. create a task above.</div>
+            <div className="text-[12px] text-ink-3 py-3">no jobs yet. create a task above.</div>
           ) : (
             <div className="overflow-auto max-h-96">
-              <table className="w-full font-mono text-[11px]">
+              <table className="w-full text-[12px]">
                 <thead>
                   <tr className="text-ink-3 text-left border-b hairline">
                     <th className="py-1">job</th><th>stage</th><th>state</th><th>frames</th>
@@ -334,10 +334,10 @@ function ProjectsBody() {
 
         {/* multi-modal assets */}
         <Section title={`assets (${assets.total})`}
-          right={<span className="font-mono text-[11px] text-ink-3">
+          right={<span className="text-[12px] text-ink-3">
             {Object.entries(annKinds).map(([k, v]) => `${k} ${v}`).join("  ") || "no annotations yet"}
           </span>}>
-          <div className="flex items-center gap-2 font-mono text-[11px] flex-wrap mb-2">
+          <div className="flex items-center gap-2 text-[12px] flex-wrap mb-2">
             <select value={newMedia} onChange={(e) => setNewMedia(e.target.value)}
               className="bg-bg border border-line px-1.5 py-0.5 text-ink">
               {["text", "dialogue", "audio", "timeseries", "document", "image"].map((m) =>
@@ -352,12 +352,12 @@ function ProjectsBody() {
             </button>
           </div>
           {assets.assets.length === 0 ? (
-            <div className="font-mono text-[11px] text-ink-3 py-2">
+            <div className="text-[12px] text-ink-3 py-2">
               no assets. add one above, or POST to /api/assets to bulk import.
             </div>
           ) : (
             <div className="overflow-auto max-h-72">
-              <table className="w-full font-mono text-[11px]">
+              <table className="w-full text-[12px]">
                 <thead>
                   <tr className="text-ink-3 text-left border-b hairline">
                     <th className="py-1">asset</th><th>media</th><th>state</th><th>preview</th><th></th>
@@ -385,9 +385,9 @@ function ProjectsBody() {
         {/* scorecards */}
         <Section title="annotator scorecards">
           {cards.length === 0 ? (
-            <div className="font-mono text-[11px] text-ink-3 py-3">no review activity yet</div>
+            <div className="text-[12px] text-ink-3 py-3">no review activity yet</div>
           ) : (
-            <table className="w-full max-w-3xl font-mono text-[11px]">
+            <table className="w-full max-w-3xl text-[12px]">
               <thead>
                 <tr className="text-ink-3 text-left border-b hairline">
                   <th className="py-1">annotator</th><th>role</th>

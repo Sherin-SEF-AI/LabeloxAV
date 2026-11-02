@@ -60,7 +60,7 @@ export default function Breadcrumbs({ items, fallback = "/" }: { items?: Crumb[]
   };
 
   return (
-    <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 min-w-0 font-mono text-[11px]">
+    <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 min-w-0 text-[12px]">
       <button onClick={goBack} title="back (Alt+Left)" aria-label="Go back"
         className="text-ink-3 hover:text-accent border border-line hover:border-accent px-1.5 py-0.5 shrink-0">
         &larr;

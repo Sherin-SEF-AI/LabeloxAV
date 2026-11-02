@@ -171,7 +171,7 @@ function ExploreBody() {
       active="EXPLORE"
       title="Explore"
       subtitle="see the corpus by similarity, cut it by facets, act on what you lasso"
-      meta={<span className="font-mono text-[11px] text-ink-3">
+      meta={<span className="text-[12px] text-ink-3">
         {activeProj ? `${activeProj.method} - ${activeProj.n.toLocaleString()} pts` : "no projection"}
       </span>}
       primaryAction={
@@ -189,7 +189,7 @@ function ExploreBody() {
 
         {/* map + actions */}
         <section className="flex-1 min-w-0 flex flex-col">
-          <div className="flex items-center gap-2 px-3 py-1.5 border-b hairline font-mono text-[11px] overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b hairline text-[12px] overflow-x-auto no-scrollbar">
             <select value={projId} onChange={(e) => setProjId(e.target.value)}
               className="bg-bg border border-line px-1.5 py-0.5 text-ink max-w-[240px]">
               <option value="">no projection</option>
@@ -228,7 +228,7 @@ function ExploreBody() {
             <EmbeddingMap points={shownPoints} colorBy={colorBy} tagFilter={tagFilter}
               selected={selected} onSelect={onSelect} onHover={setHover} />
             {hover && (
-              <div className="absolute top-2 left-2 panel px-2 py-1 font-mono text-[10px] text-ink-2 pointer-events-none">
+              <div className="absolute top-2 left-2 panel px-2 py-1 text-[11px] text-ink-2 pointer-events-none">
                 <div>{hover.id.slice(0, 8)}</div>
                 {hover.state && <div className="text-ink-3">{hover.state} - {hover.source}</div>}
                 {hover.conf != null && <div className="text-ink-3">conf {hover.conf}</div>}
@@ -238,7 +238,7 @@ function ExploreBody() {
           </div>
 
           {/* selection action bar */}
-          <div className="border-t hairline px-3 py-2 flex items-center gap-2 font-mono text-[11px] flex-wrap">
+          <div className="border-t hairline px-3 py-2 flex items-center gap-2 text-[12px] flex-wrap">
             <span className="text-ink-3">acting on</span>
             <span className="text-ink">{selCount.toLocaleString()}</span>
             <span className="text-ink-3">{selected.size ? "lassoed" : "matching"} objects</span>
@@ -265,17 +265,17 @@ function ExploreBody() {
         {/* saved views */}
         <aside className={`w-52 shrink-0 border-l hairline overflow-auto no-scrollbar p-1.5 ${
           focusViews ? "ring-1 ring-accent bg-head/30" : ""}`}>
-          <div className={`font-mono text-[10px] uppercase px-1.5 py-1 ${
+          <div className={`text-[10.5px] font-medium uppercase tracking-[0.06em] px-1.5 py-1 ${
             focusViews ? "text-accent" : "text-ink-3"}`}>saved views</div>
           {views.length === 0 && (
-            <div className="px-1.5 font-mono text-[11px] text-ink-3">
+            <div className="px-1.5 text-[12px] text-ink-3">
               none yet. filter, then save.
             </div>
           )}
           {views.map((v) => (
             <button key={v.slice_id} onClick={() => { setPredicate(v.predicate ?? {}); setSelected(new Set()); }}
               title={JSON.stringify(v.predicate)}
-              className="w-full text-left px-1.5 py-1 font-mono text-[11px] text-ink-3 hover:text-ink">
+              className="w-full text-left px-1.5 py-1 text-[12px] text-ink-3 hover:text-ink">
               {v.name}
             </button>
           ))}

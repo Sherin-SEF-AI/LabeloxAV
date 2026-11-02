@@ -88,7 +88,7 @@ test.describe("a failure does not read as a finished shift", () => {
     // Triage said "Queue is clear", analytics said "no objects yet" over a 570k-object corpus, and the
     // project board rendered as though a manager had no projects.
     await page.route("**/api/triage*", (route) => route.abort("failed"));
-    const res = await page.goto("/");
+    const res = await page.goto("/queue");
     expect(res?.status(), "the page must render in order to be wrong about the queue").toBeLessThan(400);
     const body = await page.locator("body").innerText();
     expect(body.toLowerCase()).not.toContain("queue is clear");

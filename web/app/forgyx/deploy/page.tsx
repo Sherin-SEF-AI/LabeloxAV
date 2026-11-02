@@ -40,7 +40,7 @@ export default function DeployPage() {
       <div className="p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 max-w-6xl">
         {/* co-optimization */}
         <Panel title="model-target co-optimization" hint="vs latency budget">
-          <label className="flex items-center gap-2 font-mono text-[11px] mb-2">
+          <label className="flex items-center gap-2 text-[12px] mb-2">
             <span className="text-ink-3">target</span>
             <select value={target} onChange={(e) => setTarget(e.target.value)}
               className="flex-1 bg-bg-2 border border-line px-1 py-0.5 text-ink outline-none focus:border-accent">
@@ -60,7 +60,7 @@ export default function DeployPage() {
               <Verdict ok={coopt.out.feasible} yes="feasible" no="no config fits" />
               <KV k="budget" v={`${coopt.out.budget_ms} ms`} tone="ink-3" />
               {coopt.out.chosen && (
-                <div className="border border-pass/30 p-2 mt-2 font-mono text-[10px]">
+                <div className="border border-pass/30 p-2 mt-2 text-[11px]">
                   <div className="text-ink-2">chosen config</div>
                   <KV k="prune" v={coopt.out.chosen.prune} tone="ink" />
                   <KV k="int8" v={coopt.out.chosen.int8 ? "yes" : "no"} tone="ink" />
@@ -97,7 +97,7 @@ export default function DeployPage() {
 
         {/* rollout */}
         <Panel title="rollout / rollback" hint="canary before fleet">
-          <div className="flex items-center gap-2 font-mono text-[11px] mb-3">
+          <div className="flex items-center gap-2 text-[12px] mb-3">
             <span className="text-ink-3">state</span>
             <span className="px-2 py-0.5 border border-line text-ink">{rollout.out?.new_state ?? state}</span>
           </div>
@@ -110,7 +110,7 @@ export default function DeployPage() {
                   setState(r.new_state);
                   return r;
                 })}
-                className="font-mono text-[11px] px-2 py-1 border border-line text-ink-2 hover:text-accent hover:border-accent disabled:opacity-40">
+                className="text-[12px] px-2 py-1 border border-line text-ink-2 hover:text-accent hover:border-accent disabled:opacity-40">
                 {action}
               </button>
             ))}
@@ -119,11 +119,11 @@ export default function DeployPage() {
           {rollout.out && (
             <div className="mt-3">
               <Verdict ok={rollout.out.allowed} yes={`${rollout.out.from} to ${rollout.out.action}`} no="transition refused" />
-              {rollout.out.reason && <div className="font-mono text-[10px] text-block mt-1">{rollout.out.reason}</div>}
+              {rollout.out.reason && <div className="text-[11px] text-block mt-1">{rollout.out.reason}</div>}
             </div>
           )}
           <button onClick={() => { setState("none"); rollout.setOut(null); }}
-            className="mt-3 font-mono text-[10px] text-ink-3 hover:text-accent">reset to none</button>
+            className="mt-3 text-[11px] text-ink-3 hover:text-accent">reset to none</button>
         </Panel>
       </div>
     </PageShell>

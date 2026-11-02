@@ -40,8 +40,8 @@ export default function PanelHeader({
         <span className="font-display font-semibold text-[12.5px] text-ink truncate">
           {selectedName ?? "Properties"}
         </span>
-        <span className="font-mono text-[10px] text-ink-3 bg-line/50 rounded px-1.5 shrink-0">{objects.length}</span>
-        <span className="ml-auto flex items-center gap-1.5 font-mono text-[10px] text-ink-3 shrink-0">
+        <span className="text-[11px] text-ink-3 bg-line/50 rounded px-1.5 shrink-0">{objects.length}</span>
+        <span className="ml-auto flex items-center gap-1.5 text-[11px] text-ink-3 shrink-0">
           <span className={`w-1.5 h-1.5 rounded-full ${dirty ? "bg-warn" : "bg-pass"}`} />
           {dirty ? "unsaved" : "saved"}
         </span>
@@ -59,13 +59,13 @@ export default function PanelHeader({
         <span className="w-4 h-4 shrink-0 rounded-sm border border-line/60"
           style={{ background: currentClass ? classColor(currentClass.id) : "#333" }} />
         <div className="flex flex-col min-w-0">
-          <span className="font-mono text-[9px] uppercase tracking-wider text-ink-3">painting as</span>
+          <span className="text-[10px] font-medium uppercase tracking-[0.06em]r text-ink-3">painting as</span>
           <span className="font-mono text-[11.5px] text-ink truncate">{currentClass?.name ?? "-"}</span>
         </div>
         <button ref={anchorRef} onClick={() => setOpen((o) => !o)}
           aria-haspopup="dialog" aria-expanded={open}
           title="pick the class for new objects and for the selection (1-9 also work)"
-          className="ml-auto shrink-0 font-mono text-[10px] border border-line rounded px-2 py-1 text-ink-2 hover:border-accent hover:text-accent-2">
+          className="ml-auto shrink-0 text-[11px] border border-line rounded px-2 py-1 text-ink-2 hover:border-accent hover:text-accent-2">
           change
         </button>
         <ClassPopover anchorRef={anchorRef} open={open} onClose={() => setOpen(false)}

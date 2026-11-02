@@ -115,7 +115,7 @@ export default function HistoryPanel({ frameId, past, future, onJump, onRestored
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-2 py-0.5 font-mono text-[10px] uppercase border ${
+            className={`px-2 py-0.5 text-[10.5px] font-medium uppercase tracking-[0.06em] border ${
               tab === t ? "border-accent text-ink" : "border-line text-ink-3 hover:text-ink-2"
             }`}
           >
@@ -127,7 +127,7 @@ export default function HistoryPanel({ frameId, past, future, onJump, onRestored
       {tab === "steps" && (
         <>
           {steps.length === 0 && (
-            <p className="font-mono text-[10px] text-ink-3">
+            <p className="text-[11px] text-ink-3">
               Nothing edited yet. Steps here are this tab&apos;s undo stack: they are capped and do not
               survive a refresh. For anything you want to keep, use a save.
             </p>
@@ -138,7 +138,7 @@ export default function HistoryPanel({ frameId, past, future, onJump, onRestored
                 key={h.at}
                 onClick={() => onJump(h.at)}
                 title={h.ahead ? "redo forward to this point" : "go back to this point"}
-                className={`w-full text-left px-2 py-0.5 font-mono text-[11px] flex items-center gap-2
+                className={`w-full text-left px-2 py-0.5 text-[12px] flex items-center gap-2
                   hover:bg-line ${h.ahead ? "text-ink-3 italic" : "text-ink-2"}`}
               >
                 <span className="text-ink-3 w-3">{h.ahead ? "↓" : "↑"}</span>
@@ -148,7 +148,7 @@ export default function HistoryPanel({ frameId, past, future, onJump, onRestored
             ))}
           </div>
           {steps.length > 0 && (
-            <p className="font-mono text-[10px] text-ink-3">
+            <p className="text-[11px] text-ink-3">
               Arrows show direction: up is undone, down is redone. The number is how many objects the frame
               had at that point.
             </p>
@@ -160,7 +160,7 @@ export default function HistoryPanel({ frameId, past, future, onJump, onRestored
         <>
           <div className="flex gap-1">
             <input
-              className="input font-mono text-[11px] flex-1"
+              className="input text-[12px] flex-1"
               placeholder="name this state"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -172,21 +172,21 @@ export default function HistoryPanel({ frameId, past, future, onJump, onRestored
             <button
               onClick={() => void saveAs()}
               disabled={busy}
-              className="border border-line text-ink-2 px-2 py-1 font-mono text-[11px] hover:border-accent"
+              className="border border-line text-ink-2 px-2 py-1 text-[12px] hover:border-accent"
             >
               save as
             </button>
           </div>
 
           {saves.some((c) => c.auto) && (
-            <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-3">
+            <label className="flex items-center gap-1.5 text-[11px] text-ink-3">
               <input type="checkbox" checked={showAuto} onChange={(e) => setShowAuto(e.target.checked)} />
               show the {saves.filter((c) => c.auto).length} automatic saves a restore left behind
             </label>
           )}
 
           {visibleSaves.length === 0 && (
-            <p className="font-mono text-[10px] text-ink-3">
+            <p className="text-[11px] text-ink-3">
               No saves on this frame. A save is named, lives on the server, and survives a refresh, which
               undo does not.
             </p>
@@ -196,26 +196,26 @@ export default function HistoryPanel({ frameId, past, future, onJump, onRestored
             {visibleSaves.map((c) => (
               <div key={c.checkpoint_id} className="px-2 py-1 border-b border-line">
                 <div className="flex items-center gap-2">
-                  <span className={`flex-1 truncate font-mono text-[11px] ${c.auto ? "text-ink-3 italic" : "text-ink-2"}`}>
+                  <span className={`flex-1 truncate text-[12px] ${c.auto ? "text-ink-3 italic" : "text-ink-2"}`}>
                     {c.name}
                   </span>
                   <button
                     onClick={() => void restore(c)}
                     disabled={busy}
-                    className="border border-line text-ink-3 px-1.5 hover:border-accent font-mono text-[10px]"
+                    className="border border-line text-ink-3 px-1.5 hover:border-accent text-[11px]"
                   >
                     restore
                   </button>
                   <button
                     onClick={() => void remove(c)}
                     disabled={busy}
-                    className="text-ink-3 hover:text-block font-mono text-[10px] px-1"
+                    className="text-ink-3 hover:text-block text-[11px] px-1"
                     title="delete this save"
                   >
                     &times;
                   </button>
                 </div>
-                <div className="font-mono text-[10px] text-ink-3">
+                <div className="text-[11px] text-ink-3">
                   {c.object_count} objects &middot; {ago(c.created_at)}
                   {c.created_by ? ` · ${c.created_by}` : ""}
                 </div>
@@ -223,7 +223,7 @@ export default function HistoryPanel({ frameId, past, future, onJump, onRestored
             ))}
           </div>
 
-          <p className="font-mono text-[10px] text-ink-3">
+          <p className="text-[11px] text-ink-3">
             Restoring takes a save of what it replaces first, so a restore you did not mean is itself one
             click from being undone.
           </p>

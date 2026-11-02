@@ -9,7 +9,7 @@ import { useState } from "react";
 import PageShell from "@/components/shell/PageShell";
 import OntologyRepair from "@/components/labelui/OntologyRepair";
 import { Panel, KV, Verdict, RunButton, useRun, ErrLine, NumField } from "@/components/engine/prim";
-import { runJSON } from "@/lib/engine";
+import { runJSON, parseInput } from "@/lib/engine";
 
 type Audit = { n: number; n_pass: number; n_fail: number; missed_gold: number;
   verdicts: { object_id: string; verdict: string; iou: number }[] };
@@ -17,15 +17,15 @@ type Parity = { promote: boolean; delta: number; learned: number; heuristic: num
 type Prop = { track_id: string; n_frames: number; identities: number; healed_gaps: number;
   boxes: { frame: number; source: string }[] };
 
-const DEMO_PRED = JSON.stringify([
+const EXAMPLE_PRED = JSON.stringify([
   { object_id: "a", class_id: 6, bbox: [10, 10, 50, 50] },
   { object_id: "b", class_id: 6, bbox: [500, 500, 540, 540] },
 ], null, 2);
-const DEMO_GOLD = JSON.stringify([{ class_id: 6, bbox: [11, 11, 51, 51] }], null, 2);
+const EXAMPLE_GOLD = JSON.stringify([{ class_id: 6, bbox: [11, 11, 51, 51] }], null, 2);
 
 export default function QualityPage() {
-  const [pred, setPred] = useState(DEMO_PRED);
-  const [gold, setGold] = useState(DEMO_GOLD);
+  const [pred, setPred] = useState("");
+  const [gold, setGold] = useState("");
   const audit = useRun<Audit>();
 
   const [learned, setLearned] = useState(0.56);
@@ -48,15 +48,15 @@ export default function QualityPage() {
       <div className="p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 max-w-6xl">
         {/* gold audit */}
         <Panel title="gold-set audit" hint="catches bad labels">
-          <div className="font-mono text-[10px] text-ink-3 mb-1">predicted annotations</div>
-          <textarea value={pred} onChange={(e) => setPred(e.target.value)} rows={5}
-            className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
-          <div className="font-mono text-[10px] text-ink-3 mt-2 mb-1">gold</div>
-          <textarea value={gold} onChange={(e) => setGold(e.target.value)} rows={3}
-            className="w-full bg-bg-2 border border-line px-2 py-1 font-mono text-[10px] text-ink outline-none focus:border-accent" />
+          <div className="text-[11px] text-ink-3 mb-1">predicted annotations</div>
+          <textarea value={pred} placeholder={EXAMPLE_PRED} onChange={(e) => setPred(e.target.value)} rows={5}
+            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
+          <div className="text-[11px] text-ink-3 mt-2 mb-1">gold</div>
+          <textarea value={gold} placeholder={EXAMPLE_GOLD} onChange={(e) => setGold(e.target.value)} rows={3}
+            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
           <div className="mt-2"><RunButton busy={audit.busy}
             onClick={() => audit.run(() => runJSON<Audit>("/api/labelox/quality/audit",
-              { predicted: JSON.parse(pred), gold: JSON.parse(gold) }))} label="audit" /></div>
+              { predicted: parseInput(pred, "pred"), gold: parseInput(gold, "gold") }))} label="audit" /></div>
           <ErrLine err={audit.err} />
           {audit.out && (
             <div className="mt-3">
@@ -65,7 +65,7 @@ export default function QualityPage() {
               <KV k="missed gold" v={audit.out.missed_gold} tone="ink-3" />
               <div className="space-y-0.5 mt-1">
                 {audit.out.verdicts.map((v) => (
-                  <div key={v.object_id} className="flex justify-between font-mono text-[10px]">
+                  <div key={v.object_id} className="flex justify-between text-[11px]">
                     <span className="text-ink-2">{v.object_id}</span>
                     <span className={v.verdict === "pass" ? "text-pass" : "text-block"}>{v.verdict} · iou {v.iou}</span>
                   </div>
@@ -90,7 +90,7 @@ export default function QualityPage() {
             <div className="mt-3">
               <Verdict ok={parity.out.promote} yes="promote learned" no="keep heuristic" />
               <KV k="delta" v={parity.out.delta} tone={parity.out.delta > 0 ? "pass" : "block"} />
-              <div className="font-mono text-[10px] text-ink-3 mt-1">{parity.out.reason}</div>
+              <div className="text-[11px] text-ink-3 mt-1">{parity.out.reason}</div>
             </div>
           )}
         </Panel>
@@ -115,7 +115,7 @@ export default function QualityPage() {
                       b.source === "observed" ? "bg-info" : b.source === "interpolated" ? "bg-pass" : "bg-ink-3"}`} />
                 ))}
               </div>
-              <div className="font-mono text-[9px] text-ink-3 mt-1">keyframe / observed / interpolated / propagated</div>
+              <div className="text-[10.5px] text-ink-3 mt-1">keyframe / observed / interpolated / propagated</div>
             </div>
           )}
         </Panel>

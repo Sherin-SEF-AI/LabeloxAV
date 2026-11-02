@@ -18,12 +18,12 @@ export default function DynamicsCard({ row, onRecompute }: {
     <>
       <div className="flex justify-end mb-1">
         <button onClick={onRecompute} title="compute distance/speed/heading/TTC/risk for this session"
-          className="font-mono text-[10px] text-info hover:text-accent">recompute</button>
+          className="text-[11px] text-info hover:text-accent">recompute</button>
       </div>
       {!row ? (
-        <div className="font-mono text-[10px] text-ink-3">no dynamics yet (save the object, then recompute)</div>
+        <div className="text-[11px] text-ink-3">no dynamics yet (save the object, then recompute)</div>
       ) : (
-        <div className="font-mono text-[10px] space-y-0.5">
+        <div className="text-[11px] space-y-0.5">
           {line("distance", row.distance_m != null ? `${row.distance_m} m` : "-")}
           {line("speed", row.speed_kmh != null ? `${row.speed_kmh} km/h` : "-")}
           {line("closing", row.closing_speed_kmh != null ? `${row.closing_speed_kmh} km/h` : "-")}

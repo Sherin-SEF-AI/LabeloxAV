@@ -23,7 +23,7 @@ export default function InspectorHome() {
   }, []);
 
   return (
-    <PageShell active="INSPECT" title="Session Inspector" subtitle="MCAP" right={loading ? <Spinner label="loading" /> : <span className="font-mono text-xs text-ink-3">{rows.length} sessions</span>}>
+    <PageShell active="INSPECT" title="Session Inspector" subtitle="MCAP" right={loading ? <Spinner label="loading" /> : <span className="text-[12.5px] text-ink-3">{rows.length} sessions</span>}>
       <div className="h-full overflow-auto">
         <div className="max-w-4xl mx-auto p-6">
           <p className="text-ink-3 text-sm mb-4 max-w-2xl">Foxglove-class MCAP inspection inside LabeloxAV: one ts_ns clock across camera, IMU, CAN, GPS, and raw messages, with annotation overlays and session-health verdicts. Open any session below, or use the Lichtblick escape hatch for the long tail.</p>
@@ -34,11 +34,11 @@ export default function InspectorHome() {
               {rows.map((r) => (
                 <button key={r.session_id} onClick={() => router.push(`/inspect/${r.session_id}`)}
                   className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-bg-2 text-left">
-                  <span className="font-mono text-[12px] text-ink-2">{r.vehicle_id}</span>
-                  <span className="font-mono text-[10px] text-ink-3">{r.city || ""}</span>
-                  <span className="font-mono text-[9.5px] text-ink-3/70 truncate">{r.session_id}</span>
-                  {r.verdict && <span className={`ml-auto border px-1.5 rounded uppercase font-mono text-[10px] ${V[r.verdict] || "border-line text-ink-3"}`}>{r.verdict}</span>}
-                  <span className={r.verdict ? "font-mono text-[10px] text-accent" : "ml-auto font-mono text-[10px] text-accent"}>inspect →</span>
+                  <span className="text-[12.5px] text-ink-2">{r.vehicle_id}</span>
+                  <span className="text-[11px] text-ink-3">{r.city || ""}</span>
+                  <span className="text-[10.5px] text-ink-3/70 truncate">{r.session_id}</span>
+                  {r.verdict && <span className={`ml-auto border px-1.5 rounded uppercase text-[11px] ${V[r.verdict] || "border-line text-ink-3"}`}>{r.verdict}</span>}
+                  <span className={r.verdict ? "text-[11px] text-accent" : "ml-auto text-[11px] text-accent"}>inspect →</span>
                 </button>
               ))}
             </div>

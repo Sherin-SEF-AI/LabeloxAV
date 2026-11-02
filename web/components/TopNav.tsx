@@ -60,7 +60,7 @@ export default function TopNav({ active, right, showCrumb = true }: {
           className="hidden sm:flex items-center gap-2 h-8 w-56 lg:w-64 px-2.5 rounded-md bg-bg-2 border hairline text-[12px] text-ink-3 hover:border-[#383b42] hover:text-ink-2 transition-colors">
           <Icon name="search" size={13} />
           <span className="flex-1 text-left">Go to...</span>
-          <kbd className="font-mono text-[10.5px] px-1.5 py-0.5 rounded border hairline text-ink-3">Ctrl K</kbd>
+          <kbd className="text-[11.5px] px-1.5 py-0.5 rounded border hairline text-ink-3">Ctrl K</kbd>
         </button>
         <button onClick={() => window.dispatchEvent(new Event("lbx:palette"))}
           aria-label="Jump to any page" className="side-icon-btn flex sm:hidden">

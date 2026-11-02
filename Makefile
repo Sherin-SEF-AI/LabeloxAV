@@ -238,6 +238,10 @@ install-docker: ## Deploy the whole product with Docker (generates secrets, migr
 # when Docker can use the GPU) and Compose reads it from there; an older install falls back to the two files.
 APP_COMPOSE := $(if $(shell grep -s '^COMPOSE_FILE=.' .env),docker compose,docker compose -f docker-compose.yml -f docker-compose.app.yml)
 
+.PHONY: sign-in-link
+sign-in-link: ## A link that lets NAME (default admin) choose a password and sign in
+	$(APP_COMPOSE) exec -T api python -m scripts.sign_in_link --name $(or $(NAME),admin) --url http://localhost:$(or $(WEB_PORT),3000)
+
 .PHONY: doctor
 doctor: ## Check the deployed installation and say what to fix
 	./scripts/doctor.sh

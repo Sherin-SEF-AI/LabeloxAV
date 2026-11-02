@@ -45,7 +45,6 @@ const ALLOWED: Record<string, number> = {
   "app/sievyx/page.tsx": 1,
   "app/training/page.tsx": 1,
   "app/verdyx/page.tsx": 1,
-  "components/UserPicker.tsx": 1,
   "components/training/RunsPanel.tsx": 1,
   // The shared client's own best-effort paths (token refresh, the 401 announce).
   "lib/api.ts": 1,
@@ -54,7 +53,7 @@ const ALLOWED: Record<string, number> = {
   "components/agent/AgentPanel.tsx": 2,
   "components/CorrectionModal.tsx": 2,
   "app/frame/[id]/page.tsx": 2,
-  "app/page.tsx": 3,
+  "app/queue/page.tsx": 3,
   "app/annotate/lane/[frameId]/page.tsx": 1,
   "app/flywheel/adaptive/page.tsx": 1,
   "app/ops/page.tsx": 1,

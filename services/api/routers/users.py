@@ -131,3 +131,59 @@ async def revoke_tokens(user_id: str, _admin=Depends(require_role("admin")),
                           commit=False)
     await db.commit()
     return {"user_id": str(u.user_id), "token_version": u.token_version, "revoked": True}
+
+
+class InviteIn(UserCreateIn):
+    pass
+
+
+async def _sign_in_link(db: AsyncSession, admin, u: User, verb: str) -> dict:
+    """A single-use link that lets this person choose a password and sign in. The plaintext is returned once
+    and never stored. Recorded with the administrator as actor, because handing someone a way into an account
+    is exactly the kind of act that must leave a trace."""
+    from datetime import timedelta
+
+    from services.api import identity as ident
+
+    hours = get_settings().auth.invite_ttl_hours
+    token = await ident.create_reset(db, u, ttl=timedelta(hours=hours))
+    await record_activity(db, user=admin, verb=verb, subject_type="user", subject_id=str(u.user_id),
+                          summary=f"{getattr(admin, 'name', 'an admin')} issued a sign-in link for {u.name}")
+    await db.commit()
+    return {"user_id": str(u.user_id), "name": u.name, "role": u.role, "invite_token": token,
+            "expires_in_hours": hours}
+
+
+@router.post("/users/invite")
+async def invite(payload: InviteIn, admin=Depends(require_role("admin")), db: AsyncSession = Depends(db_session)):
+    """Add a person to the team and return a sign-in link for them to choose their password.
+
+    Replaces handing a new teammate a raw API token: the link works once, expires, and leaves the person
+    with an ordinary password sign-in of their own.
+    """
+    if payload.role not in _ROLES:
+        raise HTTPException(400, f"role must be one of {sorted(_ROLES)}")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    if (await db.execute(select(User).where(User.name == name))).scalar_one_or_none():
+        raise HTTPException(409, f"user '{name}' already exists")
+    u = User(name=name, role=payload.role)
+    db.add(u)
+    await db.commit()
+    return await _sign_in_link(db, admin, u, "invited_user")
+
+
+@router.post("/users/{user_id}/sign-in-link")
+async def sign_in_link(user_id: str, admin=Depends(require_role("admin")), db: AsyncSession = Depends(db_session)):
+    """A fresh sign-in link for an existing person, for a lost password. Their current password keeps working
+    until they use the link; to cut off a compromised account, also sign them out everywhere."""
+    from uuid import UUID
+
+    try:
+        u = await db.get(User, UUID(user_id))
+    except ValueError:
+        raise HTTPException(400, "invalid user id") from None
+    if u is None:
+        raise HTTPException(404, "user not found")
+    return await _sign_in_link(db, admin, u, "issued_sign_in_link")

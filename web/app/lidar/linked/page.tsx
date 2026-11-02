@@ -112,7 +112,7 @@ export default function LinkedWorkspacePage() {
   return (
     <PageShell active="LINKED 2D-3D" title="Linked 2D-3D"
       meta={err ? <span className="text-block">{err}</span> : undefined}>
-      <div className="flex h-full bg-[#0a0e14] text-neutral-200">
+      <div className="flex h-full bg-[#0a0e14] text-ink">
         <Inspector title="Controls" side="left" width="w-80">
           <div className="flex flex-col gap-3 p-4">
             <SessionPicker value={sessionId} onChange={setSessionId} onLoad={(id) => {
@@ -124,7 +124,7 @@ export default function LinkedWorkspacePage() {
               <div className="flex max-h-28 flex-col gap-1 overflow-y-auto">
                 {clouds.map((c) => (
                   <button key={c.cloud_id} onClick={() => openCloud(c)}
-                    className={`rounded border px-2 py-1 text-left text-xs ${cloud?.cloud_id === c.cloud_id ? "border-cyan-600 bg-cyan-950" : "border-neutral-800 bg-neutral-900"}`}>
+                    className={`rounded border px-2 py-1 text-left text-xs ${cloud?.cloud_id === c.cloud_id ? "border-accent/60 bg-accent/15" : "border-line bg-bg-2"}`}>
                     {c.source} | {c.point_count.toLocaleString()} pts
                   </button>
                 ))}
@@ -132,17 +132,17 @@ export default function LinkedWorkspacePage() {
             )}
 
             {cloud && (
-              <button onClick={link} className="rounded bg-emerald-800 px-2 py-1.5 text-xs hover:bg-emerald-700">
+              <button onClick={link} className="rounded bg-pass/25 px-2 py-1.5 text-xs hover:bg-pass/35">
                 Link cuboids to 2D objects
               </button>
             )}
 
             {selected && (
-              <div className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-2 text-xs">
-                <div className="text-neutral-400">Selected {selected.class_name}</div>
-                <div className="text-neutral-500">2D object: {selected.object_id ? selected.object_id.slice(0, 8) : "unlinked"}</div>
+              <div className="flex flex-col gap-2 rounded border border-line bg-bg-2 p-2 text-xs">
+                <div className="text-ink-2">Selected {selected.class_name}</div>
+                <div className="text-ink-3">2D object: {selected.object_id ? selected.object_id.slice(0, 8) : "unlinked"}</div>
                 {props && (
-                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-neutral-300">
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-ink-2">
                     <span>distance</span><span className="text-right">{props.distance_m} m</span>
                     <span>heading</span><span className="text-right">{props.heading_deg} deg</span>
                     <span>velocity</span><span className="text-right">{props.velocity_mps} m/s</span>
@@ -150,28 +150,28 @@ export default function LinkedWorkspacePage() {
                   </div>
                 )}
                 {linked && (
-                  <div className="text-neutral-500">visible in: {Object.keys(linked).join(", ") || "none"}</div>
+                  <div className="text-ink-3">visible in: {Object.keys(linked).join(", ") || "none"}</div>
                 )}
                 {similar.length > 0 && (
                   <div>
-                    <div className="mb-1 text-neutral-400">{similar.length} similar. Batch correct to:</div>
+                    <div className="mb-1 text-ink-2">{similar.length} similar. Batch correct to:</div>
                     <div className="flex flex-wrap gap-1">
                       {classes.filter((c) => ["sedan", "suv", "truck", "bus", "autorickshaw"].includes(c.name)).map((c) => (
                         <button key={c.id} onClick={() => batchCorrect(c.id)}
-                          className="rounded bg-neutral-800 px-2 py-0.5 hover:bg-cyan-800">{c.name}</button>
+                          className="rounded bg-head px-2 py-0.5 hover:bg-[#2862c0]">{c.name}</button>
                       ))}
                     </div>
                   </div>
                 )}
               </div>
             )}
-            {err && <div className="rounded border border-red-900 bg-red-950 p-2 text-xs text-red-300">{err}</div>}
+            {err && <div className="rounded border border-block/40 bg-block/10 p-2 text-xs text-block">{err}</div>}
           </div>
         </Inspector>
 
         <div className="flex flex-1 min-w-0">
-          <div className="relative flex-1 border-r border-neutral-800">
-            <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-neutral-500">Cloud</div>
+          <div className="relative flex-1 border-r border-line">
+            <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-ink-3">Cloud</div>
             {data && (
               <PointCloudViewer points={data.points} count={data.count} colorBy="height"
                 intensityRange={[data.intensityMin, data.intensityMax]} source={data.source} mode="perspective"
@@ -179,7 +179,7 @@ export default function LinkedWorkspacePage() {
             )}
           </div>
           <div className="relative w-1/2 bg-black">
-            <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-neutral-500">Camera (cam_f)</div>
+            <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-ink-3">Camera (cam_f)</div>
             {frameId && (
               <div className="relative h-full w-full">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -201,7 +201,7 @@ export default function LinkedWorkspacePage() {
                 </svg>
               </div>
             )}
-            {!frameId && <div className="flex h-full items-center justify-center text-sm text-neutral-600">Pick a cloud with cuboids.</div>}
+            {!frameId && <div className="flex h-full items-center justify-center text-sm text-ink-3">Pick a cloud with cuboids.</div>}
           </div>
         </div>
       </div>

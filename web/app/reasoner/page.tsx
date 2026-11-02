@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
+import SessionSelect from "@/components/shell/SessionSelect";
 import Inspector from "@/components/shell/Inspector";
 import EvidencePanel, { type EvidenceSubject } from "@/components/inspect/EvidencePanel";
 import { toast } from "@/lib/toast";
@@ -40,9 +41,9 @@ function Stat({ label, value, hint, tone }: {
 }) {
   return (
     <div className="panel px-3 py-2 min-w-[130px]">
-      <div className="font-mono text-[10px] uppercase text-ink-3">{label}</div>
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</div>
       <div className={`font-mono text-[18px] tabular-nums ${tone ?? "text-ink"}`}>{value}</div>
-      {hint && <div className="font-mono text-[10px] text-ink-3">{hint}</div>}
+      {hint && <div className="text-[11px] text-ink-3">{hint}</div>}
     </div>
   );
 }
@@ -126,11 +127,11 @@ export default function ReasonerPage() {
 
         {outcomes && Object.keys(outcomes.by_decision ?? {}).length > 0 && (
           <section className="panel">
-            <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+            <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
               did its decisions hold up
             </div>
             <div className="p-3 space-y-2">
-              <table className="w-full font-mono text-[11px]">
+              <table className="w-full text-[12px]">
                 <thead>
                   <tr className="text-ink-3 text-left border-b hairline">
                     <th className="py-1">decision</th><th>objects</th><th>since reviewed</th>
@@ -151,23 +152,23 @@ export default function ReasonerPage() {
                   ))}
                 </tbody>
               </table>
-              <div className="font-mono text-[10px] text-ink-3">{outcomes.headline}</div>
+              <div className="text-[11px] text-ink-3">{outcomes.headline}</div>
             </div>
           </section>
         )}
 
         <section className="panel">
-          <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
             which checks actually catch errors
           </div>
           <div className="p-3 space-y-2">
             {!attribution || Object.keys(attribution.checks).length === 0 ? (
-              <div className="font-mono text-[11px] text-ink-3">
+              <div className="text-[12px] text-ink-3">
                 Nothing measured yet. Precision is computed by joining each reasoning trace against what a
                 human later decided, so it appears once reasoned objects have been reviewed.
               </div>
             ) : (
-              <table className="w-full font-mono text-[11px]">
+              <table className="w-full text-[12px]">
                 <thead>
                   <tr className="text-ink-3 text-left border-b hairline">
                     <th className="py-1">check</th><th>what it asks</th>
@@ -196,7 +197,7 @@ export default function ReasonerPage() {
             {attribution?.caveat && (
               // Said out loud rather than buried: review is not a random sample, so these numbers describe
               // the checks' behaviour on hard cases rather than on the corpus as a whole.
-              <div className="font-mono text-[10px] text-ink-3 border-l-2 border-line pl-2">
+              <div className="text-[11px] text-ink-3 border-l-2 border-line pl-2">
                 {attribution.caveat}
               </div>
             )}
@@ -204,15 +205,15 @@ export default function ReasonerPage() {
         </section>
 
         <section className="panel">
-          <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
             try a detection
           </div>
           <div className="p-3 space-y-2">
-            <div className="font-mono text-[10px] text-ink-3">
+            <div className="text-[11px] text-ink-3">
               Adjusting a height band and seeing what it does to a known-bad detection is far more useful
               than reading the weights. Nothing is written; this runs Tier 1 and returns every finding.
             </div>
-            <div className="flex items-center gap-2 font-mono text-[11px] flex-wrap">
+            <div className="flex items-center gap-2 text-[12px] flex-wrap">
               <input value={cls} onChange={(e) => setCls(e.target.value)} placeholder="class"
                 className="bg-bg border border-line px-1.5 py-0.5 text-ink w-40" />
               <input value={bbox} onChange={(e) => setBbox(e.target.value)} placeholder="x1,y1,x2,y2"
@@ -240,7 +241,7 @@ export default function ReasonerPage() {
 
             {explained && (
               <div className="space-y-1">
-                <div className="font-mono text-[12px]">
+                <div className="text-[12.5px]">
                   <span className={DECISION_TONE[explained.decision] ?? "text-ink"}>
                     {explained.decision}
                   </span>
@@ -250,14 +251,14 @@ export default function ReasonerPage() {
                   )}
                 </div>
                 {explained.findings.length === 0 ? (
-                  <div className="font-mono text-[10.5px] text-ink-3">
+                  <div className="text-[11.5px] text-ink-3">
                     No check could be applied, so the reasoner abstains and the gate decides on confidence
                     alone. That is deliberately different from having assessed it and found nothing.
                   </div>
                 ) : (
                   <ul className="space-y-0.5">
                     {explained.findings.map((f, i) => (
-                      <li key={i} className="font-mono text-[10.5px]">
+                      <li key={i} className="text-[11.5px]">
                         <span className={f.weight < 0 ? "text-block" : "text-pass"}>
                           {f.weight > 0 ? "+" : ""}{f.weight.toFixed(2)}
                         </span>{" "}
@@ -268,7 +269,7 @@ export default function ReasonerPage() {
                   </ul>
                 )}
                 {explained.question && (
-                  <div className="font-mono text-[10.5px] text-accent">
+                  <div className="text-[11.5px] text-accent">
                     would ask the adjudicator: {explained.question}
                   </div>
                 )}
@@ -278,14 +279,12 @@ export default function ReasonerPage() {
         </section>
 
         <section className="panel">
-          <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
             reason over a session already annotated
           </div>
           <div className="p-3 space-y-2">
-            <div className="flex items-center gap-2 font-mono text-[11px] flex-wrap">
-              <input value={sessionId} onChange={(e) => setSessionId(e.target.value)}
-                placeholder="session id"
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink w-80" />
+            <div className="flex items-center gap-2 text-[12px] flex-wrap">
+              <SessionSelect value={sessionId} onChange={setSessionId} className="w-80" />
               <button onClick={doRerun(false)} disabled={busy}
                 className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
                 {busy ? "reasoning..." : "dry run"}
@@ -297,7 +296,7 @@ export default function ReasonerPage() {
                 </button>
               )}
             </div>
-            <div className="font-mono text-[10px] text-ink-3">
+            <div className="text-[11px] text-ink-3">
               Applies the reasoning to boxes that already exist, without re-detecting. Human decisions are
               never overwritten: an object a person accepted or rejected is settled.
             </div>
@@ -316,14 +315,14 @@ export default function ReasonerPage() {
                 <div className="flex gap-1 flex-wrap">
                   {Object.entries(rerun.decisions).map(([d, n]) => (
                     <span key={d}
-                      className={`border border-line px-1.5 py-0.5 font-mono text-[10.5px] ${
+                      className={`border border-line px-1.5 py-0.5 text-[11.5px] ${
                         DECISION_TONE[d] ?? "text-ink-2"}`}>
                       {d} <span className="text-ink-3">{n}</span>
                     </span>
                   ))}
                 </div>
                 {rerun.examples.length > 0 && (
-                  <table className="w-full font-mono text-[11px]">
+                  <table className="w-full text-[12px]">
                     <thead>
                       <tr className="text-ink-3 text-left border-b hairline">
                         <th className="py-1">class</th><th>was</th><th>verdict</th>

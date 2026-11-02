@@ -131,7 +131,7 @@ export default function CorrectionModal({
       <div className="panel w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         {/* header */}
         <div className="flex items-center justify-between px-4 py-2 border-b hairline">
-          <div className="font-mono text-xs">
+          <div className="text-[12.5px]">
             <span className="text-ink-3">you corrected</span>{" "}
             <span className="text-accent">{title}</span>
             {sug && (
@@ -146,11 +146,11 @@ export default function CorrectionModal({
               </span>
             )}
           </div>
-          <button onClick={onClose} className="font-mono text-xs text-ink-3 hover:text-ink border border-line px-2 py-0.5">esc</button>
+          <button onClick={onClose} className="text-[12.5px] text-ink-3 hover:text-ink border border-line px-2 py-0.5">esc</button>
         </div>
 
         {/* controls */}
-        <div className="flex items-center gap-4 px-4 py-2 border-b hairline font-mono text-[11px] text-ink-3">
+        <div className="flex items-center gap-4 px-4 py-2 border-b hairline text-[12px] text-ink-3">
           <label className="flex items-center gap-2">
             similarity ≥ <span className="text-ink-2 w-8">{threshold.toFixed(2)}</span>
             <input type="range" min={0.7} max={0.97} step={0.01} value={threshold}
@@ -169,7 +169,7 @@ export default function CorrectionModal({
         </div>
 
         {lowCoverage && (
-          <div className="px-4 py-1.5 border-b hairline font-mono text-[11px] text-warn flex items-center gap-2">
+          <div className="px-4 py-1.5 border-b hairline text-[12px] text-warn flex items-center gap-2">
             embeddings cover only {cov?.pct}% of objects — similar-search may miss matches.
             <button onClick={() => { api.computeObjectEmbeddings().then(() => setMsg("embedding corpus in background…")); }}
               className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent">compute embeddings</button>
@@ -179,11 +179,11 @@ export default function CorrectionModal({
         {/* grid */}
         <div className="flex-1 overflow-auto p-3">
           {loading ? (
-            <div className="text-center font-mono text-xs text-ink-3 py-10">searching…</div>
+            <div className="text-center text-[12.5px] text-ink-3 py-10">searching…</div>
           ) : !sug || !sug.candidates.length ? (
             /* Three different situations used to render as one sentence about similarity. The one this
                feature actually hit was "nothing was compared", because it searched an empty table. */
-            <div className="text-center font-mono text-xs text-ink-3 py-10">
+            <div className="text-center text-[12.5px] text-ink-3 py-10">
               <div>{emptyReason(sug)?.headline ?? "no similar objects found"}</div>
               {emptyReason(sug)?.detail && (
                 <div className="mt-1 text-ink-3/70">{emptyReason(sug)?.detail}</div>
@@ -202,25 +202,25 @@ export default function CorrectionModal({
                            + (c.human ? " · a person already reviewed this one" : "")}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={c.crop_url} alt="" className="w-full h-20 object-cover bg-bg-2" />
-                    <span className={`absolute top-0 left-0 px-1 font-mono text-[10px] ${on ? "bg-accent text-bg" : "bg-bg/80 text-ink-3"}`}>
+                    <span className={`absolute top-0 left-0 px-1 text-[11px] ${on ? "bg-accent text-bg" : "bg-bg/80 text-ink-3"}`}>
                       {on ? "✓" : "○"}
                     </span>
-                    <span className="absolute bottom-0 right-0 bg-bg/80 font-mono text-[9px] px-0.5 text-ink-2">{c.score.toFixed(2)}</span>
+                    <span className="absolute bottom-0 right-0 bg-bg/80 text-[10.5px] px-0.5 text-ink-2">{c.score.toFixed(2)}</span>
                     {/* The class is load-bearing now that the candidate set spans classes: a person
                         agreeing to a batch has to see what each thing currently is. */}
-                    <span className="absolute top-0 right-0 bg-bg/80 font-mono text-[9px] px-0.5 text-ink-2 max-w-full truncate">
+                    <span className="absolute top-0 right-0 bg-bg/80 text-[10.5px] px-0.5 text-ink-2 max-w-full truncate">
                       {c.class_name}
                     </span>
-                    {c.already && <span className="absolute bottom-0 left-0 bg-bg/80 font-mono text-[9px] px-0.5 text-pass">already</span>}
+                    {c.already && <span className="absolute bottom-0 left-0 bg-bg/80 text-[10.5px] px-0.5 text-pass">already</span>}
                     {!c.already && onExcludedTrack(c, excludeTrackId) && (
                       // These are the other frames of the object that was just corrected. They already
                       // carry the new class; ticking them would send them through bulkReview, which writes
                       // source=human onto frames nobody looked at.
-                      <span className="absolute bottom-0 left-0 bg-bg/80 font-mono text-[9px] px-0.5 text-pass"
+                      <span className="absolute bottom-0 left-0 bg-bg/80 text-[10.5px] px-0.5 text-pass"
                             title="another frame of the track you just fixed">on this track</span>
                     )}
                     {c.human && !c.already && (
-                      <span className="absolute bottom-0 left-0 bg-bg/80 font-mono text-[9px] px-0.5 text-warn">human</span>
+                      <span className="absolute bottom-0 left-0 bg-bg/80 text-[10.5px] px-0.5 text-warn">human</span>
                     )}
                   </button>
                 );
@@ -230,7 +230,7 @@ export default function CorrectionModal({
         </div>
 
         {/* footer */}
-        <div className="flex items-center justify-end gap-2 px-4 py-2 border-t hairline font-mono text-[11px]">
+        <div className="flex items-center justify-end gap-2 px-4 py-2 border-t hairline text-[12px]">
           <button onClick={onClose} className="border border-line px-3 py-1 text-ink-3 hover:text-ink">cancel</button>
           <button onClick={apply} disabled={!sel.size || applying}
             className="border border-pass text-pass px-3 py-1 hover:bg-pass/10 disabled:opacity-40">

@@ -43,7 +43,7 @@ export default function GovernPage() {
   const paused = state && (!state.loop_enabled || !state.auto_promote_enabled);
 
   const primaryAction = (
-    <div className="flex gap-2 font-mono text-[11px]">
+    <div className="flex gap-2 text-[12px]">
       <button onClick={() => act(() => api.governDriftScan(), "drift scan")} className="border border-line px-2 py-1 hover:border-accent">drift scan</button>
       <button onClick={() => act(() => api.governTick(), "controller tick")} className="border border-line px-2 py-1 hover:border-accent">controller tick</button>
       {state?.loop_enabled
@@ -54,7 +54,7 @@ export default function GovernPage() {
 
   return (
     <PageShell active="GOVERN" title="GOVERN" primaryAction={primaryAction}>
-      <div className="p-4 space-y-4 font-mono text-[11px]">
+      <div className="p-4 space-y-4 text-[12px]">
         {err != null && <LoadState error={err} onRetry={() => void load()} />}
         {/* state banner */}
         <div className={`panel p-3 flex items-center gap-3 ${paused ? "border-warn" : ""}`}>
@@ -122,7 +122,7 @@ export default function GovernPage() {
                 <span className="text-ink-3 w-24 shrink-0">{a.actor}</span>
                 {/* audit decisions are free-form multi-word strings; color by substring (StateBadge only
                     matches an exact vocabulary), so a kill-engage / reject still reads red at a glance. */}
-                <span className={`font-mono text-[11px] uppercase tracking-wide border px-1.5 py-0.5 ${
+                <span className={`text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide border px-1.5 py-0.5 ${
                   a.decision.includes("promote") && !a.decision.includes("paused") ? "text-pass border-pass"
                     : a.decision.includes("reject") || a.decision.includes("engage") || a.decision.includes("kill") ? "text-block border-block"
                     : a.decision.includes("pause") ? "text-warn border-warn"

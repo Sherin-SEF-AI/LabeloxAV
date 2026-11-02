@@ -117,7 +117,7 @@ export default function MulticamWorkspace() {
       <div className="flex-1 flex min-h-0">
         <Inspector title="sync groups" side="left">
           <div className="p-3 space-y-2">
-            <div className="font-mono text-[10px] uppercase text-ink-3">synchronized instants (PPS ts_ns)</div>
+            <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">synchronized instants (PPS ts_ns)</div>
             <div className="flex flex-wrap items-center gap-px">
               {groups?.groups.map((g, i) => (
                 <button key={i} onClick={() => setSel(i)}
@@ -134,7 +134,7 @@ export default function MulticamWorkspace() {
               on a session whose calibration has never been validated produces labels that cannot be
               projected anywhere, so the ordering is part of the answer. */}
           {ready && !ready.ready && (
-            <div className="panel p-3 font-mono text-[11px] space-y-2">
+            <div className="panel p-3 text-[12px] space-y-2">
               <div className="text-warn uppercase text-[10px]">
                 cross-view linking is not available on this session
               </div>
@@ -156,7 +156,7 @@ export default function MulticamWorkspace() {
 
           {/* Carry one object across the rig. Only offered where it can actually work. */}
           {ready?.ready && group && (
-            <div className="panel p-3 font-mono text-[11px] flex flex-wrap items-center gap-2">
+            <div className="panel p-3 text-[12px] flex flex-wrap items-center gap-2">
               <span className="text-ink-3">carry an object across from</span>
               {cams.filter((c) => group.frames[c]).map((c) => (
                 <button key={c} onClick={() => setSrcCam(c === srcCam ? null : c)}
@@ -180,7 +180,7 @@ export default function MulticamWorkspace() {
 
           {/* The objects available to carry, from the chosen source view. */}
           {ready?.ready && srcCam && objects.length > 0 && (
-            <div className="panel p-2 flex flex-wrap gap-1.5 font-mono text-[10px]">
+            <div className="panel p-2 flex flex-wrap gap-1.5 text-[11px]">
               {objects.map((o) => (
                 <button key={o.object_id} onClick={() => void planCross(o.object_id)} disabled={busy}
                   className={`border px-1.5 py-0.5 rounded ${o.object_id === pick ? "border-accent text-accent" : "border-line text-ink-2 hover:border-accent"} disabled:opacity-40`}>
@@ -197,7 +197,7 @@ export default function MulticamWorkspace() {
                 const f = group.frames[cam];
                 return (
                   <div key={cam} className="panel">
-                    <div className="font-mono text-[10px] uppercase text-ink-3 px-2 py-1 border-b hairline flex justify-between">
+                    <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 px-2 py-1 border-b hairline flex justify-between">
                       <span className="text-ink-2">{cam}</span>
                       {f && <button onClick={() => router.push(`/frame/${f.frame_id}`)} className="text-info hover:text-accent">annotate →</button>}
                     </div>
@@ -224,13 +224,13 @@ export default function MulticamWorkspace() {
                           );
                         })()}
                         {plan?.items.some((x) => x.frame_id === f.frame_id && x.action === "skip") && (
-                          <span className="absolute bottom-1 left-1 bg-bg/80 text-ink-3 font-mono text-[9px] px-1">
+                          <span className="absolute bottom-1 left-1 bg-bg/80 text-ink-3 text-[10.5px] px-1">
                             not visible from here
                           </span>
                         )}
                       </div>
                     ) : (
-                      <div className="aspect-video bg-bg-2 flex items-center justify-center font-mono text-[10px] text-ink-3">no frame at this instant</div>
+                      <div className="aspect-video bg-bg-2 flex items-center justify-center text-[11px] text-ink-3">no frame at this instant</div>
                     )}
                   </div>
                 );

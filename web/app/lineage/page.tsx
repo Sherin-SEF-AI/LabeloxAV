@@ -34,12 +34,12 @@ function Column({ kind, nodes, onPick, selected }: {
   if (!nodes.length) return null;
   return (
     <div className="min-w-[13rem] space-y-1">
-      <div className="font-mono text-[10px] uppercase text-ink-3">
+      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">
         {kind.replace(/_/g, " ")} ({nodes.length})
       </div>
       {nodes.map((n) => (
         <button key={n.id} onClick={() => onPick(n)}
-          className={`block w-full text-left border px-2 py-1 font-mono text-[10.5px]
+          className={`block w-full text-left border px-2 py-1 text-[11.5px]
                       ${KIND_TONE[n.kind] ?? "border-line text-ink-2"}
                       ${selected === n.id ? "bg-panel-2" : ""}
                       ${n.incomplete ? "border-dashed opacity-70" : ""}`}>
@@ -106,7 +106,7 @@ function LineageBody() {
       }>
       <div className="p-4 space-y-4">
         {!graph ? (
-          <div className="panel p-4 font-mono text-[11px] text-ink-3 max-w-3xl space-y-2">
+          <div className="panel p-4 text-[12px] text-ink-3 max-w-3xl space-y-2">
             <div>Trace a model backwards to the footage it is made of, or a session forwards to
               everything it ended up in.</div>
             <div className="text-ink-3">
@@ -129,17 +129,17 @@ function LineageBody() {
 
             <div className="flex gap-4 flex-wrap">
               <div className="panel px-3 py-2">
-                <div className="font-mono text-[10px] uppercase text-ink-3">nodes</div>
-                <div className="font-mono text-[18px] text-ink tabular-nums">{graph.nodes.length}</div>
+                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">nodes</div>
+                <div className="text-[18px] font-semibold text-ink tabular-nums">{graph.nodes.length}</div>
               </div>
               <div className="panel px-3 py-2">
-                <div className="font-mono text-[10px] uppercase text-ink-3">edges</div>
-                <div className="font-mono text-[18px] text-ink tabular-nums">{graph.edges.length}</div>
+                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">edges</div>
+                <div className="text-[18px] font-semibold text-ink tabular-nums">{graph.edges.length}</div>
               </div>
               {graph.sessions_truncated && (
                 <div className="panel px-3 py-2 border border-warn">
-                  <div className="font-mono text-[10px] uppercase text-warn">truncated</div>
-                  <div className="font-mono text-[10.5px] text-ink-3 max-w-sm">
+                  <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-warn">truncated</div>
+                  <div className="text-[11.5px] text-ink-3 max-w-sm">
                     showing {graph.sessions_shown} sessions; the model draws on more
                   </div>
                 </div>
@@ -147,14 +147,14 @@ function LineageBody() {
             </div>
 
             {graph.detail && (
-              <div className="panel p-3 font-mono text-[10.5px] text-ink-3 max-w-4xl">
+              <div className="panel p-3 text-[11.5px] text-ink-3 max-w-4xl">
                 {graph.detail}
               </div>
             )}
 
             {picked && (
               <section className="panel">
-                <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
                   {picked.kind.replace(/_/g, " ")} · {picked.label}
                 </div>
                 <div className="p-3 space-y-2">
@@ -162,16 +162,16 @@ function LineageBody() {
                     <div className="flex gap-1 flex-wrap">
                       {Object.entries(picked.meta).map(([k, v]) => (
                         <span key={k}
-                          className="border border-line px-1.5 py-0.5 font-mono text-[10px] text-ink-2">
+                          className="border border-line px-1.5 py-0.5 text-[11px] text-ink-2">
                           {k} <span className="text-ink-3">{String(v).slice(0, 40)}</span>
                         </span>
                       ))}
                     </div>
                   )}
-                  <div className="font-mono text-[10px] uppercase text-ink-3">connections</div>
+                  <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">connections</div>
                   <ul className="space-y-0.5">
                     {edgesFor(picked.id).map((e, i) => (
-                      <li key={i} className="font-mono text-[10.5px] text-ink-2">
+                      <li key={i} className="text-[11.5px] text-ink-2">
                         {e.source === picked.id ? "→" : "←"} {e.kind.replace(/_/g, " ")}{" "}
                         <span className="text-ink-3">
                           {(graph.nodes.find(

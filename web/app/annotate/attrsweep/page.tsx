@@ -234,13 +234,13 @@ function AttrSweep() {
       <div className="p-3 flex gap-3 items-start">
         {/* what work exists */}
         <aside className="panel w-72 shrink-0 max-h-[80vh] overflow-auto">
-          <div className="font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
             unanswered
           </div>
-          {!cov && <div className="px-3 py-3 font-mono text-[11px] text-ink-3">counting...</div>}
+          {!cov && <div className="px-3 py-3 text-[12px] text-ink-3">counting...</div>}
           {cov?.filter((c) => c.missing > 0).map((c) => (
             <button key={c.attribute} onClick={() => { setAttr(c.attribute); setKlass(""); }}
-              className={`w-full text-left px-3 py-1.5 font-mono text-[11px] border-b hairline hover:bg-bg-2 ${
+              className={`w-full text-left px-3 py-1.5 text-[12px] border-b hairline hover:bg-bg-2 ${
                 c.attribute === attr ? "bg-bg-2 text-ink" : "text-ink-2"}`}>
               <div className="flex items-center gap-2">
                 <span className="truncate">{c.attribute}</span>
@@ -254,7 +254,7 @@ function AttrSweep() {
             </button>
           ))}
           {cov && !cov.some((c) => c.missing > 0) && (
-            <div className="px-3 py-3 font-mono text-[11px] text-ink-3">
+            <div className="px-3 py-3 text-[12px] text-ink-3">
               Every attribute in scope is answered.
             </div>
           )}
@@ -262,14 +262,14 @@ function AttrSweep() {
 
         <div className="flex-1 min-w-0 space-y-2">
           {!attr && (
-            <div className="panel px-3 py-6 font-mono text-[11px] text-ink-3 text-center">
+            <div className="panel px-3 py-6 text-[12px] text-ink-3 text-center">
               Pick an attribute on the left. The list is ordered by how much of it is unanswered.
             </div>
           )}
 
           {queue && (
             <>
-              <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-ink-3">
+              <div className="flex flex-wrap items-center gap-3 text-[12px] text-ink-3">
                 <span className="text-ink">{queue.attribute}</span>
                 <span className={queue.unit === "track" ? "text-accent" : ""}>
                   {queue.unit === "track" ? "one answer per track" : "one answer per object"}
@@ -290,7 +290,7 @@ function AttrSweep() {
               </div>
 
               {!klass && (cov?.find((c) => c.attribute === attr)?.classes.length ?? 0) > 0 && (
-                <div className="flex flex-wrap gap-1 font-mono text-[10px]">
+                <div className="flex flex-wrap gap-1 text-[11px]">
                   <span className="text-ink-3 py-0.5">narrow to a class:</span>
                   {cov!.find((c) => c.attribute === attr)!.classes.slice(0, 8).map((c) => (
                     <button key={c.class_id} onClick={() => setKlass(c.class_name)}
@@ -303,7 +303,7 @@ function AttrSweep() {
 
               {/* the answer keys */}
               {keymap ? (
-                <div className="panel px-3 py-2 flex flex-wrap items-center gap-2 font-mono text-[11px]">
+                <div className="panel px-3 py-2 flex flex-wrap items-center gap-2 text-[12px]">
                   {keymap.keys.map((b) => (
                     <button key={b.key} onClick={() => (keymap.multi
                       ? setMultiPick((p) => (p.includes(b.value) ? p.filter((v) => v !== b.value) : [...p, b.value]))
@@ -328,16 +328,16 @@ function AttrSweep() {
                   </span>
                 </div>
               ) : (
-                <div className="panel px-3 py-2 font-mono text-[11px] text-warn">
+                <div className="panel px-3 py-2 text-[12px] text-warn">
                   No keyboard for {queue.attribute}: {noKeymapReason({ type: queue.type, range: queue.range })}.
                   Press <b className="text-ink">O</b> to open the frame editor on the crop under the cursor.
                 </div>
               )}
 
-              {loading && <div className="font-mono text-[11px] text-ink-3">loading the grid...</div>}
+              {loading && <div className="text-[12px] text-ink-3">loading the grid...</div>}
 
               {!loading && !items.length && (
-                <div className="panel px-3 py-6 font-mono text-[11px] text-ink-3 text-center">
+                <div className="panel px-3 py-6 text-[12px] text-ink-3 text-center">
                   {queue.remaining > 0
                     ? <>This page is done. <button onClick={() => void loadQueue()}
                         className="text-accent underline">load the next {queue.remaining.toLocaleString()}</button></>
@@ -393,7 +393,7 @@ function AttrSweep() {
                 </div>
               )}
 
-              <div className="font-mono text-[10px] text-ink-3 flex flex-wrap gap-3">
+              <div className="text-[11px] text-ink-3 flex flex-wrap gap-3">
                 <span><b className="text-ink">arrows</b> move</span>
                 <span><b className="text-ink">shift+move</b> range</span>
                 <span><b className="text-ink">space</b> select</span>
@@ -412,7 +412,7 @@ function AttrSweep() {
 
 export default function Page() {
   return (
-    <Suspense fallback={<div className="p-4 font-mono text-[11px] text-ink-3">loading...</div>}>
+    <Suspense fallback={<div className="p-4 text-[12px] text-ink-3">loading...</div>}>
       <AttrSweep />
     </Suspense>
   );

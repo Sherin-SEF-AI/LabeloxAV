@@ -22,7 +22,7 @@ export default function FloatingLayers({ layers, onToggle, extra, meta }: {
       <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 w-full px-2.5 py-2 border-b hairline">
         <span className="flex text-ink-3"><Icon name="layers" size={14} /></span>
         <span className="font-display font-semibold text-[10px] uppercase tracking-wider text-ink-2">Layers</span>
-        <span className="ml-auto font-mono text-[9px] text-ink-3/70">{open ? "view state" : "show"}</span>
+        <span className="ml-auto text-[10.5px] text-ink-3/70">{open ? "view state" : "show"}</span>
       </button>
       {open && (
         <div className="p-1">
@@ -36,7 +36,7 @@ export default function FloatingLayers({ layers, onToggle, extra, meta }: {
                 <span className={`w-2 h-2 rounded-sm shrink-0 ${on ? "bg-accent" : "bg-line"}`} />
                 <span className="flex-1 min-w-0 text-left">
                   <span className="block font-body text-[11.5px] leading-tight">{k}</span>
-                  {prov && <span className="block font-mono text-[9px] leading-tight text-ink-3/80 truncate">{prov}</span>}
+                  {prov && <span className="block text-[10.5px] leading-tight text-ink-3/80 truncate">{prov}</span>}
                 </span>
               </button>
             );

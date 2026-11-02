@@ -104,7 +104,7 @@ export default function NotificationBell() {
         {unread > 0 && (
           // A count, not a dot: "something happened" is not actionable, "three things happened" is.
           <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-[3px] rounded-full
-                           bg-accent text-bg font-mono text-[9px] leading-[14px] text-center">
+                           bg-accent text-bg text-[10.5px] leading-[14px] text-center">
             {unread > 99 ? "99+" : unread}
           </span>
         )}
@@ -112,7 +112,7 @@ export default function NotificationBell() {
 
       {open && (
         <div style={style} className="z-50 w-[min(26rem,92vw)] panel shadow-lg">
-          <div className="flex items-center gap-2 px-3 py-2 border-b hairline font-mono text-[11px]">
+          <div className="flex items-center gap-2 px-3 py-2 border-b hairline text-[12px]">
             <span className="uppercase text-ink-3">notifications</span>
             {unread > 0 && (
               <button onClick={markAll} className="ml-auto text-ink-3 hover:text-accent">
@@ -122,7 +122,7 @@ export default function NotificationBell() {
           </div>
 
           {rows.length === 0 ? (
-            <div className="p-4 font-mono text-[11px] text-ink-3">
+            <div className="p-4 text-[12px] text-ink-3">
               Nothing yet. Assignments, raised issues, blocked promotions and drift breaches land here.
             </div>
           ) : (
@@ -136,8 +136,8 @@ export default function NotificationBell() {
                       <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${SEV_DOT[n.severity] ?? "bg-ink-3"}`} />
                       <div className="min-w-0 flex-1">
                         <div className="font-mono text-[11.5px] text-ink truncate">{n.title}</div>
-                        {n.body && <div className="font-mono text-[10.5px] text-ink-3 line-clamp-2">{n.body}</div>}
-                        <div className="font-mono text-[9.5px] text-ink-3">
+                        {n.body && <div className="text-[11.5px] text-ink-3 line-clamp-2">{n.body}</div>}
+                        <div className="text-[10.5px] text-ink-3">
                           {n.kind.replace(/_/g, " ")} · {mounted ? ago(n.created_at) : ""}
                         </div>
                       </div>
@@ -149,7 +149,7 @@ export default function NotificationBell() {
           )}
 
           <button onClick={() => { setOpen(false); router.push("/activity"); }}
-            className="w-full px-3 py-2 font-mono text-[10.5px] text-ink-3 hover:text-accent text-left">
+            className="w-full px-3 py-2 text-[11.5px] text-ink-3 hover:text-accent text-left">
             open the activity feed
           </button>
         </div>

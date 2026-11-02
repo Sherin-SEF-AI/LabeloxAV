@@ -80,7 +80,7 @@ export default function EvalDrilldown() {
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-2 font-mono text-[11px] flex-wrap">
+      <div className="flex items-center gap-2 mb-2 text-[12px] flex-wrap">
         <select value={goldId} onChange={(e) => setGoldId(e.target.value)}
           className="bg-bg border border-line px-1.5 py-0.5 text-ink max-w-[220px]">
           <option value="">pick a gold set</option>
@@ -114,13 +114,13 @@ export default function EvalDrilldown() {
       </div>
 
       {!cells.length ? (
-        <div className="font-mono text-xs text-ink-3 py-4 text-center">
+        <div className="text-[12.5px] text-ink-3 py-4 text-center">
           no evaluation yet. pick a sealed gold set and score against it.
         </div>
       ) : (
         <div className="flex gap-3 items-start">
           {/* cells */}
-          <table className="font-mono text-[11px] shrink-0">
+          <table className="text-[12px] shrink-0">
             <thead>
               <tr className="text-ink-3 text-left border-b hairline">
                 <th className="py-1 pr-3">gold</th><th className="pr-3">predicted</th>
@@ -148,7 +148,7 @@ export default function EvalDrilldown() {
           <div className="flex-1 min-w-0">
             {active ? (
               <>
-                <div className="font-mono text-[11px] text-ink-3 mb-1.5">
+                <div className="text-[12px] text-ink-3 mb-1.5">
                   {active.gt_class ?? "nothing"} <span className="text-ink-3">seen as</span>{" "}
                   {active.pred_class ?? "nothing"}{" "}
                   <span className={OUTCOME_STYLE[active.outcome]}>({active.outcome})</span>
@@ -165,11 +165,11 @@ export default function EvalDrilldown() {
                   ))}
                 </div>
                 {!patches.length && (
-                  <div className="font-mono text-[11px] text-ink-3 py-3">no crops for this cell</div>
+                  <div className="text-[12px] text-ink-3 py-3">no crops for this cell</div>
                 )}
               </>
             ) : (
-              <div className="font-mono text-[11px] text-ink-3 py-3">
+              <div className="text-[12px] text-ink-3 py-3">
                 click a row to see the objects behind it.
               </div>
             )}

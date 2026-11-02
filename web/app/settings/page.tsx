@@ -163,6 +163,9 @@ function Preferences() {
 
 const LINKS: { href: string; label: string; hint: string; icon: string }[] = [
   { href: "/profile", label: "Your account", hint: "password, two-factor authentication, sessions", icon: "user" },
+  { href: "/settings/team", label: "Team", hint: "invite teammates, issue sign-in links (administrators)", icon: "person" },
+  { href: "/settings/projects", label: "Projects", hint: "who sees which sessions, members, moving sessions (administrators)", icon: "folder" },
+  { href: "/settings/keys", label: "API keys", hint: "credentials for scripts, notebooks and CI (administrators)", icon: "terminal" },
   { href: "/integrations", label: "Integrations", hint: "storage buckets and webhooks", icon: "link" },
   { href: "/activity", label: "Activity", hint: "what you and the team have done", icon: "activity" },
   { href: "/govern/pii-access", label: "Personal data access log", hint: "who viewed unblurred data (administrators)", icon: "shield" },

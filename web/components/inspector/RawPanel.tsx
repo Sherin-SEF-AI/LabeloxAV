@@ -35,7 +35,7 @@ export default function RawPanel({ topic }: { topic: string }) {
 
   return (
     <div className="h-full overflow-auto no-scrollbar p-2">
-      <pre className="font-mono text-[10.5px] text-ink-2 whitespace-pre-wrap">{text}</pre>
+      <pre className="text-[11.5px] text-ink-2 whitespace-pre-wrap">{text}</pre>
     </div>
   );
 }

@@ -35,7 +35,7 @@ export default function ConsolePage() {
       title="Console"
       subtitle={headline(jobs, sys)}
       right={
-        <span className="flex items-center gap-2 font-mono text-[11px] text-ink-3">
+        <span className="flex items-center gap-2 text-[12px] text-ink-3">
           {/* A console whose numbers freeze looks exactly like a quiet machine, so it says which it is. */}
           <span className={`w-1.5 h-1.5 rounded-full ${live ? "bg-pass" : "bg-ink-3"}`} />
           <span>{live ? "live" : "not connected"}</span>
@@ -66,7 +66,7 @@ export default function ConsolePage() {
               {running.length ? `${running.length} job${running.length === 1 ? "" : "s"}` : "nothing"}
             </span>
             <button onClick={() => router.push("/jobs")}
-              className="ml-auto font-mono text-[10px] border border-line px-1.5 py-0.5 text-ink-3 hover:border-accent">
+              className="ml-auto text-[11px] border border-line px-1.5 py-0.5 text-ink-3 hover:border-accent">
               all jobs
             </button>
           </div>
@@ -83,7 +83,7 @@ export default function ConsolePage() {
               {activeRuns.length ? `${activeRuns.length} active` : "corpus sweeps, relabels, batches"}
             </span>
             <button onClick={() => router.push("/agent")}
-              className="ml-auto font-mono text-[10px] border border-line px-1.5 py-0.5 text-ink-3 hover:border-accent">
+              className="ml-auto text-[11px] border border-line px-1.5 py-0.5 text-ink-3 hover:border-accent">
               agent console
             </button>
           </div>

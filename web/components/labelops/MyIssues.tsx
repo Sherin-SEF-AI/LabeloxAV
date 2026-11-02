@@ -53,7 +53,7 @@ export default function MyIssues({ limit = 25 }: { limit?: number }) {
 
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 font-mono text-[11px] uppercase text-ink-3 border-b hairline px-3 py-2">
+      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
         <span>feedback on my labels</span>
         <label className="ml-auto normal-case flex items-center gap-1 text-ink-3">
           <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} />
@@ -67,9 +67,9 @@ export default function MyIssues({ limit = 25 }: { limit?: number }) {
         {err != null ? (
           <LoadState error={err} onRetry={() => void load()} />
         ) : loading ? (
-          <div className="font-mono text-xs text-ink-3/50 animate-pulse py-4 text-center">loading...</div>
+          <div className="text-[12.5px] text-ink-3/50 animate-pulse py-4 text-center">loading...</div>
         ) : rows.length === 0 ? (
-          <div className="font-mono text-xs text-ink-3 py-4 text-center">
+          <div className="text-[12.5px] text-ink-3 py-4 text-center">
             {openOnly ? "nothing outstanding on your labels" : "no feedback on your labels yet"}
           </div>
         ) : (
@@ -80,14 +80,14 @@ export default function MyIssues({ limit = 25 }: { limit?: number }) {
                 <span className={`text-[10px] leading-none px-1.5 py-1 rounded border ${KIND_TONE[i.kind] ?? KIND_TONE.comment}`}>
                   {i.kind.replace(/_/g, " ")}
                 </span>
-                <span className="font-mono text-[11px] text-ink-2 truncate">
+                <span className="text-[12px] text-ink-2 truncate">
                   {i.object_id ? `object ${i.object_id.slice(0, 8)}` : `frame ${(i.frame_id ?? "").slice(0, 8)}`}
                 </span>
-                {i.n_comments ? <span className="font-mono text-[10px] text-ink-3">{i.n_comments} comment{i.n_comments === 1 ? "" : "s"}</span> : null}
-                <span className={`ml-auto font-mono text-[10px] ${i.status === "open" ? "text-warn" : "text-pass"}`}>
+                {i.n_comments ? <span className="text-[11px] text-ink-3">{i.n_comments} comment{i.n_comments === 1 ? "" : "s"}</span> : null}
+                <span className={`ml-auto text-[11px] ${i.status === "open" ? "text-warn" : "text-pass"}`}>
                   {i.status}
                 </span>
-                <span className="font-mono text-[10px] text-ink-3">
+                <span className="text-[11px] text-ink-3">
                   {i.created_at ? new Date(i.created_at).toLocaleDateString() : ""}
                 </span>
               </button>

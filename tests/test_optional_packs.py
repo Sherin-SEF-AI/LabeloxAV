@@ -90,7 +90,9 @@ def test_the_web_app_is_told_what_is_installed(security_install):
     with TestClient(app) as c:
         r = c.get("/api/system/features", headers=auth_headers("annotator"))
     assert r.status_code == 200
-    assert r.json() == {"optional_packs": {"sec": True}}
+    assert r.json()["optional_packs"] == {"sec": True}
+    # No worker runs during the suite.
+    assert r.json()["gpu_worker"] is False
 
 
 def test_a_default_install_reports_it_off(default_install):
@@ -101,4 +103,4 @@ def test_a_default_install_reports_it_off(default_install):
 
     with TestClient(app) as c:
         r = c.get("/api/system/features", headers=auth_headers("annotator"))
-    assert r.json() == {"optional_packs": {"sec": False}}
+    assert r.json()["optional_packs"] == {"sec": False}

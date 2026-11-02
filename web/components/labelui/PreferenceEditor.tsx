@@ -39,7 +39,7 @@ export default function PreferenceEditor({
 
   if (!candidates.length) {
     return (
-      <div className="p-4 font-mono text-[11px] text-ink-3">
+      <div className="p-4 text-[12px] text-ink-3">
         this asset has no candidates in meta.candidates, so there is nothing to compare
       </div>
     );
@@ -48,18 +48,18 @@ export default function PreferenceEditor({
   return (
     <div className="p-4 space-y-4">
       <div>
-        <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">prompt</div>
+        <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">prompt</div>
         <div className="font-sans text-[14px] text-ink whitespace-pre-wrap">{prompt}</div>
       </div>
 
       {/* side by side preference */}
       <div>
-        <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">which response is better</div>
+        <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">which response is better</div>
         <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(candidates.length, 3)}, minmax(0,1fr))` }}>
           {candidates.map((c, i) => (
             <button key={i} onClick={() => onPreference(i)}
               className={`text-left panel p-2 border ${chosen === i ? "border-accent" : "border-line hover:border-ink-3"}`}>
-              <div className="font-mono text-[10px] text-ink-3 mb-1">
+              <div className="text-[11px] text-ink-3 mb-1">
                 candidate {i + 1}{chosen === i ? " - chosen" : ""}
               </div>
               <div className="font-sans text-[13px] text-ink whitespace-pre-wrap">{c}</div>
@@ -70,8 +70,8 @@ export default function PreferenceEditor({
 
       {/* rubric */}
       <div>
-        <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">rubric (1 to 5)</div>
-        <div className="flex items-center gap-3 flex-wrap font-mono text-[11px]">
+        <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">rubric (1 to 5)</div>
+        <div className="flex items-center gap-3 flex-wrap text-[12px]">
           {DEFAULT_CRITERIA.map((k) => (
             <label key={k} className="flex items-center gap-1">
               <span className="text-ink-3">{k}</span>
@@ -89,10 +89,10 @@ export default function PreferenceEditor({
 
       {/* ranking */}
       <div>
-        <div className="font-mono text-[10px] uppercase text-ink-3 mb-1">full ranking (best first)</div>
+        <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">full ranking (best first)</div>
         <div className="space-y-1">
           {order.map((idx, i) => (
-            <div key={idx} className="flex items-center gap-2 font-mono text-[11px]">
+            <div key={idx} className="flex items-center gap-2 text-[12px]">
               <span className="text-ink-3 w-5">{i + 1}.</span>
               <span className="text-ink-2 flex-1 truncate">
                 candidate {Number(idx) + 1}: {candidates[Number(idx)]?.slice(0, 60)}
@@ -103,7 +103,7 @@ export default function PreferenceEditor({
           ))}
         </div>
         <button onClick={() => onRanking(order)}
-          className="mt-1 border border-line px-2 py-0.5 font-mono text-[11px] text-ink-2 hover:border-accent">
+          className="mt-1 border border-line px-2 py-0.5 text-[12px] text-ink-2 hover:border-accent">
           save ranking
         </button>
       </div>

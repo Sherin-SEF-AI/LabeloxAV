@@ -38,8 +38,8 @@ export default function VerdyxMatrix() {
 
   return (
     <PageShell active="VERDYX" title="VERDYX slice matrix"
-      right={rows ? <span className="font-mono text-[11px]">{regressed ? <span className="text-block">{regressed} slice(s) regressed</span> : <span className="text-pass">no slice regression</span>}</span> : undefined}>
-      <div className="p-4 max-w-4xl space-y-3 font-mono text-[11px]">
+      right={rows ? <span className="text-[12px]">{regressed ? <span className="text-block">{regressed} slice(s) regressed</span> : <span className="text-pass">no slice regression</span>}</span> : undefined}>
+      <div className="p-4 max-w-4xl space-y-3 text-[12px]">
         <div className="flex items-end gap-2">
           <label className="flex flex-col gap-1"><span className="text-ink-3 text-[10px] uppercase">champion</span>
             <input value={champion} onChange={(e) => setChampion(e.target.value)} className="bg-panel border border-line px-2 py-1 text-ink w-64" /></label>

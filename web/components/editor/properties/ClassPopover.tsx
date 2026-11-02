@@ -96,20 +96,20 @@ export default function ClassPopover({
             if (exact) pick(exact);
             else if (norm) { onAdd(query); onClose(); }
           }}
-          className="w-full bg-bg-2 border border-line rounded px-2 py-1 font-mono text-[11px] text-ink placeholder:text-ink-3/70 focus:border-accent outline-none" />
+          className="w-full bg-bg-2 border border-line rounded px-2 py-1 text-[12px] text-ink placeholder:text-ink-3/70 focus:border-accent outline-none" />
       </div>
 
       <div ref={listRef} className="max-h-72 overflow-auto p-1 space-y-0.5">
         {canAdd && (
           <button data-class-row onClick={() => { onAdd(query); onClose(); }}
-            className="w-full flex items-center gap-1.5 px-1 py-1 rounded font-mono text-[11px] text-left text-accent hover:bg-line/40 hover:text-accent-2">
+            className="w-full flex items-center gap-1.5 px-1 py-1 rounded text-[12px] text-left text-accent hover:bg-line/40 hover:text-accent-2">
             <span className="shrink-0">+</span>
             <span className="truncate">add &quot;{norm}&quot; as custom class</span>
           </button>
         )}
         {filtered.map((c, i) => (
           <button key={c.id} data-class-row onClick={() => pick(c)}
-            className={`w-full flex items-center gap-1.5 px-1 py-1 rounded font-mono text-[11px] text-left hover:bg-line/40 hover:text-ink ${currentId === c.id ? "text-ink bg-line/25" : "text-ink-3"}`}>
+            className={`w-full flex items-center gap-1.5 px-1 py-1 rounded text-[12px] text-left hover:bg-line/40 hover:text-ink ${currentId === c.id ? "text-ink bg-line/25" : "text-ink-3"}`}>
             <span className="w-2.5 h-2.5 inline-block shrink-0 rounded-sm" style={{ background: classColor(c.id) }} />
             <span className="truncate">{c.name}</span>
             {c.india && <span className="text-accent shrink-0" title="India-specific class">*</span>}
@@ -117,7 +117,7 @@ export default function ClassPopover({
           </button>
         ))}
         {!filtered.length && !canAdd && (
-          <div className="px-1 py-2 font-mono text-[11px] text-ink-3">no class matches that.</div>
+          <div className="px-1 py-2 text-[12px] text-ink-3">no class matches that.</div>
         )}
       </div>
     </Popover>

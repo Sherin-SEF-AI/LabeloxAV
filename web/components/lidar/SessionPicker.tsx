@@ -39,7 +39,7 @@ export default function SessionPicker({
           onChange(e.target.value);
           if (e.target.value) onLoad(e.target.value);
         }}
-        className="min-w-0 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
+        className="min-w-0 rounded border border-line bg-bg-2 px-2 py-1 text-xs"
       >
         <option value="">
           {err ? "session list unavailable" : sessions.length ? "select a session" : "loading sessions..."}
@@ -64,9 +64,9 @@ export default function SessionPicker({
           onChange={(e) => onChange(e.target.value)}
           placeholder="or paste a session id"
           aria-label="session id"
-          className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
+          className="min-w-0 flex-1 rounded border border-line bg-bg-2 px-2 py-1 text-xs"
         />
-        <button className="rounded bg-cyan-700 px-3 py-1 text-xs hover:bg-cyan-600">Load</button>
+        <button className="rounded bg-[#2f6fd6] text-white px-3 py-1 text-xs hover:bg-[#3a7ae0]">Load</button>
       </form>
     </div>
   );

@@ -80,10 +80,10 @@ export default function ScenariosPage() {
             </button>
           </form>
           <div className="flex items-center justify-between mt-1">
-            <div className="font-mono text-[11px] text-ink-3">
+            <div className="text-[12px] text-ink-3">
               parsed into structured filters over the scenario index (type, actor class, light, surface)
             </div>
-            <label className="font-mono text-[11px] text-ink-2 flex items-center gap-1.5 cursor-pointer">
+            <label className="text-[12px] text-ink-2 flex items-center gap-1.5 cursor-pointer">
               <input type="checkbox" checked={semantic} onChange={(e) => setSemantic(e.target.checked)} />
               semantic (CLIP)
             </label>
@@ -95,7 +95,7 @@ export default function ScenariosPage() {
         <div className="p-3"><LoadState error={loadErr} onRetry={() => void load()} /></div>
       )}
       <table className="w-full text-sm">
-          <thead className="text-ink-3 font-mono text-[11px] uppercase border-b hairline sticky top-0 bg-bg">
+          <thead className="text-ink-3 text-[10.5px] font-medium uppercase tracking-[0.06em] border-b hairline sticky top-0 bg-bg">
             <tr>
               <th className="text-left font-normal px-3 py-2 w-40">type</th>
               <th className="text-left font-normal px-3 py-2 w-40">criticality</th>
@@ -108,21 +108,21 @@ export default function ScenariosPage() {
             {rows.map((s) => (
               <tr key={s.scenario_id} className="border-b hairline hover:bg-bg-2">
                 <td className="px-3 py-2">
-                  <span className={`font-mono text-[11px] uppercase border px-1.5 py-0.5 ${TYPE_COLOR[s.type] ?? "text-ink-2 border-line"}`}>
+                  <span className={`text-[10.5px] font-medium uppercase tracking-[0.06em] border px-1.5 py-0.5 ${TYPE_COLOR[s.type] ?? "text-ink-2 border-line"}`}>
                     {s.type}
                   </span>
                 </td>
                 <td className="px-3 py-2">
                   <ScoreBar value={s.criticality} tone="warn" />
                 </td>
-                <td className="px-3 py-2 font-mono text-xs text-ink-2">
+                <td className="px-3 py-2 text-[12.5px] text-ink-2">
                   {(s.meta?.actor_classes as string[] | undefined)?.join(", ") ||
                     (s.meta?.class as string) ||
                     "ego"}
                   <span className="text-ink-3"> · {s.tags.join(" ")}</span>
                 </td>
-                <td className="px-3 py-2 font-mono text-xs">{s.city ?? "?"}</td>
-                <td className="px-3 py-2 font-mono text-[11px] text-ink-3">
+                <td className="px-3 py-2 text-[12.5px]">{s.city ?? "?"}</td>
+                <td className="px-3 py-2 text-[12px] text-ink-3">
                   {String(s.t_in_ns).slice(0, 13)}
                 </td>
               </tr>

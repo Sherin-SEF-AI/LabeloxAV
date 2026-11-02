@@ -202,7 +202,7 @@ export default function CuboidAnnotatePage() {
 
   return (
     <PageShell active="CUBOID ANNOTATE" title="Cuboid annotation" right="AI lift 2D to 3D">
-      <div className="flex h-full bg-[#0a0e14] text-neutral-200">
+      <div className="flex h-full bg-[#0a0e14] text-ink">
         <Inspector title="Cuboid annotation" side="left" width="w-80">
           <div className="flex flex-col gap-3 p-4">
 <SessionPicker value={sessionId} onChange={setSessionId} onLoad={loadClouds} />
@@ -212,7 +212,7 @@ export default function CuboidAnnotatePage() {
             {clouds.map((c) => (
               <button key={c.cloud_id} onClick={() => openCloud(c)}
                 className={`rounded border px-2 py-1 text-left text-xs ${
-                  cloud?.cloud_id === c.cloud_id ? "border-cyan-600 bg-cyan-950" : "border-neutral-800 bg-neutral-900"}`}>
+                  cloud?.cloud_id === c.cloud_id ? "border-accent/60 bg-accent/15" : "border-line bg-bg-2"}`}>
                 {c.source} | {c.point_count.toLocaleString()} pts | {c.cloud_id.slice(0, 8)}
               </button>
             ))}
@@ -222,14 +222,14 @@ export default function CuboidAnnotatePage() {
         {/* The trajectory the cuboids are placed against. A session without one is a session where every
             cuboid sits in the coordinate frame of its own instant and cannot be compared to the next. */}
         {sessionId && (
-          <div className="rounded border border-neutral-800 bg-neutral-950">
-            <div className="border-b border-neutral-800 px-2 py-1 text-[10px] uppercase text-neutral-500">
+          <div className="rounded border border-line bg-bg-2">
+            <div className="border-b border-line px-2 py-1 text-[10px] uppercase text-ink-3">
               ego trajectory
             </div>
             <EgoTrajectoryPlot trajectory={trajectory} currentTs={cloud?.ts_ns ?? null} height={160} />
             {trajectory && trajectory.poses === 0 && (
               <button onClick={buildPose} disabled={busy}
-                className="m-2 rounded border border-neutral-700 px-2 py-1 text-xs hover:border-cyan-700 disabled:opacity-40">
+                className="m-2 rounded border border-line px-2 py-1 text-xs hover:border-accent/60 disabled:opacity-40">
                 recover trajectory
               </button>
             )}
@@ -240,8 +240,8 @@ export default function CuboidAnnotatePage() {
             that a track actually spoke for printed beside it: the rest is an assumed zero and an arrow
             drawn from it would be confidence nobody has. */}
         {grids.length > 0 && (
-          <div className="rounded border border-neutral-800 bg-neutral-950 p-2">
-            <div className="mb-1 text-[10px] uppercase text-neutral-500">
+          <div className="rounded border border-line bg-bg-2 p-2">
+            <div className="mb-1 text-[10px] uppercase text-ink-3">
               occupancy · {grids.length} grids
             </div>
             <input type="range" min={0} max={grids.length - 1} value={gridIdx} className="w-full"
@@ -251,7 +251,7 @@ export default function CuboidAnnotatePage() {
                 setGridIdx(i);
                 api.occupancyVoxels(grids[i].grid_id).then(setOcc).catch(() => setOcc(null));
               }} />
-            <div className="text-[10px] text-neutral-400">
+            <div className="text-[10px] text-ink-2">
               {grids[gridIdx]?.occupied.toLocaleString()} voxels ·{" "}
               {grids[gridIdx]?.flow_share != null
                 ? `${((grids[gridIdx].flow_share ?? 0) * 100).toFixed(1)}% with a track velocity`
@@ -269,26 +269,26 @@ export default function CuboidAnnotatePage() {
         {cloud && (
           <div className="flex gap-2">
             <button onClick={aiLift} disabled={busy}
-              className="flex-1 rounded bg-emerald-800 px-2 py-1.5 text-xs hover:bg-emerald-700 disabled:opacity-40">
+              className="flex-1 rounded bg-pass/25 px-2 py-1.5 text-xs hover:bg-pass/35 disabled:opacity-40">
               AI lift 2D to 3D
             </button>
             <button onClick={addCuboid}
-              className="rounded border border-neutral-700 px-2 py-1.5 text-xs hover:border-cyan-700">+ box</button>
+              className="rounded border border-line px-2 py-1.5 text-xs hover:border-accent/60">+ box</button>
           </div>
         )}
 
         {cloud && (
           <div>
-            <div className="mb-1 text-xs uppercase tracking-wider text-neutral-500">Cuboids ({cuboids.length})</div>
+            <div className="mb-1 text-xs uppercase tracking-wider text-ink-3">Cuboids ({cuboids.length})</div>
             <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
               {cuboids.map((c) => (
                 <button key={c.object_3d_id} onClick={() => setSelectedId(c.object_3d_id)}
                   className={`flex justify-between rounded border px-2 py-1 text-left text-xs ${
-                    selectedId === c.object_3d_id ? "border-white bg-neutral-800" : "border-neutral-800 bg-neutral-900"}`}>
+                    selectedId === c.object_3d_id ? "border-white bg-head" : "border-line bg-bg-2"}`}>
                   <span>{c.class_name}</span>
                   <span className="flex items-center gap-1.5">
                     <StateBadge state={c.state} />
-                    <span className="text-neutral-500">{c.box_source}</span>
+                    <span className="text-ink-3">{c.box_source}</span>
                   </span>
                 </button>
               ))}
@@ -297,8 +297,8 @@ export default function CuboidAnnotatePage() {
         )}
 
         {selected && (
-          <div className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-2 text-xs">
-            <div className="flex items-center gap-2 text-neutral-400">
+          <div className="flex flex-col gap-2 rounded border border-line bg-bg-2 p-2 text-xs">
+            <div className="flex items-center gap-2 text-ink-2">
               <span>Selected</span>
               <StateBadge state={selected.state} />
             </div>
@@ -306,7 +306,7 @@ export default function CuboidAnnotatePage() {
               class
               <select value={selected.class_id}
                 onChange={(e) => { const id = Number(e.target.value); patchLocal(selected.object_3d_id, { class_id: id, class_name: classes.find((x) => x.id === id)?.name }); saveCuboid(selected.object_3d_id, { class_id: id }); }}
-                className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-1 py-0.5">
+                className="min-w-0 flex-1 rounded border border-line bg-bg-2 px-1 py-0.5">
                 {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </label>
@@ -317,7 +317,7 @@ export default function CuboidAnnotatePage() {
                   onChange={(e) => setDim(i, Number(e.target.value))}
                   onMouseUp={() => saveCuboid(selected.object_3d_id, { dims: selected.dims })}
                   className="flex-1" />
-                <span className="w-10 text-right text-neutral-400">{selected.dims[i].toFixed(1)}</span>
+                <span className="w-10 text-right text-ink-2">{selected.dims[i].toFixed(1)}</span>
               </label>
             ))}
             <label className="flex items-center gap-2">
@@ -326,25 +326,25 @@ export default function CuboidAnnotatePage() {
                 onChange={(e) => patchLocal(selected.object_3d_id, { yaw: Number(e.target.value) })}
                 onMouseUp={() => saveCuboid(selected.object_3d_id, { yaw: selected.yaw })}
                 className="flex-1" />
-              <span className="w-10 text-right text-neutral-400">{(selected.yaw * 57.3).toFixed(0)}</span>
+              <span className="w-10 text-right text-ink-2">{(selected.yaw * 57.3).toFixed(0)}</span>
             </label>
             <div className="flex gap-2">
               <button onClick={() => groundSnap(selected.object_3d_id)}
-                className="flex-1 rounded bg-neutral-800 px-2 py-1 hover:bg-neutral-700">Ground snap</button>
+                className="flex-1 rounded bg-head px-2 py-1 hover:bg-btn-2">Ground snap</button>
               <button onClick={() => removeCuboid(selected.object_3d_id)}
-                className="rounded bg-red-900 px-2 py-1 hover:bg-red-800">Delete</button>
+                className="rounded bg-block/20 px-2 py-1 hover:bg-block/30">Delete</button>
             </div>
-            <div className="text-neutral-600">Drag the box in the BEV view to move it.</div>
+            <div className="text-ink-3">Drag the box in the BEV view to move it.</div>
           </div>
         )}
 
-        {err && <div className="rounded border border-red-900 bg-red-950 p-2 text-xs text-red-300">{err}</div>}
+        {err && <div className="rounded border border-block/40 bg-block/10 p-2 text-xs text-block">{err}</div>}
           </div>
         </Inspector>
 
       <main className="flex flex-1 flex-col">
-        <div className="relative flex-1 border-b border-neutral-800">
-          <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-neutral-500">3D</div>
+        <div className="relative flex-1 border-b border-line">
+          <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-ink-3">3D</div>
           {data && (
             <PointCloudViewer points={data.points} count={data.count} colorBy={colorBy}
               occupancy={occ ? { voxels: occ.voxels, flow: occ.flow, origin: occ.origin,
@@ -353,14 +353,14 @@ export default function CuboidAnnotatePage() {
               intensityRange={[data.intensityMin, data.intensityMax]} source={data.source} mode="perspective"
               cuboids={cuboids} selectedId={selectedId} onSelectCuboid={setSelectedId} />
           )}
-          {!data && <div className="flex h-full items-center justify-center text-sm text-neutral-600">Load a session and pick a cloud.</div>}
+          {!data && <div className="flex h-full items-center justify-center text-sm text-ink-3">Load a session and pick a cloud.</div>}
         </div>
         <div className="relative h-2/5 min-h-[220px]">
-          <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-neutral-500">BEV (drag to move)</div>
+          <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-ink-3">BEV (drag to move)</div>
           <div className="absolute right-3 top-3 z-10 flex gap-1">
             {(["height", "intensity"] as ColorBy[]).map((k) => (
               <button key={k} onClick={() => setColorBy(k)}
-                className={`rounded px-2 py-0.5 text-xs ${colorBy === k ? "bg-cyan-700" : "bg-neutral-800"}`}>{k}</button>
+                className={`rounded px-2 py-0.5 text-xs ${colorBy === k ? "bg-[#2f6fd6] text-white" : "bg-head"}`}>{k}</button>
             ))}
           </div>
           {data && (

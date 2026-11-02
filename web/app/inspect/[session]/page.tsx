@@ -155,7 +155,7 @@ export default function InspectorWorkspace() {
   const vColor = verdict === "pass" ? "text-pass border-pass" : verdict === "warn" ? "text-warn border-warn" : verdict === "fail" ? "text-block border-block" : "text-ink-3 border-line";
 
   const right = useMemo(() => (
-    <div className="flex items-center gap-2 font-mono text-[11px]">
+    <div className="flex items-center gap-2 text-[12px]">
       {verdict && <span className={`border px-1.5 rounded uppercase ${vColor}`}>{verdict}</span>}
       {curFrame?.frameId && (
         <button onClick={() => router.push(`/frame/${curFrame.frameId}`)} title="open the frame at the current time in the annotation workspace"
@@ -180,7 +180,7 @@ export default function InspectorWorkspace() {
       {loading ? (
         <div className="h-full flex items-center justify-center"><Spinner label="opening session mcap" /></div>
       ) : err ? (
-        <div className="h-full flex items-center justify-center font-mono text-sm text-block px-6 text-center">{err}</div>
+        <div className="h-full flex items-center justify-center text-[13.5px] font-medium text-block px-6 text-center">{err}</div>
       ) : mcap && range ? (
         <ClockProvider startNs={range[0]} endNs={range[1]}>
           <McapProvider mcap={mcap} sessionId={sessionId}>
@@ -192,12 +192,12 @@ export default function InspectorWorkspace() {
                   <div className="p-2 border-b hairline space-y-1.5">
                     <div className="flex gap-1">
                       <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="layout name"
-                        className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-1.5 py-1 font-mono text-[10px] text-ink-2 focus:border-accent outline-none" />
-                      <button onClick={saveLayout} className="font-mono text-[10px] border border-line px-1.5 rounded hover:border-accent">save</button>
+                        className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-1.5 py-1 text-[11px] text-ink-2 focus:border-accent outline-none" />
+                      <button onClick={saveLayout} className="text-[11px] border border-line px-1.5 rounded hover:border-accent">save</button>
                     </div>
                     {layouts.length > 0 && (
                       <select onChange={(e) => e.target.value && loadLayout(e.target.value)} defaultValue=""
-                        className="w-full bg-bg-2 border border-line rounded px-1 py-1 font-mono text-[10px] text-ink-2">
+                        className="w-full bg-bg-2 border border-line rounded px-1 py-1 text-[11px] text-ink-2">
                         <option value="">load layout...</option>
                         {layouts.map((l) => <option key={l.layout_id} value={l.layout_id}>{l.name}{l.is_default ? " (default)" : ""}</option>)}
                       </select>
@@ -208,7 +208,7 @@ export default function InspectorWorkspace() {
                       offer it. */}
                   <div className="px-2 py-1.5 border-b hairline">
                     <button onClick={() => addPanel("scene3d")}
-                      className="w-full font-mono text-[10px] border border-line rounded px-1.5 py-1 text-ink-2 hover:border-accent hover:text-ink">
+                      className="w-full text-[11px] border border-line rounded px-1.5 py-1 text-ink-2 hover:border-accent hover:text-ink">
                       + 3D point cloud
                     </button>
                   </div>
@@ -216,7 +216,7 @@ export default function InspectorWorkspace() {
                     {noRecording ? (
                       // Said plainly, because an empty topic list otherwise reads as a failed load rather
                       // than as a session that was never recorded to an .mcap.
-                      <div className="p-2 font-mono text-[10px] text-ink-3 leading-relaxed">
+                      <div className="p-2 text-[11px] text-ink-3 leading-relaxed">
                         no .mcap recording for this session, so there are no topics to browse. The 3D and
                         camera panels read this session&apos;s own timeline and work regardless.
                       </div>
@@ -228,7 +228,7 @@ export default function InspectorWorkspace() {
                 {/* panel grid */}
                 <div className="flex-1 min-h-0 overflow-auto p-2">
                   {panels.length === 0 ? (
-                    <div className="h-full flex items-center justify-center font-mono text-xs text-ink-3">add a panel from the topic list</div>
+                    <div className="h-full flex items-center justify-center text-[12.5px] text-ink-3">add a panel from the topic list</div>
                   ) : (
                     <div className="grid grid-cols-2 gap-2 auto-rows-[minmax(200px,1fr)]">
                       {panels.map((p, i) => (
@@ -260,7 +260,7 @@ export default function InspectorWorkspace() {
           </McapProvider>
         </ClockProvider>
       ) : (
-        <div className="h-full flex items-center justify-center font-mono text-sm text-ink-3">no MCAP for this session</div>
+        <div className="h-full flex items-center justify-center text-[13.5px] font-medium text-ink-3">no MCAP for this session</div>
       )}
     </PageShell>
   );

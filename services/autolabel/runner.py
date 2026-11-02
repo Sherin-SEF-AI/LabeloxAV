@@ -15,6 +15,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import cast
 from uuid import UUID
 
 import click
@@ -393,9 +394,15 @@ async def _autolabel_session_locked(session_id: UUID, limit: int | None, vlm_cli
     # the camera's pre-estimated hood mask (the ego vehicle labeling itself). No mask cached -> a safe no-op.
     from db.models import Session as DbSession
     from services.autolabel.ego_mask import get_ego_mask
+    from services.project_classes import keep_in_set, session_class_ids
     async with maker() as _s:
         vehicle_id = (await _s.execute(
             select(DbSession.vehicle_id).where(DbSession.session_id == session_id))).scalar_one_or_none()
+        # The classes this session's project labels (None: all of them). Open-vocab prompts are narrowed to
+        # it, which saves the work, and nothing outside it is written (the filter before persist).
+        class_set = await session_class_ids(_s, session_id)
+    if class_set is not None and supported_ids is not None:
+        supported_ids = set(supported_ids) & class_set
 
     verifier = None
     if settings.models.vlm.enabled:
@@ -450,6 +457,12 @@ async def _autolabel_session_locked(session_id: UUID, limit: int | None, vlm_cli
         # trip per detection would cost more than the whole reasoning pass.
         track_history: dict[str, list] = {}
 
+        def _in_class_set(fused: list) -> list:
+            kept, n_out = keep_in_set(fused, class_set)
+            if n_out:
+                totals["outside_class_set"] = cast(int, totals.get("outside_class_set", 0)) + n_out
+            return kept
+
         async def on_frame(fd: FrameDetections) -> None:
             fused = engine.fuse_frame(fd.frame.frame_id, fd.dets_a, fd.dets_b)
             # Thing/stuff (panoptic): drop stuff detections (sky, road, vegetation, barriers, walls) before
@@ -459,6 +472,8 @@ async def _autolabel_session_locked(session_id: UUID, limit: int | None, vlm_cli
             if n_stuff:
                 fused = [g for g in fused if onto.is_thing(g.obj.class_id)]
                 totals["stuff_dropped"] = totals.get("stuff_dropped", 0) + n_stuff
+            # Classes the project does not label: dropped before any review or VLM budget is spent on them.
+            fused = _in_class_set(fused)
             # Ego-hood: drop any detection that is mostly inside this camera's hood mask (the car labeling
             # its own bonnet). Cached mask per camera; absent -> no-op.
             ego = get_ego_mask(vehicle_id, fd.frame.cam_id) if vehicle_id else None
@@ -551,6 +566,8 @@ async def _autolabel_session_locked(session_id: UUID, limit: int | None, vlm_cli
                     hist.append((fd.frame.ts_ns, fo.obj.bbox, fo.obj.class_id))
                     if len(hist) > 6:
                         del hist[:-6]
+            # Again after the VLM, which can move an object to a class the project does not label.
+            fused = _in_class_set(fused)
             by_state = await persist_frame_objects(db, store, bus, fd.frame, fused)
             totals["objects"] += len(fused)
             for k, v in by_state.items():

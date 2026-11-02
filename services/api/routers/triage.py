@@ -12,7 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Frame, Object
 from db.models import Session as DbSession
 from services.api.deps import TriageRow, db_session
+from services.api.project_guard import caller_hidden_projects
 from services.autolabel.ontology import get_ontology
+from services.project_access import scope_visible_sessions
 
 router = APIRouter()
 
@@ -112,6 +114,7 @@ async def triage(
     flywheel: str | None = None,
     control: bool = False,
     limit: int = 200,
+    hidden=Depends(caller_hidden_projects),
 ):
     limit = min(max(limit, 1), 1000)
     onto = get_ontology()
@@ -121,6 +124,7 @@ async def triage(
         .join(Frame, Object.frame_id == Frame.frame_id)
         .join(DbSession, Frame.session_id == DbSession.session_id)
     )
+    stmt = scope_visible_sessions(stmt, hidden)
     if control:
         # The control queue: objects the gate auto-accepted that were randomly sampled for an always-human
         # verdict. The sample defines the queue, so the states filter does not apply - these objects sit in

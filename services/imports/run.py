@@ -73,6 +73,10 @@ ADAPTERS = {
     "encord": adapter_encord.parse,
 }
 RAW_FORMATS = {"video", "mcap", "images"}
+# Every container the upload page accepts as video and OpenCV's FFmpeg backend decodes. The upload page
+# offered .webm and .m4v while this list stopped at .avi, so those uploads were stored and then failed with
+# "no video file found"; the two lists must match (tests/test_video_import_formats.py).
+VIDEO_EXTENSIONS = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v")
 ALL_FORMATS = sorted(set(ADAPTERS) | RAW_FORMATS)
 
 
@@ -147,7 +151,7 @@ async def _import_raw(spec: ImportSpec, job_id, root: Path) -> dict:
         frame_iter = read_image_folder(root)
         raw_uri, mcap_uri = spec.source_uri, None
     elif spec.format == "video":
-        vid = next((p for p in root.rglob("*") if p.suffix.lower() in (".mp4", ".mov", ".mkv", ".avi")), None)
+        vid = next((p for p in root.rglob("*") if p.suffix.lower() in VIDEO_EXTENSIONS), None)
         if vid is None:
             raise FileNotFoundError("no video file found in the source")
         frame_iter = read_video(str(vid), "cam_front", now_ns(), get_settings().ingest.target_fps)
@@ -163,6 +167,7 @@ async def _import_raw(spec: ImportSpec, job_id, root: Path) -> dict:
         frame_iter=frame_iter, vehicle=spec.target_vehicle, city=spec.city,
         route=spec.route or f"import:{spec.format}", raw_uri=raw_uri, mcap_uri=mcap_uri,
         source_streams=[spec.format],
+        project_id=uuid.UUID(spec.project_id) if spec.project_id else None,
     )
     counts = {"sessions": 1, "frames": result["n_frames"], "objects": 0,
               "faces_blurred": result.get("pii", {}).get("n_faces", 0)}
@@ -194,10 +199,13 @@ async def import_dataset(spec: ImportSpec, job_id=None) -> dict:
 
         async with get_sessionmaker()() as db:
             base = now_ns()
+            from services.api.tenancy import default_project_id
+
             session_row = DbSession(
                 session_id=session_id, vehicle_id=spec.target_vehicle, start_ts_ns=base, end_ts_ns=base,
                 city=spec.city, route=spec.route or f"import:{spec.format}", sensors={},
                 raw_uri=spec.source_uri, ontology_version=onto.version,
+                project_id=uuid.UUID(spec.project_id) if spec.project_id else await default_project_id(db),
             )
             db.add(session_row)
             await db.flush()

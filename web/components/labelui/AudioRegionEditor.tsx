@@ -161,7 +161,7 @@ export default function AudioRegionEditor({
 
   return (
     <div className="p-4 space-y-2">
-      {err && <div className="font-mono text-[11px] text-block">could not decode audio: {err}</div>}
+      {err && <div className="text-[12px] text-block">could not decode audio: {err}</div>}
       <canvas ref={canvasRef}
         className="block border border-line cursor-crosshair"
         onMouseDown={(e) => setDrag({ x0: localX(e), x1: localX(e) })}
@@ -185,7 +185,7 @@ export default function AudioRegionEditor({
         }}
         onMouseLeave={() => setDrag(null)} />
 
-      <div className="flex items-center gap-3 font-mono text-[11px] text-ink-3">
+      <div className="flex items-center gap-3 text-[12px] text-ink-3">
         <audio ref={audioRef} src={uri} controls
           onTimeUpdate={(e) => setPlayhead((e.target as HTMLAudioElement).currentTime)}
           className="h-7" />

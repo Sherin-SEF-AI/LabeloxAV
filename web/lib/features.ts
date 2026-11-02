@@ -11,7 +11,8 @@ import { apiGet } from "@/lib/api";
 // absent. Showing a security console that then fails on every request is worse than showing it a moment
 // late.
 
-export type Features = { optional_packs: Record<string, boolean> };
+export type Features = { optional_packs: Record<string, boolean>; gpu_worker?: boolean; autolabel_executor?: string;
+  auth_enabled?: boolean };
 
 const NONE: Features = { optional_packs: {} };
 let cached: Features | null = null;

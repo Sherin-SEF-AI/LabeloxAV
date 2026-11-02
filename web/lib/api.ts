@@ -556,7 +556,9 @@ export const api = {
   // the instant it returns, so nothing decides from it - it exists so an annotator can see that SAM will
   // refuse before spending a click finding out.
   gpuSlot: () => get<{ free: boolean; cuda: Record<string, unknown>; detail: string }>("/api/gpu/slot"),
-  ontology: () => get<Ontology>("/api/ontology"),
+  /** With a frame, `active_class_ids` is the set that frame's project labels (null: every class). */
+  ontology: (frameId?: string) =>
+    get<Ontology>(frameId ? `/api/ontology?frame_id=${encodeURIComponent(frameId)}` : "/api/ontology"),
   // Attribute sweep: what is unanswered, a page of crops to answer it on, and the write.
   attrCoverage: (session_id?: string) =>
     get<{ session_id: string | null; attributes: AttrCoverage[] }>(

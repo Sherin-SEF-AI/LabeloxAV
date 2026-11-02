@@ -28,6 +28,7 @@ from db.models import Frame, PiiAudit
 from db.models import Session as DbSession
 from db.session import get_sessionmaker
 from services.anonymize.anonymizer import get_anonymizer
+from services.api.tenancy import default_project_id
 from services.autolabel.ontology import get_ontology
 from services.ingest.manifest import write_manifest
 from services.ingest.quality import score_frame
@@ -58,6 +59,7 @@ async def ingest(
     mcap_uri: str | None,
     source_streams: list[str],
     anonymizer=None,
+    project_id=None,
 ) -> dict:
     settings = get_settings()
     store = get_object_store()
@@ -113,6 +115,9 @@ async def ingest(
                         raw_uri=raw_uri,
                         mcap_uri=mcap_uri,
                         ontology_version=onto.version,
+                        # Every session belongs to a project, so visibility rules (services/project_access.py)
+                        # cover it from the moment it exists. Ingest used to leave this empty.
+                        project_id=project_id or await default_project_id(db),
                     )
                     db.add(session_row)
                     await db.flush()

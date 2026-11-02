@@ -51,13 +51,13 @@ export default function ImportedPanel({ item, onClose }: { item: QueueItem; onCl
   return (
     <aside className="reveal w-80 shrink-0 border hairline rounded bg-panel flex flex-col max-h-[36rem]">
       <div className="flex items-center gap-2 px-3 py-2 border-b hairline">
-        <span className="font-mono text-[11px] uppercase text-ink-3">imported</span>
+        <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">imported</span>
         <button onClick={onClose} title="close"
-          className="ml-auto font-mono text-[11px] text-ink-3 hover:text-ink px-1">x</button>
+          className="ml-auto text-[12px] text-ink-3 hover:text-ink px-1">x</button>
       </div>
 
       <div className="p-3 space-y-3 overflow-y-auto">
-        <div className="font-mono text-[11px] text-ink break-all">{item.name}</div>
+        <div className="text-[12px] text-ink break-all">{item.name}</div>
 
         {preview?.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -65,7 +65,7 @@ export default function ImportedPanel({ item, onClose }: { item: QueueItem; onCl
         ) : (
           <div className={`w-full h-32 rounded border hairline ${loaded ? "" : "skeleton"}`}>
             {loaded && (
-              <div className="h-full flex items-center justify-center font-mono text-[10px] text-ink-3">
+              <div className="h-full flex items-center justify-center text-[11px] text-ink-3">
                 {/* An import with no frames is a real outcome, and saying so beats an endless placeholder. */}
                 no frame to preview
               </div>
@@ -73,7 +73,7 @@ export default function ImportedPanel({ item, onClose }: { item: QueueItem; onCl
           </div>
         )}
 
-        <dl className="grid grid-cols-2 gap-y-1 font-mono text-[10px]">
+        <dl className="grid grid-cols-2 gap-y-1 text-[11px]">
           <dt className="text-ink-3">frames</dt>
           <dd className="text-ink text-right">{loaded ? (preview?.frames ?? 0).toLocaleString() : "..."}</dd>
           <dt className="text-ink-3">objects</dt>
@@ -85,7 +85,7 @@ export default function ImportedPanel({ item, onClose }: { item: QueueItem; onCl
           <dd className="text-ink text-right">{loaded ? (preview?.done ?? 0).toLocaleString() : "..."}</dd>
         </dl>
 
-        {err && <div className="font-mono text-[10px] text-block">{err}</div>}
+        {err && <div className="text-[11px] text-block">{err}</div>}
       </div>
 
       <div className="border-t hairline p-2 flex items-center gap-2">
@@ -93,14 +93,14 @@ export default function ImportedPanel({ item, onClose }: { item: QueueItem; onCl
           <a href={`/frame/${item.frameId}`}
             // Deliberately a real navigation, and deliberately not the only control on the row. Leaving is
             // now a choice somebody makes on purpose rather than the default action on a finished clip.
-            className="font-mono text-[10px] border border-line rounded px-2 py-1 text-accent hover:border-accent">
+            className="text-[11px] border border-line rounded px-2 py-1 text-accent hover:border-accent">
             open in editor
           </a>
         ) : (
-          <span className="font-mono text-[10px] text-ink-3">nothing to open</span>
+          <span className="text-[11px] text-ink-3">nothing to open</span>
         )}
         <a href={`/annotations?session=${item.sessionId}`}
-          className="font-mono text-[10px] text-ink-3 hover:text-ink ml-auto">session -&gt;</a>
+          className="text-[11px] text-ink-3 hover:text-ink ml-auto">session -&gt;</a>
       </div>
     </aside>
   );

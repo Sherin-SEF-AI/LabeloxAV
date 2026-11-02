@@ -108,7 +108,7 @@ export default function TimeSeriesEditor({
   };
 
   if (!series.length) {
-    return <div className="p-4 font-mono text-[11px] text-ink-3">this asset carries no series data</div>;
+    return <div className="p-4 text-[12px] text-ink-3">this asset carries no series data</div>;
   }
 
   return (
@@ -132,7 +132,7 @@ export default function TimeSeriesEditor({
           onCreate(xToT(a), xToT(b));
         }}
         onMouseLeave={() => setDrag(null)} />
-      <div className="font-mono text-[11px] text-ink-3">
+      <div className="text-[12px] text-ink-3">
         {series.length} channels, {duration.toFixed(2)}s, {regions.length} segments
         {!activeLabel && " - pick a label, then brush a span"}
       </div>

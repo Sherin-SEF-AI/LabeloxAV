@@ -42,7 +42,7 @@ export default function LineageObjects({ fromName, toName, selectedId, onPick }:
 
   return (
     <div className="p-3 space-y-2">
-      <div className="font-mono text-[11px]">
+      <div className="text-[12px]">
         <span className="text-ink-3">{fromName}</span>
         <span className="text-ink-3"> &rarr; </span>
         <span className="text-block">{toName}</span>
@@ -50,14 +50,14 @@ export default function LineageObjects({ fromName, toName, selectedId, onPick }:
       {reason && <div className="text-xs text-ink-3 leading-relaxed">{reason}</div>}
 
       {err != null ? <LoadState error={err} /> : loading ? (
-        <div className="font-mono text-[11px] text-ink-3/60 animate-pulse py-6 text-center">loading objects...</div>
+        <div className="text-[12px] text-ink-3/60 animate-pulse py-6 text-center">loading objects...</div>
       ) : rows.length === 0 ? (
-        <div className="font-mono text-[11px] text-ink-3 py-6 text-center">
+        <div className="text-[12px] text-ink-3 py-6 text-center">
           Nothing still carries this class. The move has already been put right or reviewed.
         </div>
       ) : (
         <>
-          <div className="font-mono text-[10px] text-ink-3">
+          <div className="text-[11px] text-ink-3">
             {/* The count is stated because the grid is capped: a reviewer looking at 60 of 1,047 should
                 know that is what they are looking at. */}
             showing {rows.length} of {total.toLocaleString()} still carrying {toName}

@@ -95,7 +95,7 @@ export default function EventSearchPage() {
       <div className="p-4 space-y-3 max-w-6xl">
 
         {summary && (
-          <div className="flex flex-wrap gap-2 font-mono text-[11px]">
+          <div className="flex flex-wrap gap-2 text-[12px]">
             <Stat label="events" value={summary.total} />
             <Stat label="violations" value={summary.by_severity.violation ?? 0}
               tone={(summary.by_severity.violation ?? 0) > 0 ? "text-block" : undefined} />
@@ -107,10 +107,10 @@ export default function EventSearchPage() {
           </div>
         )}
 
-        <div className="panel px-3 py-2 space-y-2 font-mono text-[11px]">
+        <div className="panel px-3 py-2 space-y-2 text-[12px]">
           <div className="flex flex-wrap items-end gap-2">
             <Field label="kind">
-              <select className="input font-mono text-[11px]" value={kind}
+              <select className="input text-[12px]" value={kind}
                 onChange={(e) => setKind(e.target.value)}>
                 <option value="">any</option>
                 {/* A preset can set several kinds at once, and without an option carrying that exact value
@@ -123,14 +123,14 @@ export default function EventSearchPage() {
               </select>
             </Field>
             <Field label="severity">
-              <select className="input font-mono text-[11px]" value={severity}
+              <select className="input text-[12px]" value={severity}
                 onChange={(e) => setSeverity(e.target.value)}>
                 <option value="">any</option>
                 {(taxonomy?.severities ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </Field>
             <Field label="review state">
-              <select className="input font-mono text-[11px]" value={state}
+              <select className="input text-[12px]" value={state}
                 onChange={(e) => setState(e.target.value)}>
                 <option value="">any</option>
                 <option value="review">review</option>
@@ -139,7 +139,7 @@ export default function EventSearchPage() {
               </select>
             </Field>
             <Field label="city">
-              <select className="input font-mono text-[11px]" value={city}
+              <select className="input text-[12px]" value={city}
                 onChange={(e) => setCity(e.target.value)}>
                 <option value="">any</option>
                 {Object.keys(summary?.cities ?? {}).map((c) => <option key={c} value={c}>{c}</option>)}
@@ -152,7 +152,7 @@ export default function EventSearchPage() {
           <div className="flex flex-wrap items-end gap-2 border-t hairline pt-2">
             <span className="text-ink-3 uppercase text-[10px] pb-1.5">while</span>
             <Field label="another event">
-              <select className="input font-mono text-[11px]" value={withKind}
+              <select className="input text-[12px]" value={withKind}
                 onChange={(e) => setWithKind(e.target.value)}>
                 <option value="">nothing in particular</option>
                 {kinds.map((k) => <option key={k} value={k}>{k}</option>)}
@@ -160,7 +160,7 @@ export default function EventSearchPage() {
             </Field>
             {withKind === "signal_phase" && (
               <Field label="was showing">
-                <select className="input font-mono text-[11px]" value={withState}
+                <select className="input text-[12px]" value={withState}
                   onChange={(e) => setWithState(e.target.value)}>
                   <option value="">any colour</option>
                   {SIGNAL_STATES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
@@ -169,7 +169,7 @@ export default function EventSearchPage() {
             )}
             {withKind && (
               <Field label="within">
-                <select className="input font-mono text-[11px]" value={withinMs}
+                <select className="input text-[12px]" value={withinMs}
                   onChange={(e) => setWithinMs(Number(e.target.value))}>
                   <option value={0}>exactly overlapping</option>
                   <option value={1000}>1s either side</option>
@@ -191,7 +191,7 @@ export default function EventSearchPage() {
           <>
             {/* The question, in words. A row of dropdowns states a query; a sentence states what was
                 actually asked, which is what somebody reads before trusting a count of zero. */}
-            <div className="font-mono text-[11px] text-ink-2">
+            <div className="text-[12px] text-ink-2">
               asking:{" "}
               <span className="text-ink">
                 {kind ? kind.split(",").join(" or ") : "any event"}
@@ -203,20 +203,20 @@ export default function EventSearchPage() {
                 {withKind && withinMs ? ` (within ${withinMs / 1000}s)` : ""}
               </span>
             </div>
-            <div className="font-mono text-[11px] text-ink-3">
+            <div className="text-[12px] text-ink-3">
               {res.total} match{res.total === 1 ? "" : "es"}
               {res.returned < res.total ? `, showing the first ${res.returned} by confidence` : ""}
               {res.detail ? ` (${res.detail})` : ""}
             </div>
 
             {res.results.length === 0 ? (
-              <div className="panel px-3 py-6 font-mono text-[11px] text-ink-3 text-center">
+              <div className="panel px-3 py-6 text-[12px] text-ink-3 text-center">
                 Nothing matches. A conjunction that returns nothing is an answer: it means the corpus holds
                 no case of the two things happening together, which is worth knowing.
               </div>
             ) : (
               <div className="panel overflow-x-auto">
-                <table className="w-full font-mono text-[11px]">
+                <table className="w-full text-[12px]">
                   <thead className="text-ink-3 text-left">
                     <tr>
                       <th className="px-2 py-1">kind</th><th>severity</th><th>actor</th>
@@ -258,7 +258,7 @@ export default function EventSearchPage() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="font-mono text-[10px] uppercase text-ink-3">{label}</span>
+      <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</span>
       {children}
     </label>
   );

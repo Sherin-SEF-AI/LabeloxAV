@@ -100,7 +100,7 @@ export default function Onboarding() {
       <div className="panel w-[min(34rem,94vw)] p-5 space-y-4">
         <div className="flex items-start gap-3">
           <div className="flex-1">
-            <div className="font-mono text-[10px] uppercase text-ink-3">
+            <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">
               {t("onboarding.welcome")} · {step + 1} of {STEPS.length}
             </div>
             <h2 className="font-display font-bold text-[17px] text-ink mt-1">{s.title}</h2>
@@ -109,7 +109,7 @@ export default function Onboarding() {
               needs it is the one who cannot read the settings page. */}
           <select value={locale}
             onChange={(e) => setLocale(e.target.value as Locale)}
-            className="bg-bg border border-line px-1.5 py-0.5 font-mono text-[11px] text-ink-2">
+            className="bg-bg border border-line px-1.5 py-0.5 text-[12px] text-ink-2">
             {LOCALES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
           </select>
         </div>
@@ -123,17 +123,17 @@ export default function Onboarding() {
             ))}
           </div>
           <button onClick={dismiss}
-            className="ml-auto font-mono text-[11px] text-ink-3 hover:text-ink">
+            className="ml-auto text-[12px] text-ink-3 hover:text-ink">
             {t("onboarding.skip")}
           </button>
           {s.href && (
             <button onClick={() => { dismiss(); router.push(s.href!); }}
-              className="border border-line px-2 py-1 font-mono text-[11px] text-ink-2 hover:border-accent">
+              className="border border-line px-2 py-1 text-[12px] text-ink-2 hover:border-accent">
               {s.cta}
             </button>
           )}
           <button onClick={() => (last ? dismiss() : setStep((x) => x + 1))}
-            className="border border-accent px-3 py-1 font-mono text-[11px] text-accent hover:bg-accent/10">
+            className="border border-accent px-3 py-1 text-[12px] text-accent hover:bg-accent/10">
             {last ? t("onboarding.done") : t("onboarding.next")}
           </button>
         </div>
