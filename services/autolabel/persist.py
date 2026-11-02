@@ -44,16 +44,42 @@ def _mask_key(session_id, frame_id, object_id) -> str:
     return f"masks/{session_id}/{frame_id}/{object_id}.json"
 
 
+# States that only a person's verdict produces. An object in one of them carries a decision, whatever its source.
+_VERDICT_STATES = ("accepted", "rejected", "submitted")
+
+# A new detection this close to an object the re-run kept is the same object seen again, whatever class the
+# model gives it: a person who corrected the class is exactly the case where the model still says the old one.
+KEPT_OVERLAP_IOU = 0.6
+
+
+def _carries_a_decision():
+    """Machine rows a person has acted on. Not every human decision changes `source`: re-classing a track,
+    reverting a relabel and the backfill of a track relabel all leave the row "fused" or "propagated" with a
+    review row beside it, and a re-run that keyed on source alone deleted those corrections."""
+    from sqlalchemy import exists, or_
+
+    from db.models import Review
+
+    return or_(Object.state.in_(_VERDICT_STATES),
+               exists().where(Review.object_id == Object.object_id))
+
+
 async def _clear_machine_objects(db: AsyncSession, store: ObjectStore, frame: FrameMeta) -> None:
     """Idempotency: drop this frame's prior machine objects (and their mask blobs) before re-inserting,
-    so a re-run does not duplicate. Human-reviewed objects (source='human') are never touched."""
-    rows = (await db.execute(
-        select(Object.mask_uri).where(Object.frame_id == frame.frame_id, Object.source.in_(_MACHINE_SOURCES))
-    )).all()
+    so a re-run does not duplicate. Human work is never touched: source='human', and any machine row that
+    carries a person's decision (a review row or a verdict state)."""
+    clearable = (Object.frame_id == frame.frame_id) & Object.source.in_(_MACHINE_SOURCES) & ~_carries_a_decision()
+    rows = (await db.execute(select(Object.mask_uri).where(clearable))).all()
     for (mask_uri,) in rows:
         if mask_uri:
             store.remove(mask_uri)
-    await db.execute(delete(Object).where(Object.frame_id == frame.frame_id, Object.source.in_(_MACHINE_SOURCES)))
+    await db.execute(delete(Object).where(clearable))
+
+
+async def _kept_boxes(db: AsyncSession, frame: FrameMeta) -> list[list[float]]:
+    """Boxes of the objects a re-run left in place on this frame (human work, decisions, recall candidates)."""
+    rows = (await db.execute(select(Object.bbox).where(Object.frame_id == frame.frame_id))).scalars().all()
+    return [list(map(float, b)) for b in rows if b is not None and len(b) == 4]
 
 
 async def persist_frame_objects(
@@ -72,6 +98,15 @@ async def persist_frame_objects(
     # fresh-inference, re-detection -- can ever persist a boxed tree or barrier, by construction.
     onto = get_ontology()
     fused = [fo for fo in fused if onto.is_thing(fo.obj.class_id)]
+
+    # What survived the clear is a person's work. A detection on top of it is the same object again, and
+    # writing it would label that object twice, once as corrected and once as the model still sees it.
+    kept = await _kept_boxes(db, frame)
+    if kept and fused:
+        from core.accel.boxes import box_iou_matrix
+
+        iou = box_iou_matrix([fo.obj.bbox.as_list() for fo in fused], kept)
+        fused = [fo for fo, row in zip(fused, iou, strict=True) if row.max() < KEPT_OVERLAP_IOU]
 
     for fo in fused:
         obj = fo.obj

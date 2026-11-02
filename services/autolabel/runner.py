@@ -367,7 +367,7 @@ async def process_session(
 
 async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None,
                             on_progress: Callable[[int, int], Awaitable[None]] | None = None,
-                            only_unlabelled: bool = False) -> dict:
+                            only_unlabelled: bool = False, detector_weights: str | None = None) -> dict:
     """Full pipeline: detect + segment -> fuse -> calibrate -> gate -> (Path C VLM on the uncertain
     subset) -> persist objects.
 
@@ -392,12 +392,13 @@ async def autolabel_session(session_id: UUID, limit: int | None, vlm_client=None
     from core.gpu_slot import gpu_slot
 
     async with gpu_slot(f"autolabel:{session_id}", timeout_s=None):
-        return await _autolabel_session_locked(session_id, limit, vlm_client, on_progress, only_unlabelled)
+        return await _autolabel_session_locked(session_id, limit, vlm_client, on_progress, only_unlabelled,
+                                               detector_weights)
 
 
 async def _autolabel_session_locked(session_id: UUID, limit: int | None, vlm_client=None,
                                     on_progress: Callable[[int, int], Awaitable[None]] | None = None,
-                                    only_unlabelled: bool = False) -> dict:
+                                    only_unlabelled: bool = False, detector_weights: str | None = None) -> dict:
     """The pipeline itself, with the card already held. Never call this directly."""
     from services.autolabel.fusion import FusionEngine
     from services.autolabel.gate import gate_object, needs_vlm
@@ -452,9 +453,11 @@ async def _autolabel_session_locked(session_id: UUID, limit: int | None, vlm_cli
             auto_accept_enabled = (await get_state(db)).auto_accept_enabled
         except Exception:  # noqa: BLE001
             auto_accept_enabled = True
-        champion_weights = await resolve_detector_weights(db)
+        # A caller may name the weights for one run (a challenger that beat the champion on gold labels the
+        # corpus without being promoted); otherwise the registered champion serves.
+        champion_weights = detector_weights or await resolve_detector_weights(db)
         if champion_weights:
-            log.info("autolabel.champion_serving", weights=champion_weights)
+            log.info("autolabel.champion_serving", weights=champion_weights, override=bool(detector_weights))
 
         # The measured auto-accept thresholds for the model actually serving, resolved once here and passed
         # down. The gate is a pure function on a hot path and must not reach the database per object, and
