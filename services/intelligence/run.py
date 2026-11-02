@@ -6,12 +6,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from uuid import UUID
 
 import click
 from geoalchemy2 import Geometry
 from geoalchemy2.elements import WKTElement
-from sqlalchemy import cast, func, select
+from sqlalchemy import cast, delete, func, select
 
 from core.config import get_settings
 from core.logging import get_logger, setup_logging
@@ -20,10 +21,32 @@ from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
 from services.autolabel.track.tracker import track_camera_botsort
 from services.intelligence.events import detect_events
-from services.intelligence.tracking import Det, track_camera
+from services.intelligence.tracking import Det, TrackResult, track_camera
 from services.intelligence.trajectory import FrameCtx, build_trajectory
 
 log = get_logger("mine")
+
+
+def _tracks_from_rows(tracks: Sequence[Track], dets_by_cam: dict[str, list[Det]], objects_by_id: dict) -> list[TrackResult]:
+    """A session's stored tracks in the tracker's own shape, members ordered by time, for mining."""
+    members: dict = {}
+    cams: dict = {}
+    for cam, dets in dets_by_cam.items():
+        for d in dets:
+            members.setdefault(d.object_id, (cam, d))
+    by_track: dict = {}
+    for oid, (cam, d) in members.items():
+        tid = objects_by_id[oid].track_id
+        if tid is not None:
+            by_track.setdefault(tid, []).append(d)
+            cams[tid] = cam
+    out = []
+    for t in tracks:
+        ms = sorted(by_track.get(t.track_id, []), key=lambda d: d.ts_ns)
+        if ms:
+            out.append(TrackResult(track_id=t.track_id, cam_id=cams[t.track_id], class_id=t.class_id,
+                                   first_ts_ns=ms[0].ts_ns, last_ts_ns=ms[-1].ts_ns, members=ms))
+    return out
 
 
 async def mine_session(session_id: UUID) -> dict:
@@ -80,25 +103,35 @@ async def mine_session(session_id: UUID) -> dict:
             )
 
         backend = get_settings().intelligence.tracker.backend
-        all_tracks = []
+        all_tracks: list[TrackResult] = []
         assignment: dict = {}
         switches_by_track: dict = {}
-        for cam, dets in dets_by_cam.items():
-            if backend == "bot_sort":
-                a, tracks, sw = track_camera_botsort(dets)
-                switches_by_track.update(sw)
-            else:
-                a, tracks = track_camera(dets)
-            assignment.update(a)
-            all_tracks.extend(tracks)
+        existing = (await db.execute(select(Track).where(Track.session_id == session_id))).scalars().all()
+        reused = bool(existing)
+        if reused:
+            # Mined before: mine from the tracks it already has. Tracking again would leave the old tracks
+            # beside new ones, and replacing them would cascade away the track events people wrote on them,
+            # so neither is safe here. POST /tracks/retrack replaces a session's tracks, and says so.
+            all_tracks = _tracks_from_rows(existing, dets_by_cam, objects_by_id)
+        else:
+            for cam, dets in dets_by_cam.items():
+                if backend == "bot_sort":
+                    a, tracks, sw = track_camera_botsort(dets)
+                    switches_by_track.update(sw)
+                else:
+                    a, tracks = track_camera(dets)
+                assignment.update(a)
+                all_tracks.extend(tracks)
 
-        # Persist tracks, then point objects at them.
+        # Persist new tracks, then point objects at them. Reused tracks are already stored.
         trajs: dict[str, object] = {}
         track_class: dict[str, int] = {}
         for tr in all_tracks:
             tj = build_trajectory(tr, frame_ctx)
             trajs[str(tr.track_id)] = tj
             track_class[str(tr.track_id)] = tr.class_id
+            if reused:
+                continue
             sw = switches_by_track.get(str(tr.track_id))
             db.add(Track(track_id=tr.track_id, session_id=session_id, class_id=tr.class_id,
                          first_ts_ns=tr.first_ts_ns, last_ts_ns=tr.last_ts_ns,
@@ -108,6 +141,10 @@ async def mine_session(session_id: UUID) -> dict:
         await db.flush()
         for object_id, track_id in assignment.items():
             objects_by_id[object_id].track_id = track_id
+
+        # Scenarios are derived from the tracks and nothing refers to one, so a re-mine replaces them rather
+        # than adding a second copy of every event.
+        await db.execute(delete(Scenario).where(Scenario.session_id == session_id))
 
         scenarios = detect_events(all_tracks, trajs, frame_ctx, ego_series, onto)
 
@@ -127,6 +164,7 @@ async def mine_session(session_id: UUID) -> dict:
     summary = {
         "session_id": str(session_id),
         "tracks": len(all_tracks),
+        "tracks_reused": reused,
         "objects_tracked": len(assignment),
         "scenarios": len(scenarios),
         "by_type": by_type,

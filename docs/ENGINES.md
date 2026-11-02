@@ -31,11 +31,11 @@ change what those tests expect (the gated one refuses holes), so it stays until 
 `intelligence.tracker.backend`. The greedy IoU tracker (`services/intelligence/tracking.py::track_camera`)
 runs only if that setting is changed.
 
-Known follow-up, not done: `POST /mine` (`services/intelligence/run.py::mine_session`) tracks every
-non-rejected label, including interpolated and propagated ones, and does not remove tracks from an earlier
-run, while `POST /tracks/retrack` uses detections only and replaces the session's tracks. Making them agree
-means deleting tracks on a re-mine, and tracks carry events people wrote, so that change needs a decision,
-not a refactor.
+`POST /mine` (`services/intelligence/run.py::mine_session`) tracks a session the first time it is mined.
+Mined again, it reuses the tracks already stored rather than adding a second set beside them, because
+replacing tracks would cascade away the track events people wrote on them, and it replaces the session's
+scenarios instead of duplicating them. `POST /tracks/retrack` is the explicit way to replace a session's
+tracks, from detections only.
 
 3D tracking, cross-camera rig tracks and person re-identification are different jobs and stay separate.
 
