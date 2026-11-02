@@ -1,9 +1,12 @@
 """UI-triggered autolabel: run the Path A/B/C + fusion + gate sweep over a session from the UI as a
-background job, instead of `make label` in a terminal. Single-GPU discipline: refuse if a training job
-holds the GPU, and only one autolabel runs at a time.
+background job, instead of `make label` in a terminal.
 
-The sweep runs as an asyncio task in the API process (the simplest robust model on one box); it is GPU
-heavy, so the API is somewhat less responsive while it runs. A dedicated worker is the cloud seam.
+Who runs it depends on `jobs.autolabel_executor`:
+  "api"     an asyncio task in this process. Single-GPU discipline is enforced here, by refusing while a
+            training job holds the GPU or another auto-label is running.
+  "worker"  the row is queued and the GPU worker claims it. Nothing is refused for being busy: the worker
+            runs one job at a time and the queue is the discipline. This is the Docker deployment.
+Either way the job itself is `services/autolabel/jobs.run_autolabel_job`, read from its row.
 """
 
 from __future__ import annotations
@@ -14,11 +17,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config import get_settings
 from core.logging import get_logger
 from core.observability import spawn
 from db.models import AutolabelJob
 from db.models import Session as DbSession
-from db.session import get_sessionmaker
 from services.api.deps import AutolabelStartIn, db_session
 from services.training.gpu_lease import training_holds_gpu
 
@@ -29,52 +32,11 @@ router = APIRouter()
 def _job_dict(j: AutolabelJob) -> dict:
     return {
         "job_id": str(j.job_id), "session_id": str(j.session_id), "status": j.status,
+        "executor": (j.params or {}).get("executor", "api"), "attempts": j.attempts,
         "progress": j.progress, "counts": j.counts, "error": j.error,
         "created_at": j.created_at.isoformat() if j.created_at else None,
         "updated_at": j.updated_at.isoformat() if j.updated_at else None,
     }
-
-
-async def _bump(job_id, **fields) -> None:
-    async with get_sessionmaker()() as db:
-        j = await db.get(AutolabelJob, uuid.UUID(str(job_id)))
-        if j:
-            for k, v in fields.items():
-                setattr(j, k, v)
-            await db.commit()
-
-
-async def _run_guarded(job_id, session_id, limit, only_unlabelled: bool = False) -> None:
-    from services.autolabel.progress import ProgressBand
-    from services.autolabel.runner import autolabel_session
-    from services.job_control import JobCanceled, raise_if_canceled
-
-    await _bump(job_id, status="running", progress=0.05)
-    band = ProgressBand()
-
-    async def report(done: int, total: int) -> None:
-        # Rationed by the band: one write per percent, not one per frame. A five thousand frame session
-        # would otherwise commit five thousand times to move a bar a few pixels.
-        f = band.next_if_due(done, total)
-        if f is None:
-            return
-        # The same write asks whether the job is still wanted. A cancel that only set a column would leave
-        # this loop labelling for another twenty minutes on a GPU somebody has taken back.
-        async with get_sessionmaker()() as db:
-            await raise_if_canceled(db, AutolabelJob, uuid.UUID(str(job_id)), progress=f)
-
-    try:
-        result = await autolabel_session(session_id, limit, on_progress=report,
-                                         only_unlabelled=only_unlabelled)
-        await _bump(job_id, status="done", progress=1.0, counts=result)
-        log.info("autolabel.done", job_id=str(job_id), **{k: result[k] for k in result if k in ("n_frames", "n_objects")})
-    except JobCanceled:
-        # Not a failure. The row already says `canceled`; overwriting it with `error` would turn somebody's
-        # deliberate decision into a fault report.
-        log.info("autolabel.canceled", job_id=str(job_id))
-    except Exception as exc:  # noqa: BLE001
-        log.error("autolabel.failed", job_id=str(job_id), error=str(exc))
-        await _bump(job_id, status="error", error=str(exc))
 
 
 @router.post("/autolabel/start")
@@ -82,8 +44,11 @@ async def start(payload: AutolabelStartIn, db: AsyncSession = Depends(db_session
     # Both of these guard one thing: the single GPU in this box. A cloud-targeted job never touches it, it
     # is parked for a pod, so refusing to park one because a local job is busy turned a scheduling rule into
     # a queueing rule and made the cloud branch unreachable exactly when somebody would reach for it.
+    from services.autolabel.jobs import API, WORKER, job_params, queue_position, run_autolabel_job
+
+    executor = get_settings().jobs.autolabel_executor
     local = payload.compute_target != "cloud"
-    if local:
+    if local and executor == API:
         if await training_holds_gpu(db):
             raise HTTPException(503,
                                 "GPU reserved for a training job; autolabel is paused until it finishes")
@@ -100,7 +65,9 @@ async def start(payload: AutolabelStartIn, db: AsyncSession = Depends(db_session
     if await is_gated(db, uuid.UUID(payload.session_id)):
         raise HTTPException(409, "session failed inspector health checks; review it before auto-labeling")
     job_id = uuid.uuid4()
-    db.add(AutolabelJob(job_id=job_id, session_id=uuid.UUID(payload.session_id), status="pending"))
+    db.add(AutolabelJob(job_id=job_id, session_id=uuid.UUID(payload.session_id), status="pending",
+                        params=job_params(payload.limit, payload.only_unlabelled,
+                                          executor if local else "cloud")))
     await db.commit()
 
     if payload.compute_target == "cloud":
@@ -110,9 +77,14 @@ async def start(payload: AutolabelStartIn, db: AsyncSession = Depends(db_session
         await mark_queued_for_cloud(job_id, payload.session_id, payload.limit)
         return {"job_id": str(job_id), "status": "queued-cloud"}
 
-    spawn(_run_guarded(job_id, uuid.UUID(payload.session_id), payload.limit,
-                       payload.only_unlabelled), name="_run_guarded")
-    return {"job_id": str(job_id), "status": "pending"}
+    if executor == WORKER:
+        # Queued, not started: the GPU worker claims it. A queue position tells the person who pressed the
+        # button why nothing is moving yet, instead of a bar sitting at zero.
+        job = await db.get(AutolabelJob, job_id)
+        return {"job_id": str(job_id), "status": "pending", "executor": WORKER,
+                "queue_position": await queue_position(db, job) if job else None}
+    spawn(run_autolabel_job(job_id), name="run_autolabel_job")
+    return {"job_id": str(job_id), "status": "pending", "executor": API}
 
 
 @router.post("/autolabel/ego-masks/estimate")
@@ -163,4 +135,6 @@ async def status(job_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
     j = await db.get(AutolabelJob, job_id)
     if j is None:
         raise HTTPException(404, "autolabel job not found")
-    return _job_dict(j)
+    from services.autolabel.jobs import queue_position
+
+    return {**_job_dict(j), "queue_position": await queue_position(db, j)}

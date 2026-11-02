@@ -60,6 +60,17 @@ COPY pyproject.toml README.md LICENSE ./
 # The ml extra pins the cu128 wheels this base matches.
 RUN uv venv --python 3.11 && uv pip install --no-cache -e ".[ml]"
 COPY . .
-ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app PYTHONUNBUFFERED=1 LBX_ENV=production
+# The auto-label detector, open-vocabulary detector and segmenter, in the image rather than fetched on first
+# use. Their configured names are bare filenames, so Ultralytics downloads them into the working directory,
+# which is not a volume: every recreated container fetched about 600 MB again, and a lab network without
+# internet access could not label at all. Runs before LBX_ENV=production is set, because production settings
+# refuse to load without the deployment's secrets, which a build never has.
+RUN PYTHONPATH=/app .venv/bin/python scripts/download_models.py
+# Hugging Face models (the frame embedders) download on first use. Pointing their cache into the models
+# volume keeps them across container rebuilds.
+ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app PYTHONUNBUFFERED=1 LBX_ENV=production \
+    HF_HOME=/app/models/huggingface
 EXPOSE 8000
+# No HEALTHCHECK here: this image also runs the GPU worker, which serves no HTTP, and an image-level check
+# would mark it unhealthy forever. The API's check is on its compose service.
 CMD ["uvicorn", "services.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

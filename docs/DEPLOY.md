@@ -32,9 +32,13 @@ web 1.05 GB, database 794 MB). The API reported Postgres, Redis and MinIO health
 authentication refused a request without a token and accepted one with the generated admin token. The
 ~20 GB above is for the corpus and model weights on top of that.
 
-MinIO images come from quay.io. MinIO withdrew its Docker Hub repositories, so `minio/minio` no longer
-resolves and an install pinned to it fails at "Starting infrastructure" with `pull access denied`.
-`python scripts/check_images.py` checks that every image a fresh install pulls still resolves.
+MinIO is built from source (`docker/minio/Dockerfile`, pinned to the release the stack has always run).
+MinIO no longer publishes images: its Docker Hub repositories were withdrawn and quay.io refuses anonymous
+pulls, so an install that pulled one failed at "Starting infrastructure". The first install compiles it
+(about two minutes); later ones use the cached image. Backups no longer need MinIO's client image either:
+`make backup` and `make restore` mirror the bucket with `scripts/bucket_mirror.py`.
+`python scripts/check_images.py` checks that every image a fresh install still pulls resolves; CI runs it
+on every pull request.
 
 ---
 
@@ -61,24 +65,38 @@ deployment, with the reason buried in a config validator.
 
 ## Everyday operation
 
-The deployment is the base compose file plus the application overlay. `make` wraps the pair:
+The installer records which compose files and optional services this machine runs in `.env`
+(`COMPOSE_FILE` and `COMPOSE_PROFILES`), and Docker Compose reads both from there. So every command is plain
+`docker compose`, and it always means exactly what was installed, including the GPU overlay when Docker can
+use the GPU. `make` and the packaged `labeloxav` command use the same:
 
 ```bash
 make app-down     # stop, keeping all data
 make app-up       # start again
 make app-logs     # follow the API logs
+make doctor       # check the installation and say what to fix
 
 # the same thing without make
-docker compose -f docker-compose.yml -f docker-compose.app.yml up -d
+docker compose up -d
+docker compose ps
+./scripts/doctor.sh
 
 # stop and DESTROY the corpus, the object store, and every annotation
-docker compose -f docker-compose.yml -f docker-compose.app.yml down -v
+docker compose down -v
 ```
 
-Plain `docker compose up` uses only the base file and starts infrastructure alone, which is the development
-workflow: services in Docker, code on the host. That is why the application lives in an overlay rather than
-behind a profile: the overlay demands the deployment secrets, and requiring them in the base file would break
-every compose command for a developer who has none.
+On a development checkout there is no `COMPOSE_FILE` in `.env`, so plain `docker compose up` starts the
+infrastructure alone: services in Docker, code on the host. That is why the application lives in an overlay
+rather than behind a profile: the overlay demands the deployment secrets, and requiring them in the base file
+would break every compose command for a developer who has none.
+
+### When something is wrong
+
+`./scripts/doctor.sh` (or `labeloxav doctor`) checks the host (Docker, the GPU runtime, disk, memory, every
+configured port and who holds it, each container's state) and then the application from inside the API
+container (database and schema version, storage, event bus, torch and the GPU, model weights, and whether the
+GPU worker is running). Every problem it reports comes with the command or setting that fixes it. An
+administrator sees the same application checks in the web app.
 
 ### Signing in when the token is lost
 
@@ -91,19 +109,16 @@ make token                       # mints one for `admin`
 make token NAME=alice            # or for anyone else
 
 # the same thing without make, plus the two other modes
-docker compose -f docker-compose.yml -f docker-compose.app.yml exec api \
-  python -m scripts.mint_token --list
+docker compose exec api python -m scripts.mint_token --list
 
 # a token leaked: invalidate every one already issued to that user, then mint a fresh one
-docker compose -f docker-compose.yml -f docker-compose.app.yml exec api \
-  python -m scripts.mint_token --name admin --revoke-existing
+docker compose exec api python -m scripts.mint_token --name admin --revoke-existing
 ```
 
 ### Adding people
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.app.yml exec api \
-  python -m scripts.mint_token --name alice --role reviewer --create
+docker compose exec api python -m scripts.mint_token --name alice --role reviewer --create
 ```
 
 Roles are `annotator`, `reviewer`, `admin`, and a higher role satisfies any floor below it.
@@ -123,7 +138,12 @@ missing data rather than a misconfiguration:
 LBX_MINIO__PUBLIC_ENDPOINT=https://labelox.example.com/s3
 ```
 
-**TLS.** Nothing here terminates TLS, and the app is served over plain HTTP on ports 3000 and 8000. Put a
+**What listens where.** Only two ports face the network: the web app (`WEB_PORT`, default 3000) and MinIO's
+S3 port (`MINIO_PORT`), which presigned downloads use. Everything else, the API included, listens on this
+machine only (`127.0.0.1`): people and the SDK reach the API through the web app's `/api` proxy. Change
+`LBX_BIND_PUBLIC` / `LBX_BIND_LOCAL` in `.env` to bind differently.
+
+**TLS.** Nothing here terminates TLS, and the app is served over plain HTTP. Put a
 reverse proxy in front of it for anything beyond a trusted network: tokens live in browser storage and ride
 on every request, so an unencrypted hop is an exposed credential. If the proxy is nginx, keep
 `proxy_buffering off` on `/api/events/` or the server-sent event streams arrive in bursts instead of live
@@ -150,33 +170,53 @@ talks to the Next.js origin needs no CORS entry at all.
 
 ## What a default `up` starts
 
-The overlay brings up five things, in order: `migrate` (schema + ontology, one-shot), `pii-models` (fetches
-the face and plate detector weights, one-shot), then `api`, `web` and `govern-daemon`.
+The overlay brings up, in order: `migrate` (schema + ontology, one-shot) and `pii-models` (fetches the face
+and plate detector weights, one-shot), then `api`, `web`, `gpu-worker` and `govern-daemon`.
 
 The two one-shots are ordering, not decoration. `api` waits for both to complete, because an API that
 starts before the schema is migrated crash-loops, and an API that starts before the PII weights exist is an
-API that accepts an ingest it cannot redact - the anonymizer refuses to construct without them by design,
-so the first ingest on a fresh box used to fail until someone ran `make pii-models` by hand.
+API that accepts an ingest it cannot redact - the anonymizer refuses to construct without them by design.
+
+Every Python service runs one image, `labeloxav/app`, built from the Dockerfile's `gpu` target: CUDA 12.8,
+torch, Ultralytics, SAM and the embedding models, with the auto-label weights baked in so a lab without
+internet access can still label. The CUDA wheels run on the CPU when there is no GPU, so a CPU-only host uses
+the same image, more slowly.
+
+`gpu-worker` runs every queued GPU job one at a time: auto-label jobs first, since somebody is usually
+waiting on one, then training. The API only queues auto-label jobs (`LBX_JOBS__AUTOLABEL_EXECUTOR=worker`),
+so a job survives an API restart and the API stays responsive while the GPU works. On start the worker
+requeues whatever a crash left running; an auto-label job resumes, skipping frames already labelled, and a
+job that has crashed the worker three times is failed with a message saying so. Stopping the worker
+(`docker compose restart gpu-worker`) requeues its current job without counting that against it. It holds a
+Postgres advisory lock for its lifetime, so a second copy exits instead of sharing the card.
 
 `govern-daemon` is the loop's driver: it ticks the controller, which scans drift, gates a registered
 challenger and schedules an off-hours retrain. It holds a Postgres advisory lock, so a second copy exits
 cleanly instead of double-ticking, which is what makes `restart: unless-stopped` safe on it.
 
-## Workers and GPU
+## GPU and optional services
 
-Two workers are defined but profiled off, so a CPU-only host is never asked to pull the CUDA image:
+**GPU.** The NVIDIA device reservations live in `docker-compose.gpu.yml`. The installer adds it to
+`COMPOSE_FILE` only when Docker's NVIDIA runtime is present, because a reservation on a host without it stops
+compose from starting anything. Installed the NVIDIA Container Toolkit later? Append
+`:docker-compose.gpu.yml` to `COMPOSE_FILE` in `.env` and run `docker compose up -d`.
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.app.yml --profile workers up -d   # embed-worker
-docker compose -f docker-compose.yml -f docker-compose.app.yml --profile gpu     up -d   # train-worker
-```
+**Optional services.** Off by default, switched on by naming them in `COMPOSE_PROFILES` in `.env`
+(comma-separated), then `docker compose up -d`:
 
-`embed-worker` consumes `frame.ready` from Redpanda and embeds new frames, which is what keeps search,
-dedup and active-learning diversity current. `train-worker` builds from the `gpu` target and drains local
-training jobs; it needs the NVIDIA container toolkit on the host.
+| Profile   | Starts                | For                                                       |
+|-----------|-----------------------|-----------------------------------------------------------|
+| `workers` | `embed-worker`        | embedding new frames as they land: search, dedup, active-learning diversity |
+| `lakefs`  | lakeFS                | dataset branches and merge requests                       |
+| `viewer`  | Lichtblick            | the MCAP session viewer                                   |
+| `mlflow`  | MLflow                | experiment tracking                                       |
+| `extras`  | lakeFS, Lichtblick, MLflow | all three                                            |
 
-The scheduling model assumes one GPU: the training worker takes a Postgres advisory lock as a global mutex,
-so a second worker refuses to start rather than two runs contending for the same device.
+The vision-language reviewer (auto-label's third path) talks to Ollama, which is not part of the compose
+stack. Install it on the host; the containers reach it as `host.docker.internal:11434`. Ollama listens on
+127.0.0.1 by default, which a container cannot reach, so set `OLLAMA_HOST=0.0.0.0:11434` (or the Docker
+bridge address, usually `172.17.0.1:11434`, to keep it off the LAN) in its systemd service and restart it.
+Or turn the reviewer off with `LBX_MODELS__VLM__ENABLED=false` in `.env`. `doctor` reports which.
 
 ---
 

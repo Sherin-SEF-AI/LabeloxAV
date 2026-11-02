@@ -77,6 +77,22 @@ JOB_KINDS: tuple[JobKind, ...] = (
 )
 
 
+def job_kinds() -> tuple[JobKind, ...]:
+    """The kinds this deployment's sweep covers.
+
+    Auto-label drops out when the GPU worker runs it (`jobs.autolabel_executor == "worker"`), for the same
+    reason training is not here at all: the worker owns its rows. It requeues what its own crash left
+    `running`, with a crash count, and a sweep failing those rows first would turn a resumable job into a
+    lost one. Nor is there a deadlock to clear in that mode, because a queued start never refuses for an
+    existing `running` row.
+    """
+    from core.config import get_settings
+
+    if get_settings().jobs.autolabel_executor == "worker":
+        return tuple(k for k in JOB_KINDS if k.name != "autolabel")
+    return JOB_KINDS
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -111,7 +127,7 @@ async def reap_stale_jobs(db: AsyncSession, *, now: datetime | None = None) -> d
     """
     at = now or _now()
     reaped: dict[str, list[str]] = {}
-    for kind in JOB_KINDS:
+    for kind in job_kinds():
         rows = (await db.execute(
             select(kind.model).where(kind.model.status.in_(sweepable_statuses(kind))))).scalars().all()
         dead = [r for r in rows if is_stale(r, now=at)]

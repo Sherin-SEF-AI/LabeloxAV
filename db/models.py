@@ -1717,6 +1717,10 @@ class AutolabelJob(Base):
     progress: Mapped[float] = mapped_column(Float, default=0.0)
     counts: Mapped[dict] = mapped_column(JSONB, default=dict)  # frames, objects, by_state
     error: Mapped[str | None] = mapped_column(Text)
+    # What the job was asked to do (limit, only_unlabelled) and which process runs it (executor: api|worker),
+    # so a worker can claim it from the row and a crash can put it back in the queue (migration 0117).
+    params: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=sql_text("'{}'::jsonb"))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

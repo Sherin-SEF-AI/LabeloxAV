@@ -19,9 +19,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 ENV_FILE="${REPO_ROOT}/.env"
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.app.yml)
+# Plain `docker compose`: the files and optional services come from COMPOSE_FILE and COMPOSE_PROFILES, which
+# this script writes into .env below and Compose reads from there on every later command.
+COMPOSE=(docker compose)
 # The same command as a string, for the messages that tell an operator what to run next.
-COMPOSE_HINT="docker compose -f docker-compose.yml -f docker-compose.app.yml"
+COMPOSE_HINT="docker compose"
 
 # Colours only when attached to a terminal, so piping to a file or a log stays readable.
 if [ -t 1 ]; then
@@ -75,11 +77,77 @@ set_if_missing() {
   if grep -qE "^${key}=.+" "$ENV_FILE" 2>/dev/null; then
     return 0
   fi
+  # An intentionally empty setting (COMPOSE_PROFILES) is already present; do not append it again.
+  if [ -z "$val" ] && grep -qE "^${key}=$" "$ENV_FILE" 2>/dev/null; then
+    return 0
+  fi
   # drop an empty-valued line if present, then append
   if [ -f "$ENV_FILE" ]; then
     sed -i.bak "/^${key}=\$/d" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
   fi
   printf '%s=%s\n' "$key" "$val" >> "$ENV_FILE"
+}
+
+# Who holds a TCP port on this host: a container (by compose project, or name), another process, or nobody.
+# Docker is asked first because a container's published port shows up in `ss` as docker-proxy, which says
+# nothing about whose it is.
+port_owner() {
+  local port="$1" c
+  c="$(docker ps --filter "publish=${port}" --format '{{.Label "com.docker.compose.project"}}|{{.Names}}' | head -1)"
+  if [ -n "$c" ]; then
+    printf '%s\n' "$c"
+    return 0
+  fi
+  if command -v ss >/dev/null 2>&1 && [ -n "$(ss -ltnH "sport = :${port}" 2>/dev/null)" ]; then
+    printf '|another program on this host\n'
+    return 0
+  fi
+  if (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
+    printf '|another program on this host\n'
+  fi
+}
+
+# The compose project whose containers count as this install's own when a port is checked. Compose takes it
+# from the environment or from .env, so this does too.
+if [ -z "${COMPOSE_PROJECT_NAME:-}" ] && [ -f "$ENV_FILE" ]; then
+  COMPOSE_PROJECT_NAME="$(sed -n 's/^COMPOSE_PROJECT_NAME=\(.*\)$/\1/p' "$ENV_FILE" | tail -1)"
+fi
+
+# Ports already handed out in this run, so two services never get the same free port.
+CLAIMED_PORTS=" "
+
+# Pick a port for KEY: keep a configured one (and refuse if somebody else now holds it), otherwise take the
+# default if it is free or the next free port above it. Another stack on this box holding 5432, 6379, 8000 or
+# 9000 is common, and before this the install failed half way with a bind error naming neither the port's
+# owner nor the setting that moves it.
+pick_port() {
+  local key="$1" default="$2" current owner p
+  current="$(sed -n "s/^${key}=\(.*\)$/\1/p" "$ENV_FILE" 2>/dev/null | tail -1)"
+  if [ -n "$current" ]; then
+    owner="$(port_owner "$current")"
+    if [ -n "$owner" ] && [ "${owner%%|*}" != "${COMPOSE_PROJECT_NAME:-labeloxav}" ]; then
+      die "port ${current} (${key} in .env) is in use by ${owner#*|}.
+       Stop that, or give LabeloxAV a different port by editing ${key} in .env, then re-run."
+    fi
+    CLAIMED_PORTS="${CLAIMED_PORTS}${current} "
+    return 0
+  fi
+  p="$default"
+  while :; do
+    owner="$(port_owner "$p")"
+    # Already handed to another setting in this run. Checked over the owner, because the owner may be this
+    # deployment's own container, which would otherwise make the port look free for a second service too.
+    case "$CLAIMED_PORTS" in *" ${p} "*) owner="|${key%_PORT} sharing a port already given out above";; esac
+    if [ -z "$owner" ] || [ "${owner%%|*}" = "${COMPOSE_PROJECT_NAME:-labeloxav}" ]; then
+      break
+    fi
+    [ "$p" = "$default" ] && warn "port ${default} is in use by ${owner#*|}; looking for a free one for ${key}"
+    p=$((p + 1))
+    [ "$p" -gt $((default + 100)) ] && die "no free port near ${default} for ${key}. Set ${key} in .env and re-run."
+  done
+  [ "$p" != "$default" ] && ok "${key}=${p}"
+  CLAIMED_PORTS="${CLAIMED_PORTS}${p} "
+  set_if_missing "$key" "$p"
 }
 
 if [ -f "$ENV_FILE" ]; then
@@ -108,24 +176,24 @@ fi
 
 set_if_missing LBX_ENV                        production
 set_if_missing LBX_LOG_LEVEL                  INFO
-set_if_missing WEB_PORT                       "${WEB_PORT:-3000}"
-set_if_missing API_PORT                       "${API_PORT:-8000}"
+pick_port WEB_PORT                            "${WEB_PORT:-3000}"
+pick_port API_PORT                            "${API_PORT:-8000}"
 
 set_if_missing POSTGRES_USER                  labelox
 set_if_missing POSTGRES_PASSWORD              "$(gen_secret)"
 set_if_missing POSTGRES_DB                    labeloxav
-set_if_missing POSTGRES_PORT                  5432
+pick_port POSTGRES_PORT                       5432
 
 # The MinIO access key is a username, not a secret, but a generated one avoids the well-known default.
 set_if_missing MINIO_ROOT_USER                "lbx$(gen_secret | cut -c1-13)"
 set_if_missing MINIO_ROOT_PASSWORD            "$(gen_secret)"
 set_if_missing MINIO_BUCKET                   labeloxav
-set_if_missing MINIO_PORT                     9000
-set_if_missing MINIO_CONSOLE_PORT             9001
+pick_port MINIO_PORT                          9000
+pick_port MINIO_CONSOLE_PORT                  9001
 
-set_if_missing REDIS_PORT                     6379
-set_if_missing REDPANDA_PORT                  19092
-set_if_missing REDPANDA_ADMIN_PORT            9644
+pick_port REDIS_PORT                          6379
+pick_port REDPANDA_PORT                       19092
+pick_port REDPANDA_ADMIN_PORT                 9644
 
 set_if_missing LAKEFS_USER                    admin
 set_if_missing LAKEFS_ACCESS_KEY              AKIALABELOXAVKEY01
@@ -133,10 +201,35 @@ set_if_missing LAKEFS_SECRET_KEY              "$(gen_secret)"
 set_if_missing LAKEFS_ENCRYPT_SECRET          "$(gen_secret)"
 set_if_missing LAKEFS_PORT                    8001
 set_if_missing LICHTBLICK_PORT                8090
+set_if_missing MLFLOW_PORT                    5500
 
 set_if_missing LBX_AUTH__SIGNING_KEY                "$(gen_secret)"
 set_if_missing LBX_FORGYX__DEPLOY_SIGNING_KEY       "$(gen_secret)"
 set_if_missing LBX_PHASE4__GOVERN__ATTESTATION_KEY  "$(gen_secret)"
+
+# Which compose files and optional services this install runs. Docker Compose reads COMPOSE_FILE and
+# COMPOSE_PROFILES from .env itself, so a plain `docker compose up -d`, `make app-up` and the packaged
+# `labeloxav` command all start exactly what was installed, without anyone repeating -f flags.
+#
+# The GPU overlay is added only when Docker's NVIDIA runtime is present. Without the runtime a device
+# reservation stops compose from starting anything, so a CPU-only host gets the same images running on the
+# CPU instead: slower auto-labelling, everything else unchanged.
+if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q nvidia; then
+  set_if_missing COMPOSE_FILE "docker-compose.yml:docker-compose.app.yml:docker-compose.gpu.yml"
+  ok "NVIDIA container runtime found; models will run on the GPU"
+else
+  set_if_missing COMPOSE_FILE "docker-compose.yml:docker-compose.app.yml"
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    warn "this machine has an NVIDIA GPU but Docker cannot use it (no nvidia runtime). Models will run on
+       the CPU. Install the NVIDIA Container Toolkit, add docker-compose.gpu.yml to COMPOSE_FILE in .env,
+       and run: docker compose up -d"
+  else
+    warn "no GPU found; models will run on the CPU. Labelling works, auto-labelling is much slower."
+  fi
+fi
+# Optional services, empty by default: lakefs (dataset branches), viewer (MCAP viewer), mlflow (experiment
+# tracking), or extras for all three. Edit this line in .env and run `docker compose up -d` to add them.
+set_if_missing COMPOSE_PROFILES ""
 
 # Read the ports back so the messages at the end match what was actually configured.
 # shellcheck disable=SC1090
@@ -157,7 +250,7 @@ step "Building images (first run takes a few minutes)"
 ok "images built"
 
 step "Starting infrastructure"
-docker compose up -d postgres minio minio-init redis redpanda lakefs
+"${COMPOSE[@]}" up -d postgres minio redis redpanda
 ok "infrastructure starting"
 
 step "Checking the database accepts the configured credentials"
@@ -212,8 +305,10 @@ step "Applying the schema and seeding the ontology"
 ok "schema at head, ontology seeded"
 
 step "Starting the application"
-"${COMPOSE[@]}" up -d api web
-ok "api and web starting"
+# Everything else in the configured files and profiles: the API, the web app, the GPU worker, the governance
+# daemon, and any optional services named in COMPOSE_PROFILES.
+"${COMPOSE[@]}" up -d
+ok "api, web and GPU worker starting"
 
 # ---------------------------------------------------------------------------
 # 4. Wait for readiness
@@ -290,9 +385,10 @@ cat <<EOF
 
 ${G}${B}LabeloxAV is running.${N}
 
-  Web app     ${B}${web_url}${N}
-  API         ${api_url}
-  MinIO       http://localhost:${MINIO_CONSOLE_PORT}   (console)
+  Web app     ${B}${web_url}${N}   (open this from any machine on your network: http://<this-host>:${WEB_PORT})
+  API         ${api_url}   (this machine only; other machines use ${web_url}/api)
+  Storage     http://localhost:${MINIO_CONSOLE_PORT}   (MinIO console, this machine only)
+  Health      ./scripts/doctor.sh
 
 EOF
 

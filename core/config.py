@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import (
@@ -536,6 +537,19 @@ class M9Settings(BaseModel):
     safety_weight: float = 2.0        # scales the Safe-mIoU penalty for unsafe class confusions
     mask_iou_thresh: float = 0.5
     ece_bins: int = 10
+
+
+class JobsSettings(BaseModel):
+    # Who runs an auto-label job once the API has written its row.
+    #   "api": an asyncio task inside the API process. Fine for a developer running the API from a virtualenv
+    #     with the ML extras; it dies with the process and holds the API's event loop busy while it runs.
+    #   "worker": the API only queues the row and the GPU worker (python -m services.gpu_worker) claims it.
+    #     It survives an API restart, queues instead of refusing when the GPU is busy, and resumes a job its
+    #     own crash interrupted. The Docker deployment sets this.
+    autolabel_executor: Literal["api", "worker"] = "api"
+    # How many times a job orphaned by a worker crash goes back in the queue before it is failed. A job that
+    # kills its worker every time would otherwise take the GPU worker down in a loop.
+    max_attempts: int = 3
 
 
 class TrainingSettings(BaseModel):
@@ -1126,6 +1140,7 @@ class Settings(BaseSettings):
     spatial: SpatialSettings = SpatialSettings()  # Phase 3 calibration + map thresholds
     pii: PiiSettings = PiiSettings()
     m9: M9Settings = M9Settings()
+    jobs: JobsSettings = JobsSettings()        # who runs auto-label jobs: the API process or the GPU worker
     training: TrainingSettings = TrainingSettings()
     cloud: CloudSettings = CloudSettings()
     sim: SimSettings = SimSettings()

@@ -1,0 +1,22 @@
+# GPU access for the services that load models. Added by scripts/install.sh (through COMPOSE_FILE in .env)
+# only when Docker's NVIDIA runtime is present: a device reservation on a host without it makes compose
+# refuse to start any service, GPU or not.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.app.yml -f docker-compose.gpu.yml up -d
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+  api:
+    <<: *gpu
+  gpu-worker:
+    <<: *gpu
+  embed-worker:
+    <<: *gpu

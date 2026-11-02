@@ -74,21 +74,93 @@ class TestAFreshInstallCanIngest:
         assert scratch_mounts("api"), "the API would not see the weights that were fetched for it"
 
 
-class TestTheWorkersAreProfiledNotAbsent:
-    """A CPU-only host must not be asked to pull the CUDA image, but the workers still have to exist."""
+class TestTheModelsCanRunInTheDeployment:
+    """The deployment used to build every Python service from the slim `api` target, which has no torch and
+    no Ultralytics. Ingest then refused uploads for want of the plate detector, auto-label and embeddings
+    could not load a model, and the editor's SAM tools failed: the product could store frames and do little
+    else with them."""
 
-    def test_the_training_worker_is_defined_behind_the_gpu_profile(self):
-        svc = _services()["train-worker"]
-        assert svc["profiles"] == ["gpu"]
-        assert svc["build"]["target"] == "gpu"
+    PYTHON_SERVICES = ("migrate", "pii-models", "api", "govern-daemon", "embed-worker", "gpu-worker")
 
-    def test_the_embedding_worker_is_defined_behind_the_workers_profile(self):
+    def test_every_python_service_runs_the_ml_image(self):
+        services = _services()
+        for name in self.PYTHON_SERVICES:
+            assert services[name]["image"].startswith("labeloxav/app:"), name
+        assert services["migrate"]["build"]["target"] == "${LBX_IMAGE_TARGET:-gpu}"
+
+    def test_the_image_is_built_by_one_service_only(self):
+        """Without buildx, compose builds once per service that declares `build:`. Six parallel builds of one
+        7 GB image raced to tag it and the install failed with the tag missing."""
+        services = _services()
+        builders = [n for n in self.PYTHON_SERVICES if "build" in services[n]]
+        assert builders == ["migrate"]
+        for name in self.PYTHON_SERVICES:
+            if name != "migrate":
+                assert services[name]["pull_policy"] == "never", name
+
+    def test_the_gpu_worker_runs_by_default(self):
+        svc = _services()["gpu-worker"]
+        assert not svc.get("profiles"), "a queued job would wait forever on a default install"
+        assert svc["command"] == ["python", "-m", "services.gpu_worker"]
+        assert svc["restart"] == "unless-stopped"
+
+    def test_the_api_queues_auto_label_for_the_worker(self):
+        assert _services()["api"]["environment"]["LBX_JOBS__AUTOLABEL_EXECUTOR"] == "worker"
+
+    def test_the_old_training_only_worker_is_gone(self):
+        # It took the same lifetime lock, so beside the GPU worker one of the two would exit at once.
+        assert "train-worker" not in _services()
+
+    def test_the_embedding_worker_is_still_opt_in(self):
         assert _services()["embed-worker"]["profiles"] == ["workers"]
 
-    def test_neither_is_in_the_default_set(self):
-        # `docker compose up` on a laptop must stay CPU-sized.
-        for name in ("train-worker", "embed-worker"):
-            assert _services()[name].get("profiles"), f"{name} would start by default"
+
+class TestTheGpuIsAnOverlay:
+    """A device reservation on a host without Docker's NVIDIA runtime stops compose from starting anything,
+    so the reservations live in their own file, which the installer adds only when the runtime exists."""
+
+    def test_the_app_file_reserves_no_devices(self):
+        for name, svc in _services().items():
+            assert "deploy" not in svc, f"{name} reserves a device in the base app file"
+
+    def test_the_overlay_gives_the_gpu_to_the_model_services(self):
+        gpu = yaml.safe_load((REPO_ROOT / "docker-compose.gpu.yml").read_text())["services"]
+        for name in ("api", "gpu-worker"):
+            devices = gpu[name]["deploy"]["resources"]["reservations"]["devices"]
+            assert devices[0]["driver"] == "nvidia", name
+
+
+def _ports(compose: dict, service: str) -> list[str]:
+    return [str(p) for p in compose["services"][service].get("ports", [])]
+
+
+class TestOnlyTheRightPortsFaceTheNetwork:
+    """Redis, Redpanda and the API answered on every interface with no authentication of their own. On a
+    lab network, or a cloud VM without a firewall, that is the database's neighbours handing out writes."""
+
+    def test_infrastructure_listens_on_this_host_only(self):
+        infra = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        for svc in ("postgres", "redis", "redpanda", "lakefs", "mlflow", "lichtblick"):
+            for p in _ports(infra, svc):
+                assert p.startswith("${LBX_BIND_LOCAL:-127.0.0.1}:"), (svc, p)
+
+    def test_minio_serves_downloads_to_the_network_but_not_its_console(self):
+        infra = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        s3, console = _ports(infra, "minio")
+        assert s3.startswith("${LBX_BIND_PUBLIC:-0.0.0.0}:")
+        assert console.startswith("${LBX_BIND_LOCAL:-127.0.0.1}:")
+
+    def test_people_reach_the_web_app_and_the_api_only_through_it(self):
+        app = yaml.safe_load(APP_COMPOSE.read_text())
+        assert _ports(app, "web")[0].startswith("${LBX_BIND_PUBLIC:-0.0.0.0}:")
+        assert _ports(app, "api")[0].startswith("${LBX_BIND_LOCAL:-127.0.0.1}:")
+
+    def test_the_optional_services_are_opt_in(self):
+        infra = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())["services"]
+        for svc in ("lakefs", "mlflow", "lichtblick"):
+            assert "extras" in infra[svc].get("profiles", []), svc
+        for svc in ("postgres", "minio", "redis", "redpanda"):
+            assert not infra[svc].get("profiles"), svc
 
 
 class TestCorsIsConfigurable:
@@ -133,3 +205,41 @@ class TestCorsIsConfigurable:
             "CORS credentials are no longer conditioned on the origin list being specific")
         assert "*" in CorsSettings(origins="*").origin_list()
         assert "*" not in CorsSettings(origins="https://a.example.com").origin_list()
+
+
+class TestTheBucketNeedsNoExtraImage:
+    """MinIO stopped publishing its `mc` client image, which a one-shot service used only to create the
+    bucket. The app creates its own bucket in the migrate step instead."""
+
+    def test_no_service_runs_the_minio_client_image(self):
+        infra = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())["services"]
+        for name, svc in {**infra, **_services()}.items():
+            assert "minio/mc" not in str(svc.get("image", "")), name
+
+    def test_migrate_creates_the_bucket_once_storage_is_up(self):
+        svc = _services()["migrate"]
+        assert "scripts.ensure_bucket" in svc["command"]
+        assert svc["depends_on"]["minio"]["condition"] == "service_healthy"
+
+
+class TestMinioIsBuiltNotPulled:
+    """MinIO withdrew its Docker Hub images and quay.io now refuses anonymous pulls, so any MinIO image
+    named by registry fails on a machine without a cached copy. It is built from source instead."""
+
+    def test_the_server_is_built_from_the_pinned_source(self):
+        svc = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())["services"]["minio"]
+        assert svc["build"]["context"] == "./docker/minio"
+        assert svc["pull_policy"] == "build"
+        dockerfile = (REPO_ROOT / "docker" / "minio" / "Dockerfile").read_text()
+        release = svc["image"].split(":", 1)[1]
+        assert f"ARG MINIO_RELEASE={release}" in dockerfile, "the image tag and the built release must agree"
+
+    def test_nothing_pulls_a_minio_registry_image(self):
+        infra = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())["services"]
+        for name, svc in {**infra, **_services()}.items():
+            image = str(svc.get("image", ""))
+            assert not image.startswith(("quay.io/minio/", "minio/", "docker.io/minio/")), (name, image)
+
+    def test_the_healthcheck_needs_only_what_the_image_has(self):
+        svc = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())["services"]["minio"]
+        assert "mc " not in " ".join(svc["healthcheck"]["test"]) and "curl" in " ".join(svc["healthcheck"]["test"])

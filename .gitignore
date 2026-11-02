@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 .scratch/
 .env
+# The administrator token scripts/install.sh writes next to .env. A credential, like .env.
+.admin-token
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
