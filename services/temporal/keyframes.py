@@ -8,7 +8,7 @@ from uuid import UUID
 
 from db.models import Frame, Object
 from db.session import get_sessionmaker
-from services.temporal.interpolate import _keyframes, interpolate_track_keyframed
+from services.temporal.interpolate import _anchors, interpolate_track_keyframed
 
 
 async def mark_keyframe(object_id: UUID, value: bool = True) -> dict:
@@ -35,7 +35,7 @@ async def reinterpolate_segment(object_id: UUID, method: str = "linear") -> dict
         track_id = o.track_id
         frame = await db.get(Frame, o.frame_id)
         ts = frame.ts_ns
-        kf_ts = sorted(t for _, t in await _keyframes(db, track_id))
+        kf_ts = sorted(t for _, t in await _anchors(db, track_id, "keyframe"))
 
     lo = max([t for t in kf_ts if t < ts], default=None)
     hi = min([t for t in kf_ts if t > ts], default=None)

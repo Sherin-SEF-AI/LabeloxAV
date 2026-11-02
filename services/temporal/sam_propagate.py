@@ -23,70 +23,10 @@ from core.logging import get_logger
 from core.storage import get_object_store
 from db.models import Frame, Object, Track
 from db.session import get_sessionmaker
-from services.intelligence.propagate import _clip_box, _gray
+from services.temporal.flow import flow_track
+from services.temporal.flow import gray as _gray
 
 log = get_logger("sam_propagate")
-
-_LK = {"winSize": (21, 21), "maxLevel": 3,
-       "criteria": (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.03)}
-
-
-def flow_box(prev_gray: np.ndarray, cur_gray: np.ndarray, box: list[float]) -> list[float] | None:
-    """Move a box from prev_gray to cur_gray via LK optical flow on its interior features plus a RANSAC
-    similarity fit. None when it cannot be tracked (too small, too few features, no transform)."""
-    ph, pw = prev_gray.shape
-    ch, cw = cur_gray.shape
-    # Optical flow requires both frames to be the same size; a session with varying image dimensions (common
-    # in imported imagery) otherwise crashes calcOpticalFlowPyrLK. Track in the previous frame's space by
-    # resizing the current frame to match, then scale the result back to the current frame's real size.
-    if (ch, cw) != (ph, pw):
-        cur_gray = cv2.resize(cur_gray, (pw, ph))
-    h, w = ph, pw
-    x1, y1, x2, y2 = (int(v) for v in box)
-    if x2 - x1 < 4 or y2 - y1 < 4:
-        return None
-    roi = prev_gray[y1:y2, x1:x2]
-    pts = cv2.goodFeaturesToTrack(roi, maxCorners=60, qualityLevel=0.01, minDistance=4)
-    if pts is None or len(pts) < 4:
-        return None
-    pts = pts.reshape(-1, 2) + np.float32([x1, y1])
-    nxt, st, _ = cv2.calcOpticalFlowPyrLK(prev_gray, cur_gray, pts, None, **_LK)
-    st = st.reshape(-1).astype(bool)
-    if st.sum() < 4:
-        return None
-    m, _ = cv2.estimateAffinePartial2D(pts[st], nxt.reshape(-1, 2)[st], method=cv2.RANSAC)
-    if m is None:
-        return None
-    corners = np.float32([[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]]])
-    moved = cv2.transform(corners.reshape(-1, 1, 2), m).reshape(-1, 2)
-    nb = _clip_box([moved[:, 0].min(), moved[:, 1].min(), moved[:, 0].max(), moved[:, 1].max()], w, h)
-    if nb[2] - nb[0] < 4 or nb[3] - nb[1] < 4:
-        return None
-    # reject a blown-up or collapsed track (e.g. flow onto a featureless frame): a real object's box does not
-    # jump more than ~4x in area between adjacent frames.
-    old_area = max(1.0, (box[2] - box[0]) * (box[3] - box[1]))
-    if not (0.25 <= (nb[2] - nb[0]) * (nb[3] - nb[1]) / old_area <= 4.0):
-        return None
-    # nb is in the previous frame's space; scale it back to the current frame's real dimensions when they differ
-    if (ch, cw) != (ph, pw):
-        sx, sy = cw / pw, ch / ph
-        nb = [nb[0] * sx, nb[1] * sy, nb[2] * sx, nb[3] * sy]
-    return nb
-
-
-def flow_track(grays: list, box0: list[float]) -> list[list[float] | None]:
-    """Track a box across a sequence of gray frames (grays[0] is the anchor). Returns the propagated box for
-    each of grays[1:], stopping (the rest None) once tracking fails."""
-    out: list[list[float] | None] = []
-    box, prev = list(box0), grays[0]
-    for cur in grays[1:]:
-        nb = flow_box(prev, cur, box) if (prev is not None and cur is not None) else None
-        out.append(nb)
-        if nb is None:
-            break
-        box, prev = nb, cur
-    return out
-
 
 def _sam_refine(image_bgr, box: list[float]) -> tuple[list[float], list[list[float]]] | None:
     """Best-effort SAM box-prompt refinement: returns (tightened_box, polygons) or None if SAM yields nothing."""
@@ -126,15 +66,18 @@ async def sam_propagate_object(object_id: UUID, n_frames: int = 12, direction: s
         created: dict[str, list[str]] = {}
         for d in dirs:
             if d == "forward":
+                # The anchor's camera only; see services/intelligence/propagate.py.
                 frames = (await db.execute(select(Frame).where(
-                    Frame.session_id == anchor.session_id, Frame.ts_ns > anchor.ts_ns)
+                    Frame.session_id == anchor.session_id, Frame.cam_id == anchor.cam_id,
+                    Frame.ts_ns > anchor.ts_ns)
                     .order_by(Frame.ts_ns.asc()).limit(n_frames))).scalars().all()
             else:
                 # Backward: walk from the anchor to progressively earlier frames (nearest-first), so optical
                 # flow sees small step-to-step motion. Reversing to ascending order made the first flow step
                 # jump from the anchor all the way to the farthest frame, breaking the track.
                 frames = (await db.execute(select(Frame).where(
-                    Frame.session_id == anchor.session_id, Frame.ts_ns < anchor.ts_ns)
+                    Frame.session_id == anchor.session_id, Frame.cam_id == anchor.cam_id,
+                    Frame.ts_ns < anchor.ts_ns)
                     .order_by(Frame.ts_ns.desc()).limit(n_frames))).scalars().all()
             if not frames:
                 created[d] = []

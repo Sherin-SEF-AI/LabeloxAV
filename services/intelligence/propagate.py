@@ -18,8 +18,6 @@ from collections import Counter
 from uuid import UUID
 
 import click
-import cv2
-import numpy as np
 from sqlalchemy import select
 
 from core.config import get_settings
@@ -27,20 +25,14 @@ from core.logging import get_logger, setup_logging
 from core.storage import get_object_store
 from db.models import AgentRun, Frame, Object, Track
 from db.session import get_sessionmaker
+from services.temporal.flow import clip_box, flow_box, gray
 
 log = get_logger("propagate")
 
 
-def _gray(store, uri: str) -> np.ndarray | None:
-    img = cv2.imdecode(np.frombuffer(store.get_bytes(uri), np.uint8), cv2.IMREAD_COLOR)
-    return None if img is None else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-
-def _clip_box(b, w, h):
-    x1, y1, x2, y2 = b
-    x1, x2 = sorted((max(0.0, min(x1, w - 1)), max(0.0, min(x2, w - 1))))
-    y1, y2 = sorted((max(0.0, min(y1, h - 1)), max(0.0, min(y2, h - 1))))
-    return [x1, y1, x2, y2]
+# The flow step and its helpers live in services/temporal/flow.py; these names stay for existing importers.
+_gray = gray
+_clip_box = clip_box
 
 
 async def propagate_forward(object_id: UUID, n_frames: int = 12) -> dict:
@@ -54,7 +46,10 @@ async def propagate_forward(object_id: UUID, n_frames: int = 12) -> dict:
         nexts = (
             await db.execute(
                 select(Frame)
-                .where(Frame.session_id == frame.session_id, Frame.ts_ns > frame.ts_ns)
+                # The same camera only: in a multi-camera session the next frame by time is usually another
+                # camera's, and flow from one view into another walks the box onto something else.
+                .where(Frame.session_id == frame.session_id, Frame.cam_id == frame.cam_id,
+                       Frame.ts_ns > frame.ts_ns)
                 .order_by(Frame.ts_ns.asc())
                 .limit(n_frames)
             )
@@ -75,34 +70,14 @@ async def propagate_forward(object_id: UUID, n_frames: int = 12) -> dict:
         prev_gray = _gray(store, frame.img_uri)
         box = list(obj.bbox)
         created: list[str] = []
-        lk = dict(winSize=(21, 21), maxLevel=3,
-                  criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.03))
         for nf in nexts:
             cur_gray = _gray(store, nf.img_uri)
             if prev_gray is None or cur_gray is None:
                 break
-            h, w = cur_gray.shape
-            x1, y1, x2, y2 = (int(v) for v in box)
-            if x2 - x1 < 4 or y2 - y1 < 4:
+            moved = flow_box(prev_gray, cur_gray, box)
+            if moved is None:
                 break
-            roi = prev_gray[y1:y2, x1:x2]
-            pts = cv2.goodFeaturesToTrack(roi, maxCorners=60, qualityLevel=0.01, minDistance=4)
-            if pts is None or len(pts) < 4:
-                break
-            pts = pts.reshape(-1, 2) + np.float32([x1, y1])
-            nxt, st, _ = cv2.calcOpticalFlowPyrLK(prev_gray, cur_gray, pts, None, **lk)
-            st = st.reshape(-1).astype(bool)
-            if st.sum() < 4:
-                break
-            p0, p1 = pts[st], nxt.reshape(-1, 2)[st]
-            M, _ = cv2.estimateAffinePartial2D(p0, p1, method=cv2.RANSAC)
-            if M is None:
-                break
-            corners = np.float32([[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]]])
-            moved = cv2.transform(corners.reshape(-1, 1, 2), M).reshape(-1, 2)
-            box = _clip_box([moved[:, 0].min(), moved[:, 1].min(), moved[:, 0].max(), moved[:, 1].max()], w, h)
-            if box[2] - box[0] < 4 or box[3] - box[1] < 4:
-                break
+            box = moved
             o = Object(frame_id=nf.frame_id, track_id=track_id, class_id=obj.class_id,
                        bbox=[float(v) for v in box], conf=0.5, source="propagated", state="annotate",
                        provenance={"propagated_from": str(object_id), "method": "optical-flow"})
