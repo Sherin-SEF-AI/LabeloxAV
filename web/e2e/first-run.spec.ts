@@ -100,5 +100,5 @@ test("from the installer's sign-in link to an exported dataset", async ({ page }
 
   // Data, auto-label, review and export done; training a model is the one step left.
   expect(await stepsDone(page)).toBe(4);
-  await expect(page.getByText("Train a model")).toBeVisible();
+  await expect(page.getByRole("listitem").filter({ hasText: "Train a model" })).toBeVisible();
 });
