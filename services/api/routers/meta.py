@@ -144,9 +144,30 @@ async def retire_classes(class_ids: list[int], db: AsyncSession = Depends(db_ses
 
 
 @router.get("/ontology")
-async def ontology():
+async def ontology(frame_id: str | None = None, session_id: str | None = None, project_id: uuid.UUID | None = None,
+                   db: AsyncSession = Depends(db_session)):
+    """The whole ontology, and, given where the caller is working (a frame, a session or a project), the
+    classes that project labels: `active_class_ids`, or null for all of them. Every class stays in `classes`,
+    because objects already stored may carry one outside the set and still need a name and a colour."""
+    from services.project_classes import (
+        describe,
+        frame_class_ids,
+        project_class_ids,
+        session_class_ids,
+    )
+
     onto = get_ontology()
+    active: frozenset[int] | None = None
+    if frame_id:
+        active = await frame_class_ids(db, frame_id)
+    elif session_id:
+        active = await session_class_ids(db, session_id)
+    elif project_id:
+        active = await project_class_ids(db, project_id)
+    ids = sorted(active) if active is not None else None
     return {
+        "active_class_ids": ids,
+        "class_set": describe(ids)["class_set"],
         "version": onto.version,
         "hierarchy_levels": onto.hierarchy_levels,
         "attributes": {

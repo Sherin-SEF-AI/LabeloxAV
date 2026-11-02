@@ -2703,10 +2703,10 @@ class LabeloxClient:
         return self._call("POST", f"/api/ocr/run",
                           params={"session_id": session_id, "limit": limit}, json_body=None)
 
-    def get_ontology(self) -> Any:
+    def get_ontology(self, frame_id: Any | None = None, session_id: Any | None = None, project_id: Any | None = None) -> Any:
         """Ontology"""
         return self._call("GET", f"/api/ontology",
-                          params=None, json_body=None)
+                          params={"frame_id": frame_id, "session_id": session_id, "project_id": project_id}, json_body=None)
 
     def post_ontology_classes(self, body: Any = None) -> Any:
         """Create Class"""
@@ -2731,6 +2731,11 @@ class LabeloxClient:
     def post_ontology_merges_by_run_id_revert(self, run_id: str) -> Any:
         """Revert Merge Run"""
         return self._call("POST", f"/api/ontology/merges/{run_id}/revert",
+                          params=None, json_body=None)
+
+    def get_ontology_templates(self) -> Any:
+        """Class Templates"""
+        return self._call("GET", f"/api/ontology/templates",
                           params=None, json_body=None)
 
     def get_oraclyx_board(self) -> Any:
@@ -2822,6 +2827,11 @@ class LabeloxClient:
         """List Assets"""
         return self._call("GET", f"/api/projects/{project_id}/assets",
                           params={"state": state, "media_type": media_type, "limit": limit, "offset": offset}, json_body=None)
+
+    def put_projects_by_project_id_classes(self, project_id: str, body: Any = None) -> Any:
+        """Set Classes"""
+        return self._call("PUT", f"/api/projects/{project_id}/classes",
+                          params=None, json_body=body)
 
     def post_projects_by_project_id_label_config(self, project_id: str, body: Any = None) -> Any:
         """Set Label Config"""
@@ -3861,4 +3871,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 755 routes generated from the server schema.
+# 757 routes generated from the server schema.

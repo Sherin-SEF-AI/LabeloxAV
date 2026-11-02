@@ -274,7 +274,7 @@ export default function FrameEditor() {
       try {
         const [m, objs, o] = await Promise.all([
           api.frame(id, jobParam ?? undefined), api.frameObjects(id, jobParam ?? undefined),
-          api.ontology()]);
+          api.ontology(id)]);
         if (!live) return;
         setMeta(m);
         setOnto(o);
@@ -287,7 +287,8 @@ export default function FrameEditor() {
         }));
         dispatch({ t: "load", objects: eds, viewport: { scale: 0, ox: 0, oy: 0 }, selectedId: focus });
         const fc = (focus && eds.find((e) => e.id === focus)) || null;
-        setCurrentClass(fc ? o.classes.find((c) => c.id === fc.class_id) || o.classes[0] : o.classes[0]);
+        const offered = o.active_class_ids ? o.classes.filter((c) => o.active_class_ids!.includes(c.id)) : o.classes;
+        setCurrentClass(fc ? o.classes.find((c) => c.id === fc.class_id) || offered[0] : offered[0]);
         loadedRef.current = true;
       } catch (e) {
         if (live) setLoadError(humanizeError(e));
@@ -892,9 +893,16 @@ export default function FrameEditor() {
   // every selection for nothing.
   const selectedAtRef = useRef<number | null>(null);
   useEffect(() => { selectedAtRef.current = st.selectedId ? Date.now() : null; }, [st.selectedId]);
+  // The project's class set (services/project_classes.py): pickers offer only these. `onto` itself keeps every
+  // class, because an object already stored may carry one outside the set and still needs its name and l1.
+  const pickOnto = useMemo(() => {
+    if (!onto?.active_class_ids) return onto;
+    const active = new Set(onto.active_class_ids);
+    return { ...onto, classes: onto.classes.filter((c) => active.has(c.id)) };
+  }, [onto]);
   const editClasses = useMemo(
-    () => (onto ? onto.classes.filter((c) => c.name.includes(editSearch.toLowerCase().replace(/\s/g, "_"))) : []),
-    [onto, editSearch],
+    () => (pickOnto ? pickOnto.classes.filter((c) => c.name.includes(editSearch.toLowerCase().replace(/\s/g, "_"))) : []),
+    [pickOnto, editSearch],
   );
 
   // ---- interactive AI correction: a deliberate relabel / attribute change on an EXISTING object opens
@@ -934,7 +942,7 @@ export default function FrameEditor() {
     async (rawName: string) => {
       try {
         const cls = await api.addClass(rawName);
-        const o = await api.ontology();   // refresh so the new class shows in every picker
+        const o = await api.ontology(id);   // refresh so the new class shows in every picker
         setOnto(o);
         const full = o.classes.find((c) => c.id === cls.id) || cls;
         relabelSelected(full as OntologyClass);
@@ -1605,8 +1613,8 @@ export default function FrameEditor() {
       else if ((e.key === "Delete" || e.key === "Backspace") && st.selectedId) dispatch({ t: "delete", id: st.selectedId });
       else if (e.key === "[") gotoFrame(meta?.prev_frame_id ?? null);
       else if (e.key === "]") gotoFrame(meta?.next_frame_id ?? null);
-      else if (/^[1-9]$/.test(e.key) && onto) {
-        const c = onto.classes[parseInt(e.key, 10) - 1];
+      else if (/^[1-9]$/.test(e.key) && pickOnto) {
+        const c = pickOnto.classes[parseInt(e.key, 10) - 1];
         if (c) relabelSelected(c);
       }
     };
@@ -1614,7 +1622,7 @@ export default function FrameEditor() {
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onUp); };
-  }, [st.selectedId, selected, onto, meta, dispatch, save, fit, zoomBy, acceptCandidate, gotoFrame, confirmFrame,
+  }, [st.selectedId, selected, onto, pickOnto, meta, dispatch, save, fit, zoomBy, acceptCandidate, gotoFrame, confirmFrame,
       relabelSelected, finishKeypoints, mode, alItems, ridable, toggleHelmets, bumpOccupants]);
 
   if (loadError && (!meta || !onto)) return (
@@ -1877,7 +1885,7 @@ export default function FrameEditor() {
             return (
               <CanvasMenu
                 at={canvasMenuAt.at}
-                classes={onto.classes}
+                classes={pickOnto?.classes ?? onto.classes}
                 target={{
                   object: o && { id: o.id, class_name: o.class_name, locked: o.locked, visible: o.visible,
                                  isNew: o.isNew, track_id: o.track_id, state: o.state },
@@ -2298,7 +2306,7 @@ export default function FrameEditor() {
                   <select value={cubSelected.class_id}
                     onChange={(e) => { const cid = Number(e.target.value); patchCub(cubSelected.object_3d_id, { class_id: cid, class_name: onto?.classes.find((x) => x.id === cid)?.name }); saveCub(cubSelected.object_3d_id, { class_id: cid }); }}
                     className="w-full bg-bg border border-line px-1 py-0.5 text-ink">
-                    {onto?.classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {pickOnto?.classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                   {["L", "W", "H"].map((lab, i) => (
                     <label key={lab} className="flex items-center gap-2">
@@ -2400,7 +2408,7 @@ export default function FrameEditor() {
           )}
           {mode !== "lanes" && mode !== "lidar3d" && mode !== "review" && onto && meta && (
             <PropertiesPanel
-              frame={{ id, meta, onto, dirty, flash }}
+              frame={{ id, meta, onto: pickOnto ?? onto, dirty, flash }}
               editor={{ st, dispatch, selected }}
               risk={riskView}
               lint={lint}

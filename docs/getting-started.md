@@ -90,6 +90,13 @@ Any list the server returns leaves out rows that name a hidden session, frame, o
 pages that were never written with projects in mind. What is not scoped are aggregate numbers: the charts
 on analytics and similar overview pages still count across every project.
 
+## Which classes a project labels
+
+The ontology is shared, but each project chooses which of its classes it labels, in **Settings > Projects >
+Classes**: **Indian roads** (every class, the default), **Generic driving** (the road users found anywhere,
+without the Indian long tail), or a custom list. The editor offers only those classes and auto-labelling
+writes no others; labels already saved keep their class.
+
 ## First labelling run
 
 The home page's "Get started" checklist walks through this and ticks each step off from the data:

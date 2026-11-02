@@ -1272,6 +1272,8 @@ class LabelProject(Base):
     gold_id: Mapped[str | None] = mapped_column(String(128))   # the sealed gold set honeypots are drawn from
     # Who may see its sessions: "team" (everyone signed in) or "members" (its members and administrators).
     visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="team", server_default="team")
+    # The classes this project labels, as ontology ids; NULL is the whole ontology (services/project_classes.py).
+    class_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

@@ -20,6 +20,7 @@ from services.activity import record_activity
 from services.api.deps import current_user, db_session, require_role
 from services.api.project_guard import caller_hidden_projects
 from services.project_access import VISIBILITIES, as_hidden
+from services.project_classes import CUSTOM, TEMPLATES, describe, template_ids, validate
 
 router = APIRouter()
 
@@ -56,6 +57,7 @@ async def list_projects(db: AsyncSession = Depends(db_session), user=Depends(cur
     return {"projects": [
         {"project_id": str(p.project_id), "name": p.name, "description": p.description,
          "visibility": p.visibility or "team", "sessions": int(sessions.get(p.project_id, 0)),
+         **describe(p.class_ids),
          "members": int(members.get(p.project_id, 0)), "is_member": p.project_id in mine,
          "created_at": p.created_at.isoformat() if p.created_at else None}
         for p in rows if p.project_id not in hidden]}
@@ -148,6 +150,50 @@ async def remove_member(project_id: str, user_id: str, admin=Depends(require_rol
                               summary=f"removed {u.name if u else uid} from {p.name}")
     await db.commit()
     return {"project_id": str(p.project_id), "user_id": str(uid), "member": False}
+
+
+@router.get("/ontology/templates", dependencies=[Depends(require_role("annotator"))])
+async def class_templates():
+    """The ready-made class sets a project can start from, with the classes each holds."""
+    from services.autolabel.ontology import get_ontology
+
+    onto = get_ontology()
+    out = []
+    for name in TEMPLATES:
+        ids = template_ids(name)
+        out.append({"name": name, "class_ids": ids if ids is not None else sorted(c.id for c in onto.classes),
+                    "all": ids is None})
+    return {"templates": out}
+
+
+class ClassesIn(BaseModel):
+    template: str | None = None
+    class_ids: list[int] | None = Field(default=None, max_length=5000)
+
+
+@router.put("/projects/{project_id}/classes")
+async def set_classes(project_id: str, body: ClassesIn, admin=Depends(require_role("admin")),
+                      db: AsyncSession = Depends(db_session)):
+    """Choose what a project labels: a template by name, or a list of class ids. Objects already stored keep
+    their class; the editor and auto-labelling use the new set from the next frame on."""
+    p = await _project(db, project_id)
+    if (body.template is None) == (body.class_ids is None):
+        raise HTTPException(400, "give a template or a list of class ids, not both")
+    try:
+        if body.template is not None:
+            ids = template_ids(body.template)
+        else:
+            ids = validate(body.class_ids or [])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    p.class_ids = ids
+    d = describe(ids)
+    await record_activity(db, user=admin, verb="changed_classes", subject_type="project", commit=False,
+                          subject_id=str(p.project_id),
+                          summary=f"{p.name}: labels {d['class_count']} of {d['of']} classes"
+                                  + ("" if d["class_set"] == CUSTOM else f" ({d['class_set']})"))
+    await db.commit()
+    return {"project_id": str(p.project_id), "class_ids": ids, **d}
 
 
 class MoveIn(BaseModel):

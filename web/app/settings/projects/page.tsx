@@ -7,6 +7,7 @@ import PageShell from "@/components/shell/PageShell";
 import Icon from "@/components/shell/Icon";
 import LoadState from "@/components/shell/LoadState";
 import SessionSelect from "@/components/shell/SessionSelect";
+import ProjectClasses, { type ClassSet } from "@/components/settings/ProjectClasses";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { api, apiDelete, apiGet, apiPatch, apiPost, apiPut, humanizeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
@@ -20,6 +21,7 @@ import { useCurrentUser } from "@/lib/user";
 type Project = {
   project_id: string; name: string; description: string | null; visibility: "team" | "members";
   sessions: number; members: number; is_member: boolean;
+  class_set: ClassSet; class_count: number; of: number;
 };
 type Member = { user_id: string; name: string; role: string; added_at: string | null };
 type User = { user_id: string; name: string; role: string };
@@ -141,6 +143,9 @@ function ProjectDetail({ project, users, onChanged }: { project: Project; users:
                   onChange={(e) => setDescription(e.target.value)} onBlur={() => void saveDescription()}
                   placeholder="What this project holds, and who it is for" />
       </label>
+
+      <ProjectClasses projectId={project.project_id} projectName={project.name} classSet={project.class_set}
+                      classCount={project.class_count} of={project.of} onChanged={onChanged} />
 
       <LoadState loading={!members && !error} error={error} onRetry={() => void load()} />
 
