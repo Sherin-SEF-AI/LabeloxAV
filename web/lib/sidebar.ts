@@ -52,6 +52,8 @@ export const NAV: NavSection[] = [
         hint: "labelling projects, assignments and stages" },
       { key: "errors", label: "Label errors", href: "/quality/errors", icon: "flag",
         hint: "labels the models think are wrong, to confirm or dismiss" },
+      { key: "assistant", label: "Assistant", href: "/assistant", icon: "comment",
+        hint: "ask about the data in words; changes it proposes wait for a reviewer" },
     ],
   },
   {

@@ -63,7 +63,8 @@ export default function TrainingPage() {
   useEffect(() => {
     api.trainingTasks().then(setTasks).catch(() => {});
     apiGet<{ projects: typeof projects }>("/api/projects")
-      .then((r) => setProjects(r.projects.filter((p) => p.sessions > 0))).catch(() => {});
+      .then((r) => setProjects(r.projects.filter((p) => p.sessions > 0)))
+      .catch((e) => setErr(`Could not load projects, so training covers every project: ${humanizeError(e)}`));
     refresh();
   }, []);
   useEffect(() => { if (jobStream.data) refresh(); }, [jobStream.data]);

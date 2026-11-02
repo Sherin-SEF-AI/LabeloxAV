@@ -181,6 +181,18 @@ class GroqSettings(BaseModel):
     timeout_s: float = 30.0
 
 
+class AssistantSettings(BaseModel):
+    """The tool-calling assistant (services/assistant). Local by default: the conversation, the tool calls and
+    their results are text (counts, class names, ids), never an image, and with `ollama` none of it leaves
+    the machine. groq and anthropic reuse those providers' keys and endpoints."""
+    provider: str = "ollama"            # ollama | groq | anthropic
+    ollama_model: str = "qwen2.5:7b"    # a text model with tool calling; reached at models.vlm.ollama_url
+    groq_model: str = ""                # empty: groq.text_model
+    anthropic_model: str = "claude-sonnet-5-5"
+    max_steps: int = 6                  # tool rounds per message before it must answer
+    timeout_s: float = 90.0
+
+
 class AnthropicSettings(BaseModel):
     """Anthropic cloud inference (Messages API). Optional in exactly the way Groq is: an empty api_key means
     "not configured" and the router falls back to the local provider, so nothing here is a hard dependency.
@@ -1161,6 +1173,7 @@ class Settings(BaseSettings):
     anpr: AnprSettings = AnprSettings()        # ANPR-India (security domain; pack-gated on 'anpr')
     groq: GroqSettings = GroqSettings()        # optional Groq cloud inference (text + vision), ollama fallback
     anthropic: AnthropicSettings = AnthropicSettings()  # optional frontier judge (text + vision), same fallback
+    assistant: AssistantSettings = AssistantSettings()  # the tool-calling assistant; local unless configured
     billing: BillingSettings = BillingSettings()  # metered delivery pricing (0 by default; metering still records)
 
     @model_validator(mode="after")

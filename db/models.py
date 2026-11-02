@@ -3710,3 +3710,24 @@ class EdgeTelemetry(Base):
                                                  server_default=func.now(), index=True)
 
     __table_args__ = (Index("ix_edge_telemetry_artifact_time", "artifact_id", "created_at"),)
+
+
+class AssistantProposal(Base):
+    """A change the assistant proposed and a person approves or rejects (services/assistant, migration 0120)."""
+
+    __tablename__ = "assistant_proposal"
+
+    proposal_id: Mapped[uuid.UUID] = _uuid_pk()
+    tool: Mapped[str] = mapped_column(String(64), nullable=False)
+    args: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    preview: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
+    result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    request: Mapped[str | None] = mapped_column(Text, nullable=True)   # what the person asked, verbatim
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("ix_assistant_proposal_status", "status", "created_at"),)
