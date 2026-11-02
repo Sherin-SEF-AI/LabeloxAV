@@ -12,7 +12,9 @@ import { expect, test, type Page } from "@playwright/test";
 // It runs for minutes: the sample is fetched and imported, and auto-labelling waits for the GPU worker.
 
 const SIGNIN = process.env.LBX_E2E_SIGNIN_URL;
-const PASSWORD = "first-run-e2e-password-7731"; // gitleaks:allow (a throwaway install's admin, deleted after)
+// Random per run: the install is thrown away afterwards, and the password policy rightly refuses anything that
+// reads as a phrase (an earlier fixed one containing the word "password" was refused, which is the policy working).
+const PASSWORD = `lbx-${crypto.randomUUID()}`;
 
 test.describe.configure({ mode: "serial", timeout: 30 * 60_000 });
 test.skip(!SIGNIN, "set LBX_E2E_SIGNIN_URL (scripts/e2e_first_run.sh does) to run the first-run journey");
