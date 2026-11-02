@@ -176,3 +176,17 @@ run. All three are computed against a gold denominator of 302 objects on 157 fra
 emits 26 detections per frame. Until audit `445bdc59` is labelled, "the model is bad" and "the gold set
 never recorded most of what is there" fit the evidence equally well, and the audit is the only thing that
 separates them.
+
+## Is each assistive feature earning its place
+
+Added 2026-11-02. Every feature that changes what a person sees or does in the default path is measured
+against gold, and the measurement can be rerun from the product, not only read here.
+
+| Feature | Measured how | Result on this corpus |
+| --- | --- | --- |
+| Review queue order (`services/queue_order.py`; My queue > "Why this order?") | Machine labels on gold frames that overlap a gold object, marked right or wrong; share of the wrong ones a reviewer meets in the first 10/25/50% of the queue, and AP, against 200 random orders | One pool of **147 labels, 79% wrong** (the two newest gold sets share 150 of their frames, so they are one measurement, not two). The queue's formula finds **60%** of the wrong labels in the first half (random 50%), AP **0.90-0.94** against a random 95th percentile of 0.85. The active-learning value score: 57-59%, AP 0.88-0.90. Lowest confidence first: 53%, inside the random band. The formula stays the queue's order. |
+
+The 79% is its own finding: most machine labels a reviewer can check against gold are wrong, and 107 of the
+116 wrong ones have the wrong class (84 with a good box), which is the same naming failure item 9 above
+points at. A pool of 147 is small; the ranking between the formula and the AL score could move with more
+gold, the gap to random is the part that is solid.

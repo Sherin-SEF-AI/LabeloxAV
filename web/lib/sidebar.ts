@@ -43,7 +43,7 @@ export const NAV: NavSection[] = [
       { key: "home", label: "Home", href: "/", icon: "home",
         hint: "what is waiting, what is running, and where to start" },
       { key: "queue", label: "My queue", href: "/queue", icon: "target",
-        hint: "objects waiting for a decision, most valuable first" },
+        hint: "objects waiting for a decision, likeliest wrong first" },
       { key: "review", label: "Review", href: "/review/queue", icon: "check", match: ["/review"],
         hint: "auto-labels and likely mistakes waiting for a person",
         children: [{ label: "Queue", href: "/review/queue" }, { label: "Rapid review", href: "/review/rapid" },
