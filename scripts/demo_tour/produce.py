@@ -62,6 +62,7 @@ OUTRO_S = 12.0
 MIN_ZOOM, MAX_ZOOM = 1.2, 1.75
 ZOOM_AT, ZOOM_FOR = 1.2, 1.4   # seconds into the scene the move starts, and how long it takes
 CHROME_PX = 124                # app menu, breadcrumb and page title bar, which every page shares
+SIDEBAR_PX = 224               # the navigation column down the left of the app
 
 
 
@@ -341,6 +342,9 @@ def framing(sc: SceneClip) -> dict | None:
         hist = np.bincount((g // 4).ravel(), minlength=64)
         bg = int(hist.argmax()) * 4 + 2
         mask |= np.abs(g - bg) > 24
+    # The navigation sidebar is on nearly every page and always "content", so counting it pinned every
+    # region's left edge to the screen's and no page qualified for a zoom. Zooming past it is the point.
+    mask[:, :SIDEBAR_PX] = False
     if mask.sum() < 400:
         return None
     rows, cols = mask.sum(axis=1).astype(float), mask.sum(axis=0).astype(float)
@@ -722,7 +726,10 @@ def build() -> Path:
             f"[{{a}}]asplit=2[nar][key];"
             f"[mus][key]sidechaincompress=threshold=0.03:ratio=4:attack=40:release=900:knee=6[duck];"
             f"[nar][duck]amix=inputs=2:duration=first:normalize=0,"
-            f"loudnorm=I=-15:TP=-1.5:LRA=11[aout]")
+            # loudnorm's true-peak target is approximate in one pass and AAC overshoots it further; the
+            # Kokoro film measured -0.2 dBFS. A hard limiter after it holds the ceiling a platform re-encode
+            # needs to stay clean.
+            f"loudnorm=I=-15:TP=-1.5:LRA=11,alimiter=limit=0.79:level=false:attack=2:release=60[aout]")
     xfade_chain(top, [XF_CHAPTER] * (m - 1), final, final=True,
                 extra_inputs=["-i", str(bed), "-i", str(chapters_meta), "-map_metadata", str(m + 1)],
                 audio_tail=tail)

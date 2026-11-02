@@ -130,7 +130,7 @@ SCENES: list[Scene] = [
       live=[("move_text", "AI assist"), ("wait", 1500), ("move_text", "Mask edit"), ("wait", 1200),
             ("move_text", "3D box"), ("wait", 1200), ("move_text", "LAYERS"), ("wait", 1500),
             ("point", 600, 1040), ("wait", 1200)]),
-    S("lanes", "Labelling", "Lanes", "/annotate/lane/{dash_frame}",
+    S("lanes", "Labelling", "Lanes", "/annotate/lane/{frame_id}",
       "Lanes have their own view. Each lane line is typed, dashed, solid or double, and the ego lane is "
       "marked, because a lane change is only measurable against the lane you were in.",
       settle_s=4.0),
@@ -322,7 +322,7 @@ SCENES: list[Scene] = [
       "Projects group sessions for a client, a study or a partner. "
       "A project can be visible to the whole team or to its members only, and it carries its own class "
       "set: all {classes} Indian road classes, a generic driving set, or a custom list.",
-      settle_s=3.0, live=[("move_text", "Members only"), ("wait", 1500), ("move_text", "Indian roads"),
+      settle_s=3.0, live=[("move_text", "Who sees its sessions"), ("wait", 1500), ("move_text", "Indian roads"),
                           ("wait", 1200), ("move_text", "Generic driving"), ("wait", 1200)]),
     S("team", "Privacy and governance", "The team", "/settings/team",
       "Teammates are invited by link and choose their own password, with a role: annotator, reviewer or "

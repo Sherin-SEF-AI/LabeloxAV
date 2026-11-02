@@ -176,7 +176,9 @@ def outro_html(stills: list[Path], version: str, credit: str = "",
     <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
       <img class="a" src="file://{HERE}/logo-light.png" style="height:210px;animation:pop 1.1s .2s both">
       <div class="a display" style="animation:rise 1.0s .85s both;font-size:54px;font-weight:600;margin-top:40px;letter-spacing:-.01em">
-        Open source, Apache 2.0</div>
+        Open source</div>
+      <div class="a" style="animation:rise 1.0s 1.0s both;font-size:26px;margin-top:14px;opacity:.75">
+        Apache-2.0 code, AGPL-3.0 as installed with its model libraries</div>
       <div style="display:flex;flex-direction:column;gap:24px;margin-top:56px">
         {row("CODE", f'<span class="display" style="font-size:38px">github.com/Sherin-SEF-AI/<b style="color:{VIOLET_LIGHT};font-weight:600">LabeloxAV</b></span>', 1.35)}
         {row("INSTALL", f'<span class="mono" style="font-size:30px;padding:12px 22px;border-radius:12px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13)">sudo apt install ./labeloxav_{version}_all.deb</span>', 1.55)}
