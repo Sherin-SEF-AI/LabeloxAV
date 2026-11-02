@@ -67,6 +67,10 @@ class RedpandaSettings(BaseModel):
 
 class IngestSettings(BaseModel):
     target_fps: float = 3.0
+    # Read the date/speed/GNSS stamp a dashcam burns into its video into Frame.gnss and ego_speed, then build
+    # the session's ego poses (services/ingest/overlay_telemetry.py). Only runs on a session with no GNSS of
+    # its own, and gives up after a few frames on footage without a stamp.
+    overlay_telemetry: bool = True
     blur_threshold: float = 60.0
     # Upper bound on variance-of-Laplacian: a real image is sharp at hundreds to low thousands; random noise
     # (a corrupted/garbage frame) is tens of thousands. Above this the frame is rejected as noise, not kept
