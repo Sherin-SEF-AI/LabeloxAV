@@ -1,5 +1,6 @@
 "use client";
 
+import PackGate from "@/components/shell/PackGate";
 import { useCallback, useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
@@ -27,7 +28,7 @@ function when(ns: number): string {
   return new Date(ns / 1e6).toISOString().slice(0, 19).replace("T", " ");
 }
 
-export default function IncidentsPage() {
+function IncidentsPage() {
   const [incidents, setIncidents] = useState<SecurityIncident[]>([]);
   const [zones, setZones] = useState<CameraZone[]>([]);
   const [identities, setIdentities] = useState<PersonIdentityRow[]>([]);
@@ -248,5 +249,15 @@ export default function IncidentsPage() {
         )}
       </div>
     </PageShell>
+  );
+}
+
+// LabeloxSec is an optional package (settings.packs.optional on the server); without it these routes do not exist.
+export default function IncidentsPageRoute() {
+  return (
+    <PackGate pack="sec" title="Incidents"
+      what="LabeloxSec, for authorised security deployments: registration-plate reading, watchlists, zones and cross-camera re-identification">
+      <IncidentsPage />
+    </PackGate>
   );
 }

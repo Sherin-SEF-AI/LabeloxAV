@@ -1,5 +1,6 @@
 "use client";
 
+import PackGate from "@/components/shell/PackGate";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
@@ -49,7 +50,7 @@ function Stat({ label, value, hint }: { label: string; value: number | string; h
   );
 }
 
-export default function LabeloxSecPage() {
+function LabeloxSecPage() {
   // useSearchParams forces a client-side-render bailout, which Next requires be under a Suspense boundary or
   // the static prerender of this route fails the build. Match the pattern used by integrations and search.
   return <Suspense fallback={null}><LabeloxSecBody /></Suspense>;
@@ -377,5 +378,15 @@ function LabeloxSecBody() {
         </Section>
       </div>
     </PageShell>
+  );
+}
+
+// LabeloxSec is an optional package (settings.packs.optional on the server); without it these routes do not exist.
+export default function LabeloxSecPageRoute() {
+  return (
+    <PackGate pack="sec" title="Security console"
+      what="LabeloxSec, for authorised security deployments: registration-plate reading, watchlists, zones and cross-camera re-identification">
+      <LabeloxSecPage />
+    </PackGate>
   );
 }

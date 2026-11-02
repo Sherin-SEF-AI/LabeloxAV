@@ -664,10 +664,26 @@ app.include_router(reasoner.router, prefix="/api", tags=["reasoner"])
 app.include_router(edge.router, prefix="/api", tags=["edge"])
 app.include_router(experiments.router, prefix="/api", tags=["experiments"])
 app.include_router(op_eval.router, prefix="/api", tags=["eval"])
-app.include_router(secv2.router, prefix="/api", tags=["security"])
 app.include_router(identity_routes.router, prefix="/api", tags=["identity"])
 app.include_router(inbox.router, prefix="/api", tags=["inbox"])
-app.include_router(security.router, prefix="/api", tags=["security"])
 app.include_router(signs.router, prefix="/api", tags=["signs"])
+
+# Routes that belong to an optional pack, mounted only when the deployment enables that pack
+# (settings.packs.optional). LabeloxSec reads registration plates and follows people between cameras; on an
+# AV install those routes do not exist at all, rather than existing and refusing.
+OPTIONAL_PACK_ROUTERS = {"sec": [secv2.router, security.router]}
+
+
+def mount_optional_routers(target, enabled) -> list[str]:
+    mounted = []
+    for pack_id, routers in OPTIONAL_PACK_ROUTERS.items():
+        if pack_id in enabled:
+            for r in routers:
+                target.include_router(r, prefix="/api", tags=["security"])
+            mounted.append(pack_id)
+    return mounted
+
+
+mount_optional_routers(app, set(get_settings().packs.optional))
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])
 app.include_router(track_events.router, prefix="/api", tags=["tracks"])

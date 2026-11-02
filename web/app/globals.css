@@ -8,25 +8,26 @@
 
 html,
 body {
-  background: #1d1d1d;
-  color: #e6e6e6;
+  background: #121316;
+  color: #e8e9ec;
 }
 
-/* Blender-style surfaces: panels are a flat lighter grey with a 1px outline and moderate rounding. */
+/* Surfaces: a panel is one step up from the page, with a hairline and moderate rounding. Depth comes from the
+   surface steps (tailwind.config.ts), not from shadows or gradients. */
 .panel {
-  background: #2d2d2d;
-  border: 1px solid #3c3c3c;
-  border-radius: 4px;
+  background: #18191d;
+  border: 1px solid #2a2c32;
+  border-radius: 8px;
 }
 
 .hairline {
-  border-color: #3c3c3c;
+  border-color: #2a2c32;
 }
 
-/* Blender component layer: tool buttons, primary/toggle states, input fields, panel headers, tooltips.
-   Using classes (not per-page edits) so the whole app inherits the Blender look. */
+/* Component layer: buttons, inputs, panel headers, and the sidebar. Classes rather than per-page styling, so
+   every page inherits the same controls. */
 @layer components {
-  /* Tool button: subtle top-lit vertical gradient, darker border, rounded, brightens on hover. */
+  /* Button: flat, one step above the page, brightening on hover. */
   .btn {
     display: inline-flex;
     align-items: center;
@@ -34,78 +35,127 @@ body {
     gap: 6px;
     padding: 5px 10px;
     font-size: 12px;
+    font-weight: 500;
     line-height: 1;
-    color: #e6e6e6;
-    background: linear-gradient(#525252, #454545);
-    border: 1px solid #2b2b2b;
-    border-radius: 4px;
+    color: #e8e9ec;
+    background: #24262c;
+    border: 1px solid #31343b;
+    border-radius: 6px;
     white-space: nowrap;
-    transition: background 90ms linear, border-color 90ms linear;
+    transition: background-color 100ms ease, border-color 100ms ease, color 100ms ease;
   }
-  .btn:hover:not(:disabled) { background: linear-gradient(#5e5e5e, #515151); border-color: #262626; }
-  .btn:active:not(:disabled) { background: #3d3d3d; }
-  .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn:hover:not(:disabled) { background: #2c2f36; border-color: #3a3e46; }
+  .btn:active:not(:disabled) { background: #202227; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
 
-  /* Primary action: Blender blue gradient. */
+  /* Primary action: solid blue, white text at 4.8:1. */
   .btn-primary {
     color: #ffffff;
-    background: linear-gradient(#6f97d4, #5b86c7);
-    border-color: #2f5588;
+    background: #2f6fd6;
+    border-color: #2f6fd6;
   }
-  .btn-primary:hover:not(:disabled) { background: linear-gradient(#5f92d6, #5080c4); border-color: #365f97; }
-  .btn-primary:active:not(:disabled) { background: #3f66a0; }
+  .btn-primary:hover:not(:disabled) { background: #3a7ae0; border-color: #3a7ae0; }
+  .btn-primary:active:not(:disabled) { background: #2862c0; }
 
-  /* An engaged toggle reads as the blue selection state. */
+  /* An engaged toggle: tinted with the selection blue rather than filled, so it reads as state, not action. */
   .btn-on {
-    color: #ffffff;
-    background: linear-gradient(#6f97d4, #5b86c7);
-    border-color: #2f5588;
+    color: #cfe0fd;
+    background: rgba(95, 155, 245, 0.16);
+    border-color: rgba(95, 155, 245, 0.55);
   }
+  .btn-on:hover:not(:disabled) { background: rgba(95, 155, 245, 0.22); border-color: rgba(95, 155, 245, 0.7); }
 
-  /* Recessed input field. */
+  /* Input field: recessed below the page. */
   .field {
-    background: #161616;
-    border: 1px solid #333333;
-    border-radius: 4px;
-    color: #e6e6e6;
-    padding: 4px 8px;
+    background: #0d0e10;
+    border: 1px solid #2e3137;
+    border-radius: 6px;
+    color: #e8e9ec;
+    padding: 5px 9px;
     font-size: 12px;
     outline: none;
+    transition: border-color 100ms ease, box-shadow 100ms ease;
   }
-  .field:focus { border-color: #5b86c7; box-shadow: inset 0 0 0 1px rgba(91, 134, 199, 0.7); }
-  .field::placeholder { color: #6a6a6a; }
+  .field:hover { border-color: #383b42; }
+  .field:focus { border-color: #5f9bf5; box-shadow: 0 0 0 3px rgba(95, 155, 245, 0.18); }
+  .field::placeholder { color: #6c717a; }
 
-  /* Panel header strip: a raised bar that names a panel, like Blender's collapsible region headers. */
+  /* Panel header: names a panel. */
   .panel-head {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 10px;
-    background: #383838;
-    border-bottom: 1px solid #262626;
-    border-top-left-radius: 4px;
-    border-top-right-radius: 4px;
-    font-size: 11px;
-    color: #cfcfcf;
+    padding: 8px 12px;
+    background: #1c1d22;
+    border-bottom: 1px solid #2a2c32;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: #c9ccd2;
   }
+
+  /* Sidebar. */
+  .side-section {
+    padding: 0 10px;
+    margin-bottom: 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #8e939c;
+  }
+  .side-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #b4b8c0;
+    transition: background-color 100ms ease, color 100ms ease;
+  }
+  .side-item:hover { background: #1a1c20; color: #e8e9ec; }
+  .side-item-on, .side-item-on:hover { background: #1f2229; color: #e8e9ec; }
+  .side-sub {
+    display: flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 5px;
+    font-size: 12.5px;
+    color: #8e939c;
+    transition: background-color 100ms ease, color 100ms ease;
+  }
+  .side-sub:hover { color: #e8e9ec; background: #1a1c20; }
+  .side-sub-on, .side-sub-on:hover { color: #e8e9ec; background: #1a1c20; }
+  .side-icon-btn {
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    color: #8e939c;
+  }
+  .side-icon-btn:hover { background: #1a1c20; color: #e8e9ec; }
 }
 
-/* Blender selection blue. */
 ::selection {
-  background: rgba(91, 134, 199, 0.4);
+  background: rgba(95, 155, 245, 0.35);
 }
 
-/* Global control rounding: buttons, inputs, selects round like Blender by default. */
+/* Global control rounding. */
 button, input, select, textarea {
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
-/* Keyboard focus: the Blender blue ring. */
+/* Keyboard focus ring. */
 :focus-visible {
   /* 2px and opaque. A 1px ring at 80% opacity against #1d1d1d is legible on a large monitor and easy to
      lose on a laptop in daylight, which matters most for the keyboard-driven review loop where the ring is
      the only thing telling you where you are. */
-  outline: 2px solid #7ea9e0;
+  outline: 2px solid #86b4fa;
   outline-offset: 1px;
 }
 /* Row actions get a reachable target without the type getting bigger.
@@ -122,7 +172,7 @@ button:not(:disabled) {
   cursor: pointer;
 }
 
-/* Native tooltip helper: any element with data-tip shows a Blender-style tooltip on hover. Self-explanatory
+/* Native tooltip helper: any element with data-tip shows a tooltip on hover. Self-explanatory
    UI leans on these so every control says what it does. */
 [data-tip] {
   position: relative;
@@ -142,10 +192,10 @@ button:not(:disabled) {
   padding: 4px 8px;
   font-size: 11px;
   line-height: 1.3;
-  color: #e6e6e6;
-  background: #101010;
-  border: 1px solid #5b86c7;
-  border-radius: 4px;
+  color: #e8e9ec;
+  background: #0b0c0e;
+  border: 1px solid #31343b;
+  border-radius: 6px;
   white-space: nowrap;
   pointer-events: none;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
@@ -160,23 +210,23 @@ button:not(:disabled) {
   animation: confirm-flash 120ms steps(1, end);
 }
 
-/* Thin Blender-grey scrollbars. */
+/* Thin scrollbars. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #4a4a4a transparent;
+  scrollbar-color: #33363d transparent;
 }
 *::-webkit-scrollbar {
   width: 11px;
   height: 11px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #4a4a4a;
+  background: #33363d;
   border-radius: 6px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: #5a5a5a;
+  background: #40444c;
   background-clip: content-box;
 }
 
@@ -198,7 +248,7 @@ button:not(:disabled) {
   position: absolute;
   top: 0;
   height: 100%;
-  background: #5b87c9;
+  background: #5f9bf5;
   animation: lbx-progress 1.1s ease-in-out infinite;
 }
 
@@ -227,7 +277,7 @@ button:not(:disabled) {
   100% { background-position: 160% 0; }
 }
 .skeleton {
-  background: linear-gradient(90deg, #232323 25%, #333333 50%, #232323 75%);
+  background: linear-gradient(90deg, #1a1b1f 25%, #24262b 50%, #1a1b1f 75%);
   background-size: 220% 100%;
   animation: lbx-shimmer 1.3s ease-in-out infinite;
   border-radius: 3px;
@@ -242,7 +292,7 @@ button:not(:disabled) {
   width: 6px;
   height: 6px;
   border-radius: 9999px;
-  background: #5b87c9;
+  background: #5f9bf5;
   animation: lbx-pulse 0.9s ease-in-out infinite;
 }
 
@@ -260,7 +310,7 @@ button:not(:disabled) {
   border-radius: 9999px;
   flex-shrink: 0;
 }
-.pulse-dot--live { background: #5b87c9; animation: lbx-pulse 0.9s ease-in-out infinite; }
+.pulse-dot--live { background: #5f9bf5; animation: lbx-pulse 0.9s ease-in-out infinite; }
 .pulse-dot--good { background: #56D364; animation: lbx-pulse 1.6s ease-in-out infinite; }
 .pulse-dot--warn { background: #E3B341; animation: lbx-pulse 1.6s ease-in-out infinite; }
 .pulse-dot--bad  { background: #F85149; animation: lbx-pulse 1.2s ease-in-out infinite; }
@@ -289,8 +339,8 @@ button:not(:disabled) {
   animation: lbx-running 1.1s ease-in-out infinite;
 }
 @keyframes lbx-running {
-  0%, 100% { border-color: #3c3c3c; }
-  50%      { border-color: rgba(91, 135, 201, 0.6); }
+  0%, 100% { border-color: #2a2c32; }
+  50%      { border-color: rgba(95, 155, 245, 0.6); }
 }
 
 /* A progress fill that is visibly alive between updates.
@@ -331,8 +381,8 @@ button:not(:disabled) {
 }
 .lift:hover {
   transform: translateY(-2px);
-  border-color: rgba(91, 135, 201, 0.55);
-  box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(91, 134, 199, 0.12);
+  border-color: rgba(95, 155, 245, 0.45);
+  box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(95, 155, 245, 0.1);
 }
 
 /* Sheen: a one-pass light sweep across the primary call to action on hover. */
@@ -351,7 +401,7 @@ button:not(:disabled) {
 .rail::before {
   content: "";
   position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
-  background: var(--accent, #5b86c7);
+  background: var(--accent, #5f9bf5);
   transform: scaleY(0);
   transform-origin: center;
   transition: transform 160ms ease;
@@ -378,7 +428,7 @@ button:not(:disabled) {
    focus-visible, so it appears for keyboard navigation and not on every mouse click. The accent is the
    same one the active control uses, so focus reads as "this is live" rather than as a new visual language. */
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--accent, #2f7ad6);
+  outline: 2px solid var(--accent, #5f9bf5);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -396,7 +446,7 @@ button:not(:disabled) {
   left: 8px;
   top: 8px;
   padding: 8px 12px;
-  background: var(--bg, #1c1c1c);
-  border: 1px solid var(--accent, #2f7ad6);
+  background: var(--bg, #121316);
+  border: 1px solid var(--accent, #5f9bf5);
   color: inherit;
 }
