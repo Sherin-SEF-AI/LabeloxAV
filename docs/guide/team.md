@@ -27,8 +27,8 @@ its sessions, frames and labels everywhere: in lists, in search, and by direct l
 Set it up in **Settings > Projects**: create the project, make it members only, add its members, and move its
 sessions in. An upload or import can name its project; without one it goes to the default project.
 
-Two things are not scoped by project: aggregate charts (they count across all projects but name no item),
-and the corpus-wide engines in Labs, which are for administrators.
+The analytics charts count only the sessions you may see. The one thing not scoped by project is the
+corpus-wide engines in Labs, which are for administrators.
 
 ## What each project labels
 

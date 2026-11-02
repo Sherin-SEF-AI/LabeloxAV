@@ -197,3 +197,19 @@ def test_a_listing_that_does_not_scope_itself_still_leaves_hidden_rows_out(restr
 
         whole = c.get("/api/rows", headers=restricted["member"]).json()
         assert len(whole["frames"]) == 2 and len(whole["groups"][0]["items"]) == 2
+
+
+def test_analytics_count_only_what_the_caller_may_see(restricted):
+    """Aggregates name no item, but before this they counted members-only projects for everyone, so the
+    numbers still said what was in them."""
+    with _client() as c:
+        out = c.get("/api/analytics/overview", headers=restricted["outsider"]).json()
+        member = c.get("/api/analytics/overview", headers=restricted["member"]).json()
+        admin = c.get("/api/analytics/overview", headers=restricted["admin"]).json()
+        # The member and the outsider differ by exactly this project's one session and frame. An
+        # administrator sees at least as much (earlier tests leave other members-only projects behind).
+        assert member["sessions"] == out["sessions"] + 1 and member["frames"] == out["frames"] + 1
+        assert admin["sessions"] >= member["sessions"]
+        pii_out = c.get("/api/analytics/pii", headers=restricted["outsider"]).json()
+        pii_member = c.get("/api/analytics/pii", headers=restricted["member"]).json()
+        assert pii_member["total_frames"] == pii_out["total_frames"] + 1

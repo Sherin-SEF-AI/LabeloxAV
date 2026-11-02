@@ -5,13 +5,14 @@ or "members" (its members and administrators only). The rule is phrased as what 
 that keeps the common case free: when no project is members-only, or the caller is an administrator, nothing
 is hidden and no query changes.
 
-Enforced at three layers (see services/api/main.py):
+Enforced at four layers (see services/api/main.py):
   1. by id: any route with a session, frame, object or track id in its path or query answers 404 for an item
      in a project hidden from the caller. 404 rather than 403, so the response does not confirm it exists.
   2. in the listings a person browses, scoped in the query so totals and pages stay right: sessions, the
      home page, the command palette's search, the review and triage queues.
   3. under every other JSON response, a net that drops rows naming a hidden item (services/api/project_filter.py).
-Aggregates (analytics charts and the like) still count across projects; they name no item.
+  4. in the analytics charts, which count only visible sessions (services/analytics/dashboards.py).
+The corpus-wide engines in Labs still read across projects; they are for administrators.
 """
 
 from __future__ import annotations
