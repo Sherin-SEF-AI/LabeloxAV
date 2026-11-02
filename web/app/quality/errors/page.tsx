@@ -4,12 +4,14 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useRouter, useSearchParams } from "next/navigation";
 
 import PageShell from "@/components/shell/PageShell";
+import DetectorBenchmark from "@/components/quality/DetectorBenchmark";
 import { api, humanizeError } from "@/lib/api";
 import {
   cursorAfterRemoval, moveCursor, rangeBetween, targetIndices, toggle,
 } from "@/lib/gridSelection";
 import { toast } from "@/lib/toast";
 import type { ErrorCandidateRow } from "@/lib/types";
+import { useCurrentUser } from "@/lib/user";
 
 // Ruling on error candidates the way review rules on labels: many crops on screen, one keystroke each.
 //
@@ -44,6 +46,7 @@ export default function ErrorGridPage() {
 type Precision = Awaited<ReturnType<typeof api.errorPrecision>>;
 
 function ErrorGrid() {
+  const me = useCurrentUser();
   const params = useSearchParams();
   const router = useRouter();
   const kind = params.get("kind") || "";
@@ -194,6 +197,7 @@ function ErrorGrid() {
       subtitle={kind ? `${kind} · confirm or dismiss, one keystroke each` : "confirm or dismiss, one keystroke each"}
     >
       <div className="p-3 space-y-2">
+        {me?.role === "admin" && <DetectorBenchmark />}
         {/* The detector scoreboard. Shown above the grid because which detector you are judging is the
             decision that matters most, and because a detector nobody has ruled on should say so rather
             than showing an interval that looks like a bad score. */}
