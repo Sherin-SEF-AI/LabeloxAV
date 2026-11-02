@@ -518,3 +518,21 @@ class TestSubmittingTheJobMarksTheFrames:
                 BlindAuditFrame.audit_id == fx["audit_id"]))).scalars().all()
             assert all(r.labeled_at is not None for r in rows)
             assert (await db.get(BlindAudit, fx["audit_id"])).status == "labeling"
+
+
+class TestWaitingForPeople:
+    """Home names an audit nobody has labelled, so it does not sit seeded for months as the first one did."""
+
+    async def test_an_unlabelled_audit_is_on_the_home_page_until_its_frames_are_done(self):
+        from services.api.routers.home import _waiting_for_people
+
+        async with get_sessionmaker()() as db:
+            fx = await _fixture(db, with_human=False)
+            mine = [w for w in await _waiting_for_people(db) if w["audit_id"] == str(fx["audit_id"])]
+            assert len(mine) == 1
+            w = mine[0]
+            assert w["job_id"] == fx["res"]["job_id"] and w["n_labeled"] == 0 and w["n_frames"] > 0
+            assert uuid.UUID(w["frame_id"]) in set(fx["frames"].values())
+
+            await mark_frames_labeled(db, fx["audit_id"])
+            assert not [w for w in await _waiting_for_people(db) if w["audit_id"] == str(fx["audit_id"])]
