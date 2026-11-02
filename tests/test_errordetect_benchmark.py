@@ -41,6 +41,12 @@ def _seed(n_tracks_per_class: int = 8, frames_per_track: int = 5) -> str:
     rng = np.random.default_rng(3)
     centres = {c: rng.normal(size=768) * 4 for c in classes}
 
+    # Object ids that sort in creation order (random high bits, a counter below), so the benchmark, which
+    # orders by id, plants the same labels and cross-validates on the same folds every run. With plain random
+    # ids the planted sample changed run to run, and so did the recall.
+    base = uuid.uuid4().int >> 32 << 32
+    counter = iter(range(1, 1_000_000))
+
     async def _go():
         sid, ts = uuid.uuid4(), now_ns()
         async with get_sessionmaker()() as db:
@@ -62,7 +68,7 @@ def _seed(n_tracks_per_class: int = 8, frames_per_track: int = 5) -> str:
                                  last_ts_ns=ts + seconds_to_ns(frames_per_track)))
                     await db.flush()
                     for f, fid in enumerate(fids):
-                        oid = uuid.uuid4()
+                        oid = uuid.UUID(int=base + next(counter))
                         x = 20.0 * t + f
                         db.add(Object(object_id=oid, frame_id=fid, track_id=tid, class_id=c,
                                       bbox=[x, 10.0, x + 40, 50.0], conf=0.9, source="human", state="accepted",
