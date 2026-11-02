@@ -400,6 +400,13 @@ async def propose_export(ctx: Context, a: dict) -> dict:
 
 async def propose_training(ctx: Context, a: dict) -> dict:
     project = await _visible_project(ctx, a)
+    if project is None and not a.get("all_projects"):
+        # Training on everything is a real choice, not a default to fall into because a name was dropped: the
+        # model once proposed whole-corpus training and then told the person it was "on the default project".
+        n = len((await ctx.db.execute(select(LabelProject.project_id))).scalars().all())
+        if n > 1:
+            raise ToolError("name the project to train on (project_name, from list_projects), or set "
+                            "all_projects to true if the person asked for every project")
     classes = [c.name for c in (get_ontology().by_id(i) for i in _class_ids(a.get("class_names")))]
     epochs = max(1, min(int(a.get("epochs") or 20), 200))
     q = (select(func.count()).select_from(Object).join(Frame, Frame.frame_id == Object.frame_id)
@@ -444,9 +451,11 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("propose_export", "Propose exporting a dataset (formats such as coco, yolo, parquet), of one session or of "
          "everything. Creates a proposal; exports nothing.",
          _schema({"name": _STR, "formats": _STRS, "session_id": _STR}), "propose", propose_export),
-    Tool("propose_training", "Propose training a detector, optionally on one project (project_id or project_name) "
-         "and some classes. Creates a proposal; starts nothing. Never promotes the result.",
-         _schema({"project_id": _STR, "project_name": _STR, "class_names": _STRS, "epochs": {"type": "integer"}}),
+    Tool("propose_training", "Propose training a detector on one project (project_id or project_name), or on every "
+         "project with all_projects, optionally some classes. Creates a proposal; starts nothing. Never promotes the "
+         "result.",
+         _schema({"project_id": _STR, "project_name": _STR, "all_projects": {"type": "boolean"},
+                  "class_names": _STRS, "epochs": {"type": "integer"}}),
          "propose", propose_training),
     Tool("propose_reclassify", "Propose changing machine labels of some classes to another class, in one session "
          "or frame. Creates a proposal for a reviewer; changes nothing itself. Human labels are never changed.",
