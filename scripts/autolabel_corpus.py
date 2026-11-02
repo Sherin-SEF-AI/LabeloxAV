@@ -46,6 +46,44 @@ STAGES = ["detect", "lanes", "tracks", "gapfill", "attributes", "3d", "embedding
 PER_SESSION = {"detect", "lanes", "tracks", "attributes", "3d", "embeddings"}
 
 
+QUIET_EXIT = 3        # the child's exit code for "stopped at the start of quiet hours; resume after"
+QUIET_MARGIN_S = 300  # a unit must be expected to finish this long before quiet hours begin
+
+
+def _quiet_window(spec: str) -> tuple[int, int] | None:
+    """"10:00-18:00" as minutes after midnight, local time; empty means no quiet hours."""
+    if not spec:
+        return None
+    a, b = spec.split("-")
+    ha, ma = (int(x) for x in a.split(":"))
+    hb, mb = (int(x) for x in b.split(":"))
+    return ha * 60 + ma, hb * 60 + mb
+
+
+def _seconds_until_quiet(window: tuple[int, int] | None, now: float | None = None) -> float:
+    """Seconds from now to the next start of quiet hours (0 inside them); infinity with none set."""
+    if window is None:
+        return float("inf")
+    t = time.localtime(now if now is not None else time.time())
+    mins = t.tm_hour * 60 + t.tm_min + t.tm_sec / 60.0
+    start, end = window
+    if start <= mins < end:
+        return 0.0
+    return ((start - mins) % (24 * 60)) * 60.0
+
+
+def _seconds_until_allowed(window: tuple[int, int] | None, now: float | None = None) -> float:
+    """Seconds until quiet hours end (0 outside them)."""
+    if window is None:
+        return 0.0
+    t = time.localtime(now if now is not None else time.time())
+    mins = t.tm_hour * 60 + t.tm_min + t.tm_sec / 60.0
+    start, end = window
+    if start <= mins < end:
+        return (end - mins) * 60.0
+    return 0.0
+
+
 def _done(path: Path) -> set[tuple[str, str]]:
     if not path.exists():
         return set()
@@ -58,6 +96,35 @@ def _done(path: Path) -> set[tuple[str, str]]:
         if r.get("ok"):
             out.add((r["stage"], r.get("session") or "*"))
     return out
+
+
+def _expected_secs(path: Path, stage: str, default: float) -> float:
+    """The longest this stage has taken per unit so far, so a unit is not started that cannot finish in time."""
+    worst = 0.0
+    if path.exists():
+        for line in path.read_text().splitlines():
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if r.get("stage") == stage and r.get("secs"):
+                worst = max(worst, float(r["secs"]))
+    return worst or default
+
+
+def _unload_ollama() -> None:
+    """Free the vision-language model's memory now rather than in five minutes, so quiet hours start clean."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen("http://localhost:11434/api/ps", timeout=5) as r:
+            models = [m["name"] for m in json.loads(r.read()).get("models", [])]
+        for m in models:
+            req = urllib.request.Request("http://localhost:11434/api/generate", method="POST",
+                                         data=json.dumps({"model": m, "keep_alive": 0}).encode())
+            urllib.request.urlopen(req, timeout=30).read()
+    except Exception:  # noqa: BLE001 - Ollama not running is fine, there is nothing to unload
+        pass
 
 
 def _record(path: Path, **row) -> None:
@@ -209,6 +276,7 @@ async def main_async(a) -> int:
 
     setup_logging("warning")
     flag = Path(a.flag)
+    window = _quiet_window(a.quiet_hours)
     ckpt = Path(a.checkpoint)
     ckpt.parent.mkdir(parents=True, exist_ok=True)
     done = _done(ckpt)
@@ -234,6 +302,14 @@ async def main_async(a) -> int:
             key = unit[0] if unit else "*"
             if (st, key) in done:
                 continue
+            # Quiet hours: the machine is someone's during the working day. A unit that could not finish
+            # before they begin is not started; the parent waits them out and relaunches this.
+            need = _expected_secs(ckpt, st, 900.0) * 1.3 + QUIET_MARGIN_S
+            if _seconds_until_quiet(window) < need:
+                print(f"{st} {key}: quiet hours {a.quiet_hours} begin before this could finish; stopping "
+                      f"cleanly, resuming after them", flush=True)
+                _unload_ollama()
+                return QUIET_EXIT
             # The one place this waits on the machine: between sessions, where stopping is safe.
             if not wait_while_paused(flag, timeout_s=a.pause_timeout):
                 print(f"{st} {key}: resources stayed over their limits for {a.pause_timeout:.0f}s, stopping "
@@ -277,10 +353,30 @@ def main() -> int:
     ap.add_argument("--flag", default=".scratch/watch/PAUSE.json")
     ap.add_argument("--pause-timeout", type=float, default=1800.0)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--quiet-hours", default="", help='local "HH:MM-HH:MM" when nothing may run, e.g. 10:00-18:00')
+    ap.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     a = ap.parse_args()
     if "detect" in a.stages.split(",") and not a.weights and not a.dry_run:
         ap.error("--weights is required when the detect stage runs")
-    return asyncio.run(main_async(a))
+    if a.child or a.dry_run or not a.quiet_hours:
+        rc = asyncio.run(main_async(a))
+        if rc == 0:
+            _unload_ollama()
+        return rc
+    # The parent: imports nothing heavy and holds no GPU, so waiting out the working day costs nothing. Each
+    # run is a fresh child, which also hands every byte of GPU and host memory back when it stops.
+    import subprocess
+
+    window = _quiet_window(a.quiet_hours)
+    while True:
+        wait = _seconds_until_allowed(window)
+        if wait > 0:
+            print(f"quiet hours {a.quiet_hours}: waiting {wait / 3600:.1f} h until they end", flush=True)
+            time.sleep(wait + 30)
+            continue
+        rc = subprocess.run([sys.executable, __file__, *sys.argv[1:], "--child"]).returncode
+        if rc != QUIET_EXIT:
+            return rc
 
 
 if __name__ == "__main__":
