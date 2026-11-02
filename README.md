@@ -126,9 +126,13 @@ enforced by `lint-imports`; domain logic lives in swappable packs (`packs/av`, `
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+LabeloxAV's own source code is under the Apache License 2.0. See [LICENSE](LICENSE). Copyright 2026 Sherin
+Joseph Roy.
 
-Copyright 2026 Sherin Joseph Roy. You may use, modify and redistribute this software, including
-commercially, under the terms of that licence. The KITTI raw drives referenced in the documentation are
+The application as installed also runs AGPL-3.0 components: Ultralytics (the detector) and cleanlab (label
+error detection) in the same process, and MinIO as a separate service. That changes nothing for a team
+running it for itself. If you modify it and let people outside your team use it, they must be able to get
+your source. [docs/LICENSING.md](docs/LICENSING.md) covers each situation, and the app links its exact source
+from Settings > About. The KITTI raw drives referenced in the documentation are
 not part of this repository and carry their own licence (CC BY-NC-SA 3.0, KIT and Toyota Technological
 Institute).

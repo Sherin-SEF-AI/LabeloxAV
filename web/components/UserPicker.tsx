@@ -95,6 +95,7 @@ export default function UserPicker() {
               { href: "/settings/team", label: "Team", icon: "person", show: isAdmin },
               { href: "/settings/keys", label: "API keys", icon: "terminal", show: isAdmin },
               { href: "/settings", label: "Settings", icon: "gear", show: true },
+              { href: "/settings/about", label: "About & source", icon: "info", show: true },
             ].filter((i) => i.show).map((i) => (
               <Link key={i.href} href={i.href} role="menuitem" onClick={() => setOpen(false)}
                 className="flex items-center gap-2.5 px-3 py-1.5 text-[12.5px] text-ink-2 hover:bg-head hover:text-ink">

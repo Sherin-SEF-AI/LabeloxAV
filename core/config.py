@@ -181,6 +181,15 @@ class GroqSettings(BaseModel):
     timeout_s: float = 30.0
 
 
+class AboutSettings(BaseModel):
+    """What the app says about itself in Settings > About. `source_url` is where the people using this
+    deployment can get its source: the AGPL components (docs/LICENSING.md) require offering it to anyone who
+    uses a modified version over a network. A fork that changes the code points this at its own repository."""
+    source_url: str = "https://github.com/Sherin-SEF-AI/LabeloxAV"
+    # Whether this deployment runs modified code. Unmodified: the link names the exact upstream commit.
+    modified: bool = False
+
+
 class AssistantSettings(BaseModel):
     """The tool-calling assistant (services/assistant). Local by default: the conversation, the tool calls and
     their results are text (counts, class names, ids), never an image, and with `ollama` none of it leaves
@@ -1174,6 +1183,7 @@ class Settings(BaseSettings):
     groq: GroqSettings = GroqSettings()        # optional Groq cloud inference (text + vision), ollama fallback
     anthropic: AnthropicSettings = AnthropicSettings()  # optional frontier judge (text + vision), same fallback
     assistant: AssistantSettings = AssistantSettings()  # the tool-calling assistant; local unless configured
+    about: AboutSettings = AboutSettings()  # Settings > About: version, licences, where the source is
     billing: BillingSettings = BillingSettings()  # metered delivery pricing (0 by default; metering still records)
 
     @model_validator(mode="after")
