@@ -168,7 +168,7 @@ replace, which is the point.
 | 7 | Density calibration (`services/oraclyx/density_calibration.py`) | Worst-bucket ECE 0.00277 -> 0.00241; **33,600 predictions got `conf_calibrated`**, first ever written |
 | 8 | Reflection twins (`core/accel/reflection_twin.py`) | Built; hood-mask estimator rewritten to streaming Welford |
 | 9 | Hierarchical AP (`core/accel/hier_ap.py`) | leaf AP50 **0.072**, l1 **0.143**: half the apparent failure is naming, not finding |
-| 10 | Redact-then-verify text (`services/anonymize/text_regions.py`) | Built; needs `LBX_PII__TEXT_WEIGHTS` set and `make pii-models` |
+| 10 | Redact-then-verify text (`services/anonymize/text_regions.py`) | On by default since 2026-11-02 (OpenCV DB_TD500_resnet50, hash-checked; its old download URL had been a 404). On 150 stored frames with plates: text near the plate on 7, all blurred on the first pass, none escalated, **0 frames withheld**, 0.63 s per frame on CPU. A frame whose text survives both passes is now actually withheld at ingest; before, the flag was set and nothing read it |
 
 Three of these interlock and must be read together. Item 2 says most classes cannot be auto-accepted at
 any threshold; item 9 says half the model's apparent failure is naming rather than finding; item 1 has not

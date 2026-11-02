@@ -527,9 +527,13 @@ class PiiSettings(BaseModel):
     # The DB text detector that backs the "text" redaction target: the plate the plate detector missed.
     # Empty means not installed, and the anonymizer then refuses the frame rather than passing it, because
     # a privacy detector that quietly does nothing is worse than one that is absent.
-    text_weights: str = ""
-    text_url: str = ("https://github.com/opencv/opencv_extra/raw/master/testdata/dnn/"
-                     "onnx/models/DB_TD500_resnet50.onnx")
+    text_weights: str = ".scratch/models/pii/text_db_td500_resnet50.onnx"
+    # OpenCV's DB_TD500_resnet50 text detector. The URL OpenCV's own tutorial gives is a Google Drive link
+    # that needs a browser; this mirror serves the same file, and text_sha1 is the hash OpenCV publishes for
+    # it, so the download is checked rather than trusted. (The old opencv_extra URL had been a 404.)
+    text_url: str = ("https://github.com/cocoa-xu/evision-misc/releases/download/v20240216/"
+                     "text_detection_DB_TD500_resnet50.onnx")
+    text_sha1: str = "1b4dd21a6baa5e3523156776970895bd3db6960a"
     text_min_score: float = 0.3
     # Source for `make pii-models` to fetch a license-plate detector to plate_weights. Override with
     # LBX_PII__PLATE_URL if this mirror moves; an Ultralytics-loadable .pt is expected. Hugging Face now

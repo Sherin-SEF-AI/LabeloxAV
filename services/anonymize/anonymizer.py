@@ -33,6 +33,15 @@ class PiiResult:
     # otherwise assert it passed the PII gate.
     released: bool = True
     redaction_reason: str | None = None
+    # False when the pack declares the text target but its detector is not installed. That frame was not
+    # verified, which is reported (system checks, ingest totals), but it is not withheld: refusing every
+    # frame because a model file is missing would stop ingest outright.
+    text_detector_available: bool = True
+
+    @property
+    def withheld(self) -> bool:
+        """Text survived both blur passes: the frame must not be stored or served."""
+        return not self.released and self.text_detector_available
 
 
 class PiiAnonymizer:
@@ -126,7 +135,7 @@ class PiiAnonymizer:
 
         # Redact-then-verify. Blurring a region and calling the frame clean assumes the blur worked, and a
         # kernel sized for a large plate leaves a small one legible. This looks again at what it blurred.
-        released, text_reason, n_text = True, None, 0
+        released, text_reason, n_text, text_available = True, None, 0, True
         if any(t.detector == "text" for t in redaction_targets()):
             from services.anonymize.text_regions import redact_and_verify
 
@@ -137,6 +146,7 @@ class PiiAnonymizer:
             out = redact_and_verify(image_bgr, prior, detector=self._text_detector(),
                                     min_score=self.cfg.text_min_score)
             released, text_reason, n_text = out.released, out.reason, out.n_redacted
+            text_available = out.detector_available
             for r in out.detected:
                 if r.in_vehicle:
                     regions.append({"type": "text", "bbox": [round(v, 1) for v in r.bbox],
@@ -144,7 +154,8 @@ class PiiAnonymizer:
 
         return PiiResult(n_faces=counts.get("face", 0), n_plates=counts.get("plate", 0),
                          regions=regions, method_version=self.method_version,
-                         released=released, redaction_reason=text_reason, n_text=n_text)
+                         released=released, redaction_reason=text_reason, n_text=n_text,
+                         text_detector_available=text_available)
 
     def _text_detector(self):
         """Built once. An absent weights file is a refusal at redact time, not a silent pass."""

@@ -136,6 +136,15 @@ def main() -> None:
         log.info("pii.text_present", path=str(text_path))
     elif cfg.text_url:
         text_ok = _download(cfg.text_url, text_path)
+        if text_ok and cfg.text_sha1:
+            import hashlib
+
+            got = hashlib.sha1(text_path.read_bytes()).hexdigest()  # noqa: S324 - matches OpenCV's published hash
+            if got != cfg.text_sha1:
+                log.error("pii.text_hash_mismatch", expected=cfg.text_sha1, got=got,
+                          hint="the downloaded file is not OpenCV's model; it was removed, not used")
+                text_path.unlink()
+                text_ok = False
         if not text_ok:
             log.error("pii.text_download_failed", url=cfg.text_url,
                       hint=(f"drop an OpenCV DB text-detection ONNX at {text_path}; with the text target "

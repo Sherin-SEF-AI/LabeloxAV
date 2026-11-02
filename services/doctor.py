@@ -170,6 +170,19 @@ def check_weights() -> list[Check]:
     else:
         out.append(Check("Privacy blur models", WARN, "PII blurring is switched off (LBX_PII__ENABLED=false)",
                          "", group="models"))
+    if s.pii.enabled:
+        from services.domain import redaction_targets
+
+        if any(t.detector == "text" for t in redaction_targets()):
+            # Missing, the text pass cannot verify that a blurred plate is unreadable. Frames are still stored
+            # (refusing all of them would stop ingest), so this is the place that says they went unverified.
+            present = bool(s.pii.text_weights) and _weight_present(s.pii.text_weights)
+            out.append(Check("Plate text verification", OK if present else WARN,
+                             "text detector present: a plate that survives its blur is caught and the frame "
+                             "withheld" if present else
+                             f"text detector not installed ({s.pii.text_weights or 'unset'}): frames are blurred "
+                             "but not verified, so a plate the blur left readable is not caught",
+                             "" if present else "docker compose run --rm pii-models", group="models"))
     ov = s.models.openvocab
     auto = [s.models.yolo.weights, ov.detector_weights, ov.seg_weights]
     missing = [w for w in auto if not _weight_present(w)]
