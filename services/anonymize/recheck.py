@@ -32,7 +32,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.logging import get_logger
 from db.models import Frame, Object, OntologyClass, PiiAudit
 from services.anonymize.backfill import ROI_SUFFIX, StoreRefused, _audit_of, _put_with_backoff
-from services.anonymize.coverage import FACE_GROUPS, MARGIN, MIN_CROP_PX, PLATE_GROUPS, crop_window
+from services.anonymize.coverage import (
+    FACE_GROUPS,
+    MARGIN,
+    MIN_CROP_PX,
+    PLATE_GROUPS,
+    crop_window,
+    inside_fraction,
+)
 from services.quality.iaa import iou
 from services.recall.backends import load_image_bgr
 
@@ -78,13 +85,34 @@ _MAX_AREA_FRACTION = {"face": 0.5, "plate": 0.7}
 #     roughly a third of them not faces at all
 #   at 0.70, 24 candidates were faces with one or two exceptions, at the cost of 91 candidates becoming 24
 #
-# Plates were sampled the same way and needed nothing: at scores from 0.36 upward the boxes sat on real
-# registration plates, one of them legible ("KA01MG9647") on a frame whose whole-frame pass found none. So
-# the plate detector keeps its configured floor and only faces are held higher.
+# Plates were sampled the same way on a handful of frames and looked fine at the configured 0.35. A larger
+# measurement said otherwise once this pass started running on every auto-labelled frame: on 91 raw
+# DASHCAM-01 frames from 30 sessions, with every candidate region judged by eye, the window pass at 0.35
+# blurred 31 regions that were not plates (barricade lettering, bus route displays, railings, which inside
+# an upscaled vehicle crop look like plate rectangles), and on an elevated junction view it blurred the same
+# roadside railing frame after frame, which the floor alone does not stop (see the placement rule below).
+# Held at 0.55 it blurred 7, and the frame as a whole still lost only 2 of the 112 readable plates it covered
+# at 0.35 (107 to 105, two-line plates 14 of 17 either way). The whole-frame pass keeps the configured 0.35;
+# only detections this pass adds are held higher.
 #
 # Losing two thirds of the face candidates is the right side to err on. This blur is permanent, a face
 # missed today is still reachable by a later pass with better weights, and a face blurred in error is not.
-_ROI_MIN_SCORE = {"face": 0.70}
+_ROI_MIN_SCORE = {"face": 0.70, "plate": 0.55}
+
+# How much of a plate found inside a crop must lie on SOME annotated vehicle or person on the frame, rather
+# than merely inside the crop. The crop is margined because a plate straddles the edge of a tightly drawn
+# vehicle box, and the margin is also where the worst false plates come from: on an elevated junction view in
+# INDIA-CTC-01, every plate this pass found at 0.55 was the same roadside railing, sitting in a car's margin
+# and on no annotated thing at all, frame after frame.
+#
+# Any annotated box rather than the window's own vehicle, and people as well as vehicles. Tied to the
+# window's own vehicle, the rule lost a readable two-line plate on the 91 DASHCAM-01 frames: a scooter
+# annotated only as its rider, whose plate was found in the margin of the bus beside it. Anchored on any
+# vehicle or person, those frames keep all 105 readable plates and the railing hits on the six junction frames
+# go from 7 to 0. Half rather than any overlap, because touching a box let 4 of the 7 back in. The 7
+# non-plates the dashcam sample blurs at 0.55 are untouched: they are lettering and stickers on the vehicles
+# themselves, which no placement rule can tell from a plate.
+_PLATE_MIN_ON_ANNOTATION = 0.5
 
 # Overlap at which a candidate counts as already covered by an existing blurred region. Deliberately low:
 # a partial overlap with an existing blur usually means the same PII found again with slightly different
@@ -115,34 +143,51 @@ def _upscaled(crop: np.ndarray) -> tuple[np.ndarray, float]:
     return cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC), scale
 
 
-async def roi_windows(db: AsyncSession, frame_id: uuid.UUID, w: int, h: int,
-                      ) -> list[tuple[tuple[int, int, int, int], frozenset[str]]]:
-    """Crop windows for one frame, each with the detectors worth running inside it.
+async def _redaction_boxes(db: AsyncSession, frame_id: uuid.UUID) -> list[tuple[list[float], frozenset[str]]]:
+    """Every annotated box on the frame that implies a redaction, with the detectors it implies.
 
-    A three-wheeler carries both a rider's face and a plate, so a window can want more than one detector and
+    A three-wheeler carries both a rider's face and a plate, so a box can want more than one detector and
     the detectors are a set rather than a single kind.
     """
     rows = (await db.execute(
         select(Object.bbox, OntologyClass.l0, OntologyClass.l1)
         .join(OntologyClass, OntologyClass.id == Object.class_id)
         .where(Object.frame_id == frame_id))).all()
-    out: list[tuple[tuple[int, int, int, int], frozenset[str]]] = []
+    out: list[tuple[list[float], frozenset[str]]] = []
     for bbox, l0, l1 in rows:
-        if l0 != "object" or not bbox:
+        if l0 != "object" or not bbox or len(bbox) < 4:
             continue
         wants = {d for d, groups in (("face", _FACE_GROUPS), ("plate", _PLATE_GROUPS)) if l1 in groups}
-        if not wants:
-            continue
-        window = _crop_window(list(bbox), w, h)
-        if window is not None:
-            out.append((window, frozenset(wants)))
+        if wants:
+            out.append(([float(v) for v in bbox[:4]], frozenset(wants)))
     return out
+
+
+def _windows(boxes: list[tuple[list[float], frozenset[str]]], w: int, h: int,
+             ) -> list[tuple[tuple[int, int, int, int], frozenset[str]]]:
+    out: list[tuple[tuple[int, int, int, int], frozenset[str]]] = []
+    for bbox, wants in boxes:
+        window = _crop_window(bbox, w, h)
+        if window is not None:
+            out.append((window, wants))
+    return out
+
+
+async def roi_windows(db: AsyncSession, frame_id: uuid.UUID, w: int, h: int,
+                      ) -> list[tuple[tuple[int, int, int, int], frozenset[str]]]:
+    """Crop windows for one frame, each with the detectors worth running inside it."""
+    return _windows(await _redaction_boxes(db, frame_id), w, h)
 
 
 def _detect_in_windows(anonymizer, img: np.ndarray,
                        windows: list[tuple[tuple[int, int, int, int], frozenset[str]]],
-                       targets_by_detector: dict[str, str]) -> list[Candidate]:
-    """Run each window's detectors on its upscaled crop, mapped back to full-frame coordinates."""
+                       targets_by_detector: dict[str, str],
+                       anchors: list[list[float]] | None = None) -> list[Candidate]:
+    """Run each window's detectors on its upscaled crop, mapped back to full-frame coordinates.
+
+    `anchors` are the frame's annotated vehicle and person boxes. Given, a plate must lie on one of them
+    (`_PLATE_MIN_ON_ANNOTATION`); None skips that check, for a caller with no annotations to hold it to.
+    """
     detectors = {"face": anonymizer.face, "plate": anonymizer.plate}
     found: list[Candidate] = []
     for (cx1, cy1, cx2, cy2), wants in windows:
@@ -162,6 +207,9 @@ def _detect_in_windows(anonymizer, img: np.ndarray,
                 fx2, fy2 = cx1 + x2 / scale, cy1 + y2 / scale
                 area = max(0.0, fx2 - fx1) * max(0.0, fy2 - fy1)
                 if crop_area > 0 and area / crop_area > _MAX_AREA_FRACTION.get(kind, 0.7):
+                    continue
+                if kind == "plate" and anchors is not None and not any(
+                        inside_fraction((fx1, fy1, fx2, fy2), a) >= _PLATE_MIN_ON_ANNOTATION for a in anchors):
                     continue
                 found.append(Candidate(type=target_name,
                                        bbox=[round(fx1, 1), round(fy1, 1), round(fx2, 1), round(fy2, 1)],
@@ -232,8 +280,10 @@ async def recheck_frame(db: AsyncSession, store, anonymizer, frame: Frame, *, ap
                                         bbox=[round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1)],
                                         score=round(float(score), 3), where="frame"))
 
-    windows = await roi_windows(db, frame.frame_id, w, h)
-    candidates.extend(_detect_in_windows(anonymizer, img, windows, targets_by_detector))
+    boxes = await _redaction_boxes(db, frame.frame_id)
+    windows = _windows(boxes, w, h)
+    candidates.extend(_detect_in_windows(anonymizer, img, windows, targets_by_detector,
+                                         anchors=[b for b, _wants in boxes]))
 
     fresh = new_regions(_dedup(candidates), prior_regions)
     counts = {"face": 0, "plate": 0}

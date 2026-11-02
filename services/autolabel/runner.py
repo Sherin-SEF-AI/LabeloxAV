@@ -49,6 +49,35 @@ class FrameDetections:
     dets_b: list[RawDetection] = field(default_factory=list)
 
 
+async def _recheck_frame_pii(db, store, fd, totals: dict) -> None:
+    """Re-check this frame's redaction inside the vehicles and people just written, and blur what was missed.
+
+    Ingest blurs faces and plates on the whole frame, where a plate that is small at 1920 wide, or a two-line
+    plate, is often below what the detector can see. The objects auto-labelling has just persisted say where
+    every vehicle and person is, and the same detectors run on upscaled crops of them find most of those.
+    services/anonymize/recheck.py does the work; this only calls it at the one moment the boxes exist.
+
+    A failure costs this frame its second look, never its objects, and is counted so a run that could not
+    re-check its frames says so rather than reporting a clean pass.
+    """
+    from services.anonymize.anonymizer import get_anonymizer
+    from services.anonymize.recheck import recheck_frame
+
+    stats = totals.setdefault("pii_recheck", {"frames": 0, "plates_added": 0, "faces_added": 0, "failed": 0})
+    try:
+        res = await recheck_frame(db, store, get_anonymizer(), fd.frame, apply=True)
+    except Exception as exc:  # noqa: BLE001
+        stats["failed"] += 1
+        log.warning("autolabel.pii_recheck_failed", frame=str(fd.frame.frame_id), error=str(exc))
+        return
+    if res.get("status") not in ("applied", "planned"):
+        stats["failed"] += 1
+        return
+    stats["frames"] += 1
+    stats["plates_added"] += int(res.get("plates_added", 0))
+    stats["faces_added"] += int(res.get("faces_added", 0))
+
+
 async def _segment_frame_drivable(db, store, fd, totals: dict) -> None:
     """Segment and store this frame's drivable surface, counting what it could not do.
 
@@ -572,6 +601,10 @@ async def _autolabel_session_locked(session_id: UUID, limit: int | None, vlm_cli
             totals["objects"] += len(fused)
             for k, v in by_state.items():
                 totals["by_state"][k] = totals["by_state"].get(k, 0) + v
+
+            # The second redaction look, at the only moment the vehicle and person boxes it needs exist.
+            if settings.pii.enabled and settings.pii.recheck_after_autolabel:
+                await _recheck_frame_pii(db, store, fd, totals)
 
             # Drivable surface, per frame. This is why the gap existed: segment_drivable had exactly one
             # caller in the tree, the editor's button, so a mask existed only where somebody had opened a

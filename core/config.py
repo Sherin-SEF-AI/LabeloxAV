@@ -513,6 +513,17 @@ class PiiSettings(BaseModel):
     # fails loud rather than silently passing un-blurred plates into the object store. Set false only for
     # face-only corpora where plates are provably absent.
     plate_mandatory: bool = True
+    # Run the region-of-interest re-check (services/anonymize/recheck.py) on every frame auto-labelling has
+    # just written objects for. The whole-frame pass at ingest cannot see a plate that is small at 1920 wide,
+    # and it misses most two-line plates, the format on Indian motorcycles and commercial vehicles; inside an
+    # upscaled crop of the vehicle carrying it the same detector finds them. The re-check needs the vehicle
+    # boxes, which exist only after auto-labelling, and until now it ran only when someone pressed Reanalyse.
+    # Measured on 91 raw DASHCAM-01 frames from 30 sessions against 112 hand-checked readable plates: the
+    # ingest pass blurred 92 (82%) and 9 of 17 two-line plates; with this re-check, 105 (94%) and 14 of 17.
+    # It only ever adds blur. The cost on that sample is 7 non-plate regions blurred across the 91 frames,
+    # lettering and stickers on the vehicles themselves; the floor and placement rule that hold it there are
+    # in recheck.py (_ROI_MIN_SCORE, _PLATE_MIN_ON_ANNOTATION).
+    recheck_after_autolabel: bool = True
     # The DB text detector that backs the "text" redaction target: the plate the plate detector missed.
     # Empty means not installed, and the anonymizer then refuses the frame rather than passing it, because
     # a privacy detector that quietly does nothing is worse than one that is absent.
