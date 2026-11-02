@@ -307,6 +307,8 @@ class Track(Base):
     trajectory: Mapped[dict | None] = mapped_column(JSONB)  # per-frame centroids (image + ego frame)
     id_switch_flags: Mapped[dict | None] = mapped_column(JSONB)  # M2.0: flagged re-id/occlusion events
     tracker_version: Mapped[str | None] = mapped_column(String(48))  # M2.0: tracker backend + version
+    # Temporal coherence over the track's span (services/temporal/tube.py); NULL is not measured.
+    tube_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     # M-F.2 track-level typed intents (proposed/confirmed). The same idea as TrackEvent below without a
     # time extent, and empty: 0 rows across 11,406 tracks. TrackEvent is what an annotator writes; this is
     # kept because services/intelligence/intent.py and the VLM dataset generator still read it, and its

@@ -164,7 +164,7 @@ replace, which is the point.
 | 3 | Relationship-aware NMS (`core/accel/rel_nms.py`) | Matrix over 170 frames, 347 human objects, 203 cells; motorcycle-rider 0.700 (kept apart) vs motorcycle-scooter 0.256 (merged) |
 | 4 | Confusion-clique AL (`core/accel/clique_margin.py`) | Built; posteriors all at Beta(1,1), so allocation is uniform and says so |
 | 5 | Ego propagation (`core/accel/ego_homography.py`) | **Refuses on every session**: GNSS on 3 frames of 41,752, no attitude, no pose table |
-| 6 | Tube consistency (`core/accel/tube_score.py`) | Built; needs a tracker run with `track_id` to fit against |
+| 6 | Tube consistency (`core/accel/tube_score.py`) | Stored on every track since 2026-11-02 (`track.tube_score`, migration 0121; 10,807 of 14,676 tracks long enough to measure). Joined to the champion's gold run through the corpus tracks its predictions land on (4,129 predictions, 271 tracks): confidence plus tube ranks right above wrong far better than confidence alone, **AUC 0.787 -> 0.874**, frame-bootstrap 95% CI of the gain 0.027-0.155. As a calibration it is worse than confidence-only isotonic (held-out ECE 0.012 vs 0.0055), so the auto-accept gate keeps the 1D curve. In the review queue it adds nothing (AP 0.899 with or without it): the queue's errors are wrong classes on real objects, which form steady tracks |
 | 7 | Density calibration (`services/oraclyx/density_calibration.py`) | Worst-bucket ECE 0.00277 -> 0.00241; **33,600 predictions got `conf_calibrated`**, first ever written |
 | 8 | Reflection twins (`core/accel/reflection_twin.py`) | Built; hood-mask estimator rewritten to streaming Welford |
 | 9 | Hierarchical AP (`core/accel/hier_ap.py`) | leaf AP50 **0.072**, l1 **0.143**: half the apparent failure is naming, not finding |
