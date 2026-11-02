@@ -2803,6 +2803,21 @@ class LabeloxClient:
         return self._call("GET", f"/api/predictions/{prediction_id}/crop",
                           params={"pad": pad}, json_body=None)
 
+    def get_projects(self) -> Any:
+        """List Projects"""
+        return self._call("GET", f"/api/projects",
+                          params=None, json_body=None)
+
+    def post_projects(self, body: Any = None) -> Any:
+        """Create Project"""
+        return self._call("POST", f"/api/projects",
+                          params=None, json_body=body)
+
+    def patch_projects_by_project_id(self, project_id: str, body: Any = None) -> Any:
+        """Change Project"""
+        return self._call("PATCH", f"/api/projects/{project_id}",
+                          params=None, json_body=body)
+
     def get_projects_by_project_id_assets(self, project_id: str, state: Any | None = None, media_type: Any | None = None, limit: int | None = 200, offset: int | None = 0) -> Any:
         """List Assets"""
         return self._call("GET", f"/api/projects/{project_id}/assets",
@@ -2811,6 +2826,26 @@ class LabeloxClient:
     def post_projects_by_project_id_label_config(self, project_id: str, body: Any = None) -> Any:
         """Set Label Config"""
         return self._call("POST", f"/api/projects/{project_id}/label-config",
+                          params=None, json_body=body)
+
+    def get_projects_by_project_id_members(self, project_id: str) -> Any:
+        """Members"""
+        return self._call("GET", f"/api/projects/{project_id}/members",
+                          params=None, json_body=None)
+
+    def delete_projects_by_project_id_members_by_user_id(self, project_id: str, user_id: str) -> Any:
+        """Remove Member"""
+        return self._call("DELETE", f"/api/projects/{project_id}/members/{user_id}",
+                          params=None, json_body=None)
+
+    def put_projects_by_project_id_members_by_user_id(self, project_id: str, user_id: str) -> Any:
+        """Add Member"""
+        return self._call("PUT", f"/api/projects/{project_id}/members/{user_id}",
+                          params=None, json_body=None)
+
+    def post_projects_by_project_id_sessions(self, project_id: str, body: Any = None) -> Any:
+        """Move Sessions"""
+        return self._call("POST", f"/api/projects/{project_id}/sessions",
                           params=None, json_body=body)
 
     def get_projects_by_project_id_stats(self, project_id: str) -> Any:
@@ -3203,10 +3238,10 @@ class LabeloxClient:
         return self._call("GET", f"/api/sessions",
                           params={"limit": limit}, json_body=None)
 
-    def get_sessions_page(self, limit: int | None = 50, offset: int | None = 0, vehicle_id: Any | None = None) -> Any:
+    def get_sessions_page(self, limit: int | None = 50, offset: int | None = 0, vehicle_id: Any | None = None, project_id: Any | None = None) -> Any:
         """Sessions Page"""
         return self._call("GET", f"/api/sessions/page",
-                          params={"limit": limit, "offset": offset, "vehicle_id": vehicle_id}, json_body=None)
+                          params={"limit": limit, "offset": offset, "vehicle_id": vehicle_id, "project_id": project_id}, json_body=None)
 
     def get_sessions_states(self) -> Any:
         """Session States"""
@@ -3826,4 +3861,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 748 routes generated from the server schema.
+# 755 routes generated from the server schema.

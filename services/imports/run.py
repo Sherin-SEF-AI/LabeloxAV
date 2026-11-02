@@ -167,6 +167,7 @@ async def _import_raw(spec: ImportSpec, job_id, root: Path) -> dict:
         frame_iter=frame_iter, vehicle=spec.target_vehicle, city=spec.city,
         route=spec.route or f"import:{spec.format}", raw_uri=raw_uri, mcap_uri=mcap_uri,
         source_streams=[spec.format],
+        project_id=uuid.UUID(spec.project_id) if spec.project_id else None,
     )
     counts = {"sessions": 1, "frames": result["n_frames"], "objects": 0,
               "faces_blurred": result.get("pii", {}).get("n_faces", 0)}
@@ -198,10 +199,13 @@ async def import_dataset(spec: ImportSpec, job_id=None) -> dict:
 
         async with get_sessionmaker()() as db:
             base = now_ns()
+            from services.api.tenancy import default_project_id
+
             session_row = DbSession(
                 session_id=session_id, vehicle_id=spec.target_vehicle, start_ts_ns=base, end_ts_ns=base,
                 city=spec.city, route=spec.route or f"import:{spec.format}", sensors={},
                 raw_uri=spec.source_uri, ontology_version=onto.version,
+                project_id=uuid.UUID(spec.project_id) if spec.project_id else await default_project_id(db),
             )
             db.add(session_row)
             await db.flush()

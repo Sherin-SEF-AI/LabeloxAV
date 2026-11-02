@@ -13,7 +13,9 @@ from db.models import Frame, Object, OntologyClass, Review
 from db.models import Session as DbSession
 from platforms.registry import as_dicts as platform_dicts
 from services.api.deps import OntologyClassOut, current_user, db_session, require_role
+from services.api.project_guard import caller_hidden_projects
 from services.autolabel.ontology import add_custom_class, get_ontology
+from services.project_access import scope_visible_sessions
 
 router = APIRouter()
 
@@ -193,24 +195,31 @@ def _session_row(s) -> dict:
         "end_ts_ns": s.end_ts_ns,
         "ontology_version": s.ontology_version,
         "origin": _session_origin(s),
+        "project_id": str(s.project_id) if s.project_id else None,
     }
 
 
 @router.get("/sessions")
-async def sessions(db: AsyncSession = Depends(db_session), limit: int = Query(200, ge=1, le=1000)):
-    rows = (await db.execute(select(DbSession).order_by(DbSession.created_at.desc()).limit(limit))).scalars().all()
+async def sessions(db: AsyncSession = Depends(db_session), limit: int = Query(200, ge=1, le=1000),
+                   hidden=Depends(caller_hidden_projects)):
+    rows = (await db.execute(scope_visible_sessions(select(DbSession), hidden)
+                             .order_by(DbSession.created_at.desc()).limit(limit))).scalars().all()
     return [_session_row(s) for s in rows]
 
 
 @router.get("/sessions/page")
 async def sessions_page(db: AsyncSession = Depends(db_session),
                         limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
-                        vehicle_id: str | None = None):
+                        vehicle_id: str | None = None, project_id: uuid.UUID | None = None,
+                        hidden=Depends(caller_hidden_projects)):
     """Paginated session list with a total, so the browser can page through all 2000+ drives instead of
-    being silently capped at the first window. Optional vehicle_id narrows to one fleet."""
-    base = select(DbSession)
+    being silently capped at the first window. Optional vehicle_id narrows to one fleet, project_id to one
+    project."""
+    base = scope_visible_sessions(select(DbSession), hidden)
     if vehicle_id:
         base = base.where(DbSession.vehicle_id == vehicle_id)
+    if project_id:
+        base = base.where(DbSession.project_id == project_id)
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
     rows = (await db.execute(
         base.order_by(DbSession.created_at.desc()).offset(offset).limit(limit))).scalars().all()
@@ -219,7 +228,7 @@ async def sessions_page(db: AsyncSession = Depends(db_session),
 
 
 @router.get("/sessions/states")
-async def session_states(db: AsyncSession = Depends(db_session)):
+async def session_states(db: AsyncSession = Depends(db_session), hidden=Depends(caller_hidden_projects)):
     """One row per session saying what state the work is in, for the editor's drive picker.
 
     The picker needs to separate a drive nobody has started from one somebody is part way through, and the
@@ -254,9 +263,12 @@ async def session_states(db: AsyncSession = Depends(db_session)):
         .group_by(Frame.session_id))).all()
     reviewed = {str(sid): int(n) for sid, n in reviewed_q}
 
-    return [{"session_id": str(sid), "frames": int(fr), "objects": int(ob),
+    rows_out = [{"session_id": str(sid), "frames": int(fr), "objects": int(ob),
              "reviewed_objects": reviewed.get(str(sid), 0)}
             for sid, fr, ob in frames_q]
+    from services.project_access import drop_hidden
+
+    return await drop_hidden(db, hidden, rows_out, "session_id")
 
 
 @router.get("/sessions/{session_id}/stats")

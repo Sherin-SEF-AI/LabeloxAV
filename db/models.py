@@ -1270,8 +1270,25 @@ class LabelProject(Base):
     min_honeypot_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.9,
                                                          server_default="0.9")
     gold_id: Mapped[str | None] = mapped_column(String(128))   # the sealed gold set honeypots are drawn from
+    # Who may see its sessions: "team" (everyone signed in) or "members" (its members and administrators).
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="team", server_default="team")
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProjectMember(Base):
+    """A person in a project. Only matters for a "members" project, whose sessions only members (and
+    administrators) can see (migration 0118)."""
+
+    __tablename__ = "project_member"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("label_project.project_id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.user_id", ondelete="CASCADE"), primary_key=True)
+    added_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_project_member_user", "user_id"),)
 
 
 class LabelTask(Base):

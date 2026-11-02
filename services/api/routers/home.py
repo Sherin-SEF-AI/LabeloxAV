@@ -10,6 +10,7 @@ cached or estimated, so the numbers on screen are the numbers in the tables.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
@@ -18,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import AutolabelJob, ExportJob, Frame, ImportJob, ModelRegistry, Object, TrainingJob
 from db.models import Session as DbSession
 from services.api.deps import db_session, require_role
+from services.api.project_guard import caller_hidden_projects
+from services.project_access import as_hidden, scope_visible_sessions, visible_session_ids
 
 router = APIRouter()
 
@@ -36,11 +39,18 @@ async def _count(db: AsyncSession, stmt) -> int:
 
 
 @router.get("/home", dependencies=[Depends(require_role("annotator"))])
-async def home(db: AsyncSession = Depends(db_session)):
-    sessions = await _count(db, select(func.count()).select_from(DbSession))
-    frames = await _count(db, select(func.count()).select_from(Frame))
-    by_state = {k: int(v) for k, v in (await db.execute(
-        select(Object.state, func.count()).group_by(Object.state))).all()}
+async def home(db: AsyncSession = Depends(db_session), hidden=Depends(caller_hidden_projects)):
+    # Counted over what the caller may see (services/project_access.py). With nothing hidden, the plain counts.
+    hidden = as_hidden(hidden)
+    sessions = await _count(db, scope_visible_sessions(select(func.count()).select_from(DbSession), hidden))
+    frame_q = select(func.count()).select_from(Frame)
+    state_q = select(Object.state, func.count()).group_by(Object.state)
+    if hidden:
+        frame_q = frame_q.where(Frame.session_id.in_(visible_session_ids(hidden)))
+        state_q = state_q.join(Frame, Frame.frame_id == Object.frame_id) \
+            .where(Frame.session_id.in_(visible_session_ids(hidden)))
+    frames = await _count(db, frame_q)
+    by_state = {k: int(v) for k, v in (await db.execute(state_q)).all()}
     objects = sum(by_state.values())
 
     # Jobs: what is running or queued now, and what failed recently, across the three job kinds a team starts
@@ -49,7 +59,9 @@ async def home(db: AsyncSession = Depends(db_session)):
     active: dict[str, int] = {}
     running = 0
     failed: list[dict] = []
-    for kind, model in (("autolabel", AutolabelJob), ("import", ImportJob), ("training", TrainingJob)):
+    job_models: tuple[tuple[str, Any], ...] = (("autolabel", AutolabelJob), ("import", ImportJob),
+                                                ("training", TrainingJob))
+    for kind, model in job_models:
         active[kind] = await _count(db, select(func.count()).select_from(model).where(model.status.in_(ACTIVE)))
         running += await _count(db, select(func.count()).select_from(model).where(model.status == "running"))
         for j in (await db.execute(select(model).where(model.status == "error", model.updated_at >= since)
@@ -59,8 +71,8 @@ async def home(db: AsyncSession = Depends(db_session)):
     failed.sort(key=lambda f: f["at"] or "", reverse=True)
 
     # Recent sessions with how far labelling has got: frames, objects, and how many still wait for a person.
-    recent_rows = (await db.execute(
-        select(DbSession).order_by(DbSession.start_ts_ns.desc()).limit(RECENT_SESSIONS))).scalars().all()
+    recent_rows = (await db.execute(scope_visible_sessions(select(DbSession), hidden)
+                                    .order_by(DbSession.start_ts_ns.desc()).limit(RECENT_SESSIONS))).scalars().all()
     recent = []
     for s in recent_rows:
         n_frames = await _count(db, select(func.count()).select_from(Frame).where(Frame.session_id == s.session_id))

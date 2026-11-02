@@ -21,6 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Frame, Object, OntologyClass, Track
 from db.models import Session as DbSession
 from services.api.deps import db_session, require_role
+from services.api.project_guard import caller_hidden_projects
+from services.project_access import as_hidden, drop_hidden, project_of, scope_visible_sessions
 
 router = APIRouter()
 
@@ -49,7 +51,9 @@ async def _first_frame(db: AsyncSession, session_id) -> str | None:
 
 
 @router.get("/find", dependencies=[Depends(require_role("annotator"))])
-async def find(q: str = Query(min_length=2, max_length=80), db: AsyncSession = Depends(db_session)):
+async def find(q: str = Query(min_length=2, max_length=80), db: AsyncSession = Depends(db_session),
+               hidden=Depends(caller_hidden_projects)):
+    hidden = as_hidden(hidden)
     text = q.strip()
     like = f"%{text.replace('%', '').replace('_', '')}%"
     prefix = _id_prefix(text)
@@ -59,7 +63,7 @@ async def find(q: str = Query(min_length=2, max_length=80), db: AsyncSession = D
     if prefix:
         lo, hi = _uuid_range(prefix)
         session_match.append(DbSession.session_id.between(lo, hi))
-    sessions = (await db.execute(select(DbSession).where(or_(*session_match))
+    sessions = (await db.execute(scope_visible_sessions(select(DbSession), hidden).where(or_(*session_match))
                                  .order_by(DbSession.start_ts_ns.desc()).limit(PER_KIND))).scalars().all()
     for s in sessions:
         first = await _first_frame(db, s.session_id)
@@ -93,4 +97,17 @@ async def find(q: str = Query(min_length=2, max_length=80), db: AsyncSession = D
             out.append({"kind": "track", "id": str(tid), "label": f"{cls} track {str(tid)[:8]}",
                         "detail": f"{n} objects", "href": f"/track/{tid}"})
 
+    if hidden:
+        # Sessions were scoped in their query. Frames, objects and tracks found by id prefix are checked here, and
+        # any in a project hidden from the caller dropped, keeping the order results were found in.
+        keep: set[tuple[str, str]] = set()
+        for kind, key in (("frame", "frame_id"), ("object", "object_id")):
+            rows = [{"id": r["id"], key: r["id"]} for r in out if r["kind"] == kind]
+            keep |= {(kind, r["id"]) for r in await drop_hidden(db, hidden, rows, key)}
+        for r in out:
+            if r["kind"] == "track":
+                found, pid = await project_of(db, "track_id", r["id"])
+                if not (found and pid in hidden):
+                    keep.add(("track", r["id"]))
+        out = [r for r in out if r["kind"] == "session" or (r["kind"], r["id"]) in keep]
     return {"q": text, "results": out}

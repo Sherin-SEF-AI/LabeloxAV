@@ -77,6 +77,19 @@ export LBX_URL=http://localhost:3000 LBX_API_KEY=lbxk_...
 labelox health
 ```
 
+## Who sees which data
+
+Every session belongs to a project, and every project starts visible to the whole team. When some data
+should stay with a few people (a client's drives, a partner's recordings), an administrator opens
+**Settings > Projects**, makes that project **Members only**, adds its members and moves its sessions in.
+Everyone else then stops seeing those sessions, their frames and their labels, both in lists and by direct
+link (the server answers 404, so nothing confirms they exist). Administrators see everything. An upload or
+import can name its project (`project_id`); without one it goes to the default project.
+
+Any list the server returns leaves out rows that name a hidden session, frame, object or track, including
+pages that were never written with projects in mind. What is not scoped are aggregate numbers: the charts
+on analytics and similar overview pages still count across every project.
+
 ## First labelling run
 
 The home page's "Get started" checklist walks through this and ticks each step off from the data:

@@ -105,7 +105,8 @@ async def start(payload: ImportStartIn):
                          target_vehicle=payload.target_vehicle, city=payload.city, progress=0.0, counts={}))
         await db.commit()
     spec = ImportSpec(format=payload.format, source_uri=payload.source_uri,
-                      target_vehicle=payload.target_vehicle, city=payload.city, options=payload.options)
+                      target_vehicle=payload.target_vehicle, city=payload.city, options=payload.options,
+                      project_id=payload.project_id)
     spawn(run_import_guarded(spec, job_id), name="run_import_guarded")
     return {"job_id": str(job_id), "status": "pending"}
 
