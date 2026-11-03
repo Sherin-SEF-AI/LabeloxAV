@@ -888,6 +888,7 @@ class EvalPatch(Base):
     __table_args__ = (
         Index("ix_eval_patch_eval", "eval_id"),
         Index("ix_eval_patch_cell", "eval_id", "gt_class_id", "pred_class_id"),
+        Index("ix_eval_patch_object", "object_id"),
     )
 
 
@@ -1002,6 +1003,7 @@ class PropagationConflict(Base):
     __table_args__ = (
         Index("ix_propagation_conflict_frames", "from_frame_id", "to_frame_id"),
         Index("ix_propagation_conflict_session", "session_id"),
+        Index("ix_propagation_conflict_object", "object_id"),
     )
 
 
@@ -1416,6 +1418,7 @@ class Issue(Base):
     __table_args__ = (
         Index("ix_issue_frame", "frame_id", "status"),
         Index("ix_issue_job", "job_id", "status"),
+        Index("ix_issue_object", "object_id"),
     )
 
 
@@ -2107,6 +2110,7 @@ class ShadowDisagreement(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
+        Index("ix_shadow_disagreement_verdict_object", "verdict_object_id"),
         CheckConstraint("kind in ('champion_miss','challenger_miss','class_flip','conf_gap')",
                         name="ck_shadow_disagreement_kind"),
         CheckConstraint("state in ('pending','queued','adjudicated','dismissed')",
@@ -2135,7 +2139,8 @@ class ControlSample(Base):
     verdict_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_control_sample_verdict", "human_verdict"),)
+    __table_args__ = (Index("ix_control_sample_verdict", "human_verdict"),
+                      Index("ix_control_sample_object", "object_id"))
 
 
 class DriftMetric(Base):
@@ -2314,7 +2319,8 @@ class SettlementSpot(Base):
     verdict_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_settlement_spot_lot", "lot_id", "human_verdict"),)
+    __table_args__ = (Index("ix_settlement_spot_lot", "lot_id", "human_verdict"),
+                      Index("ix_settlement_spot_object", "object_id"))
 
 
 class ObjectDynamics(Base):
@@ -2659,7 +2665,8 @@ class RecallCandidate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_recall_candidate_status", "status"),
-                      Index("ix_recall_candidate_frame", "frame_id"))
+                      Index("ix_recall_candidate_frame", "frame_id"),
+                      Index("ix_recall_candidate_object", "object_id"))
 
 
 class AdverseRegion(Base):

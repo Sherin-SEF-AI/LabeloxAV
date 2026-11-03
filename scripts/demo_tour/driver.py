@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 import time
 from dataclasses import asdict
@@ -57,6 +58,7 @@ def use_script(name: str) -> None:
         if "—" in x.narration or "–" in x.narration:
             raise ValueError(f"dash in narration for {x.key}")
 from record import (  # noqa: E402
+    API,
     FPS,
     OUT,
     WEB,
@@ -79,6 +81,56 @@ from record import (  # noqa: E402
 
 # The key `components/shell/Onboarding.tsx` writes when somebody finishes or skips the welcome tour.
 ONBOARDED = "try { localStorage.setItem('lbx_onboarded', new Date().toISOString()); } catch (e) {}"
+
+# A pointer drawn into the page, because a headless browser renders no cursor and a demo where things
+# click themselves is hard to follow. It follows real mouse events, so it is only ever where Playwright
+# actually moved the mouse, and every press leaves a ripple where it landed.
+CURSOR = r"""
+(() => {
+  if (window.__lbxCursor) return; window.__lbxCursor = true;
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">' +
+    '<path d="M5 3 L5 22 L10 17.5 L13.6 25 L17 23.4 L13.5 16 L20 16 Z" fill="#fff" stroke="#111" ' +
+    'stroke-width="1.6" stroke-linejoin="round"/></svg>';
+  const style = document.createElement('style');
+  style.textContent = '@keyframes lbxRipple{from{transform:translate(-50%,-50%) scale(.2);opacity:.85}' +
+    'to{transform:translate(-50%,-50%) scale(1.9);opacity:0}}';
+  const put = () => {
+    if (!document.body) return setTimeout(put, 30);
+    document.head && document.head.appendChild(style);
+    const c = document.createElement('div');
+    c.id = '__lbx_cursor';
+    c.innerHTML = svg;
+    c.style.cssText = 'position:fixed;left:0;top:0;width:28px;height:28px;z-index:2147483647;' +
+      'pointer-events:none;filter:drop-shadow(0 2px 3px rgba(0,0,0,.45));transform:translate(-200px,-200px)';
+    document.documentElement.appendChild(c);
+    addEventListener('mousemove', e => { c.style.transform = `translate(${e.clientX - 5}px,${e.clientY - 3}px)`; }, true);
+    addEventListener('mousedown', e => {
+      const r = document.createElement('div');
+      r.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;width:44px;height:44px;` +
+        'border-radius:50%;border:3px solid rgba(64,150,255,.95);background:rgba(64,150,255,.18);' +
+        'z-index:2147483646;pointer-events:none;animation:lbxRipple .6s ease-out forwards';
+      document.documentElement.appendChild(r);
+      setTimeout(() => r.remove(), 700);
+    }, true);
+  };
+  put();
+})();
+"""
+
+
+def signed_in() -> str:
+    """An init script that puts a signed admin session where the web app looks for it.
+
+    Auth is always on now, so a fresh browser context opens to a sign-in wall. dev-login is the product's
+    own local bootstrap (404 anywhere but a local install), and the browser is handed its answer exactly as
+    the sign-in page would store it.
+    """
+    import urllib.request
+
+    req = urllib.request.Request(f"{API}/api/auth/dev-login", method="POST", data=b"")
+    with urllib.request.urlopen(req, timeout=15) as r:
+        user = json.loads(r.read())
+    return f"try {{ localStorage.setItem('lbx_user', {json.dumps(json.dumps(user))}); }} catch (e) {{}}"
 
 
 async def facts() -> dict[str, str]:
@@ -114,6 +166,21 @@ async def facts() -> dict[str, str]:
         # insists every figure comes from the database should not make an exception for the small ones.
         "demo_recordings": "select count(*) from session where route = 'demo-tour-2026' or route like 'KITTI 2011%'",
         "demo_dashcam": "select count(*) from session where route = 'demo-tour-2026'",
+        # Added for the 2026-11 film.
+        "tracks_all": "select count(*) from track",
+        "scenarios": "select count(*) from scenario",
+        "people": "select count(*) from app_user",
+        "projects": "select count(*) from label_project",
+        "gnss_frames": "select count(*) from frame where gnss is not null",
+        "gnss_sessions": "select count(distinct session_id) from frame where gnss is not null",
+        "gold_sets": "select count(*) from gold_set",
+        "human_verdicts": "select count(*) from object where state in ('accepted', 'rejected')",
+        "auto_accepted": "select count(*) from object where state = 'auto_accept'",
+        "pii_access": "select count(*) from pii_access_log",
+        "classes": "select count(*) from ontology_class where version = (select max(version) from ontology_version)",
+        "dash_objects": "select count(*) from object o join frame f on f.frame_id = o.frame_id "
+                        "where f.frame_id = (select frame_id from frame where frame_id = :dash_frame)",
+        "dash_track_len": "select count(*) from object where track_id = :dash_track",
     }
     # Small counts are spoken, so they are spelled. "3 are dashcam clips" is read correctly by the voice
     # but reads as a stray digit in a caption sitting beside sentences that spell everything else out.
@@ -124,9 +191,12 @@ async def facts() -> dict[str, str]:
         kitti = (await db.execute(text(
             "select session_id from session where route like 'KITTI%' order by created_at desc limit 1"
         ))).scalar()
+        picked = await ids()
         for name, sql in queries.items():
             try:
-                v = (await db.execute(text(sql), {"kitti": kitti})).scalar()
+                params = {"kitti": kitti, "dash_frame": picked.get("dash_frame") or None,
+                          "dash_track": picked.get("dash_track") or None}
+                v = (await db.execute(text(sql), {k: v for k, v in params.items() if ":" + k in sql})).scalar()
             except Exception as exc:
                 # A number that cannot be read is spoken as unmeasured. It is never spoken as zero and
                 # the scene is never dropped, because a missing figure is itself worth hearing.
@@ -177,6 +247,35 @@ async def ids() -> dict[str, str]:
             await one(f"select object_id from object where frame_id = '{picks['frame_id']}' limit 1")
             if picks["frame_id"] else None
         ) or await one("select object_id from object order by created_at desc limit 1") or ""
+        # The 2026-11 film opens its 2D pages on the operator's own Bengaluru dashcam drives, which carry
+        # GPS read from the stamp the camera burns into its video. The busiest frame of the drive with the
+        # most objects; a long single-class vehicle track ranked by tube coherence; the KITTI drive with
+        # the most real point clouds.
+        picks["dash_frame"] = await one("""
+            with best as (select f.session_id from frame f join object o on o.frame_id = f.frame_id
+                          join session s on s.session_id = f.session_id
+                          where s.vehicle_id = 'DASHCAM-01' and f.gnss is not null
+                          group by 1 order by count(*) desc limit 1)
+            select f.frame_id from frame f join object o on o.frame_id = f.frame_id
+            where f.session_id = (select session_id from best)
+            group by f.frame_id, f.ts_ns order by count(*) desc, f.ts_ns asc limit 1""") or ""
+        picks["dash_session"] = (await one(
+            f"select session_id from frame where frame_id = '{picks['dash_frame']}'") if picks["dash_frame"] else "") or ""
+        picks["dash_track"] = await one("""
+            select t.track_id from track t join object o on o.track_id = t.track_id
+            join frame f on f.frame_id = o.frame_id join session s on s.session_id = f.session_id
+            join ontology_class c on c.id = o.class_id
+            where s.vehicle_id = 'DASHCAM-01' and t.tube_score is not null
+              and c.name in ('bus', 'truck', 'sedan', 'autorickshaw', 'suv', 'hatchback')
+            group by t.track_id, t.tube_score
+            having count(*) between 100 and 160 and count(distinct o.class_id) = 1
+            order by t.tube_score desc limit 1""") or ""
+        picks["kitti_session"] = await one("""
+            select s.session_id from session s join point_cloud p on p.session_id = s.session_id
+            where s.route like 'KITTI%' group by 1 order by count(*) desc limit 1""") or ""
+        # The drive whose clouds carry cuboids lifted from 2D, so the 3D pages have boxes to show.
+        picks["kitti_cuboids"] = await one(
+            "select session_id from session where route like 'KITTI 2011_09_26_drive_0005%' limit 1") or ""
         picks["track_id"] = (
             await one("""select o.track_id from object o join frame f on f.frame_id = o.frame_id
                          join session s on s.session_id = f.session_id
@@ -212,19 +311,62 @@ async def act(page, actions: list, i: dict[str, str]) -> str:
         return v
 
     problems = []
+
+    async def glide(loc) -> tuple[float, float]:
+        """Move the visible pointer to the middle of `loc` the way a hand would, and return where it is."""
+        await loc.scroll_into_view_if_needed(timeout=8000)
+        box = await loc.bounding_box(timeout=8000)
+        if box is None:
+            raise RuntimeError("no box")
+        x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        await page.mouse.move(x, y, steps=28)
+        await page.wait_for_timeout(180)
+        return x, y
+
     for step in actions:
         kind, args = step[0], [sub(a) for a in step[1:]]
         try:
             if kind == "fill":
                 await page.fill(args[0], args[1], timeout=8000)
-            elif kind == "click":
-                await page.click(args[0], timeout=8000)
-            elif kind == "click_text":
-                await page.get_by_text(args[0], exact=False).first.click(timeout=8000)
+            elif kind in ("click", "click_text", "move", "move_text"):
+                if kind in ("click", "move"):
+                    loc = page.locator(args[0]).first
+                else:
+                    # Prefer the page's own content: a word like "Search" or "Load" is also a sidebar link,
+                    # and a pointer that wanders off to the navigation looks like a mistake.
+                    main = page.locator("main").get_by_text(args[0], exact=False)
+                    loc = (main if await main.count() else page.get_by_text(args[0], exact=False)).first
+                x, y = await glide(loc)
+                if kind.startswith("click"):
+                    await page.mouse.click(x, y)
+            elif kind == "type":
+                # Typed at a person's pace, so the viewer can read the query as it is entered.
+                loc = page.locator(args[0]).first
+                x, y = await glide(loc)
+                await page.mouse.click(x, y)
+                await loc.fill("")
+                await page.keyboard.type(args[1], delay=55)
+            elif kind == "select":
+                # Choose the option whose text contains args[1]; option labels carry ids we cannot predict.
+                loc = page.locator(args[0]).first
+                await glide(loc)
+                value = await loc.evaluate(
+                    "(e, t) => { const o = [...e.options].find(o => o.value === t || o.text.includes(t));"
+                    " return o ? o.value : null; }",
+                    args[1])
+                if value is None:
+                    raise RuntimeError(f"no option containing {args[1]!r}")
+                await loc.select_option(value)
             elif kind == "press":
                 await page.keyboard.press(args[0])
             elif kind == "scroll":
-                await page.mouse.wheel(0, int(args[0]))
+                # In small steps, so it reads as a scroll rather than a cut.
+                total, n = int(args[0]), 12
+                for _ in range(n):
+                    await page.mouse.wheel(0, total / n)
+                    await page.wait_for_timeout(35)
+            elif kind == "point":
+                await page.mouse.move(float(args[0]), float(args[1]), steps=24)
             elif kind == "wait":
                 await page.wait_for_timeout(int(args[0]))
             else:
@@ -261,6 +403,7 @@ async def record(only: list[str] | None, skip_capture: bool) -> list[dict]:
         raise SystemExit(f"cannot record, missing: {', '.join(missing)}")
 
     f, i = await facts(), await ids()
+    session = signed_in()
     print("facts:", ", ".join(f"{k}={v}" for k, v in f.items()))
     print("ids:", ", ".join(f"{k}={v[:8]}" for k, v in i.items() if v))
 
@@ -302,7 +445,11 @@ async def record(only: list[str] | None, skip_capture: bool) -> list[dict]:
             # over the page. Marking it seen before any script runs keeps the product's own onboarding
             # out of a recording that is itself an onboarding.
             await ctx.add_init_script(ONBOARDED)
+            await ctx.add_init_script(session)
+            await ctx.add_init_script(CURSOR)
             page = await ctx.new_page()
+            # Parked off to the side of the content, so the first glide reads as a move toward something.
+            await page.mouse.move(1700, 760)
             settle = scene.settle_s
             opened = time.monotonic()
             try:
@@ -331,7 +478,19 @@ async def record(only: list[str] | None, skip_capture: bool) -> list[dict]:
             # the load plus however long the clicking took, and guessing it would put the narration over
             # a page that is still being set up.
             lead = time.monotonic() - opened
-            await page.wait_for_timeout(int(dur * 1000))
+            live = getattr(scene, "live", None)
+            if live and path:
+                # Interactions the viewer should see happen inside the recorded window, while the narration
+                # describes them; the scene's length is still the narration's, so whatever they took is
+                # subtracted from the hold rather than added to the segment.
+                started = time.monotonic()
+                failed = await act(page, live, i)
+                if failed:
+                    note = (note + "; " if note else "") + f"live: {failed}"
+                spent = time.monotonic() - started
+                await page.wait_for_timeout(int(max(0.0, dur - spent) * 1000))
+            else:
+                await page.wait_for_timeout(int(dur * 1000))
             await ctx.close()   # the video file is only finalised on close
 
             vids = sorted(raw.glob("*.webm"))
@@ -367,7 +526,10 @@ async def check_pages() -> int:
     bad: list[tuple[str, str]] = []
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
-        page = await browser.new_page(viewport={"width": 1920, "height": 1080})
+        ctx = await browser.new_context(viewport={"width": 1920, "height": 1080})
+        await ctx.add_init_script(ONBOARDED)
+        await ctx.add_init_script(signed_in())
+        page = await ctx.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)[:120]))
         for n, scene in enumerate(SCENES, 1):
