@@ -9,6 +9,7 @@ import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
 import Inspector from "@/components/shell/Inspector";
 import { OSM_STYLE } from "@/lib/basemap";
+import { tryCreateMap } from "@/lib/mapgl";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 
 // M3.3 HD map viewer: render a fused map_commit (lanes + signs) on a MapLibre basemap; click an element to
@@ -23,6 +24,7 @@ export default function MapPage() {
   const [sel, setSel] = useState<string>("");
   const [prov, setProv] = useState<MapProvenance | null>(null);
   const [loadErr, setLoadErr] = useState<unknown>(null);
+  const [mapErr, setMapErr] = useState<string | null>(null);
 
   useEffect(() => {
     // A bare .then() left a rejection unhandled and the map permanently empty, which reads as a corpus
@@ -34,7 +36,8 @@ export default function MapPage() {
 
   useEffect(() => {
     if (!wrap.current || map.current) return;
-    const m = new maplibregl.Map({ container: wrap.current, style: STYLE, center: [77.5946, 12.9716], zoom: 15 });
+    const { map: m, error } = tryCreateMap({ container: wrap.current, style: STYLE, center: [77.5946, 12.9716], zoom: 15 });
+    if (!m) { setMapErr(error); return; }
     m.addControl(new maplibregl.NavigationControl(), "top-right");
     map.current = m;
   }, []);
@@ -89,7 +92,14 @@ export default function MapPage() {
       </>
     )}>
       <div className="flex h-full min-h-0">
-        <div ref={wrap} className="flex-1" />
+        <div className="relative flex-1">
+          <div ref={wrap} className="absolute inset-0" />
+          {mapErr && (
+            <div role="alert" className="absolute inset-0 flex items-center justify-center p-6">
+              <p className="max-w-md text-[12px] text-warn">{mapErr}</p>
+            </div>
+          )}
+        </div>
         <Inspector title="element provenance" side="right">
           <div className="p-3 text-[12px]">
             {loadErr != null && <LoadState error={loadErr} onRetry={() => window.location.reload()} />}

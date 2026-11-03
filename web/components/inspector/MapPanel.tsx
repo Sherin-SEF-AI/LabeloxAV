@@ -6,6 +6,7 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useClock } from "@/lib/inspector/clock";
 import { useMcap } from "@/lib/inspector/mcapContext";
+import { tryCreateMap } from "@/lib/mapgl";
 
 // Map panel (MapLibre): the GNSS track with the current position advancing on the clock. Works offline with
 // a plain background style (the track is the data); a raster basemap can be layered in later.
@@ -28,7 +29,8 @@ export default function MapPanel() {
     let alive = true;
     const gnss = mcap.topics().find((t) => /locationfix/i.test(t.schema) || /gnss|gps/i.test(t.topic));
     if (!gnss) { setNote("no GNSS topic"); return; }
-    const map = new maplibregl.Map({ container: hostRef.current!, style: STYLE, attributionControl: false, center: [0, 0], zoom: 1 });
+    const { map, error } = tryCreateMap({ container: hostRef.current!, style: STYLE, attributionControl: false, center: [0, 0], zoom: 1 });
+    if (!map) { setNote(error); return; }
     mapRef.current = map;
     // the grid cell sizes after the map is created, so a map made at 0x0 renders blank; keep it sized.
     const ro = new ResizeObserver(() => {
@@ -78,7 +80,7 @@ export default function MapPanel() {
   return (
     <div className="relative h-full w-full">
       <div ref={hostRef} className="absolute inset-0" />
-      {note && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-ink-3 pointer-events-none">{note}</div>}
+      {note && <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-[11px] text-ink-3 pointer-events-none">{note}</div>}
     </div>
   );
 }
