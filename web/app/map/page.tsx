@@ -93,7 +93,9 @@ export default function MapPage() {
     )}>
       <div className="flex h-full min-h-0">
         <div className="relative flex-1">
-          <div ref={wrap} className="absolute inset-0" />
+          {/* MapLibre's stylesheet sets position: relative on its container, which beats `absolute`; a plain
+              wrapper takes the position and the container only fills it, or it collapses to 0px tall. */}
+          <div className="absolute inset-0"><div ref={wrap} className="h-full w-full" /></div>
           {mapErr && (
             <div role="alert" className="absolute inset-0 flex items-center justify-center p-6">
               <p className="max-w-md text-[12px] text-warn">{mapErr}</p>

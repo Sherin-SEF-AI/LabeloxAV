@@ -79,7 +79,9 @@ export default function MapPanel() {
 
   return (
     <div className="relative h-full w-full">
-      <div ref={hostRef} className="absolute inset-0" />
+      {/* MapLibre's stylesheet sets position: relative on its container, which beats `absolute`; a plain
+          wrapper takes the position and the container only fills it, or it collapses to 0px tall. */}
+      <div className="absolute inset-0"><div ref={hostRef} className="h-full w-full" /></div>
       {note && <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-[11px] text-ink-3 pointer-events-none">{note}</div>}
     </div>
   );
