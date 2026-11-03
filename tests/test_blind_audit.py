@@ -569,3 +569,61 @@ class TestClosing:
 
             assert "error" in await close_audit(db, str(fx["audit_id"]), reason="again")
 
+
+
+class TestNoLeakAroundTheEditor:
+    async def test_the_filmstrip_counts_only_the_auditors_own_boxes(self):
+        """It showed "52" under a frame the auditor saw as empty: the number the audit exists to withhold."""
+        from services.api.routers.objects import frame_filmstrip
+
+        async with get_sessionmaker()() as db:
+            user = User(name=f"auditor-{uuid.uuid4().hex[:6]}", role="annotator")
+            db.add(user)
+            await db.commit()
+            fx = await _fixture(db, with_human=False, assignee=user.user_id)
+            frame_a = fx["frames"]["A"]
+            for i in range(3):
+                db.add(Object(frame_id=frame_a, class_id=fx["ped"], bbox=_box(i, 7), conf=0.8,
+                              source="fused", state="review"))
+            db.add(Object(frame_id=frame_a, class_id=fx["ped"], bbox=_box(8, 8), conf=1.0, source="human",
+                          state="accepted", blind_audit_id=fx["audit_id"]))
+            await db.commit()
+
+            def count(strip):
+                return next(t["n_objects"] for t in strip["frames"] if t["frame_id"] == str(frame_a))
+
+            assert count(await frame_filmstrip(str(frame_a), db=db, user=user)) == 1
+            assert count(await frame_filmstrip(str(frame_a), db=db, user=None)) == 4   # not the auditor
+
+            await close_audit(db, str(fx["audit_id"]), reason="test")
+            assert count(await frame_filmstrip(str(frame_a), db=db, user=user)) == 4
+
+    async def test_the_agent_is_refused_on_a_frame_the_caller_is_auditing(self):
+        """Its suggestions said "51 objects look inconsistent" on a frame the auditor saw as empty, and its
+        actions rewrite the labels the audit withholds."""
+        from types import SimpleNamespace
+
+        from fastapi import HTTPException
+
+        from services.api.routers.agent import _not_on_an_audit_frame
+
+        async with get_sessionmaker()() as db:
+            user = User(name=f"auditor-{uuid.uuid4().hex[:6]}", role="annotator")
+            other = User(name=f"other-{uuid.uuid4().hex[:6]}", role="annotator")
+            db.add_all([user, other])
+            await db.commit()
+            fx = await _fixture(db, with_human=False, assignee=user.user_id)
+            frame_a = fx["frames"]["A"]
+            obj = Object(frame_id=frame_a, class_id=fx["ped"], bbox=_box(1, 7), conf=0.8, source="fused",
+                         state="review")
+            db.add(obj)
+            await db.commit()
+
+            for params in ({"frame_id": str(frame_a)}, {"object_id": str(obj.object_id)}):
+                with pytest.raises(HTTPException) as e:
+                    await _not_on_an_audit_frame(SimpleNamespace(path_params=params), db=db, user=user)
+                assert e.value.status_code == 409
+                await _not_on_an_audit_frame(SimpleNamespace(path_params=params), db=db, user=other)
+
+            await close_audit(db, str(fx["audit_id"]), reason="test")
+            await _not_on_an_audit_frame(SimpleNamespace(path_params={"frame_id": str(frame_a)}), db=db, user=user)

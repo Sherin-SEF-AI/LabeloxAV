@@ -269,6 +269,32 @@ async def active_audit_id(db: AsyncSession, *, frame_id: UUID, job_id: UUID | No
         .limit(1))).scalars().first()
 
 
+async def audits_for_user(db: AsyncSession, frame_ids: list[UUID], user_id: UUID | None) -> dict[UUID, UUID]:
+    """frame -> open audit, for those of these frames this user is auditing. One query, for views that
+    show many frames at once (the filmstrip), where calling `active_audit_id` per frame would be a round
+    trip per tile. The same rule as its user clause: an open audit whose job is assigned to this user."""
+    if user_id is None or not frame_ids:
+        return {}
+    rows = (await db.execute(
+        select(BlindAuditFrame.frame_id, BlindAudit.audit_id)
+        .join(BlindAudit, BlindAudit.audit_id == BlindAuditFrame.audit_id)
+        .join(LabelJob, LabelJob.job_id == BlindAudit.job_id)
+        .where(BlindAuditFrame.frame_id.in_(frame_ids), BlindAudit.status.in_(OPEN_STATUSES),
+               LabelJob.assignee_id == user_id))).all()
+    return {fid: aid for fid, aid in rows}
+
+
+async def refuse_agent_on_audit_frame(db: AsyncSession, frame_id: UUID, user_id: UUID | None) -> None:
+    """Raise 409 when this user is auditing this frame. The agent reads the frame's existing labels (its
+    suggestions said "51 objects look inconsistent" on a frame the auditor saw as empty) and its actions
+    rewrite them, so on an audit frame it is either a leak or a way round the blindness."""
+    from fastapi import HTTPException
+
+    if await active_audit_id(db, frame_id=frame_id, job_id=None, user_id=user_id) is not None:
+        raise HTTPException(409, "this frame is in a blind audit you are labelling; the agent works from "
+                                 "the labels the audit withholds, so it is off here until the audit is done")
+
+
 async def mark_frames_labeled(db: AsyncSession, audit_id: UUID,
                               frame_ids: list[UUID] | None = None) -> int:
     """Record that the auditor is finished with these frames (all of them when frame_ids is None).

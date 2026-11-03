@@ -542,7 +542,8 @@ _SETTLED_STATES = ("accepted", "rejected", "settled")
 
 
 @router.get("/frames/{frame_id}/filmstrip")
-async def frame_filmstrip(frame_id: str, span: int = 12, db: AsyncSession = Depends(db_session)):
+async def frame_filmstrip(frame_id: str, span: int = 12, db: AsyncSession = Depends(db_session),
+                         user=Depends(current_user)):
     """The frames on either side of this one, in capture order, for the editor's filmstrip.
 
     The editor could only step one frame at a time through prev/next, so a reviewer had no way to see what
@@ -578,9 +579,20 @@ async def frame_filmstrip(frame_id: str, span: int = 12, db: AsyncSession = Depe
     # could not see which frames they had already done or where they had stopped, and reopened frames that
     # were finished. The counts have to be per state rather than a boolean because a partly confirmed frame
     # is the interesting case: it is the one somebody left halfway.
+    # A tile in the viewer's open blind audit counts only their own audit boxes, the rule get_frame follows:
+    # "52" under a frame the auditor sees as empty is the answer the audit exists to withhold.
+    from services.verdyx.blind_audit import audits_for_user
+
+    audited = await audits_for_user(db, ids, user.user_id if user is not None else None)
     rows = (await db.execute(
-        select(Object.frame_id, Object.state, func.count()).where(Object.frame_id.in_(ids))
+        select(Object.frame_id, Object.state, func.count())
+        .where(Object.frame_id.in_([i for i in ids if i not in audited]))
         .group_by(Object.frame_id, Object.state))).all()
+    if audited:
+        rows += (await db.execute(
+            select(Object.frame_id, Object.state, func.count())
+            .where(Object.frame_id.in_(list(audited)), Object.blind_audit_id.in_(set(audited.values())))
+            .group_by(Object.frame_id, Object.state))).all()
     counts: dict[UUID, int] = {}
     confirmed: dict[UUID, int] = {}
     for fid, state, n in rows:

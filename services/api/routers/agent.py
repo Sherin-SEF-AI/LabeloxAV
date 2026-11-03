@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +21,29 @@ from services.agent.runs import list_runs, revert_run, run_dict
 from services.api.deps import current_user, db_session, require_role
 from services.autolabel.ontology import get_ontology
 
-router = APIRouter()
+
+async def _not_on_an_audit_frame(request: Request, db: AsyncSession = Depends(db_session),
+                                 user=Depends(current_user)) -> None:
+    """Every frame- or object-scoped agent route is off on a frame the caller is blind-auditing. A
+    router-level guard rather than one per route, so an agent route added later cannot leak by default."""
+    from db.models import Object
+    from services.verdyx.blind_audit import refuse_agent_on_audit_frame
+
+    params = request.path_params
+    frame_id = None
+    try:
+        if "frame_id" in params:
+            frame_id = uuid.UUID(params["frame_id"])
+        elif "object_id" in params:
+            obj = await db.get(Object, uuid.UUID(params["object_id"]))
+            frame_id = obj.frame_id if obj is not None else None
+    except ValueError:
+        return  # a malformed id is the route's own 404/422 to give
+    if frame_id is not None:
+        await refuse_agent_on_audit_frame(db, frame_id, user.user_id if user is not None else None)
+
+
+router = APIRouter(dependencies=[Depends(_not_on_an_audit_frame)])
 
 
 class AgentPolicyIn(BaseModel):
@@ -459,9 +481,12 @@ async def command(body: CommandIn, db: AsyncSession = Depends(db_session), user=
     plan/find are read-only; accept/revert write and are reversible."""
     from services.agent.nl import execute_command
     from services.api.deps import role_rank
+    from services.verdyx.blind_audit import refuse_agent_on_audit_frame
 
     can_write = bool(user) and role_rank(user.role) >= role_rank("reviewer")
     try:
+        # The frame travels in the body here, so the router-level audit guard cannot see it.
+        await refuse_agent_on_audit_frame(db, uuid.UUID(body.frame_id), user.user_id if user else None)
         return await execute_command(db, body.text, uuid.UUID(body.frame_id),
                                      created_by=str(user.user_id) if user else None, can_write=can_write)
     except ValueError as exc:

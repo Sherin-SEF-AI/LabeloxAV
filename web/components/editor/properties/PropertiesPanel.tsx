@@ -141,9 +141,12 @@ export default function PropertiesPanel({ frame, editor, klass, sel, tools, onCo
 
         <ToolTabs tabs={[...TABS]} value={tab} onChange={setTab} idPrefix="props" label="Editor tools" />
 
-        {panel("agent",
-          <AgentPanel frameId={frame.id} sessionId={frame.meta.session_id ?? null}
-            selectedId={st.selectedId} onApplied={tools.onAgentApplied} embedded />)}
+        {/* The agent reads and rewrites the labels a blind audit withholds, so the server refuses it on an
+            audit frame; saying why beats a panel of buttons that each answer 409. */}
+        {panel("agent", frame.meta.blind_audit_id
+          ? <p className="p-3 text-[12px] text-ink-3">The agent is off on this frame: it works from the labels this blind audit hides from you. It comes back once the audit is done.</p>
+          : <AgentPanel frameId={frame.id} sessionId={frame.meta.session_id ?? null}
+              selectedId={st.selectedId} onApplied={tools.onAgentApplied} embedded />)}
 
         {panel("bulk",
           <BulkEditBar frameId={frame.id} sessionId={frame.meta.session_id}

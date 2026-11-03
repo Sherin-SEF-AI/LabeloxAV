@@ -70,7 +70,7 @@ async def test_the_strip_says_how_much_of_each_frame_is_confirmed():
             ["accepted", "accepted"],
             [],
         ])
-        out = await frame_filmstrip(ids[0], span=12, db=db)
+        out = await frame_filmstrip(ids[0], span=12, db=db, user=None)
         tiles = {t["frame_id"]: t for t in out["frames"]}
 
         assert tiles[ids[0]]["n_objects"] == 4 and tiles[ids[0]]["n_confirmed"] == 0
