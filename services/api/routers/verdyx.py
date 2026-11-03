@@ -221,6 +221,18 @@ async def blind_audit_mark_labeled(audit_id: str, db: AsyncSession = Depends(db_
     return {"audit_id": audit_id, "marked": n}
 
 
+@router.post("/verdyx/blind-audit/{audit_id}/close")
+async def blind_audit_close(audit_id: str, reason: str = "", db: AsyncSession = Depends(db_session),
+                            _user=Depends(require_role("reviewer"))):
+    """Close an open audit without scoring it, so its frames show their labels again. Takes no measurement."""
+    from services.verdyx.blind_audit import close_audit
+
+    res = await close_audit(db, audit_id, reason=reason)
+    if "error" in res:
+        raise HTTPException(404 if res["error"] == "audit not found" else 409, res["error"])
+    return res
+
+
 @router.get("/verdyx/blind-audits")
 async def blind_audit_list(run_id: str | None = None, limit: int = 50,
                            db: AsyncSession = Depends(db_session)):

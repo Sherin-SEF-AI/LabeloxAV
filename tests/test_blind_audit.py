@@ -40,6 +40,7 @@ from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
 from services.verdyx.blind_audit import (
     active_audit_id,
+    close_audit,
     mark_frames_labeled,
     pooled_estimate,
     score_audit,
@@ -536,3 +537,35 @@ class TestWaitingForPeople:
 
             await mark_frames_labeled(db, fx["audit_id"])
             assert not [w for w in await _waiting_for_people(db) if w["audit_id"] == str(fx["audit_id"])]
+
+
+class TestClosing:
+    async def test_a_closed_audit_gives_the_auditor_back_the_frame_labels(self):
+        """The first audit sat seeded for ten weeks, and its auditor saw empty frames with 52 labels behind
+        them. Closing ends the withholding for everyone and takes no measurement."""
+        from services.api.routers.objects import frame_objects
+
+        async with get_sessionmaker()() as db:
+            user = User(name=f"auditor-{uuid.uuid4().hex[:6]}", role="annotator")
+            db.add(user)
+            await db.commit()
+            fx = await _fixture(db, with_human=False, assignee=user.user_id)
+            frame_a = fx["frames"]["A"]
+            db.add(Object(frame_id=frame_a, class_id=fx["ped"], bbox=_box(4, 4), conf=0.8,
+                          source="fused", state="review"))
+            await db.commit()
+            assert await frame_objects(str(frame_a), db=db, user=user) == []
+
+            res = await close_audit(db, str(fx["audit_id"]), reason="no auditor")
+            assert res["status"] == "closed" and res["job_unassigned"] and res["audit_boxes_kept"] == 0
+
+            assert len(await frame_objects(str(frame_a), db=db, user=user)) == 1
+            assert await active_audit_id(db, frame_id=frame_a, job_id=uuid.UUID(fx["res"]["job_id"]),
+                                         user_id=user.user_id) is None
+            job = await db.get(LabelJob, uuid.UUID(fx["res"]["job_id"]))
+            assert job.assignee_id is None and job.state == "new"
+            audit = await db.get(BlindAudit, fx["audit_id"])
+            assert "without scoring: no auditor" in audit.notes
+
+            assert "error" in await close_audit(db, str(fx["audit_id"]), reason="again")
+

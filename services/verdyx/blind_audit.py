@@ -67,6 +67,8 @@ from services.analytics.evaluation import _greedy_match
 log = get_logger("blind_audit")
 
 ESTIMATOR = "chapman-lp-v1"
+# An audit in one of these withholds its frames' labels from the auditor; scored or closed, it does not.
+OPEN_STATUSES = ("seeded", "labeling")
 
 # Density strata, by how many predictions the run left on the frame at the audit's operating point. Capture
 # probability is not constant across the corpus: an empty highway and a crowded junction do not share a
@@ -252,7 +254,7 @@ async def active_audit_id(db: AsyncSession, *, frame_id: UUID, job_id: UUID | No
     if job_id is not None:
         audit = (await db.execute(
             select(BlindAudit).where(BlindAudit.job_id == job_id,
-                                     BlindAudit.status.in_(("seeded", "labeling"))))).scalars().first()
+                                     BlindAudit.status.in_(OPEN_STATUSES)))).scalars().first()
         if audit is not None:
             return audit.audit_id
     if user_id is None:
@@ -262,7 +264,7 @@ async def active_audit_id(db: AsyncSession, *, frame_id: UUID, job_id: UUID | No
         .join(BlindAuditFrame, BlindAuditFrame.audit_id == BlindAudit.audit_id)
         .join(LabelJob, LabelJob.job_id == BlindAudit.job_id)
         .where(BlindAuditFrame.frame_id == frame_id,
-               BlindAudit.status.in_(("seeded", "labeling")),
+               BlindAudit.status.in_(OPEN_STATUSES),
                LabelJob.assignee_id == user_id)
         .limit(1))).scalars().first()
 
@@ -289,6 +291,38 @@ async def mark_frames_labeled(db: AsyncSession, audit_id: UUID,
             audit.status = "labeling"
         await db.commit()
     return len(rows)
+
+
+
+async def close_audit(db: AsyncSession, audit_id: str, *, reason: str) -> dict:
+    """Stop an audit nobody is going to label, so its frames show their labels again.
+
+    An open audit withholds every label on its frames from the auditor wherever they open them, which is
+    the point while the audit is being done and a broken editor once it never will be: the first one sat
+    seeded for ten weeks and its auditor saw empty frames with 52 labels behind them. Closing takes no
+    measurement, and the audit is no longer blind for anyone, so a later attempt must be a new audit for
+    someone who has not seen these frames' labels.
+
+    The job is unassigned rather than marked completed: nothing was submitted, and a completed job reads as
+    finished work to everything that counts jobs. Boxes already drawn under the audit are kept as the
+    human labels they are.
+    """
+    audit = await db.get(BlindAudit, UUID(audit_id))
+    if audit is None:
+        return {"error": "audit not found"}
+    if audit.status not in OPEN_STATUSES:
+        return {"error": f"audit is {audit.status}, so there is nothing to close"}
+    audit.status = "closed"
+    note = f"Closed {datetime.now(UTC):%Y-%m-%d} without scoring: {reason.strip() or 'no reason given'}"
+    audit.notes = f"{audit.notes}\n{note}" if audit.notes else note
+    job = await db.get(LabelJob, audit.job_id) if audit.job_id else None
+    unassigned = job is not None and job.assignee_id is not None
+    if unassigned:
+        job.assignee_id = None
+    drawn = (await db.execute(select(func.count()).select_from(Object)
+                              .where(Object.blind_audit_id == audit.audit_id))).scalar_one()
+    await db.commit()
+    return {"audit_id": audit_id, "status": "closed", "job_unassigned": unassigned, "audit_boxes_kept": drawn}
 
 
 async def _gold_recall(db: AsyncSession, run_id: UUID, gold_id: str | None) -> tuple[float | None, dict]:
