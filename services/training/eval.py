@@ -17,11 +17,88 @@ from core.logging import get_logger
 log = get_logger("eval")
 
 
+def _names(names) -> dict[int, str]:
+    return {int(k): str(v) for k, v in (names.items() if isinstance(names, dict) else enumerate(names))}
+
+
+def aligned_data_yaml(model_names, data_yaml: str, split: str = "val") -> tuple[str, dict]:
+    """A data yaml whose class indices are the model's own, so its predictions are scored as what they are.
+
+    Ultralytics matches a prediction to a label by class INDEX. A model trained on its own class list and a
+    dataset built from the ontology disagree on what index 3 means: the champion knows 15 classes in its own
+    order, the training set carries all 156 in ontology order, and only index 0 named the same class in both.
+    Its baseline therefore scored mAP50 0.0001 against a candidate's 0.05, and the training gate read every
+    candidate as an improvement over a model that was in fact far better.
+
+    When the two lists differ, the split's labels are rewritten into the model's indices by class NAME, in a
+    sibling directory that links the same images. Labels of classes the model was never taught are dropped
+    and counted: the model cannot be wrong about a class it does not have, and scoring it on its own classes
+    is the comparison the gate needs. When the lists already agree, the original yaml is returned untouched.
+    """
+    import hashlib
+    import os
+    from pathlib import Path
+
+    import yaml
+
+    data_yaml_p = Path(data_yaml)
+    data = yaml.safe_load(data_yaml_p.read_text())
+    mnames, dnames = _names(model_names), _names(data["names"])
+    info = {"remapped": False, "model_classes": len(mnames), "dataset_classes": len(dnames)}
+    if mnames == dnames:
+        return data_yaml, info
+
+    by_name = {v: k for k, v in mnames.items()}
+    remap = {d: by_name[n] for d, n in dnames.items() if n in by_name}
+    root = Path(data.get("path") or data_yaml_p.parent)
+    images = root / data[split] if not Path(data[split]).is_absolute() else Path(data[split])
+    # Ultralytics' own rule (img2label_paths): the last /images/ segment becomes /labels/.
+    sa, sb = f"{os.sep}images{os.sep}", f"{os.sep}labels{os.sep}"
+    labels = Path(sb.join(str(images / "_").rsplit(sa, 1))).parent
+    key = hashlib.sha256(repr(sorted(mnames.items())).encode()).hexdigest()[:12]
+    out = root.parent / f"{root.name}__as-{key}"
+    (out / "images" / split).mkdir(parents=True, exist_ok=True)
+    (out / "labels" / split).mkdir(parents=True, exist_ok=True)
+    # Each image is linked, not the directory: Ultralytics resolve()s the dataset paths, so a linked
+    # directory resolves straight back to the original and its labels, the rewritten ones unread.
+    for img in images.iterdir():
+        dst = out / "images" / split / img.name
+        if not dst.exists():
+            try:
+                os.link(img, dst)
+            except OSError:
+                dst.symlink_to(img.resolve())
+
+    kept = dropped = 0
+    for src in labels.glob("*.txt"):
+        lines = []
+        for line in src.read_text().splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            m = remap.get(int(parts[0]))
+            if m is None:
+                dropped += 1
+                continue
+            lines.append(" ".join([str(m), *parts[1:]]))
+            kept += 1
+        (out / "labels" / split / src.name).write_text("\n".join(lines) + ("\n" if lines else ""))
+    (out / "labels" / f"{split}.cache").unlink(missing_ok=True)
+    out_yaml = out / "data.yaml"
+    out_yaml.write_text(yaml.safe_dump({"path": str(out), "train": f"images/{split}", "val": f"images/{split}",
+                                        split: f"images/{split}", "nc": len(mnames),
+                                        "names": mnames}, sort_keys=False))
+    info.update(remapped=True, shared_classes=len(remap), labels_kept=kept, labels_dropped=dropped)
+    log.info("eval.class_space_aligned", **info)
+    return str(out_yaml), info
+
+
 def evaluate(weights: str, data_yaml: str, split: str = "val", imgsz: int = 960) -> dict:
     from ultralytics import YOLO
 
     device = get_settings().gpu.device
     model = YOLO(weights)
+    data_yaml, class_space = aligned_data_yaml(model.names, data_yaml, split)
     res = model.val(data=data_yaml, split=split, imgsz=imgsz, device=device, verbose=False, plots=False)
 
     per_class: dict[str, float] = {}
@@ -52,6 +129,8 @@ def evaluate(weights: str, data_yaml: str, split: str = "val", imgsz: int = 960)
         # Flat class_name -> recall, so the champion recall gate (fail-closed on safety-class recall)
         # can read it directly from gold_metrics.
         "per_class_recall": {name: pr["recall"] for name, pr in per_class_pr.items()},
+        # Which classes these numbers cover; the gate reads it to compare like with like.
+        "class_space": class_space,
     }
     # Segmentation models also report mask metrics; absent for detect models.
     if getattr(res, "seg", None) is not None:
@@ -74,6 +153,7 @@ def safe_miou_report(weights: str, data_yaml: str, split: str = "val", imgsz: in
     settings = get_settings()
     onto = get_ontology()
     model = YOLO(weights)
+    data_yaml, _ = aligned_data_yaml(model.names, data_yaml, split)
     # plots=True is required: ultralytics only accumulates the confusion matrix when plotting is on,
     # otherwise res.confusion_matrix.matrix is all zeros and Safe-mIoU reads as undefined.
     res = model.val(data=data_yaml, split=split, imgsz=imgsz, device=settings.gpu.device, verbose=False, plots=True)
@@ -110,9 +190,23 @@ def regression_gate(
     min_safe_miou: float | None = None,
 ) -> dict:
     reasons: list[str] = []
-    delta = round(candidate["map50"] - baseline["map50"], 4)
+    # mAP50 is a mean over whichever classes a model was scored on. A 15-class champion and a 156-class
+    # candidate average over different sets, so their headline numbers are not comparable; when the scored
+    # sets differ, both are re-averaged over the classes they share. Identical sets keep the headline figure.
+    base_pc, cand_pc = baseline.get("per_class") or {}, candidate.get("per_class") or {}
+    compared_on = "all classes"
+    cand_m, base_m = candidate["map50"], baseline["map50"]
+    if set(base_pc) != set(cand_pc) and base_pc and cand_pc:
+        shared = sorted(set(base_pc) & set(cand_pc))
+        if not shared:
+            reasons.append("candidate and baseline share no scored class, so they cannot be compared")
+        else:
+            cand_m = sum(cand_pc[c] for c in shared) / len(shared)
+            base_m = sum(base_pc[c] for c in shared) / len(shared)
+            compared_on = f"{len(shared)} shared classes"
+    delta = round(cand_m - base_m, 4)
     if delta < min_map_delta:
-        reasons.append(f"map50 delta {delta} < required {min_map_delta}")
+        reasons.append(f"map50 delta {delta} on {compared_on} < required {min_map_delta}")
 
     # Optional Safe-mIoU floor (off by default: gating on a noisy first gold set would block
     # legitimate promotions). When set, the candidate must not confuse VRUs unsafely below the floor.
@@ -166,6 +260,7 @@ def regression_gate(
     return {
         "promote": promote,
         "map50_delta": delta,
+        "compared_on": compared_on,
         "regressed_classes": regressed,
         "reasons": reasons or ["passes: mAP improved, no class regressed past tolerance"],
         # Always present, so a caller cannot mistake "nothing to report" for "everything was checked".
