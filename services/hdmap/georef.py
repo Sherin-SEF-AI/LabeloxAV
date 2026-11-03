@@ -121,6 +121,9 @@ async def georef_session(session_id: UUID, height_m: float | None = None) -> dic
     stored extrinsic is wrong. Left as None, every camera uses its own resolved height, which is the
     right default now that the height is per camera rather than one global constant.
     """
+    # Local: services.dynamics.compute imports this module's projection.
+    from services.dynamics.compute import ipm_max_range_m
+
     if not await session_calibrated(session_id):
         return {"elements": 0, "reason": "session not calibrated (run /api/calibration/validate first)"}
 
@@ -171,12 +174,16 @@ async def georef_session(session_id: UUID, height_m: float | None = None) -> dic
             if height_m is not None:
                 args["height_m"] = height_m
             cam_yaw = math.radians(float(cal.rpy_deg[2]))
+            # Past this a flat-road lift is not a position. A lane's far control point sits a few pixels
+            # under the horizon, and lifted without the bound it landed 8.4 km away: the Karlsruhe commit
+            # drew lanes as straight lines through forest. The same bound the BEV view and the dynamics use.
+            far_m = ipm_max_range_m(args["fy"], args["height_m"])
 
             for lane in (await db.execute(select(Lane).where(Lane.frame_id == fid))).scalars().all():
                 world = []
                 for pt in lane.control_points:
                     fl = ipm_pixel_to_vehicle(pt[0], pt[1], **args)
-                    if fl is None:
+                    if fl is None or fl[0] > far_m:
                         continue
                     wlat, wlon = vehicle_to_world(fl[0], fl[1], lat, lon, hd, cam_yaw_rad=cam_yaw)
                     world.append((wlon, wlat))
@@ -200,7 +207,7 @@ async def georef_session(session_id: UUID, height_m: float | None = None) -> dic
                     select(Object).where(Object.frame_id == fid, Object.sign_type.isnot(None)))).scalars().all():
                 bb = s.bbox
                 fl = ipm_pixel_to_vehicle((bb[0] + bb[2]) / 2.0, bb[3], **args)
-                if fl is None:
+                if fl is None or fl[0] > far_m:
                     continue
                 wlat, wlon = vehicle_to_world(fl[0], fl[1], lat, lon, hd, cam_yaw_rad=cam_yaw)
                 db.add(MapElement(kind="sign", geometry=WKTElement(f"POINT({wlon} {wlat})", srid=4326),

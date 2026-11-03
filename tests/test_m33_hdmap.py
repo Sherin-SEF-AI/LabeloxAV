@@ -163,3 +163,57 @@ def test_ipm_args_is_the_one_definition_the_bev_warp_also_uses():
     assert _cal_args(cal) == ipm_args(cal)
     assert ipm_args(cal)["fisheye"] is True
     assert abs(ipm_args(cal)["pitch_rad"] - math.radians(4.0)) < 1e-12
+
+
+def test_a_lane_point_near_the_horizon_is_not_lifted_kilometres_away():
+    """A lane's far control point sits a few pixels under the horizon, where a flat-road lift has no
+    meaning. Without the range bound it landed 8.4 km from the car, and the Karlsruhe map drew lanes as
+    straight lines through forest. Points past `ipm_max_range_m` are dropped instead."""
+    from sqlalchemy import func, select
+
+    from db.models import CalibrationValidation, Frame, Lane, MapElement
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.calibration.resolve import ipm_args, resolve_calibration
+    from services.dynamics.compute import ipm_max_range_m
+    from services.hdmap.georef import georef_session
+
+    sid = uuid.uuid4()
+
+    async def run():
+        maker = get_sessionmaker()
+        async with maker() as db:
+            db.add(DbSession(session_id=sid, vehicle_id="MAP-HORIZON", start_ts_ns=0, end_ts_ns=2,
+                             ontology_version="labelox-in-0.1.0"))
+            await db.flush()
+            f1 = Frame(session_id=sid, ts_ns=1000, cam_id="cam_f", img_uri="s3://x/1.jpg", width=640, height=480,
+                       gnss="SRID=4326;POINT(77.5900 12.9700)")
+            f2 = Frame(session_id=sid, ts_ns=2000, cam_id="cam_f", img_uri="s3://x/2.jpg", width=640, height=480,
+                       gnss="SRID=4326;POINT(77.5901 12.9701)")
+            db.add_all([f1, f2])
+            await db.flush()
+            args = ipm_args(await resolve_calibration(sid, "cam_f", 640, 480))
+            near_horizon = args["cy"] + 1.0
+            db.add(Lane(frame_id=f1.frame_id, session_id=sid,
+                        control_points=[[100, 460], [220, 360], [320, near_horizon]],
+                        lane_type="solid", is_ego=True, source="human"))
+            db.add(CalibrationValidation(session_id=sid, cam_id="cam_f", model="pinhole", status="pass"))
+            await db.commit()
+            # Unbounded, that point would be this far out: the failure being guarded against.
+            assert ipm_pixel_to_vehicle(320, near_horizon, **args)[0] > 10 * ipm_max_range_m(args["fy"], args["height_m"])
+        try:
+            assert (await georef_session(sid))["lanes"] == 1
+            async with maker() as db:
+                wkts = (await db.execute(select(func.ST_AsText(MapElement.geometry)).where(
+                    MapElement.source_sessions.any(str(sid))))).scalars().all()
+            # Equirectangular metres from the frame; ample at this scale.
+            far = max(math.hypot((lon - 77.5900) * 111_320 * math.cos(math.radians(12.97)), (lat - 12.9700) * 110_540)
+                      for w in wkts for lon, lat in parse_wkt(w)[1])
+            assert far <= ipm_max_range_m(args["fy"], args["height_m"]) + 5.0
+        finally:
+            async with maker() as db:
+                await db.execute(MapElement.__table__.delete().where(MapElement.source_sessions.any(str(sid))))
+                await db.delete(await db.get(DbSession, sid))
+                await db.commit()
+
+    asyncio.run(run())
