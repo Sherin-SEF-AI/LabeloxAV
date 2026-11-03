@@ -3788,6 +3788,11 @@ class LabeloxClient:
         return self._call("GET", f"/api/verdyx/blind-audit/{audit_id}",
                           params=None, json_body=None)
 
+    def post_verdyx_blind_audit_by_audit_id_close(self, audit_id: str, reason: str | None = '') -> Any:
+        """Blind Audit Close"""
+        return self._call("POST", f"/api/verdyx/blind-audit/{audit_id}/close",
+                          params={"reason": reason}, json_body=None)
+
     def get_verdyx_blind_audit_by_audit_id_estimate(self, audit_id: str) -> Any:
         """Blind Audit Estimate"""
         return self._call("GET", f"/api/verdyx/blind-audit/{audit_id}/estimate",
@@ -3921,4 +3926,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 767 routes generated from the server schema.
+# 768 routes generated from the server schema.
