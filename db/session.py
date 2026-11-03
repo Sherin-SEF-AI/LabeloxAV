@@ -15,8 +15,39 @@ from sqlalchemy.ext.asyncio import (
 from core.config import get_settings
 
 
+def _close_socket_on_terminate() -> None:
+    """Make a terminated asyncpg connection actually close its socket.
+
+    A request cancelled while its query runs (the browser navigated away) leaked its connection for the
+    life of the process: Postgres kept the session open in its transaction, holding its snapshot, which
+    blocks vacuum and made CREATE INDEX CONCURRENTLY wait forever. Ten such sessions sat on the API for
+    13 hours. The chain, reproduced: SQLAlchemy invalidates the connection and tries a graceful close()
+    first; under Starlette's anyio cancel scope that close is itself cancelled after asyncpg has marked
+    the protocol closing; SQLAlchemy then calls asyncpg's terminate(), which skips the abort because a
+    closing connection already reports is_closed(). Nothing closes the transport. So after terminate, a
+    transport still open is aborted here. (SQLAlchemy 2.0.36, asyncpg 0.30.0; tests/test_db_cancel_leak.py.)
+    """
+    from sqlalchemy.dialects.postgresql.asyncpg import AsyncAdapt_asyncpg_connection as Conn
+
+    if getattr(Conn.terminate, "_lbx_closes_socket", False):
+        return
+    terminate = Conn.terminate
+
+    def terminate_and_close(self):
+        try:
+            terminate(self)
+        finally:
+            transport = getattr(self._connection, "_transport", None)
+            if transport is not None and not transport.is_closing():
+                transport.abort()
+
+    terminate_and_close._lbx_closes_socket = True
+    Conn.terminate = terminate_and_close
+
+
 @lru_cache(maxsize=1)
 def get_engine() -> AsyncEngine:
+    _close_socket_on_terminate()
     settings = get_settings()
     if settings.postgres.pool == "null":
         from sqlalchemy.pool import NullPool
