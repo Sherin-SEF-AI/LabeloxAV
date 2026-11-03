@@ -277,6 +277,11 @@ async def main_async(a) -> int:
     setup_logging("warning")
     flag = Path(a.flag)
     window = _quiet_window(a.quiet_hours)
+    if a.guard:
+        # The watcher signals only the pids listed here, and each relaunch is a new process.
+        import os
+
+        Path(a.guard).write_text(f"{os.getpid()}\n")
     ckpt = Path(a.checkpoint)
     ckpt.parent.mkdir(parents=True, exist_ok=True)
     done = _done(ckpt)
@@ -355,6 +360,8 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--quiet-hours", default="", help='local "HH:MM-HH:MM" when nothing may run, e.g. 10:00-18:00')
     ap.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--guard", default=".scratch/watch/guard.pids",
+                    help="the resource watcher's guard file; this run lists itself there ('' to skip)")
     a = ap.parse_args()
     if "detect" in a.stages.split(",") and not a.weights and not a.dry_run:
         ap.error("--weights is required when the detect stage runs")
@@ -374,9 +381,28 @@ def main() -> int:
             print(f"quiet hours {a.quiet_hours}: waiting {wait / 3600:.1f} h until they end", flush=True)
             time.sleep(wait + 30)
             continue
-        rc = subprocess.run([sys.executable, __file__, *sys.argv[1:], "--child"]).returncode
+        child = subprocess.Popen([sys.executable, __file__, *sys.argv[1:], "--child"])
+        try:
+            rc = child.wait(timeout=max(_seconds_until_quiet(window), 1.0))
+        except subprocess.TimeoutExpired:
+            # The child only checks the clock between units, and a unit can run far past its estimate (the
+            # first drive of a run took 8 hours on a missing index). Quiet hours are a hard line, so the parent
+            # stops it there. Mid-unit is safe: the unit is not checkpointed, so it is redone from the start,
+            # and re-labelling a frame keeps every human decision.
+            print(f"quiet hours {a.quiet_hours} began with a unit still running; stopping it", flush=True)
+            child.terminate()
+            try:
+                child.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait()
+            _unload_ollama()
+            continue
         if rc != QUIET_EXIT:
             return rc
+        # The child stopped because its next unit could not finish before quiet hours, which have not begun
+        # yet. Relaunching now would only stop again, over and over, so sleep into them and wait them out.
+        time.sleep(_seconds_until_quiet(window) + 30)
 
 
 if __name__ == "__main__":
