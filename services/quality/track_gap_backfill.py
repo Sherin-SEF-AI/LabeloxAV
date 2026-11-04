@@ -90,7 +90,7 @@ async def run_gap_fill(run_id: uuid.UUID, *, max_tracks: int = 20_000) -> None:
         done = done_set(dict(prior.progress or {})) if prior is not None else set()
         totals = dict(prior.counts or {}) if prior is not None else {}
 
-    for k in ("tracks", "created", "failed", "skipped_long_gaps"):
+    for k in ("tracks", "created", "failed", "skipped_long_gaps", "refused_frames"):
         totals.setdefault(k, 0)
 
     targets = [t for t, _ in gapped if t not in done][:max_tracks]

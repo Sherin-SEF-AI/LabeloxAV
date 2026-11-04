@@ -160,6 +160,10 @@ async def test_the_sweep_is_one_run_that_deletes_what_it_created():
             assert made, "the sweep created nothing"
             run = await db.get(AgentRun, run_id)
             assert run.status == "committed"
+            # Counted as filled, not failed: a missing counter key once turned every track into a failure
+            # after its boxes were written, and twenty of those in a row aborted the corpus sweep.
+            assert (run.counts or {}).get("failed") == 0, f"tracks counted as failed: {run.counts}"
+            assert (run.counts or {}).get("tracks") == 1, run.counts
             mine = {k for k in (run.changes or {}) if uuid.UUID(k) in {o.object_id for o in made}}
             assert len(mine) == len(made), "every created box must be recorded for the undo"
             assert all((run.changes or {})[k].get("created") for k in mine)
