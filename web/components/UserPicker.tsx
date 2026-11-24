@@ -5,11 +5,15 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import Icon from "@/components/shell/Icon";
+import LocalePicker from "@/components/shell/LocalePicker";
+import ThemePicker from "@/components/shell/ThemePicker";
 import { api, apiPost, humanizeError } from "@/lib/api";
 import { useFeatures } from "@/lib/features";
 import { toast } from "@/lib/toast";
 import type { UserRow } from "@/lib/types";
 import { getUser, setUser, type CurrentUser } from "@/lib/user";
+import { useLabel, useT } from "@/lib/i18n";
+import { clearQueries, useQuery } from "@/lib/useQuery";
 
 // The account menu in the top bar: who you are, your account, the team and keys for administrators, and
 // sign out.
@@ -31,23 +35,31 @@ export default function UserPicker() {
   const features = useFeatures();
   const devSwitch = features.auth_enabled === false;
   const [cur, setCur] = useState<CurrentUser | null>(null);
-  const [users, setUsers] = useState<UserRow[]>([]);
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const t = useT();
+  const label = useLabel();
 
   useEffect(() => { setCur(getUser()); }, []);
   useEffect(() => {
     const close = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); };
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    // Escape closes and puts focus back on the chip, but only when the menu is what had it: this listener
+    // is on the document, and stealing focus for an Escape pressed in some other field would be a bug.
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const inside = !!box.current && box.current.contains(document.activeElement);
+      setOpen(false);
+      if (inside) trigger.current?.focus();
+    };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", esc);
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
   }, []);
   // The switch list is fetched only where switching exists.
-  useEffect(() => {
-    if (!devSwitch) return;
-    api.users().then(setUsers).catch((e) => toast(humanizeError(e), "error"));
-  }, [devSwitch]);
+  const usersQ = useQuery(["users"], () => api.users(), { enabled: devSwitch });
+  const users: UserRow[] = usersQ.data ?? [];
+  useEffect(() => { if (usersQ.error) toast(humanizeError(usersQ.error), "error"); }, [usersQ.error]);
 
   const switchTo = (u: UserRow) => {
     const c: CurrentUser = { user_id: u.user_id, name: u.name, role: u.role };
@@ -67,15 +79,19 @@ export default function UserPicker() {
       toast(`Signed out in this browser; the server did not clear its cookies: ${humanizeError(e)}`, "error");
     }
     setUser(null);
+    // Everything cached was read as the person who just left. The next one to sign in on this tab must
+    // not be shown it while their own requests are still in flight.
+    void clearQueries();
     router.push("/login");
   };
 
   const isAdmin = cur?.role === "admin";
-  const name = cur?.name ?? "Not signed in";
+  const name = cur?.name ?? label("Not signed in");
 
   return (
     <div ref={box} className="relative">
-      <button onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}
+      <button ref={trigger} onClick={() => setOpen((o) => !o)} aria-haspopup="true" aria-expanded={open}
+        aria-label={`${t("account.menu", "Account menu")}: ${name}`}
         className="flex items-center gap-2 h-8 pl-1 pr-2 rounded-md hover:bg-head transition-colors">
         <span className="w-6 h-6 rounded-full bg-accent/20 text-accent-2 text-[10.5px] font-semibold flex items-center justify-center">
           {cur ? initials(cur.name) : "?"}
@@ -84,10 +100,12 @@ export default function UserPicker() {
         <Icon name="chevD" size={12} />
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 mt-1.5 w-64 panel z-50 py-1.5 shadow-2xl">
+        // A disclosure, not role="menu": it holds links, two selects and a button, and a menu role would
+        // promise arrow-key navigation this does not have and forbid the selects it does.
+        <div role="group" aria-label={t("account.menu", "Account menu")} className="absolute right-0 mt-1.5 w-64 panel z-50 py-1.5 shadow-2xl">
           <div className="px-3 pt-1 pb-2 border-b hairline">
             <div className="text-[13px] font-medium text-ink truncate">{name}</div>
-            {cur && <div className="text-[12px] text-ink-3">{ROLE_LABEL[cur.role] ?? cur.role}</div>}
+            {cur && <div className="text-[12px] text-ink-3">{t(`account.role.${cur.role}`, ROLE_LABEL[cur.role] ?? cur.role)}</div>}
           </div>
           <div className="py-1">
             {[
@@ -97,17 +115,23 @@ export default function UserPicker() {
               { href: "/settings", label: "Settings", icon: "gear", show: true },
               { href: "/settings/about", label: "About & source", icon: "info", show: true },
             ].filter((i) => i.show).map((i) => (
-              <Link key={i.href} href={i.href} role="menuitem" onClick={() => setOpen(false)}
+              <Link key={i.href} href={i.href} onClick={() => setOpen(false)}
                 className="flex items-center gap-2.5 px-3 py-1.5 text-[12.5px] text-ink-2 hover:bg-head hover:text-ink">
-                <span className="text-ink-3"><Icon name={i.icon} size={14} /></span>{i.label}
+                <span className="text-ink-3"><Icon name={i.icon} size={14} /></span>{label(i.label)}
               </Link>
             ))}
           </div>
+          {/* Language and theme, here because this menu is on every page: the person who cannot read the
+              interface should not have to find the settings page in it first. */}
+          <div className="px-3 py-2 border-t hairline flex flex-col gap-2">
+            <LocalePicker compact />
+            <ThemePicker compact />
+          </div>
           {devSwitch && users.length > 0 && (
             <div className="py-1 border-t hairline">
-              <div className="px-3 pt-1 pb-1 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">Act as (dev server, auth off)</div>
+              <div className="px-3 pt-1 pb-1 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{t("account.act_as", "Act as (dev server, auth off)")}</div>
               {users.map((u) => (
-                <button key={u.user_id} role="menuitem" onClick={() => switchTo(u)}
+                <button key={u.user_id} onClick={() => switchTo(u)}
                   className={`w-full flex justify-between px-3 py-1 text-[12.5px] hover:bg-head ${cur?.user_id === u.user_id ? "text-ink" : "text-ink-3"}`}>
                   <span className="truncate">{u.name}</span>
                   <span className="text-ink-3">{u.role}</span>
@@ -116,9 +140,9 @@ export default function UserPicker() {
             </div>
           )}
           <div className="pt-1 border-t hairline">
-            <button role="menuitem" onClick={() => void signOut()}
+            <button onClick={() => void signOut()}
               className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12.5px] text-ink-2 hover:bg-head hover:text-ink">
-              <span className="text-ink-3"><Icon name="chevR" size={14} /></span>Sign out
+              <span className="text-ink-3"><Icon name="chevR" size={14} /></span>{label("Sign out")}
             </button>
           </div>
         </div>

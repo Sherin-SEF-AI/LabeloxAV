@@ -1,6 +1,7 @@
 "use client";
 
 import { type ActivityEntry, type ActivityLog as Log, runningCount } from "@/lib/activityLog";
+import { T } from "@/lib/i18n";
 
 // The console's transcript. It replaces a single shared message line that 64 call sites wrote to, where
 // starting a second operation erased the first one's result and a background job landing minutes later
@@ -43,7 +44,7 @@ export default function ActivityLog({ log, onClear }: { log: Log; onClear: () =>
         </div>
         <button onClick={onClear}
           className="ml-auto text-[11px] border border-line text-ink-3 px-2 py-0.5 rounded hover:text-ink">
-          clear
+          <T k="action.clear">clear</T>
         </button>
       </div>
       {/* aria-live so a background result is announced when it lands, since it may arrive long after the

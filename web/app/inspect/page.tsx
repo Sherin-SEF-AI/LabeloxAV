@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { Spinner } from "@/components/Spinner";
+import { useQuery } from "@/lib/useQuery";
 
 // The Session Inspector home: pick an MCAP session to inspect. The health verdict chip answers "did my
 // recording work" before a single panel is opened.
@@ -15,12 +15,10 @@ const V: Record<string, string> = { pass: "text-pass border-pass", warn: "text-w
 
 export default function InspectorHome() {
   const router = useRouter();
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api.inspectorSessions().then(setRows).catch(() => setRows([])).finally(() => setLoading(false));
-  }, []);
+  // A failed read shows the empty list, as it always has; the cached list paints at once on return.
+  const q = useQuery(["inspectorSessions"], () => api.inspectorSessions());
+  const rows: Row[] = q.error ? [] : q.data ?? [];
+  const loading = q.loading;
 
   return (
     <PageShell active="INSPECT" title="Session Inspector" subtitle="MCAP" right={loading ? <Spinner label="loading" /> : <span className="text-[12.5px] text-ink-3">{rows.length} sessions</span>}>

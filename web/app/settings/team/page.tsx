@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { T } from "@/lib/i18n";
 
 import PageShell from "@/components/shell/PageShell";
 import Icon from "@/components/shell/Icon";
 import LoadState from "@/components/shell/LoadState";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { apiGet, apiPost, humanizeError } from "@/lib/api";
+import { invalidate, useQuery } from "@/lib/useQuery";
 import { toast } from "@/lib/toast";
 import { useCurrentUser } from "@/lib/user";
 
@@ -44,7 +46,7 @@ function SignInLink({ link, onDone }: { link: Link; onDone: () => void }) {
         <code className="flex-1 min-w-0 font-mono text-[12px] text-ink bg-bg-2 border hairline rounded px-3 py-2 break-all select-all">{url}</code>
         <button className="btn btn-primary shrink-0" onClick={() => void copy()}>Copy link</button>
       </div>
-      <div className="mt-3"><button className="btn" onClick={onDone}>Done</button></div>
+      <div className="mt-3"><button className="btn" onClick={onDone}><T k="common.done">Done</T></button></div>
     </section>
   );
 }
@@ -52,19 +54,19 @@ function SignInLink({ link, onDone }: { link: Link; onDone: () => void }) {
 export default function TeamPage() {
   const me = useCurrentUser();
   const confirm = useConfirm();
-  const [members, setMembers] = useState<Member[] | null>(null);
-  const [error, setError] = useState<unknown>(null);
   const [link, setLink] = useState<Link | null>(null);
   const [name, setName] = useState("");
   const [role, setRole] = useState("annotator");
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    setError(null);
-    try { setMembers((await apiGet<{ users: Member[] }>("/api/users?limit=500")).users); }
-    catch (e) { setError(e); }
-  }, []);
-  useEffect(() => { if (me?.role === "admin") void load(); }, [load, me?.role]);
+  // Administrators only, so it waits for the role. The same read the project settings page makes, under
+  // the same key.
+  const membersQ = useQuery(["/api/users?limit=500"],
+    () => apiGet<{ users: Member[] }>("/api/users?limit=500"), { enabled: me?.role === "admin" });
+  const members: Member[] | null = membersQ.data?.users ?? null;
+  const error = membersQ.validating ? null : membersQ.error ?? null;
+  // Every cached user list, whichever read produced it.
+  const load = useCallback(() => invalidate(["/api/users?limit=500"], "users"), []);
 
   const invite = async (e: React.FormEvent) => {
     e.preventDefault();

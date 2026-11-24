@@ -1,5 +1,7 @@
 "use client";
 
+import { T } from "@/lib/i18n";
+
 // The event lane: typed spans drawn across the same frames the crop strip shows.
 //
 // A track event has a time extent, which is the whole reason it exists rather than being another entry in
@@ -223,11 +225,11 @@ export default function EventLane({ trackId, items, onChanged }: {
               <div className="shrink-0 flex items-center gap-1.5 pl-2 text-[11px]">
                 {e.state !== "accepted" && (
                   <button onClick={() => setState(e.event_id, "accepted")}
-                    className="text-pass hover:underline">accept</button>
+                    className="text-pass hover:underline"><T k="action.accept">accept</T></button>
                 )}
                 {e.state !== "rejected" && (
                   <button onClick={() => setState(e.event_id, "rejected")}
-                    className="text-block hover:underline">reject</button>
+                    className="text-block hover:underline"><T k="action.reject">reject</T></button>
                 )}
                 <span className="text-ink-3">{e.source}</span>
                 {e.evidence && Object.keys(e.evidence).length > 0 && (
@@ -256,7 +258,7 @@ export default function EventLane({ trackId, items, onChanged }: {
                 </button>
               ))}
               <button onClick={() => setPending(null)}
-                className="ml-auto text-[11px] text-ink-3 hover:text-ink">cancel</button>
+                className="ml-auto text-[11px] text-ink-3 hover:text-ink"><T k="action.cancel">cancel</T></button>
             </div>
             {/* The definition is the interface, so it is on hover of every choice rather than something an
                 annotator has to go and look up while deciding. */}

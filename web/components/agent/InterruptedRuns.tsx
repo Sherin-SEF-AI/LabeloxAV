@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 
 import { api } from "@/lib/api";
 import type { InterruptedRun } from "@/lib/types";
 import { describeFailure } from "@/lib/actionError";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // Jobs whose process stopped before they finished. Background work runs as a task inside the API process,
 // so a restart or a crash takes it with no trace but a row still marked running. Until this existed the
@@ -31,16 +32,15 @@ function countSummary(counts: Record<string, unknown>): string {
   return parts.join("  ");
 }
 
+const NO_RUNS: InterruptedRun[] = [];
+
 export default function InterruptedRuns({ onResumed }: { onResumed?: () => void }) {
-  const [runs, setRuns] = useState<InterruptedRun[]>([]);
+  // A failed read shows nothing here; the console reports it.
+  const runsQ = useQuery(["agentInterruptedRuns"], () => api.agentInterruptedRuns());
+  const runs: InterruptedRun[] = runsQ.data?.runs ?? NO_RUNS;
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
-
-  const load = useCallback(async () => {
-    try { setRuns((await api.agentInterruptedRuns()).runs); } catch { /* the console reports it */ }
-  }, []);
-  useEffect(() => { load(); }, [load]);
 
   const resume = async (r: InterruptedRun) => {
     setBusy(r.run_id); setNote(null);
@@ -49,7 +49,8 @@ export default function InterruptedRuns({ onResumed }: { onResumed?: () => void 
       setNote(out.restarted
         ? `${r.kind} resumed from where it stopped`
         : `${r.kind} claimed, but it has no resume path`);
-      await load();
+      // The resumed run leaves this list and reappears in the run lists as running.
+      await invalidate("agentInterruptedRuns", "agentRuns");
       onResumed?.();
     } catch (e) {
       const f = describeFailure(`resume ${r.kind}`, e);

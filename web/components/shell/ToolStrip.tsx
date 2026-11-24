@@ -154,7 +154,7 @@ export default function ToolStrip({ groups, tool, onSelect, options, modeIcon, m
       {options && <div className="flex items-center gap-1 ml-1 pl-2 border-l hairline shrink-0">{options}</div>}
       {open && flyoutTools.length > 0 && typeof document !== "undefined" && createPortal(
         <>
-          <div className="fixed inset-0 z-[60]" onClick={() => setOpen(null)} />
+          <div className="fixed inset-0 z-[60]" aria-hidden="true" onClick={() => setOpen(null)} />
           <div className="fixed z-[61] min-w-[204px] panel p-1.5" style={{ left: open.x, top: open.y }}>
             <div className="flex items-center gap-1.5 px-2 pt-1 pb-1.5">
               <span className="font-display text-[10px] font-semibold uppercase tracking-wider text-ink-3">{flyoutLabel}</span>

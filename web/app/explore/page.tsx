@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { T } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import { api , humanizeError } from "@/lib/api";
 import type {
@@ -14,6 +15,7 @@ import PageShell from "@/components/shell/PageShell";
 import EmbeddingMap, { type ColorBy } from "@/components/explore/EmbeddingMap";
 import FacetRail from "@/components/explore/FacetRail";
 import { useQueryParam } from "@/lib/useQueryParam";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // The Explore workspace: see the corpus as structure, cut it by facets, lasso what looks alike, and act on
 // the selection in bulk. The filter you build here IS a saved view and an export spec, because it is the same
@@ -36,15 +38,26 @@ export default function ExplorePage() {
 function ExploreBody() {
   const router = useRouter();
   const [predicate, setPredicate] = useState<ExplorePredicate>({});
-  const [facets, setFacets] = useState<Facets | null>(null);
-  const [projections, setProjections] = useState<ProjectionRow[]>([]);
+  // Facets recompute whenever the predicate changes: the counts must always describe the current cut.
+  // Keyed by the predicate, so going back to a cut already seen shows its counts at once; the previous
+  // cut's counts stay up while the next ones load, and a failure reads as no facets, as it did.
+  const facetsQ = useQuery(["exploreFacets", predicate], () => api.exploreFacets(predicate),
+    { keepPrevious: true });
+  const facets: Facets | null = facetsQ.error ? null : facetsQ.data ?? null;
+  const projQ = useQuery(["exploreProjections"], () => api.exploreProjections());
+  const projections: ProjectionRow[] = useMemo(() => projQ.data?.projections ?? [], [projQ.data]);
   const [projId, setProjId] = useState<string>("");
-  const [points, setPoints] = useState<ProjectionPoint[]>([]);
+  const pointsQ = useQuery(projId ? ["exploreProjectionPoints", projId] : null,
+    () => api.exploreProjectionPoints(projId), { keepPrevious: true });
+  const points: ProjectionPoint[] = useMemo(
+    () => (projId && !pointsQ.error ? pointsQ.data?.points ?? [] : []),
+    [projId, pointsQ.data, pointsQ.error]);
   const [colorBy, setColorBy] = useState<ColorBy>("cluster");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [hover, setHover] = useState<ProjectionPoint | null>(null);
-  const [views, setViews] = useState<SavedView[]>([]);
+  const viewsQ = useQuery(["exploreViews"], () => api.exploreViews());
+  const views: SavedView[] = viewsQ.data?.views ?? [];
   // Edit > Saved views deep-links here; highlight the rail so the menu entry lands somewhere visible
   const focusViews = useQueryParam("panel") === "views";
   const [tagText, setTagText] = useState("");
@@ -53,26 +66,14 @@ function ExploreBody() {
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 3500); };
 
-  // Facets recompute whenever the predicate changes: the counts must always describe the current cut.
+  // Open on the first fitted projection once the list arrives, unless one is already chosen.
+  const firstProjId = projections[0]?.projection_id;
   useEffect(() => {
-    api.exploreFacets(predicate).then(setFacets).catch(() => setFacets(null));
-  }, [predicate]);
+    if (firstProjId) setProjId((cur) => cur || firstProjId);
+  }, [firstProjId]);
 
-  useEffect(() => {
-    api.exploreProjections().then((r) => {
-      setProjections(r.projections);
-      if (!projId && r.projections.length) setProjId(r.projections[0].projection_id);
-    }).catch(() => {});
-    api.exploreViews().then((r) => setViews(r.views)).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!projId) { setPoints([]); return; }
-    api.exploreProjectionPoints(projId).then((r) => setPoints(r.points ?? []))
-      .catch(() => setPoints([]));
-    setSelected(new Set());
-  }, [projId]);
+  // A lasso belongs to the layout it was drawn on.
+  useEffect(() => { setSelected(new Set()); }, [projId]);
 
   const activeProj = useMemo(
     () => projections.find((p) => p.projection_id === projId) ?? null, [projections, projId]);
@@ -119,9 +120,9 @@ function ExploreBody() {
       });
       flash(`${remove ? "removed" : "tagged"} ${r.matched} objects`);
       setTagText("");
-      const f = await api.exploreFacets(predicate);
-      setFacets(f);
-      if (projId) setPoints((await api.exploreProjectionPoints(projId)).points ?? []);
+      // Tags are a facet and a point attribute, so every cached cut and layout is stale, not only the
+      // ones on screen.
+      await invalidate("exploreFacets", "exploreProjectionPoints");
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(null); }
   };
 
@@ -131,7 +132,7 @@ function ExploreBody() {
     setBusy("view");
     try {
       await api.exploreSaveView(name, actionPredicate());
-      setViews((await api.exploreViews()).views);
+      await viewsQ.reload();
       flash(`saved view "${name}"`);
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(null); }
   };
@@ -145,8 +146,7 @@ function ExploreBody() {
         session_id: predicate.session_id ?? null, method: "umap",
       });
       if (r.error) { flash(r.error); return; }
-      const list = await api.exploreProjections();
-      setProjections(list.projections);
+      await projQ.reload();
       if (r.projection_id) setProjId(r.projection_id);
       flash(`fitted ${r.n} points with ${r.method}${r.clusters ? `, ${r.clusters} clusters` : ""}`);
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(null); }
@@ -161,6 +161,8 @@ function ExploreBody() {
       // routes the selection into the review queue without changing any label.
       await api.bulkReview(ids, "confirm", undefined, "review");
       flash(`sent ${ids.length} objects to review`);
+      // Their state changed, which is a facet here and a row in every review queue.
+      void invalidate("exploreFacets", "exploreProjectionPoints", "triage", "/api/home");
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(null); }
   };
 
@@ -220,7 +222,7 @@ function ExploreBody() {
             </span>
             {selected.size > 0 && (
               <button onClick={() => setSelected(new Set())}
-                className="px-1.5 py-0.5 border border-line text-ink-3 hover:text-ink-2">clear</button>
+                className="px-1.5 py-0.5 border border-line text-ink-3 hover:text-ink-2"><T k="action.clear">clear</T></button>
             )}
           </div>
 
@@ -249,7 +251,7 @@ function ExploreBody() {
             <button onClick={() => applyTags(false)} disabled={!!busy}
               className="px-2 py-0.5 border border-line text-ink-2 hover:border-accent disabled:opacity-40">add tag</button>
             <button onClick={() => applyTags(true)} disabled={!!busy}
-              className="px-2 py-0.5 border border-line text-ink-3 hover:border-accent disabled:opacity-40">remove</button>
+              className="px-2 py-0.5 border border-line text-ink-3 hover:border-accent disabled:opacity-40"><T k="action.remove">remove</T></button>
 
             <button onClick={saveView} disabled={!!busy}
               className="px-2 py-0.5 border border-line text-ink-2 hover:border-accent disabled:opacity-40">save view</button>

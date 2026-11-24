@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { T } from "@/lib/i18n";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api , humanizeError } from "@/lib/api";
 import type { Ontology, OntologyClass, SimilarResponse } from "@/lib/types";
@@ -9,6 +10,7 @@ import ClassPopover from "@/components/editor/properties/ClassPopover";
 import { cursorAfterRemoval, moveCursor, rangeBetween, targetIndices, toggle } from "@/lib/gridSelection";
 import { toast } from "@/lib/toast";
 import { acceptState, useCurrentUser } from "@/lib/user";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // Similarity search. One surface for every query kind: natural-language text (SigLIP 2), an uploaded image,
 // a frame, or an object crop (DINOv3), all reranked for diversity and a similarity floor so the grid shows
@@ -67,7 +69,8 @@ function SearchBody() {
   const [cursor, setCursor] = useState(0);
   const [anchor, setAnchor] = useState<number | null>(null);
   const [pickOpen, setPickOpen] = useState(false);
-  const [onto, setOnto] = useState<Ontology | null>(null);
+  // Set once an object result has been shown, and never unset: see the ontology read below.
+  const [wantOnto, setWantOnto] = useState(false);
   const [applying, setApplying] = useState(false);
   const pickAnchor = useRef<HTMLButtonElement | null>(null);
   const batchStart = useRef<number>(Date.now());
@@ -130,15 +133,15 @@ function SearchBody() {
 
   // The ontology is only needed once there is something to relabel, so it is fetched with the first
   // object result rather than on every visit to a text search.
+  useEffect(() => { if (isObject) setWantOnto(true); }, [isObject]);
+  const ontoQ = useQuery(["ontology"], () => api.ontology(), { enabled: wantOnto });
+  const onto: Ontology | null = ontoQ.data ?? null;
   useEffect(() => {
-    if (!isObject || onto) return;
-    api.ontology().then(setOnto).catch((e) => {
-      // Said out loud rather than swallowed. Without the ontology the "set class" button stays disabled,
-      // and a disabled button with no reason reads as "this page cannot relabel", which is a different
-      // and wrong conclusion from "the ontology did not load".
-      toast(`class list unavailable, so relabelling is off: ${humanizeError(e)}`, "error");
-    });
-  }, [isObject, onto]);
+    // Said out loud rather than swallowed. Without the ontology the "set class" button stays disabled,
+    // and a disabled button with no reason reads as "this page cannot relabel", which is a different
+    // and wrong conclusion from "the ontology did not load".
+    if (ontoQ.error) toast(`class list unavailable, so relabelling is off: ${humanizeError(ontoQ.error)}`, "error");
+  }, [ontoQ.error]);
 
   useEffect(() => { setSelection(new Set()); setAnchor(null); setCursor(0); }, [res]);
 
@@ -161,11 +164,13 @@ function SearchBody() {
         ids, action, className,
         action === "reject" ? "rejected" : acceptState(me?.role),
         undefined, { time_spent_ms: elapsed });
+      // The verdict moved these objects out of the review queues other pages cache.
+      void invalidate("triage", "/api/home");
       const lost = (r.skipped_stale?.length ?? 0) + (r.skipped_missing?.length ?? 0);
       const what = action === "reclassify" ? `set to ${className}` : action === "reject" ? "rejected" : "accepted";
       if (r.run_id) {
         toast(`${r.updated} ${what}${lost ? `, ${lost} skipped` : ""}`, lost ? "error" : "success", 12000,
-              { label: "undo", run: () => api.agentRevert(r.run_id!).then(() => {}) });
+              { label: "undo", run: () => api.agentRevert(r.run_id!).then(() => { void invalidate("triage", "/api/home"); }) });
       } else {
         toast(`nothing changed${lost ? `; ${lost} had moved on since this search ran` : ""}`, "error");
       }
@@ -231,7 +236,7 @@ function SearchBody() {
           placeholder='natural language, e.g. "night rain autorickshaw" or "dense urban traffic"'
           className="flex-1 min-w-[18rem] bg-bg border border-line px-3 py-1.5 text-[12.5px] text-ink" />
         <button onClick={() => q.trim() && run({ kind: "text", q })} disabled={busy}
-          className="border border-accent text-accent px-3 py-1.5 text-[12.5px] hover:bg-accent/10 disabled:opacity-50">search</button>
+          className="border border-accent text-accent px-3 py-1.5 text-[12.5px] hover:bg-accent/10 disabled:opacity-50"><T k="action.search">search</T></button>
         <label className="border border-line px-2 py-1.5 text-[12.5px] text-ink-3 hover:border-accent cursor-pointer">
           upload image
           <input type="file" accept="image/*" className="hidden"
@@ -301,12 +306,12 @@ function SearchBody() {
                   <button onClick={() => void applyVerdict("confirm")} disabled={applying}
                     title="confirm the selection as it is (A)"
                     className="border border-pass/60 text-pass px-2 py-0.5 rounded hover:bg-pass/10 disabled:opacity-40">
-                    <b>A</b> accept
+                    <b>A</b> <T k="action.accept">accept</T>
                   </button>
                   <button onClick={() => void applyVerdict("reject")} disabled={applying}
                     title="reject the selection (R)"
                     className="border border-line text-ink-3 px-2 py-0.5 rounded hover:border-block hover:text-block disabled:opacity-40">
-                    <b>R</b> reject
+                    <b>R</b> <T k="action.reject">reject</T>
                   </button>
                   {onto && (
                     <ClassPopover anchorRef={pickAnchor} open={pickOpen} onClose={() => setPickOpen(false)}
@@ -314,7 +319,7 @@ function SearchBody() {
                       onPick={(c: OntologyClass) => { void applyVerdict("reclassify", c.name); }}
                       onAdd={(raw: string) => {
                         void api.addClass(raw)
-                          .then(async (c) => { setOnto(await api.ontology()); await applyVerdict("reclassify", c.name); })
+                          .then(async (c) => { await invalidate("ontology"); await applyVerdict("reclassify", c.name); })
                           .catch((e) => toast(humanizeError(e), "error"));
                       }} />
                   )}

@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { api } from "@/lib/api";
+import { invalidate, useQuery } from "@/lib/useQuery";
 import type { AuditRow, GovState, RegistryRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
@@ -11,27 +12,29 @@ import { StateBadge, ConfBar } from "@/components/StateBadge";
 // switch. The one place a governor watches the unattended loop. Color is earned: green when healthy, warn
 // when paused, block-red for the kill switch.
 
+const NO_REGISTRY: RegistryRow[] = [];
+const NO_AUDIT: AuditRow[] = [];
+
 export default function GovernPage() {
-  const [state, setState] = useState<GovState | null>(null);
-  const [registry, setRegistry] = useState<RegistryRow[]>([]);
-  const [prec, setPrec] = useState<{ reviewed: number; incorrect: number; precision: number | null; pending?: number; interval?: { lo: number; hi: number; p: number | null } } | null>(null);
-  const [audit, setAudit] = useState<AuditRow[]>([]);
+  // Four reads, cached separately so the console's gate panel and the autonomy page share them. Any one
+  // failing is shown: this page holds the kill switch and the promotion gate, and a silent failure here
+  // shows stale or absent state for controls somebody is about to act on, which is the worst place in the
+  // app to be quiet.
+  const stateQ = useQuery(["governState"], () => api.governState());
+  const registryQ = useQuery(["governRegistry"], () => api.governRegistry());
+  const precQ = useQuery(["governPrecision"], () => api.governPrecision());
+  const auditQ = useQuery(["governAudit"], () => api.governAudit());
+  const state: GovState | null = stateQ.data ?? null;
+  const registry: RegistryRow[] = registryQ.data ?? NO_REGISTRY;
+  const prec: { reviewed: number; incorrect: number; precision: number | null; pending?: number; interval?: { lo: number; hi: number; p: number | null } } | null = precQ.data ?? null;
+  const audit: AuditRow[] = auditQ.data ?? NO_AUDIT;
   const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<unknown>(null);
+  const err = stateQ.loadState.error ?? registryQ.loadState.error ?? precQ.loadState.error ?? auditQ.loadState.error ?? null;
 
-  const load = useCallback(async () => {
-    setErr(null);
-    try {
-      const [s, r, p, a] = await Promise.all([api.governState(), api.governRegistry(), api.governPrecision(), api.governAudit()]);
-      setState(s); setRegistry(r); setPrec(p); setAudit(a);
-    } catch (e) {
-      // This page holds the kill switch and the promotion gate. A silent failure here shows stale or absent
-      // state for controls somebody is about to act on, which is the worst place in the app to be quiet.
-      setErr(e);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+  const load = useCallback(
+    // Everything a governance action can move, here and on the pages that cache the same reads.
+    () => invalidate("governState", "governRegistry", "governPrecision", "governAudit", "autonomyState"),
+    []);
 
   const act = async (fn: () => Promise<unknown>, label: string) => {
     const r = (await fn()) as { paused?: boolean; breached?: string[]; status?: string };

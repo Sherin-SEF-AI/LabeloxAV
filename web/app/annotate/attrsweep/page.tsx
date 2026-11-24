@@ -285,7 +285,7 @@ function AttrSweep() {
                 )}
                 {/* Class filter, from the classes that actually have work. */}
                 {klass && <span className="text-ink-2">class: {klass}
-                  <button onClick={() => setKlass("")} className="ml-1 text-ink-3 hover:text-block">x</button>
+                  <button onClick={() => setKlass("")} aria-label={`clear the class filter ${klass}`} className="ml-1 text-ink-3 hover:text-block">x</button>
                 </span>}
               </div>
 

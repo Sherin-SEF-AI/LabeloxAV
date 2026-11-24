@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Icon from "./Icon";
 import { MENUS, type Menu, type MenuItem } from "@/lib/menus";
+import { useLabel } from "@/lib/i18n";
 
 // The application menu bar, Blender-style.
 //
@@ -38,6 +39,8 @@ export default function MenuBar({ menus = MENUS, compact = false, fixed = false 
   const [sub, setSub] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
   const barRef = useRef<HTMLDivElement | null>(null);
+  // Menu names and entries are data in English (lib/menus.ts); shown in the interface language.
+  const label = useLabel();
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isEnabled = useCallback((it: MenuItem) => !it.disabled, []);
@@ -134,7 +137,7 @@ export default function MenuBar({ menus = MENUS, compact = false, fixed = false 
           <span className="w-4 shrink-0 flex items-center justify-center opacity-80">
             {it.icon ? <Icon name={it.icon} size={13} /> : null}
           </span>
-          <span className="flex-1 truncate">{it.label}</span>
+          <span className="flex-1 truncate">{label(it.label)}</span>
           {it.shortcut && (
             <span className={`text-[11.5px] shrink-0 ${active && enabled ? "text-bg/70" : "text-ink-3"}`}>
               {it.shortcut}
@@ -155,7 +158,7 @@ export default function MenuBar({ menus = MENUS, compact = false, fixed = false 
                 className="w-full flex items-center gap-2 pl-2 pr-3 py-[5px] text-left text-[12.5px]
                   text-ink-2 hover:bg-accent hover:text-bg rounded-[3px]">
                 <span className="w-4 shrink-0" />
-                <span className="flex-1 truncate">{s.label}</span>
+                <span className="flex-1 truncate">{label(s.label)}</span>
               </button>
             ))}
           </div>
@@ -175,7 +178,7 @@ export default function MenuBar({ menus = MENUS, compact = false, fixed = false 
             className={`h-full ${compact ? "px-2 text-[11.5px]" : "px-2.5 text-[12.5px]"} font-display ${
               open === m.key ? "bg-panel text-ink" : "text-ink-2 hover:text-ink"}`}
           >
-            {m.label}
+            {label(m.label)}
           </button>
 
           {open === m.key && (

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, type GoldSetRow , humanizeError } from "@/lib/api";
 import type { ConfusionCell, EvalPatchRow, EvalRun } from "@/lib/types";
+import { useQuery } from "@/lib/useQuery";
 
 // Model-versus-gold drill-down. The corrections table elsewhere on this page answers "what did humans fix";
 // this answers "where does the model disagree with sealed ground truth", and crucially lets you open a cell
@@ -20,10 +21,17 @@ function cellKey(c: ConfusionCell) {
 }
 
 export default function EvalDrilldown() {
-  const [golds, setGolds] = useState<GoldSetRow[]>([]);
-  const [evals, setEvals] = useState<EvalRun[]>([]);
+  // Both lists are optional here: without them the pickers are empty, which is what a failure has
+  // always looked like in this panel, so neither error is rendered.
+  const goldsQ = useQuery(["goldSets"], () => api.goldSets());
+  const golds: GoldSetRow[] = goldsQ.data ?? [];
+  const evalsQ = useQuery(["exploreEvals"], () => api.exploreEvals());
+  const evals: EvalRun[] = evalsQ.data?.evals ?? [];
   const [evalId, setEvalId] = useState<string>("");
-  const [cells, setCells] = useState<ConfusionCell[]>([]);
+  // The previous run's matrix stays up while the next loads; a failure reads as an empty matrix.
+  const cellsQ = useQuery(evalId ? ["exploreEvalCells", evalId] : null, () => api.exploreEvalCells(evalId),
+    { keepPrevious: true });
+  const cells: ConfusionCell[] = evalId && !cellsQ.error ? cellsQ.data?.cells ?? [] : [];
   const [active, setActive] = useState<ConfusionCell | null>(null);
   const [patches, setPatches] = useState<EvalPatchRow[]>([]);
   const [goldId, setGoldId] = useState<string>("");
@@ -32,23 +40,17 @@ export default function EvalDrilldown() {
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 4000); };
 
-  useEffect(() => {
-    api.goldSets().then((g) => {
-      setGolds(g);
-      if (g.length && !goldId) setGoldId(g[0].gold_id);
-    }).catch(() => {});
-    api.exploreEvals().then((r) => {
-      setEvals(r.evals);
-      if (r.evals.length && !evalId) setEvalId(r.evals[0].eval_id);
-    }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Open on the first gold set and the newest run once they arrive, unless one is already chosen.
+  const firstGoldId = golds[0]?.gold_id;
+  useEffect(() => { if (firstGoldId) setGoldId((cur) => cur || firstGoldId); }, [firstGoldId]);
+  const firstEvalId = evals[0]?.eval_id;
+  useEffect(() => { if (firstEvalId) setEvalId((cur) => cur || firstEvalId); }, [firstEvalId]);
 
+  // An open cell and its patches belong to the run they were opened in.
   useEffect(() => {
-    if (!evalId) { setCells([]); return; }
+    if (!evalId) return;
     setActive(null);
     setPatches([]);
-    api.exploreEvalCells(evalId).then((r) => setCells(r.cells)).catch(() => setCells([]));
   }, [evalId]);
 
   const openCell = async (c: ConfusionCell) => {
@@ -69,8 +71,7 @@ export default function EvalDrilldown() {
     try {
       const r = await api.exploreRunEval(goldId);
       if (r.error) { flash(r.error); return; }
-      const list = await api.exploreEvals();
-      setEvals(list.evals);
+      await evalsQ.reload();
       if (r.eval_id) setEvalId(r.eval_id);
       flash(`tp ${r.tp} / fp ${r.fp} / fn ${r.fn}`);
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }

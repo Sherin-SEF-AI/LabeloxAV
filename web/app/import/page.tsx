@@ -1,12 +1,14 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useJobStream } from "@/lib/useEventStream";
 import { api, type ImportJob , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import { useQueryParam } from "@/lib/useQueryParam";
+import { invalidate, useQuery } from "@/lib/useQuery";
+import { pressable } from "@/components/ui/pressable";
 
 // Upload a dataset (any size) straight to storage, then import it. The file goes browser -> MinIO via
 // presigned multipart; the API only signs and runs the import as a background job. PII (Gate A) runs
@@ -37,8 +39,10 @@ export default function ImportPage() {
 function ImportBody() {
   const router = useRouter();
   const qsFormat = useQueryParam("format");
-  const [formats, setFormats] = useState<string[]>(FALLBACK_FORMATS);
-  const [rawFormats, setRawFormats] = useState<string[]>([]);
+  // What the importer registers. Until it answers (or if it does not) the fallback list stands, as before.
+  const formatsQ = useQuery(["importFormats"], () => api.importFormats());
+  const formats: string[] = formatsQ.data?.formats ?? FALLBACK_FORMATS;
+  const rawFormats: string[] = formatsQ.data?.raw ?? [];
   // The File > Import menu deep-links a format per entry. Honoured as given: whether the importer knows it
   // is the server's question, and answering it from a stale local list is what silently sent nine formats
   // to the wrong importer.
@@ -46,13 +50,9 @@ function ImportBody() {
   const [unknownFormat, setUnknownFormat] = useState<string | null>(null);
 
   useEffect(() => {
-    api.importFormats().then((r) => {
-      setFormats(r.formats);
-      setRawFormats(r.raw);
-      // Said out loud rather than corrected behind the user's back.
-      if (qsFormat && !r.formats.includes(qsFormat)) setUnknownFormat(qsFormat);
-    }).catch(() => {});
-  }, [qsFormat]);
+    // Said out loud rather than corrected behind the user's back.
+    if (qsFormat && formatsQ.data && !formatsQ.data.formats.includes(qsFormat)) setUnknownFormat(qsFormat);
+  }, [qsFormat, formatsQ.data]);
   const [vehicle, setVehicle] = useState("IMPORT-01");
   const [city, setCity] = useState("BLR");
   const [files, setFiles] = useState<File[]>([]);
@@ -60,32 +60,32 @@ function ImportBody() {
   const [phase, setPhase] = useState<"idle" | "uploading" | "importing">("idle");
   const [uploadFrac, setUploadFrac] = useState(0);
   const [batchIdx, setBatchIdx] = useState(0);
-  const [jobs, setJobs] = useState<ImportJob[]>([]);
+  // A failed list has always rendered as no import jobs here; that is unchanged.
+  const jobsQ = useQuery(["listImports"], () => api.listImports());
+  const jobs: ImportJob[] = useMemo(() => jobsQ.data ?? [], [jobsQ.data]);
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const [health, setHealth] = useState<Record<string, "pass" | "warn" | "fail" | null>>({});
-  async function refresh() {
-    try {
-      const js = await api.listImports();
-      setJobs(js);
-      // Inspector health verdict per session: the chip that answers "did my recording work" before opening a panel.
-      const sids = Array.from(new Set(js.map((j) => j.session_id).filter(Boolean))) as string[];
-      const pairs = await Promise.all(sids.map(async (sid) => {
-        try { return [sid, (await api.inspectorHealth(sid)).verdict] as const; } catch { return [sid, null] as const; }
-      }));
-      setHealth(Object.fromEntries(pairs));
-    } catch {
-      /* ignore */
-    }
-  }
+  // Inspector health verdict per session: the chip that answers "did my recording work" before opening a
+  // panel. One read per imported session, after the list; the chips on screen stay while they refresh.
+  const sids = useMemo(
+    () => Array.from(new Set(jobs.map((j) => j.session_id).filter(Boolean))) as string[], [jobs]);
+  const healthQ = useQuery(jobsQ.data ? ["inspectorHealth", sids] : null, async () => {
+    const pairs = await Promise.all(sids.map(async (sid) => {
+      try { return [sid, (await api.inspectorHealth(sid)).verdict] as const; } catch { return [sid, null] as const; }
+    }));
+    return Object.fromEntries(pairs) as Record<string, "pass" | "warn" | "fail" | null>;
+  }, { keepPrevious: true });
+  const health: Record<string, "pass" | "warn" | "fail" | null> = healthQ.data ?? {};
+  const reloadJobs = jobsQ.reload;
+  const reloadHealth = healthQ.reload;
+  const refresh = useCallback(() => { void reloadJobs(); void reloadHealth(); }, [reloadJobs, reloadHealth]);
   const HEALTH_COLOR: Record<string, string> = { pass: "text-pass border-pass", warn: "text-warn border-warn", fail: "text-block border-block" };
 
   // The import job list arrives on the shared stream; refreshing on each push replaces the two-second
   // poll that ran on every open tab regardless of whether anything was importing.
   const jobStream = useJobStream();
-  useEffect(() => { refresh(); }, []);
-  useEffect(() => { if (jobStream.data) refresh(); }, [jobStream.data]);
+  useEffect(() => { if (jobStream.data) refresh(); }, [jobStream.data, refresh]);
 
   async function onGo() {
     if (!files.length) return;
@@ -104,6 +104,8 @@ function ImportBody() {
       setPhase("idle");
       setFiles([]);
       refresh();
+      // Each import is a job and will become a session: the jobs table, home and the session list change.
+      void invalidate("jobs", "/api/home", "sessionsPage", "sessions");
     } catch (e) {
       setErr(humanizeError(e));
       setPhase("idle");
@@ -117,6 +119,7 @@ function ImportBody() {
       <div className="p-4 space-y-4 max-w-4xl w-full mx-auto">
         <Section title="upload a dataset (any format, any size)">
           <div
+            {...pressable(() => inputRef.current?.click())}
             onDragOver={(e) => {
               e.preventDefault();
               setDrag(true);
@@ -127,7 +130,6 @@ function ImportBody() {
               setDrag(false);
               if (e.dataTransfer.files.length) setFiles(Array.from(e.dataTransfer.files));
             }}
-            onClick={() => inputRef.current?.click()}
             className={`border border-dashed ${
               drag ? "border-accent" : "border-line"
             } p-8 text-center cursor-pointer text-[12.5px] text-ink-3`}

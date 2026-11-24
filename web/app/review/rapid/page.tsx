@@ -6,12 +6,13 @@ import { useRouter } from "next/navigation";
 
 import PageShell from "@/components/shell/PageShell";
 import { api, humanizeError } from "@/lib/api";
-import { t } from "@/lib/i18n";
+import { useT } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 import { undoPayload, verdictPayload } from "@/lib/reviewVerdict";
 import { describeScope, triageQuery } from "@/lib/triageScope";
 import { acceptState, useCurrentUser } from "@/lib/user";
 import type { TriageRow } from "@/lib/types";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // Rapid review: one crop, one keystroke.
 //
@@ -37,6 +38,8 @@ type Decided = { row: TriageRow; verdict: Verdict; className?: string };
 const PREFETCH = 4;
 
 function RapidBody() {
+  // Bound to the locale this render used: the server and hydration see English, then the stored language.
+  const t = useT();
   const params = useSearchParams();
   const router = useRouter();
   const me = useCurrentUser();
@@ -47,7 +50,10 @@ function RapidBody() {
   const [loading, setLoading] = useState(true);
   const [reclassOpen, setReclassOpen] = useState(false);
   const [classQuery, setClassQuery] = useState("");
-  const [classes, setClasses] = useState<string[]>([]);
+  // The class list for the reclassify box. Shared with every other page that reads the ontology; without
+  // it the box simply has no suggestions, which is what a failure has always looked like here.
+  const ontologyQ = useQuery(["ontology"], () => api.ontology());
+  const classes: string[] = useMemo(() => (ontologyQ.data?.classes ?? []).map((c) => c.name), [ontologyQ.data]);
   const shownAt = useRef<number>(Date.now());
   const inFlight = useRef(0);
 
@@ -57,13 +63,15 @@ function RapidBody() {
   const scopeLabel = describeScope(params);
   const current = queue[index] ?? null;
 
+  // Deliberately not through the query cache. This queue is consumed by position, one keystroke per row:
+  // painting the last visit's rows and swapping in the fresh ones a moment later would put a different
+  // object under a verdict already on its way. It is fetched once per scope and then only walked.
   useEffect(() => {
     (async () => {
       try {
         setQueue(await api.triage(triageQuery(new URLSearchParams(scope))));
       } catch (e) { toast(humanizeError(e), "error"); } finally { setLoading(false); }
     })();
-    api.ontology().then((o) => setClasses(o.classes.map((c) => c.name))).catch(() => {});
   }, [scope]);
 
   useEffect(() => { shownAt.current = Date.now(); }, [index]);
@@ -87,6 +95,8 @@ function RapidBody() {
         className,
         timeSpentMs: Date.now() - shownAt.current,
       }));
+      // The object has left the queues other pages cache, and home's waiting count with it.
+      void invalidate("triage", "/api/home");
     } catch (e) {
       toast(`${row.class_name}: ${humanizeError(e)}`, "error");
     } finally { inFlight.current -= 1; }
@@ -115,7 +125,10 @@ function RapidBody() {
     // Success is claimed only once the server confirms it. This toast used to fire synchronously beside
     // the request, so when every reversal was being rejected the annotator was still told it had worked.
     void api.review(last.row.object_id, undoPayload(last.row, { reviewer: me?.name ?? "anon" }))
-      .then(() => toast(`undid ${last.verdict} on ${last.row.class_name}`, "success"))
+      .then(() => {
+        toast(`undid ${last.verdict} on ${last.row.class_name}`, "success");
+        void invalidate("triage", "/api/home");
+      })
       .catch((e) => toast(`could not undo ${last.verdict} on ${last.row.class_name}: `
                           + `${humanizeError(e)}. The verdict still stands.`, "error"));
   }, [done, me]);
@@ -215,7 +228,8 @@ function RapidBody() {
                 <div className="absolute inset-0 bg-bg/80 flex items-center justify-center">
                   <div className="panel p-3 w-[min(22rem,90vw)] space-y-2">
                     <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">reclassify as</div>
-                    <input autoFocus value={classQuery} onChange={(e) => setClassQuery(e.target.value)}
+                    {/* eslint-disable-next-line jsx-a11y/no-autofocus -- opened by the C key in a one-keystroke loop; a box that did not take the next keystroke would break it */}
+                    <input autoFocus aria-label="reclassify as" value={classQuery} onChange={(e) => setClassQuery(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && matches[0]) {
                           setReclassOpen(false); setClassQuery("");

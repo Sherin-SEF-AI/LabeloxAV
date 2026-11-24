@@ -120,7 +120,8 @@ export default function MulticamWorkspace() {
             <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">synchronized instants (PPS ts_ns)</div>
             <div className="flex flex-wrap items-center gap-px">
               {groups?.groups.map((g, i) => (
-                <button key={i} onClick={() => setSel(i)}
+                <button key={i} onClick={() => setSel(i)} aria-pressed={i === sel}
+                  aria-label={`instant ${i + 1}: ts ${g.ts_ns}, ${Object.keys(g.frames).length} view(s)`}
                   title={`ts ${g.ts_ns} · ${Object.keys(g.frames).length} view(s)`}
                   className="w-2 shrink-0 h-8"
                   style={{ background: i === sel ? "#FF7A2F" : Object.keys(g.frames).length > 1 ? "#56D364" : "#3a3f46" }} />
@@ -204,7 +205,11 @@ export default function MulticamWorkspace() {
                     {f ? (
                       <div className="relative">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={`/api/frames/${f.frame_id}/image`} alt={cam} className="w-full aspect-video object-cover bg-bg-2 cursor-pointer" onClick={() => router.push(`/frame/${f.frame_id}`)} />
+                        <button type="button" className="block w-full" aria-label={`open the ${cam} frame in the editor`}
+                          onClick={() => router.push(`/frame/${f.frame_id}`)}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={`/api/frames/${f.frame_id}/image`} alt={cam} className="w-full aspect-video object-cover bg-bg-2 cursor-pointer" />
+                        </button>
                         {/* Where the picked object would land in this view, before anything is written.
                             Drawn as a fraction of the frame so it survives the aspect crop above. */}
                         {(() => {

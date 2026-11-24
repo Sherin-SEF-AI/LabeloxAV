@@ -23,7 +23,7 @@ export default function Inspector({ title, side = "right", defaultOpen = true, w
   if (!open) {
     return (
       <div className={`${border} hairline shrink-0 w-8 flex flex-col items-center py-2`}>
-        <button onClick={() => setOpen(true)} title={`show ${title}`}
+        <button onClick={() => setOpen(true)} title={`show ${title}`} aria-expanded={false}
           className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 hover:text-accent [writing-mode:vertical-rl]">
           {title}
         </button>
@@ -37,7 +37,7 @@ export default function Inspector({ title, side = "right", defaultOpen = true, w
         <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 truncate">{title}</span>
         <div className="flex items-center gap-2 shrink-0">
           {meta && <span className="text-[11px] text-ink-3">{meta}</span>}
-          <button onClick={() => setOpen(false)} title="collapse"
+          <button onClick={() => setOpen(false)} title="collapse" aria-label={`collapse ${title}`} aria-expanded
             className="text-[12px] text-ink-3 hover:text-accent">{side === "right" ? ">" : "<"}</button>
         </div>
       </div>

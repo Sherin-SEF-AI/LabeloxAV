@@ -85,11 +85,11 @@ export default function SafetyEval() {
 
         {/* significance */}
         <Panel title="paired significance" hint="challenger vs champion, per-object">
-          <label className="block text-[11px] text-ink-3 mb-1">champion per-object scores</label>
-          <input value={champ} placeholder="per-sample hits for the champion, e.g. [0,1,1,0,1]" onChange={(e) => setChamp(e.target.value)}
+          <label htmlFor="champ-scores" className="block text-[11px] text-ink-3 mb-1">champion per-object scores</label>
+          <input id="champ-scores" value={champ} placeholder="per-sample hits for the champion, e.g. [0,1,1,0,1]" onChange={(e) => setChamp(e.target.value)}
             className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
-          <label className="block text-[11px] text-ink-3 mt-2 mb-1">challenger per-object scores</label>
-          <input value={chall} placeholder="per-sample hits for the challenger, e.g. [1,1,0,1,1]" onChange={(e) => setChall(e.target.value)}
+          <label htmlFor="chall-scores" className="block text-[11px] text-ink-3 mt-2 mb-1">challenger per-object scores</label>
+          <input id="chall-scores" value={chall} placeholder="per-sample hits for the challenger, e.g. [1,1,0,1,1]" onChange={(e) => setChall(e.target.value)}
             className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
           <div className="mt-2"><RunButton busy={sig.busy}
             onClick={() => sig.run(() => runJSON<Sig>("/api/verdyx/stats/significance",
@@ -107,11 +107,11 @@ export default function SafetyEval() {
 
         {/* shadow triage */}
         <Panel title="shadow regression triage" hint="protected slice alarms">
-          <label className="block text-[11px] text-ink-3 mb-1">baseline per-slice recall</label>
-          <input value={baseline} placeholder={'per-slice metric, e.g. {"vru_night": 0.9}'} onChange={(e) => setBaseline(e.target.value)}
+          <label htmlFor="baseline-recall" className="block text-[11px] text-ink-3 mb-1">baseline per-slice recall</label>
+          <input id="baseline-recall" value={baseline} placeholder={'per-slice metric, e.g. {"vru_night": 0.9}'} onChange={(e) => setBaseline(e.target.value)}
             className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
-          <label className="block text-[11px] text-ink-3 mt-2 mb-1">current per-slice recall</label>
-          <input value={current} placeholder={'per-slice metric, e.g. {"vru_night": 0.8}'} onChange={(e) => setCurrent(e.target.value)}
+          <label htmlFor="current-recall" className="block text-[11px] text-ink-3 mt-2 mb-1">current per-slice recall</label>
+          <input id="current-recall" value={current} placeholder={'per-slice metric, e.g. {"vru_night": 0.8}'} onChange={(e) => setCurrent(e.target.value)}
             className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
           <div className="mt-2"><RunButton busy={triage.busy}
             onClick={() => triage.run(() => runJSON<Triage>("/api/verdyx/shadow/triage",

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { LOCALES, getLocale, setLocale, type Locale } from "@/lib/i18n";
+import { LOCALES, T, getLocale, setLocale, type Locale } from "@/lib/i18n";
 
 // The interface language, somewhere a person can actually find it.
 //
@@ -14,7 +14,7 @@ import { LOCALES, getLocale, setLocale, type Locale } from "@/lib/i18n";
 //
 // Reads at mount rather than during render, because getLocale touches localStorage and navigator, and the
 // server render has neither - a mismatch would hydrate wrong and flicker.
-export default function LocalePicker() {
+export default function LocalePicker({ compact = false }: { compact?: boolean }) {
   const [locale, setLocaleState] = useState<Locale>("en");
   const [ready, setReady] = useState(false);
 
@@ -25,11 +25,11 @@ export default function LocalePicker() {
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <label htmlFor="locale" className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">
-        interface language
+      <label htmlFor={compact ? "locale-menu" : "locale"} className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">
+        <T k="prefs.language">interface language</T>
       </label>
       <select
-        id="locale"
+        id={compact ? "locale-menu" : "locale"}
         value={ready ? locale : "en"}
         disabled={!ready}
         onChange={(e) => setLocale(e.target.value as Locale)}
@@ -41,9 +41,11 @@ export default function LocalePicker() {
           </option>
         ))}
       </select>
-      <span className="text-[11px] text-ink-3">
-        the page reloads; class names and ids are never translated
-      </span>
+      {!compact && (
+        <span className="text-[11px] text-ink-3">
+          <T k="prefs.language_note">the page reloads; class names and ids are never translated</T>
+        </span>
+      )}
     </div>
   );
 }

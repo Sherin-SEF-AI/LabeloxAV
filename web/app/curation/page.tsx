@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useJobStream } from "@/lib/useEventStream";
 import { api , humanizeError } from "@/lib/api";
+import { useQuery } from "@/lib/useQuery";
 import type { CurationSummary } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 
@@ -31,23 +32,17 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function CurationPage() {
   const router = useRouter();
-  const [sum, setSum] = useState<CurationSummary | null>(null);
+  // A failed read is ignored, as before: the last summary stays up.
+  const sumQ = useQuery(["curationSummary"], () => api.curationSummary());
+  const sum: CurationSummary | null = sumQ.data ?? null;
+  const refresh = sumQ.reload;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-
-  async function refresh() {
-    try {
-      setSum(await api.curationSummary());
-    } catch {
-      /* ignore */
-    }
-  }
 
   // The curation summary changes when embedding or autolabel work lands, both of which are on the shared
   // job stream, so this follows the stream instead of running its own three-second timer.
   const jobStream = useJobStream();
-  useEffect(() => { refresh(); }, []);
-  useEffect(() => { if (jobStream.data) refresh(); }, [jobStream.data]);
+  useEffect(() => { if (jobStream.data) void refresh(); }, [jobStream.data, refresh]);
 
   async function embed() {
     setBusy(true);
@@ -107,10 +102,16 @@ export default function CurationPage() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {sum.duplicates.map((d, i) => (
                     <div key={i} className="flex items-center gap-1 border border-line p-1">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={d.a_url} alt="" className="w-1/2 h-14 object-cover bg-bg-2 cursor-pointer" onClick={() => router.push(`/frame/${d.a}`)} />
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={d.b_url} alt="" className="w-1/2 h-14 object-cover bg-bg-2 cursor-pointer" onClick={() => router.push(`/frame/${d.b}`)} />
+                      <button type="button" className="w-1/2 h-14" aria-label="open the first frame of this duplicate pair"
+                        onClick={() => router.push(`/frame/${d.a}`)}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={d.a_url} alt="" className="w-full h-full object-cover bg-bg-2 cursor-pointer" />
+                      </button>
+                      <button type="button" className="w-1/2 h-14" aria-label="open the second frame of this duplicate pair"
+                        onClick={() => router.push(`/frame/${d.b}`)}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={d.b_url} alt="" className="w-full h-full object-cover bg-bg-2 cursor-pointer" />
+                      </button>
                       <span className="text-[10.5px] text-block absolute">{d.sim}</span>
                     </div>
                   ))}

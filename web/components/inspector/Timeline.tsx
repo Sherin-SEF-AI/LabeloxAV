@@ -32,6 +32,8 @@ export default function Timeline({ topics, gaps, events, onMarkerClick }: {
   const scrubRef = useRef<HTMLDivElement>(null);
   const hudRef = useRef<HTMLSpanElement>(null);
   const dragging = useRef(false);
+  const sliderRef = useRef<HTMLDivElement>(null);
+  const offsetRef = useRef(0);
 
   const dur = clock.durationSec || 1;
   const startNs = clock.startNs;
@@ -42,6 +44,10 @@ export default function Timeline({ topics, gaps, events, onMarkerClick }: {
       const pct = Math.min(1, Math.max(0, offsetSec / dur)) * 100;
       if (scrubRef.current) scrubRef.current.style.left = `${pct}%`;
       if (hudRef.current) hudRef.current.textContent = fmt(offsetSec);
+      // The slider's value, kept in step the same way: an attribute write, not a render per tick.
+      offsetRef.current = offsetSec;
+      sliderRef.current?.setAttribute("aria-valuenow", String(Math.round(offsetSec)));
+      sliderRef.current?.setAttribute("aria-valuetext", fmt(offsetSec));
     });
   }, [clock, dur]);
 
@@ -65,10 +71,10 @@ export default function Timeline({ topics, gaps, events, onMarkerClick }: {
   return (
     <div className="border-t hairline bg-panel px-3 py-2 select-none">
       <div className="flex items-center gap-3 mb-2 text-[12px]">
-        <button onClick={() => clock.step(-1 / 30)} className="border border-line px-1.5 rounded hover:border-accent" title="step back">{"|<"}</button>
+        <button onClick={() => clock.step(-1 / 30)} className="border border-line px-1.5 rounded hover:border-accent" title="step back" aria-label="step back one frame">{"|<"}</button>
         <button onClick={() => clock.toggle()} className="border border-accent/50 bg-accent/10 text-accent px-3 rounded hover:bg-accent/20">{playing ? "pause" : "play"}</button>
-        <button onClick={() => clock.step(1 / 30)} className="border border-line px-1.5 rounded hover:border-accent" title="step forward">{">|"}</button>
-        <select onChange={(e) => clock.setSpeed(Number(e.target.value))} defaultValue="1" className="bg-bg-2 border border-line rounded px-1 text-ink-2">
+        <button onClick={() => clock.step(1 / 30)} className="border border-line px-1.5 rounded hover:border-accent" title="step forward" aria-label="step forward one frame">{">|"}</button>
+        <select onChange={(e) => clock.setSpeed(Number(e.target.value))} defaultValue="1" aria-label="playback speed" className="bg-bg-2 border border-line rounded px-1 text-ink-2">
           {[0.25, 0.5, 1, 2, 4].map((x) => <option key={x} value={x}>{x}x</option>)}
         </select>
         <span ref={hudRef} className="text-accent tabular-nums">00:00.00</span>
@@ -77,13 +83,31 @@ export default function Timeline({ topics, gaps, events, onMarkerClick }: {
       </div>
 
       {/* scrub track with event markers */}
-      <div ref={trackRef} onMouseDown={(e) => { dragging.current = true; seekFromEvent(e.clientX); }}
-        className="relative h-6 bg-bg-2 rounded cursor-pointer">
+      <div ref={trackRef} className="relative h-6 bg-bg-2 rounded cursor-pointer">
+        {/* The track is a slider: drag it, or focus it and use the arrow keys (a second a press, ten with
+            Shift), Home and End. The event markers are buttons laid over it as siblings, since a slider
+            cannot contain other controls. */}
+        <div ref={sliderRef} role="slider" tabIndex={0} aria-label="playback position"
+          aria-valuemin={0} aria-valuemax={Math.round(dur)} aria-valuenow={0} aria-valuetext={fmt(0)}
+          onMouseDown={(e) => { dragging.current = true; seekFromEvent(e.clientX); }}
+          onKeyDown={(e) => {
+            const step = e.shiftKey ? 10 : 1;
+            let to: number | null = null;
+            if (e.key === "ArrowRight" || e.key === "ArrowUp") to = offsetRef.current + step;
+            else if (e.key === "ArrowLeft" || e.key === "ArrowDown") to = offsetRef.current - step;
+            else if (e.key === "Home") to = 0;
+            else if (e.key === "End") to = dur;
+            if (to === null) return;
+            e.preventDefault();
+            clock.seek(Math.min(dur, Math.max(0, to)));
+          }}
+          className="absolute inset-0 rounded" />
         {events.map((ev, i) => (
-          <div key={i} title={`${ev.label}${ev.detail ? " - " + ev.detail : ""}`}
-            onClick={(e) => { e.stopPropagation(); if (onMarkerClick) onMarkerClick(ev.ts_ns); clock.seek(Number(BigInt(Math.round(ev.ts_ns)) - startNs) / 1e9); }}
+          <button type="button" key={i} title={`${ev.label}${ev.detail ? " - " + ev.detail : ""}`}
+            aria-label={`jump to ${ev.label}${ev.detail ? `, ${ev.detail}` : ""}`}
+            onClick={() => { if (onMarkerClick) onMarkerClick(ev.ts_ns); clock.seek(Number(BigInt(Math.round(ev.ts_ns)) - startNs) / 1e9); }}
             style={{ left: `${pctOfNs(ev.ts_ns)}%`, background: MARKER_COLOR[ev.kind] ?? "#6C727A" }}
-            className="absolute top-0 bottom-0 w-[2px] hover:w-[3px]" />
+            className="absolute top-0 bottom-0 w-[2px] hover:w-[3px] rounded-none" />
         ))}
         <div ref={scrubRef} style={{ left: "0%" }} className="absolute top-0 bottom-0 w-[2px] bg-accent pointer-events-none">
           <div className="absolute -top-1 -left-[3px] w-2 h-2 rounded-full bg-accent" />

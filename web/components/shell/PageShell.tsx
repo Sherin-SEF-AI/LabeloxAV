@@ -5,6 +5,7 @@ import PageHeaderBar from "./PageHeaderBar";
 import Sidebar from "./Sidebar";
 import { usePathname } from "next/navigation";
 import { titleFor } from "@/lib/sidebar";
+import { useLabel, useT } from "@/lib/i18n";
 import Breadcrumbs, { type Crumb } from "./Breadcrumbs";
 
 // The single dashboard chrome wrapper. Renders TopNav (its {active, right} contract preserved verbatim, so
@@ -29,7 +30,13 @@ export default function PageShell({ active, title, subtitle, right, primaryActio
   // clicked. Pages set their own titles over the years, several still carrying the retired platform code
   // names; a page outside the sidebar (a single object, a track) keeps the title it passes.
   const nav = titleFor(usePathname() ?? "");
-  const shownTitle = nav?.title ?? title;
+  const t = useT();
+  const label = useLabel();
+  // The title is looked up by the same key the sidebar entry uses, so the header reads what was clicked in
+  // whichever language it was clicked in. A title with no key (a session's name, an asset's type) is data
+  // and comes back as it was passed.
+  const rawTitle = nav?.title ?? title;
+  const shownTitle = rawTitle ? label(rawTitle) : rawTitle;
   const showBar = Boolean(shownTitle || primaryAction || meta || subtitle);
   return (
     // min-h-0 on the column and overflow on the bands: without it a narrow viewport clips the filter row
@@ -38,7 +45,7 @@ export default function PageShell({ active, title, subtitle, right, primaryActio
     <div className="h-[100dvh] flex min-h-0">
       {/* First in the tab order, before the sidebar, hidden until focused: a keyboard user should not have
           to walk the whole navigation to reach what they came for. */}
-      <a href="#content" className="skip-link">skip to content</a>
+      <a href="#content" className="skip-link">{t("sidebar.skip", "skip to content")}</a>
       <Sidebar />
     <div className="flex-1 min-w-0 flex flex-col min-h-0">
       {/* The header crumb only appears when the page has no title bar of its own, so the location is never
@@ -53,7 +60,7 @@ export default function PageShell({ active, title, subtitle, right, primaryActio
           <Breadcrumbs items={crumbs} />
         </div>
       )}
-      {showBar && <PageHeaderBar title={shownTitle ?? active} parent={nav?.parent} subtitle={subtitle} meta={meta}
+      {showBar && <PageHeaderBar title={shownTitle ?? active} parent={nav?.parent ? label(nav.parent) : undefined} subtitle={subtitle} meta={meta}
         primaryAction={primaryAction} />}
       {filters && (
         <div className="flex items-center gap-2 px-4 py-2 border-b hairline shrink-0 text-[12px] overflow-x-auto no-scrollbar">

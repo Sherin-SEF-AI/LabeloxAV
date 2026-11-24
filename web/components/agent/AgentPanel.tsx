@@ -1,15 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type AgentPlan, type ReanalyzeResult, humanizeError } from "@/lib/api";
 import { trackOp, trackRun } from "@/lib/canvasOps";
 import { Busy } from "@/components/Spinner";
 import { OpPrecisionChip, fetchOpState } from "@/components/agent/OpPrecision";
+import { useQuery } from "@/lib/useQuery";
 
 // The frame agent, surfaced in the editor. It runs a dry-run plan first (writes nothing), shows what it
 // would auto-accept vs route to a human plus any consistency-critic flags, and only then lets a reviewer
 // commit. Every commit is one reversible run, so the Revert button undoes it exactly. This is the
 // "human supervises exceptions" surface: you see the 80% the system is sure about before it touches them.
+
+const NO_SUGGESTIONS: { action: string; label: string }[] = [];
 
 export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, embedded = false }: { frameId: string; sessionId?: string | null; selectedId?: string | null; onApplied?: () => void; embedded?: boolean }) {
   const [plan, setPlan] = useState<AgentPlan | null>(null);
@@ -20,16 +23,25 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
   const [intent, setIntent] = useState<{ action: string; classes: string[] | string;
                                          conf_min: number | null } | null>(null);
   const [cmd, setCmd] = useState("");
-  const [suggestions, setSuggestions] = useState<{ action: string; label: string }[]>([]);
   const [reanalysis, setReanalysis] = useState<ReanalyzeResult | null>(null);
-  const [copilot, setCopilot] = useState<{ pattern: { from_name: string; to_name: string; to_class: number; count: number } | null; candidates: string[] } | null>(null);
 
+  // Both are best-effort hints: a failure leaves the panel without them rather than reporting anything.
+  // keepPrevious, so the last frame's hints stay until this frame's arrive, as the state they replace did.
+  const suggestQ = useQuery(["agentSuggest", frameId], () => api.agentSuggest(frameId), { keepPrevious: true });
+  const suggestions: { action: string; label: string }[] = (suggestQ.data?.suggestions ?? NO_SUGGESTIONS).slice(0, 3);
+  // The pattern is not about this frame, so it is one cache entry rather than one per frame: a stale
+  // per-frame copy would offer a batch fix over candidates that have since been fixed. It is still re-read
+  // on every frame, because it follows the corrections just made.
+  const copilotQ = useQuery<{ pattern: { from_name: string; to_name: string; to_class: number; count: number } | null; candidates: string[] }>(
+    ["agentCopilotPattern"], () => api.agentCopilotPattern());
+  const copilot = copilotQ.data ?? null;
+  const reloadCopilot = copilotQ.reload;
+  const mountedFrame = useRef(true);
   useEffect(() => {
-    let live = true;
-    api.agentSuggest(frameId).then((r) => { if (live) setSuggestions(r.suggestions.slice(0, 3)); }).catch(() => {});
-    api.agentCopilotPattern().then((r) => { if (live) setCopilot(r); }).catch(() => {});
-    return () => { live = false; };
-  }, [frameId]);
+    // The mount read is the query's own; this is for the frames after it.
+    if (mountedFrame.current) { mountedFrame.current = false; return; }
+    void reloadCopilot();
+  }, [frameId, reloadCopilot]);
 
   const doBatchFix = async () => {
     if (!(await guardUnmeasured("copilot_batch", "batch-fix"))) return;
@@ -38,7 +50,8 @@ export default function AgentPanel({ frameId, sessionId, selectedId, onApplied, 
     try {
       const r = await api.agentCopilotBatchFix(copilot.candidates, copilot.pattern.to_class);
       setMsg(`batch-fixed ${r.relabeled} similar ${copilot.pattern.from_name} -> ${copilot.pattern.to_name}, routed to review (reversible)`);
-      setCopilot(null); onApplied?.();
+      // The offer is spent: clear it from the cache too, so it is not offered again from there.
+      copilotQ.setData(undefined); onApplied?.();
     } catch (e) { setMsg("batch fix failed (needs reviewer role): " + humanizeError(e)); }
     finally { setBusy(null); }
   };

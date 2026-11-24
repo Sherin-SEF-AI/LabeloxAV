@@ -102,18 +102,23 @@ export const MODES: EditorMode[] = [
   },
 ];
 
-export function modeByKey(key: string): EditorMode | undefined {
-  return MODES.find((m) => m.key === key);
+// Every lookup below takes the mode list as a last argument and defaults it to MODES. The default is the
+// registry as shipped; the argument is the same registry with an annotator's rebound keys applied
+// (lib/editor/keymap.ts). One set of functions answering for both is what keeps "what does this key do"
+// and "do two things want this key" from being computed two different ways.
+
+export function modeByKey(key: string, modes: EditorMode[] = MODES): EditorMode | undefined {
+  return modes.find((m) => m.key === key);
 }
 
 /** Every tool key a mode's strip offers, in strip order. */
-export function toolsForMode(modeKey: string): string[] {
-  return (modeByKey(modeKey)?.groups ?? []).flatMap((g) => g.tools.map((t) => t.key));
+export function toolsForMode(modeKey: string, modes: EditorMode[] = MODES): string[] {
+  return (modeByKey(modeKey, modes)?.groups ?? []).flatMap((g) => g.tools.map((t) => t.key));
 }
 
 /** The strip's groups for a mode, falling back to Objects so an unknown mode still renders something. */
-export function groupsForMode(modeKey: string): ToolGroup[] {
-  return modeByKey(modeKey)?.groups ?? modeByKey("objects")?.groups ?? [];
+export function groupsForMode(modeKey: string, modes: EditorMode[] = MODES): ToolGroup[] {
+  return modeByKey(modeKey, modes)?.groups ?? modeByKey("objects", modes)?.groups ?? [];
 }
 
 /**
@@ -125,9 +130,9 @@ export function groupsForMode(modeKey: string): ToolGroup[] {
  * second, which selected the whole-extent tool, could never run. That tool had a button and a documented
  * shortcut and no way to reach it.
  */
-export function toolForHotkey(modeKey: string, key: string): string | null {
+export function toolForHotkey(modeKey: string, key: string, modes: EditorMode[] = MODES): string | null {
   const want = key.toLowerCase();
-  for (const g of groupsForMode(modeKey)) {
+  for (const g of groupsForMode(modeKey, modes)) {
     for (const t of g.tools) {
       if (t.hotkey.toLowerCase() === want) return t.key;
     }
@@ -136,9 +141,9 @@ export function toolForHotkey(modeKey: string, key: string): string | null {
 }
 
 /** Modes whose hotkeys collide inside one mode. Empty is the invariant; the test asserts it. */
-export function hotkeyCollisions(): { mode: string; hotkey: string; tools: string[] }[] {
+export function hotkeyCollisions(modes: EditorMode[] = MODES): { mode: string; hotkey: string; tools: string[] }[] {
   const out: { mode: string; hotkey: string; tools: string[] }[] = [];
-  for (const m of MODES) {
+  for (const m of modes) {
     const byKey = new Map<string, string[]>();
     for (const g of m.groups) {
       for (const t of g.tools) {

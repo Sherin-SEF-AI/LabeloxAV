@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { T } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { useQuery } from "@/lib/useQuery";
 import type { Scenario } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
@@ -20,35 +22,33 @@ const TYPE_COLOR: Record<string, string> = {
   congestion: "text-ink-2 border-line",
 };
 
+const NO_ROWS: Scenario[] = [];
+
 export default function ScenariosPage() {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [semantic, setSemantic] = useState(false);
-  const [rows, setRows] = useState<Scenario[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadErr, setLoadErr] = useState<unknown>(null);
+  // What was last asked for, as opposed to what is in the box: the list only changes on submit, so typing
+  // does not fire a request per keystroke. Starts as the unfiltered list.
+  const [asked, setAsked] = useState<{ q: string; semantic: boolean }>({ q: "", semantic: false });
+  // Each answer is cached under the read that produced it. keepPrevious: the last rows stay up while the
+  // next search runs, and when it fails.
+  const scenariosQ = useQuery<Scenario[] | { results: Scenario[] }>(
+    asked.q ? ["scenarioSearch", asked.q, asked.semantic] : ["scenarios", { limit: "200" }],
+    () => (asked.q ? api.scenarioSearch(asked.q, asked.semantic) : api.scenarios({ limit: "200" })),
+    { keepPrevious: true });
+  const found = scenariosQ.data;
+  const rows: Scenario[] = !found ? NO_ROWS : Array.isArray(found) ? found : found.results;
+  const loading = scenariosQ.validating;
+  // A search that fails must not look like a search that found nothing.
+  const loadErr = scenariosQ.validating ? null : scenariosQ.error ?? null;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadErr(null);
-    try {
-      if (q.trim()) {
-        const res = await api.scenarioSearch(q.trim(), semantic);
-        setRows(res.results);
-      } else {
-        setRows(await api.scenarios({ limit: "200" }));
-      }
-    } catch (e) {
-      // A search that fails must not look like a search that found nothing.
-      setLoadErr(e);
-    } finally {
-      setLoading(false);
-    }
-  }, [q, semantic]);
-
-  useEffect(() => {
-    load();
-  }, []); // initial
+  const load = () => {
+    const next = { q: q.trim(), semantic };
+    // The same question again is a refresh; a new one changes the key and fetches by itself.
+    if (next.q === asked.q && (next.semantic === asked.semantic || !next.q)) void scenariosQ.reload();
+    else setAsked(next);
+  };
 
   return (
     <PageShell
@@ -76,7 +76,7 @@ export default function ScenariosPage() {
               className="flex-1 bg-panel border hairline text-ink text-sm px-3 py-2 font-mono"
             />
             <button className="border border-accent text-accent px-4 text-sm font-mono hover:bg-accent/10">
-              search
+              <T k="action.search">search</T>
             </button>
           </form>
           <div className="flex items-center justify-between mt-1">

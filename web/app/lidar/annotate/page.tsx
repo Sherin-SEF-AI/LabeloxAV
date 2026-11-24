@@ -1,5 +1,7 @@
 "use client";
 
+import { T } from "@/lib/i18n";
+
 // The 3D cuboid annotation workspace (M-L2.1), BEV-first. Load a cloud, AI-lift its 2D objects into
 // ground-snapped cuboids, then refine: select a box (click in either view), drag it in the BEV, set its
 // dimensions and yaw, pick an ontology class, ground-snap, and save. Cuboids render in the 3D and BEV views
@@ -202,7 +204,7 @@ export default function CuboidAnnotatePage() {
 
   return (
     <PageShell active="CUBOID ANNOTATE" title="Cuboid annotation" right="AI lift 2D to 3D">
-      <div className="flex h-full bg-[#0a0e14] text-ink">
+      <div data-theme="dark" className="flex h-full bg-[#0a0e14] text-ink">
         <Inspector title="Cuboid annotation" side="left" width="w-80">
           <div className="flex flex-col gap-3 p-4">
 <SessionPicker value={sessionId} onChange={setSessionId} onLoad={loadClouds} />
@@ -332,7 +334,7 @@ export default function CuboidAnnotatePage() {
               <button onClick={() => groundSnap(selected.object_3d_id)}
                 className="flex-1 rounded bg-head px-2 py-1 hover:bg-btn-2">Ground snap</button>
               <button onClick={() => removeCuboid(selected.object_3d_id)}
-                className="rounded bg-block/20 px-2 py-1 hover:bg-block/30">Delete</button>
+                className="rounded bg-block/20 px-2 py-1 hover:bg-block/30"><T k="common.delete">Delete</T></button>
             </div>
             <div className="text-ink-3">Drag the box in the BEV view to move it.</div>
           </div>
@@ -360,7 +362,7 @@ export default function CuboidAnnotatePage() {
           <div className="absolute right-3 top-3 z-10 flex gap-1">
             {(["height", "intensity"] as ColorBy[]).map((k) => (
               <button key={k} onClick={() => setColorBy(k)}
-                className={`rounded px-2 py-0.5 text-xs ${colorBy === k ? "bg-[#2f6fd6] text-white" : "bg-head"}`}>{k}</button>
+                className={`rounded px-2 py-0.5 text-xs ${colorBy === k ? "bg-primary text-white" : "bg-head"}`}>{k}</button>
             ))}
           </div>
           {data && (

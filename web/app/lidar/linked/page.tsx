@@ -112,7 +112,7 @@ export default function LinkedWorkspacePage() {
   return (
     <PageShell active="LINKED 2D-3D" title="Linked 2D-3D"
       meta={err ? <span className="text-block">{err}</span> : undefined}>
-      <div className="flex h-full bg-[#0a0e14] text-ink">
+      <div data-theme="dark" className="flex h-full bg-[#0a0e14] text-ink">
         <Inspector title="Controls" side="left" width="w-80">
           <div className="flex flex-col gap-3 p-4">
             <SessionPicker value={sessionId} onChange={setSessionId} onLoad={(id) => {
@@ -158,7 +158,7 @@ export default function LinkedWorkspacePage() {
                     <div className="flex flex-wrap gap-1">
                       {classes.filter((c) => ["sedan", "suv", "truck", "bus", "autorickshaw"].includes(c.name)).map((c) => (
                         <button key={c.id} onClick={() => batchCorrect(c.id)}
-                          className="rounded bg-head px-2 py-0.5 hover:bg-[#2862c0]">{c.name}</button>
+                          className="rounded bg-head px-2 py-0.5 hover:bg-primary-3">{c.name}</button>
                       ))}
                     </div>
                   </div>

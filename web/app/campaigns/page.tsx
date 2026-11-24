@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { T } from "@/lib/i18n";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "@/lib/toast";
+import { invalidate, useQuery } from "@/lib/useQuery";
 import type { Campaign, CampaignDetail } from "@/lib/types";
 
 // Campaigns: the improvement loop, run by the system instead of by somebody remembering to.
@@ -38,10 +40,17 @@ function Bar({ value, target }: { value: number | null; target: number }) {
   );
 }
 
+const NO_ROWS: Campaign[] = [];
+
 export default function CampaignsPage() {
-  const [rows, setRows] = useState<Campaign[]>([]);
   const [open, setOpen] = useState<string | null>(null);
-  const [detail, setDetail] = useState<CampaignDetail | null>(null);
+  const rowsQ = useQuery(["campaigns"], () => api.campaigns());
+  const rows: Campaign[] = rowsQ.data?.campaigns ?? NO_ROWS;
+  // keepPrevious: switching to another campaign leaves the last one's detail up until the new one
+  // arrives. Closing clears it, which is why the null case is spelled out.
+  const detailQ = useQuery(open ? ["campaign", open] : null, () => api.campaign(open as string),
+    { keepPrevious: true });
+  const detail: CampaignDetail | null = open ? detailQ.data ?? null : null;
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const confirm = useConfirm();
@@ -51,16 +60,11 @@ export default function CampaignsPage() {
   const [target, setTarget] = useState(0.6);
   const [budget, setBudget] = useState(2000);
 
-  const load = useCallback(async () => {
-    try { setRows((await api.campaigns()).campaigns); }
-    catch (e) { toast(humanizeError(e), "error"); }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => {
-    if (!open) { setDetail(null); return; }
-    api.campaign(open).then(setDetail).catch((e) => toast(humanizeError(e), "error"));
-  }, [open]);
+  // A failed read is announced, as it was; the list and the detail keep whatever they last held.
+  const rowsErr = rowsQ.error;
+  const detailErr = detailQ.error;
+  useEffect(() => { if (rowsErr) toast(humanizeError(rowsErr), "error"); }, [rowsErr]);
+  useEffect(() => { if (detailErr) toast(humanizeError(detailErr), "error"); }, [detailErr]);
 
   const run = (fn: () => Promise<void>) => async () => {
     setBusy(true);
@@ -72,7 +76,7 @@ export default function CampaignsPage() {
     await api.createCampaign({ name: name.trim(), class_name: className.trim(),
                                target_value: target, label_budget: budget });
     setName(""); setClassName(""); setCreating(false);
-    await load();
+    await invalidate("campaigns");
     toast("campaign created; it waits for approval before doing anything", "success");
   });
 
@@ -80,15 +84,14 @@ export default function CampaignsPage() {
     const out = await api.tickCampaign(id);
     toast(out.detail || `${out.action}${out.stage ? `: ${out.stage}` : ""}`,
           out.action === "failed" ? "error" : "success");
-    await load();
-    if (open === id) setDetail(await api.campaign(id));
+    // The list, and this campaign's detail if it is the one open.
+    await invalidate("campaigns", ["campaign", id]);
   });
 
   const approve = (id: string, stage: string) => run(async () => {
     await api.approveCampaignStage(id, stage);
     toast(`ran ${stage}`, "success");
-    await load();
-    setDetail(await api.campaign(id));
+    await invalidate("campaigns", ["campaign", id]);
   });
 
   const stop = (id: string) => run(async () => {
@@ -96,7 +99,7 @@ export default function CampaignsPage() {
                           body: "It keeps its history and stops advancing.",
                           confirmLabel: "Stop" }))) return;
     await api.stopCampaign(id);
-    await load();
+    await invalidate("campaigns", ["campaign", id]);
   });
 
   return (
@@ -131,7 +134,7 @@ export default function CampaignsPage() {
               </label>
               <button onClick={create} disabled={busy}
                 className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
-                create
+                <T k="action.create">create</T>
               </button>
             </div>
             <div className="text-[11px] text-ink-3">
@@ -189,7 +192,7 @@ export default function CampaignsPage() {
                           <button onClick={tick(c.campaign_id)} disabled={busy}
                             className="text-ink-3 hover:text-accent disabled:opacity-40">tick</button>
                           <button onClick={stop(c.campaign_id)} disabled={busy}
-                            className="text-ink-3 hover:text-block disabled:opacity-40">stop</button>
+                            className="text-ink-3 hover:text-block disabled:opacity-40"><T k="action.stop">stop</T></button>
                         </>
                       )}
                     </td>

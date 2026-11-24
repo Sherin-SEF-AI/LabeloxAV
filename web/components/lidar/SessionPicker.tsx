@@ -66,7 +66,7 @@ export default function SessionPicker({
           aria-label="session id"
           className="min-w-0 flex-1 rounded border border-line bg-bg-2 px-2 py-1 text-xs"
         />
-        <button className="rounded bg-[#2f6fd6] text-white px-3 py-1 text-xs hover:bg-[#3a7ae0]">Load</button>
+        <button className="rounded bg-primary text-white px-3 py-1 text-xs hover:bg-primary-2">Load</button>
       </form>
     </div>
   );

@@ -52,7 +52,7 @@ export default function ImportedPanel({ item, onClose }: { item: QueueItem; onCl
     <aside className="reveal w-80 shrink-0 border hairline rounded bg-panel flex flex-col max-h-[36rem]">
       <div className="flex items-center gap-2 px-3 py-2 border-b hairline">
         <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">imported</span>
-        <button onClick={onClose} title="close"
+        <button onClick={onClose} title="close" aria-label="close the imported panel"
           className="ml-auto text-[12px] text-ink-3 hover:text-ink px-1">x</button>
       </div>
 

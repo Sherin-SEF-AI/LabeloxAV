@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { api, type GoldSetRow, type QualitySheet , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { StateBadge } from "@/components/StateBadge";
+import { useQuery } from "@/lib/useQuery";
 
 // Gate B (M9): the quality sheet. Per-class precision/recall against a sealed gold set, Safe-mIoU,
 // and calibration ECE. Seal a gold set + fit isotonic calibration from here. Measurement (GPU) runs
@@ -34,24 +35,21 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function QualityPage() {
   const router = useRouter();
-  const [goldSets, setGoldSets] = useState<GoldSetRow[]>([]);
+  const goldQ = useQuery(["goldSets"], () => api.goldSets());
+  const goldSets: GoldSetRow[] = goldQ.data ?? [];
   const [selected, setSelected] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<QualitySheet | null>(null);
+  // Keyed by the gold set, so flipping between two sets redraws from the cache. The previous sheet
+  // stays up while the next loads, and a set with no sheet (or a failed read) shows none, as before.
+  const sheetQ = useQuery(selected ? ["qualitySheet", selected] : null, () => api.qualitySheet(selected as string),
+    { keepPrevious: true });
+  const sheet: QualitySheet | null = sheetQ.error ? null : sheetQ.data ?? null;
   const [busy, setBusy] = useState<string | null>(null);
 
-  async function refreshGoldSets() {
-    const gs = await api.goldSets();
-    setGoldSets(gs);
-    if (!selected && gs.length) setSelected(gs[0].gold_id);
-  }
+  const refreshGoldSets = goldQ.reload;
 
-  useEffect(() => {
-    refreshGoldSets();
-  }, []);
-
-  useEffect(() => {
-    if (selected) api.qualitySheet(selected).then(setSheet).catch(() => setSheet(null));
-  }, [selected]);
+  // Open on the first gold set once the list arrives, unless one is already chosen.
+  const firstGoldId = goldSets[0]?.gold_id;
+  useEffect(() => { if (firstGoldId) setSelected((cur) => cur ?? firstGoldId); }, [firstGoldId]);
 
   async function onSeal() {
     setBusy("seal");

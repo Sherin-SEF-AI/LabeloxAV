@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { T } from "@/lib/i18n";
 import { api , humanizeError } from "@/lib/api";
+import { useQuery } from "@/lib/useQuery";
 import type { CalibDetail, CalibResolved, CalibSession, SessionRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import Inspector from "@/components/shell/Inspector";
@@ -10,14 +12,28 @@ import { StateBadge } from "@/components/StateBadge";
 // M3.0 calibration validation report viewer: per-camera reprojection + FOV check + time offset, with a
 // clear pass/fail. A failing session is excluded from 3D and multi-camera work.
 
+const NO_SESSIONS: SessionRow[] = [];
+const NO_VALIDATED: CalibSession[] = [];
+
 export default function CalibrationPage() {
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
-  const [validated, setValidated] = useState<CalibSession[]>([]);
+  const sessionsQ = useQuery(["sessions"], () => api.sessions());
+  const sessions: SessionRow[] = sessionsQ.data ?? NO_SESSIONS;
+  // An unreadable list reads as none validated, as before.
+  const validatedQ = useQuery(["calibrationSessions"], () => api.calibrationSessions());
+  const validated: CalibSession[] = validatedQ.error ? NO_VALIDATED : validatedQ.data ?? NO_VALIDATED;
   const [pick, setPick] = useState("");
+  // Start on the newest session, without overriding one already picked when the list refreshes.
+  useEffect(() => {
+    if (sessions[0]) setPick((cur) => cur || sessions[0].session_id);
+  }, [sessions]);
   const [detail, setDetail] = useState<CalibDetail | null>(null);
   const [busy, setBusy] = useState(false);
   // M-CAL.3 real-calibration ingestion + trust surface
-  const [resolved, setResolved] = useState<CalibResolved | null>(null);
+  // What this session's calibration resolves to, absent when it cannot be read. keepPrevious: the last
+  // session's stays up while the next one loads.
+  const resolvedQ = useQuery(pick ? ["calibrationResolved", pick] : null, () => api.calibrationResolved(pick),
+    { keepPrevious: true });
+  const resolved: CalibResolved | null = resolvedQ.error ? null : resolvedQ.data ?? null;
   const [specCam, setSpecCam] = useState("");
   const [focalMode, setFocalMode] = useState<"fov" | "fx">("fov");
   const [focalVal, setFocalVal] = useState("37");
@@ -27,23 +43,16 @@ export default function CalibrationPage() {
   const [impText, setImpText] = useState("");
   const [ing, setIng] = useState("");
 
-  const load = useCallback(async () => {
-    setValidated(await api.calibrationSessions().catch(() => []));
-  }, []);
+  const load = validatedQ.reload;
+  const loadResolved = async (_sid: string) => { await resolvedQ.reload(); };
 
-  const loadResolved = useCallback(async (sid: string) => {
-    if (!sid) return;
-    const r = await api.calibrationResolved(sid).catch(() => null);
-    setResolved(r);
-    if (r && r.cameras[0]) setSpecCam((c) => c || r.cameras[0].cam_id);
-  }, []);
-
+  // Declared in this order on purpose: a new session clears the chosen camera, then the calibration that
+  // arrives for it (at once, when cached) picks its first camera unless one has been chosen since.
+  useEffect(() => { setSpecCam(""); }, [pick]);
+  const loaded = resolvedQ.data;
   useEffect(() => {
-    load();
-    api.sessions().then((s) => { setSessions(s); if (s[0]) setPick(s[0].session_id); });
-  }, [load]);
-
-  useEffect(() => { setSpecCam(""); loadResolved(pick); }, [pick, loadResolved]);
+    if (loaded && loaded.cameras[0]) setSpecCam((c) => c || loaded.cameras[0].cam_id);
+  }, [loaded]);
 
   const ingest = async (fn: () => Promise<unknown>, label: string) => {
     setIng(label + "...");
@@ -179,7 +188,7 @@ export default function CalibrationPage() {
               <div className="uppercase text-ink-3">import KITTI calib (dataset)</div>
               <input value={impCam} onChange={(e) => setImpCam(e.target.value)} placeholder="cam_id" className="w-full bg-bg border border-line px-2 py-1 text-ink" />
               <textarea value={impText} onChange={(e) => setImpText(e.target.value)} placeholder="paste calib.txt (P2: fx 0 cx ...)" rows={3} className="w-full bg-bg border border-line px-2 py-1 text-ink resize-none" />
-              <button onClick={runImport} disabled={!pick || !impText} className="w-full border border-line text-ink-2 py-1 hover:border-accent disabled:opacity-50">import</button>
+              <button onClick={runImport} disabled={!pick || !impText} className="w-full border border-line text-ink-2 py-1 hover:border-accent disabled:opacity-50"><T k="action.import">import</T></button>
             </div>
             {ing && <div className="text-ink-3">{ing}</div>}
           </div>

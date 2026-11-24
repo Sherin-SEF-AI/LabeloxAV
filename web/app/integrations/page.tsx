@@ -1,11 +1,13 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useState } from "react";
+import { T } from "@/lib/i18n";
 import { useSearchParams } from "next/navigation";
 import { api , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "@/lib/toast";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // Outbound integrations: webhook subscriptions and registered storage buckets.
 //
@@ -41,11 +43,19 @@ export default function IntegrationsPage() {
   return <Suspense fallback={null}><IntegrationsBody /></Suspense>;
 }
 
+const NO_HOOKS: Webhook[] = [];
+const NO_SOURCES: Source[] = [];
+const NO_EVENTS: string[] = [];
+
 function IntegrationsBody() {
   const params = useSearchParams();
-  const [hooks, setHooks] = useState<Webhook[]>([]);
-  const [sources, setSources] = useState<Source[]>([]);
-  const [events, setEvents] = useState<string[]>([]);
+  const eventsQ = useQuery(["integrationEvents"], () => api.integrationEvents());
+  const sourcesQ = useQuery(["storageSources"], () => api.storageSources());
+  // Webhooks are admin-gated, so a non-admin simply sees an empty list rather than an error wall.
+  const hooksQ = useQuery(["webhooks"], () => api.webhooks());
+  const hooks: Webhook[] = hooksQ.error ? NO_HOOKS : hooksQ.data?.webhooks ?? NO_HOOKS;
+  const sources: Source[] = sourcesQ.data?.sources ?? NO_SOURCES;
+  const events: string[] = eventsQ.data?.events ?? NO_EVENTS;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [freshSecret, setFreshSecret] = useState<{ url: string; secret: string } | null>(null);
@@ -63,16 +73,13 @@ function IntegrationsBody() {
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 5000); };
 
-  const refresh = useCallback(async () => {
-    try {
-      const [e, s] = await Promise.all([api.integrationEvents(), api.storageSources()]);
-      setEvents(e.events); setSources(s.sources);
-    } catch (err) { flash(humanizeError(err)); }
-    // Webhooks are admin-gated, so a non-admin simply sees an empty list rather than an error wall.
-    try { setHooks((await api.webhooks()).webhooks); } catch { setHooks([]); }
-  }, []);
-
-  useEffect(() => { refresh(); }, [refresh]);
+  // A failed read of the events or the sources is flashed, as it was.
+  const failure = eventsQ.error ?? sourcesQ.error;
+  useEffect(() => {
+    if (failure) flash(humanizeError(failure));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [failure]);
+  const refresh = useCallback(() => invalidate("integrationEvents", "storageSources", "webhooks"), []);
 
   const addHook = async () => {
     if (!url.trim()) { flash("give the webhook a url"); return; }
@@ -131,7 +138,7 @@ function IntegrationsBody() {
             </div>
             <button onClick={() => setFreshSecret(null)}
               className="mt-1 border border-line px-2 py-0.5 text-[12px] text-ink-2 hover:border-accent">
-              dismiss
+              <T k="action.dismiss">dismiss</T>
             </button>
           </div>
         )}
@@ -181,7 +188,7 @@ function IntegrationsBody() {
                       <td className="text-ink-3">{h.last_error ?? (h.last_status ?? "-")}</td>
                       <td className="text-right">
                         <button onClick={async () => { if (!(await confirm({ title: "Remove this webhook?", body: h.url, danger: true, confirmLabel: "Remove" }))) return; try { await api.deleteWebhook(h.webhook_id); toast("Webhook removed", "success"); } catch (e) { toast(humanizeError(e), "error"); } refresh(); }}
-                          className="text-ink-3 hover:text-block">remove</button>
+                          className="text-ink-3 hover:text-block"><T k="action.remove">remove</T></button>
                       </td>
                     </tr>
                   ))}
@@ -234,7 +241,7 @@ function IntegrationsBody() {
                         <button onClick={() => preview(s.source_id)} disabled={busy}
                           className="text-ink-3 hover:text-accent disabled:opacity-40">preview</button>
                         <button onClick={async () => { if (!(await confirm({ title: "Remove this storage source?", body: s.name, danger: true, confirmLabel: "Remove" }))) return; try { await api.deleteSource(s.source_id); toast("Source removed", "success"); } catch (e) { toast(humanizeError(e), "error"); } refresh(); }}
-                          className="text-ink-3 hover:text-block">remove</button>
+                          className="text-ink-3 hover:text-block"><T k="action.remove">remove</T></button>
                       </td>
                     </tr>
                   ))}

@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import PageShell from "@/components/shell/PageShell";
 import Icon from "@/components/shell/Icon";
 import LoadState from "@/components/shell/LoadState";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { apiGet, apiPost, humanizeError } from "@/lib/api";
+import { invalidate, useQuery } from "@/lib/useQuery";
 import { toast } from "@/lib/toast";
 import { useCurrentUser } from "@/lib/user";
 
@@ -132,21 +133,18 @@ function CreateForm({ onMinted }: { onMinted: (m: Minted) => void }) {
 export default function ApiKeysPage() {
   const user = useCurrentUser();
   const confirm = useConfirm();
-  const [rows, setRows] = useState<Account[] | null>(null);
-  const [error, setError] = useState<unknown>(null);
   const [showRevoked, setShowRevoked] = useState(false);
   const [minted, setMinted] = useState<Minted | null>(null);
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const r = await apiGet<{ accounts: Account[] }>(`/api/service-accounts?include_revoked=${showRevoked}`);
-      setRows(r.accounts);
-    } catch (e) {
-      setError(e);
-    }
-  }, [showRevoked]);
-  useEffect(() => { if (user?.role === "admin") void load(); }, [load, user?.role]);
+  // Administrators only, so it waits for the role. keepPrevious: toggling "show revoked" leaves the
+  // current rows up until the other list arrives.
+  const accountsQ = useQuery(["/api/service-accounts", showRevoked],
+    () => apiGet<{ accounts: Account[] }>(`/api/service-accounts?include_revoked=${showRevoked}`),
+    { enabled: user?.role === "admin", keepPrevious: true });
+  const rows: Account[] | null = accountsQ.data?.accounts ?? null;
+  const error = accountsQ.validating ? null : accountsQ.error ?? null;
+  // Both lists: a mint, a revoke or a rotate changes the one with revoked keys as well as the one without.
+  const load = useCallback(() => invalidate("/api/service-accounts"), []);
 
   const revoke = async (a: Account) => {
     if (!(await confirm({ title: `Revoke "${a.name}"?`, body: "Anything using this key stops working immediately. This cannot be undone; create a new key instead.", confirmLabel: "Revoke", danger: true }))) return;
@@ -184,7 +182,7 @@ export default function ApiKeysPage() {
           <header className="flex items-center justify-between gap-3 px-4 pt-3.5 pb-2.5">
             <h2 className="text-[13.5px] font-semibold text-ink">Keys</h2>
             <label className="flex items-center gap-2 text-[12.5px] text-ink-3 cursor-pointer">
-              <input type="checkbox" checked={showRevoked} onChange={(e) => setShowRevoked(e.target.checked)} className="accent-[#2f6fd6]" />
+              <input type="checkbox" checked={showRevoked} onChange={(e) => setShowRevoked(e.target.checked)} className="accent-primary" />
               Show revoked
             </label>
           </header>

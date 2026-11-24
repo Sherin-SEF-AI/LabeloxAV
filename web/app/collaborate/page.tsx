@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { api } from "@/lib/api";
+import { invalidate, useQuery } from "@/lib/useQuery";
 import { useCurrentUser } from "@/lib/user";
 import type { AssignmentRow, MergeRequestRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
@@ -12,32 +13,28 @@ import { StateBadge } from "@/components/StateBadge";
 // on isolated branches; reviewers approve, merge to main, and can revert a bad merge. Color is earned: a
 // merged MR is pass-green, reverted is block-red, open is info-blue.
 
+const NO_BRANCHES: string[] = [];
+const NO_ASGS: AssignmentRow[] = [];
+const NO_MRS: MergeRequestRow[] = [];
+
 export default function CollaboratePage() {
-  const [branches, setBranches] = useState<string[]>([]);
-  const [asgs, setAsgs] = useState<AssignmentRow[]>([]);
-  const [mrs, setMrs] = useState<MergeRequestRow[]>([]);
+  const branchesQ = useQuery(["collabBranches"], () => api.collabBranches());
+  const asgsQ = useQuery(["collabAssignments"], () => api.collabAssignments());
+  const mrsQ = useQuery(["collabMRs"], () => api.collabMRs());
+  const branches: string[] = branchesQ.data?.branches ?? NO_BRANCHES;
+  const asgs: AssignmentRow[] = asgsQ.data ?? NO_ASGS;
+  const mrs: MergeRequestRow[] = mrsQ.data ?? NO_MRS;
   const [msg, setMsg] = useState<string | null>(null);
-  const [loadErr, setLoadErr] = useState<unknown>(null);
+  // Without this the page kept rendering an empty shell after a failed request, which is
+  // indistinguishable from having no data.
+  const loadErr = branchesQ.loadState.error ?? asgsQ.loadState.error ?? mrsQ.loadState.error ?? null;
   // Read in an effect, not in the body: getUser() touches localStorage and rendering it directly made
   // the server say one thing and the client another, which React resolves by discarding the server HTML.
   const me = useCurrentUser();
   const canReview = me?.role === "reviewer" || me?.role === "admin";
 
-  const load = useCallback(async () => {
-    setLoadErr(null);
-    try {
-        const [b, a, m] = await Promise.all([api.collabBranches(), api.collabAssignments(), api.collabMRs()]);
-        setBranches(b.branches);
-        setAsgs(a);
-        setMrs(m);
-    } catch (e) {
-      // Without this the page kept rendering an empty shell after a
-      // failed request, which is indistinguishable from having no data.
-      setLoadErr(e);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+  // An approve, a merge or a revert moves a merge request and can move branches and assignments with it.
+  const load = useCallback(() => invalidate("collabBranches", "collabAssignments", "collabMRs"), []);
 
   const act = async (fn: () => Promise<unknown>, label: string) => {
     if (!me) { setMsg("pick a user first"); return; }

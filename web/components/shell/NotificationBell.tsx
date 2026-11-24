@@ -1,6 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { useT } from "@/lib/i18n";
+import { useQuery } from "@/lib/useQuery";
 import { useRouter } from "next/navigation";
 
 import Icon from "./Icon";
@@ -40,6 +43,7 @@ function ago(iso: string | null): string {
 
 export default function NotificationBell() {
   const router = useRouter();
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<NotificationRow[]>([]);
   const [unread, setUnread] = useState(0);
@@ -61,26 +65,34 @@ export default function NotificationBell() {
 
   // The stream is the live path; this covers the first paint and any deployment where the stream cannot
   // connect, so the bell is never simply blank.
-  const refresh = useCallback(async () => {
-    try {
-      const [c, l] = await Promise.all([api.notificationCount(), api.notifications(10)]);
-      setUnread(c.unread);
-      setRows(l.notifications);
-    } catch { /* signed out or offline: the bell stays quiet rather than shouting an error */ }
-  }, []);
-
-  useEffect(() => { if (!stream.connected) refresh(); }, [stream.connected, refresh]);
+  // A failure is not rendered: signed out or offline, the bell stays quiet rather than shouting an error.
+  const fallback = useQuery(["notificationCount+notifications", 10], async () => {
+    const [c, l] = await Promise.all([api.notificationCount(), api.notifications(10)]);
+    return { unread: c.unread, notifications: l.notifications };
+  });
+  useEffect(() => {
+    if (!fallback.data) return;
+    setUnread(fallback.data.unread);
+    setRows(fallback.data.notifications);
+  }, [fallback.data]);
+  const refresh = fallback.reload;
+  // Asked again whenever the stream drops, which is when it stops being the live path.
+  const wasConnected = useRef(false);
+  useEffect(() => {
+    if (wasConnected.current && !stream.connected) void refresh();
+    wasConnected.current = stream.connected;
+  }, [stream.connected, refresh]);
 
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
       if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
     };
-    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") { setOpen(false); btnRef.current?.focus(); } };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onEsc);
     return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onEsc); };
-  }, [open]);
+  }, [open, btnRef]);
 
   const openItem = async (n: NotificationRow) => {
     setOpen(false);
@@ -97,8 +109,9 @@ export default function NotificationBell() {
   return (
     <div className="relative" ref={boxRef}>
       <button ref={btnRef} onClick={() => { if (!open) place(); setOpen((o) => !o); }}
-        data-tip={unread ? `${unread} unread` : "Notifications"}
-        aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
+        data-tip={unread ? t("notify.unread", "{n} unread", { n: unread }) : t("notify.title", "Notifications")}
+        aria-label={unread ? t("notify.title_unread", "Notifications, {n} unread", { n: unread }) : t("notify.title", "Notifications")}
+        aria-haspopup="dialog" aria-expanded={open}
         className="relative w-7 h-7 flex items-center justify-center rounded text-ink-3 hover:text-ink hover:bg-panel">
         <Icon name="bell" size={14} />
         {unread > 0 && (
@@ -111,29 +124,29 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div style={style} className="z-50 w-[min(26rem,92vw)] panel shadow-lg">
+        <div style={style} role="group" aria-label={t("notify.title", "Notifications")} className="z-50 w-[min(26rem,92vw)] panel shadow-lg">
           <div className="flex items-center gap-2 px-3 py-2 border-b hairline text-[12px]">
-            <span className="uppercase text-ink-3">notifications</span>
+            <span className="uppercase text-ink-3">{t("notify.title_lc", "notifications")}</span>
             {unread > 0 && (
               <button onClick={markAll} className="ml-auto text-ink-3 hover:text-accent">
-                mark all read
+                {t("notify.mark_all", "mark all read")}
               </button>
             )}
           </div>
 
           {rows.length === 0 ? (
             <div className="p-4 text-[12px] text-ink-3">
-              Nothing yet. Assignments, raised issues, blocked promotions and drift breaches land here.
+              {t("notify.empty_long", "Nothing yet. Assignments, raised issues, blocked promotions and drift breaches land here.")}
             </div>
           ) : (
             <ul className="max-h-[60vh] overflow-auto">
               {rows.map((n) => (
                 <li key={n.notification_id}>
                   <button onClick={() => openItem(n)}
-                    className={`w-full text-left px-3 py-2 border-b hairline hover:bg-panel-2
+                    className={`w-full text-left px-3 py-2 border-b hairline hover:bg-head
                                 ${n.read ? "opacity-60" : ""}`}>
                     <div className="flex items-start gap-2">
-                      <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${SEV_DOT[n.severity] ?? "bg-ink-3"}`} />
+                      <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${SEV_DOT[n.severity] ?? "bg-ink-3"}`} aria-hidden />
                       <div className="min-w-0 flex-1">
                         <div className="font-mono text-[11.5px] text-ink truncate">{n.title}</div>
                         {n.body && <div className="text-[11.5px] text-ink-3 line-clamp-2">{n.body}</div>}
@@ -150,7 +163,7 @@ export default function NotificationBell() {
 
           <button onClick={() => { setOpen(false); router.push("/activity"); }}
             className="w-full px-3 py-2 text-[11.5px] text-ink-3 hover:text-accent text-left">
-            open the activity feed
+            {t("notify.open_feed", "open the activity feed")}
           </button>
         </div>
       )}

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
 import { isNavigable } from "@/lib/routeGaps";
+import { useLabel, useT } from "@/lib/i18n";
 
 // The location trail, so you can see where you are in the platform -> tool -> session -> frame -> object
 // hierarchy and click up a level instead of guessing. Computed from the pathname by default; a page with
@@ -53,6 +54,8 @@ export default function Breadcrumbs({ items, fallback = "/" }: { items?: Crumb[]
   const pathname = usePathname();
   const router = useRouter();
   const crumbs = items && items.length ? items : fromPath(pathname || "/");
+  const t = useT();
+  const label = useLabel();
 
   const goBack = () => {
     if (typeof window !== "undefined" && window.history.length > 1) router.back();
@@ -60,8 +63,8 @@ export default function Breadcrumbs({ items, fallback = "/" }: { items?: Crumb[]
   };
 
   return (
-    <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 min-w-0 text-[12px]">
-      <button onClick={goBack} title="back (Alt+Left)" aria-label="Go back"
+    <nav aria-label={t("crumb.label", "Breadcrumb")} className="flex items-center gap-1.5 min-w-0 text-[12px]">
+      <button onClick={goBack} title={t("crumb.back_tip", "back (Alt+Left)")} aria-label={t("crumb.back", "Go back")}
         className="text-ink-3 hover:text-accent border border-line hover:border-accent px-1.5 py-0.5 shrink-0">
         &larr;
       </button>
@@ -70,9 +73,9 @@ export default function Breadcrumbs({ items, fallback = "/" }: { items?: Crumb[]
           <li key={i} className="flex items-center gap-1.5 min-w-0">
             {i > 0 && <span className="text-ink-3" aria-hidden>/</span>}
             {c.href ? (
-              <Link href={c.href} className="text-ink-3 hover:text-accent truncate">{c.label}</Link>
+              <Link href={c.href} className="text-ink-3 hover:text-accent truncate">{label(c.label)}</Link>
             ) : (
-              <span className="text-ink-2 truncate" aria-current="page">{c.label}</span>
+              <span className="text-ink-2 truncate" aria-current="page">{label(c.label)}</span>
             )}
           </li>
         ))}

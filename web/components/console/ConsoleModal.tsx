@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDialog } from "@/components/ui/useDialog";
 
 import {
   BackgroundPanel, CanvasPanel, GatePanel, GpuPanel, HostPanel, ProcessPanel, RunningNowPanel,
@@ -81,6 +82,10 @@ export default function ConsoleModal() {
     if (open) searchRef.current?.focus();
   }, [open]);
 
+  // Tab stays inside. Escape and the return of focus are handled above, because Escape here clears the
+  // search before it closes anything.
+  const dialogRef = useDialog<HTMLDivElement>(open, close, { closeOnEscape: false });
+
   const matches = useMemo(() => filterSections(query), [query]);
   const shown = useMemo(() => resolveSelection(query, section), [query, section]);
   const groups = useMemo(() => groupSections(matches), [matches]);
@@ -94,10 +99,10 @@ export default function ConsoleModal() {
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
       {/* The backdrop is a button so a click outside closes, which is the gesture people try first. */}
-      <button aria-label="close console" onClick={close}
+      <button aria-label="close console" onClick={close} tabIndex={-1}
         className="absolute inset-0 bg-black/45 backdrop-blur-[2px] reveal cursor-default" />
 
-      <div role="dialog" aria-modal="true" aria-label="Console"
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Console" tabIndex={-1}
         className="reveal-pop relative w-full max-w-[980px] h-[min(680px,88vh)] flex
                    bg-bg-2 border border-line rounded-lg shadow-2xl overflow-hidden">
 

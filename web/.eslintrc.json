@@ -1,8 +1,29 @@
 {
-  "extends": ["next/core-web-vitals"],
-  "ignorePatterns": ["node_modules/", ".next/", "out/", "public/"],
+  "extends": ["next/core-web-vitals", "plugin:jsx-a11y/recommended"],
+  "ignorePatterns": ["node_modules/", ".next/", "out/", "public/", "coverage/"],
   "rules": {
     "react-hooks/rules-of-hooks": "error",
-    "react-hooks/exhaustive-deps": "warn"
-  }
+    "react-hooks/exhaustive-deps": "warn",
+    "jsx-a11y/label-has-associated-control": ["error", {
+      "controlComponents": ["SessionSelect"],
+      "assert": "either",
+      "depth": 4
+    }],
+    "jsx-a11y/control-has-associated-label": ["error", {
+      "depth": 4,
+      "ignoreElements": ["audio", "canvas", "embed", "input", "textarea", "tr", "video", "select", "option", "th", "td"],
+      "ignoreRoles": ["grid", "listbox", "menu", "menubar", "radiogroup", "row", "tablist", "toolbar", "tree", "treegrid", "slider"]
+    }]
+  },
+  "overrides": [
+    {
+      "files": ["app/frame/**", "components/editor/**", "lib/editor/**"],
+      "rules": {
+        "jsx-a11y/click-events-have-key-events": "warn",
+        "jsx-a11y/no-static-element-interactions": "warn",
+        "jsx-a11y/no-autofocus": "warn",
+        "jsx-a11y/interactive-supports-focus": "warn"
+      }
+    }
+  ]
 }

@@ -1,7 +1,8 @@
 "use client";
 
 export const dynamic = "force-dynamic";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
+import { T } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, humanizeError } from "@/lib/api";
@@ -13,6 +14,7 @@ import Pager from "@/components/shell/Pager";
 import { usePager } from "@/lib/usePager";
 import { StateBadge } from "@/components/StateBadge";
 import { useQueryFlag } from "@/lib/useQueryParam";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // The "open annotation" browser: every capture session as a card with review progress and a
 // state breakdown. "open" jumps to the first frame; "resume queue" jumps to the highest-priority
@@ -108,7 +110,7 @@ function SessionCard({
           onClick={() => onOpen(session)}
           className="btn"
         >
-          open
+          <T k="action.open">open</T>
         </button>
         <button
           onClick={() => onResume(session)}
@@ -140,40 +142,31 @@ function AnnotationsBody() {
   const rigMode = useQueryFlag("rig");
   const router = useRouter();
   const { offset, limit, setOffset } = usePager(24);
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
+  // Paginated: the corpus has 2000+ sessions, so the list pages through them with a real total instead
+  // of silently showing only the first window. Keyed by the window, so paging back, or returning from a
+  // session, shows the page that was there while it refreshes. A failed load leaves the grid empty
+  // rather than crashing, as before, so the error is not rendered.
+  const pageQ = useQuery(["sessionsPage", { limit, offset }], () => api.sessionsPage({ limit, offset }),
+    { keepPrevious: true });
+  const sessions: SessionRow[] = useMemo(() => pageQ.data?.sessions ?? [], [pageQ.data]);
+  const total = pageQ.data?.total ?? 0;
+  // One stats read per listed session, after the page itself. A session whose stats fail simply has none.
+  const ids = useMemo(() => sessions.map((s) => s.session_id), [sessions]);
+  const statsQ = useQuery(pageQ.data ? ["sessionStats", ids] : null, async () => {
+    const results = await Promise.all(ids.map((id) => api.sessionStats(id).catch(() => null)));
+    const map: Record<string, SessionStats> = {};
+    results.forEach((st) => {
+      if (st) map[st.session_id] = st;
+    });
+    return map;
+  }, { keepPrevious: true });
+  const stats: Record<string, SessionStats> = statsQ.data ?? {};
+  const loading = pageQ.validating || statsQ.validating;
   // Selection for the batch autolabel. Kept here rather than in the manager: which sessions somebody has
   // ticked is a property of this screen, and only the ones they confirm are handed over.
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [labelBusy, setLabelBusy] = useState(false);
-  const [total, setTotal] = useState(0);
-  const [stats, setStats] = useState<Record<string, SessionStats>>({});
-  const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        // Paginated: the corpus has 2000+ sessions, so the list pages through them with a real total instead
-        // of silently showing only the first window.
-        const page = await api.sessionsPage({ limit, offset });
-        setSessions(page.sessions);
-        setTotal(page.total);
-        const results = await Promise.all(
-          page.sessions.map((s) => api.sessionStats(s.session_id).catch(() => null)),
-        );
-        const map: Record<string, SessionStats> = {};
-        results.forEach((st) => {
-          if (st) map[st.session_id] = st;
-        });
-        setStats(map);
-      } catch {
-        /* ignore: leave the grid empty rather than crash */
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [offset, limit]);
 
   function flash(text: string) {
     setMsg(text);
@@ -210,6 +203,8 @@ function AnnotationsBody() {
         watchAutolabel: watchAutolabelJob,
       });
       setSel(new Set());
+      // The batch has written objects: the cards' counts, the jobs table and home are all stale.
+      void invalidate("sessionStats", "jobs", "/api/home");
     } finally {
       setLabelBusy(false);
     }

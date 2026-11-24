@@ -2,14 +2,113 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+/* The palette, as RGB channels so Tailwind can apply an opacity to any of them (tailwind.config.ts reads
+   these as rgb(var(--c-x) / alpha)). Dark is the default and what every page was designed against.
+
+   The selectors are attribute selectors on purpose, not just :root. A subtree can pin its own theme with
+   data-theme: the 3D viewports stay dark in the light theme, because a point cloud is drawn for a dark
+   ground and the panels over it are read against that ground, not against the page. */
+:root,
+[data-theme="dark"] {
   color-scheme: dark;
+  --c-rail: 15 16 19;        /* #0f1013 */
+  --c-bg: 18 19 22;          /* #121316 */
+  --c-bg-2: 13 14 16;        /* #0d0e10 */
+  --c-panel: 24 25 29;       /* #18191d */
+  --c-head: 31 32 37;        /* #1f2025 */
+  --c-line: 42 44 50;        /* #2a2c32 */
+  --c-line-2: 26 27 31;      /* #1a1b1f */
+  --c-line-3: 56 59 66;      /* #383b42 */
+  --c-ink: 232 233 236;      /* #e8e9ec */
+  --c-ink-2: 180 184 192;    /* #b4b8c0 */
+  --c-ink-3: 142 147 156;    /* #8e939c */
+  --c-accent: 95 155 245;    /* #5f9bf5 */
+  --c-accent-2: 134 180 250; /* #86b4fa */
+  --c-pass: 79 191 122;      /* #4fbf7a */
+  --c-warn: 226 166 64;      /* #e2a640 */
+  --c-block: 238 98 89;      /* #ee6259 */
+  --c-info: 106 166 240;     /* #6aa6f0 */
+  --c-btn: 36 38 44;         /* #24262c */
+  --c-btn-2: 44 47 54;       /* #2c2f36 */
+  --c-primary: 47 111 214;   /* #2f6fd6 */
+  --c-primary-2: 58 122 224; /* #3a7ae0 */
+  --c-primary-3: 40 98 192;  /* #2862c0 */
+  /* One-off shades the component classes below use. */
+  --c-btn-border: 49 52 59;        /* #31343b */
+  --c-btn-border-hover: 58 62 70;  /* #3a3e46 */
+  --c-btn-active: 32 34 39;        /* #202227 */
+  --c-btn-on-ink: 207 224 253;     /* #cfe0fd */
+  --c-field-border: 46 49 55;      /* #2e3137 */
+  --c-placeholder: 108 113 122;    /* #6c717a */
+  --c-panel-head: 28 29 34;        /* #1c1d22 */
+  --c-panel-head-ink: 201 204 210; /* #c9ccd2 */
+  --c-side-hover: 26 28 32;        /* #1a1c20 */
+  --c-side-on: 31 34 41;           /* #1f2229 */
+  --c-scroll: 51 54 61;            /* #33363d */
+  --c-scroll-hover: 64 68 76;      /* #40444c */
+  --c-skeleton: 26 27 31;          /* #1a1b1f */
+  --c-skeleton-2: 36 38 43;        /* #24262b */
+  --c-tip-bg: 11 12 14;            /* #0b0c0e */
+  --c-tip-ink: 232 233 236;
+  --c-tip-border: 49 52 59;
+  /* Named for the rules further down that already asked for them and were getting their fallbacks. */
+  --accent: rgb(var(--c-accent));
+  --bg: rgb(var(--c-bg));
+}
+
+/* Light. Surfaces step the other way (the page is the darkest, a panel is white) and every text and state
+   colour is darker than its dark-theme twin, because the same blue that reads on graphite disappears on
+   white. Text tokens are held to 4.5:1 on all four surfaces; lib/themePalette.test.ts measures it. */
+[data-theme="light"] {
+  color-scheme: light;
+  --c-rail: 238 240 243;     /* #eef0f3 */
+  --c-bg: 246 247 249;       /* #f6f7f9 */
+  --c-bg-2: 255 255 255;     /* #ffffff */
+  --c-panel: 255 255 255;    /* #ffffff */
+  --c-head: 235 237 241;     /* #ebedf1 */
+  --c-line: 212 215 221;     /* #d4d7dd */
+  --c-line-2: 229 231 235;   /* #e5e7eb */
+  --c-line-3: 174 179 189;   /* #aeb3bd */
+  --c-ink: 23 25 29;         /* #17191d */
+  --c-ink-2: 61 66 75;       /* #3d424b */
+  --c-ink-3: 88 94 105;      /* #585e69 */
+  --c-accent: 31 92 196;     /* #1f5cc4 */
+  --c-accent-2: 24 73 160;   /* #1849a0 */
+  --c-pass: 21 115 58;       /* #15733a */
+  --c-warn: 133 85 0;        /* #855500 */
+  --c-block: 186 43 36;      /* #ba2b24 */
+  --c-info: 28 96 184;       /* #1c60b8 */
+  --c-btn: 255 255 255;      /* #ffffff */
+  --c-btn-2: 240 242 245;    /* #f0f2f5 */
+  --c-primary: 37 99 201;    /* #2563c9 */
+  --c-primary-2: 31 88 181;  /* #1f58b5 */
+  --c-primary-3: 27 79 168;  /* #1b4fa8 */
+  --c-btn-border: 201 205 212;
+  --c-btn-border-hover: 174 179 189;
+  --c-btn-active: 229 231 235;
+  --c-btn-on-ink: 24 73 160;
+  --c-field-border: 201 205 212;
+  --c-placeholder: 107 113 124;
+  --c-panel-head: 243 244 247;
+  --c-panel-head-ink: 61 66 75;
+  --c-side-hover: 229 231 236;
+  --c-side-on: 221 225 233;
+  --c-scroll: 195 199 206;
+  --c-scroll-hover: 164 169 179;
+  --c-skeleton: 232 234 238;
+  --c-skeleton-2: 244 245 247;
+  /* The tooltip stays dark on purpose: it is the one surface that must read over anything. */
+  --c-tip-bg: 23 25 29;
+  --c-tip-ink: 240 241 243;
+  --c-tip-border: 23 25 29;
+  --accent: rgb(var(--c-accent));
+  --bg: rgb(var(--c-bg));
 }
 
 html,
 body {
-  background: #121316;
-  color: #e8e9ec;
+  background: rgb(var(--c-bg));
+  color: rgb(var(--c-ink));
   /* Figures line up in every column and counter without each table having to ask for it. */
   font-variant-numeric: tabular-nums;
 }
@@ -17,13 +116,13 @@ body {
 /* Surfaces: a panel is one step up from the page, with a hairline and moderate rounding. Depth comes from the
    surface steps (tailwind.config.ts), not from shadows or gradients. */
 .panel {
-  background: #18191d;
-  border: 1px solid #2a2c32;
+  background: rgb(var(--c-panel));
+  border: 1px solid rgb(var(--c-line));
   border-radius: 8px;
 }
 
 .hairline {
-  border-color: #2a2c32;
+  border-color: rgb(var(--c-line));
 }
 
 /* Component layer: buttons, inputs, panel headers, and the sidebar. Classes rather than per-page styling, so
@@ -39,48 +138,48 @@ body {
     font-size: 12px;
     font-weight: 500;
     line-height: 1;
-    color: #e8e9ec;
-    background: #24262c;
-    border: 1px solid #31343b;
+    color: rgb(var(--c-ink));
+    background: rgb(var(--c-btn));
+    border: 1px solid rgb(var(--c-btn-border));
     border-radius: 6px;
     white-space: nowrap;
     transition: background-color 100ms ease, border-color 100ms ease, color 100ms ease;
   }
-  .btn:hover:not(:disabled) { background: #2c2f36; border-color: #3a3e46; }
-  .btn:active:not(:disabled) { background: #202227; }
+  .btn:hover:not(:disabled) { background: rgb(var(--c-btn-2)); border-color: rgb(var(--c-btn-border-hover)); }
+  .btn:active:not(:disabled) { background: rgb(var(--c-btn-active)); }
   .btn:disabled { opacity: 0.45; cursor: default; }
 
   /* Primary action: solid blue, white text at 4.8:1. */
   .btn-primary {
     color: #ffffff;
-    background: #2f6fd6;
-    border-color: #2f6fd6;
+    background: rgb(var(--c-primary));
+    border-color: rgb(var(--c-primary));
   }
-  .btn-primary:hover:not(:disabled) { background: #3a7ae0; border-color: #3a7ae0; }
-  .btn-primary:active:not(:disabled) { background: #2862c0; }
+  .btn-primary:hover:not(:disabled) { background: rgb(var(--c-primary-2)); border-color: rgb(var(--c-primary-2)); }
+  .btn-primary:active:not(:disabled) { background: rgb(var(--c-primary-3)); }
 
   /* An engaged toggle: tinted with the selection blue rather than filled, so it reads as state, not action. */
   .btn-on {
-    color: #cfe0fd;
-    background: rgba(95, 155, 245, 0.16);
-    border-color: rgba(95, 155, 245, 0.55);
+    color: rgb(var(--c-btn-on-ink));
+    background: rgb(var(--c-accent) / 0.16);
+    border-color: rgb(var(--c-accent) / 0.55);
   }
-  .btn-on:hover:not(:disabled) { background: rgba(95, 155, 245, 0.22); border-color: rgba(95, 155, 245, 0.7); }
+  .btn-on:hover:not(:disabled) { background: rgb(var(--c-accent) / 0.22); border-color: rgb(var(--c-accent) / 0.7); }
 
   /* Input field: recessed below the page. */
   .field {
-    background: #0d0e10;
-    border: 1px solid #2e3137;
+    background: rgb(var(--c-bg-2));
+    border: 1px solid rgb(var(--c-field-border));
     border-radius: 6px;
-    color: #e8e9ec;
+    color: rgb(var(--c-ink));
     padding: 5px 9px;
     font-size: 12px;
     outline: none;
     transition: border-color 100ms ease, box-shadow 100ms ease;
   }
-  .field:hover { border-color: #383b42; }
-  .field:focus { border-color: #5f9bf5; box-shadow: 0 0 0 3px rgba(95, 155, 245, 0.18); }
-  .field::placeholder { color: #6c717a; }
+  .field:hover { border-color: rgb(var(--c-line-3)); }
+  .field:focus { border-color: rgb(var(--c-accent)); box-shadow: 0 0 0 3px rgb(var(--c-accent) / 0.18); }
+  .field::placeholder { color: rgb(var(--c-placeholder)); }
 
   /* Panel header: names a panel. */
   .panel-head {
@@ -88,13 +187,13 @@ body {
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    background: #1c1d22;
-    border-bottom: 1px solid #2a2c32;
+    background: rgb(var(--c-panel-head));
+    border-bottom: 1px solid rgb(var(--c-line));
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;
     font-size: 11.5px;
     font-weight: 500;
-    color: #c9ccd2;
+    color: rgb(var(--c-panel-head-ink));
   }
 
   /* Sidebar. */
@@ -105,7 +204,7 @@ body {
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #8e939c;
+    color: rgb(var(--c-ink-3));
   }
   .side-item {
     display: flex;
@@ -115,11 +214,11 @@ body {
     padding: 0 10px;
     border-radius: 6px;
     font-size: 13px;
-    color: #b4b8c0;
+    color: rgb(var(--c-ink-2));
     transition: background-color 100ms ease, color 100ms ease;
   }
-  .side-item:hover { background: #1a1c20; color: #e8e9ec; }
-  .side-item-on, .side-item-on:hover { background: #1f2229; color: #e8e9ec; }
+  .side-item:hover { background: rgb(var(--c-side-hover)); color: rgb(var(--c-ink)); }
+  .side-item-on, .side-item-on:hover { background: rgb(var(--c-side-on)); color: rgb(var(--c-ink)); }
   .side-sub {
     display: flex;
     align-items: center;
@@ -127,24 +226,24 @@ body {
     padding: 0 8px;
     border-radius: 5px;
     font-size: 12.5px;
-    color: #8e939c;
+    color: rgb(var(--c-ink-3));
     transition: background-color 100ms ease, color 100ms ease;
   }
-  .side-sub:hover { color: #e8e9ec; background: #1a1c20; }
-  .side-sub-on, .side-sub-on:hover { color: #e8e9ec; background: #1a1c20; }
+  .side-sub:hover { color: rgb(var(--c-ink)); background: rgb(var(--c-side-hover)); }
+  .side-sub-on, .side-sub-on:hover { color: rgb(var(--c-ink)); background: rgb(var(--c-side-hover)); }
   .side-icon-btn {
     align-items: center;
     justify-content: center;
     width: 28px;
     height: 28px;
     border-radius: 6px;
-    color: #8e939c;
+    color: rgb(var(--c-ink-3));
   }
-  .side-icon-btn:hover { background: #1a1c20; color: #e8e9ec; }
+  .side-icon-btn:hover { background: rgb(var(--c-side-hover)); color: rgb(var(--c-ink)); }
 }
 
 ::selection {
-  background: rgba(95, 155, 245, 0.35);
+  background: rgb(var(--c-accent) / 0.35);
 }
 
 /* Global control rounding. */
@@ -157,7 +256,7 @@ button, input, select, textarea {
   /* 2px and opaque. A 1px ring at 80% opacity against #1d1d1d is legible on a large monitor and easy to
      lose on a laptop in daylight, which matters most for the keyboard-driven review loop where the ring is
      the only thing telling you where you are. */
-  outline: 2px solid #86b4fa;
+  outline: 2px solid rgb(var(--c-accent-2));
   outline-offset: 1px;
 }
 /* Row actions get a reachable target without the type getting bigger.
@@ -194,9 +293,9 @@ button:not(:disabled) {
   padding: 4px 8px;
   font-size: 11px;
   line-height: 1.3;
-  color: #e8e9ec;
-  background: #0b0c0e;
-  border: 1px solid #31343b;
+  color: rgb(var(--c-tip-ink));
+  background: rgb(var(--c-tip-bg));
+  border: 1px solid rgb(var(--c-tip-border));
   border-radius: 6px;
   white-space: nowrap;
   pointer-events: none;
@@ -215,20 +314,20 @@ button:not(:disabled) {
 /* Thin scrollbars. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #33363d transparent;
+  scrollbar-color: rgb(var(--c-scroll)) transparent;
 }
 *::-webkit-scrollbar {
   width: 11px;
   height: 11px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #33363d;
+  background: rgb(var(--c-scroll));
   border-radius: 6px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: #40444c;
+  background: rgb(var(--c-scroll-hover));
   background-clip: content-box;
 }
 
@@ -250,7 +349,7 @@ button:not(:disabled) {
   position: absolute;
   top: 0;
   height: 100%;
-  background: #5f9bf5;
+  background: rgb(var(--c-accent));
   animation: lbx-progress 1.1s ease-in-out infinite;
 }
 
@@ -279,7 +378,7 @@ button:not(:disabled) {
   100% { background-position: 160% 0; }
 }
 .skeleton {
-  background: linear-gradient(90deg, #1a1b1f 25%, #24262b 50%, #1a1b1f 75%);
+  background: linear-gradient(90deg, rgb(var(--c-skeleton)) 25%, rgb(var(--c-skeleton-2)) 50%, rgb(var(--c-skeleton)) 75%);
   background-size: 220% 100%;
   animation: lbx-shimmer 1.3s ease-in-out infinite;
   border-radius: 3px;
@@ -294,7 +393,7 @@ button:not(:disabled) {
   width: 6px;
   height: 6px;
   border-radius: 9999px;
-  background: #5f9bf5;
+  background: rgb(var(--c-accent));
   animation: lbx-pulse 0.9s ease-in-out infinite;
 }
 
@@ -312,7 +411,7 @@ button:not(:disabled) {
   border-radius: 9999px;
   flex-shrink: 0;
 }
-.pulse-dot--live { background: #5f9bf5; animation: lbx-pulse 0.9s ease-in-out infinite; }
+.pulse-dot--live { background: rgb(var(--c-accent)); animation: lbx-pulse 0.9s ease-in-out infinite; }
 .pulse-dot--good { background: #56D364; animation: lbx-pulse 1.6s ease-in-out infinite; }
 .pulse-dot--warn { background: #E3B341; animation: lbx-pulse 1.6s ease-in-out infinite; }
 .pulse-dot--bad  { background: #F85149; animation: lbx-pulse 1.2s ease-in-out infinite; }
@@ -341,8 +440,8 @@ button:not(:disabled) {
   animation: lbx-running 1.1s ease-in-out infinite;
 }
 @keyframes lbx-running {
-  0%, 100% { border-color: #2a2c32; }
-  50%      { border-color: rgba(95, 155, 245, 0.6); }
+  0%, 100% { border-color: rgb(var(--c-line)); }
+  50%      { border-color: rgb(var(--c-accent) / 0.6); }
 }
 
 /* A progress fill that is visibly alive between updates.
@@ -383,8 +482,8 @@ button:not(:disabled) {
 }
 .lift:hover {
   transform: translateY(-2px);
-  border-color: rgba(95, 155, 245, 0.45);
-  box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(95, 155, 245, 0.1);
+  border-color: rgb(var(--c-accent) / 0.45);
+  box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px rgb(var(--c-accent) / 0.1);
 }
 
 /* Sheen: a one-pass light sweep across the primary call to action on hover. */

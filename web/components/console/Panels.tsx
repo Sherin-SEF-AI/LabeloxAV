@@ -6,6 +6,7 @@ import { type CanvasOp, subscribeOps } from "@/lib/canvasOps";
 import { level, mb, uptime, workInFlight } from "@/lib/console";
 import type { AgentRunRow } from "@/lib/types";
 import type { JobStream, SystemStream } from "@/lib/useEventStream";
+import { useQuery } from "@/lib/useQuery";
 
 // The console's panels, as pieces rather than a page.
 //
@@ -147,10 +148,8 @@ export function RunningNowPanel({ jobs }: { jobs: JobStream | null }) {
  * decided to look is not a signal.
  */
 export function GatePanel() {
-  const [p, setP] = useState<{ reviewed: number; precision: number | null; pending: number } | null>(null);
-  useEffect(() => {
-    api.governPrecision().then(setP).catch(() => {});
-  }, []);
+  // A failed read renders as "no reading", which is what it is; the error is deliberately not shown here.
+  const { data: p } = useQuery(["governPrecision"], () => api.governPrecision());
   if (!p) return <div className="text-[12px] text-ink-3">no reading</div>;
   return (
     <div className="text-[12px] space-y-1 text-ink-3">
@@ -176,16 +175,15 @@ export function GatePanel() {
 
 /** Agent runs, polled rather than streamed: a corpus sweep going for an hour is no more informative for
  *  being re-read every three seconds. */
+const NO_RUNS: AgentRunRow[] = [];
+
 export function useAgentRuns(enabled = true) {
-  const [runs, setRuns] = useState<AgentRunRow[]>([]);
-  useEffect(() => {
-    if (!enabled) return;
-    const load = () => api.agentRuns(12).then(setRuns).catch(() => {});
-    load();
-    const t = setInterval(load, 20_000);
-    return () => clearInterval(t);
-  }, [enabled]);
-  return runs;
+  // A failed poll keeps the last list rather than blanking it, and the next beat tries again. The poll
+  // stops while the tab is hidden. keepPrevious, so switching it off leaves the last list in place as the
+  // state it replaces did.
+  const { data } = useQuery(["agentRuns", 12], () => api.agentRuns(12),
+    { enabled, pollMs: 20_000, keepPrevious: true });
+  return data ?? NO_RUNS;
 }
 
 /** One entry of an agent run's `counts`, rendered so a value that is not a number still says something.

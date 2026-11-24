@@ -4,7 +4,10 @@
 // tool. Edits mutate local state; the page's Save diffs against the server and syncs. Continuous drags
 // are committed once on drag-end (the canvas moves konva nodes live), so history is one entry per edit.
 
-import { useReducer } from "react";
+import { useMemo, useReducer, useRef, type Dispatch } from "react";
+
+import { canNudge, translateObject } from "@/lib/editor/geometry";
+import { actionAllowed } from "@/lib/editor/readOnly";
 
 export type Tool = "select" | "box" | "amodal" | "polygon" | "polyline" | "adverse" | "cuboid" | "keypoint" | "measure" | "sam-point" | "sam-box" | "magic-wand" | "brush" | "eraser" | "superpixel";
 
@@ -45,7 +48,11 @@ type Snapshot = { objects: EdObject[]; deleted: string[] };
 
 // A history entry is a snapshot plus what the edit was and a stable identity to jump to. Kept apart from
 // Snapshot so EditorState, which spreads Snapshot, does not sprout a label of its own.
-export type HistoryEntry = Snapshot & { label: string; at: number };
+//
+// `nudge` is set on an entry made by an arrow-key nudge and holds the ids it moved. A held key repeats
+// thirty times a second, and thirty undo steps to take back one gesture is not an undo. The repeat folds
+// into the entry the first press made, and this is how the reducer recognises that entry.
+export type HistoryEntry = Snapshot & { label: string; at: number; nudge?: string[] };
 
 // Ways to pick a set of objects that are not "drag a box round them". A dense frame holds forty vehicles
 // and the useful selections are almost never contiguous: every autorickshaw, everything the model was
@@ -87,11 +94,15 @@ export type Action =
   | { t: "setLocked"; ids: string[]; locked: boolean }
   | { t: "candidate"; polys: number[][] | null }
   | { t: "add"; obj: EdObject }
+  | { t: "addMany"; objs: EdObject[]; label?: string }
   | { t: "update"; id: string; patch: Partial<EdObject> }
   | { t: "acceptAll" }
   | { t: "acceptRest" }
   | { t: "reviewed"; id: string; state: string; version?: number }
   | { t: "delete"; id: string }
+  | { t: "deleteMany"; ids: string[] }
+  | { t: "nudge"; ids: string[]; dx: number; dy: number; coalesce?: boolean }
+  | { t: "reload"; objects: EdObject[] }
   | { t: "undo" }
   | { t: "redo" }
   | { t: "jump"; at: number }
@@ -114,8 +125,8 @@ export function tmpId(): string {
   return `tmp-${_load}-${++_tmp}`;
 }
 
-const snap = (s: EditorState, label = "edit"): HistoryEntry =>
-  ({ objects: s.objects, deleted: s.deleted, label, at: ++_seq });
+const snap = (s: EditorState, label = "edit", nudge?: string[]): HistoryEntry =>
+  ({ objects: s.objects, deleted: s.deleted, label, at: ++_seq, ...(nudge ? { nudge } : {}) });
 
 // A monotonic counter rather than a clock: history entries need a stable identity to be jumped to and
 // rendered as a list, and Date.now() collides when two edits land in the same millisecond, which dragging
@@ -154,9 +165,37 @@ const HISTORY_CAP = 100;
 // wrap a mutating result: push current snapshot to history (capped), clear redo.
 // The label describes the edit that is about to happen, not the state being stored, because that is what a
 // person reading the list is looking for: "deleted 3 objects", not "12 objects".
-function mutate(s: EditorState, next: Snapshot, label = "edit"): EditorState {
-  return { ...s, ...next, past: [...s.past, snap(s, label)].slice(-HISTORY_CAP), future: [] };
+function mutate(s: EditorState, next: Snapshot, label = "edit", nudge?: string[]): EditorState {
+  return { ...s, ...next, past: [...s.past, snap(s, label, nudge)].slice(-HISTORY_CAP), future: [] };
 }
+
+/**
+ * Every object a selection-wide action applies to: the multi-selection plus the primary, minus anything
+ * that no longer exists.
+ *
+ * The keyboard read `selectedId` alone, so Delete with six boxes selected removed one of them while the
+ * context menu's delete removed all six. Copy had the same split. One definition, used by every bulk path,
+ * is what stops the keyboard and the menu disagreeing about what "the selection" is.
+ */
+export function selectionIds(s: Pick<EditorState, "objects" | "selectedId" | "selectedIds">): string[] {
+  const have = new Set(s.objects.map((o) => o.id));
+  const ids = s.selectedIds.filter((id) => have.has(id));
+  if (s.selectedId && have.has(s.selectedId) && !ids.includes(s.selectedId)) ids.push(s.selectedId);
+  return ids;
+}
+
+// The selection after the object list was replaced (undo, redo, jump, reload): ids that survived, and
+// nothing else. A stale id is harmless while its object is gone and wrong the moment a redo brings the
+// object back, because it is then selected for bulk actions with nothing on screen saying so.
+function keepSelection(s: EditorState, objects: EdObject[]): Pick<EditorState, "selectedId" | "selectedIds"> {
+  const have = new Set(objects.map((o) => o.id));
+  return {
+    selectedId: s.selectedId && have.has(s.selectedId) ? s.selectedId : null,
+    selectedIds: s.selectedIds.filter((id) => have.has(id)),
+  };
+}
+
+const sameIds = (a: string[], b: string[]) => a.length === b.length && a.every((id) => b.includes(id));
 
 // two objects differ if any human-syncable field changed (geometry / class / mask / attrs / state / rot)
 function differs(a: EdObject, b: EdObject): boolean {
@@ -271,8 +310,19 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
     case "candidate":
       return { ...s, candidate: a.polys };
     case "add":
+      // The multi-selection follows the new object too. It used to keep whatever was swept before, so the
+      // bulk bar went on saying "3 selected" about three other boxes while the one just drawn was primary.
       return { ...mutate(s, { objects: uniqById([...s.objects, a.obj]), deleted: s.deleted },
-                         `added ${a.obj.class_name}`), selectedId: a.obj.id };
+                         `added ${a.obj.class_name}`), selectedId: a.obj.id, selectedIds: [a.obj.id] };
+    case "addMany": {
+      // A paste. One history entry however many objects it carries, and all of them selected afterwards,
+      // so the next gesture (nudge them into place, or undo) applies to exactly what just arrived.
+      if (!a.objs.length) return s;
+      const ids = a.objs.map((o) => o.id);
+      return { ...mutate(s, { objects: uniqById([...s.objects, ...a.objs]), deleted: s.deleted },
+                         a.label ?? (ids.length === 1 ? `added ${a.objs[0].class_name}` : `added ${ids.length} objects`)),
+               selectedId: ids[0], selectedIds: ids };
+    }
     case "update":
       return {
         ...mutate(s, {
@@ -324,14 +374,70 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
         ...mutate(s, { objects: s.objects.filter((o) => o.id !== a.id), deleted },
                   `deleted ${obj?.class_name ?? "object"}`),
         selectedId: s.selectedId === a.id ? null : s.selectedId,
+        selectedIds: s.selectedIds.filter((x) => x !== a.id),
       };
+    }
+    case "deleteMany": {
+      // One entry for the whole set. Looping `delete` made six entries for six boxes, so undoing a bulk
+      // delete was six presses and stopping after three left the frame in a state nobody had chosen.
+      // Locked objects are skipped: a lock is a promise that a bulk action cannot reach the object.
+      const want = new Set(a.ids);
+      const gone = s.objects.filter((o) => want.has(o.id) && !o.locked);
+      if (!gone.length) return s;
+      const goneIds = new Set(gone.map((o) => o.id));
+      return {
+        ...mutate(s, {
+          objects: s.objects.filter((o) => !goneIds.has(o.id)),
+          deleted: [...s.deleted, ...gone.filter((o) => !o.isNew).map((o) => o.id)],
+        }, gone.length === 1 ? `deleted ${gone[0].class_name}` : `deleted ${gone.length} objects`),
+        selectedId: s.selectedId && goneIds.has(s.selectedId) ? null : s.selectedId,
+        selectedIds: s.selectedIds.filter((id) => !goneIds.has(id)),
+      };
+    }
+    case "nudge": {
+      if (!a.dx && !a.dy) return s;
+      const want = new Set(a.ids);
+      const moved = s.objects.filter((o) => want.has(o.id) && canNudge(o)).map((o) => o.id);
+      // Nothing movable is not an edit: no history entry, and the redo stack survives.
+      if (!moved.length) return s;
+      const objects = s.objects.map((o) =>
+        (moved.includes(o.id) ? { ...translateObject(o, a.dx, a.dy), dirty: !o.isNew } : o));
+      const touched = Array.from(new Set([...s.touched, ...moved]));
+      // A key-repeat continues the entry the first press made, as long as nothing else happened since:
+      // same objects, and no undo in between (a non-empty redo stack means the history moved).
+      const last = s.past[s.past.length - 1];
+      if (a.coalesce && !s.future.length && last?.nudge && sameIds(last.nudge, moved)) {
+        return { ...s, objects, touched };
+      }
+      const first = s.objects.find((o) => o.id === moved[0]);
+      const label = moved.length === 1 ? `nudged ${first?.class_name ?? "object"}` : `nudged ${moved.length} objects`;
+      return { ...mutate(s, { objects, deleted: s.deleted }, label, moved), touched };
+    }
+    case "reload": {
+      // The server's copy of this frame, taken after something changed it behind the editor (a track
+      // interpolation). Not `load`: that is opening a frame, and it resets the tool, the viewport and the
+      // record of what the annotator has reviewed. This replaces the objects and keeps the session.
+      //
+      // The caller saves first, so there is no unsaved work here to lose. History is dropped because its
+      // snapshots hold versions the server has since moved past, and undoing into one would be refused as
+      // a conflict with the editor's own request.
+      const prev = new Map(s.objects.map((o) => [o.id, o]));
+      const objects = uniqById(a.objects).map((o) => {
+        const was = prev.get(o.id);
+        // Hide, lock and the attributes edited this session are things the object list endpoint does not
+        // return; without carrying them a reload would unhide and unlock everything.
+        return was ? { ...o, visible: was.visible, locked: was.locked, attrs: was.attrs } : o;
+      });
+      const have = new Set(objects.map((o) => o.id));
+      return { ...s, objects, deleted: [], ...keepSelection(s, objects),
+               touched: s.touched.filter((id) => have.has(id)), past: [], future: [] };
     }
     case "undo": {
       if (!s.past.length) return s;
       const prev = s.past[s.past.length - 1];
       const r = restore(s, prev);
       return { ...s, objects: r.objects, deleted: r.deleted,
-        selectedId: r.objects.some((o) => o.id === s.selectedId) ? s.selectedId : null,
+        ...keepSelection(s, r.objects),
         past: s.past.slice(0, -1), future: [snap(s, prev.label), ...s.future] };
     }
     case "redo": {
@@ -339,7 +445,7 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
       const nxt = s.future[0];
       const r = restore(s, nxt);
       return { ...s, objects: r.objects, deleted: r.deleted,
-        selectedId: r.objects.some((o) => o.id === s.selectedId) ? s.selectedId : null,
+        ...keepSelection(s, r.objects),
         past: [...s.past, snap(s, nxt.label)], future: s.future.slice(1) };
     }
     case "jump": {
@@ -354,7 +460,7 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
         // replays the same edits in the order they happened.
         const undone = [...s.past.slice(iPast + 1), snap(s, target.label)].reverse();
         return { ...s, objects: r.objects, deleted: r.deleted,
-          selectedId: r.objects.some((o) => o.id === s.selectedId) ? s.selectedId : null,
+          ...keepSelection(s, r.objects),
           past: s.past.slice(0, iPast), future: [...undone, ...s.future] };
       }
       const iFut = s.future.findIndex((h) => h.at === a.at);
@@ -363,7 +469,7 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
       const r = restore(s, target);
       const redone = [snap(s, target.label), ...s.future.slice(0, iFut).reverse()];
       return { ...s, objects: r.objects, deleted: r.deleted,
-        selectedId: r.objects.some((o) => o.id === s.selectedId) ? s.selectedId : null,
+        ...keepSelection(s, r.objects),
         past: [...s.past, ...redone], future: s.future.slice(iFut + 1) };
     }
     case "saved": {
@@ -385,7 +491,10 @@ export function editorReducer(s: EditorState, a: Action): EditorState {
         // The label and the entry's identity carry through the remap. They describe the edit, which the
         // save did not change, and losing them would leave a history panel full of unnamed steps after the
         // first autosave.
-        past: s.past.map((sn) => ({ ...sn, objects: sn.objects.map(remap), deleted: [] })),
+        // A nudge entry names the ids it moved, and those are remapped with everything else: an autosave
+        // landing mid-hold must not make the next repeat look like a different gesture.
+        past: s.past.map((sn) => ({ ...sn, objects: sn.objects.map(remap), deleted: [],
+                                    ...(sn.nudge ? { nudge: sn.nudge.map((id) => a.remap[id] ?? id) } : {}) })),
         future: s.future.map((sn) => ({ ...sn, objects: sn.objects.map(remap), deleted: [] })),
         // `touched` holds ids too, and a new object's id changes here. Left unremapped it kept the old
         // tmp- id, so an object the annotator had drawn and edited stopped counting as reviewed the moment
@@ -417,6 +526,37 @@ const INITIAL: EditorState = {
   future: [],
 };
 
-export function useEditor() {
-  return useReducer(editorReducer, INITIAL);
+export type EditGate = {
+  /** The frame is view-only: somebody else holds its edit lock. */
+  readOnly: boolean;
+  /** An edit was refused. Called with the action, so the page can say why nothing happened. */
+  onBlocked?: (a: Action) => void;
+};
+
+/**
+ * Dispatch that refuses edits while the frame is view-only.
+ *
+ * This is the one door every change to the working copy goes through, whichever button, key, menu or
+ * canvas gesture asked for it, so it is where view-only is enforced rather than at each of them. What
+ * counts as an edit is decided in lib/editor/readOnly.ts. The gate is read through a ref, so the
+ * returned function keeps one identity for the life of the editor, as the reducer's own dispatch does:
+ * a dozen effects and memoized handlers on the page depend on that.
+ */
+export function gateDispatch(raw: Dispatch<Action>, gate: () => EditGate | undefined): Dispatch<Action> {
+  return (a) => {
+    const g = gate();
+    if (g?.readOnly && !actionAllowed(a)) {
+      g.onBlocked?.(a);
+      return;
+    }
+    raw(a);
+  };
+}
+
+export function useEditor(gate?: EditGate): [EditorState, Dispatch<Action>] {
+  const [state, raw] = useReducer(editorReducer, INITIAL);
+  const gateRef = useRef(gate);
+  gateRef.current = gate;
+  const dispatch = useMemo(() => gateDispatch(raw, () => gateRef.current), [raw]);
+  return [state, dispatch];
 }

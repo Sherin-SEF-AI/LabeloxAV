@@ -136,6 +136,10 @@ export type SessionRow = {
   start_ts_ns: number;
   end_ts_ns: number;
   origin?: string;
+  // Served on every row and missing here until the generated types showed it (lib/api.generated.test.ts).
+  // Optional, like `origin`, only because fixtures build this type by hand.
+  ontology_version?: string;
+  project_id?: string | null;
 };
 
 export type SegmentResult = { polygons: number[][]; bbox: number[] | null };
@@ -503,9 +507,12 @@ export type SimilarResponse = {
   results: Array<Partial<SimilarFrameResult> & Partial<SimilarObjectResult> & { score: number }>;
 };
 
-export type DatasetDetail = DatasetRow & {
+// Not the list row plus two fields: the detail carries the files and so has no `n_files`. This type said it
+// did, so `detail.n_files` compiled and was undefined. `missing` marks a file whose object is gone from
+// storage, which is the reason its url is null.
+export type DatasetDetail = Omit<DatasetRow, "n_files"> & {
   slice_spec: Record<string, unknown>;
-  files: { path: string; url: string | null }[];
+  files: { path: string; url: string | null; missing: boolean }[];
 };
 
 export type JobRow = {

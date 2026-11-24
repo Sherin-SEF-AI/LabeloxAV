@@ -15,12 +15,22 @@ import ActionResultPanel, { type ActionResult } from "@/components/inspect/Actio
 import { describeFailure } from "@/lib/actionError";
 import { type ActivityLog as Log, emptyLog, record } from "@/lib/activityLog";
 import { Spinner } from "@/components/Spinner";
+import { invalidate, useQuery } from "@/lib/useQuery";
+import { REVIEW_QUEUE_KEY } from "@/lib/queryKeys";
+import { T } from "@/lib/i18n";
 
 // The Agent Console: the corpus-level home for the autonomous agent. Self-healing QA (the error daemon
 // sweep + temporal auto-repair) and the ranked fix queue it produces. Programs 3-5 (data intelligence,
 // flywheel, copilot) add their sections here.
 
 type Cand = { candidate_id: string; object_id: string; kind: string; score: number; detail: Record<string, unknown>; proposed_label?: { class_name?: string } | null };
+
+// Stable empties: the queue effects below depend on the array's identity, and a fresh [] on every render
+// while nothing has loaded would re-run them each time.
+const NO_CANDS: Cand[] = [];
+const NO_SUMMARY: Record<string, number> = {};
+const NO_PROPS: PromotionProposalRow[] = [];
+const NO_ORDERS: { order_id: string; priority: number; summary: string; status: string }[] = [];
 
 const KIND_LABEL: Record<string, string> = {
   critic_flag: "consistency", near_dup_inconsistent: "near-dup", policy_violation: "policy",
@@ -38,8 +48,11 @@ const KIND_LABEL: Record<string, string> = {
 
 export default function AgentConsole() {
   const router = useRouter();
-  const [queue, setQueue] = useState<Cand[]>([]);
-  const [summary, setSummary] = useState<Record<string, number>>({});
+  // The fix queue. Cached, so coming back to this page shows the last queue while it refreshes. A failed
+  // load was never rendered here and still is not: the queue simply stays as it was.
+  const queueQ = useQuery(["agentErrorQueue"], () => api.agentErrorQueue());
+  const queue: Cand[] = queueQ.data?.candidates ?? NO_CANDS;
+  const summary: Record<string, number> = queueQ.data?.summary ?? NO_SUMMARY;
   // Which row the evidence panel is showing, and which row the keyboard is on. One index rather than an
   // id: the queue is ordered worst-first and acting on a row removes it, so the cursor has to be able to
   // stay put and pick up whatever moved into that position.
@@ -75,16 +88,15 @@ export default function AgentConsole() {
     const f = describeFailure(action, e);
     setLog((l) => record(l, action, "failed", f.message, Date.now(), f.hint));
   }, []);
-  const [loading, setLoading] = useState(true);
+  // True during any fetch of the queue, the first or a refresh, as the flag it replaces was.
+  const loading = queueQ.validating;
+  const load = queueQ.reload;
 
-  const [audit, setAudit] = useState<{ status?: string; created_at?: string; report: AuditReport | null } | null>(null);
-  const loadAudit = useCallback(async () => { try { setAudit(await api.agentAuditLatest()); } catch { /* none yet */ } }, []);
-  const load = useCallback(async () => {
-    setLoading(true);
-    try { const q = await api.agentErrorQueue(); setQueue(q.candidates); setSummary(q.summary); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); loadAudit(); }, [load, loadAudit]);
+  // The latest audit, or nothing: there may not have been one yet, so a failure is not shown.
+  const auditQ = useQuery<{ status?: string; created_at?: string; report: AuditReport | null }>(
+    ["agentAuditLatest"], () => api.agentAuditLatest());
+  const audit = auditQ.data ?? null;
+  const setAudit = auditQ.setData;
 
   const runAudit = async () => {
     setBusy("audit"); setMsg(null);
@@ -253,9 +265,13 @@ export default function AgentConsole() {
   // Memoised because the keyboard effect depends on it: recreated every render, the listener would be
   // torn down and rebound on every keystroke that changed any state on this page.
   const act = useCallback(async (c: Cand, kind: "confirm" | "dismiss") => {
-    try { await (kind === "confirm" ? api.errorConfirm(c.candidate_id) : api.errorDismiss(c.candidate_id)); load(); }
+    try {
+      await (kind === "confirm" ? api.errorConfirm(c.candidate_id) : api.errorDismiss(c.candidate_id));
+      // This page's queue, and the error-candidate lists the quality pages cache.
+      void invalidate("agentErrorQueue", REVIEW_QUEUE_KEY);
+    }
     catch (e) { failed(kind === "confirm" ? "confirm" : "dismiss", e); }
-  }, [load, failed]);
+  }, [failed]);
 
   // Declared before `open`, which reads it: a const arrow is in the temporal dead zone until its line
   // runs, and a useCallback dependency array is evaluated during render.
@@ -310,8 +326,11 @@ export default function AgentConsole() {
     if (!subject || queue[at]?.object_id !== subject.objectId) open(queue[at], at);
   }, [queue]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [driftDiag, setDriftDiag] = useState<{ report: { hypothesis: string; proposed_action: { kind: string } } | null } | null>(null);
-  useEffect(() => { api.agentDriftLatest().then(setDriftDiag).catch(() => {}); }, []);
+  // Best-effort: the panel is simply absent when there is no diagnosis or it could not be read.
+  const driftQ = useQuery<{ report: { hypothesis: string; proposed_action: { kind: string } } | null }>(
+    ["agentDriftLatest"], () => api.agentDriftLatest());
+  const driftDiag = driftQ.data ?? null;
+  const setDriftDiag = driftQ.setData;
   const investigateDrift = async () => {
     setBusy("driftinv"); setMsg(null);
     try {
@@ -339,10 +358,10 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
-  const [props, setProps] = useState<PromotionProposalRow[]>([]);
+  const propsQ = useQuery(["agentOntologyProposals"], () => api.agentOntologyProposals());
+  const props: PromotionProposalRow[] = propsQ.data ?? NO_PROPS;
   const [names, setNames] = useState<Record<string, string>>({});
-  const loadProps = useCallback(async () => { try { setProps(await api.agentOntologyProposals()); } catch { /* none */ } }, []);
-  useEffect(() => { loadProps(); }, [loadProps]);
+  const loadProps = propsQ.reload;
   const scanOntology = async () => {
     setBusy("ontscan"); setMsg(null);
     try {
@@ -363,15 +382,17 @@ export default function AgentConsole() {
         const r = await api.agentOntologyApprove(id, nm);
         showResult("ontology", `mint ${nm}`, r);
         setMsg(`minted ${r.name} (#${r.class_id}), relabeled ${r.relabeled} - reversible run ${r.run_id.slice(0, 8)}`);
+        // A new class exists and objects moved into it: the cached ontology and run lists are stale.
+        void invalidate("ontology", "agentRuns");
       } else { await api.agentOntologyReject(id); setMsg("proposal rejected"); }
       await loadProps();
     } catch (e) { failed("decision", e); }
     finally { setBusy(null); }
   };
 
-  const [orders, setOrders] = useState<{ order_id: string; priority: number; summary: string; status: string }[]>([]);
-  const loadOrders = useCallback(async () => { try { setOrders(await api.agentFleetOrders("proposed")); } catch { /* none */ } }, []);
-  useEffect(() => { loadOrders(); }, [loadOrders]);
+  const ordersQ = useQuery(["agentFleetOrders", "proposed"], () => api.agentFleetOrders("proposed"));
+  const orders: { order_id: string; priority: number; summary: string; status: string }[] = ordersQ.data ?? NO_ORDERS;
+  const loadOrders = ordersQ.reload;
   const planFleet = async () => {
     setBusy("fleet"); setMsg(null);
     try {
@@ -668,7 +689,7 @@ export default function AgentConsole() {
                       <input value={names[p.proposal_id] ?? p.suggested_name ?? ""} onChange={(e) => setNames((s) => ({ ...s, [p.proposal_id]: e.target.value }))}
                         placeholder="new class name" className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-1.5 py-1 text-[11.5px] text-ink-2 focus:border-accent outline-none" />
                       <button onClick={() => decide(p.proposal_id, "approve")} disabled={!!busy} className="text-[11px] border border-pass text-pass px-2 py-1 rounded disabled:opacity-40">approve</button>
-                      <button onClick={() => decide(p.proposal_id, "reject")} disabled={!!busy} className="text-[11px] border border-line text-ink-3 px-2 py-1 rounded hover:text-ink disabled:opacity-40">reject</button>
+                      <button onClick={() => decide(p.proposal_id, "reject")} disabled={!!busy} className="text-[11px] border border-line text-ink-3 px-2 py-1 rounded hover:text-ink disabled:opacity-40"><T k="action.reject">reject</T></button>
                     </div>
                   </div>
                 ))}
@@ -711,8 +732,8 @@ export default function AgentConsole() {
                       <td className="px-3 py-2 text-right text-[11px]">
                         {/* stopPropagation: acting on a row must not also re-open it, which would refetch
                             the object that just left the queue. */}
-                        <button onClick={(e) => { e.stopPropagation(); act(c, "confirm"); }} className="border border-pass text-pass px-1.5 py-0.5 rounded mr-1">confirm</button>
-                        <button onClick={(e) => { e.stopPropagation(); act(c, "dismiss"); }} className="border border-line text-ink-3 px-1.5 py-0.5 rounded hover:text-ink">dismiss</button>
+                        <button onClick={(e) => { e.stopPropagation(); act(c, "confirm"); }} className="border border-pass text-pass px-1.5 py-0.5 rounded mr-1"><T k="action.confirm_short">confirm</T></button>
+                        <button onClick={(e) => { e.stopPropagation(); act(c, "dismiss"); }} className="border border-line text-ink-3 px-1.5 py-0.5 rounded hover:text-ink"><T k="action.dismiss">dismiss</T></button>
                       </td>
                     </tr>
                   ))}
@@ -765,10 +786,10 @@ export default function AgentConsole() {
             actions={cursor >= 0 && queue[cursor] ? [
               { key: "confirm", label: "confirm", tone: "accept" as const,
                 hint: "the label is wrong; apply the proposed class and mark it reviewed",
-                run: async () => { await api.errorConfirm(queue[cursor].candidate_id); load(); } },
+                run: async () => { await api.errorConfirm(queue[cursor].candidate_id); void invalidate("agentErrorQueue", REVIEW_QUEUE_KEY); } },
               { key: "dismiss", label: "dismiss", tone: "reject" as const,
                 hint: "the label is fine; this candidate was a false alarm",
-                run: async () => { await api.errorDismiss(queue[cursor].candidate_id); load(); } },
+                run: async () => { await api.errorDismiss(queue[cursor].candidate_id); void invalidate("agentErrorQueue", REVIEW_QUEUE_KEY); } },
             ] : []}
           />
           </>)}

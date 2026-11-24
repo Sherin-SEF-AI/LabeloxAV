@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 
 import PageShell from "@/components/shell/PageShell";
 import Icon from "@/components/shell/Icon";
 import LoadState from "@/components/shell/LoadState";
 import { api, apiGet, humanizeError } from "@/lib/api";
+import { useT, type Translate } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
+import { invalidate, useQuery } from "@/lib/useQuery";
 import { useCurrentUser } from "@/lib/user";
 import SampleDrives from "@/components/SampleDrives";
 
@@ -34,29 +36,42 @@ type Home = {
 };
 type Check = { name: string; status: "ok" | "warn" | "fail" | "info"; detail: string; fix: string };
 
-const STEPS: { key: keyof Home["steps"]; title: string; body: string; actions: { label: string; href: string }[] }[] = [
-  { key: "data", title: "Bring in data", body: "Upload dashcam video or images, or import a dataset already labelled in COCO, YOLO, KITTI, nuScenes, CVAT and more. Faces and plates are blurred as frames are stored.",
-    actions: [{ label: "Upload footage", href: "/annotate/new" }, { label: "Import a dataset", href: "/import" }] },
-  { key: "autolabel", title: "Auto-label a session", body: "Open a session and run auto-label. Three detectors propose every object; confident ones are accepted, the rest wait for a person.",
-    actions: [{ label: "Open sessions", href: "/annotations" }] },
-  { key: "review", title: "Review the labels", body: "Accept, fix or reject what the models proposed, one keystroke per object. The most useful objects come first.",
-    actions: [{ label: "Start reviewing", href: "/review/queue" }] },
-  { key: "export", title: "Export a dataset", body: "Freeze a versioned dataset in the format your training code reads.",
-    actions: [{ label: "Datasets", href: "/datasets" }] },
-  { key: "model", title: "Train a model", body: "Fine-tune a detector on your reviewed labels and compare it with the current one, class by class.",
-    actions: [{ label: "Training", href: "/training" }] },
+// The English here is what renders in English and what a missing translation falls back to; `k` is the
+// dictionary key (lib/locales). Kept side by side so the page still reads as what it shows.
+type Text = { k: string; en: string };
+const STEPS: { key: keyof Home["steps"]; title: Text; body: Text; actions: { label: Text; href: string }[] }[] = [
+  { key: "data", title: { k: "home.step.data.title", en: "Bring in data" },
+    body: { k: "home.step.data.body", en: "Upload dashcam video or images, or import a dataset already labelled in COCO, YOLO, KITTI, nuScenes, CVAT and more. Faces and plates are blurred as frames are stored." },
+    actions: [{ label: { k: "home.upload_footage", en: "Upload footage" }, href: "/annotate/new" },
+              { label: { k: "shell.import_a_dataset", en: "Import a dataset" }, href: "/import" }] },
+  { key: "autolabel", title: { k: "home.step.autolabel.title", en: "Auto-label a session" },
+    body: { k: "home.step.autolabel.body", en: "Open a session and run auto-label. Three detectors propose every object; confident ones are accepted, the rest wait for a person." },
+    actions: [{ label: { k: "home.open_sessions", en: "Open sessions" }, href: "/annotations" }] },
+  { key: "review", title: { k: "home.step.review.title", en: "Review the labels" },
+    body: { k: "home.step.review.body", en: "Accept, fix or reject what the models proposed, one keystroke per object. The most useful objects come first." },
+    actions: [{ label: { k: "home.start_reviewing", en: "Start reviewing" }, href: "/review/queue" }] },
+  { key: "export", title: { k: "home.step.export.title", en: "Export a dataset" },
+    body: { k: "home.step.export.body", en: "Freeze a versioned dataset in the format your training code reads." },
+    actions: [{ label: { k: "shell.datasets", en: "Datasets" }, href: "/datasets" }] },
+  { key: "model", title: { k: "home.step.model.title", en: "Train a model" },
+    body: { k: "home.step.model.body", en: "Fine-tune a detector on your reviewed labels and compare it with the current one, class by class." },
+    actions: [{ label: { k: "shell.training", en: "Training" }, href: "/training" }] },
 ];
 
 const n = (v: number) => v.toLocaleString();
-const KIND: Record<string, string> = { autolabel: "Auto-label", import: "Import", training: "Training" };
+const KIND: Record<string, Text> = {
+  autolabel: { k: "home.kind.autolabel", en: "Auto-label" },
+  import: { k: "shell.import", en: "Import" },
+  training: { k: "shell.training", en: "Training" },
+};
 
-function ago(iso: string | null): string {
+function ago(iso: string | null, t: Translate): string {
   if (!iso) return "";
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (s < 90) return "just now";
-  if (s < 5400) return `${Math.round(s / 60)} min ago`;
-  if (s < 129600) return `${Math.round(s / 3600)} h ago`;
-  return `${Math.round(s / 86400)} days ago`;
+  if (s < 90) return t("home.ago.now", "just now");
+  if (s < 5400) return t("home.ago.min", "{n} min ago", { n: Math.round(s / 60) });
+  if (s < 129600) return t("home.ago.hours", "{n} h ago", { n: Math.round(s / 3600) });
+  return t("home.ago.days", "{n} days ago", { n: Math.round(s / 86400) });
 }
 
 function Stat({ label, value, sub, href, tone }: {
@@ -70,7 +85,7 @@ function Stat({ label, value, sub, href, tone }: {
     </>
   );
   return href ? (
-    <Link href={href} className="panel px-4 py-3.5 hover:border-[#383b42] hover:bg-head transition-colors">{body}</Link>
+    <Link href={href} className="panel px-4 py-3.5 hover:border-line-3 hover:bg-head transition-colors">{body}</Link>
   ) : (
     <div className="panel px-4 py-3.5">{body}</div>
   );
@@ -91,12 +106,13 @@ function Card({ title, action, children }: { title: string; action?: React.React
 function AutolabelNow({ session, onChange }: { session: Home["recent_sessions"][number]; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState<string | null>(null);
+  const t = useT();
   const start = async () => {
     setBusy(true);
     try {
       const r = await api.startAutolabel(session.session_id);
       setQueued(r.job_id);
-      toast(`Auto-label started on ${session.vehicle_id}`, "success");
+      toast(t("home.autolabel.started", "Auto-label started on {vehicle}", { vehicle: session.vehicle_id }), "success");
       onChange();
     } catch (e) {
       toast(humanizeError(e), "error");
@@ -105,11 +121,12 @@ function AutolabelNow({ session, onChange }: { session: Home["recent_sessions"][
     }
   };
   if (queued) {
-    return <Link href="/jobs" className="btn">Follow it in Jobs</Link>;
+    return <Link href="/jobs" className="btn">{t("home.autolabel.follow", "Follow it in Jobs")}</Link>;
   }
   return (
     <button className="btn btn-primary" onClick={() => void start()} disabled={busy}>
-      {busy ? "Starting" : `Auto-label ${session.vehicle_id}`}
+      {busy ? t("home.autolabel.starting", "Starting")
+        : t("home.autolabel.run", "Auto-label {vehicle}", { vehicle: session.vehicle_id })}
     </button>
   );
 }
@@ -119,14 +136,15 @@ function Setup({ steps, recent, onChange }: { steps: Home["steps"]; recent: Home
   const unlabelled = recent.find((r) => r.frames > 0 && r.objects === 0);
   const done = STEPS.filter((s) => steps[s.key]).length;
   const next = STEPS.find((s) => !steps[s.key]);
+  const t = useT();
   return (
     <section className="panel p-5">
       <div className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-[16px] font-semibold text-ink">Get started</h2>
-          <p className="mt-1 text-[13px] text-ink-3">From raw footage to a trained detector. Each step ticks itself off when the data says it is done.</p>
+          <h2 className="text-[16px] font-semibold text-ink">{t("home.setup.title", "Get started")}</h2>
+          <p className="mt-1 text-[13px] text-ink-3">{t("home.setup.body", "From raw footage to a trained detector. Each step ticks itself off when the data says it is done.")}</p>
         </div>
-        <span className="text-[12.5px] text-ink-2 tabular-nums">{done} of {STEPS.length} done</span>
+        <span className="text-[12.5px] text-ink-2 tabular-nums">{t("home.setup.progress", "{done} of {total} done", { done, total: STEPS.length })}</span>
       </div>
       <div className="mt-3 h-1 rounded-full bg-line overflow-hidden" aria-hidden>
         <div className="h-full bg-accent" style={{ width: `${(done / STEPS.length) * 100}%` }} />
@@ -141,11 +159,11 @@ function Setup({ steps, recent, onChange }: { steps: Home["steps"]; recent: Home
                 {isDone ? <Icon name="check" size={12} /> : i + 1}
               </span>
               <div className="flex-1 min-w-0">
-                <div className={`text-[13.5px] ${isDone ? "text-ink-3 line-through decoration-ink-3/40" : "text-ink"}`}>{s.title}</div>
-                {isNext && <p className="mt-0.5 text-[12.5px] text-ink-2 max-w-[70ch]">{s.body}</p>}
+                <div className={`text-[13.5px] ${isDone ? "text-ink-3 line-through decoration-ink-3/40" : "text-ink"}`}>{t(s.title.k, s.title.en)}</div>
+                {isNext && <p className="mt-0.5 text-[12.5px] text-ink-2 max-w-[70ch]">{t(s.body.k, s.body.en)}</p>}
                 {isNext && s.key === "data" && (
                   <div className="mt-3">
-                    <div className="mb-1.5 text-[12px] text-ink-3">No footage yet? Load a sample drive to try the whole loop:</div>
+                    <div className="mb-1.5 text-[12px] text-ink-3">{t("home.setup.sample", "No footage yet? Load a sample drive to try the whole loop:")}</div>
                     <SampleDrives onLoaded={onChange} />
                   </div>
                 )}
@@ -155,7 +173,7 @@ function Setup({ steps, recent, onChange }: { steps: Home["steps"]; recent: Home
                   {s.key === "autolabel" && unlabelled && <AutolabelNow session={unlabelled} onChange={onChange} />}
                   {s.actions.map((a, j) => (
                     <Link key={a.href} href={a.href}
-                      className={`btn ${j === 0 && !(s.key === "autolabel" && unlabelled) ? "btn-primary" : ""}`}>{a.label}</Link>
+                      className={`btn ${j === 0 && !(s.key === "autolabel" && unlabelled) ? "btn-primary" : ""}`}>{t(a.label.k, a.label.en)}</Link>
                   ))}
                 </div>
               )}
@@ -169,17 +187,15 @@ function Setup({ steps, recent, onChange }: { steps: Home["steps"]; recent: Home
 
 function SystemAttention() {
   const user = useCurrentUser();
-  const [bad, setBad] = useState<Check[] | null>(null);
-  const [failed, setFailed] = useState<unknown>(null);
-  useEffect(() => {
-    if (user?.role !== "admin") return;
-    apiGet<{ checks: Check[] }>("/api/system/checks")
-      .then((r) => setBad(r.checks.filter((c) => c.status === "warn" || c.status === "fail")))
-      .catch((e) => setFailed(e));
-  }, [user?.role]);
+  const t = useT();
+  // Same key as the settings page, which reads the same checks: opening one after the other is one request.
+  const checks = useQuery(["/api/system/checks"], () => apiGet<{ checks: Check[] }>("/api/system/checks"),
+    { enabled: user?.role === "admin" });
+  const bad = checks.data ? checks.data.checks.filter((c) => c.status === "warn" || c.status === "fail") : null;
+  const failed = checks.data ? null : checks.error;
   // Not knowing is not the same as everything being fine, so a failed check says so.
   if (failed) {
-    return <p className="text-[12.5px] text-warn">Could not load system status: {humanizeError(failed)}</p>;
+    return <p className="text-[12.5px] text-warn">{t("home.system.failed", "Could not load system status: {error}", { error: humanizeError(failed) })}</p>;
   }
   if (!bad || !bad.length) return null;
   return (
@@ -193,21 +209,22 @@ function SystemAttention() {
           </div>
         </li>
       ))}
-      <li><Link href="/settings" className="text-[12.5px] text-accent hover:text-accent-2">How to fix these</Link></li>
+      <li><Link href="/settings" className="text-[12.5px] text-accent hover:text-accent-2">{t("home.system.fix", "How to fix these")}</Link></li>
     </ul>
   );
 }
 
 export default function HomePage() {
   const router = useRouter();
-  const [data, setData] = useState<Home | null>(null);
-  const [error, setError] = useState<unknown>(null);
-
-  const load = useCallback(async () => {
-    setError(null);
-    try { setData(await apiGet<Home>("/api/home")); } catch (e) { setError(e); }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
+  const t = useT();
+  // Cached under the path, so coming back to Home shows the last numbers at once and refreshes them
+  // behind, instead of a spinner over a page that was there a moment ago.
+  const home = useQuery(["/api/home"], () => apiGet<Home>("/api/home"));
+  const data = home.data ?? null;
+  // A failed refresh keeps the last numbers on screen and says so above them, as the old load() did.
+  const error = home.error;
+  // Starting an auto-label or loading a sample drive changes the counts here and the job lists elsewhere.
+  const load = async () => { await Promise.all([home.reload(), invalidate("jobs", "sessions", "sessionsPage", "sessionStats")]); };
 
   const open = async (sessionId: string) => {
     try {
@@ -224,13 +241,13 @@ export default function HomePage() {
   return (
     <PageShell active="Home" title="Home">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 flex flex-col gap-5">
-        <LoadState loading={!data && !error} error={error} onRetry={() => void load()} />
+        <LoadState loading={home.loading} error={home.loadState.error} onRetry={() => void load()} />
 
         {data && !setupDone && <Setup steps={data.steps} recent={data.recent_sessions} onChange={() => void load()} />}
 
         {data && (data.waiting_for_people ?? []).length > 0 && (
-          <section className="panel p-4 flex flex-col gap-2.5" aria-label="Waiting for a person">
-            <h2 className="text-[14px] font-semibold text-ink">Waiting for a person</h2>
+          <section className="panel p-4 flex flex-col gap-2.5" aria-label={t("home.waiting.title", "Waiting for a person")}>
+            <h2 className="text-[14px] font-semibold text-ink">{t("home.waiting.title", "Waiting for a person")}</h2>
             {data.waiting_for_people.map((w) => {
               const row = (key: string, title: string, why: string, href: string, label: string) => (
                 <div key={key} className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -242,21 +259,31 @@ export default function HomePage() {
                 </div>
               );
               if (w.kind === "blind_audit") {
-                return row(w.audit_id, `Blind audit: label ${w.n_frames - w.n_labeled} of ${w.n_frames} frames from scratch`,
-                  "The model's detections are hidden while you label, on purpose. Comparing the two afterwards is the only " +
+                // Two whole sentences rather than one with a clause bolted on: where "done so far" goes is
+                // the translator's call, and a suffix concatenated in English order would take it away.
+                const why = "The model's detections are hidden while you label, on purpose. Comparing the two afterwards is the only " +
                   "measurement that says whether recall on gold is real or the gold set is missing most of what is there. " +
-                  `It can be split across people and sittings${w.n_labeled ? `; ${w.n_labeled} done so far` : ""}.`,
-                  `/frame/${w.frame_id}?job=${w.job_id}`, w.n_labeled ? "Continue labelling" : "Start labelling");
+                  "It can be split across people and sittings";
+                return row(w.audit_id,
+                  t("home.audit.title", "Blind audit: label {remaining} of {total} frames from scratch",
+                    { remaining: w.n_frames - w.n_labeled, total: w.n_frames }),
+                  w.n_labeled ? t("home.audit.why_progress", `${why}; {n} done so far.`, { n: w.n_labeled })
+                    : t("home.audit.why", `${why}.`),
+                  `/frame/${w.frame_id}?job=${w.job_id}`,
+                  w.n_labeled ? t("home.audit.continue", "Continue labelling") : t("home.audit.start", "Start labelling"));
               }
               if (w.kind === "control_samples") {
-                return row("controls", `Check ${n(w.count)} auto-accepted labels`,
-                  "A random sample of what the gate accepted without a person. Your verdicts are the only measured " +
-                  "precision the auto-accept gate has; until they exist it runs on an assumption. One key per label.",
-                  w.href, "Check them");
+                return row("controls", t("home.controls.title", "Check {n} auto-accepted labels", { n: n(w.count) }),
+                  t("home.controls.why", "A random sample of what the gate accepted without a person. Your verdicts are the only measured " +
+                    "precision the auto-accept gate has; until they exist it runs on an assumption. One key per label."),
+                  w.href, t("home.controls.go", "Check them"));
               }
-              return row(w.lot_id, `Settle a lot of ${n(w.population)} ${w.class_name} labels: ${w.judged} of ${w.of} sample verdicts`,
-                "A random sample from the lot. Its verdicts decide whether the whole lot is accepted or sent back, " +
-                "so the sample is served in draw order.", w.href, w.judged ? "Continue" : "Start");
+              return row(w.lot_id,
+                t("home.lot.title", "Settle a lot of {population} {klass} labels: {judged} of {of} sample verdicts",
+                  { population: n(w.population), klass: w.class_name, judged: w.judged, of: w.of }),
+                t("home.lot.why", "A random sample from the lot. Its verdicts decide whether the whole lot is accepted or sent back, " +
+                  "so the sample is served in draw order."),
+                w.href, w.judged ? t("home.lot.continue", "Continue") : t("home.lot.start", "Start"));
             })}
           </section>
         )}
@@ -264,30 +291,32 @@ export default function HomePage() {
         {data && c && (
           <>
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-              <Stat label="Sessions" value={n(c.sessions)} href="/annotations" sub="recordings and uploads" />
-              <Stat label="Frames" value={n(c.frames)} sub="stored, faces and plates blurred" />
-              <Stat label="Objects" value={n(c.objects)} href="/explore" sub={`${n(c.settled)} settled`} />
-              <Stat label="Waiting for review" value={n(c.waiting)} href="/review/queue" tone={c.waiting ? "accent" : undefined}
-                sub={c.objects ? `${Math.round((c.waiting / c.objects) * 100)}% of all objects` : "nothing yet"} />
-              <Stat label="Jobs queued or running" value={n(data.jobs.active_total)} href="/jobs"
+              <Stat label={t("shell.sessions", "Sessions")} value={n(c.sessions)} href="/annotations" sub={t("home.stat.sessions_sub", "recordings and uploads")} />
+              <Stat label={t("home.stat.frames", "Frames")} value={n(c.frames)} sub={t("home.stat.frames_sub", "stored, faces and plates blurred")} />
+              <Stat label={t("home.stat.objects", "Objects")} value={n(c.objects)} href="/explore" sub={t("home.stat.objects_sub", "{n} settled", { n: n(c.settled) })} />
+              <Stat label={t("home.stat.waiting", "Waiting for review")} value={n(c.waiting)} href="/review/queue" tone={c.waiting ? "accent" : undefined}
+                sub={c.objects ? t("home.stat.waiting_sub", "{pct}% of all objects", { pct: Math.round((c.waiting / c.objects) * 100) })
+                  : t("home.stat.nothing", "nothing yet")} />
+              <Stat label={t("home.stat.jobs", "Jobs queued or running")} value={n(data.jobs.active_total)} href="/jobs"
                 sub={data.jobs.active_total
-                  ? `${n(data.jobs.running)} running: ${Object.entries(data.jobs.active).filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(", ")}`
-                  : "none"} />
+                  ? t("home.stat.jobs_sub", "{n} running: {list}", { n: n(data.jobs.running),
+                      list: Object.entries(data.jobs.active).filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(", ") })
+                  : t("home.stat.none", "none")} />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-[1.7fr_1fr] gap-5">
-              <Card title="Recent sessions" action={<Link href="/annotations" className="text-[12.5px] text-accent hover:text-accent-2">All sessions</Link>}>
+              <Card title={t("home.recent.title", "Recent sessions")} action={<Link href="/annotations" className="text-[12.5px] text-accent hover:text-accent-2">{t("home.recent.all", "All sessions")}</Link>}>
                 {data.recent_sessions.length ? (
                   <div className="overflow-x-auto -mx-1">
                     <table className="w-full text-[12.5px] tabular-nums">
                       <thead>
                         <tr className="text-left text-ink-3 border-b hairline">
-                          <th className="font-medium px-1 py-2">Session</th>
-                          <th className="font-medium px-1 py-2">Recorded</th>
-                          <th className="font-medium px-1 py-2 text-right">Frames</th>
-                          <th className="font-medium px-1 py-2 text-right">Objects</th>
-                          <th className="font-medium px-1 py-2 text-right">To review</th>
-                          <th className="px-1 py-2" />
+                          <th scope="col" className="font-medium px-1 py-2">{t("home.recent.session", "Session")}</th>
+                          <th scope="col" className="font-medium px-1 py-2">{t("home.recent.recorded", "Recorded")}</th>
+                          <th scope="col" className="font-medium px-1 py-2 text-right">{t("home.stat.frames", "Frames")}</th>
+                          <th scope="col" className="font-medium px-1 py-2 text-right">{t("home.stat.objects", "Objects")}</th>
+                          <th scope="col" className="font-medium px-1 py-2 text-right">{t("home.recent.to_review", "To review")}</th>
+                          <td className="px-1 py-2" />
                         </tr>
                       </thead>
                       <tbody>
@@ -299,7 +328,8 @@ export default function HomePage() {
                             <td className="px-1 py-2 text-right text-ink-2">{n(s.objects)}</td>
                             <td className={`px-1 py-2 text-right ${s.waiting ? "text-ink" : "text-ink-3"}`}>{n(s.waiting)}</td>
                             <td className="px-1 py-2 text-right">
-                              <button className="btn" onClick={() => void open(s.session_id)} disabled={!s.frames}>Open</button>
+                              <button className="btn" onClick={() => void open(s.session_id)} disabled={!s.frames}
+                                aria-label={`${t("common.open", "Open")} ${s.vehicle_id}`}>{t("common.open", "Open")}</button>
                             </td>
                           </tr>
                         ))}
@@ -308,28 +338,28 @@ export default function HomePage() {
                   </div>
                 ) : (
                   <div className="py-6 text-center">
-                    <p className="text-[13px] text-ink-3">No sessions yet.</p>
+                    <p className="text-[13px] text-ink-3">{t("home.recent.empty", "No sessions yet.")}</p>
                     <div className="mt-3 flex justify-center gap-2">
-                      <Link href="/annotate/new" className="btn btn-primary"><Icon name="upload" size={13} />Upload footage</Link>
-                      <Link href="/import" className="btn">Import a dataset</Link>
+                      <Link href="/annotate/new" className="btn btn-primary"><Icon name="upload" size={13} />{t("home.upload_footage", "Upload footage")}</Link>
+                      <Link href="/import" className="btn">{t("shell.import_a_dataset", "Import a dataset")}</Link>
                     </div>
                   </div>
                 )}
               </Card>
 
               <div className="flex flex-col gap-5 min-w-0">
-                <Card title="Quick actions">
+                <Card title={t("home.quick.title", "Quick actions")}>
                   <div className="grid grid-cols-2 gap-2">
-                    {[["Upload footage", "/annotate/new", "upload"], ["Import a dataset", "/import", "database"],
-                      ["Review labels", "/review/queue", "check"], ["Train a model", "/training", "chip"]].map(([label, href, icon]) => (
+                    {[["home.upload_footage", "Upload footage", "/annotate/new", "upload"], ["shell.import_a_dataset", "Import a dataset", "/import", "database"],
+                      ["home.quick.review", "Review labels", "/review/queue", "check"], ["home.step.model.title", "Train a model", "/training", "chip"]].map(([k, label, href, icon]) => (
                       <Link key={href} href={href} className="flex items-center gap-2 rounded-md border hairline px-3 py-2 text-[12.5px] text-ink-2 hover:bg-head hover:text-ink transition-colors">
-                        <span className="text-ink-3"><Icon name={icon} size={14} /></span>{label}
+                        <span className="text-ink-3"><Icon name={icon} size={14} /></span>{t(k, label)}
                       </Link>
                     ))}
                   </div>
                 </Card>
 
-                <Card title="Needs attention" action={<Link href="/jobs" className="text-[12.5px] text-accent hover:text-accent-2">Jobs</Link>}>
+                <Card title={t("home.attention.title", "Needs attention")} action={<Link href="/jobs" className="text-[12.5px] text-accent hover:text-accent-2">{t("shell.jobs", "Jobs")}</Link>}>
                   <div className="flex flex-col gap-3">
                     <SystemAttention />
                     {data.jobs.failed.length ? (
@@ -338,14 +368,14 @@ export default function HomePage() {
                           <li key={f.job_id} className="flex items-start gap-2.5">
                             <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 bg-block" aria-hidden />
                             <div className="min-w-0">
-                              <div className="text-[12.5px] text-ink">{KIND[f.kind] ?? f.kind} failed <span className="text-ink-3">{ago(f.at)}</span></div>
-                              <div className="text-[12px] text-ink-3 break-words line-clamp-2">{f.error || "no reason recorded"}</div>
+                              <div className="text-[12.5px] text-ink">{t("home.attention.failed", "{kind} failed", { kind: KIND[f.kind] ? t(KIND[f.kind].k, KIND[f.kind].en) : f.kind })} <span className="text-ink-3">{ago(f.at, t)}</span></div>
+                              <div className="text-[12px] text-ink-3 break-words line-clamp-2">{f.error || t("home.attention.no_reason", "no reason recorded")}</div>
                             </div>
                           </li>
                         ))}
                       </ul>
                     ) : (
-                      <p className="text-[12.5px] text-ink-3">No failed jobs in the last {data.jobs.failed_window_days} days.</p>
+                      <p className="text-[12.5px] text-ink-3">{t("home.attention.none", "No failed jobs in the last {days} days.", { days: data.jobs.failed_window_days })}</p>
                     )}
                   </div>
                 </Card>

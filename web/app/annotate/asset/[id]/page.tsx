@@ -178,13 +178,18 @@ export default function AssetEditor() {
             </div>
             <div className="space-y-0.5">
               {anns.map((a) => (
+                // Two buttons side by side, not a clickable row with a button inside it: select, and remove.
                 <div key={a.annotation_id}
-                  onClick={() => setSelectedId(a.annotation_id === selectedId ? null : a.annotation_id)}
-                  className={`flex items-center gap-1.5 px-1.5 py-0.5 text-[12px] cursor-pointer ${
+                  className={`flex items-center gap-1.5 px-1.5 py-0.5 text-[12px] ${
                     a.annotation_id === selectedId ? "bg-bg-2 text-ink" : "text-ink-3 hover:text-ink-2"}`}>
-                  <span className="text-ink-2">{a.kind}</span>
-                  <span className="truncate flex-1">{a.label ?? ""}</span>
-                  <button onClick={(e) => { e.stopPropagation(); remove(a.annotation_id); }}
+                  <button type="button" aria-pressed={a.annotation_id === selectedId}
+                    onClick={() => setSelectedId(a.annotation_id === selectedId ? null : a.annotation_id)}
+                    className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
+                    <span className="text-ink-2">{a.kind}</span>
+                    <span className="truncate flex-1">{a.label ?? ""}</span>
+                  </button>
+                  <button type="button" onClick={() => remove(a.annotation_id)}
+                    aria-label={`remove ${a.kind}${a.label ? ` ${a.label}` : ""}`}
                     className="text-ink-3 hover:text-block">x</button>
                 </div>
               ))}

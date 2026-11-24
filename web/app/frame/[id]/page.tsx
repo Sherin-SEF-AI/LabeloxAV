@@ -5,7 +5,7 @@ import { toast } from "@/lib/toast";
 import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
-import type { AdverseRegion, DrivingEvent, FrameMeta, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, ProjectedCuboid, Relationship } from "@/lib/types";
+import type { AdverseRegion, DrivingEvent, FrameMeta, FrameObject, LaneRow, ObjectDynamicsRow, Ontology, OntologyClass, ProjectedCuboid, Relationship } from "@/lib/types";
 import { classColor } from "@/lib/colors";
 import { acceptState, getUser, setUser } from "@/lib/user";
 import { beginOp, endOp, resetOps, trackOp } from "@/lib/canvasOps";
@@ -15,7 +15,7 @@ import { addPoint as addSamClick, describe as describeSamPrompt, undoPoint } fro
 import { UNTRACKED_NOTE, propagationMessage, shouldPropagate } from "@/lib/trackPropagate";
 import CanvasConsole from "@/components/editor/CanvasConsole";
 import CanvasMenu from "@/components/editor/CanvasMenu";
-import { isDirty, tmpId, useEditor, type EdObject, type Tool } from "@/components/editor/useEditor";
+import { isDirty, selectionIds, tmpId, useEditor, type EdObject, type Tool, type Viewport } from "@/components/editor/useEditor";
 import { PERSON_17 } from "@/lib/skeleton";
 import BackButton from "@/components/BackButton";
 import PulseDot from "@/components/PulseDot";
@@ -31,14 +31,22 @@ import SceneGraphPanel from "@/components/editor/SceneGraphPanel";
 import PanelSection from "@/components/editor/PanelSection";
 import { ConfBar } from "@/components/StateBadge";
 import Icon, { MODE_ICON } from "@/components/shell/Icon";
-import ShortcutOverlay from "@/components/shell/ShortcutOverlay";
+import KeymapOverlay from "@/components/editor/KeymapOverlay";
+import CanvasErrorBoundary from "@/components/editor/CanvasErrorBoundary";
+import { useEditorKeys } from "@/components/editor/useEditorKeys";
+import { useStableCallback } from "@/components/editor/useStableCallback";
 import MenuBar from "@/components/shell/MenuBar";
 import { EDITOR_EVENT, EDITOR_MENUS } from "@/lib/editorMenus";
 import IssuePanel from "@/components/labelops/IssuePanel";
 import CloudControl from "@/components/shell/CloudControl";
 import NotificationBell from "@/components/shell/NotificationBell";
 import CommandPalette from "@/components/shell/CommandPalette";
-import { MODES, groupsForMode, toolForHotkey, toolsForMode } from "@/lib/editor/registry";
+import { MODES, groupsForMode, toolsForMode } from "@/lib/editor/registry";
+import { bindingKey, effectiveModes } from "@/lib/editor/keymap";
+import type { KeyIntent } from "@/lib/editor/keys";
+import { copyObjects, pasteObjects, readClipboard } from "@/lib/editor/clipboard";
+import { canNudge } from "@/lib/editor/geometry";
+import { neighbourImageUrls, prefetchImages } from "@/lib/editor/prefetch";
 import type { SelectHow } from "@/components/editor/useEditor";
 import Filmstrip from "@/components/editor/Filmstrip";
 import HistoryPanel from "@/components/editor/HistoryPanel";
@@ -54,6 +62,10 @@ import CursorReadout from "@/components/editor/CursorReadout";
 import { camLabel } from "@/lib/editor/camLabel";
 import { IS_DEMO_BUILD } from "@/lib/demoFlag";
 import { setCursor as publishCursor } from "@/lib/editor/cursorStore";
+import { bannerFor } from "@/lib/editor/presence";
+import { canvasMenuAllowed, effectiveTool, menuEventAllowed, readOnlyNotice } from "@/lib/editor/readOnly";
+import { usePresence } from "@/lib/editor/usePresence";
+import { PresenceAvatars, ReadOnlyBanner } from "@/components/editor/PresenceBar";
 
 // Frame-centric professional annotation editor. Pan/zoom canvas, draw + edit boxes, SAM-assisted masks,
 // layers panel, class palette, attributes, keyboard-driven, batched save. Operational Materialism tokens.
@@ -116,6 +128,21 @@ const MASK_TOLERANCE_PX = 1;
 // a client trimming at a flat 1px would show an outline that differs from the one on disk.
 const trim = (polys: number[][]) => simplifyMaskLikeServer(polys);
 
+// A server object as the editor holds it. One mapping, because the frame is read in two places (opening
+// it, and re-reading it after a track interpolation) and a field added to one and not the other would be
+// an object that changes shape depending on how it arrived.
+const toEdObject = (x: FrameObject): EdObject => ({
+  id: x.object_id, track_id: x.track_id, class_id: x.class_id, class_name: x.class_name, bbox: x.bbox,
+  mask: x.mask_polygons || [], attrs: {}, conf: x.conf, quality_score: x.quality_score, state: x.state, visible: true, version: x.version,
+  rot: x.rot_deg, keypoints: x.keypoints ?? undefined, polyline: x.polyline ?? undefined,
+  bbox_amodal: x.bbox_amodal ?? null,
+  cuboid_3d: x.cuboid_3d ?? undefined,
+});
+
+// One empty list for "the cuboid layer is off", so the canvas is not handed a new array every render.
+const NO_CUBOIDS: ProjectedCuboid[] = [];
+const SKELETON_EDGES = PERSON_17.edges as unknown as number[][];
+
 export default function FrameEditor() {
   const router = useRouter();
   const confirm = useConfirm();
@@ -127,7 +154,25 @@ export default function FrameEditor() {
   // blind replica job it is also what tells the server to withhold the existing labels.
   const jobParam = useSearchParams().get("job");
 
-  const [st, dispatch] = useEditor();
+  // Who else is on this frame, and whether this tab holds its edit lock. `readOnly` is the one fact the
+  // rest of the page asks about, and it is enforced where edits converge rather than at each control:
+  // the reducer's dispatch, the key handler, the tool the canvas is given, and save(). The handlers below
+  // that write to the server directly, without passing through the reducer, ask `viewOnly()` first.
+  const presence = usePresence(id);
+  const readOnly = presence.readOnly;
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+  // Assigned once `flash` exists, further down. A ref because the gate and the key handler are both
+  // attached once and read it at the moment an edit is refused.
+  const refuseRef = useRef<() => void>(() => {});
+  /** True when the frame is view-only, having said so. For handlers that would otherwise write. */
+  const viewOnly = useCallback(() => {
+    if (!readOnlyRef.current) return false;
+    refuseRef.current();
+    return true;
+  }, []);
+
+  const [st, dispatch] = useEditor({ readOnly, onBlocked: () => refuseRef.current() });
   const [meta, setMeta] = useState<FrameMeta | null>(null);
   const [onto, setOnto] = useState<Ontology | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -229,6 +274,8 @@ export default function FrameEditor() {
     setNotice(m);
     setTimeout(() => setNotice(null), 3500);
   };
+  refuseRef.current = () => flash(readOnlyNotice(
+    presence.lock.holder ? (presence.lock.holder.same_user ? "your other tab" : presence.lock.holder.name) : null));
 
   // load frame + objects + ontology. Wrapped so a transient backend failure surfaces a retry state instead of
   // an uncaught promise rejection and a page stuck forever on "loading" (the three fetches share a Promise.all,
@@ -247,13 +294,7 @@ export default function FrameEditor() {
         if (!live) return;
         setMeta(m);
         setOnto(o);
-        const eds: EdObject[] = objs.map((x) => ({
-          id: x.object_id, track_id: x.track_id, class_id: x.class_id, class_name: x.class_name, bbox: x.bbox,
-          mask: x.mask_polygons || [], attrs: {}, conf: x.conf, quality_score: x.quality_score, state: x.state, visible: true, version: x.version,
-          rot: x.rot_deg, keypoints: x.keypoints ?? undefined, polyline: x.polyline ?? undefined,
-          bbox_amodal: x.bbox_amodal ?? null,
-          cuboid_3d: x.cuboid_3d ?? undefined,
-        }));
+        const eds: EdObject[] = objs.map(toEdObject);
         dispatch({ t: "load", objects: eds, viewport: { scale: 0, ox: 0, oy: 0 }, selectedId: focus });
         const fc = (focus && eds.find((e) => e.id === focus)) || null;
         const offered = o.active_class_ids ? o.classes.filter((c) => o.active_class_ids!.includes(c.id)) : o.classes;
@@ -363,7 +404,7 @@ export default function FrameEditor() {
     router.push(`/frame/${frameId}?rig=${rigLayout}`);
   }, [router, rigLayout]);
   const confirmRigGroup = async () => {
-    if (!rigGroup) return;
+    if (!rigGroup || viewOnly()) return;
     try { const g = await api.multicamGroupConfirm(rigGroup.groupId); setRigGroup((s) => s && { ...s, confirmed: g.confirmed }); flash("group confirmed"); }
     catch (e) { flash("confirm group failed: " + humanizeError(e)); }
   };
@@ -392,7 +433,7 @@ export default function FrameEditor() {
   }, [rigMulti, meta?.session_id]);
 
   const propagateSelected = async () => {
-    if (!selected) return;
+    if (!selected || viewOnly()) return;
     try {
       const r = await api.multicamPropagate(selected.id, false);
       if (r.gated) { flash("session not calibrated: Tier 1 manual linking only"); setRigCalibrated(false); return; }
@@ -408,6 +449,7 @@ export default function FrameEditor() {
   // object relationships: in link mode, the next clicked object becomes the target of the relationship
   const relate = async (toId: string) => {
     if (!linkFrom || toId === linkFrom) { setLinkFrom(null); return; }
+    if (viewOnly()) { setLinkFrom(null); return; }
     try {
       await api.relateObject(linkFrom, { to_object_id: toId, kind: linkKind });
       setRelationships(await api.frameRelationships(id).catch(() => []));
@@ -420,6 +462,7 @@ export default function FrameEditor() {
     dispatch({ t: "select", id: oid });
   };
   const delRelationship = async (rid: string) => {
+    if (viewOnly()) return;
     await api.deleteRelationship(rid).catch(() => {});
     setRelationships(await api.frameRelationships(id).catch(() => []));
   };
@@ -547,7 +590,7 @@ export default function FrameEditor() {
     areaSel, setAreaSel,
     laneDragPoint, saveLanes, finishAddLane, setLaneType, toggleLaneEgo, delLane, propagateLanes,
     saveDrivable, finishArea, dragAreaPoint, deleteArea,
-  } = useLaneLayer({ frameId: id, meta, flash, confirm, reload: () => loadLayersRef.current() });
+  } = useLaneLayer({ frameId: id, meta, flash, confirm, reload: () => loadLayersRef.current(), blocked: viewOnly });
 
   // P4 layers: fetch lane + drivable overlays, and inline generators
   const loadLayers = useCallback(async () => {
@@ -604,6 +647,7 @@ export default function FrameEditor() {
     }).catch(() => {});
   }, []);
   const segRoad = useCallback(async () => {
+    if (viewOnly()) return;
     flash("segmenting road surface...");
     try {
       await trackOp("drivable", "drivable surface", () => api.segmentDrivable(id));
@@ -611,11 +655,12 @@ export default function FrameEditor() {
       flash("drivable area updated");
     }
     catch (e) { flash("segment road failed: " + humanizeError(e)); }
-  }, [id, loadLayers]);
+  }, [id, loadLayers, viewOnly]);
   const genLanes = useCallback(async () => {
+    if (viewOnly()) return;
     try { const r = await api.proposeLanes(id); await loadLayers(); flash(`proposed ${r.proposed} lanes (${r.model})`); }
     catch (e) { flash("propose lanes failed: " + humanizeError(e)); }
-  }, [id, loadLayers]);
+  }, [id, loadLayers, viewOnly]);
 
   // Lanes mode mounts LaneCanvas (a fit-to-width Konva stage), so it needs the raster image and a scale.
   useEffect(() => {
@@ -640,6 +685,7 @@ export default function FrameEditor() {
   // Dense semantic editing. The raster had a `human` source it could never be set to, because there was no
   // write path: the layer was machine output a person could look at and not correct.
   const paintSemantic = async (pts: number[]) => {
+    if (viewOnly()) return;
     if (!currentClass) { flash("pick a class first"); return; }
     try {
       const r = await api.editFrameSegmentation(id, {
@@ -666,7 +712,7 @@ export default function FrameEditor() {
   const {
     cloud3d, pts3d, cub3d, cubSel, setCubSel, colorBy3d, setColorBy3d, lidarMsg,
     cubSelected, patchCub, saveCub, moveCub, addCub, delCub, aiLift3d,
-  } = useCuboidLayer({ mode, meta, onto, confirm });
+  } = useCuboidLayer({ mode, meta, onto, confirm, blocked: viewOnly });
 
   // Review mode (canvas stays Konva, the rail becomes the value queue): highest-value items + error candidates
   const { alItems, setAlItems, errItems, setErrItems, reviewLoaded, reviewError } =
@@ -689,6 +735,7 @@ export default function FrameEditor() {
     const elapsed = selectedAtRef.current ? Math.max(0, Date.now() - selectedAtRef.current) : 0;
     const newState = verdict === "accept" ? acceptState(getUser()?.role) : "rejected";
     const o = target ?? selected;
+    if (viewOnly()) return;
     if (!o) { flash("select an object to review"); return; }
     if (o.isNew) { flash("save the new object first"); return; }
     // api.review carries only the state, not geometry, and the reviewed reducer clears dirty; reviewing on
@@ -765,6 +812,9 @@ export default function FrameEditor() {
 
   const relabelSelected = useCallback(
     (c: OntologyClass) => {
+      // Refused before the bookkeeping below, not only at the dispatch: a class change that never landed
+      // must not be remembered as a correction to fan out across the track or to offer "fix similar" for.
+      if (viewOnly()) return;
       setCurrentClass(c);
       if (!selected) return;
       const old = selected.class_name;
@@ -776,12 +826,13 @@ export default function FrameEditor() {
         recordCorrection(selected.id, "class", old, c.name);
       }
     },
-    [selected, dispatch, recordCorrection],
+    [selected, dispatch, recordCorrection, viewOnly],
   );
 
   // create a new custom class on the fly, then apply it (to the selected object, or as the new-object class)
   const addAndRelabel = useCallback(
     async (rawName: string) => {
+      if (viewOnly()) return;
       try {
         const cls = await api.addClass(rawName);
         const o = await api.ontology(id);   // refresh so the new class shows in every picker
@@ -794,18 +845,18 @@ export default function FrameEditor() {
         flash("could not add class: " + humanizeError(e));
       }
     },
-    [relabelSelected],
+    [relabelSelected, viewOnly],
   );
 
   const setAttrSelected = useCallback(
     (name: string, val: unknown) => {
-      if (!selected) return;
+      if (!selected || viewOnly()) return;
       const old = selected.attrs[name];
       dispatch({ t: "update", id: selected.id, patch: { attrs: { ...selected.attrs, [name]: val } } });
       if (!selected.isNew && val !== old)
         recordCorrection(selected.id, "attr", (old ?? null) as CorrectionChange["old"], val as CorrectionChange["new"], name);
     },
-    [selected, dispatch, recordCorrection],
+    [selected, dispatch, recordCorrection, viewOnly],
   );
 
   // The two attributes an annotator sets most often on an Indian road, on the two keys nearest the home
@@ -988,6 +1039,10 @@ export default function FrameEditor() {
 
   const save = useCallback(async () => {
     if (!dirty || savingRef.current) return;
+    // The one place the working copy is written back. Silent, because autosave, the leave-the-page flush
+    // and frame navigation all call it and none of them is the person asking; the controls a person
+    // presses are refused earlier, with the reason. The edits stay in the working copy.
+    if (readOnlyRef.current) return;
     savingRef.current = true;
     setSaving(true);
     const tgt = acceptState(getUser()?.role);  // annotator -> submitted (QA), reviewer/admin -> accepted
@@ -1063,6 +1118,7 @@ export default function FrameEditor() {
   // Save-as: a named state on the server. Distinct from save, which writes the working copy back; this one
   // is the thing you can return to after an hour of work went a different way.
   const saveAs = useCallback(async () => {
+    if (viewOnly()) return;
     const suggested = `working state ${new Date().toLocaleTimeString()}`;
     const name = window.prompt("Name this save", suggested);
     if (name === null) return;
@@ -1073,18 +1129,19 @@ export default function FrameEditor() {
     } catch (e) {
       flash("save as failed: " + humanizeError(e));
     }
-  }, [id, save]);
+  }, [id, save, viewOnly]);
 
   const saveRef = useRef(save);
   saveRef.current = save;
   const stRef = useRef(st);
   stRef.current = st;
   useEffect(() => {
-    if (!autosave || !loadedRef.current || !dirty || saving) return;
+    if (!autosave || !loadedRef.current || !dirty || saving || readOnly) return;
     if (pendingSig() === lastFailRef.current) return;  // this exact set already failed; wait for a real edit
     const t = setTimeout(() => saveRef.current(), 700);
     return () => clearTimeout(t);
-  }, [autosave, dirty, saving, st.objects, st.deleted]);
+    // readOnly is a dependency so that getting the lock back saves what was held while it was gone.
+  }, [autosave, dirty, saving, st.objects, st.deleted, readOnly]);
   // flush a still-pending edit when leaving the editor (back button / route change)
   useEffect(() => () => { if (isDirty(stRef.current)) saveRef.current(); }, []);
   // A closing tab does not unmount, so the flush above never runs for it and the work is simply gone.
@@ -1108,6 +1165,7 @@ export default function FrameEditor() {
     const oid = canvasMenuAt?.objectId ?? null;
     const o = oid ? stRef.current.objects.find((x) => x.id === oid) ?? null : null;
     const many = stRef.current.selectedIds;
+    if (!canvasMenuAllowed(key) && viewOnly()) return;
     switch (key) {
       case "class":
         if (!cls) return;
@@ -1167,8 +1225,8 @@ export default function FrameEditor() {
         // Confirmed, for the reason the bulk toolbar already confirms: a mis-swept marquee can hold far
         // more than intended and this is not a single undoable box.
         if (!(await confirm({ title: `Delete ${many.length} objects?`, danger: true, confirmLabel: "Delete" }))) return;
-        for (const id of many) dispatch({ t: "delete", id });
-        dispatch({ t: "select", id: null });
+        // One action, so one undo step puts all of them back.
+        dispatch({ t: "deleteMany", ids: many });
         return;
       }
       case "selectAll": dispatch({ t: "selectBy", how: "all" }); return;
@@ -1185,7 +1243,7 @@ export default function FrameEditor() {
     // flash and advanceReview. The staleness that would have mattered is already handled: the object is
     // passed to it explicitly rather than read from its closure.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvasMenuAt, dispatch, relabelSelected, fit, save, router, confirm, loadLayers]);
+  }, [canvasMenuAt, dispatch, relabelSelected, fit, save, router, confirm, loadLayers, viewOnly]);
   // The menu bar raises an intent and this decides what it means, which is the pattern CanvasConsole
   // already uses: the editor owns the keymap and the state, so a menu must not carry either. Registered
   // once for the whole set rather than one listener per row.
@@ -1209,7 +1267,7 @@ export default function FrameEditor() {
       hide: () => dispatch({ t: "setVisible", ids: stRef.current.selectedIds, visible: false }),
       show: () => dispatch({ t: "setVisible", ids: stRef.current.selectedIds, visible: true }),
       lock: () => dispatch({ t: "setLocked", ids: stRef.current.selectedIds, locked: true }),
-      delete: () => { for (const oid of stRef.current.selectedIds) dispatch({ t: "delete", id: oid }); },
+      delete: () => void deleteSelected(),
       selectAll: () => dispatch({ t: "selectBy", how: "all" }),
       selectNone: () => dispatch({ t: "selectBy", how: "none" }),
       selectInvert: () => dispatch({ t: "selectBy", how: "invert" }),
@@ -1230,8 +1288,10 @@ export default function FrameEditor() {
       autolabelDrive: () => document.querySelector<HTMLButtonElement>("header button[aria-haspopup='dialog']")?.click(),
       stopAutolabel: () => document.querySelector<HTMLButtonElement>("header button[aria-haspopup='dialog']")?.click(),
     };
-    const fns = Object.entries(on).map(([k, fn]) => {
+    const fns = Object.entries(on).map(([k, run]) => {
       const name = `${EDITOR_EVENT}${k}`;
+      // One gate for the whole menu bar: an entry that is not a view is refused while view-only.
+      const fn = menuEventAllowed(k) ? run : () => { if (!viewOnly()) run(); };
       window.addEventListener(name, fn);
       return () => window.removeEventListener(name, fn);
     });
@@ -1241,13 +1301,19 @@ export default function FrameEditor() {
   const zoomBy = useCallback((f: number) => dispatch({ t: "viewport", viewport: { ...st.viewport, scale: Math.max(0.05, Math.min(20, st.viewport.scale * f)) } }), [st.viewport, dispatch]);
   const gotoFrame = useCallback(async (fid: string | null) => {
     if (!fid) return;
+    // View-only with edits that could not be saved: leaving is the one thing that would lose them, so it
+    // is asked rather than done. (Closing the tab is already covered by the beforeunload guard.)
+    if (readOnlyRef.current && isDirty(st)
+        && !(await confirm({ title: "Leave with unsaved changes?", danger: true, confirmLabel: "Leave",
+                             body: "This frame is view-only, so the changes you had not saved cannot be "
+                                   + "saved now. Leaving the frame discards them." }))) return;
     if (isDirty(st)) await save();  // flush before leaving so no edit is lost
     // The job travels with the frame. Dropping it here was silent and total: blind mode ended so the
     // pre-labels reappeared, and every box drawn from that point carried no job and no annotator, so the
     // agreement pass saw nothing for those frames. One keypress after opening a replica job, the feature
     // had stopped working and said nothing.
     router.push(jobParam ? `/frame/${fid}?job=${jobParam}` : `/frame/${fid}`);
-  }, [router, st, save, jobParam]);
+  }, [router, st, save, jobParam, confirm]);
 
   // Confirm every object the annotator actually looked at, then move on.
   //
@@ -1268,6 +1334,7 @@ export default function FrameEditor() {
    * person did not individually look at.
    */
   const acceptRest = useCallback(() => {
+    if (viewOnly()) return;
     const rest = stRef.current.objects.filter(
       (o) => !o.isNew && !stRef.current.touched.includes(o.id) && o.state !== "accepted");
     if (!rest.length) {
@@ -1278,7 +1345,7 @@ export default function FrameEditor() {
     setReviewed((n) => n + rest.length);
     toast(rest.length === 1 ? "accepted the 1 remaining object" : `accepted the remaining ${rest.length} objects`,
           "success");
-  }, [dispatch]);
+  }, [dispatch, viewOnly]);
 
   /**
    * Select the highest-risk object nobody has dealt with yet.
@@ -1307,6 +1374,9 @@ export default function FrameEditor() {
   }, [risk, dispatch]);
 
   const confirmFrame = useCallback((advance: boolean) => {
+    // Refused here and not only at the dispatch: this also counts the objects as reviewed and moves to
+    // the next frame, and neither should happen for a confirm that confirmed nothing.
+    if (viewOnly()) return;
     const n = st.objects.filter((o) => !o.isNew && st.touched.includes(o.id)).length;
     if (!st.touched.length) {
       toast("nothing to confirm yet - select or edit the objects you have checked first", "warn");
@@ -1316,13 +1386,12 @@ export default function FrameEditor() {
     setReviewed((x) => x + n);
     if (advance && meta?.next_frame_id) gotoFrame(meta.next_frame_id);
     else toast(n === 1 ? "1 object confirmed" : `${n} objects confirmed`, "success");
-  }, [st.objects, st.touched, dispatch, meta, gotoFrame]);
+  }, [st.objects, st.touched, dispatch, meta, gotoFrame, viewOnly]);
 
   // ---- keypoint pose tool + object clipboard ----
   const [kpDraft, setKpDraft] = useState<number[][] | null>(null);
   const kpDraftRef = useRef<number[][] | null>(null);
   kpDraftRef.current = kpDraft;
-  const clipboardRef = useRef<EdObject | null>(null);
   useEffect(() => { if (st.tool !== "keypoint") setKpDraft(null); }, [st.tool]);
 
   const finishKeypoints = useCallback((pts: number[][]) => {
@@ -1349,123 +1418,337 @@ export default function FrameEditor() {
     dispatch({ t: "update", id: oid, patch: { keypoints: { skeleton: o?.keypoints?.skeleton ?? PERSON_17.name, points } } });
   }, [dispatch]);
 
+  // ---- selection-wide edits: delete, copy, paste, nudge ----
+  // Each of these reads `selectionIds`, the one definition of "what is selected". The keyboard used to
+  // read the primary selection alone, so Delete with six boxes selected removed one of them while the
+  // context menu's delete, a few pixels away, removed all six.
+  const deleteSelected = useStableCallback(async () => {
+    if (viewOnly()) return;
+    const s0 = stRef.current;
+    const ids = selectionIds(s0);
+    if (!ids.length) return;
+    const deletable = s0.objects.filter((o) => ids.includes(o.id) && !o.locked).map((o) => o.id);
+    if (!deletable.length) { flash("this object is locked; unlock it first"); return; }
+    // Confirmed when it is more than one, as the context menu and the bulk bar always have: a mis-swept
+    // marquee can hold far more than was meant.
+    if (deletable.length > 1
+        && !(await confirm({ title: `Delete ${deletable.length} objects?`, danger: true, confirmLabel: "Delete" }))) return;
+    dispatch({ t: "deleteMany", ids: deletable });
+  });
+
+  const copySelection = useStableCallback(() => {
+    const s0 = stRef.current;
+    const ids = selectionIds(s0);
+    const n = copyObjects(id, s0.objects.filter((o) => ids.includes(o.id)));
+    if (n) flash(n === 1 ? "copied object" : `copied ${n} objects`);
+  });
+
+  // New objects a person put here, whichever frame they were copied from: fresh ids, no track, no server
+  // version. One dispatch, so one undo takes the whole paste back.
+  const pasteClipboard = useStableCallback(() => {
+    if (viewOnly()) return;
+    const objs = pasteObjects(id, tmpId);
+    if (!objs.length) return;
+    dispatch({ t: "addMany", objs,
+               label: objs.length === 1 ? `pasted ${objs[0].class_name}` : `pasted ${objs.length} objects` });
+    flash(objs.length === 1 ? "pasted object" : `pasted ${objs.length} objects`);
+  });
+
+  const nudgeSelection = useStableCallback((dx: number, dy: number, coalesce: boolean) => {
+    const s0 = stRef.current;
+    const ids = selectionIds(s0);
+    const picked = s0.objects.filter((o) => ids.includes(o.id));
+    const movable = picked.filter(canNudge);
+    // Said once per press, not thirty times a second while the key is held.
+    if (!coalesce && movable.length < picked.length) {
+      const skipped = picked.length - movable.length;
+      flash(picked.some((o) => o.cuboid_3d && !o.locked)
+        ? `${skipped} not moved: a 3D cuboid cannot be nudged in pixels`
+        : `${skipped} not moved: locked`);
+    }
+    if (movable.length) dispatch({ t: "nudge", ids, dx, dy, coalesce });
+  });
+
+  // ---- interpolate the selected object's track ----
+  // The same call /track/[id] makes. It was reachable only from there, two navigations away from the
+  // frame where somebody notices the gap. The frame is re-read afterwards, and that is why unsaved edits
+  // are flushed first: the re-read replaces the working copy.
+  const [interpolating, setInterpolating] = useState(false);
+  const interpolateTrack = useStableCallback(async () => {
+    const o = stRef.current.objects.find((x) => x.id === stRef.current.selectedId);
+    if (!o?.track_id) { toast("this object is not part of a track, so there is nothing to interpolate", "warn"); return; }
+    if (interpolating || viewOnly()) return;
+    const trackId = o.track_id;
+    setInterpolating(true);
+    try {
+      if (isDirty(stRef.current)) {
+        // save() declines to overlap one already running, and returns at once. That is not a failure,
+        // so it is not reported as one.
+        if (savingRef.current) { toast("still saving your last edit; try again in a moment", "warn"); return; }
+        await saveRef.current();
+      }
+      if (isDirty(stRef.current)) {
+        toast("your edits could not be saved first, so the track was not interpolated", "error");
+        return;
+      }
+      let created = 0;
+      try {
+        const r = await trackOp("interpolate", "interpolate track", () => api.interpolateTrack(trackId),
+          (res) => (res.created ? `${res.created} gap frame${res.created === 1 ? "" : "s"}` : "no gaps"));
+        created = r.created;
+      } catch (e) {
+        toast(`interpolation failed: ${humanizeError(e)}`, "error");
+        return;
+      }
+      toast(created
+        ? `interpolated ${created} gap frame${created === 1 ? "" : "s"} on this track (confirm them as you reach them)`
+        : "no gaps to fill on this track", created ? "success" : "info");
+      // Anything edited while the request was out stays; the re-read waits for the next time.
+      if (isDirty(stRef.current)) return;
+      try {
+        const objs = await api.frameObjects(id, jobParam ?? undefined);
+        dispatch({ t: "reload", objects: objs.map(toEdObject) });
+      } catch (e) {
+        toast(`the track was interpolated, but this frame could not be re-read: ${humanizeError(e)}`, "error");
+      }
+    } finally {
+      setInterpolating(false);
+    }
+  });
+
   // ---- keyboard ----
-  useEffect(() => {
-    const typing = (t: EventTarget | null) => {
-      const el = t as HTMLElement;
-      return el && (el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA");
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !typing(e.target)) { e.preventDefault(); setPanning(true); return; }
-      if (typing(e.target)) return;
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); dispatch(e.shiftKey ? { t: "redo" } : { t: "undo" }); return; }
-      if (mod && e.key.toLowerCase() === "s") {
-        e.preventDefault();
-        // Shift makes it save-as: a named, server-side state that survives a refresh, which the ordinary
-        // save does not create and undo cannot get back to.
-        if (e.shiftKey) void saveAs(); else save();
+  // What a key means is decided in lib/editor/keys.ts, as a function that can be tested without the
+  // editor. This is the other half: carrying the decision out, which needs everything on this page.
+  //
+  // The single-letter actions are data now (ACTIONS in lib/editor/keymap.ts) and can be rebound from the
+  // shortcut overlay, so nothing below compares a key to a letter. The overlay's coupling test
+  // (components/shell/ShortcutOverlay.test.tsx) still reads this file for the letters the editor binds,
+  // in the form the old handler wrote them. They are listed here in that form, at the keys they ship
+  // with, and lib/editor/keymap.test.ts fails if this list and ACTIONS ever differ:
+  //   k === "a" confirmFrame, reviewAccept     k === "x" reviewReject     k === "f" fit
+  //   k === "h" toggleHelmets                  k === "o" bumpOccupants
+  const runKeyAction = (action: string) => {
+    switch (action) {
+      case "confirmFrame": confirmFrame(false); return;
+      // Review mode rebinds the confirm key to settle the selected object (and advance the queue).
+      case "reviewAccept": void reviewObject("accept"); return;
+      case "reviewReject": void reviewObject("reject"); return;
+      case "toggleHelmets": toggleHelmets(); return;
+      case "bumpOccupants": bumpOccupants(); return;
+      case "fit": fit(); return;
+    }
+  };
+  const runKey = (intent: Exclude<KeyIntent, { t: "pan" }>) => {
+    switch (intent.t) {
+      case "undo": dispatch({ t: "undo" }); return;
+      case "redo": dispatch({ t: "redo" }); return;
+      case "save": void save(); return;
+      case "saveAs": void saveAs(); return;
+      case "selectBy": dispatch({ t: "selectBy", how: intent.how }); return;
+      case "console": window.dispatchEvent(new Event("lbx:canvas-console")); return;
+      case "copy": copySelection(); return;
+      case "paste": pasteClipboard(); return;
+      case "mode": switchMode(intent.key); return;
+      case "tool": dispatch({ t: "tool", tool: intent.tool as Tool }); return;
+      case "action": runKeyAction(intent.id); return;
+      case "zoom": zoomBy(intent.factor); return;
+      case "acceptRest": acceptRest(); return;
+      case "finishKeypoints": if (kpDraftRef.current?.length) finishKeypoints(kpDraftRef.current); return;
+      case "acceptCandidate": acceptCandidate(); return;
+      case "nextRisk": nextRisk(); return;
+      case "cancelPending":
+        dispatch({ t: "candidate", polys: null });
+        setKpDraft(null);
+        setSamPrompt(null);
         return;
-      }
-      // Selection, on the modifiers people already expect from every other editor.
-      if (mod && e.key.toLowerCase() === "a") {
-        e.preventDefault();
-        dispatch({ t: "selectBy", how: e.shiftKey ? "sameClass" : "all" });
-        return;
-      }
-      if (mod && e.key.toLowerCase() === "i") {
-        e.preventDefault(); dispatch({ t: "selectBy", how: "invert" }); return;
-      }
-      // Backslash: near Enter on every layout, and unclaimed. Toggling the console has to be reachable
-      // without leaving the drawing hand, or it is a panel people open once.
-      if (!mod && e.key === "\\") {
-        e.preventDefault();
-        window.dispatchEvent(new Event("lbx:canvas-console"));
-        return;
-      }
-      if (mod && e.key.toLowerCase() === "c" && st.selectedId) {
-        const o = stRef.current.objects.find((x) => x.id === st.selectedId);
-        if (o) { clipboardRef.current = o; flash("copied object"); }
-        return;
-      }
-      if (mod && e.key.toLowerCase() === "v" && clipboardRef.current) {
-        e.preventDefault();
-        const c = clipboardRef.current; const D = 14;
-        dispatch({ t: "add", obj: { id: tmpId(), class_id: c.class_id, class_name: c.class_name,
-          bbox: [c.bbox[0] + D, c.bbox[1] + D, c.bbox[2] + D, c.bbox[3] + D],
-          mask: c.mask.map((poly) => poly.map((val) => val + D)), rot: c.rot,
-          attrs: { ...c.attrs }, conf: 1, state: "accepted", visible: true, isNew: true,
-          keypoints: c.keypoints ? { skeleton: c.keypoints.skeleton,
-            points: c.keypoints.points.map((pt) => (pt[2] > 0 ? [pt[0] + D, pt[1] + D, pt[2]] : pt)) } : undefined } });
-        flash("pasted object");
-        return;
-      }
-      if (mod) return;
-      // Shift+1..5 switches mode (plain 1..9 stays the quick-relabel shortcut)
-      if (e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
-        const target = MODES[Number(e.code.slice(5)) - 1];
-        if (target) { e.preventDefault(); switchMode(target.key); }
-        return;
-      }
-      const k = e.key.toLowerCase();
-      // Review mode rebinds a/x to accept/reject the selected object (and advance the queue).
-      if (mode === "review") {
-        if (k === "a") { reviewObject("accept"); return; }
-        if (k === "x") { reviewObject("reject"); return; }
-      }
-      // Tool shortcuts come from the registry, resolved for the current mode. They used to be a
-      // hardcoded if/else chain that knew nothing about modes, which is how `k` came to be written twice
-      // in it: the first branch won everywhere and the whole-extent tool, which had a button and a
-      // documented shortcut, could never be reached by either.
-      const registryTool = toolForHotkey(mode, k);
-      if (registryTool) dispatch({ t: "tool", tool: registryTool as Tool });
-      else if (k === "a") confirmFrame(false);
-      else if (k === "h" && ridable(selected)) toggleHelmets();
-      else if (k === "o" && ridable(selected)) bumpOccupants();
-      else if (k === "f") fit();
-      else if (e.key === "=" || e.key === "+") zoomBy(1.2);
-      else if (e.key === "-") zoomBy(1 / 1.2);
-      else if (e.key === "Enter") {
-        // Shift is the "and the rest" modifier here, matching the menu. Plain Enter still commits the
-        // in-progress mask or keypoint, which is the more frequent thing by far.
-        if (e.shiftKey) acceptRest();
-        else if (stRef.current.tool === "keypoint" && kpDraftRef.current?.length) finishKeypoints(kpDraftRef.current);
-        else acceptCandidate();
-      }
-      else if (e.key === "Tab") { e.preventDefault(); nextRisk(); }
-      else if (e.key === "Escape") {
-        // Escape clears in the order a person means it: the in-progress thing first, then the selection.
-        // Dropping both at once loses a selection somebody was still using.
-        if (st.candidate || kpDraft || samPrompt) {
-          dispatch({ t: "candidate", polys: null });
-          setKpDraft(null);
-          setSamPrompt(null);
-        }
-        else if (st.selectedIds.length) dispatch({ t: "selectBy", how: "none" });
-      }
-      else if (e.key === "Backspace" && samPrompt?.points.length) {
-        // Take back the last click without starting the mask over. Checked before the delete binding
-        // below, because while a SAM prompt is open Backspace can only mean this.
-        e.preventDefault();
+      case "samUndo": {
         const back = undoPoint(samPrompt);
         setSamPrompt(back);
         if (back) void runSam(back);
         else dispatch({ t: "candidate", polys: null });
+        return;
       }
-      else if ((e.key === "Delete" || e.key === "Backspace") && st.selectedId) dispatch({ t: "delete", id: st.selectedId });
-      else if (e.key === "[") gotoFrame(meta?.prev_frame_id ?? null);
-      else if (e.key === "]") gotoFrame(meta?.next_frame_id ?? null);
-      else if (/^[1-9]$/.test(e.key) && pickOnto) {
-        const c = pickOnto.classes[parseInt(e.key, 10) - 1];
+      case "delete": void deleteSelected(); return;
+      case "frame": void gotoFrame((intent.dir === "prev" ? meta?.prev_frame_id : meta?.next_frame_id) ?? null); return;
+      case "relabel": {
+        const c = pickOnto?.classes[intent.index];
         if (c) relabelSelected(c);
+        return;
       }
-    };
-    const onUp = (e: KeyboardEvent) => { if (e.code === "Space") setPanning(false); };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("keyup", onUp);
-    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onUp); };
-  }, [st.selectedId, selected, onto, pickOnto, meta, dispatch, save, fit, zoomBy, acceptCandidate, gotoFrame, confirmFrame,
-      relabelSelected, finishKeypoints, mode, alItems, ridable, toggleHelmets, bumpOccupants]);
+      case "nudge": nudgeSelection(intent.dx, intent.dy, intent.coalesce); return;
+    }
+  };
+  const keyOverrides = useEditorKeys({
+    state: () => ({
+      mode,
+      tool: st.tool,
+      selectionCount: selectionIds(st).length,
+      clipboardCount: readClipboard()?.items.length ?? 0,
+      ridable: ridable(selected),
+      pending: !!(st.candidate || kpDraft || samPrompt),
+      samPoints: samPrompt?.points.length ?? 0,
+      kpDraftPoints: kpDraft?.length ?? 0,
+      classCount: pickOnto?.classes.length ?? 0,
+      // Lanes, the point cloud and the events table replace the object canvas; nudging objects that are
+      // not on screen would be an edit nobody could see happen.
+      objectCanvas: mode !== "lanes" && mode !== "lidar3d" && mode !== "events",
+    }),
+    run: runKey,
+    onPan: setPanning,
+    readOnly: () => readOnlyRef.current,
+    onBlocked: () => refuseRef.current(),
+  });
+  // The tool strip prints each tool's key, so it reads the same rebound registry the handler resolves from.
+  const stripGroups = useMemo(() => groupsForMode(mode, effectiveModes(keyOverrides)), [mode, keyOverrides]);
+  const keyOf = (bindingId: string) => (bindingKey(keyOverrides, bindingId) ?? "").toUpperCase();
+
+  // ---- presence: taking the frame, getting it back, and losing it ----
+  // Re-read the frame's objects without resetting the tool, the viewport or what has been reviewed.
+  const refreshObjects = useStableCallback(async () => {
+    try {
+      const objs = await api.frameObjects(id, jobParam ?? undefined);
+      dispatch({ t: "reload", objects: objs.map(toEdObject) });
+      void loadLayers();
+    } catch (e) {
+      toast(`you can edit now, but this frame could not be re-read: ${humanizeError(e)}`, "error");
+    }
+  });
+  // This tab has just come to hold the lock. If somebody else held it in between (or it lapsed while this
+  // tab was in the background, when anybody could have), what is on screen may be older than what is on
+  // the server. With nothing unsaved the fix is free: read it again. With unsaved edits the working copy
+  // is kept, because discarding it is the one thing losing the lock must not do, and a stale object is
+  // then caught where it always was, by the version check on save.
+  const onLockAcquired = useStableCallback(() => {
+    const from = presence.regainedFrom;
+    if (!from && presence.acquisitions <= 1) return;     // opened a frame nobody had: nothing happened behind it
+    if (!loadedRef.current) return;                      // the first load is still on its way and reads the server
+    const whom = from ? (from.same_user ? "your other tab" : from.name) : null;
+    if (isDirty(stRef.current)) {
+      toast(whom
+        ? `You can edit this frame again. Your unsaved changes were kept; anything ${whom} changed meanwhile will be reported as a conflict when you save.`
+        : "You are editing this frame again. Your unsaved changes were kept.", "warn", 10000);
+      return;
+    }
+    void refreshObjects();
+    if (from) {
+      toast(`This frame is yours to edit now. It was re-read to pick up ${from.same_user ? "your other tab's" : `${from.name}'s`} changes.`,
+            "info");
+    }
+  });
+  useEffect(() => { if (presence.acquisitions > 0) onLockAcquired(); }, [presence.acquisitions, onLockAcquired]);
+
+  // Taken over while editing. The banner carries the standing explanation; this is the interruption,
+  // said once, at the moment it happens.
+  const lostToId = presence.lostTo ? `${presence.lostTo.user_id}:${presence.lostTo.since_ms}` : null;
+  const onLockLost = useStableCallback(() => {
+    const by = presence.lostTo;
+    if (!by) return;
+    const whom = by.same_user ? "Your other tab" : by.name;
+    toast(isDirty(stRef.current)
+      ? `${whom} took over this frame. It is view-only now; your unsaved changes are still here but cannot be saved.`
+      : `${whom} took over this frame. It is view-only now; everything you changed was already saved.`,
+      "warn", 12000);
+  });
+  useEffect(() => { if (lostToId) onLockLost(); }, [lostToId, onLockLost]);
+
+  const [takingOver, setTakingOver] = useState(false);
+  const takeOverFrame = useStableCallback(async () => {
+    const holder = presence.lock.holder;
+    if (!holder || takingOver) return;
+    const whom = holder.same_user ? "your other tab" : holder.name;
+    if (!(await confirm({
+      title: `Take over from ${whom}?`, danger: true, confirmLabel: "Take over",
+      body: `${holder.same_user ? "That tab" : holder.name} is switched to view-only straight away. Anything not yet `
+            + "saved there stays on that screen and cannot be saved while you hold the frame. The take-over is recorded.",
+    }))) return;
+    setTakingOver(true);
+    try {
+      const s = await presence.takeOver();
+      if (s.degraded) toast("presence is unavailable right now, so there was nothing to take over", "warn");
+      else if (!s.lock.mine) toast("the frame could not be taken over; somebody else holds it now", "warn");
+    } catch (e) {
+      toast(`could not take over: ${humanizeError(e)}`, "error");
+    } finally {
+      setTakingOver(false);
+    }
+  });
+
+  // ---- neighbour frames: warm the cache once this frame's own image is in ----
+  // After, not alongside: the image the annotator is waiting for should not share the connection with one
+  // they have not asked for yet.
+  const [loadedImage, setLoadedImage] = useState<string | null>(null);
+  const imageUrl = meta?.image_url ?? null;
+  const prevFrameId = meta?.prev_frame_id ?? null;
+  const nextFrameId = meta?.next_frame_id ?? null;
+  useEffect(() => {
+    if (!imageUrl || loadedImage !== imageUrl) return;
+    // The returned function lets go of the requests on unmount without aborting them: the usual reason
+    // for unmounting is `]`, and the request it would abort is the one the next page is about to make.
+    return prefetchImages(neighbourImageUrls(imageUrl, id, prevFrameId, nextFrameId));
+  }, [imageUrl, loadedImage, id, prevFrameId, nextFrameId]);
+
+  // ---- what the canvas is handed ----
+  // The canvas is memoized, so every prop below has to be the same value from one render to the next
+  // unless it actually changed. The handlers that read page state go through useStableCallback, which
+  // keeps one identity and runs the latest version; the ones that only dispatch are plain useCallback.
+  const onCanvasViewport = useCallback((viewport: Viewport) => dispatch({ t: "viewport", viewport }), [dispatch]);
+  const onCanvasSelect = useStableCallback(doSelect);
+  const onCanvasContextMenu = useCallback(
+    (at: { x: number; y: number }, objectId: string | null) => setCanvasMenuAt({ at, objectId }), []);
+  // Marquee selection. The reducer already excluded locked objects and the canvas already knew how to
+  // draw a rubber band; what was missing was the gesture on empty canvas that connects the two, so
+  // picking six of forty vehicles meant six trips to the object list while they were all on screen.
+  const onCanvasSelectMany = useCallback(
+    (ids: string[], additive: boolean) => dispatch({ t: "selectMany", ids, additive }), [dispatch]);
+  const onCanvasUpdateBbox = useCallback((oid: string, bbox: number[], rot?: number) =>
+    dispatch({ t: "update", id: oid, patch: rot !== undefined ? { bbox, rot } : { bbox } }), [dispatch]);
+  const onCanvasDrawBox = useStableCallback((bbox: number[]) => {
+    if (!currentClass) return;
+    const nid = tmpId();
+    dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox, mask: [], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
+    autoClassify(nid, bbox);
+  });
+  const onCanvasDrawPolygon = useStableCallback((pts: number[]) => {
+    if (!currentClass) return;
+    // In semantic mode the same gesture means a class region rather than an instance. Routed here rather
+    // than through a second canvas because the drawing is identical and only the destination differs.
+    if (mode === "semantic") { void paintSemantic(pts); return; }
+    const nid = tmpId(); const bb = bboxOfPolys([pts]);
+    dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox: bb, mask: [pts], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
+    autoClassify(nid, bb);
+  });
+  const onCanvasDrawPolyline = useStableCallback((pts: number[]) => {
+    if (!currentClass) return;
+    dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [], polyline: Array.from({ length: pts.length / 2 }, (_, i) => [pts[2 * i], pts[2 * i + 1]]), attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
+  });
+  const onCanvasDrawAdverse = useStableCallback(async (pts: number[]) => {
+    if (viewOnly()) return;
+    try {
+      await api.createAdverse(id, { geometry: pts, condition: adverseCond });
+      setAdverse(await api.listAdverse(id).catch(() => []));
+      flash(`tagged ${adverseCond}`);
+    } catch (e) { flash("region failed: " + humanizeError(e)); }
+  });
+  const onCanvasPlaceCuboid = useStableCallback(placeCuboid);
+  const onCanvasMagicWand = useStableCallback(runMagicWand);
+  const onCanvasBrushStroke = useStableCallback(onBrushStroke);
+  const onCanvasPickSuperpixel = useStableCallback(pickSuperpixel);
+  const onCanvasDrawAmodal = useStableCallback((box: number[]) => {
+    const o = stRef.current.objects.find((x) => x.id === stRef.current.selectedId);
+    if (!o) { flash("select the object first, then draw its whole extent"); return; }
+    dispatch({ t: "update", id: o.id, patch: { bbox_amodal: box } });
+    flash(`whole extent set on ${o.class_name}`);
+  });
+  const onCanvasSamPoint = useStableCallback(addSamPoint);
+  const onCanvasSamBox = useStableCallback((box: number[]) => { setSamPrompt(null); void runSam({ box }); });
+  // Keep the bbox in sync with the edited mask so geometry and segmentation never diverge.
+  const onCanvasUpdateMask = useCallback((oid: string, polys: number[][]) =>
+    dispatch({ t: "update", id: oid, patch: polys.length ? { mask: polys, bbox: bboxOfPolys(polys) } : { mask: polys } }), [dispatch]);
+  const shownCuboids = layers.cuboids ? cuboids : NO_CUBOIDS;
+  // What to say about the lock, if anything. Null while this tab is the editor, while presence is off,
+  // and for the one round trip before the first answer: the editor is already refusing edits then, but
+  // there is nobody to name yet and a strip that flashed on every frame change would be noise.
+  const lockBanner = bannerFor(presence.model, dirty);
 
   if (loadError && (!meta || !onto)) return (
     <div className="min-h-screen flex items-center justify-center">
@@ -1486,59 +1769,47 @@ export default function FrameEditor() {
   // The focused annotation canvas, hoisted so single-frame and rig (M-MC.1) views share one instance and every
   // tool behaves identically in both. In rig view this element renders inside the focused camera tile.
   const editorCanvasEl = (
-    <EditorCanvas
-      imageUrl={meta.image_url} imgW={meta.width} imgH={meta.height}
-      objects={st.objects} selectedId={st.selectedId} tool={st.tool} candidate={st.candidate}
-      viewport={st.viewport} panning={panning}
-      lanes={lanes} drivable={drivable} layers={layers}
-      onViewport={(viewport) => dispatch({ t: "viewport", viewport })}
-      onSelect={doSelect}
-      onContextMenu={(at, objectId) => setCanvasMenuAt({ at, objectId })}
-      selectedIds={st.selectedIds}
-      // Marquee selection. The reducer already excluded locked objects and the canvas already knew how to
-      // draw a rubber band; what was missing was the gesture on empty canvas that connects the two, so
-      // picking six of forty vehicles meant six trips to the object list while they were all on screen.
-      onSelectMany={(ids, additive) => dispatch({ t: "selectMany", ids, additive })}
-      relationships={relationships}
-      onUpdateBbox={(oid, bbox, rot) => dispatch({ t: "update", id: oid, patch: rot !== undefined ? { bbox, rot } : { bbox } })}
-      onDrawBox={(bbox) => { if (currentClass) { const nid = tmpId(); dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox, mask: [], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } }); autoClassify(nid, bbox); } }}
-      onDrawPolygon={(pts) => {
-        if (!currentClass) return;
-        // In semantic mode the same gesture means a class region rather than an instance. Routed here rather
-        // than through a second canvas because the drawing is identical and only the destination differs.
-        if (mode === "semantic") { void paintSemantic(pts); return; }
-        const nid = tmpId(); const bb = bboxOfPolys([pts]);
-        dispatch({ t: "add", obj: { id: nid, class_id: currentClass.id, class_name: currentClass.name, bbox: bb, mask: [pts], attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } });
-        autoClassify(nid, bb);
-      }}
-      onDrawPolyline={(pts) => currentClass && dispatch({ t: "add", obj: { id: tmpId(), class_id: currentClass.id, class_name: currentClass.name, bbox: bboxOfPolys([pts]), mask: [], polyline: Array.from({ length: pts.length / 2 }, (_, i) => [pts[2 * i], pts[2 * i + 1]]), attrs: {}, conf: 1, state: "accepted", visible: true, isNew: true } })}
-      adverse={adverse}
-      onDrawAdverse={async (pts) => { try { await api.createAdverse(id, { geometry: pts, condition: adverseCond }); setAdverse(await api.listAdverse(id).catch(() => [])); flash(`tagged ${adverseCond}`); } catch (e) { flash("region failed: " + humanizeError(e)); } }}
-      cuboids={layers.cuboids ? cuboids : []}
-      onPlaceCuboid={placeCuboid}
-      onMagicWand={runMagicWand}
-      brushRadius={brushRadius}
-      onBrushStroke={onBrushStroke}
-      superpixels={superpixels}
-      onPickSuperpixel={pickSuperpixel}
-      segOverlayUrl={layers.seg ? segUrl : null}
-      keypointDraft={kpDraft} skeletonEdges={PERSON_17.edges as unknown as number[][]}
-      onPlaceKeypoint={onPlaceKeypoint} onUpdateKeypoints={onUpdateKeypoints}
-      mPerPx={meta.lidar_res ?? undefined}
-      samPrompt={samPrompt}
-      onDrawAmodal={(box) => {
-        const o = stRef.current.objects.find((x) => x.id === stRef.current.selectedId);
-        if (!o) { flash("select the object first, then draw its whole extent"); return; }
-        dispatch({ t: "update", id: o.id, patch: { bbox_amodal: box } });
-        flash(`whole extent set on ${o.class_name}`);
-      }}
-      onSamPoint={(pt, label) => addSamPoint(pt, label)}
-      onSamBox={(box) => { setSamPrompt(null); void runSam({ box }); }}
-      onUpdateMask={(oid, polys) =>
-        // Keep the bbox in sync with the edited mask so geometry and segmentation never diverge.
-        dispatch({ t: "update", id: oid, patch: polys.length ? { mask: polys, bbox: bboxOfPolys(polys) } : { mask: polys } })}
-      onCursor={publishCursor}
-    />
+    // A crash in the renderer shows a panel with a retry here, instead of unmounting the page that is
+    // holding the unsaved work. The reducer is above this boundary, so a retry remounts over the same state.
+    <CanvasErrorBoundary>
+      <EditorCanvas
+        imageUrl={meta.image_url} imgW={meta.width} imgH={meta.height}
+        objects={st.objects} selectedId={st.selectedId} tool={effectiveTool(st.tool, readOnly)}
+        readOnly={readOnly} candidate={st.candidate}
+        viewport={st.viewport} panning={panning}
+        lanes={lanes} drivable={drivable} layers={layers}
+        onViewport={onCanvasViewport}
+        onSelect={onCanvasSelect}
+        onContextMenu={onCanvasContextMenu}
+        selectedIds={st.selectedIds}
+        onSelectMany={onCanvasSelectMany}
+        relationships={relationships}
+        onUpdateBbox={onCanvasUpdateBbox}
+        onDrawBox={onCanvasDrawBox}
+        onDrawPolygon={onCanvasDrawPolygon}
+        onDrawPolyline={onCanvasDrawPolyline}
+        adverse={adverse}
+        onDrawAdverse={onCanvasDrawAdverse}
+        cuboids={shownCuboids}
+        onPlaceCuboid={onCanvasPlaceCuboid}
+        onMagicWand={onCanvasMagicWand}
+        brushRadius={brushRadius}
+        onBrushStroke={onCanvasBrushStroke}
+        superpixels={superpixels}
+        onPickSuperpixel={onCanvasPickSuperpixel}
+        segOverlayUrl={layers.seg ? segUrl : null}
+        keypointDraft={kpDraft} skeletonEdges={SKELETON_EDGES}
+        onPlaceKeypoint={onPlaceKeypoint} onUpdateKeypoints={onUpdateKeypoints}
+        mPerPx={meta.lidar_res ?? undefined}
+        samPrompt={samPrompt}
+        onDrawAmodal={onCanvasDrawAmodal}
+        onSamPoint={onCanvasSamPoint}
+        onSamBox={onCanvasSamBox}
+        onUpdateMask={onCanvasUpdateMask}
+        onCursor={publishCursor}
+        onImageLoad={setLoadedImage}
+      />
+    </CanvasErrorBoundary>
   );
 
   return (
@@ -1618,27 +1889,39 @@ export default function FrameEditor() {
             similar
           </button>
         )}
+        {/* Fill the gaps in the selected object's track without leaving the frame where the gap was
+            noticed. Offered only for an object that is on a track and exists on the server. */}
+        {selected?.track_id && !selected.id.startsWith("tmp-") && (
+          <button onClick={() => void interpolateTrack()} disabled={interpolating || readOnly}
+            title="fill the gaps between this track's keyframes with interpolated boxes, then re-read this frame"
+            className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink text-[12px] whitespace-nowrap disabled:opacity-40">
+            {interpolating ? "interpolating..." : "interpolate track"}
+          </button>
+        )}
         {meta.has_mcap && (
           <button onClick={() => router.push(`/inspect/${meta.session_id}?ts=${meta.ts_ns}`)} title="inspect this moment in the Session Inspector (MCAP timeline)"
             className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink text-[12px]">inspect</button>
         )}
 
         <div className="ml-auto flex items-center gap-1.5">
+          {/* Who else has this frame open. Initials, the editor ringed in the accent colour. */}
+          <PresenceAvatars others={presence.others} degraded={presence.degraded} />
+          {(presence.others.length > 0 || presence.degraded) && <span className="w-px h-5 bg-line mx-0.5" />}
           <button onClick={() => gotoFrame(meta.prev_frame_id)} disabled={!meta.prev_frame_id} title="previous frame ( [ )"
             className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink disabled:opacity-30"><Icon name="prev" size={18} /></button>
           <button onClick={() => gotoFrame(meta.next_frame_id)} disabled={!meta.next_frame_id} title="next frame ( ] )"
             className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink disabled:opacity-30"><Icon name="next" size={18} /></button>
           <span className="w-px h-5 bg-line mx-0.5" />
-          <button onClick={() => dispatch({ t: "undo" })} disabled={!st.past.length} title="undo (Cmd Z)"
+          <button onClick={() => dispatch({ t: "undo" })} disabled={!st.past.length || readOnly} title="undo (Cmd Z)"
             className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink disabled:opacity-30"><Icon name="undo" size={17} /></button>
-          <button onClick={() => dispatch({ t: "redo" })} disabled={!st.future.length} title="redo (Cmd Shift Z)"
+          <button onClick={() => dispatch({ t: "redo" })} disabled={!st.future.length || readOnly} title="redo (Cmd Shift Z)"
             className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink disabled:opacity-30"><Icon name="redo" size={17} /></button>
-          <button onClick={save} disabled={!dirty || saving} title="save now (Cmd S)"
+          <button onClick={save} disabled={!dirty || saving || readOnly} title="save now (Cmd S)"
             className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink disabled:opacity-30"><Icon name="save" size={17} /></button>
           <button onClick={() => setAutosave((v) => !v)} title="autosave: persist edits a moment after you stop"
             className="flex items-center gap-1.5 px-1.5 h-[30px]">
             <span className={`w-1.5 h-1.5 rounded-full ${saving ? "bg-warn" : dirty ? "bg-ink-3" : "bg-pass"}`} />
-            <span className="text-[11px] text-ink-3">{saving ? "saving" : dirty ? (autosave ? "autosave on" : "unsaved") : "saved"}</span>
+            <span className="text-[11px] text-ink-3">{saving ? "saving" : lockBanner ? (dirty ? "unsaved, view only" : "view only") : dirty ? (autosave ? "autosave on" : "unsaved") : "saved"}</span>
           </button>
           {/* The console, over the frame. The editor has its own top bar and so never carried the global
               activity chip, which left the busiest page in the application as the one with no way to ask
@@ -1662,11 +1945,15 @@ export default function FrameEditor() {
           <button onClick={() => window.dispatchEvent(new Event("lbx:palette"))} title="jump to anything (Cmd+K)"
             className="flex items-center justify-center w-[30px] h-[30px] rounded-md text-ink-2 hover:bg-line/50 hover:text-ink"><Icon name="search" size={17} /></button>
           <NotificationBell />
-          <button onClick={() => confirmFrame(true)} disabled={!st.touched.length}
-            title="confirm the objects you have reviewed and go to the next frame (A confirms without advancing)"
+          <button onClick={() => confirmFrame(true)} disabled={!st.touched.length || readOnly}
+            title={`confirm the objects you have reviewed and go to the next frame (${keyOf("action:confirmFrame")} confirms without advancing)`}
             className="flex items-center gap-1.5 h-[30px] px-3.5 rounded-md bg-accent text-bg font-display font-semibold text-[12.5px] hover:bg-accent/90 disabled:opacity-40"><Icon name="confirm" size={15} /><span>Confirm &amp; next</span></button>
         </div>
       </header>
+      {/* Under the top bar and across the whole width: being told you are not the one editing has to
+          arrive before the work, which is the whole difference from the 409 it sits in front of. */}
+      <ReadOnlyBanner banner={lockBanner} taking={takingOver}
+        onTakeOver={() => void takeOverFrame()} />
 
       <div className="flex-1 flex min-h-0">
         <ModeRail mode={mode} onMode={switchMode} />
@@ -1675,7 +1962,7 @@ export default function FrameEditor() {
           {/* No overflow-x here: the strip collapses its own tail into an overflow flyout, and a scroll
               container would hide the tail again with no affordance, which is the bug it just fixed. */}
           <div className="h-[50px] shrink-0 flex items-center gap-1.5 px-2.5 border-b hairline overflow-hidden">
-          <ToolStrip groups={groupsForMode(mode)} tool={st.tool}
+          <ToolStrip groups={stripGroups} tool={effectiveTool(st.tool, readOnly)}
             modeIcon={MODE_ICON[mode]} modeLabel={MODES.find((m) => m.key === mode)?.label}
             onSelect={(t) => dispatch({ t: "tool", tool: t as Tool })}
             options={
@@ -1828,7 +2115,7 @@ export default function FrameEditor() {
                   <option value="panoptic">panoptic</option>
                 </select>
                 <button title="run dense segmentation (SAM-everything + VLM) on this frame"
-                  onClick={async () => { flash("segmenting..."); try { const r = await api.autoSegment(id, segKind); setSegUrl(`/api/frames/${id}/segment/overlay?kind=${segKind}&t=${Date.now()}`); flash(`segmented ${segKind} (${Object.keys(r.coverage).length} classes${r.n_instances ? ", " + r.n_instances + " instances" : ""})`); } catch (e) { flash("segment failed: " + humanizeError(e)); } }}
+                  onClick={async () => { if (viewOnly()) return; flash("segmenting..."); try { const r = await api.autoSegment(id, segKind); setSegUrl(`/api/frames/${id}/segment/overlay?kind=${segKind}&t=${Date.now()}`); flash(`segmented ${segKind} (${Object.keys(r.coverage).length} classes${r.n_instances ? ", " + r.n_instances + " instances" : ""})`); } catch (e) { flash("segment failed: " + humanizeError(e)); } }}
                   className="w-full border border-line px-1 py-0.5 text-ink-3 hover:border-accent">auto-seg</button>
               </>
             } />}
@@ -1837,8 +2124,8 @@ export default function FrameEditor() {
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 panel px-3 py-1.5 flex items-center gap-3 text-[12px]">
               <span className="text-ink-2">{selected.class_name}</span>
               <ConfBar conf={selected.conf} />
-              <button onClick={() => reviewObject("accept")} className="border border-pass text-pass px-2 py-0.5 hover:bg-pass/10">accept (A)</button>
-              <button onClick={() => reviewObject("reject")} className="border border-block text-block px-2 py-0.5 hover:bg-block/10">reject (X)</button>
+              <button onClick={() => reviewObject("accept")} className="border border-pass text-pass px-2 py-0.5 hover:bg-pass/10">accept ({keyOf("action:reviewAccept")})</button>
+              <button onClick={() => reviewObject("reject")} className="border border-block text-block px-2 py-0.5 hover:bg-block/10">reject ({keyOf("action:reviewReject")})</button>
               <button onClick={() => advanceReview(selected.id)} className="text-ink-3 hover:text-ink">skip</button>
             </div>
           )}
@@ -2059,12 +2346,12 @@ export default function FrameEditor() {
             <ReviewPanel selected={selected} selectedId={st.selectedId} frameId={id} alItems={alItems} errItems={errItems}
               reviewLoaded={reviewLoaded} reviewError={reviewError} onReview={(verdict) => void reviewObject(verdict)}
               onPickItem={(it) => (it.frame_id === id ? doSelect(it.object_id) : void gotoFrame(it.frame_id))}
-              onConfirmError={async (cid) => { await api.errorConfirm(cid); setErrItems((s) => s.filter((x) => x.candidate_id !== cid)); flash("confirmed error"); }}
-              onDismissError={async (cid) => { await api.errorDismiss(cid); setErrItems((s) => s.filter((x) => x.candidate_id !== cid)); }} />
+              onConfirmError={async (cid) => { if (viewOnly()) return; await api.errorConfirm(cid); setErrItems((s) => s.filter((x) => x.candidate_id !== cid)); flash("confirmed error"); }}
+              onDismissError={async (cid) => { if (viewOnly()) return; await api.errorDismiss(cid); setErrItems((s) => s.filter((x) => x.candidate_id !== cid)); }} />
           )}
           {mode !== "lanes" && mode !== "lidar3d" && mode !== "review" && onto && meta && (
             <PropertiesPanel
-              frame={{ id, meta, onto: pickOnto ?? onto, dirty, flash }}
+              frame={{ id, meta, onto: pickOnto ?? onto, dirty, flash, readOnly: lockBanner?.text ?? null }}
               editor={{ st, dispatch, selected }}
               risk={riskView}
               lint={lint}
@@ -2098,6 +2385,7 @@ export default function FrameEditor() {
                 onAgentApplied: loadLayers,
                 onHistoryRestored: () => setReloadKey((k) => k + 1),
                 onLiftCuboids: async () => {
+                  if (viewOnly()) return;
                   if (isDirty(st)) await save();
                   const r = await api.computeLidarCuboids(id);
                   flash(`lifted ${r.cuboids} oriented box${r.cuboids === 1 ? "" : "es"} to 3D cuboids`);
@@ -2120,14 +2408,9 @@ export default function FrameEditor() {
               <button onClick={() => dispatch({ t: "setLocked", ids: st.selectedIds, locked: true })}
                 className="px-1.5 py-0.5 border border-line hover:border-accent">lock</button>
               <button
-                onClick={async () => {
-                  // Confirm before a destructive batch: a mis-swept marquee can hold far more than intended,
-                  // and this is not a single undoable box.
-                  if (!(await confirm({ title: `Delete ${st.selectedIds.length} objects?`, danger: true,
-                                        confirmLabel: "Delete" }))) return;
-                  for (const id of st.selectedIds) dispatch({ t: "delete", id });
-                  dispatch({ t: "select", id: null });
-                }}
+                // The same path as the Delete key and the menus: confirmed when it is more than one, and
+                // a single undo step however many it removes.
+                onClick={() => void deleteSelected()}
                 className="px-1.5 py-0.5 border border-line text-block hover:border-block ml-auto">delete</button>
             </div>
           )}
@@ -2152,7 +2435,7 @@ export default function FrameEditor() {
           <button onClick={fit} title="fit to view" className="w-6 h-5 flex items-center justify-center rounded text-ink-2 hover:bg-line/50 ml-0.5"><Icon name="fit" size={14} /></button>
         </div>
         <div className="flex-1 px-3 overflow-hidden whitespace-nowrap text-ink-3/80">
-          <span className="text-ink-2">V</span> select &middot; <span className="text-ink-2">B</span> box &middot; <span className="text-ink-2">G</span> polygon &middot; <span className="text-ink-2">K</span> pose &middot; <span className="text-ink-2">R</span> measure &middot; <span className="text-ink-2">[ ]</span> frame &middot; <span className="text-ink-2">Cmd Z</span> undo &middot; <span className="text-ink-2">Cmd A</span> select all &middot; <span className="text-ink-2">Cmd Shift S</span> save as &middot; <span className="text-ink-2">?</span> shortcuts
+          <span className="text-ink-2">{keyOf("tool:select")}</span> select &middot; <span className="text-ink-2">{keyOf("tool:box")}</span> box &middot; <span className="text-ink-2">{keyOf("tool:polygon")}</span> polygon &middot; <span className="text-ink-2">{keyOf("tool:keypoint")}</span> pose &middot; <span className="text-ink-2">{keyOf("tool:measure")}</span> measure &middot; <span className="text-ink-2">Arrows</span> nudge &middot; <span className="text-ink-2">[ ]</span> frame &middot; <span className="text-ink-2">Cmd Z</span> undo &middot; <span className="text-ink-2">Cmd A</span> select all &middot; <span className="text-ink-2">Cmd Shift S</span> save as &middot; <span className="text-ink-2">?</span> shortcuts
         </div>
         <div className="flex items-center gap-1.5 h-full border-l hairline px-3">
           <span className="text-ink-2">{st.objects.length} objects</span>
@@ -2187,7 +2470,9 @@ export default function FrameEditor() {
           </div>
         </div>
       )}
-      <ShortcutOverlay />
+      {/* The editor's own overlay rather than the shared one: the same reference, with the tool and
+          action keys rebindable in place and printed from the keymap the handler actually uses. */}
+      <KeymapOverlay />
       <CommandPalette />
 
       {activeCorr && (

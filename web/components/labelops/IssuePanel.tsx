@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api , humanizeError } from "@/lib/api";
 import type { IssueRow } from "@/lib/types";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // Issue threads for the frame currently open in the editor. A reviewer rejecting a job teaches nobody
 // anything; an issue anchored to the exact object turns review into specific feedback that outlives the
@@ -21,7 +22,6 @@ const KIND_TONE: Record<string, string> = {
 };
 
 export default function IssuePanel({ frameId, objectId }: { frameId: string; objectId?: string | null }) {
-  const [issues, setIssues] = useState<IssueRow[]>([]);
   const [open, setOpen] = useState<IssueRow | null>(null);
   const [kind, setKind] = useState<string>("comment");
   const [body, setBody] = useState("");
@@ -30,15 +30,15 @@ export default function IssuePanel({ frameId, objectId }: { frameId: string; obj
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (!frameId) return;
-    try {
-      const r = await api.lopIssues({ frame_id: frameId, ...(showResolved ? {} : { status: "open" }) });
-      setIssues(r.issues);
-    } catch (e) { setErr(humanizeError(e)); }
-  }, [frameId, showResolved]);
-
-  useEffect(() => { refresh(); }, [refresh]);
+  // Keyed by the frame and the filter. The list on screen stays up while the next frame's loads, as the
+  // state it replaces did, and a failure goes to the same error line the actions below use.
+  const params = useMemo(
+    () => ({ frame_id: frameId, ...(showResolved ? {} : { status: "open" }) }), [frameId, showResolved]);
+  const q = useQuery(frameId ? ["lopIssues", params] : null, () => api.lopIssues(params), { keepPrevious: true });
+  const issues: IssueRow[] = q.data?.issues ?? [];
+  useEffect(() => { if (q.error) setErr(humanizeError(q.error)); }, [q.error]);
+  // Every cached issue list, not only this one: the same issue is in its author's inbox on the profile page.
+  const refresh = () => invalidate("lopIssues");
 
   const create = async () => {
     if (!body.trim()) { setErr("describe the problem first"); return; }

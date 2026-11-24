@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { T } from "@/lib/i18n";
 import { api , humanizeError } from "@/lib/api";
 import { applicableCount, defaultSelection, emptyReason, onExcludedTrack } from "@/lib/correctionCandidates";
 import { toast } from "@/lib/toast";
 import type { CorrectionCandidate, CorrectionCoverage, CorrectionSuggestion } from "@/lib/types";
+import { useDialog } from "@/components/ui/useDialog";
 
 // Interactive AI correction: after one fix (Truck->Bus, or an attribute), find visually-similar objects
 // that still carry the old value, preview them, deselect wrong matches, and bulk-apply. Shared by the
@@ -125,13 +127,18 @@ export default function CorrectionModal({
   );
 
   const lowCoverage = cov && cov.pct < 50;
+  // The button has always said "esc"; this is what makes the key do it, keeps Tab inside, and hands focus
+  // back to the editor control that opened the dialog.
+  const dialogRef = useDialog<HTMLDivElement>(true, onClose);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="panel w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="absolute inset-0" aria-hidden="true" onClick={onClose} />
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="correction-title" tabIndex={-1}
+        className="panel relative w-full max-w-3xl max-h-[85vh] flex flex-col">
         {/* header */}
         <div className="flex items-center justify-between px-4 py-2 border-b hairline">
-          <div className="text-[12.5px]">
+          <div id="correction-title" className="text-[12.5px]">
             <span className="text-ink-3">you corrected</span>{" "}
             <span className="text-accent">{title}</span>
             {sug && (
@@ -146,7 +153,7 @@ export default function CorrectionModal({
               </span>
             )}
           </div>
-          <button onClick={onClose} className="text-[12.5px] text-ink-3 hover:text-ink border border-line px-2 py-0.5">esc</button>
+          <button onClick={onClose} aria-label="close" className="text-[12.5px] text-ink-3 hover:text-ink border border-line px-2 py-0.5">esc</button>
         </div>
 
         {/* controls */}
@@ -231,7 +238,7 @@ export default function CorrectionModal({
 
         {/* footer */}
         <div className="flex items-center justify-end gap-2 px-4 py-2 border-t hairline text-[12px]">
-          <button onClick={onClose} className="border border-line px-3 py-1 text-ink-3 hover:text-ink">cancel</button>
+          <button onClick={onClose} className="border border-line px-3 py-1 text-ink-3 hover:text-ink"><T k="action.cancel">cancel</T></button>
           <button onClick={apply} disabled={!sel.size || applying}
             className="border border-pass text-pass px-3 py-1 hover:bg-pass/10 disabled:opacity-40">
             {applying ? "applying…" : `apply ${kind === "class" ? change.new : change.new} to ${sel.size}`}

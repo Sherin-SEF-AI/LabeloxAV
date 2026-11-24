@@ -17,11 +17,13 @@ const CUBOID_DIMS: Record<string, number[]> = {
   motorcycle: [2.0, 0.8, 1.4], pedestrian: [0.6, 0.6, 1.7], autorickshaw: [2.6, 1.4, 1.8],
 };
 
-export function useCuboidLayer({ mode, meta, onto, confirm }: {
+export function useCuboidLayer({ mode, meta, onto, confirm, blocked }: {
   mode: string;
   meta: FrameMeta | null;
   onto: Ontology | null;
   confirm: Confirm;
+  /** True when the frame is view-only; says so as a side effect. Every edit below asks it first. */
+  blocked?: () => boolean;
 }) {
   const [cloud3d, setCloud3d] = useState<LidarCloud | null>(null);
   const [pts3d, setPts3d] = useState<LidarPoints | null>(null);
@@ -88,8 +90,13 @@ export function useCuboidLayer({ mode, meta, onto, confirm }: {
     catch (e) { setLidarMsg("lift failed: " + humanizeError(e)); }
   };
 
+  // The edits, gated in the one place they leave this hook.
+  const edit = <A extends unknown[], R>(fn: (...args: A) => R) =>
+    (...args: A): R | undefined => (blocked?.() ? undefined : fn(...args));
+
   return {
     cloud3d, pts3d, cub3d, cubSel, setCubSel, colorBy3d, setColorBy3d, lidarMsg,
-    cubSelected, patchCub, saveCub, moveCub, addCub, delCub, aiLift3d,
+    cubSelected, patchCub: edit(patchCub), saveCub: edit(saveCub), moveCub: edit(moveCub),
+    addCub: edit(addCub), delCub: edit(delCub), aiLift3d: edit(aiLift3d),
   };
 }

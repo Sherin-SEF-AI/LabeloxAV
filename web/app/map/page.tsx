@@ -1,77 +1,36 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { api } from "@/lib/api";
-import type { MapCommitRow, MapProvenance } from "@/lib/types";
+import type { MapProvenance } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
 import Inspector from "@/components/shell/Inspector";
-import { OSM_STYLE } from "@/lib/basemap";
-import { tryCreateMap } from "@/lib/mapgl";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
+import { useQuery } from "@/lib/useQuery";
 
 // M3.3 HD map viewer: render a fused map_commit (lanes + signs) on a MapLibre basemap; click an element to
 // trace its provenance (source frames, calibration version, fusion run). OSM raster basemap, no token.
-
-const STYLE = OSM_STYLE;
+//
+// The map itself is components/map/HdMapCanvas, loaded on demand so maplibre-gl is not in this route's
+// first load. ssr: false because it needs a canvas and has nothing to render without one.
+const HdMapCanvas = dynamic(() => import("@/components/map/HdMapCanvas"), {
+  ssr: false,
+  loading: () => <div className="relative flex-1 flex items-center justify-center text-[12px] text-ink-3" role="status">loading map</div>,
+});
 
 export default function MapPage() {
-  const wrap = useRef<HTMLDivElement>(null);
-  const map = useRef<maplibregl.Map | null>(null);
-  const [commits, setCommits] = useState<MapCommitRow[]>([]);
   const [sel, setSel] = useState<string>("");
   const [prov, setProv] = useState<MapProvenance | null>(null);
-  const [loadErr, setLoadErr] = useState<unknown>(null);
-  const [mapErr, setMapErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    // A bare .then() left a rejection unhandled and the map permanently empty, which reads as a corpus
-    // with no map rather than a request that failed.
-    api.hdmapCommits()
-      .then((c) => { setCommits(c); if (c[0]) setSel(c[0].commit_id); })
-      .catch(setLoadErr);
-  }, []);
-
-  useEffect(() => {
-    if (!wrap.current || map.current) return;
-    const { map: m, error } = tryCreateMap({ container: wrap.current, style: STYLE, center: [77.5946, 12.9716], zoom: 15 });
-    if (!m) { setMapErr(error); return; }
-    m.addControl(new maplibregl.NavigationControl(), "top-right");
-    map.current = m;
-  }, []);
-
-  const render = useCallback(async (commitId: string) => {
-    const m = map.current;
-    if (!m || !commitId) return;
-    const fc = await api.hdmapElements(`commit_id=${commitId}`);
-    const draw = () => {
-      for (const id of ["lanes", "signs", "lanes-hit"]) if (m.getLayer(id)) m.removeLayer(id);
-      if (m.getSource("hdmap")) m.removeSource("hdmap");
-      m.addSource("hdmap", { type: "geojson", data: fc as GeoJSON.FeatureCollection });
-      m.addLayer({ id: "lanes", type: "line", source: "hdmap", filter: ["==", "kind", "lane"],
-        paint: { "line-color": "#FF7A2F", "line-width": 3, "line-opacity": ["get", "confidence"] } });
-      m.addLayer({ id: "signs", type: "circle", source: "hdmap", filter: ["==", "kind", "sign"],
-        paint: { "circle-radius": 6, "circle-color": "#58A6FF", "circle-stroke-color": "#fff", "circle-stroke-width": 1 } });
-      // fit to data
-      const coords: number[][] = [];
-      for (const f of fc.features) {
-        if (!f.geometry) continue;
-        if (f.geometry.type === "LineString") coords.push(...(f.geometry.coordinates as number[][]));
-        else coords.push(f.geometry.coordinates as number[]);
-      }
-      if (coords.length) {
-        const b = coords.reduce((bb, c) => bb.extend(c as [number, number]), new maplibregl.LngLatBounds(coords[0] as [number, number], coords[0] as [number, number]));
-        m.fitBounds(b, { padding: 80, maxZoom: 18, duration: 600 });
-      }
-    };
-    if (m.isStyleLoaded()) draw(); else m.once("load", draw);
-    m.on("click", "lanes", (e) => { const id = e.features?.[0]?.properties?.element_id as string; if (id) api.hdmapProvenance(id).then(setProv); });
-    m.on("click", "signs", (e) => { const id = e.features?.[0]?.properties?.element_id as string; if (id) api.hdmapProvenance(id).then(setProv); });
-  }, []);
-
-  useEffect(() => { if (sel) render(sel); }, [sel, render]);
+  // A bare .then() once left a rejection unhandled and the map permanently empty, which reads as a corpus
+  // with no map rather than a request that failed.
+  const commitsQ = useQuery(["hdmapCommits"], () => api.hdmapCommits());
+  const commits = commitsQ.data ?? [];
+  const loadErr = commitsQ.error;
+  const first = commitsQ.data?.[0]?.commit_id;
+  useEffect(() => { if (first) setSel((cur) => cur || first); }, [first]);
 
   const commit = commits.find((c) => c.commit_id === sel);
 
@@ -92,16 +51,7 @@ export default function MapPage() {
       </>
     )}>
       <div className="flex h-full min-h-0">
-        <div className="relative flex-1">
-          {/* MapLibre's stylesheet sets position: relative on its container, which beats `absolute`; a plain
-              wrapper takes the position and the container only fills it, or it collapses to 0px tall. */}
-          <div className="absolute inset-0"><div ref={wrap} className="h-full w-full" /></div>
-          {mapErr && (
-            <div role="alert" className="absolute inset-0 flex items-center justify-center p-6">
-              <p className="max-w-md text-[12px] text-warn">{mapErr}</p>
-            </div>
-          )}
-        </div>
+        <HdMapCanvas commitId={sel} onProvenance={setProv} />
         <Inspector title="element provenance" side="right">
           <div className="p-3 text-[12px]">
             {loadErr != null && <LoadState error={loadErr} onRetry={() => window.location.reload()} />}

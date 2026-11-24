@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { T } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 
 import PageShell from "@/components/shell/PageShell";
@@ -10,6 +11,7 @@ import SessionSelect from "@/components/shell/SessionSelect";
 import ProjectClasses, { type ClassSet } from "@/components/settings/ProjectClasses";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { api, apiDelete, apiGet, apiPatch, apiPost, apiPut, humanizeError } from "@/lib/api";
+import { invalidate, useQuery } from "@/lib/useQuery";
 import { toast } from "@/lib/toast";
 import { useCurrentUser } from "@/lib/user";
 
@@ -43,25 +45,26 @@ function sessionLabel(s: SessionRow): string {
 function ProjectDetail({ project, users, onChanged }: { project: Project; users: User[]; onChanged: () => void }) {
   const confirm = useConfirm();
   const router = useRouter();
-  const [members, setMembers] = useState<Member[] | null>(null);
-  const [sessions, setSessions] = useState<{ total: number; rows: SessionRow[] } | null>(null);
-  const [error, setError] = useState<unknown>(null);
+  const membersPath = `/api/projects/${project.project_id}/members`;
+  const sessionsPath = `/api/sessions/page?limit=${SESSION_PAGE}&project_id=${project.project_id}`;
+  const membersQ = useQuery([membersPath], () => apiGet<{ members: Member[] }>(membersPath));
+  const sessionsQ = useQuery([sessionsPath], () => apiGet<{ total: number; sessions: SessionRow[] }>(sessionsPath));
+  const members: Member[] | null = membersQ.data?.members ?? null;
+  const sessions = useMemo(
+    () => (sessionsQ.data ? { total: sessionsQ.data.total, rows: sessionsQ.data.sessions } : null),
+    [sessionsQ.data]);
+  const failure = membersQ.error ?? sessionsQ.error ?? null;
+  const error = membersQ.validating || sessionsQ.validating ? null : failure;
   const [adding, setAdding] = useState("");
   const [moving, setMoving] = useState("");
   const [description, setDescription] = useState(project.description ?? "");
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const [m, s] = await Promise.all([
-        apiGet<{ members: Member[] }>(`/api/projects/${project.project_id}/members`),
-        apiGet<{ total: number; sessions: SessionRow[] }>(`/api/sessions/page?limit=${SESSION_PAGE}&project_id=${project.project_id}`),
-      ]);
-      setMembers(m.members);
-      setSessions({ total: s.total, rows: s.sessions });
-    } catch (e) { setError(e); }
-  }, [project.project_id]);
-  useEffect(() => { void load(); setDescription(project.description ?? ""); }, [load, project.description]);
+  // This project's members and sessions. A move also takes the session out of whichever project held it,
+  // so every cached session page is stale, not only this one.
+  const load = useCallback(
+    () => invalidate([membersPath], [sessionsPath], "sessionsPage", "sessions"),
+    [membersPath, sessionsPath]);
+  useEffect(() => { setDescription(project.description ?? ""); }, [project.description]);
 
   const setVisibility = async (v: Project["visibility"]) => {
     if (v === project.visibility) return;
@@ -161,7 +164,7 @@ function ProjectDetail({ project, users, onChanged }: { project: Project; users:
                 <li key={m.user_id} className="flex items-center gap-3 px-3 py-2 text-[12.5px]">
                   <span className="text-ink">{m.name}</span>
                   <span className="text-ink-3 capitalize">{m.role}</span>
-                  <button className="btn ml-auto" onClick={() => void removeMember(m)}>Remove</button>
+                  <button className="btn ml-auto" onClick={() => void removeMember(m)}><T k="common.remove">Remove</T></button>
                 </li>
               ))}
             </ul>
@@ -206,31 +209,34 @@ function ProjectDetail({ project, users, onChanged }: { project: Project; users:
   );
 }
 
+const NO_USERS: User[] = [];
+
 export default function ProjectSettingsPage() {
   const me = useCurrentUser();
-  const [projects, setProjects] = useState<Project[] | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
-  const [error, setError] = useState<unknown>(null);
+  // Administrators only, so both wait for the role.
+  const admin = me?.role === "admin";
+  const projectsQ = useQuery(["/api/projects"], () => apiGet<{ projects: Project[] }>("/api/projects"), { enabled: admin });
+  const usersQ = useQuery(["/api/users?limit=500"], () => apiGet<{ users: User[] }>("/api/users?limit=500"), { enabled: admin });
+  const listed = projectsQ.data?.projects;
+  // The projects holding data first: a lab accumulates empty ones (trials, checks) that would otherwise
+  // bury the one everything is in.
+  const projects: Project[] | null = useMemo(
+    () => (listed ? [...listed].sort((a, b) => b.sessions - a.sessions || a.name.localeCompare(b.name)) : null),
+    [listed]);
+  const users: User[] = usersQ.data?.users ?? NO_USERS;
+  const failure = projectsQ.error ?? usersQ.error ?? null;
+  const error = projectsQ.validating || usersQ.validating ? null : failure;
   const [selected, setSelected] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [visibility, setVisibility] = useState<Project["visibility"]>("team");
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const [p, u] = await Promise.all([
-        apiGet<{ projects: Project[] }>("/api/projects"),
-        apiGet<{ users: User[] }>("/api/users?limit=500"),
-      ]);
-      // The projects holding data first: a lab accumulates empty ones (trials, checks) that would otherwise
-      // bury the one everything is in.
-      setProjects([...p.projects].sort((a, b) => b.sessions - a.sessions || a.name.localeCompare(b.name)));
-      setUsers(u.users);
-      setSelected((cur) => cur ?? [...p.projects].sort((a, b) => b.sessions - a.sessions)[0]?.project_id ?? null);
-    } catch (e) { setError(e); }
-  }, []);
-  useEffect(() => { if (me?.role === "admin") void load(); }, [load, me?.role]);
+  // Open the project with the most data unless one is already chosen.
+  useEffect(() => {
+    if (!listed) return;
+    setSelected((cur) => cur ?? [...listed].sort((a, b) => b.sessions - a.sessions)[0]?.project_id ?? null);
+  }, [listed]);
+  const load = useCallback(() => invalidate(["/api/projects"], ["/api/users?limit=500"]), []);
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { T } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // What a past relabel run did to the corpus, grouped by the decision rather than by the object.
 //
@@ -26,6 +28,8 @@ type Lineage = {
   examples: { object_id: string; frame_id: string }[];
 };
 
+const NO_ROWS: Lineage[] = [];
+
 export default function ContaminationPanel({ onInspect, inspecting }: {
   /** Show this lineage's objects in the page's evidence rail. Absent, rows keep the old open-an-example
       behaviour, so the component still works standalone. */
@@ -33,23 +37,23 @@ export default function ContaminationPanel({ onInspect, inspecting }: {
   inspecting?: string | null;
 } = {}) {
   const router = useRouter();
-  const [rows, setRows] = useState<Lineage[]>([]);
   type Sum = { lineages: number; objects: number; refused_lineages: number; refused_objects: number;
     outstanding: number; refused_outstanding: number };
-  const [summary, setSummary] = useState<Sum | null>(null);
-  const [shown, setShown] = useState<Sum | null>(null);
   const [refusedOnly, setRefusedOnly] = useState(true);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const load = () => {
-    setLoading(true);
-    api.agentContamination(25, refusedOnly)
-      .then((r) => { setRows(r.lineages); setSummary(r.summary); setShown(r.shown ?? null); setErr(null); })
-      .catch((e) => setErr(humanizeError(e)))
-      .finally(() => setLoading(false));
-  };
+  // keepPrevious: toggling the filter leaves the last summary in place while the other list loads, as
+  // the separate pieces of state this replaces did.
+  const q = useQuery(["agentContamination", 25, refusedOnly], () => api.agentContamination(25, refusedOnly),
+    { keepPrevious: true });
+  const rows: Lineage[] = q.data?.lineages ?? NO_ROWS;
+  const summary: Sum | null = q.data?.summary ?? null;
+  const shown: Sum | null = q.data?.shown ?? null;
+  // True during any fetch, so a reload after a revert shows "loading..." over the table as before.
+  const loading = q.validating;
+  const err = q.error ? humanizeError(q.error) : null;
+  // Both filters: a revert changes what each of them lists.
+  const load = () => { void invalidate("agentContamination"); };
 
   // Put a refused move back. Offered only where the ontology forbids the result, because a refinement is a
   // judgement call and undoing it in bulk would replace one bulk opinion with another.
@@ -74,9 +78,6 @@ export default function ContaminationPanel({ onInspect, inspecting }: {
       setBusy(null);
     }
   };
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(load, [refusedOnly]);
 
   // Into the frame editor with the object focused, which is where the correction dialog lives: one fix
   // there now offers to clear the rest of the lineage. A lineage with no example is a number nobody can act
@@ -159,7 +160,7 @@ export default function ContaminationPanel({ onInspect, inspecting }: {
                       <button onClick={(e) => { e.stopPropagation(); open(l); }}
                         title="open an example, where one correction can be applied to the rest"
                         className="border border-line px-1.5 py-0.5 rounded text-ink-3 hover:border-accent">
-                        open
+                        <T k="action.open">open</T>
                       </button>
                     )}
                     {l.refused_now && l.outstanding > 0 && (

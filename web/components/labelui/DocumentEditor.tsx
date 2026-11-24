@@ -60,7 +60,10 @@ export default function DocumentEditor({
   return (
     <div className="p-4">
       <div ref={wrapRef} className="relative inline-block max-w-full">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {/* The page is a drawing surface: a region is made by dragging a rectangle over it. That gesture
+            has no keyboard form, so the handlers stay on the image and the rule is waived here, with the
+            regions themselves (below) reachable and selectable as buttons. */}
+        {/* eslint-disable-next-line @next/next/no-img-element, jsx-a11y/no-noninteractive-element-interactions */}
         <img ref={imgRef} src={uri} alt="document page"
           onLoad={(e) => {
             const el = e.currentTarget;
@@ -96,10 +99,11 @@ export default function DocumentEditor({
           const c = colorFor(config, a.label);
           const on = a.annotation_id === selectedId;
           return (
-            <div key={a.annotation_id} onClick={() => onSelect(on ? null : a.annotation_id)}
+            <button type="button" key={a.annotation_id} onClick={() => onSelect(on ? null : a.annotation_id)}
+              aria-pressed={on} aria-label={`region: ${String(a.fields?.text ?? a.label ?? "unlabelled")}`}
               title={String(a.fields?.text ?? a.label ?? "region")}
               style={{ ...pct(b), borderColor: on ? "#fff" : c, backgroundColor: `${c}1f` }}
-              className="absolute border-2 cursor-pointer" />
+              className="absolute border-2 cursor-pointer rounded-none" />
           );
         })}
 

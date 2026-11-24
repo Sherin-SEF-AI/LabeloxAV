@@ -1,13 +1,26 @@
 "use client";
 
+import dynamic from "next/dynamic";
+
+import { T } from "@/lib/i18n";
+
 import type { InspectorPanel } from "@/lib/api";
 import RawPanel from "@/components/inspector/RawPanel";
-import PlotPanel from "@/components/inspector/PlotPanel";
 import ImagePanel from "@/components/inspector/ImagePanel";
-import MapPanel from "@/components/inspector/MapPanel";
 import CanPanel from "@/components/inspector/CanPanel";
 import AudioPanel from "@/components/inspector/AudioPanel";
-import Scene3DPanel from "@/components/inspector/Scene3DPanel";
+
+// The three panels that each bring a rendering library with them: maplibre for the map, three for the 3D
+// view, uplot for the plots. Imported statically, all three shipped with /inspect/[session] whether or not
+// the layout on screen had a map or a 3D view in it, which for the default camera-and-plot layout meant
+// downloading and parsing two WebGL engines to draw neither. Loaded on demand, a layout pays for the
+// panels it shows. ssr: false because all three need a canvas and none has anything to render without one.
+function PanelLoading() {
+  return <div className="p-3 text-[12px] text-ink-3" role="status"><T k="load.panel">loading panel</T></div>;
+}
+const PlotPanel = dynamic(() => import("@/components/inspector/PlotPanel"), { ssr: false, loading: PanelLoading });
+const MapPanel = dynamic(() => import("@/components/inspector/MapPanel"), { ssr: false, loading: PanelLoading });
+const Scene3DPanel = dynamic(() => import("@/components/inspector/Scene3DPanel"), { ssr: false, loading: PanelLoading });
 
 // Renders one panel by type inside a shared chrome. Every panel subscribes to the one clock and reads via
 // the shared MCAP reader. Adding a panel type is one case here plus its component.
@@ -43,10 +56,10 @@ export default function PanelHost({ panel, onRemove, onFrame, onCycleSpan, onGro
         className="flex items-center gap-2 px-2 py-1 border-b hairline cursor-grab active:cursor-grabbing">
         <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wider text-ink-3 truncate">{title}</span>
         <span className="ml-auto flex items-center gap-0.5">
-          <button onClick={onShrink} className="text-[11px] text-ink-3 hover:text-ink px-1" title="shorter">&minus;</button>
-          <button onClick={onGrow} className="text-[11px] text-ink-3 hover:text-ink px-1" title="taller">+</button>
-          <button onClick={onCycleSpan} className="text-[11px] text-ink-3 hover:text-ink px-1" title="toggle full width">&harr;</button>
-          <button onClick={onRemove} className="text-[11px] text-ink-3 hover:text-block px-1" title="remove panel">x</button>
+          <button onClick={onShrink} className="text-[11px] text-ink-3 hover:text-ink px-1" title="shorter" aria-label={`make the ${title} panel shorter`}>&minus;</button>
+          <button onClick={onGrow} className="text-[11px] text-ink-3 hover:text-ink px-1" title="taller" aria-label={`make the ${title} panel taller`}>+</button>
+          <button onClick={onCycleSpan} className="text-[11px] text-ink-3 hover:text-ink px-1" title="toggle full width" aria-label={`toggle full width for the ${title} panel`}>&harr;</button>
+          <button onClick={onRemove} className="text-[11px] text-ink-3 hover:text-block px-1" title="remove panel" aria-label={`remove the ${title} panel`}>x</button>
         </span>
       </div>
       <div className="flex-1 min-h-0">

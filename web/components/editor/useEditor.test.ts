@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { type Action, type EdObject, type EditorState, editorReducer } from "./useEditor";
+import { type Action, type EdObject, type EditorState, editorReducer, isDirty, selectionIds } from "./useEditor";
 
 // The editor reducer is the most intricate pure module in the app and had no tests at all, while being the
 // one place a bug silently corrupts annotations rather than throwing.
@@ -299,5 +299,288 @@ describe("selection across the autosave that renames a new object", () => {
     );
     expect(s.selectedIds).toEqual(["a", "real-2"]);
     expect(s.selectedId).toBe("a");
+  });
+});
+
+describe("selectionIds: what a selection-wide action reaches", () => {
+  // The keyboard read `selectedId` and the menus read `selectedIds`, so Delete and the context menu's
+  // delete disagreed about what was selected. This is the one answer both now use.
+
+  it("is the multi-selection", () => {
+    const s = run(state([obj("a"), obj("b"), obj("c")]), { t: "selectMany", ids: ["a", "c"] });
+    expect(selectionIds(s)).toEqual(["a", "c"]);
+  });
+
+  it("includes a primary selection the multi-selection has not caught up with", () => {
+    expect(selectionIds(state([obj("a"), obj("b")], { selectedId: "b", selectedIds: ["a"] }))).toEqual(["a", "b"]);
+  });
+
+  it("drops ids whose object is gone", () => {
+    expect(selectionIds(state([obj("a")], { selectedId: "gone", selectedIds: ["a", "gone"] }))).toEqual(["a"]);
+  });
+
+  it("is empty when nothing is selected", () => {
+    expect(selectionIds(state([obj("a")]))).toEqual([]);
+  });
+
+  it("a newly drawn object is the whole selection, not an addition to the last sweep", () => {
+    // `add` set the primary and left the multi-selection on whatever was swept before, so the bulk bar
+    // said "2 selected" about two other boxes and a bulk delete would have taken them with it.
+    const s = run(state([obj("a"), obj("b")]),
+      { t: "selectMany", ids: ["a", "b"] },
+      { t: "add", obj: obj("tmp-1", { isNew: true }) });
+    expect(s.selectedIds).toEqual(["tmp-1"]);
+    expect(selectionIds(s)).toEqual(["tmp-1"]);
+  });
+
+  it("a redo does not bring an object back half selected", () => {
+    // Undo removed the object and left its id in the multi-selection. Redo restored the object, and it
+    // was then selected for bulk actions with no primary and nothing on screen to say so.
+    const s = run(state([obj("a")]),
+      { t: "add", obj: obj("tmp-1", { isNew: true }) },
+      { t: "undo" },
+      { t: "redo" });
+    expect(s.objects.some((o) => o.id === "tmp-1")).toBe(true);
+    expect(selectionIds(s)).toEqual([]);
+  });
+});
+
+describe("deleteMany: a bulk delete is one edit", () => {
+  it("removes every id it is given", () => {
+    const s = editorReducer(state([obj("a"), obj("b"), obj("c")]), { t: "deleteMany", ids: ["a", "c"] });
+    expect(s.objects.map((o) => o.id)).toEqual(["b"]);
+    expect(s.deleted).toEqual(["a", "c"]);
+  });
+
+  it("is undone in one step", () => {
+    // Looping `delete` made one entry per object: undoing a six-box delete was six presses, and stopping
+    // after three left a frame nobody had chosen.
+    const s = editorReducer(state([obj("a"), obj("b"), obj("c")]), { t: "deleteMany", ids: ["a", "b", "c"] });
+    expect(s.past).toHaveLength(1);
+    expect(s.past[0].label).toBe("deleted 3 objects");
+    const back = editorReducer(s, { t: "undo" });
+    expect(back.objects.map((o) => o.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("names the object when there is only one", () => {
+    const s = editorReducer(state([obj("a", { class_name: "bus" })]), { t: "deleteMany", ids: ["a"] });
+    expect(s.past[0].label).toBe("deleted bus");
+  });
+
+  it("does not queue a server delete for an object that was never saved", () => {
+    const s = editorReducer(state([obj("tmp-1", { isNew: true }), obj("b")]), { t: "deleteMany", ids: ["tmp-1", "b"] });
+    expect(s.deleted).toEqual(["b"]);
+  });
+
+  it("leaves a locked object where it is", () => {
+    // A lock is a promise that a bulk action cannot reach the object, whatever the selection holds.
+    const s = editorReducer(state([obj("a"), obj("b", { locked: true })]), { t: "deleteMany", ids: ["a", "b"] });
+    expect(s.objects.map((o) => o.id)).toEqual(["b"]);
+  });
+
+  it("clears what it deleted from the selection and keeps the rest", () => {
+    const s = run(state([obj("a"), obj("b"), obj("c")]),
+      { t: "selectMany", ids: ["a", "b", "c"] },
+      { t: "deleteMany", ids: ["a", "b"] });
+    expect(s.selectedIds).toEqual(["c"]);
+    expect(s.selectedId).toBeNull();
+  });
+
+  it("keeps a primary selection it did not delete", () => {
+    const s = run(state([obj("a"), obj("b")]), { t: "select", id: "b" }, { t: "deleteMany", ids: ["a"] });
+    expect(s.selectedId).toBe("b");
+  });
+
+  it("is a no-op, not a history entry, when nothing can be deleted", () => {
+    const s0 = state([obj("a", { locked: true })]);
+    expect(editorReducer(s0, { t: "deleteMany", ids: ["a", "nope"] })).toBe(s0);
+  });
+
+  it("a single delete also leaves the multi-selection", () => {
+    const s = run(state([obj("a"), obj("b")]), { t: "selectMany", ids: ["a", "b"] }, { t: "delete", id: "a" });
+    expect(s.selectedIds).toEqual(["b"]);
+  });
+});
+
+describe("addMany: a paste is one edit", () => {
+  const pasted = [obj("tmp-1", { isNew: true }), obj("tmp-2", { isNew: true, class_name: "bus" })];
+
+  it("adds every object and selects exactly those", () => {
+    const s = run(state([obj("a")]), { t: "select", id: "a" }, { t: "addMany", objs: pasted });
+    expect(s.objects.map((o) => o.id)).toEqual(["a", "tmp-1", "tmp-2"]);
+    expect(s.selectedIds).toEqual(["tmp-1", "tmp-2"]);
+    expect(s.selectedId).toBe("tmp-1");
+  });
+
+  it("is undone in one step, however many it carried", () => {
+    const s = editorReducer(state([obj("a")]), { t: "addMany", objs: pasted, label: "pasted 2 objects" });
+    expect(s.past).toHaveLength(1);
+    expect(s.past[0].label).toBe("pasted 2 objects");
+    expect(editorReducer(s, { t: "undo" }).objects.map((o) => o.id)).toEqual(["a"]);
+  });
+
+  it("labels itself when the caller does not", () => {
+    expect(editorReducer(state([]), { t: "addMany", objs: pasted }).past[0].label).toBe("added 2 objects");
+    expect(editorReducer(state([]), { t: "addMany", objs: [pasted[1]] }).past[0].label).toBe("added bus");
+  });
+
+  it("an empty paste is not an edit", () => {
+    const s0 = state([obj("a")]);
+    expect(editorReducer(s0, { t: "addMany", objs: [] })).toBe(s0);
+  });
+
+  it("makes the frame dirty, so autosave creates them", () => {
+    expect(isDirty(editorReducer(state([]), { t: "addMany", objs: pasted }))).toBe(true);
+  });
+});
+
+describe("nudge: arrow keys move the selection", () => {
+  it("moves every id by the offset, in image pixels", () => {
+    const s = editorReducer(state([obj("a"), obj("b", { bbox: [5, 5, 9, 9] }), obj("c")]),
+      { t: "nudge", ids: ["a", "b"], dx: 1, dy: -10 });
+    expect(s.objects.find((o) => o.id === "a")?.bbox).toEqual([1, -10, 11, 0]);
+    expect(s.objects.find((o) => o.id === "b")?.bbox).toEqual([6, -5, 10, -1]);
+    expect(s.objects.find((o) => o.id === "c")?.bbox).toEqual([0, 0, 10, 10]);
+  });
+
+  it("carries the mask, not only the box", () => {
+    const s = editorReducer(state([obj("a", { mask: [[0, 0, 10, 0, 10, 10]] })]),
+      { t: "nudge", ids: ["a"], dx: 2, dy: 3 });
+    expect(s.objects[0].mask).toEqual([[2, 3, 12, 3, 12, 13]]);
+  });
+
+  it("marks a saved object dirty and leaves a new one new", () => {
+    const s = editorReducer(state([obj("a"), obj("tmp-1", { isNew: true })]),
+      { t: "nudge", ids: ["a", "tmp-1"], dx: 1, dy: 0 });
+    expect(s.objects.find((o) => o.id === "a")?.dirty).toBe(true);
+    expect(s.objects.find((o) => o.id === "tmp-1")?.dirty).toBe(false);
+  });
+
+  it("counts as having looked at the object", () => {
+    const s = editorReducer(state([obj("a")]), { t: "nudge", ids: ["a"], dx: 1, dy: 0 });
+    expect(s.touched).toEqual(["a"]);
+  });
+
+  it("is undoable", () => {
+    const s = run(state([obj("a")]), { t: "nudge", ids: ["a"], dx: 10, dy: 0 }, { t: "undo" });
+    expect(s.objects[0].bbox).toEqual([0, 0, 10, 10]);
+  });
+
+  it("a held key is one undo entry", () => {
+    // Key-repeat fires thirty times a second. Thirty undo steps to take back one gesture is not an undo.
+    let s = editorReducer(state([obj("a")]), { t: "nudge", ids: ["a"], dx: 1, dy: 0 });
+    for (let i = 0; i < 29; i++) s = editorReducer(s, { t: "nudge", ids: ["a"], dx: 1, dy: 0, coalesce: true });
+    expect(s.objects[0].bbox).toEqual([30, 0, 40, 10]);
+    expect(s.past).toHaveLength(1);
+    expect(editorReducer(s, { t: "undo" }).objects[0].bbox).toEqual([0, 0, 10, 10]);
+  });
+
+  it("separate presses are separate entries", () => {
+    const s = run(state([obj("a")]),
+      { t: "nudge", ids: ["a"], dx: 1, dy: 0 },
+      { t: "nudge", ids: ["a"], dx: 1, dy: 0 });
+    expect(s.past).toHaveLength(2);
+    expect(s.past[1].label).toBe("nudged sedan");
+  });
+
+  it("a repeat does not fold into a nudge of different objects", () => {
+    const s = run(state([obj("a"), obj("b")]),
+      { t: "nudge", ids: ["a"], dx: 1, dy: 0 },
+      { t: "nudge", ids: ["a", "b"], dx: 1, dy: 0, coalesce: true });
+    expect(s.past).toHaveLength(2);
+    expect(s.past[1].label).toBe("nudged 2 objects");
+  });
+
+  it("a repeat does not fold into an edit that was not a nudge", () => {
+    const s = run(state([obj("a")]),
+      { t: "update", id: "a", patch: { bbox: [0, 0, 20, 20] } },
+      { t: "nudge", ids: ["a"], dx: 1, dy: 0, coalesce: true });
+    expect(s.past).toHaveLength(2);
+  });
+
+  it("a repeat after an undo starts a new entry rather than rewriting history under the redo stack", () => {
+    const s = run(state([obj("a")]),
+      { t: "nudge", ids: ["a"], dx: 1, dy: 0 },
+      { t: "update", id: "a", patch: { bbox: [5, 5, 15, 15] } },
+      { t: "undo" },
+      { t: "nudge", ids: ["a"], dx: 1, dy: 0, coalesce: true });
+    expect(s.past).toHaveLength(2);
+    expect(s.future).toEqual([]);
+  });
+
+  it("still folds after the autosave that renames the object mid-hold", () => {
+    const s = run(state([obj("tmp-1", { isNew: true })]),
+      { t: "nudge", ids: ["tmp-1"], dx: 1, dy: 0 },
+      { t: "saved", remap: { "tmp-1": "real-1" } },
+      { t: "nudge", ids: ["real-1"], dx: 1, dy: 0, coalesce: true });
+    expect(s.past).toHaveLength(1);
+    expect(s.objects[0].bbox).toEqual([2, 0, 12, 10]);
+  });
+
+  it("does not move a locked object", () => {
+    const s0 = state([obj("a", { locked: true })]);
+    expect(editorReducer(s0, { t: "nudge", ids: ["a"], dx: 1, dy: 0 })).toBe(s0);
+  });
+
+  it("skips a cuboid object rather than moving half of it", () => {
+    // The 3D box is in the ego frame, in metres. Sliding the 2D box alone would leave the two disagreeing.
+    const cuboid = { center: [10, 0, 0.8], size: [1.8, 4.2, 1.5], yaw: 0 };
+    const s = editorReducer(state([obj("a", { cuboid_3d: cuboid }), obj("b")]),
+      { t: "nudge", ids: ["a", "b"], dx: 4, dy: 0 });
+    expect(s.objects.find((o) => o.id === "a")?.bbox).toEqual([0, 0, 10, 10]);
+    expect(s.objects.find((o) => o.id === "a")?.cuboid_3d).toBe(cuboid);
+    expect(s.objects.find((o) => o.id === "b")?.bbox).toEqual([4, 0, 14, 10]);
+    expect(s.past[0].label).toBe("nudged sedan");
+  });
+
+  it("a zero offset, or nothing movable, is not an edit", () => {
+    const s0 = state([obj("a")]);
+    expect(editorReducer(s0, { t: "nudge", ids: ["a"], dx: 0, dy: 0 })).toBe(s0);
+    expect(editorReducer(s0, { t: "nudge", ids: ["nope"], dx: 1, dy: 0 })).toBe(s0);
+  });
+});
+
+describe("reload: the server's copy, after something changed it behind the editor", () => {
+  const server = [obj("a", { version: 7, bbox: [1, 1, 9, 9] }), obj("n", { class_name: "bus" })];
+
+  it("replaces the objects and keeps the session", () => {
+    const s0 = state([obj("a"), obj("gone")], {
+      selectedId: "a", selectedIds: ["a", "gone"], touched: ["a", "gone"], tool: "box",
+      viewport: { scale: 2, ox: 5, oy: 6 },
+    });
+    const s = editorReducer(s0, { t: "reload", objects: server });
+    expect(s.objects.map((o) => o.id)).toEqual(["a", "n"]);
+    expect(s.objects[0].version).toBe(7);
+    // Opening a frame resets these; re-reading one must not.
+    expect(s.tool).toBe("box");
+    expect(s.viewport).toEqual({ scale: 2, ox: 5, oy: 6 });
+    expect(s.selectedId).toBe("a");
+    expect(s.selectedIds).toEqual(["a"]);
+    expect(s.touched).toEqual(["a"]);
+  });
+
+  it("keeps hide, lock and attributes, which the object list does not return", () => {
+    const s0 = state([obj("a", { visible: false, locked: true, attrs: { occupant_count: 2 } })]);
+    const a = editorReducer(s0, { t: "reload", objects: server }).objects[0];
+    expect(a.visible).toBe(false);
+    expect(a.locked).toBe(true);
+    expect(a.attrs).toEqual({ occupant_count: 2 });
+  });
+
+  it("drops a selection whose object the server no longer has", () => {
+    const s = editorReducer(state([obj("gone")], { selectedId: "gone", selectedIds: ["gone"] }),
+      { t: "reload", objects: server });
+    expect(s.selectedId).toBeNull();
+    expect(s.selectedIds).toEqual([]);
+  });
+
+  it("drops history, whose snapshots hold versions the server has moved past", () => {
+    const s = run(state([obj("a")]),
+      { t: "update", id: "a", patch: { bbox: [0, 0, 20, 20] } },
+      { t: "saved", remap: {} },
+      { t: "reload", objects: server });
+    expect(s.past).toEqual([]);
+    expect(s.future).toEqual([]);
+    expect(isDirty(s)).toBe(false);
   });
 });

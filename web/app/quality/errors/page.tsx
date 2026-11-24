@@ -12,6 +12,8 @@ import {
 import { toast } from "@/lib/toast";
 import type { ErrorCandidateRow } from "@/lib/types";
 import { useCurrentUser } from "@/lib/user";
+import { invalidate, useQuery } from "@/lib/useQuery";
+import { REVIEW_QUEUE_KEY } from "@/lib/queryKeys";
 
 // Ruling on error candidates the way review rules on labels: many crops on screen, one keystroke each.
 //
@@ -60,18 +62,19 @@ function ErrorGrid() {
   const [anchor, setAnchor] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [decided, setDecided] = useState(0);
-  const [precision, setPrecision] = useState<Precision | null>(null);
+  // Per-detector precision is the same whichever kind is being ruled on, so it is one cached read,
+  // refreshed after each batch of verdicts.
+  const precisionQ = useQuery(["errorPrecision"], () => api.errorPrecision());
+  const precision: Precision | null = precisionQ.data ?? null;
+  const loadPrecision = precisionQ.reload;
+  useEffect(() => { if (precisionQ.error) toast(humanizeError(precisionQ.error), "error"); }, [precisionQ.error]);
   const [note, setNote] = useState("");
   const startedAt = useRef<number>(Date.now());
 
-  const loadPrecision = useCallback(async () => {
-    try {
-      setPrecision(await api.errorPrecision());
-    } catch (e) {
-      toast(humanizeError(e), "error");
-    }
-  }, []);
-
+  // The candidate queue and its crop sheet stay outside the query cache, on purpose. The queue is
+  // consumed by position with optimistic removal, so cached rows swapped for fresh ones would move tiles
+  // under a verdict; and the sheet is a new image per set of ids, which a cache with no eviction would
+  // keep for the whole shift.
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -87,8 +90,7 @@ function ErrorGrid() {
         setLoading(false);
       }
     })();
-    void loadPrecision();
-  }, [kind, loadPrecision]);
+  }, [kind]);
 
   const page = useMemo(() => queue.slice(0, PAGE), [queue]);
   const pageKey = page.map((r) => r.object_id).join(",");
@@ -138,6 +140,8 @@ function ErrorGrid() {
         setDecided((d) => d - lost);
       }
       void loadPrecision();
+      // The same candidates are listed on the review queue's error tab.
+      void invalidate(REVIEW_QUEUE_KEY);
     } catch (e) {
       toast(humanizeError(e), "error");
     }

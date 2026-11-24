@@ -47,7 +47,14 @@ type ToolTab = (typeof TABS)[number]["key"];
 const TAB_KEYS = TABS.map((t) => t.key);
 
 export type PropertiesPanelProps = {
-  frame: { id: string; meta: FrameMeta; onto: Ontology; dirty: boolean; flash: (m: string) => void };
+  frame: {
+    id: string; meta: FrameMeta; onto: Ontology; dirty: boolean; flash: (m: string) => void;
+    /**
+     * Set while the frame is view-only (somebody else holds its edit lock), to the sentence that says so.
+     * The tool tabs then show that sentence instead of their tools.
+     */
+    readOnly?: string | null;
+  };
   editor: { st: EditorState; dispatch: Dispatch<Action>; selected: EdObject | null };
   /** What the guideline check said about this frame, and which rules could not run. */
   lint?: import("./LintCard").LintResult | null;
@@ -99,12 +106,23 @@ export default function PropertiesPanel({ frame, editor, klass, sel, tools, onCo
     setVisited((s) => new Set(s).add(tab));
   }, [tab]);
 
+  // View-only: the agent, bulk edit and the frame-data tools all write to this frame, most of them
+  // straight to the server, so none of them is offered. The same move the agent tab already makes on a
+  // blind-audit frame, for the same reason: saying why beats a panel of buttons that each refuse.
+  //
+  // The tools stay mounted underneath, hidden. Losing the lock halfway through typing a prompt or
+  // reading a dry-run plan must not throw that away, which is the keep-alive rule this panel already has.
   const panel = (key: ToolTab, children: React.ReactNode) => {
     if (!visited.has(key)) return null;
     return (
       <div key={key} role="tabpanel" hidden={key !== tab} tabIndex={0}
         id={`props-panel-${key}`} aria-labelledby={`props-tab-${key}`}>
-        {children}
+        {frame.readOnly && (
+          <p className="p-3 text-[12px] text-ink-3">
+            {frame.readOnly}. These tools change the frame, so they are off until it is yours to edit.
+          </p>
+        )}
+        <div hidden={!!frame.readOnly}>{children}</div>
       </div>
     );
   };
@@ -124,7 +142,7 @@ export default function PropertiesPanel({ frame, editor, klass, sel, tools, onCo
                 onLinkKind={sel.onLinkKind} onToggleLink={sel.onToggleLink}
                 onDeleteRelationship={sel.onDeleteRelationship} onSetAttr={sel.onSetAttr}
                 onFitCuboid={sel.onFitCuboid} onSetYaw={sel.onSetYaw}
-                onClearAmodal={sel.onClearAmodal} />
+                onClearAmodal={sel.onClearAmodal} readOnly={!!frame.readOnly} />
             </div>
             <PanelSection title="dynamics">
               <DynamicsCard row={sel.dynamics[selected.id]} onRecompute={sel.onRecomputeDynamics} />

@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { LOCALES, getLocale, setLocale, t, type Locale } from "@/lib/i18n";
 import { getUser } from "@/lib/user";
 import { isPreAuthRoute, shouldOpenOnboarding } from "@/lib/onboardingGate";
+import { useDialog } from "@/components/ui/useDialog";
 
 // The first five minutes.
 //
@@ -71,12 +72,8 @@ export default function Onboarding() {
     setOpen(false);
   };
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") dismiss(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  // Escape dismisses, Tab stays inside, and focus goes back to where it was.
+  const dialogRef = useDialog<HTMLDivElement>(open, dismiss);
 
   // The menu entries. Wired here rather than in the menu so a menu item is never a dead link: the handler
   // and the thing it opens live in the same file.
@@ -97,17 +94,18 @@ export default function Onboarding() {
 
   return (
     <div className="fixed inset-0 z-[100] bg-bg/85 flex items-center justify-center p-4">
-      <div className="panel w-[min(34rem,94vw)] p-5 space-y-4">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="onboarding-title" tabIndex={-1}
+        className="panel w-[min(34rem,94vw)] p-5 space-y-4">
         <div className="flex items-start gap-3">
           <div className="flex-1">
             <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">
               {t("onboarding.welcome")} · {step + 1} of {STEPS.length}
             </div>
-            <h2 className="font-display font-bold text-[17px] text-ink mt-1">{s.title}</h2>
+            <h2 id="onboarding-title" className="font-display font-bold text-[17px] text-ink mt-1">{s.title}</h2>
           </div>
           {/* The language picker is here rather than buried in a settings page, because the person who most
               needs it is the one who cannot read the settings page. */}
-          <select value={locale}
+          <select value={locale} aria-label={t("prefs.language", "interface language")}
             onChange={(e) => setLocale(e.target.value as Locale)}
             className="bg-bg border border-line px-1.5 py-0.5 text-[12px] text-ink-2">
             {LOCALES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
@@ -119,7 +117,7 @@ export default function Onboarding() {
         <div className="flex items-center gap-2 pt-1">
           <div className="flex gap-1">
             {STEPS.map((_, i) => (
-              <span key={i} className={`w-6 h-0.5 ${i <= step ? "bg-accent" : "bg-line"}`} />
+              <span key={i} aria-hidden className={`w-6 h-0.5 ${i <= step ? "bg-accent" : "bg-line"}`} />
             ))}
           </div>
           <button onClick={dismiss}

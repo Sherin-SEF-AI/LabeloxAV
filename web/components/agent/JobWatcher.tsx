@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
 import { describeFailure } from "@/lib/actionError";
 import { pollDelay } from "@/lib/pollDelay";
 import type { AgentRunRow } from "@/lib/types";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // What the agent is doing right now, and what it just finished.
 //
@@ -18,6 +19,7 @@ import type { AgentRunRow } from "@/lib/types";
 // or not work is happening is what let a run sit at "running" for 863 hours unnoticed.
 
 const TERMINAL = new Set(["committed", "reverted", "error", "interrupted"]);
+const NO_RUNS: AgentRunRow[] = [];
 
 const TONE: Record<string, string> = {
   running: "text-warn border-warn/50",
@@ -47,35 +49,19 @@ function results(counts: Record<string, unknown>): [string, number][] {
 }
 
 export default function JobWatcher({ limit = 12 }: { limit?: number }) {
-  const [runs, setRuns] = useState<AgentRunRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [, setTick] = useState(0);
-  const alive = useRef(true);
 
-  const load = useCallback(async (): Promise<boolean> => {
-    try { setRuns(await api.agentRuns(limit)); return true; }
-    catch { return false; }
-  }, [limit]);
-
-  // Poll only while something is running, at the cadence the cloud control already uses. An idle console
-  // must not sit on a timer: this page is left open all day.
-  useEffect(() => {
-    alive.current = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const loop = async () => {
-      if (!alive.current) return;
-      const ok = await load();
-      if (!alive.current) return;
-      const live = runs.some((r) => !TERMINAL.has(r.status));
-      timer = setTimeout(loop, pollDelay({ ok, live }));
-    };
-    loop();
-    return () => { alive.current = false; clearTimeout(timer); };
-    // `runs` is deliberately absent: including it restarts the timer on every poll, which turns an adaptive
-    // poll into a tight loop. Liveness is read from the ref-fresh closure on the next tick instead.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [load]);
+  // Polled at the cadence the cloud control already uses: briskly while something is running, slowly when
+  // idle, and backing off after a failed request. A failed poll keeps the last list on screen. The cadence
+  // is worked out from the response that just arrived, and the poll stops while the tab is hidden: this
+  // page is left open all day.
+  const runsQ = useQuery(["agentRuns", limit], () => api.agentRuns(limit), {
+    pollMs: (data, error) =>
+      pollDelay({ ok: !error, live: (data ?? []).some((r) => !TERMINAL.has(r.status)) }),
+  });
+  const runs = runsQ.data ?? NO_RUNS;
 
   // A one-second tick so an elapsed time on a running job advances between polls. Local arithmetic on
   // values already held, not a request.
@@ -91,7 +77,8 @@ export default function JobWatcher({ limit = 12 }: { limit?: number }) {
     try {
       const out = await api.agentRevertRun(r.run_id);
       setNote(`${r.kind} reverted: ${out.reverted} restored, ${out.skipped} left alone`);
-      await load();
+      // Every cached run list, whatever its limit: the console dialog reads the same runs.
+      await invalidate("agentRuns");
     } catch (e) {
       const f = describeFailure(`revert ${r.kind}`, e);
       setNote(f.hint ? `${f.message} (${f.hint})` : f.message);

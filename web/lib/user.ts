@@ -34,12 +34,24 @@ export function setUser(u: CurrentUser | null): void {
   clearMediaCookie();
 }
 
+// The frame editor's tab token, while an editor is open in this tab. It rides on every request as
+// `X-Lbx-Tab`, which is how the server knows a save came from an editor and checks that this tab holds
+// the frame's edit lock (services/collab/presence.py). Without it the lock was only as strong as the
+// read-only state of the page: a second editor that ignored its banner could still save. Nothing outside
+// the editor sets it, so the review queue and every other page are not held up by anyone's open frame.
+let editorTab: string | null = null;
+
+export function setEditorTab(token: string | null): void {
+  editorTab = token;
+}
+
 export function userHeaders(): Record<string, string> {
   const u = getUser();
-  if (u?.token) return { Authorization: `Bearer ${u.token}` };
+  const tab: Record<string, string> = editorTab ? { "X-Lbx-Tab": editorTab } : {};
+  if (u?.token) return { Authorization: `Bearer ${u.token}`, ...tab };
   // No token (e.g. a dev backend with auth disabled): fall back to the legacy id header so attribution still
   // works locally. With auth enabled server-side this header is ignored and the request is treated as anon.
-  return u ? { "X-Lbx-User-Id": u.user_id } : {};
+  return u ? { "X-Lbx-User-Id": u.user_id, ...tab } : {};
 }
 
 // Where an accept/confirm should land given the actor's role: annotators submit for QA, reviewers

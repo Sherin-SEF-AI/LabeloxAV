@@ -1,6 +1,7 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { T } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import { api , humanizeError } from "@/lib/api";
 import type { AssetRow, BoardCell, LabelJobRow, LabelProjectRow, ScorecardRow, UserRow } from "@/lib/types";
@@ -10,6 +11,7 @@ import LoadState from "@/components/shell/LoadState";
 import { useQueryFlag } from "@/lib/useQueryParam";
 import { getUser } from "@/lib/user";
 import { honeypotVerdict, nextAction } from "@/lib/labelJobActions";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // The labeling-operations board: who is doing what, where it is stuck, and whether the work is any good.
 // stage runs left to right; state is the column within a stage, so "in validation, not yet started" is a
@@ -44,15 +46,21 @@ export default function ProjectsPage() {
 
 function ProjectsBody() {
   const router = useRouter();
-  const [projects, setProjects] = useState<LabelProjectRow[]>([]);
+  // The project list is this page's primary data. Swallowed, a failed fetch left `projects` empty and the
+  // board rendered as though a manager had no projects at all - the same shape as the triage page telling
+  // an annotator their queue was clear because a request dropped. So its error is rendered (bootErr below).
+  const projectsQ = useQuery(["lopProjects"], () => api.lopProjects());
+  const projects: LabelProjectRow[] = projectsQ.data?.projects ?? [];
+  const bootErr = projectsQ.error ?? null;
   const [projectId, setProjectId] = useState("");
-  const [cells, setCells] = useState<BoardCell[]>([]);
-  const [load, setLoad] = useState<{ assignee: string; open_jobs: number }[]>([]);
-  const [jobs, setJobs] = useState<LabelJobRow[]>([]);
   // Label > My jobs deep-links ?mine=1; filter the board to the signed-in user instead of showing all
   const mineOnly = useQueryFlag("mine");
-  const [users, setUsers] = useState<UserRow[]>([]);
-  const [cards, setCards] = useState<ScorecardRow[]>([]);
+  // These two fill controls rather than the board: an empty assignee dropdown or gold-set picker is
+  // survivable, but it must say why rather than looking like an installation with no users in it.
+  const usersQ = useQuery(["users"], () => api.users());
+  const users: UserRow[] = usersQ.data ?? [];
+  const goldsQ = useQuery(["goldSets"], () => api.goldSets());
+  const golds: { gold_id: string; name: string; n_objects: number }[] = goldsQ.data ?? [];
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -60,19 +68,38 @@ function ProjectsBody() {
   const [pName, setPName] = useState("");
   const [hpFrac, setHpFrac] = useState(0.1);
   const [goldId, setGoldId] = useState("");
-  const [golds, setGolds] = useState<{ gold_id: string; name: string; n_objects: number }[]>([]);
   // new task form
   const [tName, setTName] = useState("");
   const [tSession, setTSession] = useState("");
   const [jobsOf, setJobsOf] = useState(50);
   // multi-modal assets
-  const [assets, setAssets] = useState<{ total: number; assets: AssetRow[] }>({ total: 0, assets: [] });
-  const [annKinds, setAnnKinds] = useState<Record<string, number>>({});
   const [newMedia, setNewMedia] = useState("text");
   const [newBody, setNewBody] = useState("");
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 5000); };
-  const [bootErr, setBootErr] = useState<unknown>(null);
+
+  // The board is five reads that only mean something together, so they stay one all-or-nothing request,
+  // keyed by the project and by whether "My jobs" is on. The previous project's board stays up while the
+  // next one loads, and after a failed refresh, exactly as the state it replaces did.
+  const boardQ = useQuery(
+    projectId ? ["lopBoard+lopJobs+lopScorecards+projectAssets+projectStats", projectId, mineOnly] : null,
+    () => Promise.all([
+      api.lopBoard(projectId),
+      // "My jobs" asks the server, which answers across every project. Filtering `lopJobs` by assignee on
+      // the client only ever showed the jobs inside whichever project happened to be selected, and showed
+      // nothing at all when none was, which is not what the menu entry promises.
+      mineOnly ? api.lopMyJobs() : api.lopJobs({ project_id: projectId }),
+      api.lopScorecards(projectId), api.projectAssets(projectId), api.projectStats(projectId),
+    ]),
+    { keepPrevious: true });
+  const [b, j, sc, as, st] = boardQ.data ?? [];
+  const cells: BoardCell[] = projectId ? b?.cells ?? [] : [];
+  const load: { assignee: string; open_jobs: number }[] = projectId ? b?.open_load ?? [] : [];
+  const jobs: LabelJobRow[] = projectId ? j?.jobs ?? [] : [];
+  const cards: ScorecardRow[] = sc?.scorecards ?? [];
+  const assets: { total: number; assets: AssetRow[] } = as ?? { total: 0, assets: [] };
+  const annKinds: Record<string, number> = st?.annotations_by_kind ?? {};
+  const refreshProject = boardQ.reload;
 
   // Take a job, and hand it back. `set_state` and `submit_job` are the two calls that make a label job
   // finishable at all: submit is the only writer of `honeypot_accuracy` and the only thing that advances
@@ -90,44 +117,26 @@ function ProjectsBody() {
             + `project floor of ${r.min_honeypot_accuracy.toFixed(2)}`
           : `submitted; now ${r.stage} / ${r.state}`);
       }
-      await refreshProject(projectId);
+      await refreshProject();
+      // A submit is the only writer of honeypot accuracy, which is what the scorecards page reads.
+      void invalidate("lopScorecardsFull");
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
-  const refreshProject = useCallback(async (pid: string) => {
-    if (!pid) { setCells([]); setJobs([]); setLoad([]); return; }
-    try {
-      const [b, j, s, as, st] = await Promise.all([
-        api.lopBoard(pid),
-        // "My jobs" asks the server, which answers across every project. Filtering `lopJobs` by assignee on
-        // the client only ever showed the jobs inside whichever project happened to be selected, and showed
-        // nothing at all when none was, which is not what the menu entry promises.
-        mineOnly ? api.lopMyJobs() : api.lopJobs({ project_id: pid }),
-        api.lopScorecards(pid), api.projectAssets(pid), api.projectStats(pid),
-      ]);
-      setCells(b.cells); setLoad(b.open_load); setCards(s.scorecards);
-      setJobs(j.jobs);
-      setAssets(as); setAnnKinds(st.annotations_by_kind ?? {});
-    } catch (e) { flash(humanizeError(e)); }
-  }, [mineOnly]);
-
+  // Open on the first project once the list arrives, unless one is already chosen.
+  const firstProjectId = projects[0]?.project_id;
   useEffect(() => {
-    // The project list is this page's primary data. Swallowed, a failed fetch left `projects` empty and the
-    // board rendered as though a manager had no projects at all - the same shape as the triage page telling
-    // an annotator their queue was clear because a request dropped.
-    api.lopProjects().then((r) => {
-      setBootErr(null);
-      setProjects(r.projects);
-      if (r.projects.length && !projectId) setProjectId(r.projects[0].project_id);
-    }).catch(setBootErr);
-    // These two fill controls rather than the board: an empty assignee dropdown or gold-set picker is
-    // survivable, but it must say why rather than looking like an installation with no users in it.
-    api.users().then(setUsers).catch(() => flash("could not load the user list; assignment is unavailable"));
-    api.goldSets().then((g) => setGolds(g)).catch(() => flash("could not load gold sets"));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (firstProjectId) setProjectId((cur) => cur || firstProjectId);
+  }, [firstProjectId]);
 
-  useEffect(() => { refreshProject(projectId); }, [projectId, refreshProject]);
+  // Failures that were a flash stay a flash.
+  /* eslint-disable react-hooks/exhaustive-deps */
+  useEffect(() => { if (boardQ.error) flash(humanizeError(boardQ.error)); }, [boardQ.error]);
+  useEffect(() => {
+    if (usersQ.error) flash("could not load the user list; assignment is unavailable");
+  }, [usersQ.error]);
+  useEffect(() => { if (goldsQ.error) flash("could not load gold sets"); }, [goldsQ.error]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const createProject = async () => {
     if (!pName.trim()) { flash("name the project"); return; }
@@ -137,7 +146,7 @@ function ProjectsBody() {
         name: pName.trim(), honeypot_frac: hpFrac, gold_id: goldId || null,
         min_honeypot_accuracy: 0.9,
       });
-      setProjects((ps) => [p, ...ps]);
+      projectsQ.setData((cur) => ({ ...cur, projects: [p, ...(cur?.projects ?? [])] }));
       setProjectId(p.project_id);
       setPName("");
       flash(`created "${p.name}"`);
@@ -155,7 +164,7 @@ function ProjectsBody() {
       });
       flash(`${t.n_frames} frames split into ${t.n_jobs} jobs, ${t.honeypots_seeded} honeypots seeded`);
       setTName("");
-      await refreshProject(projectId);
+      await refreshProject();
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
@@ -168,7 +177,7 @@ function ProjectsBody() {
         ? { media_type: newMedia, text: newBody.trim() }
         : { media_type: newMedia, uri: newBody.trim() }]);
       setNewBody("");
-      await refreshProject(projectId);
+      await refreshProject();
       flash("asset added");
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
@@ -176,7 +185,7 @@ function ProjectsBody() {
   const assign = async (job: LabelJobRow, assignee: string) => {
     try {
       await api.lopAssign(job.job_id, assignee || null, job.version);
-      await refreshProject(projectId);
+      await refreshProject();
     } catch (e) { flash(humanizeError(e)); }
   };
 
@@ -212,8 +221,8 @@ function ProjectsBody() {
           <span className="text-ink-3 ml-3">new:</span>
           <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder="project name"
             className="bg-bg border border-line px-1.5 py-0.5 text-ink" />
-          <label className="text-ink-3">honeypot</label>
-          <input type="number" step="0.05" min="0" max="0.5" value={hpFrac}
+          <label htmlFor="hp-frac" className="text-ink-3">honeypot</label>
+          <input id="hp-frac" type="number" step="0.05" min="0" max="0.5" value={hpFrac}
             onChange={(e) => setHpFrac(Number(e.target.value))}
             className="bg-bg border border-line px-1.5 py-0.5 text-ink w-16" />
           <select value={goldId} onChange={(e) => setGoldId(e.target.value)}
@@ -222,7 +231,7 @@ function ProjectsBody() {
             {golds.map((g) => <option key={g.gold_id} value={g.gold_id}>{g.name} ({g.n_objects})</option>)}
           </select>
           <button onClick={createProject} disabled={busy}
-            className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">create</button>
+            className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40"><T k="action.create">create</T></button>
         </div>
 
         {/* board */}
@@ -263,8 +272,8 @@ function ProjectsBody() {
             <input value={tName} onChange={(e) => setTName(e.target.value)} placeholder="task name"
               className="bg-bg border border-line px-1.5 py-0.5 text-ink" />
             <SessionSelect value={tSession} onChange={setTSession} className="min-w-[320px]" />
-            <label className="text-ink-3">frames per job</label>
-            <input type="number" min="1" value={jobsOf} onChange={(e) => setJobsOf(Number(e.target.value))}
+            <label htmlFor="jobs-of" className="text-ink-3">frames per job</label>
+            <input id="jobs-of" type="number" min="1" value={jobsOf} onChange={(e) => setJobsOf(Number(e.target.value))}
               className="bg-bg border border-line px-1.5 py-0.5 text-ink w-20" />
             <button onClick={createTask} disabled={busy || !projectId}
               className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
@@ -312,7 +321,7 @@ function ProjectsBody() {
                         {j.frame_ids[0] && (
                           <button onClick={() => router.push(`/frame/${j.frame_ids[0]}?job=${j.job_id}`)}
                             title="open the first frame of this job"
-                            className="text-ink-3 hover:text-accent">open</button>
+                            className="text-ink-3 hover:text-accent"><T k="action.open">open</T></button>
                         )}
                         {(() => {
                           const a = nextAction(j, getUser()?.user_id ?? null);

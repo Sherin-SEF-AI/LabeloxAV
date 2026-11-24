@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { AnnotationRow, LabelConfig } from "@/lib/types";
+import { pressable } from "@/components/ui/pressable";
 
 // Text / NER: select a range in the body and it becomes a span annotation; link two spans and it becomes a
 // relation.
@@ -109,12 +110,16 @@ export default function TextSpanEditor({
           </button>
         )}
       </div>
+      {/* Releasing the mouse after selecting text is what makes a span. It is not a click on a control, so
+          there is nothing here for a role or a key handler to describe; the spans it makes are buttons. */}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
       <div ref={ref} onMouseUp={handleMouseUp}
         className="font-sans text-[15px] leading-7 text-ink whitespace-pre-wrap select-text cursor-text">
         {fragments.map((f, i) =>
           f.span ? (
             <mark key={i} data-start={f.start}
-              onClick={() => clickSpan(f.span!.id)}
+              {...pressable(() => clickSpan(f.span!.id))}
+              aria-pressed={f.span.id === selectedId}
               title={`${f.span.label ?? "span"} [${f.span.start}, ${f.span.end})`}
               style={{
                 backgroundColor: `${colorFor(config, f.span.label)}33`,

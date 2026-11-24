@@ -120,10 +120,10 @@ export function Segmented<T extends string>({ options, value, onChange }: {
   options: { value: T; label: string; tip?: string }[]; value: T; onChange: (v: T) => void;
 }) {
   return (
-    <div className="inline-flex rounded overflow-hidden border border-[#2b2b2b]">
+    <div className="inline-flex rounded overflow-hidden border border-line">
       {options.map((o, i) => (
         <button key={o.value} type="button" onClick={() => onChange(o.value)} data-tip={o.tip}
-          className={`px-2.5 py-1 text-[12px] ${i > 0 ? "border-l border-[#2b2b2b]" : ""}
+          className={`px-2.5 py-1 text-[12px] ${i > 0 ? "border-l border-line" : ""}
             ${value === o.value ? "btn-on" : "bg-head text-ink-2 hover:text-ink"}`}>
           {o.label}
         </button>

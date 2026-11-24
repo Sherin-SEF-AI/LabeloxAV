@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { T } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import { useJobStream } from "@/lib/useEventStream";
 import { api , humanizeError } from "@/lib/api";
@@ -16,6 +17,7 @@ import { ObjectSourceBadge } from "@/components/SourceBadge";
 import { objectSource, sessionOrigin } from "@/lib/source";
 import { acceptState, getUser } from "@/lib/user";
 import Icon from "@/components/shell/Icon";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 const BANDS = [
   { key: "review,annotate", label: "My queue", hint: "everything assigned to you" },
@@ -72,64 +74,64 @@ function WhyChips({ row }: { row: TriageRow }) {
 
 export default function HomePage() {
   const router = useRouter();
-  const [rows, setRows] = useState<TriageRow[]>([]);
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [session, setSession] = useState<string>("");
   const [states, setStates] = useState<string>("review,annotate");
   const [cursor, setCursor] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<unknown>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkClass, setBulkClass] = useState("");
-  const [classes, setClasses] = useState<string[]>([]);
   const [corr, setCorr] = useState<{ objectId: string; old: string; to: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [role, setRole] = useState<string | undefined>(undefined);
   const [showActions, setShowActions] = useState(false);
-  const [ingest, setIngest] = useState<{ active: boolean; finished: boolean; done: number; total: number; current: string | null; frames: number } | null>(null);
+  type Ingest = { active: boolean; finished: boolean; done: number; total: number; current: string | null; frames: number };
+  const [liveIngest, setLiveIngest] = useState<Ingest | null>(null);
   const [srcFilter, setSrcFilter] = useState<"all" | "app" | "imported">("all");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setErr(null);
-    try {
-      const params: Record<string, string> = { states, limit: "200" };
-      if (session) params.session_id = session;
-      // a flywheel worklist deep-link (?flywheel=<cycle>) scopes the queue to that cycle's dispatched objects
-      const fw = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("flywheel") : null;
-      if (fw) { params.flywheel = fw; params.states = "review,annotate"; }
-      setRows(await api.triage(params));
-      setCursor(0);
-    } catch (e) {
-      // There was a finally and no catch, so a dropped request left rows empty and the page said
-      // "Queue is clear" - it told an annotator their shift was over because a fetch failed. An empty
-      // queue is a real and meaningful state here, which is exactly why it must not be what a failure
-      // looks like.
-      setErr(e);
-    } finally {
-      setLoading(false);
-    }
-  }, [states, session]);
+  // a flywheel worklist deep-link (?flywheel=<cycle>) scopes the queue to that cycle's dispatched objects
+  const fw = useMemo(
+    () => (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("flywheel") : null), []);
+  const params = useMemo(() => {
+    const p: Record<string, string> = { states, limit: "200" };
+    if (session) p.session_id = session;
+    if (fw) { p.flywheel = fw; p.states = "review,annotate"; }
+    return p;
+  }, [states, session, fw]);
+  // Keyed by the filter, so coming back from a frame shows the queue that was here while it refreshes,
+  // and the rows on screen stay up while another band or session loads.
+  const triageQ = useQuery(["triage", params], () => api.triage(params), { keepPrevious: true });
+  const rows: TriageRow[] = useMemo(() => triageQ.data ?? [], [triageQ.data]);
+  const loading = triageQ.validating;
+  // There was a finally and no catch, so a dropped request left rows empty and the page said
+  // "Queue is clear" - it told an annotator their shift was over because a fetch failed. An empty
+  // queue is a real and meaningful state here, which is exactly why it must not be what a failure
+  // looks like. A request in flight supersedes the last failure.
+  const err = triageQ.validating ? null : triageQ.error ?? null;
+  const load = triageQ.reload;
+  useEffect(() => { setCursor(0); }, [triageQ.data]);
+  // The first answer after arriving on the page. Until it lands the rows may be the cached ones from
+  // the last visit, which is fine to look at and not to rule on from the keyboard: the fresh list
+  // replaces them a moment later and the row under the cursor would not be the one that was read.
+  const [fresh, setFresh] = useState(false);
+  useEffect(() => { if (!triageQ.validating) setFresh(true); }, [triageQ.validating]);
 
-  useEffect(() => {
-    // The dropdown needs the session rows; nothing on this page shows a fleet total any more.
-    api.sessions().then(setSessions).catch(() => {});
-    api.ontology().then((o) => setClasses(o.classes.map((c) => c.name))).catch(() => {});
-    setRole(getUser()?.role);
-  }, []);
+  // The dropdown needs the session rows; nothing on this page shows a fleet total any more. Both of
+  // these fill controls, and an empty control is what their failure has always looked like here.
+  const sessionsQ = useQuery(["sessions"], () => api.sessions());
+  const sessions: SessionRow[] = useMemo(() => sessionsQ.data ?? [], [sessionsQ.data]);
+  const ontologyQ = useQuery(["ontology"], () => api.ontology());
+  const classes: string[] = useMemo(() => (ontologyQ.data?.classes ?? []).map((c) => c.name), [ontologyQ.data]);
+  useEffect(() => { setRole(getUser()?.role); }, []);
   // Ingest progress rides the shared job stream. It used to poll every three seconds on every open tab,
   // and the endpoint behind it scraped a log file with a regex, which reports a quiet system rather than
   // an error the moment the API runs in a different container from the ingest script.
   const jobStream = useJobStream();
-  useEffect(() => { api.ingestProgress().then(setIngest).catch(() => {}); }, []);
+  const ingestQ = useQuery(["ingestProgress"], () => api.ingestProgress());
   useEffect(() => {
     const live = jobStream.data?.ingest?.[0];
-    if (live) setIngest(live as typeof ingest);
+    if (live) setLiveIngest(live as Ingest);
   }, [jobStream.data]);
-  useEffect(() => {
-    load();
-    setSel(new Set());
-  }, [load]);
+  const ingest: Ingest | null = liveIngest ?? (ingestQ.data as Ingest | undefined) ?? null;
+  useEffect(() => { setSel(new Set()); }, [states, session]);
 
   const toggle = (id: string) =>
     setSel((s) => {
@@ -148,7 +150,9 @@ export default function HomePage() {
       try {
         const r = await api.bulkReview([...sel], action, className, state);
         setSel(new Set());
-        load();
+        void load();
+        // Home counts what is waiting for review.
+        void invalidate("/api/home");
         // The server returns a handle that takes the whole batch back in one move, and ToastAction was
         // built for exactly this - its comment says a batch that changed fifty objects and offers no way
         // back asks the operator to be certain before acting, where one that can be undone from the
@@ -166,7 +170,8 @@ export default function HomePage() {
                 // Toaster dismisses before awaiting this, so a failure has nowhere else to surface.
                 toastError(`undo failed: ${humanizeError(e)}`);
               }
-              load();
+              void load();
+              void invalidate("/api/home");
             },
           });
         } else {
@@ -184,6 +189,7 @@ export default function HomePage() {
     try {
       const r = await api.startAutolabel(session, undefined, "local");
       setMsg(r.status === "queued-cloud" ? "queued for the cloud A100 - see Jobs" : "autolabel queued - watch it on Jobs");
+      void invalidate("jobs", "/api/home");
     } catch (e) {
       setMsg(humanizeError(e).includes("503") ? "GPU busy (training). Try after it finishes." : humanizeError(e));
     }
@@ -194,6 +200,7 @@ export default function HomePage() {
     try {
       await api.startVlmQa(session);
       setMsg("VLM auto-QA running - it flags likely-wrong labels into the QA queue + fills attributes");
+      void invalidate("jobs", "/api/home");
     } catch (e) {
       setMsg(humanizeError(e).includes("503") ? "GPU busy (training). Try after it finishes." : humanizeError(e));
     }
@@ -204,10 +211,11 @@ export default function HomePage() {
     try {
       const r = await api.recognizeSigns(session);
       setMsg(`typed ${r.recognized} signs (Indian taxonomy), ${r.text_bearing} text-bearing routed to OCR`);
+      void load();
     } catch (e) {
       setMsg(humanizeError(e));
     }
-  }, [session]);
+  }, [session, load]);
 
   const open = useCallback(
     (r?: TriageRow) => {
@@ -232,6 +240,7 @@ export default function HomePage() {
       // Accept and reject act on the selection when there is one, otherwise on the row under the cursor,
       // which is what makes the queue workable without the mouse.
       else if (e.key === "a" || e.key === "r") {
+        if (!fresh) return;
         const row = rows[cursor];
         if (!sel.size && !row) return;
         const targets = sel.size ? sel : new Set([row.object_id]);
@@ -242,7 +251,8 @@ export default function HomePage() {
               undefined, e.key === "a" ? acceptState(role) : undefined);
             setMsg(`${e.key === "a" ? "accepted" : "rejected"} ${res.updated}`);
             setSel(new Set());
-            load();
+            void load();
+            void invalidate("/api/home");
           } catch (err) {
             setMsg(humanizeError(err));
           }
@@ -251,7 +261,7 @@ export default function HomePage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rows, cursor, sel, role, open, load]);
+  }, [rows, cursor, sel, role, open, load, fresh]);
 
   const cities = useMemo(() => new Set(sessions.map((s) => s.city).filter(Boolean)).size, [sessions]);
   const activeBand = BANDS.find((b) => b.key === states);
@@ -411,7 +421,7 @@ export default function HomePage() {
                   title={role === "annotator" ? "submit for QA" : "approve (accept)"}>
                   {role === "annotator" ? "submit" : "approve"}
                 </button>
-                <button onClick={() => bulk("reject")} className="border border-block text-block px-2 py-0.5">reject</button>
+                <button onClick={() => bulk("reject")} className="border border-block text-block px-2 py-0.5"><T k="action.reject">reject</T></button>
                 <input list="cls" value={bulkClass} onChange={(e) => setBulkClass(e.target.value)} placeholder="relabel to class"
                   className="bg-bg border border-line px-2 py-0.5 w-40 text-ink" />
                 <datalist id="cls">{classes.map((c) => <option key={c} value={c} />)}</datalist>
@@ -422,7 +432,7 @@ export default function HomePage() {
                     title="find visually-similar objects of the old class and bulk-fix them too"
                     className="border border-accent text-accent px-2 py-0.5 hover:bg-accent/10">correct similar &rarr;</button>
                 )}
-                <button onClick={() => setSel(new Set())} className="text-ink-3 hover:text-ink ml-auto">clear</button>
+                <button onClick={() => setSel(new Set())} className="text-ink-3 hover:text-ink ml-auto"><T k="action.clear">clear</T></button>
               </div>
             )}
 
@@ -521,7 +531,7 @@ export default function HomePage() {
       {corr && (
         <CorrectionModal objectId={corr.objectId} kind="class" change={{ old: corr.old, new: corr.to }}
           onClose={() => setCorr(null)}
-          onApplied={(n) => { setMsg(`corrected ${n} similar objects`); setCorr(null); setSel(new Set()); load(); }} />
+          onApplied={(n) => { setMsg(`corrected ${n} similar objects`); setCorr(null); setSel(new Set()); void load(); void invalidate("/api/home"); }} />
       )}
     </PageShell>
   );

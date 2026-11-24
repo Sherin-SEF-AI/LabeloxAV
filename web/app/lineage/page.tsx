@@ -1,10 +1,11 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { toast } from "@/lib/toast";
+import { useQuery } from "@/lib/useQuery";
 import type { LineageGraph, LineageNode } from "@/lib/types";
 
 // The lineage graph: sessions to labels to gold to trainset to model to promotion.
@@ -59,24 +60,23 @@ function LineageBody() {
   const [mode, setMode] = useState<"model" | "session" | "dataset">(
     (params.get("mode") as "model" | "session" | "dataset") || "model");
   const [target, setTarget] = useState(params.get("id") || "");
-  const [graph, setGraph] = useState<LineageGraph | null>(null);
   const [picked, setPicked] = useState<LineageNode | null>(null);
-  const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async (m: string, id: string) => {
-    if (!id.trim()) return;
-    setBusy(true);
-    try {
-      const g = m === "model" ? await api.modelLineage(id.trim())
-        : m === "session" ? await api.sessionLineage(id.trim())
-        : await api.datasetLineage(id.trim());
-      setGraph(g);
-      setPicked(null);
-    } catch (e) { toast(humanizeError(e), "error"); setGraph(null); }
-    finally { setBusy(false); }
-  }, []);
-
-  useEffect(() => { if (target) load(mode, target); }, [load, mode, target]);
+  // One cached graph per thing traced, keyed by the read that produces it. keepPrevious: the last graph
+  // stays up while the next one loads.
+  const id = target.trim();
+  const method = mode === "model" ? "modelLineage" : mode === "session" ? "sessionLineage" : "datasetLineage";
+  const graphQ = useQuery<LineageGraph>(id ? [method, id] : null,
+    () => (mode === "model" ? api.modelLineage(id) : mode === "session" ? api.sessionLineage(id) : api.datasetLineage(id)),
+    { keepPrevious: true });
+  // A failed trace clears the graph rather than leaving the previous subject's up under a new id.
+  const graph: LineageGraph | null = id && !graphQ.error ? graphQ.data ?? null : null;
+  const busy = graphQ.validating;
+  const loaded = graphQ.data;
+  const failure = graphQ.error;
+  useEffect(() => { setPicked(null); }, [loaded]);
+  useEffect(() => { if (failure) toast(humanizeError(failure), "error"); }, [failure]);
+  const load = (_m: string, _id: string) => { void graphQ.reload(); };
 
   const edgesFor = (id: string) =>
     (graph?.edges ?? []).filter((e) => e.source === id || e.target === id);

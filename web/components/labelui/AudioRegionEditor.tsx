@@ -186,6 +186,9 @@ export default function AudioRegionEditor({
         onMouseLeave={() => setDrag(null)} />
 
       <div className="flex items-center gap-3 text-[12px] text-ink-3">
+        {/* The recording being annotated. There is no caption track to offer: producing the transcript is
+            the task this editor exists for. */}
+        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
         <audio ref={audioRef} src={uri} controls
           onTimeUpdate={(e) => setPlayhead((e.target as HTMLAudioElement).currentTime)}
           className="h-7" />

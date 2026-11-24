@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { T } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 
-import { api, humanizeError } from "@/lib/api";
+import { api, humanizeError, type ReviewResult } from "@/lib/api";
 import type { FrameObject, ObjectDetail } from "@/lib/types";
 import LoadState from "@/components/shell/LoadState";
 import { toast, toastError, toastSuccess } from "@/lib/toast";
@@ -57,6 +58,28 @@ function Tile({ label, children }: { label: string; children: React.ReactNode })
       {children}
     </div>
   );
+}
+
+/**
+ * The object on screen, brought up to date with what a review just returned.
+ *
+ * A review answers with the object's reviewed fields, not the whole object: no frame id, no image url,
+ * no dimensions. This panel used to store that answer AS the object, so after "apply suggestion" or
+ * "save box" the image went blank and the footer threw on `obj.frame_id.slice`. The fields it does carry
+ * are laid over the object already loaded; everything else stays as it was.
+ */
+export function mergeReview(current: ObjectDetail | null, result: ReviewResult): ObjectDetail | null {
+  if (!current || current.object_id !== result.object_id) return current;
+  return {
+    ...current,
+    class_id: result.class_id,
+    class_name: result.class_name,
+    bbox: result.bbox,
+    state: result.state,
+    source: result.source,
+    version: result.version,
+    attrs: (result.attrs ?? current.attrs) as ObjectDetail["attrs"],
+  };
 }
 
 export default function EvidencePanel({ subject, actions = [], onResolved }: {
@@ -133,16 +156,16 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
         action: "reclassify", class_name: to, state: "accepted",
         expected_version: obj.version,
       });
-      setObj(next as ObjectDetail);
+      setObj((cur) => mergeReview(cur, next));
       toast(`${was} -> ${to}`, "success", 12000, {
         label: "undo",
         run: async () => {
           try {
             const back = await api.review(obj.object_id, {
               action: "reclassify", class_name: was, state: "accepted",
-              expected_version: (next as ObjectDetail).version,
+              expected_version: next.version,
             });
-            setObj(back as ObjectDetail);
+            setObj((cur) => mergeReview(cur, back));
             toastSuccess(`restored to ${was}`);
           } catch (e) {
             toastError(`undo failed: ${humanizeError(e)}`);
@@ -167,17 +190,18 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
       const next = await api.review(obj.object_id, {
         action: "adjust", bbox: draft, state: "accepted", expected_version: obj.version,
       });
-      setObj(next as ObjectDetail);
+      setObj((cur) => mergeReview(cur, next));
       setEditing(false);
       setDraft(null);
       toast("box adjusted", "success", 12000, {
         label: "undo",
         run: async () => {
           try {
-            setObj(await api.review(obj.object_id, {
+            const undone = await api.review(obj.object_id, {
               action: "adjust", bbox: before, state: "accepted",
-              expected_version: (next as ObjectDetail).version,
-            }) as ObjectDetail);
+              expected_version: next.version,
+            });
+            setObj((cur) => mergeReview(cur, undone));
             toastSuccess("box restored");
           } catch (e) { toastError(`undo failed: ${humanizeError(e)}`); }
         },
@@ -332,7 +356,7 @@ export default function EvidencePanel({ subject, actions = [], onResolved }: {
                   </button>
                   <button onClick={() => { setEditing(false); setDraft(null); }} disabled={!!busy}
                     className="flex-1 border border-line text-ink-3 px-2 py-1 rounded text-[12px] hover:border-accent disabled:opacity-40">
-                    cancel
+                    <T k="action.cancel">cancel</T>
                   </button>
                 </>
               ) : (

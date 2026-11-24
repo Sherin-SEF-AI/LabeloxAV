@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { T } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { JobRow } from "@/lib/types";
@@ -10,15 +11,20 @@ import { Spinner, SkeletonRows } from "@/components/Spinner";
 import { useJobStream } from "@/lib/useEventStream";
 import { canCancel, cancelPath, jobCounts, jobKinds } from "@/lib/jobActions";
 import { toast } from "@/lib/toast";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // Unified jobs dashboard: import, training, and autolabel jobs in one live stream. The single place
 // to watch everything the engine is doing.
 
 export default function JobsPage() {
   const router = useRouter();
-  const [jobs, setJobs] = useState<JobRow[]>([]);
+  // The REST list is cached, so coming back to this page paints the last table at once and refreshes
+  // behind it. It is copied into state rather than read straight from the cache because the stream below
+  // merges onto the rendered rows, and a fresh list has to replace that merge, not be overridden by it.
+  const q = useQuery(["jobs"], () => api.jobs());
+  const [jobs, setJobs] = useState<JobRow[]>(q.data ?? []);
+  useEffect(() => { if (q.data) setJobs(q.data); }, [q.data]);
   const [kind, setKind] = useState<string>("all");
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
 
   // Live via server-sent events. This page used to re-fetch every two seconds forever, whether or not
@@ -27,9 +33,8 @@ export default function JobsPage() {
   // works if the stream cannot connect.
   const { data: stream, connected } = useJobStream();
 
-  useEffect(() => {
-    api.jobs().then((j) => { setJobs(j); setLoading(false); }).catch(() => setLoading(false));
-  }, []);
+  // Loading until the list settles either way, or the stream has spoken first.
+  const loading = q.loading && !stream;
 
   useEffect(() => {
     if (!stream) return;
@@ -47,7 +52,6 @@ export default function JobsPage() {
         return u ? { ...j, status: u.status, progress: u.progress ?? j.progress } : j;
       });
     });
-    setLoading(false);
   }, [stream]);
 
   // Derived from the rows that arrived rather than from a hardcoded list, which is how export, map_fusion
@@ -61,8 +65,9 @@ export default function JobsPage() {
     try {
       const r = await api.cancelJob(cancelPath(j));
       toast(r.detail || "cancelled");
-      const fresh = await api.jobs();
-      setJobs(fresh);
+      await q.reload();
+      // Home counts queued and running jobs, and would otherwise show the one just stopped.
+      void invalidate("/api/home");
     } catch (e) {
       toast(`could not cancel: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -129,7 +134,7 @@ export default function JobsPage() {
               </span>
               <span className="flex items-center gap-1">
                 <button onClick={() => router.push(j.link)}
-                  className="border border-line px-1.5 py-0.5 text-ink-3 hover:border-accent">open</button>
+                  className="border border-line px-1.5 py-0.5 text-ink-3 hover:border-accent"><T k="action.open">open</T></button>
                 {canCancel(j) && (
                   <button onClick={() => cancel(j)} disabled={busy === j.job_id}
                     title="stop this job"

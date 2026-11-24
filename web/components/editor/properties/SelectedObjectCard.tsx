@@ -36,7 +36,7 @@ const QUALITY_CLASS = {
 
 export default function SelectedObjectCard({
   object, onto, relationships, linkKind, linkFrom,
-  onLinkKind, onToggleLink, onDeleteRelationship, onSetAttr, onFitCuboid, onSetYaw, onClearAmodal,
+  onLinkKind, onToggleLink, onDeleteRelationship, onSetAttr, onFitCuboid, onSetYaw, onClearAmodal, readOnly,
 }: {
   object: EdObject;
   onto: Ontology;
@@ -53,6 +53,11 @@ export default function SelectedObjectCard({
   onSetYaw?: (yaw: number) => void;
   /** Take back the whole-extent box. */
   onClearAmodal?: () => void;
+  /**
+   * The frame is view-only. The two propagate buttons write to the server from here, so they are
+   * disabled; everything else on this card goes through a handler the page already refuses.
+   */
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [explainOpen, setExplainOpen] = useState(false);
@@ -219,8 +224,8 @@ export default function SelectedObjectCard({
       )}
 
       <button
-        disabled={object.isNew}
-        title={object.isNew
+        disabled={object.isNew || readOnly}
+        title={readOnly ? "view only: somebody else is editing this frame" : object.isNew
           ? "save the frame first, then propagate"
           : "optical-flow propagate this box across the next 12 frames as a track to confirm"}
         onClick={async () => {
@@ -236,8 +241,8 @@ export default function SelectedObjectCard({
           out no better than flow alone (docs/MEASUREMENT.md); what it adds is the masks and the frames before
           this one. Slower: one SAM call per frame. */}
       <button
-        disabled={object.isNew}
-        title={object.isNew
+        disabled={object.isNew || readOnly}
+        title={readOnly ? "view only: somebody else is editing this frame" : object.isNew
           ? "save the frame first, then propagate"
           : "carry this box 12 frames back and 12 forward, with a SAM mask on each, as a track to confirm"}
         onClick={async () => {

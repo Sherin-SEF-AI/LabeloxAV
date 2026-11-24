@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { apiGet } from "@/lib/api";
 import LoadState from "@/components/shell/LoadState";
+import { useQuery } from "@/lib/useQuery";
 
 // How far the reported recall can be trusted, which is a different question from what the recall is.
 //
@@ -75,38 +76,27 @@ function Bar({ label, value, tone }: { label: string; value: number | null; tone
 }
 
 export default function RecallHonesty() {
-  const [audits, setAudits] = useState<AuditRow[] | null>(null);
-  const [est, setEst] = useState<Estimate | null>(null);
-  const [err, setErr] = useState<unknown>(null);
+  const auditsQ = useQuery(["/api/verdyx/blind-audits?limit=25"],
+    () => apiGet<{ audits: AuditRow[] }>("/api/verdyx/blind-audits?limit=25"));
+  const audits: AuditRow[] | null = auditsQ.data?.audits ?? null;
   const [selected, setSelected] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setErr(null);
-    try {
-      const r = await apiGet<{ audits: AuditRow[] }>("/api/verdyx/blind-audits?limit=25");
-      setAudits(r.audits);
-      const scored = r.audits.find((a) => a.status === "scored");
-      setSelected((s) => s ?? scored?.audit_id ?? null);
-    } catch (e) {
-      setErr(e);
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
-
+  // Open on the newest scored audit once the list arrives, unless one is already chosen.
+  const scoredId = audits?.find((a) => a.status === "scored")?.audit_id ?? null;
   useEffect(() => {
-    if (!selected) { setEst(null); return; }
-    let live = true;
-    void (async () => {
-      try {
-        const r = await apiGet<Estimate>(`/api/verdyx/blind-audit/${selected}/estimate`);
-        if (live) setEst(r);
-      } catch (e) {
-        if (live) setErr(e);
-      }
-    })();
-    return () => { live = false; };
-  }, [selected]);
+    if (audits) setSelected((s) => s ?? scoredId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auditsQ.data]);
+
+  // The previous audit's estimate stays up while the next one loads, as the state it replaces did.
+  const estQ = useQuery(selected ? [`/api/verdyx/blind-audit/${selected}/estimate`] : null,
+    () => apiGet<Estimate>(`/api/verdyx/blind-audit/${selected}/estimate`), { keepPrevious: true });
+  const est: Estimate | null = selected ? estQ.data ?? null : null;
+
+  // Either read failing is this panel failing: an estimate that could not be fetched must not render as
+  // an audit with nothing in it.
+  const err = auditsQ.loadState.error ?? estQ.loadState.error ?? null;
+  const load = async () => { await Promise.all([auditsQ.reload(), selected ? estQ.reload() : null]); };
 
   if (err != null) return <LoadState error={err} onRetry={() => void load()} />;
   if (audits == null) {

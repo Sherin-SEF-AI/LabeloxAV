@@ -1,12 +1,14 @@
 "use client";
 
 import PackGate from "@/components/shell/PackGate";
+import { T } from "@/lib/i18n";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "@/lib/toast";
+import { invalidate, useQuery } from "@/lib/useQuery";
 import type { SecPack, SecSession, SecStats, WatchlistEntry, PlateReadRow } from "@/lib/types";
 
 // The LabeloxSec console: the security domain's own surface.
@@ -56,15 +58,23 @@ function LabeloxSecPage() {
   return <Suspense fallback={null}><LabeloxSecBody /></Suspense>;
 }
 
+const NO_WATCH: WatchlistEntry[] = [];
+const NO_SEC_SESSIONS: SecSession[] = [];
+const NO_READS: PlateReadRow[] = [];
+
 function LabeloxSecBody() {
   const params = useSearchParams();
-  const [pack, setPack] = useState<SecPack | null>(null);
-  const [packErr, setPackErr] = useState<string | null>(null);
-  const [stats, setStats] = useState<SecStats | null>(null);
-  const [reads, setReads] = useState<PlateReadRow[]>([]);
-  const [readTotal, setReadTotal] = useState(0);
-  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
-  const [sessions, setSessions] = useState<SecSession[]>([]);
+  const packQ = useQuery(["secPack", "sec"], () => api.secPack("sec"));
+  const pack: SecPack | null = packQ.data ?? null;
+  const packErr: string | null = packQ.error ? humanizeError(packQ.error) : null;
+  const statsQ = useQuery(["secStats"], () => api.secStats());
+  const watchlistQ = useQuery(["secWatchlist", true], () => api.secWatchlist(true));
+  const sessionsQ = useQuery(["secSessions", 50], () => api.secSessions(50));
+  const stats: SecStats | null = statsQ.data ?? null;
+  const watchlist: WatchlistEntry[] = watchlistQ.data?.entries ?? NO_WATCH;
+  const sessions: SecSession[] = sessionsQ.data?.sessions ?? NO_SEC_SESSIONS;
+  const restErr = statsQ.error ?? watchlistQ.error ?? sessionsQ.error;
+  useEffect(() => { if (restErr) toast(humanizeError(restErr), "error"); }, [restErr]);
   const [busy, setBusy] = useState(false);
   const confirm = useConfirm();
 
@@ -81,44 +91,24 @@ function LabeloxSecBody() {
   const [newReason, setNewReason] = useState("");
   const [newSeverity, setNewSeverity] = useState<string>("warn");
 
-  const loadPack = useCallback(async () => {
-    try {
-      setPack(await api.secPack("sec"));
-      setPackErr(null);
-    } catch (e) {
-      setPackErr(humanizeError(e));
-    }
-  }, []);
+  // The feed follows the filters, one cached answer per combination. keepPrevious: the last rows stay up
+  // while the next ones load.
+  const readArgs = {
+    plate: plateFilter.trim() || undefined,
+    camera_id: cameraFilter.trim() || undefined,
+    state_code: stateFilter || undefined,
+    hits_only: hitsOnly || undefined,
+    limit: 200,
+  };
+  const readsQ = useQuery(["secReads", readArgs], () => api.secReads(readArgs), { keepPrevious: true });
+  const reads: PlateReadRow[] = readsQ.data?.reads ?? NO_READS;
+  const readTotal = readsQ.data?.total ?? 0;
+  const readsErr = readsQ.error;
+  useEffect(() => { if (readsErr) toast(humanizeError(readsErr), "error"); }, [readsErr]);
 
-  const loadReads = useCallback(async () => {
-    try {
-      const r = await api.secReads({
-        plate: plateFilter.trim() || undefined,
-        camera_id: cameraFilter.trim() || undefined,
-        state_code: stateFilter || undefined,
-        hits_only: hitsOnly || undefined,
-        limit: 200,
-      });
-      setReads(r.reads);
-      setReadTotal(r.total);
-    } catch (e) {
-      toast(humanizeError(e), "error");
-    }
-  }, [plateFilter, cameraFilter, stateFilter, hitsOnly]);
-
-  const loadRest = useCallback(async () => {
-    try {
-      const [s, w, ss] = await Promise.all([api.secStats(), api.secWatchlist(true), api.secSessions(50)]);
-      setStats(s);
-      setWatchlist(w.entries);
-      setSessions(ss.sessions);
-    } catch (e) {
-      toast(humanizeError(e), "error");
-    }
-  }, []);
-
-  useEffect(() => { loadPack(); loadRest(); }, [loadPack, loadRest]);
-  useEffect(() => { loadReads(); }, [loadReads]);
+  // Every filter's feed: a new watch entry turns existing reads into hits whichever filter they sit under.
+  const loadReads = useCallback(() => invalidate("secReads"), []);
+  const loadRest = useCallback(() => invalidate("secStats", "secWatchlist", "secSessions"), []);
 
   const addWatch = async () => {
     if (!newPlate.trim()) { toast("enter a registration mark", "error"); return; }
@@ -231,7 +221,7 @@ function LabeloxSecBody() {
               ))}
               {stateFilter && (
                 <button onClick={() => setStateFilter("")}
-                  className="px-1.5 py-0.5 text-[11.5px] text-ink-3 hover:text-ink">clear</button>
+                  className="px-1.5 py-0.5 text-[11.5px] text-ink-3 hover:text-ink"><T k="action.clear">clear</T></button>
               )}
             </div>
           </Section>

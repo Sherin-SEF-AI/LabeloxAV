@@ -1,10 +1,12 @@
 "use client";
 
 import PackGate from "@/components/shell/PackGate";
+import { T } from "@/lib/i18n";
 import { useCallback, useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { toast } from "@/lib/toast";
+import { invalidate, useQuery } from "@/lib/useQuery";
 import type { CameraZone, PersonIdentityRow, SecurityIncident } from "@/lib/types";
 
 // LabeloxSec v2: zones, incidents, and cross-camera identity.
@@ -28,34 +30,39 @@ function when(ns: number): string {
   return new Date(ns / 1e6).toISOString().slice(0, 19).replace("T", " ");
 }
 
+const NO_INCIDENTS: SecurityIncident[] = [];
+const NO_ZONES: CameraZone[] = [];
+const NO_IDENTITIES: PersonIdentityRow[] = [];
+
 function IncidentsPage() {
-  const [incidents, setIncidents] = useState<SecurityIncident[]>([]);
-  const [zones, setZones] = useState<CameraZone[]>([]);
-  const [identities, setIdentities] = useState<PersonIdentityRow[]>([]);
   const [hours, setHours] = useState(168);
   const [status, setStatus] = useState("open");
   const [busy, setBusy] = useState(false);
   const [denied, setDenied] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const [inc, z, ids] = await Promise.all([
-        api.secIncidents({ since_hours: hours, status: status || undefined, limit: 200 }),
-        api.secZones(),
-        api.secIdentities(2),
-      ]);
-      setIncidents(inc.incidents);
-      setZones(z.zones);
-      setIdentities(ids.identities);
-      setDenied(false);
-    } catch (e) {
-      const msg = humanizeError(e);
-      if (msg.toLowerCase().includes("authorised") || msg.includes("403")) setDenied(true);
-      else toast(msg, "error");
-    }
-  }, [hours, status]);
+  // keepPrevious: changing a filter leaves the last incidents up until the new ones arrive.
+  const incArgs = { since_hours: hours, status: status || undefined, limit: 200 };
+  const incidentsQ = useQuery(["secIncidents", incArgs], () => api.secIncidents(incArgs), { keepPrevious: true });
+  const zonesQ = useQuery(["secZones"], () => api.secZones());
+  const identitiesQ = useQuery(["secIdentities", 2], () => api.secIdentities(2));
+  const incidents: SecurityIncident[] = incidentsQ.data?.incidents ?? NO_INCIDENTS;
+  const zones: CameraZone[] = zonesQ.data?.zones ?? NO_ZONES;
+  const identities: PersonIdentityRow[] = identitiesQ.data?.identities ?? NO_IDENTITIES;
 
-  useEffect(() => { load(); }, [load]);
+  // A refusal is a state of the page, anything else is announced. `denied` clears only when the reads
+  // succeed, so it does not flicker off while a changed filter is being refused again.
+  const failure = incidentsQ.error ?? zonesQ.error ?? identitiesQ.error;
+  useEffect(() => {
+    if (!failure) return;
+    const msg = humanizeError(failure);
+    if (msg.toLowerCase().includes("authorised") || msg.includes("403")) setDenied(true);
+    else toast(msg, "error");
+  }, [failure]);
+  const settled = !failure && !incidentsQ.validating && !zonesQ.validating && !identitiesQ.validating
+    && Boolean(incidentsQ.data) && Boolean(zonesQ.data) && Boolean(identitiesQ.data);
+  useEffect(() => { if (settled) setDenied(false); }, [settled]);
+
+  const load = useCallback(() => invalidate("secIncidents", "secZones", "secIdentities"), []);
 
   const ack = (id: string, close: boolean) => async () => {
     setBusy(true);
@@ -151,7 +158,7 @@ function IncidentsPage() {
                           )}
                           {i.status !== "closed" && (
                             <button onClick={ack(i.incident_id, true)} disabled={busy}
-                              className="text-ink-3 hover:text-pass disabled:opacity-40">close</button>
+                              className="text-ink-3 hover:text-pass disabled:opacity-40"><T k="action.close">close</T></button>
                           )}
                         </td>
                       </tr>

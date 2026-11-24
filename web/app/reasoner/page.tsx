@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import SessionSelect from "@/components/shell/SessionSelect";
 import Inspector from "@/components/shell/Inspector";
 import EvidencePanel, { type EvidenceSubject } from "@/components/inspect/EvidencePanel";
 import { toast } from "@/lib/toast";
+import { invalidate, useQuery } from "@/lib/useQuery";
 import type { ReasonerAttribution, ReasonerRerun, ReasoningTrace } from "@/lib/types";
 
 // The reasoning layer, and whether it is any good.
@@ -52,10 +53,16 @@ export default function ReasonerPage() {
   // The rerun table says the reasoner disagreed with a label and names what it would suggest instead.
   // Without the object that is a claim you can only agree with.
   const [subject, setSubject] = useState<EvidenceSubject | null>(null);
-  const [attribution, setAttribution] = useState<ReasonerAttribution | null>(null);
-  const [outcomes, setOutcomes] = useState<Awaited<ReturnType<typeof api.reasonerOutcomes>> | null>(null);
-  const [coverage, setCoverage] = useState<Awaited<ReturnType<typeof api.reasonerCoverage>> | null>(null);
-  const [priors, setPriors] = useState<Awaited<ReturnType<typeof api.reasonerPriors>> | null>(null);
+  const attributionQ = useQuery(["reasonerAttribution"], () => api.reasonerAttribution());
+  const outcomesQ = useQuery(["reasonerOutcomes"], () => api.reasonerOutcomes());
+  const coverageQ = useQuery(["reasonerCoverage"], () => api.reasonerCoverage());
+  const priorsQ = useQuery(["reasonerPriors"], () => api.reasonerPriors());
+  const attribution: ReasonerAttribution | null = attributionQ.data ?? null;
+  const outcomes = outcomesQ.data ?? null;
+  const coverage = coverageQ.data ?? null;
+  const priors = priorsQ.data ?? null;
+  const failure = attributionQ.error ?? outcomesQ.error ?? coverageQ.error ?? priorsQ.error;
+  useEffect(() => { if (failure) toast(humanizeError(failure), "error"); }, [failure]);
   const [busy, setBusy] = useState(false);
 
   // The tuning surface: try a hypothetical detection without running a session.
@@ -68,18 +75,6 @@ export default function ReasonerPage() {
 
   const [sessionId, setSessionId] = useState("");
   const [rerun, setRerun] = useState<ReasonerRerun | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const [a, o, c, p] = await Promise.all([
-        api.reasonerAttribution(), api.reasonerOutcomes(),
-        api.reasonerCoverage(), api.reasonerPriors(),
-      ]);
-      setAttribution(a); setOutcomes(o); setCoverage(c); setPriors(p);
-    } catch (e) { toast(humanizeError(e), "error"); }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
 
   const explain = async () => {
     setBusy(true);
@@ -100,7 +95,11 @@ export default function ReasonerPage() {
     try {
       const r = await api.reasonerRerun(sessionId.trim(), apply);
       setRerun(r);
-      if (apply) toast(`demoted ${r.applied} labels`, "success");
+      if (apply) {
+        toast(`demoted ${r.applied} labels`, "success");
+        // Applying demotes labels, which is what the outcome and coverage tables count.
+        void invalidate("reasonerAttribution", "reasonerOutcomes", "reasonerCoverage");
+      }
     } catch (e) { toast(humanizeError(e), "error"); } finally { setBusy(false); }
   };
 

@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { T } from "@/lib/i18n";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import SessionSelect from "@/components/shell/SessionSelect";
 import { toast } from "@/lib/toast";
+import { invalidate, useQuery } from "@/lib/useQuery";
 import type {
   DrivingEvent,
   DrivingEventSummary,
@@ -74,21 +76,22 @@ function Stat({ label, value, hint, tone }: {
 
 export default function EventsPage() {
   const [sessionId, setSessionId] = useState("");
-  const [taxonomy, setTaxonomy] = useState<EventTaxonomy | null>(null);
+  const taxonomyQ = useQuery(["eventTaxonomy"], () => api.eventTaxonomy());
+  const taxonomy: EventTaxonomy | null = taxonomyQ.data ?? null;
+  const taxonomyErr = taxonomyQ.error;
+  useEffect(() => { if (taxonomyErr) toast(humanizeError(taxonomyErr), "error"); }, [taxonomyErr]);
   const [summary, setSummary] = useState<DrivingEventSummary | null>(null);
   const [events, setEvents] = useState<DrivingEvent[]>([]);
   const [linkResult, setLinkResult] = useState<LaneLinkResult | null>(null);
   const [originNs, setOriginNs] = useState<number | null>(null);
   const [typeResult, setTypeResult] = useState<LaneTypeResult | null>(null);
-  const [coverage, setCoverage] = useState<LaneTypeCoverage | null>(null);
+  // Absent when it cannot be read, as before: a failure reads as no coverage figure rather than an error.
+  const coverageQ = useQuery(["laneTypeCoverage"], () => api.laneTypeCoverage());
+  const coverage: LaneTypeCoverage | null = coverageQ.error ? null : coverageQ.data ?? null;
+  const setCoverage = coverageQ.setData;
   const [severity, setSeverity] = useState("");
   const [state, setState] = useState("");
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    api.eventTaxonomy().then(setTaxonomy).catch((e) => toast(humanizeError(e), "error"));
-    api.laneTypeCoverage().then(setCoverage).catch(() => setCoverage(null));
-  }, []);
 
   const load = useCallback(async () => {
     if (!sessionId.trim()) return;
@@ -127,6 +130,8 @@ export default function EventsPage() {
       toast(`derived ${r.derived}: ${r.inserted} new, ${r.updated} updated, ${r.pruned_stale} stale removed`,
       );
       await load();
+      // Deriving adds and removes events corpus-wide, as far as the event search is concerned.
+      void invalidate("searchEvents", "eventCorpusSummary");
     } catch (e) {
       toast(humanizeError(e), "error");
     } finally {
@@ -169,6 +174,8 @@ export default function EventsPage() {
     try {
       const updated = await api.ruleOnDrivingEvent(ev.event_id, verdict);
       setEvents((prev) => prev.map((e) => (e.event_id === updated.event_id ? updated : e)));
+      // A verdict changes an event's state, which the corpus search and its summary both filter on.
+      void invalidate("searchEvents", "eventCorpusSummary");
       if (sessionId.trim()) setSummary(await api.drivingEventSummary(sessionId.trim()));
     } catch (e) {
       toast(humanizeError(e), "error");
@@ -343,10 +350,10 @@ export default function EventsPage() {
                     {ev.state === "review" && (
                       <>
                         <button className="btn btn-sm" onClick={() => void rule(ev, "confirm")}>
-                          confirm
+                          <T k="action.confirm_short">confirm</T>
                         </button>{" "}
                         <button className="btn btn-sm" onClick={() => void rule(ev, "reject")}>
-                          reject
+                          <T k="action.reject">reject</T>
                         </button>
                       </>
                     )}

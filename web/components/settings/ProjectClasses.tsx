@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { api, apiGet, apiPut, humanizeError } from "@/lib/api";
+import { useQuery } from "@/lib/useQuery";
 import { classColor } from "@/lib/colors";
 import { toast } from "@/lib/toast";
 import type { OntologyClass } from "@/lib/types";
@@ -22,33 +23,36 @@ const CHOICES: { set: ClassSet; label: string; hint: string }[] = [
 
 const always = (c: OntologyClass) => c.l0 === "ignore" || c.l1 === "custom";
 
+const NO_TEMPLATES: Template[] = [];
+
 export default function ProjectClasses({ projectId, projectName, classSet, classCount, of, onChanged }: {
   projectId: string; projectName: string; classSet: ClassSet; classCount: number; of: number; onChanged: () => void;
 }) {
-  const [classes, setClasses] = useState<OntologyClass[] | null>(null);
-  const [templates, setTemplates] = useState<Template[]>([]);
+  // The ontology and the templates are the same for every project and are cached once; the active set is
+  // this project's.
+  const ontologyQ = useQuery(["ontology"], () => api.ontology());
+  const templatesQ = useQuery(["/api/ontology/templates"],
+    () => apiGet<{ templates: Template[] }>("/api/ontology/templates"));
+  const activePath = `/api/ontology?project_id=${projectId}`;
+  const activeQ = useQuery([activePath], () => apiGet<{ active_class_ids: number[] | null }>(activePath));
+  const ontology = ontologyQ.data;
+  const active = activeQ.data;
+  // Nothing shows until all three are in, as when they were one request group.
+  const ready = Boolean(ontology && templatesQ.data && active);
+  const classes: OntologyClass[] | null = ready && ontology ? ontology.classes : null;
+  const templates: Template[] = ready ? templatesQ.data?.templates ?? NO_TEMPLATES : NO_TEMPLATES;
+  const failure = ontologyQ.error ?? templatesQ.error ?? activeQ.error;
+  useEffect(() => { if (failure) toast(humanizeError(failure), "error"); }, [failure]);
   const [choice, setChoice] = useState<ClassSet>(classSet);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // The picks are a working copy the person edits, seeded from what the project has when it arrives.
   useEffect(() => {
-    let live = true;
-    void (async () => {
-      try {
-        const [o, t, mine] = await Promise.all([
-          api.ontology(),
-          apiGet<{ templates: Template[] }>("/api/ontology/templates"),
-          apiGet<{ active_class_ids: number[] | null }>(`/api/ontology?project_id=${projectId}`),
-        ]);
-        if (!live) return;
-        setClasses(o.classes);
-        setTemplates(t.templates);
-        setPicked(new Set(mine.active_class_ids ?? o.classes.map((c) => c.id)));
-      } catch (e) { toast(humanizeError(e), "error"); }
-    })();
-    return () => { live = false; };
-  }, [projectId]);
+    if (!ready || !ontology || !active) return;
+    setPicked(new Set(active.active_class_ids ?? ontology.classes.map((c) => c.id)));
+  }, [ready, ontology, active]);
   useEffect(() => setChoice(classSet), [classSet]);
 
   const groups = useMemo(() => {

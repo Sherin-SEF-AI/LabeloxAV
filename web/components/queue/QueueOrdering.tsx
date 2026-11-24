@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { apiGet, humanizeError } from "@/lib/api";
+import { useQuery } from "@/lib/useQuery";
 
 // Why the queue is in the order it is, measured rather than asserted (services/queue_order.py). The numbers
 // are recomputed on a gold set when the panel opens: how many of the wrong labels a reviewer meets in the
@@ -24,14 +25,15 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 export default function QueueOrdering() {
   const [open, setOpen] = useState(false);
-  const [report, setReport] = useState<Report | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Asked for the first time the panel is opened and not again: the report describes a stored ordering
+  // policy, and a failure is shown rather than retried, as before.
+  const [asked, setAsked] = useState(false);
+  useEffect(() => { if (open) setAsked(true); }, [open]);
+  const orderingQ = useQuery(asked ? ["/api/triage/ordering"] : null, () => apiGet<Report>("/api/triage/ordering"));
+  const report: Report | null = orderingQ.data ?? null;
+  const error: string | null = orderingQ.error ? humanizeError(orderingQ.error) : null;
   const box = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    if (!open || report || error) return;
-    apiGet<Report>("/api/triage/ordering").then(setReport).catch((e) => setError(humanizeError(e)));
-  }, [open, report, error]);
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); };

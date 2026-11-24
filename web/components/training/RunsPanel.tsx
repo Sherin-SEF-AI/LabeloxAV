@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type ModelRunRow, type TrainingCurve } from "@/lib/api";
 import LineChart from "@/components/charts/LineChart";
+import { useQuery } from "@/lib/useQuery";
 
 const C = { accent: "#FF7A2F", pass: "#56D364", warn: "#E3B341", block: "#F85149", info: "#58A6FF", ink3: "#6C727A" };
 
@@ -41,20 +42,19 @@ function ClassBar({ name, base, cand }: { name: string; base?: number; cand?: nu
 }
 
 export default function RunsPanel() {
-  const [runs, setRuns] = useState<ModelRunRow[]>([]);
+  // Optional panel: a failed read shows "no model runs recorded yet", as it always has.
+  const runsQ = useQuery(["trainingRuns"], () => api.trainingRuns());
+  const runs: ModelRunRow[] = runsQ.data ?? [];
   const [sel, setSel] = useState<string | null>(null);
-  const [curve, setCurve] = useState<TrainingCurve | null>(null);
+  // Keyed by the run, so flipping between two runs redraws from the cache; a run not yet fetched shows
+  // "loading curve", and a failed one stays there, as before.
+  const curveQ = useQuery(sel ? ["trainingRunCurve", sel] : null, () => api.trainingRunCurve(sel as string));
+  const curve: TrainingCurve | null = curveQ.error ? null : curveQ.data ?? null;
   const [metric, setMetric] = useState<"ap" | "recall">("ap");
 
-  useEffect(() => {
-    api.trainingRuns().then((r) => { setRuns(r); if (r.length && !sel) setSel(r[0].run_id); }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  useEffect(() => {
-    if (!sel) return;
-    setCurve(null);
-    api.trainingRunCurve(sel).then(setCurve).catch(() => setCurve(null));
-  }, [sel]);
+  // Open on the newest run once the list arrives, unless one is already chosen.
+  const firstRunId = runs[0]?.run_id;
+  useEffect(() => { if (firstRunId) setSel((cur) => cur ?? firstRunId); }, [firstRunId]);
 
   const run = runs.find((r) => r.run_id === sel) || null;
 

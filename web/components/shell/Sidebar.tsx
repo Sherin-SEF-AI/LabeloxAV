@@ -8,6 +8,8 @@ import Icon from "./Icon";
 import { NAV_FOOTER, activeKey, isLabsPath, sectionsFor, type NavItem } from "@/lib/sidebar";
 import { packEnabled, useFeatures } from "@/lib/features";
 import { readPref, writePref, LABS_PREF, SIDEBAR_COLLAPSED_PREF, LABS_EVENT } from "@/lib/prefs";
+import { useLabel, useT } from "@/lib/i18n";
+import { useDialog } from "@/components/ui/useDialog";
 
 // The application sidebar: where a person on the team goes next. Sections come from lib/sidebar.ts.
 //
@@ -19,6 +21,7 @@ function Item({ item, active, collapsed, pathname, onNavigate }: {
   item: NavItem; active: boolean; collapsed: boolean; pathname: string; onNavigate?: () => void;
 }) {
   // Sub-pages show under the entry while you are inside it, so the list stays short everywhere else.
+  const label = useLabel();
   const children = active && !collapsed ? item.children ?? [] : [];
   const onChild = children.some((c) => c.href === pathname);
   return (
@@ -27,14 +30,14 @@ function Item({ item, active, collapsed, pathname, onNavigate }: {
         href={item.href}
         onClick={onNavigate}
         aria-current={active && !onChild ? "page" : undefined}
-        aria-label={collapsed ? item.label : undefined}
+        aria-label={collapsed ? label(item.label) : undefined}
         // A native title, not the app's data-tip: the list scrolls, and a pseudo-element tooltip inside a
         // scrolling container is clipped by it.
-        title={collapsed ? `${item.label}: ${item.hint}` : item.hint}
+        title={collapsed ? `${label(item.label)}: ${item.hint}` : item.hint}
         className={`side-item ${active ? "side-item-on" : ""} ${collapsed ? "justify-center px-0" : ""}`}
       >
         <span className={`shrink-0 ${active ? "text-accent-2" : ""}`}><Icon name={item.icon} size={16} /></span>
-        {!collapsed && <span className="truncate">{item.label}</span>}
+        {!collapsed && <span className="truncate">{label(item.label)}</span>}
       </Link>
       {children.length > 0 && (
         <ul className="mt-px mb-1 ml-[17px] pl-3 border-l hairline flex flex-col gap-px">
@@ -44,7 +47,7 @@ function Item({ item, active, collapsed, pathname, onNavigate }: {
               <li key={c.href}>
                 <Link href={c.href} onClick={onNavigate} aria-current={here ? "page" : undefined}
                   className={`side-sub ${here ? "side-sub-on" : ""}`}>
-                  <span className="truncate">{c.label}</span>
+                  <span className="truncate">{label(c.label)}</span>
                 </Link>
               </li>
             );
@@ -63,6 +66,11 @@ export default function Sidebar() {
   const [labsOpen, setLabsOpen] = useState(true);
   const [drawer, setDrawer] = useState(false);
   const features = useFeatures();
+  const t = useT();
+  const label = useLabel();
+  // The drawer is a modal dialog on a phone: Escape closes it, Tab stays inside it, and focus goes back to
+  // the menu button that opened it.
+  const drawerRef = useDialog<HTMLDivElement>(drawer, () => setDrawer(false));
 
   // Read after mount, never during render: the server has no browser storage, and reading it in render would
   // make the first client render disagree with the server's HTML.
@@ -101,13 +109,13 @@ export default function Sidebar() {
           </Link>
         )}
         <button onClick={toggleCollapsed} className="side-icon-btn hidden md:flex"
-          aria-label={narrow ? "Expand sidebar" : "Collapse sidebar"}
-          data-tip={narrow ? "Expand sidebar" : "Collapse sidebar"}>
+          aria-label={narrow ? t("sidebar.expand", "Expand sidebar") : t("sidebar.collapse", "Collapse sidebar")}
+          data-tip={narrow ? t("sidebar.expand", "Expand sidebar") : t("sidebar.collapse", "Collapse sidebar")}>
           <Icon name="sidebar" size={16} />
         </button>
       </div>
 
-      <nav aria-label="Main" className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-2 pb-3 no-scrollbar">
+      <nav aria-label={t("sidebar.main", "Main")} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-2 pb-3 no-scrollbar">
         {sections.map((section) => {
           const isLabs = Boolean(section.labs);
           const open = !isLabs || labsOpen || onLabsPage;
@@ -118,11 +126,11 @@ export default function Sidebar() {
               ) : isLabs ? (
                 <button onClick={() => setLabsOpen((o) => !o)} aria-expanded={open}
                   className="side-section w-full flex items-center justify-between hover:text-ink-2">
-                  <span className="flex items-center gap-1.5"><Icon name="flask" size={12} />{section.label}</span>
+                  <span className="flex items-center gap-1.5"><Icon name="flask" size={12} />{label(section.label)}</span>
                   <span className={`transition-transform ${open ? "" : "-rotate-90"}`}><Icon name="chevD" size={12} /></span>
                 </button>
               ) : (
-                <div className="side-section">{section.label}</div>
+                <div className="side-section">{label(section.label)}</div>
               )}
               {open && (
                 <ul className="flex flex-col gap-px">
@@ -145,10 +153,11 @@ export default function Sidebar() {
             onNavigate={() => setDrawer(false)} />
         ))}
         <button onClick={() => window.dispatchEvent(new Event("lbx:shortcuts"))}
-          data-tip="Keyboard shortcuts (?)"
+          data-tip={t("sidebar.shortcuts_tip", "Keyboard shortcuts (?)")}
+          aria-label={narrow ? t("sidebar.shortcuts_tip", "Keyboard shortcuts (?)") : undefined}
           className={`side-item ${narrow ? "justify-center px-0" : ""}`}>
           <span className="shrink-0"><Icon name="keyboard" size={16} /></span>
-          {!narrow && <span className="truncate">Shortcuts</span>}
+          {!narrow && <span className="truncate">{label("Shortcuts")}</span>}
           {!narrow && <kbd className="ml-auto text-[10.5px] text-ink-3">?</kbd>}
         </button>
       </div>
@@ -162,11 +171,11 @@ export default function Sidebar() {
         {body(collapsed)}
       </aside>
       {drawer && (
-        <div className="md:hidden fixed inset-0 z-[70] flex" role="dialog" aria-modal="true" aria-label="Navigation">
+        <div ref={drawerRef} tabIndex={-1} className="md:hidden fixed inset-0 z-[70] flex" role="dialog" aria-modal="true" aria-label={t("sidebar.navigation", "Navigation")}>
           <aside className="flex flex-col w-[260px] max-w-[85vw] h-full bg-rail border-r hairline shadow-2xl">
             {body(false)}
           </aside>
-          <button className="flex-1 bg-black/50" aria-label="Close navigation" onClick={() => setDrawer(false)} />
+          <button className="flex-1 bg-black/50" aria-label={t("sidebar.close_nav", "Close navigation")} onClick={() => setDrawer(false)} />
         </div>
       )}
     </>

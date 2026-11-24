@@ -4,13 +4,29 @@
 // transform), rendering the frame image plus every object's box and mask in image space. Tools: select
 // (move + resize via Transformer, drag mask vertices), draw box, SAM point, SAM box. All geometry is in
 // image pixels; the stage transform maps to screen. getRelativePointerPosition() returns image coords.
+//
+// Three layers, because Konva redraws a layer whole. It was one, so dragging a box, sweeping a marquee or
+// painting a brush stroke repainted the full-resolution frame image and every object under it on each
+// pointer move, to change a rectangle.
+//
+//   static       the raster, the segmentation overlay, drivable and adverse regions. Never hit-tested.
+//   objects      everything that is an annotation, and every shape that can be clicked or dragged.
+//   interaction  what exists only while a gesture is in progress, plus the transform handles.
+//
+// Each layer is its own component and the two lower ones are memoized, so the state a gesture changes
+// (the rubber band, the stroke) re-renders the interaction layer and leaves the others as they were.
+//
+// The order inside the objects layer is the order the single layer had, so what sits on top of what, and
+// which shape a click lands on, is unchanged. One thing moved: the brush preview and the polygon being
+// drawn are now above committed keypoint dots rather than below them.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Circle, Group, Image as KImage, Layer, Line, Rect, Shape, Stage, Text as KText, Transformer } from "react-konva";
 import type Konva from "konva";
 import { objectTag } from "@/lib/canvasTag";
 import { handleIndices } from "@/lib/simplify";
 import { classColor, classFill } from "@/lib/colors";
+import { brushOps, traceStamps } from "@/lib/editor/brush";
 import type { EdObject, Tool, Viewport } from "./useEditor";
 import { amodalRectProps } from "./amodal";
 
@@ -72,8 +88,17 @@ type Props = {
   onSamBox: (box: number[]) => void;
   onUpdateMask: (id: string, polys: number[][]) => void;
   onCursor: (pt: number[] | null) => void;
+  /** The frame image finished loading. The page uses it to start warming the neighbouring frames. */
+  onImageLoad?: (url: string) => void;
   /** Right-click on the canvas: where on screen, and which object was under the pointer (null = empty). */
   onContextMenu?: (at: { x: number; y: number }, objectId: string | null) => void;
+  /**
+   * The frame is view-only. Objects can still be clicked to select them, and the view still pans and
+   * zooms, but nothing can be dragged, resized or reshaped: no move, no transform handles, no vertex
+   * handles. The page also hands a view-only canvas the pointer or the ruler as its tool, so the drawing
+   * tools are not reachable here either.
+   */
+  readOnly?: boolean;
 };
 
 const MIN_SCALE = 0.05;
@@ -82,15 +107,82 @@ const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const ADVERSE_COLOR: Record<string, string> = {
   glare: "#E3B341", reflection: "#58A6FF", shadow: "#8B5CF6", rain: "#56D364", fog: "#A0A6AD", lowlight: "#F85149",
 };
+const ALL_LAYERS: LayerFlags = { boxes: true, masks: true, labels: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true };
+// Module-level so the Transformer is handed the same array and function every render. A fresh one is a
+// changed prop as far as react-konva can tell, and a changed prop is a redraw.
+const ROTATION_SNAPS = [0, 90, 180, 270];
+const keepMinBox = <B extends { width: number; height: number }>(oldB: B, newB: B): B =>
+  (newB.width < 4 || newB.height < 4 ? oldB : newB);
 
-export default function EditorCanvas(p: Props) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  // Start at 0x0, not a guessed 800x600: the fit effect keys off `size` and runs once when scale is the
-  // fit-pending sentinel, so if it fired against a placeholder size it would fit to 800x600 and never
-  // re-fit when the real container size arrived. Zero keeps the fit guard (size.w > 1) false until the
-  // container is actually measured, so the frame fits to the true canvas.
-  const [size, setSize] = useState({ w: 0, h: 0 });
+type Band = { x0: number; y0: number; x1: number; y1: number };
 
+// ---- static layer: pixels and regions that nothing interacts with -------------------------------------
+
+type StaticLayerProps = {
+  img: HTMLImageElement | null;
+  segImg: HTMLImageElement | null;
+  imgW: number;
+  imgH: number;
+  s: number;
+  drivable?: Record<string, number[][]> | null;
+  adverse?: AdverseOverlay[];
+};
+
+const StaticLayer = memo(function StaticLayer(p: StaticLayerProps) {
+  const s = p.s;
+  return (
+    // Not listening as a layer, so a pointer event skips the whole of it rather than asking each shape.
+    <Layer listening={false}>
+      {p.img && <KImage image={p.img} width={p.imgW} height={p.imgH} listening={false} />}
+      {/* dense-segmentation overlay (semantic/panoptic), drawn over the frame at reduced opacity */}
+      {p.segImg && <KImage image={p.segImg} width={p.imgW} height={p.imgH} opacity={0.5} listening={false} />}
+
+      {/* drivable-area segmentation (M2.2), drawn behind everything */}
+      {p.drivable && Object.entries(p.drivable).flatMap(([cls, polys]) =>
+        polys.map((poly, i) => (
+          <Line key={`dr-${cls}-${i}`} points={poly} closed listening={false}
+            fill={cls === "drivable" ? "rgba(86,211,100,0.18)" : cls === "fallback" ? "rgba(227,179,65,0.18)" : "rgba(248,81,73,0.14)"}
+            stroke={cls === "drivable" ? "#56D364" : cls === "fallback" ? "#E3B341" : "#F85149"} strokeWidth={1 / s} />
+        )),
+      )}
+
+      {/* adverse-condition regions (glare/reflection/shadow/...), tinted by condition */}
+      {p.adverse?.map((a) => (
+        <Line key={`adv-${a.region_id}`} points={a.geometry} closed listening={false}
+          stroke={ADVERSE_COLOR[a.condition] ?? "#A0A6AD"} strokeWidth={1 / s}
+          fill={(ADVERSE_COLOR[a.condition] ?? "#A0A6AD") + "33"} />
+      ))}
+
+    </Layer>
+  );
+});
+
+// ---- objects layer: the annotations, and everything that can be clicked ------------------------------
+
+type ObjectsLayerProps = {
+  objects: EdObject[];
+  selectedId: string | null;
+  tool: Tool;
+  s: number;
+  layers: LayerFlags;
+  lanes?: LaneOverlay[];
+  relationships?: { from_object_id: string; to_object_id: string; kind: string }[];
+  cuboids?: CuboidOverlay[];
+  candidate: number[][] | null;
+  samPrompt?: { points: number[][]; labels: number[] } | null;
+  superpixels?: number[][];
+  skeletonEdges?: number[][];
+  selRectRef: RefObject<Konva.Rect>;
+  readOnly?: boolean;
+  onSelect: (id: string | null) => void;
+  onUpdateBbox: (id: string, bbox: number[], rot?: number) => void;
+  onUpdateMask: (id: string, polys: number[][]) => void;
+  onUpdateKeypoints: (id: string, points: number[][]) => void;
+};
+
+const ObjectsLayer = memo(function ObjectsLayer(p: ObjectsLayerProps) {
+  const s = p.s;
+  const L = p.layers;
   // Paint order for boxes, computed when the objects or the selection change rather than on every render.
   // Order matters for hit-testing: largest first so the smallest box sits on top and a click in a dense
   // cluster selects the tightest object rather than the big one behind it. The selected box is forced to the
@@ -116,14 +208,389 @@ export default function EditorCanvas(p: Props) {
     for (const o of p.objects) m.set(o.id, o);
     return m;
   }, [p.objects]);
+  const sel = p.objects.find((o) => o.id === p.selectedId) || null;
+  // Everything that reshapes an object hangs off this one flag: dragging a box or a pose point, and the
+  // mask's vertex and midpoint handles. Selecting stays on `p.tool === "select"` alone.
+  const canEdit = p.tool === "select" && !p.readOnly;
+
+  return (
+    <Layer>
+      {/* masks: one even-odd Shape per object, so a ring nested inside another (an erased or
+          occlusion-cut region) renders as a hole instead of a second filled blob */}
+      {L.masks && p.objects.filter((o) => o.visible && o.mask.length).map((o) => (
+        <Shape key={`m${o.id}`} listening={false}
+          sceneFunc={(ctx) => {
+            ctx.beginPath();
+            for (const poly of o.mask) {
+              if (poly.length < 6) continue;
+              ctx.moveTo(poly[0], poly[1]);
+              for (let i = 2; i < poly.length; i += 2) ctx.lineTo(poly[i], poly[i + 1]);
+              ctx.closePath();
+            }
+            ctx.fillStyle = classFill(o.class_id, o.id === p.selectedId ? 0.3 : 0.16);
+            ctx.fill("evenodd");
+            ctx.strokeStyle = classColor(o.class_id);
+            ctx.lineWidth = 1.5 / s;
+            ctx.stroke();
+          }} />
+      ))}
+
+      {/* lane splines (M2.1), drawn above masks */}
+      {L.lanes && p.lanes?.map((ln) => (
+        <Line key={ln.lane_id} points={ln.control_points.flat()} listening={false} tension={0.3}
+          stroke={ln.is_ego ? "#56D364" : ln.source === "human" ? "#FF7A2F" : ln.source === "propagated" ? "#E3B341" : "#58A6FF"}
+          strokeWidth={2.5 / s} dash={ln.lane_type === "dashed" ? [10 / s, 8 / s] : undefined} />
+      ))}
+
+      {/* open polylines (curb/road_edge/barrier): an open line, no fill, no AABB box */}
+      {L.boxes && p.objects.filter((o) => o.visible && o.polyline && o.polyline.length >= 2).map((o) => (
+        <Line key={`pl${o.id}`} name={`obj:${o.id}`} points={o.polyline!.flat()} listening={p.tool === "select"}
+          stroke={classColor(o.class_id)} strokeWidth={(o.id === p.selectedId ? 2.5 : 1.5) / s}
+          hitStrokeWidth={10 / s}
+          onMouseDown={(e) => { if (p.tool === "select") { e.cancelBubble = true; p.onSelect(o.id); } }} />
+      ))}
+
+      {/* boxes (rendered around their centre so rotation is about the centre; bbox stays the AABB).
+          Polyline objects render as the open line above, not as a box.
+          Order matters for hit-testing: draw the largest boxes first so the smallest one sits on top,
+          and a click inside a dense cluster selects the tightest object rather than the big one behind
+          it. The selected box is forced to the very top so its transform handles are never occluded. */}
+      {/* Amodal boxes: the whole extent of a partly hidden object, dashed and drawn UNDER the visible
+          boxes so the solid one an annotator is editing is never obscured by it.
+          Only where somebody has judged one. Falling back to the visible box would draw a claim about
+          what is hidden that nobody made. */}
+      {L.boxes && p.objects.map((o: EdObject) => (
+        o.visible !== false && o.bbox_amodal?.length === 4 ? (
+          <Rect key={`am:${o.id}`} {...amodalRectProps(o.bbox_amodal, classColor(o.class_id), s)} />
+        ) : null
+      ))}
+
+      {L.boxes && boxOrder.map((o: EdObject) => {
+        const w = o.bbox[2] - o.bbox[0];
+        const h = o.bbox[3] - o.bbox[1];
+        const cx = o.bbox[0] + w / 2;
+        const cy = o.bbox[1] + h / 2;
+        const isSel = o.id === p.selectedId;
+        return (
+          <Rect
+            key={o.id}
+            name={`obj:${o.id}`}
+            ref={isSel ? p.selRectRef : undefined}
+            x={cx} y={cy} offsetX={w / 2} offsetY={h / 2} width={w} height={h} rotation={o.rot ?? 0}
+            stroke={classColor(o.class_id)} strokeWidth={(isSel ? 2.5 : 1.5) / s}
+            // a hit-only transparent fill makes the whole interior selectable (an unfilled Konva shape
+            // is clickable on its 1px stroke only); the wide hitStrokeWidth makes tiny boxes catchable.
+            fill="transparent"
+            hitStrokeWidth={12 / s}
+            dash={o.isNew ? [6 / s, 4 / s] : undefined}
+            draggable={isSel && canEdit}
+            onMouseDown={(e) => {
+              if (p.tool === "select") {
+                e.cancelBubble = true;
+                p.onSelect(o.id);
+              }
+            }}
+            onDragEnd={(e) => {
+              const ncx = e.target.x();
+              const ncy = e.target.y();
+              p.onUpdateBbox(o.id, [ncx - w / 2, ncy - h / 2, ncx + w / 2, ncy + h / 2]);
+            }}
+            onTransformEnd={(e) => {
+              const node = e.target as Konva.Rect;
+              const sx = node.scaleX();
+              const sy = node.scaleY();
+              node.scaleX(1);
+              node.scaleY(1);
+              const nw = w * sx;
+              const nh = h * sy;
+              const ncx = node.x();
+              const ncy = node.y();
+              const rot = ((node.rotation() % 360) + 360) % 360;
+              p.onUpdateBbox(o.id, [ncx - nw / 2, ncy - nh / 2, ncx + nw / 2, ncy + nh / 2], rot);
+            }}
+          />
+        );
+      })}
+
+      {/* Class and the model's own confidence, on the box rather than in a panel one object at a time.
+          Drawn after every box so a tag is never hidden under a neighbouring rectangle, and never
+          listening: this is a readout, and a tag that swallowed a click would make the object under it
+          unselectable. Font size divides by the scale so the text stays 11px on screen at any zoom,
+          which is also what makes the width test below meaningful. */}
+      {L.boxes && L.labels && boxOrder.map((o: EdObject) => {
+        const widthPx = (o.bbox[2] - o.bbox[0]) * s;
+        const tag = objectTag(o, widthPx);
+        if (!tag.show) return null;
+        const pad = 3 / s;
+        const fs = 11 / s;
+        return (
+          <Group key={`tag-${o.id}`} listening={false} x={o.bbox[0]} y={o.bbox[1] - fs - pad * 2}>
+            <Rect width={(tag.text.length * fs * 0.58) + pad * 2} height={fs + pad * 2}
+                  fill={tag.low ? "#F85149" : "#0B0C0EE6"} cornerRadius={2 / s} />
+            <KText x={pad} y={pad} text={tag.text} fontSize={fs} fontFamily="ui-monospace, monospace"
+                   fill={tag.low ? "#0B0C0E" : classColor(o.class_id)} />
+          </Group>
+        );
+      })}
+
+      {/* relationship connectors: a thin dashed line between the centres of two related objects */}
+      {p.relationships?.map((r) => {
+        const a = objectById.get(r.from_object_id);
+        const b = objectById.get(r.to_object_id);
+        if (!a || !b) return null;
+        const ca = [(a.bbox[0] + a.bbox[2]) / 2, (a.bbox[1] + a.bbox[3]) / 2];
+        const cb = [(b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2];
+        return <Line key={`rel-${r.from_object_id}-${r.to_object_id}-${r.kind}`} listening={false}
+          points={[ca[0], ca[1], cb[0], cb[1]]} stroke="#E3B341" strokeWidth={1 / s}
+          dash={[4 / s, 3 / s]} />;
+      })}
+
+      {/* in-image 3D cuboids: the projected wireframe of each cuboid_3d, highlighted when selected */}
+      {p.cuboids?.flatMap((c) => c.edges.map((edge, i) => {
+        const a = c.corners_uv[edge[0]];
+        const b = c.corners_uv[edge[1]];
+        if (!a || !b) return null;
+        const sel = c.object_id === p.selectedId;
+        return <Line key={`cub-${c.object_id}-${i}`} points={[a[0], a[1], b[0], b[1]]} listening={false}
+          stroke={sel ? "#FF7A2F" : "#58A6FF"} strokeWidth={(sel ? 2 : 1.25) / s} />;
+      }))}
+
+      {/* Selected object's mask vertices: drag to move, right-click to delete.
+          Only the vertices far enough apart to be aimed at. A SAM mask carries several hundred points a
+          fraction of a pixel apart, and a handle on every one buried the object under its own controls
+          and made the vertex somebody wanted unhittable among twenty overlapping neighbours. The
+          indices are the real ones, so a handle still drags its own vertex, and zooming in brings the
+          rest back. */}
+      {sel && canEdit && sel.mask.map((poly, pi) =>
+        handleIndices(poly, s).map((k) =>
+          (
+            <Circle key={`v${pi}-${k}`} x={poly[k]} y={poly[k + 1]} radius={3.5 / s}
+              fill="#0B0C0E" stroke={classColor(sel.class_id)} strokeWidth={1.5 / s} draggable
+              onDragEnd={(e) => {
+                const next = sel.mask.map((pp) => pp.slice());
+                next[pi][k] = e.target.x();
+                next[pi][k + 1] = e.target.y();
+                p.onUpdateMask(sel.id, next);
+              }}
+              onContextMenu={(e) => {
+                e.evt.preventDefault();
+                if (poly.length <= 6) return; // never below a triangle
+                const next = sel.mask.map((pp) => pp.slice());
+                next[pi].splice(k, 2);
+                p.onUpdateMask(sel.id, next);
+              }} />
+          ),
+        ),
+      )}
+
+      {/* edge midpoints: click to insert a new vertex on that edge */}
+      {sel && canEdit && sel.mask.map((poly, pi) => {
+        const n = poly.length / 2;
+        return Array.from({ length: n }, (_, j) => {
+          const ax = poly[2 * j], ay = poly[2 * j + 1];
+          const bx = poly[2 * ((j + 1) % n)], by = poly[2 * ((j + 1) % n) + 1];
+          const mx = (ax + bx) / 2, my = (ay + by) / 2;
+          return (
+            <Circle key={`mid${pi}-${j}`} x={mx} y={my} radius={2.5 / s}
+              fill="rgba(255,122,47,0.55)" stroke="#0B0C0E" strokeWidth={1 / s}
+              onClick={() => {
+                const next = sel.mask.map((pp) => pp.slice());
+                next[pi].splice(2 * j + 2, 0, mx, my);
+                p.onUpdateMask(sel.id, next);
+              }} />
+          );
+        });
+      })}
+
+      {/* SAM candidate */}
+      {p.candidate?.map((poly, i) => (
+        <Line key={`cand${i}`} points={poly} closed listening={false}
+          stroke="#56D364" strokeWidth={2 / s} fill="rgba(86,211,100,0.25)" />
+      ))}
+
+      {/* The SAM prompt: green for "this is the object", red for "this part is not".
+          Drawn above the candidate so a point never disappears under the mask it produced. */}
+      {p.samPrompt?.points.map((pt, i) => (
+        <Circle key={`sam${i}`} x={pt[0]} y={pt[1]} radius={5 / s} listening={false}
+          fill={p.samPrompt!.labels[i] === 0 ? "#F85149" : "#56D364"}
+          stroke="#0D1117" strokeWidth={1.5 / s} />
+      ))}
+
+      {/* superpixels (faint), shown while the superpixel tool is active so the annotator can click one */}
+      {p.tool === "superpixel" && p.superpixels?.map((poly, i) => (
+        <Line key={`sp${i}`} points={poly} closed listening={false}
+          stroke="rgba(88,166,255,0.5)" strokeWidth={0.75 / s} fill="rgba(88,166,255,0.06)" />
+      ))}
+
+      {/* committed keypoints: skeleton edges + dots (dots draggable when the object is selected) */}
+      {L.boxes && p.objects.filter((o) => o.visible && o.keypoints?.points?.length).map((o) => {
+        const pts = o.keypoints!.points;
+        const isSel = o.id === p.selectedId;
+        const col = classColor(o.class_id);
+        return (
+          <Group key={`kp-${o.id}`}>
+            {(p.skeletonEdges ?? []).map(([a, b], ei) => {
+              const pa = pts[a], pb = pts[b];
+              if (!pa || !pb || pa[2] <= 0 || pb[2] <= 0) return null;
+              return <Line key={`e${ei}`} points={[pa[0], pa[1], pb[0], pb[1]]} listening={false}
+                stroke={col} strokeWidth={1.5 / s} opacity={0.85} />;
+            })}
+            {pts.map((pt, ki) => (pt[2] <= 0 ? null : (
+              <Circle key={`k${ki}`} x={pt[0]} y={pt[1]} radius={3 / s}
+                fill={pt[2] === 2 ? "#56D364" : "#E3B341"} stroke="#0B0C0E" strokeWidth={1 / s}
+                draggable={isSel && canEdit}
+                onDragEnd={(e) => {
+                  const next = pts.map((q) => q.slice());
+                  next[ki] = [e.target.x(), e.target.y(), next[ki][2] || 2];
+                  p.onUpdateKeypoints(o.id, next);
+                }} />
+            )))}
+          </Group>
+        );
+      })}
+
+    </Layer>
+  );
+});
+
+// ---- interaction layer: what exists only while a gesture is in progress ------------------------------
+
+type InteractionLayerProps = {
+  objects: EdObject[];
+  tool: Tool;
+  s: number;
+  stroke: number[][] | null;
+  brushRadius: number;
+  poly: number[];
+  keypointDraft?: number[][] | null;
+  skeletonEdges?: number[][];
+  measure: Band | null;
+  mPerPx?: number;
+  marquee: (Band & { additive: boolean }) | null;
+  draw: Band | null;
+  trRef: RefObject<Konva.Transformer>;
+  readOnly?: boolean;
+};
+
+function InteractionLayer(p: InteractionLayerProps) {
+  const s = p.s;
+  const stroke = p.stroke;
+  return (
+    <Layer>
+      {/* brush/eraser stroke preview: every stamp of the stroke, traced into one shape. Exactly the
+          circles that will be committed, so a stroke the pointer outran shows its gaps here too. */}
+      {(p.tool === "brush" || p.tool === "eraser") && stroke && stroke.length > 0 && (
+        <Shape listening={false} perfectDrawEnabled={false}
+          sceneFunc={(ctx) => {
+            ctx.beginPath();
+            traceStamps(ctx, stroke, p.brushRadius);
+            ctx.fillStyle = p.tool === "eraser" ? "rgba(248,81,73,0.25)" : "rgba(86,211,100,0.25)";
+            ctx.fill();
+          }} />
+      )}
+
+      {/* in-progress manual polygon/polyline: open line + vertex dots; double-click commits */}
+      {(p.tool === "polygon" || p.tool === "polyline" || p.tool === "adverse") && p.poly.length >= 2 && (
+        <>
+          <Line points={p.poly} listening={false} stroke="#FF7A2F" strokeWidth={1.5 / s}
+            dash={[6 / s, 4 / s]} />
+          {p.poly.map((_, k) => (k % 2 === 0 ? (
+            <Circle key={`pp${k}`} x={p.poly[k]} y={p.poly[k + 1]} radius={3 / s}
+              fill="#0B0C0E" stroke="#FF7A2F" strokeWidth={1.5 / s} listening={false} />
+          ) : null))}
+        </>
+      )}
+
+      {/* in-progress pose: placed points + the skeleton edges that connect them */}
+      {p.tool === "keypoint" && p.keypointDraft && p.keypointDraft.length > 0 && (
+        <Group>
+          {(p.skeletonEdges ?? []).map(([a, b], ei) => {
+            const pa = p.keypointDraft![a], pb = p.keypointDraft![b];
+            if (!pa || !pb) return null;
+            return <Line key={`de${ei}`} points={[pa[0], pa[1], pb[0], pb[1]]} listening={false}
+              stroke="#FF7A2F" strokeWidth={1.5 / s} opacity={0.7} />;
+          })}
+          {p.keypointDraft.map((pt, ki) => (
+            <Circle key={`dk${ki}`} x={pt[0]} y={pt[1]} radius={3.5 / s} listening={false}
+              fill="#FF7A2F" stroke="#0B0C0E" strokeWidth={1 / s} />
+          ))}
+        </Group>
+      )}
+
+      {/* measure / ruler: line + distance (px, and metres on a LiDAR BEV) */}
+      {p.measure && (() => {
+        const dpx = Math.hypot(p.measure.x1 - p.measure.x0, p.measure.y1 - p.measure.y0);
+        const label = p.mPerPx ? `${(dpx * p.mPerPx).toFixed(2)} m` : `${Math.round(dpx)} px`;
+        return (
+          <Group listening={false}>
+            <Line points={[p.measure.x0, p.measure.y0, p.measure.x1, p.measure.y1]}
+              stroke="#58A6FF" strokeWidth={1.5 / s} dash={[5 / s, 4 / s]} />
+            <Circle x={p.measure.x0} y={p.measure.y0} radius={2.5 / s} fill="#58A6FF" />
+            <Circle x={p.measure.x1} y={p.measure.y1} radius={2.5 / s} fill="#58A6FF" />
+            <KText x={(p.measure.x0 + p.measure.x1) / 2 + 6 / s} y={(p.measure.y0 + p.measure.y1) / 2 - 8 / s}
+              text={label} fontSize={13 / s} fill="#58A6FF" />
+          </Group>
+        );
+      })()}
+
+      {/* the marquee itself: enclosed objects light up live, so what will be selected is visible
+          before the mouse is released rather than discovered after */}
+      {p.marquee && (() => {
+        const bx = [Math.min(p.marquee.x0, p.marquee.x1), Math.min(p.marquee.y0, p.marquee.y1),
+                    Math.max(p.marquee.x0, p.marquee.x1), Math.max(p.marquee.y0, p.marquee.y1)];
+        const inside = p.objects.filter(
+          (o) => o.visible !== false && !o.locked
+                 && o.bbox[0] >= bx[0] && o.bbox[1] >= bx[1]
+                 && o.bbox[2] <= bx[2] && o.bbox[3] <= bx[3]);
+        return (
+          <Group listening={false}>
+            <Rect x={bx[0]} y={bx[1]} width={bx[2] - bx[0]} height={bx[3] - bx[1]}
+              stroke="#58A6FF" strokeWidth={1 / s} dash={[4 / s, 3 / s]}
+              fill="rgba(88,166,255,0.08)" />
+            {inside.map((o) => (
+              <Rect key={`mq${o.id}`} x={o.bbox[0]} y={o.bbox[1]}
+                width={o.bbox[2] - o.bbox[0]} height={o.bbox[3] - o.bbox[1]}
+                stroke="#58A6FF" strokeWidth={2 / s} />
+            ))}
+            <KText x={bx[0]} y={bx[1] - 14 / s} text={`${inside.length} enclosed`}
+              fontSize={12 / s} fill="#58A6FF" />
+          </Group>
+        );
+      })()}
+
+      {/* rubber-band while drawing */}
+      {p.draw && (
+        <Rect x={Math.min(p.draw.x0, p.draw.x1)} y={Math.min(p.draw.y0, p.draw.y1)}
+          width={Math.abs(p.draw.x1 - p.draw.x0)} height={Math.abs(p.draw.y1 - p.draw.y0)} listening={false}
+          stroke={p.tool === "sam-box" ? "#56D364" : "#FF7A2F"} strokeWidth={1.5 / s}
+          dash={[6 / s, 4 / s]} />
+      )}
+
+      {p.tool === "select" && !p.readOnly && (
+        <Transformer ref={p.trRef} rotateEnabled rotationSnaps={ROTATION_SNAPS} ignoreStroke
+          borderStroke="#FF7A2F" anchorStroke="#FF7A2F" anchorFill="#0B0C0E" anchorSize={8 / s}
+          boundBoxFunc={keepMinBox} />
+      )}
+    </Layer>
+  );
+}
+
+// ---- the stage ----------------------------------------------------------------------------------------
+
+function EditorCanvas(p: Props) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  // Start at 0x0, not a guessed 800x600: the fit effect keys off `size` and runs once when scale is the
+  // fit-pending sentinel, so if it fired against a placeholder size it would fit to 800x600 and never
+  // re-fit when the real container size arrived. Zero keeps the fit guard (size.w > 1) false until the
+  // container is actually measured, so the frame fits to the true canvas.
+  const [size, setSize] = useState({ w: 0, h: 0 });
   const [img, setImg] = useState<HTMLImageElement | null>(null);
-  const [marquee, setMarquee] = useState<
-    { x0: number; y0: number; x1: number; y1: number; additive: boolean } | null>(null);
-  const [draw, setDraw] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [marquee, setMarquee] = useState<(Band & { additive: boolean }) | null>(null);
+  const [draw, setDraw] = useState<Band | null>(null);
   const [poly, setPoly] = useState<number[]>([]); // in-progress manual polygon, flattened [x,y,...]
   const [stroke, setStroke] = useState<number[][] | null>(null); // active brush/eraser stroke stamp centres
   const [segImg, setSegImg] = useState<HTMLImageElement | null>(null); // dense-segmentation overlay png
-  const [measure, setMeasure] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [measure, setMeasure] = useState<Band | null>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const trRef = useRef<Konva.Transformer>(null);
   const selRectRef = useRef<Konva.Rect>(null);
@@ -138,13 +605,21 @@ export default function EditorCanvas(p: Props) {
     return () => ro.disconnect();
   }, []);
 
-  // load image
+  // load image. The callback is read through a ref so that a new function from the page does not count
+  // as a reason to load the image again.
+  const onImageLoadRef = useRef(p.onImageLoad);
+  onImageLoadRef.current = p.onImageLoad;
   useEffect(() => {
+    let live = true;
+    const url = p.imageUrl;
     const im = new window.Image();
     im.crossOrigin = "anonymous";
-    im.src = p.imageUrl;
-    im.onload = () => setImg(im);
-    im.onerror = () => setImg(null); // a missing frame image (404) must not leave the viewport unfit
+    im.src = url;
+    // `live` because the frame can change while this one is still arriving, and a late onload would put
+    // the previous frame's pixels under the next frame's boxes.
+    im.onload = () => { if (!live) return; setImg(im); onImageLoadRef.current?.(url); };
+    im.onerror = () => { if (live) setImg(null); }; // a missing frame image (404) must not leave the viewport unfit
+    return () => { live = false; };
   }, [p.imageUrl]);
 
   // load the dense-segmentation overlay png (a separate raster drawn over the frame at reduced opacity)
@@ -159,28 +634,34 @@ export default function EditorCanvas(p: Props) {
 
   // fit from the known frame dimensions (viewport.scale === 0 is the "fit pending" sentinel). This must not
   // wait for the image to load, or a missing image leaves scale at 0 and every stroke/radius becomes Infinity.
+  const { onViewport, imgW, imgH } = p;
+  const pendingFit = p.viewport.scale === 0;
   useEffect(() => {
-    if (p.viewport.scale === 0 && size.w > 1 && p.imgW > 0 && p.imgH > 0) {
-      const s = Math.min(size.w / p.imgW, size.h / p.imgH) * 0.96;
-      p.onViewport({ scale: s, ox: (size.w - p.imgW * s) / 2, oy: (size.h - p.imgH * s) / 2 });
+    if (pendingFit && size.w > 1 && imgW > 0 && imgH > 0) {
+      const s = Math.min(size.w / imgW, size.h / imgH) * 0.96;
+      onViewport({ scale: s, ox: (size.w - imgW * s) / 2, oy: (size.h - imgH * s) / 2 });
     }
-  }, [img, size, p]);
+  }, [img, size, pendingFit, imgW, imgH, onViewport]);
 
-  // attach transformer to the selected box
+  // attach transformer to the selected box. The box is in the objects layer and the handles are in the
+  // interaction layer; a Transformer follows its node by absolute position, so the layer between them
+  // does not matter, and the handles being in the top layer is what keeps them above every object.
   useEffect(() => {
     const tr = trRef.current;
     if (!tr) return;
     if (p.tool === "select" && selRectRef.current) tr.nodes([selRectRef.current]);
     else tr.nodes([]);
     tr.getLayer()?.batchDraw();
-  }, [p.selectedId, p.tool, p.objects]);
+    // readOnly is listed because the Transformer is mounted and unmounted with it, and a freshly mounted
+    // one has no node until this runs.
+  }, [p.selectedId, p.tool, p.objects, p.layers, p.readOnly]);
 
   const v = p.viewport;
   // Screen-constant strokes/radii are sized as `px / scale`. viewport.scale === 0 is the "fit pending"
   // sentinel (see the fit effect above), so guard the divisor: a zero or non-finite scale would make every
   // strokeWidth/radius/anchorSize Infinity and flood Konva with warnings until the first fit lands.
   const s = v.scale > 0 && Number.isFinite(v.scale) ? v.scale : 1;
-  const L = p.layers ?? { boxes: true, masks: true, labels: true, lanes: true, drivable: true, adverse: true, cuboids: true, seg: true };
+  const L = p.layers ?? ALL_LAYERS;
   const toImg = (): number[] => {
     const pt = stageRef.current?.getRelativePointerPosition();
     return pt ? [pt.x, pt.y] : [0, 0];
@@ -283,9 +764,7 @@ export default function EditorCanvas(p: Props) {
       return;
     }
     if (stroke) {
-      const r = p.brushRadius ?? 12;
-      const op = p.tool === "eraser" ? "erase" : "add";
-      p.onBrushStroke(stroke.map((c) => ({ op, center: c, radius: r })));
+      p.onBrushStroke(brushOps(stroke, p.tool, p.brushRadius ?? 12));
       setStroke(null);
     }
     if (measure) {
@@ -304,8 +783,6 @@ export default function EditorCanvas(p: Props) {
     // and a drag that silently changed which box it edited would be the worst kind of surprise.
     else if (p.tool === "amodal") p.onDrawAmodal?.(box);
   }
-
-  const sel = p.objects.find((o) => o.id === p.selectedId) || null;
 
   return (
     <div ref={wrapRef} className="w-full h-full bg-bg-2 overflow-hidden"
@@ -340,351 +817,24 @@ export default function EditorCanvas(p: Props) {
           if (p.panning) p.onViewport({ ...v, ox: e.target.x(), oy: e.target.y() });
         }}
       >
-        <Layer>
-          {img && <KImage image={img} width={p.imgW} height={p.imgH} listening={false} />}
-          {/* dense-segmentation overlay (semantic/panoptic), drawn over the frame at reduced opacity */}
-          {L.seg && segImg && <KImage image={segImg} width={p.imgW} height={p.imgH} opacity={0.5} listening={false} />}
-
-          {/* drivable-area segmentation (M2.2), drawn behind everything */}
-          {L.drivable && p.drivable && Object.entries(p.drivable).flatMap(([cls, polys]) =>
-            polys.map((poly, i) => (
-              <Line key={`dr-${cls}-${i}`} points={poly} closed listening={false}
-                fill={cls === "drivable" ? "rgba(86,211,100,0.18)" : cls === "fallback" ? "rgba(227,179,65,0.18)" : "rgba(248,81,73,0.14)"}
-                stroke={cls === "drivable" ? "#56D364" : cls === "fallback" ? "#E3B341" : "#F85149"} strokeWidth={1 / s} />
-            )),
-          )}
-
-          {/* adverse-condition regions (glare/reflection/shadow/...), tinted by condition */}
-          {L.adverse && p.adverse?.map((a) => (
-            <Line key={`adv-${a.region_id}`} points={a.geometry} closed listening={false}
-              stroke={ADVERSE_COLOR[a.condition] ?? "#A0A6AD"} strokeWidth={1 / s}
-              fill={(ADVERSE_COLOR[a.condition] ?? "#A0A6AD") + "33"} />
-          ))}
-
-          {/* masks: one even-odd Shape per object, so a ring nested inside another (an erased or
-              occlusion-cut region) renders as a hole instead of a second filled blob */}
-          {L.masks && p.objects.filter((o) => o.visible && o.mask.length).map((o) => (
-            <Shape key={`m${o.id}`} listening={false}
-              sceneFunc={(ctx) => {
-                ctx.beginPath();
-                for (const poly of o.mask) {
-                  if (poly.length < 6) continue;
-                  ctx.moveTo(poly[0], poly[1]);
-                  for (let i = 2; i < poly.length; i += 2) ctx.lineTo(poly[i], poly[i + 1]);
-                  ctx.closePath();
-                }
-                ctx.fillStyle = classFill(o.class_id, o.id === p.selectedId ? 0.3 : 0.16);
-                ctx.fill("evenodd");
-                ctx.strokeStyle = classColor(o.class_id);
-                ctx.lineWidth = 1.5 / s;
-                ctx.stroke();
-              }} />
-          ))}
-
-          {/* lane splines (M2.1), drawn above masks */}
-          {L.lanes && p.lanes?.map((ln) => (
-            <Line key={ln.lane_id} points={ln.control_points.flat()} listening={false} tension={0.3}
-              stroke={ln.is_ego ? "#56D364" : ln.source === "human" ? "#FF7A2F" : ln.source === "propagated" ? "#E3B341" : "#58A6FF"}
-              strokeWidth={2.5 / s} dash={ln.lane_type === "dashed" ? [10 / s, 8 / s] : undefined} />
-          ))}
-
-          {/* open polylines (curb/road_edge/barrier): an open line, no fill, no AABB box */}
-          {L.boxes && p.objects.filter((o) => o.visible && o.polyline && o.polyline.length >= 2).map((o) => (
-            <Line key={`pl${o.id}`} name={`obj:${o.id}`} points={o.polyline!.flat()} listening={p.tool === "select"}
-              stroke={classColor(o.class_id)} strokeWidth={(o.id === p.selectedId ? 2.5 : 1.5) / s}
-              hitStrokeWidth={10 / s}
-              onMouseDown={(e) => { if (p.tool === "select") { e.cancelBubble = true; p.onSelect(o.id); } }} />
-          ))}
-
-          {/* boxes (rendered around their centre so rotation is about the centre; bbox stays the AABB).
-              Polyline objects render as the open line above, not as a box.
-              Order matters for hit-testing: draw the largest boxes first so the smallest one sits on top,
-              and a click inside a dense cluster selects the tightest object rather than the big one behind
-              it. The selected box is forced to the very top so its transform handles are never occluded. */}
-          {/* Amodal boxes: the whole extent of a partly hidden object, dashed and drawn UNDER the visible
-              boxes so the solid one an annotator is editing is never obscured by it.
-              Only where somebody has judged one. Falling back to the visible box would draw a claim about
-              what is hidden that nobody made. */}
-          {L.boxes && p.objects.map((o: EdObject) => (
-            o.visible !== false && o.bbox_amodal?.length === 4 ? (
-              <Rect key={`am:${o.id}`} {...amodalRectProps(o.bbox_amodal, classColor(o.class_id), s)} />
-            ) : null
-          ))}
-
-          {L.boxes && boxOrder.map((o: EdObject) => {
-            const w = o.bbox[2] - o.bbox[0];
-            const h = o.bbox[3] - o.bbox[1];
-            const cx = o.bbox[0] + w / 2;
-            const cy = o.bbox[1] + h / 2;
-            const isSel = o.id === p.selectedId;
-            return (
-              <Rect
-                key={o.id}
-                name={`obj:${o.id}`}
-                ref={isSel ? selRectRef : undefined}
-                x={cx} y={cy} offsetX={w / 2} offsetY={h / 2} width={w} height={h} rotation={o.rot ?? 0}
-                stroke={classColor(o.class_id)} strokeWidth={(isSel ? 2.5 : 1.5) / s}
-                // a hit-only transparent fill makes the whole interior selectable (an unfilled Konva shape
-                // is clickable on its 1px stroke only); the wide hitStrokeWidth makes tiny boxes catchable.
-                fill="transparent"
-                hitStrokeWidth={12 / s}
-                dash={o.isNew ? [6 / s, 4 / s] : undefined}
-                draggable={isSel && p.tool === "select"}
-                onMouseDown={(e) => {
-                  if (p.tool === "select") {
-                    e.cancelBubble = true;
-                    p.onSelect(o.id);
-                  }
-                }}
-                onDragEnd={(e) => {
-                  const ncx = e.target.x();
-                  const ncy = e.target.y();
-                  p.onUpdateBbox(o.id, [ncx - w / 2, ncy - h / 2, ncx + w / 2, ncy + h / 2]);
-                }}
-                onTransformEnd={(e) => {
-                  const node = e.target as Konva.Rect;
-                  const sx = node.scaleX();
-                  const sy = node.scaleY();
-                  node.scaleX(1);
-                  node.scaleY(1);
-                  const nw = w * sx;
-                  const nh = h * sy;
-                  const ncx = node.x();
-                  const ncy = node.y();
-                  const rot = ((node.rotation() % 360) + 360) % 360;
-                  p.onUpdateBbox(o.id, [ncx - nw / 2, ncy - nh / 2, ncx + nw / 2, ncy + nh / 2], rot);
-                }}
-              />
-            );
-          })}
-
-          {/* Class and the model's own confidence, on the box rather than in a panel one object at a time.
-              Drawn after every box so a tag is never hidden under a neighbouring rectangle, and never
-              listening: this is a readout, and a tag that swallowed a click would make the object under it
-              unselectable. Font size divides by the scale so the text stays 11px on screen at any zoom,
-              which is also what makes the width test below meaningful. */}
-          {L.boxes && L.labels && boxOrder.map((o: EdObject) => {
-            const widthPx = (o.bbox[2] - o.bbox[0]) * s;
-            const tag = objectTag(o, widthPx);
-            if (!tag.show) return null;
-            const pad = 3 / s;
-            const fs = 11 / s;
-            return (
-              <Group key={`tag-${o.id}`} listening={false} x={o.bbox[0]} y={o.bbox[1] - fs - pad * 2}>
-                <Rect width={(tag.text.length * fs * 0.58) + pad * 2} height={fs + pad * 2}
-                      fill={tag.low ? "#F85149" : "#0B0C0EE6"} cornerRadius={2 / s} />
-                <KText x={pad} y={pad} text={tag.text} fontSize={fs} fontFamily="ui-monospace, monospace"
-                       fill={tag.low ? "#0B0C0E" : classColor(o.class_id)} />
-              </Group>
-            );
-          })}
-
-          {/* relationship connectors: a thin dashed line between the centres of two related objects */}
-          {p.relationships?.map((r) => {
-            const a = objectById.get(r.from_object_id);
-            const b = objectById.get(r.to_object_id);
-            if (!a || !b) return null;
-            const ca = [(a.bbox[0] + a.bbox[2]) / 2, (a.bbox[1] + a.bbox[3]) / 2];
-            const cb = [(b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2];
-            return <Line key={`rel-${r.from_object_id}-${r.to_object_id}-${r.kind}`} listening={false}
-              points={[ca[0], ca[1], cb[0], cb[1]]} stroke="#E3B341" strokeWidth={1 / s}
-              dash={[4 / s, 3 / s]} />;
-          })}
-
-          {/* in-image 3D cuboids: the projected wireframe of each cuboid_3d, highlighted when selected */}
-          {p.cuboids?.flatMap((c) => c.edges.map((edge, i) => {
-            const a = c.corners_uv[edge[0]];
-            const b = c.corners_uv[edge[1]];
-            if (!a || !b) return null;
-            const sel = c.object_id === p.selectedId;
-            return <Line key={`cub-${c.object_id}-${i}`} points={[a[0], a[1], b[0], b[1]]} listening={false}
-              stroke={sel ? "#FF7A2F" : "#58A6FF"} strokeWidth={(sel ? 2 : 1.25) / s} />;
-          }))}
-
-          {/* Selected object's mask vertices: drag to move, right-click to delete.
-              Only the vertices far enough apart to be aimed at. A SAM mask carries several hundred points a
-              fraction of a pixel apart, and a handle on every one buried the object under its own controls
-              and made the vertex somebody wanted unhittable among twenty overlapping neighbours. The
-              indices are the real ones, so a handle still drags its own vertex, and zooming in brings the
-              rest back. */}
-          {sel && p.tool === "select" && sel.mask.map((poly, pi) =>
-            handleIndices(poly, s).map((k) =>
-              (
-                <Circle key={`v${pi}-${k}`} x={poly[k]} y={poly[k + 1]} radius={3.5 / s}
-                  fill="#0B0C0E" stroke={classColor(sel.class_id)} strokeWidth={1.5 / s} draggable
-                  onDragEnd={(e) => {
-                    const next = sel.mask.map((pp) => pp.slice());
-                    next[pi][k] = e.target.x();
-                    next[pi][k + 1] = e.target.y();
-                    p.onUpdateMask(sel.id, next);
-                  }}
-                  onContextMenu={(e) => {
-                    e.evt.preventDefault();
-                    if (poly.length <= 6) return; // never below a triangle
-                    const next = sel.mask.map((pp) => pp.slice());
-                    next[pi].splice(k, 2);
-                    p.onUpdateMask(sel.id, next);
-                  }} />
-              ),
-            ),
-          )}
-
-          {/* edge midpoints: click to insert a new vertex on that edge */}
-          {sel && p.tool === "select" && sel.mask.map((poly, pi) => {
-            const n = poly.length / 2;
-            return Array.from({ length: n }, (_, j) => {
-              const ax = poly[2 * j], ay = poly[2 * j + 1];
-              const bx = poly[2 * ((j + 1) % n)], by = poly[2 * ((j + 1) % n) + 1];
-              const mx = (ax + bx) / 2, my = (ay + by) / 2;
-              return (
-                <Circle key={`mid${pi}-${j}`} x={mx} y={my} radius={2.5 / s}
-                  fill="rgba(255,122,47,0.55)" stroke="#0B0C0E" strokeWidth={1 / s}
-                  onClick={() => {
-                    const next = sel.mask.map((pp) => pp.slice());
-                    next[pi].splice(2 * j + 2, 0, mx, my);
-                    p.onUpdateMask(sel.id, next);
-                  }} />
-              );
-            });
-          })}
-
-          {/* SAM candidate */}
-          {p.candidate?.map((poly, i) => (
-            <Line key={`cand${i}`} points={poly} closed listening={false}
-              stroke="#56D364" strokeWidth={2 / s} fill="rgba(86,211,100,0.25)" />
-          ))}
-
-          {/* The SAM prompt: green for "this is the object", red for "this part is not".
-              Drawn above the candidate so a point never disappears under the mask it produced. */}
-          {p.samPrompt?.points.map((pt, i) => (
-            <Circle key={`sam${i}`} x={pt[0]} y={pt[1]} radius={5 / s} listening={false}
-              fill={p.samPrompt!.labels[i] === 0 ? "#F85149" : "#56D364"}
-              stroke="#0D1117" strokeWidth={1.5 / s} />
-          ))}
-
-          {/* superpixels (faint), shown while the superpixel tool is active so the annotator can click one */}
-          {p.tool === "superpixel" && p.superpixels?.map((poly, i) => (
-            <Line key={`sp${i}`} points={poly} closed listening={false}
-              stroke="rgba(88,166,255,0.5)" strokeWidth={0.75 / s} fill="rgba(88,166,255,0.06)" />
-          ))}
-
-          {/* brush/eraser stroke preview: a stamp circle per sampled point along the stroke */}
-          {(p.tool === "brush" || p.tool === "eraser") && stroke?.map((c, i) => (
-            <Circle key={`bs${i}`} x={c[0]} y={c[1]} radius={p.brushRadius ?? 12} listening={false}
-              fill={p.tool === "eraser" ? "rgba(248,81,73,0.25)" : "rgba(86,211,100,0.25)"} />
-          ))}
-
-          {/* in-progress manual polygon/polyline: open line + vertex dots; double-click commits */}
-          {(p.tool === "polygon" || p.tool === "polyline" || p.tool === "adverse") && poly.length >= 2 && (
-            <>
-              <Line points={poly} listening={false} stroke="#FF7A2F" strokeWidth={1.5 / s}
-                dash={[6 / s, 4 / s]} />
-              {poly.map((_, k) => (k % 2 === 0 ? (
-                <Circle key={`pp${k}`} x={poly[k]} y={poly[k + 1]} radius={3 / s}
-                  fill="#0B0C0E" stroke="#FF7A2F" strokeWidth={1.5 / s} listening={false} />
-              ) : null))}
-            </>
-          )}
-
-          {/* committed keypoints: skeleton edges + dots (dots draggable when the object is selected) */}
-          {L.boxes && p.objects.filter((o) => o.visible && o.keypoints?.points?.length).map((o) => {
-            const pts = o.keypoints!.points;
-            const isSel = o.id === p.selectedId;
-            const col = classColor(o.class_id);
-            return (
-              <Group key={`kp-${o.id}`}>
-                {(p.skeletonEdges ?? []).map(([a, b], ei) => {
-                  const pa = pts[a], pb = pts[b];
-                  if (!pa || !pb || pa[2] <= 0 || pb[2] <= 0) return null;
-                  return <Line key={`e${ei}`} points={[pa[0], pa[1], pb[0], pb[1]]} listening={false}
-                    stroke={col} strokeWidth={1.5 / s} opacity={0.85} />;
-                })}
-                {pts.map((pt, ki) => (pt[2] <= 0 ? null : (
-                  <Circle key={`k${ki}`} x={pt[0]} y={pt[1]} radius={3 / s}
-                    fill={pt[2] === 2 ? "#56D364" : "#E3B341"} stroke="#0B0C0E" strokeWidth={1 / s}
-                    draggable={isSel && p.tool === "select"}
-                    onDragEnd={(e) => {
-                      const next = pts.map((q) => q.slice());
-                      next[ki] = [e.target.x(), e.target.y(), next[ki][2] || 2];
-                      p.onUpdateKeypoints(o.id, next);
-                    }} />
-                )))}
-              </Group>
-            );
-          })}
-
-          {/* in-progress pose: placed points + the skeleton edges that connect them */}
-          {p.tool === "keypoint" && p.keypointDraft && p.keypointDraft.length > 0 && (
-            <Group>
-              {(p.skeletonEdges ?? []).map(([a, b], ei) => {
-                const pa = p.keypointDraft![a], pb = p.keypointDraft![b];
-                if (!pa || !pb) return null;
-                return <Line key={`de${ei}`} points={[pa[0], pa[1], pb[0], pb[1]]} listening={false}
-                  stroke="#FF7A2F" strokeWidth={1.5 / s} opacity={0.7} />;
-              })}
-              {p.keypointDraft.map((pt, ki) => (
-                <Circle key={`dk${ki}`} x={pt[0]} y={pt[1]} radius={3.5 / s} listening={false}
-                  fill="#FF7A2F" stroke="#0B0C0E" strokeWidth={1 / s} />
-              ))}
-            </Group>
-          )}
-
-          {/* measure / ruler: line + distance (px, and metres on a LiDAR BEV) */}
-          {measure && (() => {
-            const dpx = Math.hypot(measure.x1 - measure.x0, measure.y1 - measure.y0);
-            const label = p.mPerPx ? `${(dpx * p.mPerPx).toFixed(2)} m` : `${Math.round(dpx)} px`;
-            return (
-              <Group listening={false}>
-                <Line points={[measure.x0, measure.y0, measure.x1, measure.y1]}
-                  stroke="#58A6FF" strokeWidth={1.5 / s} dash={[5 / s, 4 / s]} />
-                <Circle x={measure.x0} y={measure.y0} radius={2.5 / s} fill="#58A6FF" />
-                <Circle x={measure.x1} y={measure.y1} radius={2.5 / s} fill="#58A6FF" />
-                <KText x={(measure.x0 + measure.x1) / 2 + 6 / s} y={(measure.y0 + measure.y1) / 2 - 8 / s}
-                  text={label} fontSize={13 / s} fill="#58A6FF" />
-              </Group>
-            );
-          })()}
-
-          {/* the marquee itself: enclosed objects light up live, so what will be selected is visible
-              before the mouse is released rather than discovered after */}
-          {marquee && (() => {
-            const bx = [Math.min(marquee.x0, marquee.x1), Math.min(marquee.y0, marquee.y1),
-                        Math.max(marquee.x0, marquee.x1), Math.max(marquee.y0, marquee.y1)];
-            const inside = p.objects.filter(
-              (o) => o.visible !== false && !o.locked
-                     && o.bbox[0] >= bx[0] && o.bbox[1] >= bx[1]
-                     && o.bbox[2] <= bx[2] && o.bbox[3] <= bx[3]);
-            return (
-              <Group listening={false}>
-                <Rect x={bx[0]} y={bx[1]} width={bx[2] - bx[0]} height={bx[3] - bx[1]}
-                  stroke="#58A6FF" strokeWidth={1 / s} dash={[4 / s, 3 / s]}
-                  fill="rgba(88,166,255,0.08)" />
-                {inside.map((o) => (
-                  <Rect key={`mq${o.id}`} x={o.bbox[0]} y={o.bbox[1]}
-                    width={o.bbox[2] - o.bbox[0]} height={o.bbox[3] - o.bbox[1]}
-                    stroke="#58A6FF" strokeWidth={2 / s} />
-                ))}
-                <KText x={bx[0]} y={bx[1] - 14 / s} text={`${inside.length} enclosed`}
-                  fontSize={12 / s} fill="#58A6FF" />
-              </Group>
-            );
-          })()}
-
-          {/* rubber-band while drawing */}
-          {draw && (
-            <Rect x={Math.min(draw.x0, draw.x1)} y={Math.min(draw.y0, draw.y1)}
-              width={Math.abs(draw.x1 - draw.x0)} height={Math.abs(draw.y1 - draw.y0)} listening={false}
-              stroke={p.tool === "sam-box" ? "#56D364" : "#FF7A2F"} strokeWidth={1.5 / s}
-              dash={[6 / s, 4 / s]} />
-          )}
-
-          {p.tool === "select" && (
-            <Transformer ref={trRef} rotateEnabled rotationSnaps={[0, 90, 180, 270]} ignoreStroke
-              borderStroke="#FF7A2F" anchorStroke="#FF7A2F" anchorFill="#0B0C0E" anchorSize={8 / s}
-              boundBoxFunc={(oldB, newB) => (newB.width < 4 || newB.height < 4 ? oldB : newB)} />
-          )}
-        </Layer>
+        <StaticLayer img={img} segImg={L.seg ? segImg : null} imgW={p.imgW} imgH={p.imgH} s={s}
+          drivable={L.drivable ? p.drivable : null} adverse={L.adverse ? p.adverse : undefined} />
+        <ObjectsLayer objects={p.objects} selectedId={p.selectedId} tool={p.tool} s={s} layers={L}
+          lanes={p.lanes} relationships={p.relationships} cuboids={p.cuboids}
+          candidate={p.candidate} samPrompt={p.samPrompt} superpixels={p.superpixels}
+          skeletonEdges={p.skeletonEdges} selRectRef={selRectRef} readOnly={p.readOnly}
+          onSelect={p.onSelect} onUpdateBbox={p.onUpdateBbox} onUpdateMask={p.onUpdateMask}
+          onUpdateKeypoints={p.onUpdateKeypoints} />
+        <InteractionLayer objects={p.objects} tool={p.tool} s={s}
+          stroke={stroke} brushRadius={p.brushRadius ?? 12} poly={poly}
+          keypointDraft={p.keypointDraft} skeletonEdges={p.skeletonEdges}
+          measure={measure} mPerPx={p.mPerPx} marquee={marquee} draw={draw} trRef={trRef}
+          readOnly={p.readOnly} />
       </Stage>
     </div>
   );
 }
+
+// Memoized: the page above re-renders for a flash message, a poll result, a panel opening. None of those
+// change a prop here, and the page keeps the handlers it passes stable so that this comparison can hold.
+export default memo(EditorCanvas);

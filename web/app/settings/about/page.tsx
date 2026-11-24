@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
 import { apiGet } from "@/lib/api";
+import { useQuery } from "@/lib/useQuery";
 
 // What is running, where its source is, and which licences reach it. The AGPL components (Ultralytics,
 // cleanlab, MinIO) require that people using a modified version over a network can get its source, so the
@@ -17,15 +16,13 @@ type About = {
 };
 
 export default function AboutPage() {
-  const [about, setAbout] = useState<About | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  const load = () => { setError(null); apiGet<About>("/api/system/about").then(setAbout).catch(setError); };
-  useEffect(load, []);
+  const aboutQ = useQuery(["/api/system/about"], () => apiGet<About>("/api/system/about"));
+  const about: About | null = aboutQ.data ?? null;
 
   return (
     <PageShell active="About" title="About" subtitle="version, source and licences">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 flex flex-col gap-5">
-        <LoadState loading={!about && !error} error={error} onRetry={load} />
+        <LoadState {...aboutQ.loadState} />
         {about && (
           <>
             <section className="panel p-5 grid gap-x-6 gap-y-3 sm:grid-cols-[max-content_1fr] text-[13px]">

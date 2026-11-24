@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useState } from "react";
+import { T } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
 import { toastError } from "@/lib/toast";
@@ -10,6 +11,8 @@ import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
 import ScoreBar from "@/components/shell/ScoreBar";
 import { ConfBar } from "@/components/StateBadge";
+import { invalidate, useQuery } from "@/lib/useQuery";
+import { REVIEW_QUEUE_KEY } from "@/lib/queryKeys";
 
 const ExplainPanel = dynamic(() => import("@/components/ExplainPanel"), { ssr: false });
 
@@ -20,52 +23,37 @@ const ExplainPanel = dynamic(() => import("@/components/ExplainPanel"), { ssr: f
 export default function ReviewQueuePage() {
   const router = useRouter();
   const [tab, setTab] = useState<"value" | "errors" | "recall" | "control">("value");
-  const [items, setItems] = useState<AlItem[]>([]);
-  const [errs, setErrs] = useState<ErrorCandidateRow[]>([]);
+  // The six reads behind the four tabs are fetched and replaced together, all or nothing: the tab counts
+  // are read against each other, and a half-refreshed set would have one tab describing a newer queue
+  // than the next. Cached, so returning here from a frame shows the queue while it refreshes.
+  const q = useQuery([REVIEW_QUEUE_KEY],
+    () => Promise.all([
+      api.alScore(undefined, 60), api.errorCandidates("pending", 80),
+      api.recallCandidates("pending", 100), api.recallProgress(),
+      api.controlPending(100), api.governPrecision(),
+    ]));
+  const [al, ec, rc, rp, cs, pr] = q.data ?? [];
+  const items: AlItem[] = al?.items ?? [];
+  const errs: ErrorCandidateRow[] = ec ?? [];
   // Objects the detector missed entirely, found by a track gap, an open-vocabulary hit or a region
   // proposal. These have always been mined and never been rulable, which is why the per-channel reliability
   // fit read an empty set and the priors stayed guesses.
-  const [recall, setRecall] = useState<Awaited<ReturnType<typeof api.recallCandidates>>["candidates"]>([]);
-  const [recallProg, setRecallProg] =
-    useState<Awaited<ReturnType<typeof api.recallProgress>> | null>(null);
+  const recall = rc?.candidates ?? [];
+  const recallProg = rp ?? null;
   // The gate's own auto-accepts, mirrored into an always-reviewed stream. The fraction judged incorrect is
   // the measured precision the drift detector watches; 601 were seeded and none had ever been judged,
   // because nothing listed them.
-  const [control, setControl] = useState<Awaited<ReturnType<typeof api.controlPending>>["samples"]>([]);
-  const [precision, setPrecision] =
-    useState<Awaited<ReturnType<typeof api.governPrecision>> | null>(null);
+  const control = cs?.samples ?? [];
+  const precision = pr ?? null;
   const [msg, setMsg] = useState<string | null>(null);
   const [whyOpen, setWhyOpen] = useState<string | null>(null);  // M-F.0 expanded rationale row
-  const [err, setErr] = useState<unknown>(null);
   const [sortQ, setSortQ] = useState(false);  // M-F.1 sort the value queue by lowest label quality first
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setErr(null);
-    try {
-      const [al, ec, rc, rp, cs, pr] = await Promise.all([
-        api.alScore(undefined, 60), api.errorCandidates("pending", 80),
-        api.recallCandidates("pending", 100), api.recallProgress(),
-        api.controlPending(100), api.governPrecision(),
-      ]);
-      setItems(al.items);
-      setErrs(ec);
-      setRecall(rc.candidates);
-      setRecallProg(rp);
-      setControl(cs.samples);
-      setPrecision(pr);
-    } catch (e) {
-      // There was a finally and no catch, so a failed fetch left the table empty and silent. An empty
-      // review queue is a meaningful state here (the shift is done) and must not be what a dropped request
-      // looks like.
-      setErr(e);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+  const loading = q.validating;
+  // There was a finally and no catch, so a failed fetch left the table empty and silent. An empty
+  // review queue is a meaningful state here (the shift is done) and must not be what a dropped request
+  // looks like. A request in flight supersedes the last failure.
+  const err = q.validating ? null : q.error ?? null;
+  const load = q.reload;
 
   // Every verdict below goes through this. The read path already surfaces its failures; these five did
   // not, so a rejected verdict was an unhandled promise: the row stayed exactly where it was, nothing
@@ -80,6 +68,8 @@ export default function ReviewQueuePage() {
       return;
     }
     await load();
+    // A verdict here moves rows in the error-candidate grid, the review queues and home's waiting count.
+    void invalidate("errorPrecision", "triage", "/api/home");
   }, [load]);
 
   const confirm = (id: string) =>
@@ -183,8 +173,8 @@ export default function ReviewQueuePage() {
                   <td className="text-info">{e.proposed_label?.class_name || "(review)"}</td>
                   <td className="text-ink-3 truncate max-w-[280px]">{JSON.stringify(e.detail)}</td>
                   <td className="text-right pr-2 space-x-2">
-                    <button onClick={() => confirm(e.candidate_id)} className="text-block hover:text-accent">confirm</button>
-                    <button onClick={() => dismiss(e.candidate_id)} className="text-ink-3 hover:text-ink">dismiss</button>
+                    <button onClick={() => confirm(e.candidate_id)} className="text-block hover:text-accent"><T k="action.confirm_short">confirm</T></button>
+                    <button onClick={() => dismiss(e.candidate_id)} className="text-ink-3 hover:text-ink"><T k="action.dismiss">dismiss</T></button>
                   </td>
                 </tr>
               ))}
@@ -222,10 +212,10 @@ export default function ReviewQueuePage() {
                     <td className="text-right pr-2 space-x-2">
                       <button onClick={() => ruleRecall(c.candidate_id, "confirmed")}
                         title="a real object the detector missed; route it to the review queue"
-                        className="text-pass hover:text-accent">confirm</button>
+                        className="text-pass hover:text-accent"><T k="action.confirm_short">confirm</T></button>
                       <button onClick={() => ruleRecall(c.candidate_id, "rejected")}
                         title="a bad suggestion; the object is left alone"
-                        className="text-ink-3 hover:text-ink">reject</button>
+                        className="text-ink-3 hover:text-ink"><T k="action.reject">reject</T></button>
                     </td>
                   </tr>
                 ))}

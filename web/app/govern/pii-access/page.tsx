@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { toast } from "@/lib/toast";
+import { useQuery } from "@/lib/useQuery";
 import type { PiiAccessRow } from "@/lib/types";
 
 // Who looked at personal data.
@@ -17,34 +18,34 @@ import type { PiiAccessRow } from "@/lib/types";
 
 const WINDOWS: [string, number][] = [["24h", 24], ["week", 168], ["month", 720], ["quarter", 2160]];
 
+const NO_ROWS: PiiAccessRow[] = [];
+
 export default function PiiAccessPage() {
-  const [rows, setRows] = useState<PiiAccessRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [summary, setSummary] = useState<Awaited<ReturnType<typeof api.piiAccessSummary>> | null>(null);
   const [hours, setHours] = useState(168);
   const [action, setAction] = useState("");
   const [subject, setSubject] = useState("");
   const [denied, setDenied] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const [list, sum] = await Promise.all([
-        api.piiAccess({ since_hours: hours, action: action || undefined,
-                        subject_id: subject.trim() || undefined, limit: 300 }),
-        api.piiAccessSummary(hours),
-      ]);
-      setRows(list.accesses);
-      setTotal(list.total);
-      setSummary(sum);
-      setDenied(false);
-    } catch (e) {
-      const msg = humanizeError(e);
-      if (msg.toLowerCase().includes("admin") || msg.includes("403")) setDenied(true);
-      else toast(msg, "error");
-    }
-  }, [hours, action, subject]);
+  // keepPrevious: changing a filter leaves the last rows up until the new ones arrive.
+  const listArgs = { since_hours: hours, action: action || undefined,
+                     subject_id: subject.trim() || undefined, limit: 300 };
+  const listQ = useQuery(["piiAccess", listArgs], () => api.piiAccess(listArgs), { keepPrevious: true });
+  const sumQ = useQuery(["piiAccessSummary", hours], () => api.piiAccessSummary(hours), { keepPrevious: true });
+  const rows: PiiAccessRow[] = listQ.data?.accesses ?? NO_ROWS;
+  const total = listQ.data?.total ?? 0;
+  const summary = sumQ.data ?? null;
 
-  useEffect(() => { load(); }, [load]);
+  // A refusal is a state of the page, anything else is announced. `denied` clears only when a read
+  // succeeds, so it does not flicker off while a changed filter is being refused again.
+  const failure = listQ.error ?? sumQ.error;
+  useEffect(() => {
+    if (!failure) return;
+    const msg = humanizeError(failure);
+    if (msg.toLowerCase().includes("admin") || msg.includes("403")) setDenied(true);
+    else toast(msg, "error");
+  }, [failure]);
+  const settled = !failure && !listQ.validating && !sumQ.validating && Boolean(listQ.data) && Boolean(sumQ.data);
+  useEffect(() => { if (settled) setDenied(false); }, [settled]);
 
   return (
     <PageShell active="PII ACCESS" title="PII access log"

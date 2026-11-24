@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { toast } from "@/lib/toast";
+import { useQuery } from "@/lib/useQuery";
 import { getUser } from "@/lib/user";
 import type { ActivityEvent, ActivitySummary } from "@/lib/types";
 
@@ -28,10 +29,9 @@ function ago(iso: string | null): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+const NO_EVENTS: ActivityEvent[] = [];
+
 export default function ActivityPage() {
-  const [events, setEvents] = useState<ActivityEvent[]>([]);
-  const [total, setTotal] = useState(0);
-  const [summary, setSummary] = useState<ActivitySummary | null>(null);
   const [mine, setMine] = useState(true);
   const [hours, setHours] = useState(24);
   const [verb, setVerb] = useState("");
@@ -43,19 +43,16 @@ export default function ActivityPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  const load = useCallback(async () => {
-    try {
-      const [feed, sum] = await Promise.all([
-        api.activity({ mine, since_hours: hours, verb: verb || undefined, limit: 200 }),
-        api.activitySummary(hours, mine),
-      ]);
-      setEvents(feed.events);
-      setTotal(feed.total);
-      setSummary(sum);
-    } catch (e) { toast(humanizeError(e), "error"); }
-  }, [mine, hours, verb]);
-
-  useEffect(() => { load(); }, [load]);
+  // keepPrevious: changing a filter leaves the last feed up until the new one arrives.
+  const feedArgs = { mine, since_hours: hours, verb: verb || undefined, limit: 200 };
+  const feedQ = useQuery(["activity", feedArgs], () => api.activity(feedArgs), { keepPrevious: true });
+  const sumQ = useQuery(["activitySummary", hours, mine], () => api.activitySummary(hours, mine),
+    { keepPrevious: true });
+  const events: ActivityEvent[] = feedQ.data?.events ?? NO_EVENTS;
+  const total = feedQ.data?.total ?? 0;
+  const summary: ActivitySummary | null = sumQ.data ?? null;
+  const failure = feedQ.error ?? sumQ.error;
+  useEffect(() => { if (failure) toast(humanizeError(failure), "error"); }, [failure]);
 
   return (
     <PageShell

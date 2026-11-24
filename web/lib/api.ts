@@ -137,6 +137,7 @@ export type { ReanalyzeResult, ReanalyzeFinding } from "./types";
 
 // Same-origin: next.config rewrites /api/* to the FastAPI backend. Every request carries the current
 // user (X-Lbx-User-Id) for attribution.
+import type { Result } from "./api.generated";
 import { userHeaders, refreshTokenIfNeeded } from "./user";
 import { begin, end } from "./progress";
 import { toast } from "./toast";
@@ -447,6 +448,9 @@ export async function lidarCloudPoints(
   };
 }
 
+/** An object as a review leaves it, exactly as the server declares the response. */
+export type ReviewResult = Result<"POST /api/objects/{object_id}/review">;
+
 export const api = {
   // Measured precision for one batch operation. Throws on 404, which is the unmeasured state and is a real
   // answer rather than an error to swallow silently.
@@ -702,7 +706,10 @@ export const api = {
     body: { class_name: string; bbox: number[]; attrs?: Record<string, unknown>; mask_polygons?: number[][]; state?: string; idem_key?: string; rot_deg?: number; keypoints?: Keypoints | null; polyline?: number[][]; cuboid_3d?: { center: number[]; size: number[]; yaw: number }; bbox_amodal?: number[]; job_id?: string },
   ) => post<ObjectDetail>(`/api/frames/${frame_id}/objects`, body),
   updateMask: (object_id: string, polygons: number[][], width?: number, height?: number) =>
-    put<{ object_id: string; version: number }>(`/api/objects/${object_id}/mask`, { polygons, width, height }),
+    // `mask_polygons` is the outline as stored, after the server simplified it, which can differ from the
+    // one sent.
+    put<{ object_id: string; mask_polygons: number[][]; version: number }>(
+      `/api/objects/${object_id}/mask`, { polygons, width, height }),
   deleteObject: (object_id: string) => del<{ deleted: string }>(`/api/objects/${object_id}`),
   // object relationships / grouping (rider_of, towed_by, part_of, member_of, occludes)
   relateObject: (object_id: string, body: { to_object_id: string; kind: string }) =>
@@ -1496,7 +1503,11 @@ export const api = {
       bbox_amodal?: number[];
       cuboid_3d?: { center: number[]; size: number[]; yaw: number };
     },
-  ) => post<ObjectDetail & { version?: number; rot_deg?: number }>(`/api/objects/${id}/review`, payload),
+  // What the server declares it returns: eleven fields about the object after the write. Not an
+  // ObjectDetail (no frame, no image url, no mask, no confidence), which this was typed as until the
+  // generated types showed the difference; a caller that wants the whole object merges this onto the one
+  // it already has (see mergeReview in components/inspect/EvidencePanel.tsx).
+  ) => post<ReviewResult>(`/api/objects/${id}/review`, payload),
   scenarios: (params: Record<string, string>) =>
     get<Scenario[]>("/api/scenarios?" + new URLSearchParams(params).toString()),
   scenarioSearch: (q: string, semantic = false) =>

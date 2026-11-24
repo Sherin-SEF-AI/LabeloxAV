@@ -12,6 +12,7 @@ import {
 import { toast } from "@/lib/toast";
 import { describeScope, triageQuery } from "@/lib/triageScope";
 import { acceptState, useCurrentUser } from "@/lib/user";
+import { invalidate } from "@/lib/useQuery";
 import type { TriageRow } from "@/lib/types";
 
 // Crop-grid review: many crops on screen, one keystroke each.
@@ -66,6 +67,11 @@ function Grid() {
   const scopeLabel = describeScope(params);
 
   // Load the queue, then one sheet for the page of tiles on screen.
+  //
+  // Neither goes through the query cache, on purpose. The queue is consumed by position, so painting the
+  // last visit's rows and swapping the fresh ones in behind them would move tiles under a verdict. And
+  // the sheet is a new image for every set of ids, which a cache with no eviction would keep for the
+  // whole shift.
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -135,6 +141,8 @@ function Grid() {
         // zero would quietly corrupt every throughput and cost-per-label number built on it.
         { time_spent_ms: elapsed },
       );
+      // These objects have left the queues other pages cache, and home's waiting count with them.
+      void invalidate("triage", "/api/home");
       const lost = (res.skipped_stale?.length ?? 0) + (res.skipped_missing?.length ?? 0);
       if (lost) {
         toast(`${res.updated} applied, ${lost} skipped (changed or gone since this grid loaded)`, "error");

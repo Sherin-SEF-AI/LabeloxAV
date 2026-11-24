@@ -6,6 +6,7 @@ import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { watchAutolabelJob, watchImportJob } from "@/lib/useEventStream";
 import { type QueueItem, humanSize, shouldAutoOpen, summarize } from "@/lib/uploadQueue";
+import { pressable } from "@/components/ui/pressable";
 import {
   clearUploads,
   enqueue,
@@ -16,6 +17,7 @@ import {
 } from "@/lib/uploadManager";
 import { importedSessions } from "@/lib/uploadQueue";
 import ImportedPanel from "@/components/annotate/ImportedPanel";
+import { T } from "@/lib/i18n";
 
 // New Annotation: upload clips, a folder of them, or an mcap; import each into its own session, then jump
 // into the editor when there was exactly one. The bytes go browser -> storage via presigned multipart; the
@@ -97,7 +99,7 @@ function Row({ item, index, onOpen }: { item: QueueItem; index: number; onOpen: 
         // exists to prevent, left in a second place. It opens a panel beside the queue instead.
         <button onClick={() => onOpen(item)}
           className="text-[11px] text-accent hover:underline shrink-0">
-          open
+          <T k="action.open">open</T>
         </button>
       )}
       {item.detail && item.status === "error" && (
@@ -193,7 +195,7 @@ export default function NewAnnotationPage() {
             right={items.length ? (
               <button onClick={() => { clearUploads(); setSkipped([]); setDuplicates(0); setOpened(null); }}
                 disabled={running}
-                className="text-[11px] text-ink-3 hover:text-ink disabled:opacity-40">clear</button>
+                className="text-[11px] text-ink-3 hover:text-ink disabled:opacity-40"><T k="action.clear">clear</T></button>
             ) : null}
           >
             {/* Outside the dropzone, deliberately. These were inside it, and calling .click() on one
@@ -212,10 +214,10 @@ export default function NewAnnotationPage() {
               {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
               onChange={(e) => take(e.target.files)} />
             <div
+              {...pressable(() => fileRef.current?.click(), { disabled: running })}
               onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
               onDragLeave={() => setDrag(false)}
               onDrop={(e) => { e.preventDefault(); setDrag(false); if (!running) take(e.dataTransfer.files); }}
-              onClick={() => !running && fileRef.current?.click()}
               className={`border border-dashed rounded p-8 text-center cursor-pointer text-[12.5px] transition-all duration-150
                 ${drag ? "border-accent bg-accent/5 text-ink scale-[1.01]" : "border-line text-ink-3 hover:border-ink-3"}`}>
               {items.length ? (

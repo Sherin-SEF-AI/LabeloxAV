@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import PageShell from "@/components/shell/PageShell";
 import Icon from "@/components/shell/Icon";
 import LoadState from "@/components/shell/LoadState";
+import LocalePicker from "@/components/shell/LocalePicker";
+import ThemePicker from "@/components/shell/ThemePicker";
 import { apiGet } from "@/lib/api";
+import { useQuery } from "@/lib/useQuery";
 import { LABS_EVENT, LABS_PREF, readPref, setLabs } from "@/lib/prefs";
 import { NAV } from "@/lib/sidebar";
 import { useCurrentUser } from "@/lib/user";
@@ -50,25 +53,17 @@ function Card({ title, description, children, action }: {
 
 function SystemStatus() {
   const user = useCurrentUser();
-  const [data, setData] = useState<Checks | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  const [loading, setLoading] = useState(true);
+  // Shared with the home page's "needs attention" card, which reads the same checks.
+  const checksQ = useQuery(["/api/system/checks"], () => apiGet<Checks>("/api/system/checks"));
+  const data: Checks | null = checksQ.data ?? null;
+  // True during any check, the first or a "Check again".
+  const loading = checksQ.validating;
+  const error = checksQ.validating ? null : checksQ.error ?? null;
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setData(await apiGet<Checks>("/api/system/checks"));
-      setCheckedAt(new Date());
-    } catch (e) {
-      setError(e);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
+  // Stamped when a check comes back good, not when a cached answer is shown.
+  const checked = !checksQ.validating && !checksQ.error && checksQ.data !== undefined;
+  useEffect(() => { if (checked) setCheckedAt(new Date()); }, [checked]);
+  const load = checksQ.reload;
 
   if (user && user.role !== "admin") {
     return (
@@ -147,7 +142,7 @@ function Preferences() {
     <Card title="Preferences" description="How this browser shows the app. Saved in this browser only.">
       <label className="flex items-start gap-3 cursor-pointer">
         <input type="checkbox" checked={labs} onChange={(e) => { setLabs(e.target.checked); setLabsState(e.target.checked); }}
-          className="mt-0.5 h-4 w-4 accent-[#2f6fd6]" />
+          className="mt-0.5 h-4 w-4 accent-primary" />
         <span>
           <span className="block text-[13px] text-ink">Show Labs in the sidebar</span>
           <span className="block text-[12.5px] text-ink-3 max-w-[65ch]">
@@ -157,6 +152,11 @@ function Preferences() {
           </span>
         </span>
       </label>
+      {/* Also in the account menu on every page; here because this is where a person looks for a setting. */}
+      <div className="mt-4 pt-4 border-t hairline flex flex-col gap-3">
+        <LocalePicker />
+        <ThemePicker />
+      </div>
     </Card>
   );
 }
@@ -170,6 +170,7 @@ const LINKS: { href: string; label: string; hint: string; icon: string }[] = [
   { href: "/activity", label: "Activity", hint: "what you and the team have done", icon: "activity" },
   { href: "/govern/pii-access", label: "Personal data access log", hint: "who viewed unblurred data (administrators)", icon: "shield" },
   { href: "/settings/about", label: "About", hint: "version, where the source is, and the licences that apply", icon: "info" },
+  { href: "/settings/usage", label: "Models and usage", hint: "what the models were asked and what it cost, and what is on the GPU (administrators)", icon: "activity" },
   { href: "/console", label: "Resource console", hint: "GPU, memory, disk and everything running now", icon: "server" },
 ];
 

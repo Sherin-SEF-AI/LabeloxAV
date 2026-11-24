@@ -373,6 +373,10 @@ export default function TrackEditor() {
               const isCursor = i === cursor;
               const isSel = selection.has(i);
               return (
+                // A pointer target only. The grid is driven from the keyboard by this page's own key map
+                // (arrows move the cursor, the verdict keys act on it), which is why the tile is out of the
+                // tab order and has no key handler of its own: a second one here would fight the first.
+                // eslint-disable-next-line jsx-a11y/click-events-have-key-events
                 <div
                   key={it.object_id}
                   ref={isCursor ? cursorTile : undefined}
@@ -464,7 +468,7 @@ export default function TrackEditor() {
                     {it.intent}
                     <span className="text-ink-3 text-[9px] uppercase">{it.source}</span>
                     {it.status === "proposed" && it.source !== "human" && (
-                      <button onClick={() => setIntent(it.intent)} disabled={busy} title="confirm this intent" className="text-pass hover:text-accent ml-0.5">✓</button>
+                      <button onClick={() => setIntent(it.intent)} disabled={busy} title="confirm this intent" aria-label={`confirm the intent ${it.intent}`} className="text-pass hover:text-accent ml-0.5">✓</button>
                     )}
                   </span>
                 ))}

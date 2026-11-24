@@ -7,6 +7,7 @@ import type { DatasetDetail, DatasetRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import { SkeletonRows } from "@/components/Spinner";
 import { useQueryParam } from "@/lib/useQueryParam";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // Datasets + delivery: seal a versioned dataset (a background export job) and download the formats.
 // This is the "product out" surface - how labeled data leaves the engine.
@@ -28,10 +29,14 @@ export default function DatasetsPage() {
 }
 
 function DatasetsBody() {
-  const [rows, setRows] = useState<DatasetRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  // A failed list has always rendered as "none sealed yet" here; that is unchanged, the error is not shown.
+  const list = useQuery(["datasets"], () => api.datasets());
+  const rows: DatasetRow[] = list.data ?? [];
+  const loading = list.loading;
+  const refresh = list.reload;
   const [open, setOpen] = useState<string | null>(null);
-  const [detail, setDetail] = useState<DatasetDetail | null>(null);
+  const opened = useQuery(open ? ["dataset", open] : null, () => api.dataset(open as string));
+  const detail: DatasetDetail | null = opened.error ? null : opened.data ?? null;
   const [msg, setMsg] = useState<string | null>(null);
 
   // export form
@@ -47,25 +52,9 @@ function DatasetsBody() {
   const [valFrac, setValFrac] = useState(0);
   const [testFrac, setTestFrac] = useState(0);
 
-  async function refresh() {
-    try {
-      setRows(await api.datasets());
-    } catch {
-      /* ignore */
-    } finally {
-      setLoading(false);
-    }
-  }
-
   // Export jobs are on the shared stream, so a sealing dataset updates as it seals rather than on a timer.
   const jobStream = useJobStream();
-  useEffect(() => { refresh(); }, []);
-  useEffect(() => { if (jobStream.data) refresh(); }, [jobStream.data]);
-
-  useEffect(() => {
-    if (open) api.dataset(open).then(setDetail).catch(() => setDetail(null));
-    else setDetail(null);
-  }, [open]);
+  useEffect(() => { if (jobStream.data) void refresh(); }, [jobStream.data, refresh]);
 
   async function runExport() {
     try {
@@ -74,7 +63,9 @@ function DatasetsBody() {
         val_frac: valFrac, test_frac: testFrac, split_group_by: "session",
       });
       setMsg("export queued - watch it on Jobs, it appears here when sealed");
-      refresh();
+      void refresh();
+      // The export is a job: the jobs table and home's running count both change.
+      void invalidate("jobs", "/api/home");
     } catch (e) {
       setMsg(humanizeError(e));
     }

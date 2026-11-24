@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { T } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 import { useJobStream } from "@/lib/useEventStream";
 import { api, apiGet, type ModelLine, type TrainingJob, humanizeError } from "@/lib/api";
@@ -8,6 +9,7 @@ import PageShell from "@/components/shell/PageShell";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import RunsPanel from "@/components/training/RunsPanel";
 import { useFeatures } from "@/lib/features";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // In-app training platform: submit a training job (a "purpose" = dataset filters + hparams), watch it
 // run on the GPU worker (status / stage / epoch / map50), and browse the model registry. The API only
@@ -28,9 +30,16 @@ function Section({ title, right, children }: { title: string; right?: React.Reac
 export default function TrainingPage() {
   const features = useFeatures();
   const router = useRouter();
-  const [tasks, setTasks] = useState<{ task_type: string; default_base_weights: string }[]>([]);
-  const [jobs, setJobs] = useState<TrainingJob[]>([]);
-  const [registry, setRegistry] = useState<ModelLine[]>([]);
+  // Optional: without it the task picker shows only the default, which is what a failure looked like.
+  const tasksQ = useQuery(["trainingTasks"], () => api.trainingTasks());
+  const tasks: { task_type: string; default_base_weights: string }[] = tasksQ.data ?? [];
+  // The job list and the registry are drawn together and refreshed together, so they stay one request
+  // pair. A failed refresh leaves what is on screen, as before.
+  const trainingQ = useQuery(["listTraining+trainingRegistry"],
+    () => Promise.all([api.listTraining(), api.trainingRegistry()]));
+  const jobs: TrainingJob[] = trainingQ.data?.[0] ?? [];
+  const registry: ModelLine[] = trainingQ.data?.[1] ?? [];
+  const refresh = trainingQ.reload;
   const [err, setErr] = useState<string | null>(null);
 
   // form
@@ -39,35 +48,26 @@ export default function TrainingPage() {
   const [computeTarget, setComputeTarget] = useState("local");
   const [includeClasses, setIncludeClasses] = useState("");
   const [projectId, setProjectId] = useState("");
-  const [projects, setProjects] = useState<{ project_id: string; name: string; sessions: number; class_set: string; class_count: number }[]>([]);
+  type ProjectOption = { project_id: string; name: string; sessions: number; class_set: string; class_count: number };
+  const projectsQ = useQuery(["/api/projects"], () => apiGet<{ projects: ProjectOption[] }>("/api/projects"));
+  const projects: ProjectOption[] = useMemo(
+    () => (projectsQ.data?.projects ?? []).filter((p) => p.sessions > 0), [projectsQ.data]);
   const [cities, setCities] = useState("");
   const [routePrefix, setRoutePrefix] = useState("");
   const [limit, setLimit] = useState("");
   const [epochs, setEpochs] = useState("20");
   const [promote, setPromote] = useState(false);
 
-  async function refresh() {
-    try {
-      const [j, r] = await Promise.all([api.listTraining(), api.trainingRegistry()]);
-      setJobs(j);
-      setRegistry(r);
-    } catch {
-      /* ignore */
-    }
-  }
-
   // Pushed, not polled. This page used to re-fetch the whole job list every two seconds whether or not
   // anything had changed, with no pause when the tab was hidden. The stream sends only on change, and the
   // one-shot refresh below covers the first paint and any deployment where the stream cannot connect.
   const jobStream = useJobStream();
   useEffect(() => {
-    api.trainingTasks().then(setTasks).catch(() => {});
-    apiGet<{ projects: typeof projects }>("/api/projects")
-      .then((r) => setProjects(r.projects.filter((p) => p.sessions > 0)))
-      .catch((e) => setErr(`Could not load projects, so training covers every project: ${humanizeError(e)}`));
-    refresh();
-  }, []);
-  useEffect(() => { if (jobStream.data) refresh(); }, [jobStream.data]);
+    if (projectsQ.error) {
+      setErr(`Could not load projects, so training covers every project: ${humanizeError(projectsQ.error)}`);
+    }
+  }, [projectsQ.error]);
+  useEffect(() => { if (jobStream.data) void refresh(); }, [jobStream.data, refresh]);
 
   function listFrom(s: string): string[] {
     return s.split(",").map((x) => x.trim()).filter(Boolean);
@@ -90,7 +90,9 @@ export default function TrainingPage() {
         hparams: { epochs: Number(epochs) },
         promote,
       });
-      refresh();
+      void refresh();
+      // A training run is a job: the jobs table and home's running count both change.
+      void invalidate("jobs", "/api/home");
     } catch (e) {
       setErr(humanizeError(e));
     }
@@ -203,8 +205,8 @@ export default function TrainingPage() {
                       {tot ? `ep ${ep}/${tot}` : ""} {live?.map50 != null ? `· map50 ${live.map50}` : ""}
                     </span>
                     {(j.status === "pending" || j.status === "running") && (
-                      <button onClick={() => api.cancelTraining(j.job_id).then(refresh)}
-                        className="border border-line px-1.5 hover:border-block">cancel</button>
+                      <button onClick={() => api.cancelTraining(j.job_id).then(() => { void refresh(); void invalidate("jobs", "/api/home"); })}
+                        className="border border-line px-1.5 hover:border-block"><T k="action.cancel">cancel</T></button>
                     )}
                   </div>
                   {/* Why it failed, on the row. The API has returned this field all along and the row never

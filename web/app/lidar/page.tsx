@@ -118,7 +118,7 @@ export default function LidarViewerPage() {
       className="flex gap-2"
     >
       <SessionSelect value={sessionId} onChange={setSessionId} className="min-w-0 flex-1" />
-      <button className="rounded bg-[#2f6fd6] text-white px-3 py-1 text-xs font-medium hover:bg-[#3a7ae0]">Load</button>
+      <button className="rounded bg-primary text-white px-3 py-1 text-xs font-medium hover:bg-primary-2">Load</button>
       <button
         type="button"
         onClick={build}
@@ -136,7 +136,10 @@ export default function LidarViewerPage() {
       right={<span className="text-[12px] text-ink-3">Loaded sessions: {clouds.length}</span>}
       primaryAction={loadForm}
     >
-      <div className="flex h-full bg-[#0a0e14] text-ink">
+      {/* Pinned dark in either theme. A point cloud is drawn for a dark ground, and the panels over it are
+          read against that ground rather than against the page, so the palette under this element is the
+          dark one whatever the rest of the app is using (see the selectors in app/globals.css). */}
+      <div data-theme="dark" className="flex h-full bg-[#0a0e14] text-ink">
       <Inspector title="Clouds" side="left" width="w-80">
       <div className="flex flex-col gap-4 p-4">
         <div>
@@ -179,7 +182,7 @@ export default function LidarViewerPage() {
                     key={v}
                     onClick={() => setVariant(v)}
                     className={`rounded px-2 py-1 text-xs ${
-                      variant === v ? "bg-[#2f6fd6] text-white" : "bg-head hover:bg-btn-2"
+                      variant === v ? "bg-primary text-white" : "bg-head hover:bg-btn-2"
                     }`}
                   >
                     {v.replace("_", " ")}
@@ -197,7 +200,7 @@ export default function LidarViewerPage() {
                     title={o.hint}
                     onClick={() => setColorBy(o.key)}
                     className={`flex-1 rounded px-2 py-1 text-xs ${
-                      colorBy === o.key ? "bg-[#2f6fd6] text-white" : "bg-head hover:bg-btn-2"
+                      colorBy === o.key ? "bg-primary text-white" : "bg-head hover:bg-btn-2"
                     }`}
                   >
                     {o.label}

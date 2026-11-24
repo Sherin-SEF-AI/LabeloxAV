@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { useQuery } from "@/lib/useQuery";
 import type { EgoSample, EgoState, InertialEvents, SessionRow } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 
@@ -21,23 +22,23 @@ const MANEUVER_COLOR: Record<string, string> = { stationary: "#3a3f47", turn: "#
 
 const W = 1000, H = 280, PAD = 8, BAND_H = 16;
 
-export default function InertialPage() {
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
-  const [pick, setPick] = useState("");
-  const [ego, setEgo] = useState<EgoState | null>(null);
-  const [ev, setEv] = useState<InertialEvents | null>(null);
-  const [busy, setBusy] = useState(false);
+const NO_SESSIONS: SessionRow[] = [];
 
-  useEffect(() => { api.sessions().then((s) => { setSessions(s); if (s[0]) setPick(s[0].session_id); }); }, []);
-  const load = useCallback(async (sid: string) => {
-    if (!sid) return;
-    setBusy(true);
-    try {
-      const [e, v] = await Promise.all([api.egoState(sid).catch(() => null), api.inertialEvents(sid).catch(() => null)]);
-      setEgo(e); setEv(v);
-    } finally { setBusy(false); }
-  }, []);
-  useEffect(() => { load(pick); }, [pick, load]);
+export default function InertialPage() {
+  const sessionsQ = useQuery(["sessions"], () => api.sessions());
+  const sessions: SessionRow[] = sessionsQ.data ?? NO_SESSIONS;
+  const [pick, setPick] = useState("");
+  // Start on the newest session, without overriding one already picked when the list refreshes.
+  useEffect(() => {
+    if (sessions[0]) setPick((cur) => cur || sessions[0].session_id);
+  }, [sessions]);
+  // Either read failing leaves that half absent rather than failing the page, as before. keepPrevious:
+  // the last session's traces stay up while the next one loads.
+  const egoQ = useQuery(pick ? ["egoState", pick] : null, () => api.egoState(pick), { keepPrevious: true });
+  const evQ = useQuery(pick ? ["inertialEvents", pick] : null, () => api.inertialEvents(pick), { keepPrevious: true });
+  const ego: EgoState | null = egoQ.error ? null : egoQ.data ?? null;
+  const ev: InertialEvents | null = evQ.error ? null : evQ.data ?? null;
+  const busy = egoQ.validating || evQ.validating;
 
   const series = ego?.series ?? [];
   const t0 = series[0]?.ts_ns ?? 0;

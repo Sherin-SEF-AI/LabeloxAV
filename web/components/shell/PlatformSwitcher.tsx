@@ -27,16 +27,18 @@ export default function PlatformSwitcher() {
       <button
         onClick={() => { setPreview(current); setOpen((o) => !o); }}
         data-tip="Switch platform: jump between the planes of the data engine"
+        aria-haspopup="true" aria-expanded={open}
+        onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
         className={`btn gap-2 ${open ? "btn-on" : ""}`}
       >
         <span className="tracking-wider text-[10px] opacity-70">{current.glyph}</span>
         <span>{current.label}</span>
-        <span className="opacity-60">&#9662;</span>
+        <span className="opacity-60" aria-hidden>&#9662;</span>
       </button>
 
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="fixed inset-0 z-40" aria-hidden="true" onClick={() => setOpen(false)} />
           {/* Anchored to the button's right edge, not its left. This button lives near the right of the
               header, so a left-anchored panel 46rem wide started there and ran off the screen: at 1700px it
               ended at 2078, and everything past the fold was simply unreachable. Growing leftward from the

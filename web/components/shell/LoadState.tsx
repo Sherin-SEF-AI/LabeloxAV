@@ -1,6 +1,7 @@
 "use client";
 
 import { humanizeError } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 // The three things a fetching page owes the person waiting on it: that it is working, that it failed, or
 // that it succeeded and there is genuinely nothing here.
@@ -21,16 +22,17 @@ export default function LoadState({ loading, error, empty, emptyText, onRetry, c
   onRetry?: () => void;
   children?: React.ReactNode;
 }) {
+  const t = useT();
   if (error) {
     return (
       <div className="panel px-3 py-2 text-[12px] flex items-start gap-3">
-        <span className="text-block shrink-0">could not load</span>
+        <span className="text-block shrink-0">{t("load.failed", "could not load")}</span>
         {/* The message, not a shrug. humanizeError already turns a status code into a sentence. */}
         <span className="text-ink-2 min-w-0 flex-1">{humanizeError(error)}</span>
         {onRetry && (
           <button onClick={onRetry}
             className="shrink-0 border border-line px-2 py-0.5 text-ink-3 hover:border-accent">
-            retry
+            {t("action.retry", "retry")}
           </button>
         )}
       </div>
@@ -38,16 +40,16 @@ export default function LoadState({ loading, error, empty, emptyText, onRetry, c
   }
   if (loading) {
     return (
-      <div className="panel px-3 py-2 text-[12px] text-ink-3 flex items-center gap-2">
-        <span className="inline-block w-2 h-2 rounded-full bg-accent animate-pulse" />
-        loading
+      <div className="panel px-3 py-2 text-[12px] text-ink-3 flex items-center gap-2" role="status">
+        <span className="inline-block w-2 h-2 rounded-full bg-accent animate-pulse" aria-hidden />
+        {t("load.loading", "loading")}
       </div>
     );
   }
   if (empty) {
     return (
       <div className="panel px-3 py-6 text-[12px] text-ink-3 text-center">
-        {emptyText ?? "nothing here yet"}
+        {emptyText ?? t("load.empty", "nothing here yet")}
       </div>
     );
   }

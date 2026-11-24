@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { T } from "@/lib/i18n";
 import { useSearchParams } from "next/navigation";
 
 import PageShell from "@/components/shell/PageShell";
@@ -73,7 +74,7 @@ function ProposalCard({ p, canDecide, onDecided }: { p: Proposal; canDecide: boo
       {p.status === "pending" && (canDecide ? (
         <div className="flex gap-2">
           <button className="btn btn-primary" disabled={busy} onClick={() => void decide("approve")}>Approve</button>
-          <button className="btn" disabled={busy} onClick={() => void decide("reject")}>Reject</button>
+          <button className="btn" disabled={busy} onClick={() => void decide("reject")}><T k="common.reject">Reject</T></button>
         </div>
       ) : <p className="text-[12px] text-ink-3">A reviewer approves or rejects this.</p>)}
     </li>
@@ -143,7 +144,7 @@ function AssistantPage() {
           <div className="px-4 py-3 border-b hairline flex flex-wrap items-center gap-2 text-[12.5px]">
             <span className="text-ink-3">Working in</span>
             <div className="w-full sm:w-80"><SessionSelect value={sessionId} onChange={setSessionId} placeholder="no particular session" /></div>
-            {sessionId && <button className="text-accent hover:text-accent-2" onClick={() => setSessionId("")}>clear</button>}
+            {sessionId && <button className="text-accent hover:text-accent-2" onClick={() => setSessionId("")}><T k="action.clear">clear</T></button>}
           </div>
           <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4 max-h-[62vh]" aria-live="polite">
             {turns.length === 0 && (

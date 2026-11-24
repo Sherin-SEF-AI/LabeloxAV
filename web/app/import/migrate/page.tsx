@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { toast } from "@/lib/toast";
+import { invalidate } from "@/lib/useQuery";
 
 // Migrating in from another tool, with the cost stated before it is paid.
 //
@@ -65,6 +66,8 @@ export default function MigratePage() {
         format, source_uri: source.trim(), target_vehicle: vehicle, city: city || undefined,
       });
       toast("import started", "success");
+      // The import page this lands on, the jobs table and home all list the job just created.
+      void invalidate("listImports", "jobs", "/api/home");
       router.push(`/import?job=${r.job_id}`);
     } catch (e) {
       toast(humanizeError(e), "error");

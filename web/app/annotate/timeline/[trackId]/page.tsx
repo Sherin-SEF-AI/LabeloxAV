@@ -191,7 +191,8 @@ export default function TimelineWorkspace() {
                 {track?.items.map((x, i) => {
                   const d = drift[x.object_id];
                   return (
-                    <button key={x.object_id} onClick={() => setSel(i)}
+                    <button key={x.object_id} onClick={() => setSel(i)} aria-pressed={i === sel}
+                      aria-label={`frame ${i + 1}: ${d ? `${d.verdict}, ${d.why}` : "an anchor, not machine fill"}`}
                       title={d ? `${d.verdict}: ${d.why}` : "an anchor, not machine fill: nothing to check"}
                       style={{ background: d ? DRIFT_COLOR[d.verdict] : "transparent",
                                outline: i === sel ? "2px solid #E7E9EB" : "none" }}
@@ -217,7 +218,11 @@ export default function TimelineWorkspace() {
           <Inspector title="frame" side="right">
             <div className="p-3 flex flex-col gap-4">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={it.crop_url} alt="" className="w-full h-32 object-cover bg-bg-2 border border-line cursor-pointer" onClick={() => router.push(`/frame/${it.frame_id}?focus=${it.object_id}`)} />
+              <button type="button" className="block w-full" aria-label={`open this ${it.class_name} in the frame editor`}
+                onClick={() => router.push(`/frame/${it.frame_id}?focus=${it.object_id}`)}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={it.crop_url} alt="" className="w-full h-32 object-cover bg-bg-2 border border-line cursor-pointer" />
+              </button>
               <div className="text-[12px] space-y-1">
                 <div className="text-ink-2">{it.class_name} <span className="text-ink-3">frame {sel + 1}/{track?.n_frames}</span></div>
                 <div className="text-ink-3">source: <span style={{ color: cellColor(it) }}>{it.source}{it.interp_source ? ` (${it.interp_source})` : ""}</span></div>

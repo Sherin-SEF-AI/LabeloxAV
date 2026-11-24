@@ -3,9 +3,22 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
+import { clearQueries, configureQueries } from "@/lib/useQuery";
+
 // Unmount between tests. Without it a component from the previous test is still in the document and a
 // getByText finds the wrong one - which fails in a way that looks like the component under test.
-afterEach(() => cleanup());
+//
+// Then empty the query cache. It is process-wide, which is the point of it in the app and a trap here:
+// without this a page test would be answered by the previous test's response. One hook, in this order,
+// because emptying the cache under a still-mounted component is a state update outside act().
+afterEach(async () => {
+  cleanup();
+  await clearQueries();
+});
+
+// The dedupe window goes to zero for the same reason: inside it, a second mount of the same key is handed
+// the first one's request.
+configureQueries({ dedupeMs: 0 });
 
 // jsdom implements neither of these, and both are used by components that have nothing to do with them:
 // the canvas measures, the shell observes resize. Stubbed rather than mocked per-test so a render does not

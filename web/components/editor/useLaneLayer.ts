@@ -16,12 +16,14 @@ import type { FrameMeta, LaneRow } from "@/lib/types";
 
 type Confirm = (opts: { title: string; body?: string; danger?: boolean; confirmLabel?: string }) => Promise<boolean>;
 
-export function useLaneLayer({ frameId: id, meta, flash, confirm, reload }: {
+export function useLaneLayer({ frameId: id, meta, flash, confirm, reload, blocked }: {
   frameId: string;
   meta: FrameMeta | null;
   flash: (message: string) => void;
   confirm: Confirm;
   reload: () => Promise<void>;
+  /** True when the frame is view-only; says so as a side effect. Every edit below asks it first. */
+  blocked?: () => boolean;
 }) {
   const [lanes, setLanes] = useState<(LaneRow & { dirty?: boolean })[]>([]);
   const [drivable, setDrivable] = useState<Record<string, number[][]> | null>(null);
@@ -112,11 +114,19 @@ export function useLaneLayer({ frameId: id, meta, flash, confirm, reload }: {
     await saveDrivable(next);
   };
 
+  // The edits, gated in the one place they leave this hook. Local ones too (dragging a point, retyping a
+  // lane): a view-only working copy that drifts from the server is a copy nobody can trust afterwards.
+  const edit = <A extends unknown[], R>(fn: (...args: A) => R) =>
+    (...args: A): R | undefined => (blocked?.() ? undefined : fn(...args));
+
   return {
     lanes, setLanes, drivable, setDrivable, drivableMeta, setDrivableMeta,
     laneSel, setLaneSel, laneAdding, setLaneAdding, areaAdding, setAreaAdding, areaClass, setAreaClass,
     areaSel, setAreaSel,
-    laneDragPoint, saveLanes, finishAddLane, setLaneType, toggleLaneEgo, delLane, propagateLanes,
-    saveDrivable, finishArea, dragAreaPoint, deleteArea,
+    laneDragPoint: edit(laneDragPoint), saveLanes: edit(saveLanes), finishAddLane: edit(finishAddLane),
+    setLaneType: edit(setLaneType), toggleLaneEgo: edit(toggleLaneEgo), delLane: edit(delLane),
+    propagateLanes: edit(propagateLanes),
+    saveDrivable: edit(saveDrivable), finishArea: edit(finishArea), dragAreaPoint: edit(dragAreaPoint),
+    deleteArea: edit(deleteArea),
   };
 }

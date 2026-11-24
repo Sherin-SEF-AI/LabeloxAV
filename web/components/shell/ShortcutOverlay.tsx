@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 
+import { useLabel } from "@/lib/i18n";
+import { useDialog } from "@/components/ui/useDialog";
+
 // A searchable keyboard-shortcut reference. Opens on "?" (or a window "lbx:shortcuts" event from a button),
 // closes on Escape. Lists the global keys and the editor tool keys exactly as the frame editor's keyboard
 // handler binds them (the tool keys are global: the same letter selects the same tool in every mode, though
@@ -61,6 +64,8 @@ export const TOOLS: { keys: string; label: string }[] = [
 export default function ShortcutOverlay() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const tl = useLabel();
+  const dialogRef = useDialog<HTMLDivElement>(open, () => setOpen(false));
 
   useEffect(() => {
     const typing = (el: EventTarget | null) => {
@@ -87,13 +92,16 @@ export default function ShortcutOverlay() {
   ].filter((s) => s.rows.length);
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[12vh] bg-bg/70" onClick={() => setOpen(false)}>
-      <div className="panel w-[34rem] max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[12vh] bg-bg/70">
+      <div className="absolute inset-0" aria-hidden="true" onClick={() => setOpen(false)} />
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="shortcuts-title" tabIndex={-1}
+        className="panel relative w-[34rem] max-h-[70vh] flex flex-col">
         <div className="flex items-center gap-2 px-3 h-10 border-b hairline shrink-0">
-          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">keyboard shortcuts</span>
-          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="search shortcuts..."
+          <span id="shortcuts-title" className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">keyboard shortcuts</span>
+          {/* eslint-disable-next-line jsx-a11y/no-autofocus -- opened by a keystroke; the next keystroke filters the list */}
+          <input autoFocus value={q} aria-label="search shortcuts" onChange={(e) => setQ(e.target.value)} placeholder="search shortcuts..."
             className="ml-auto w-48 bg-bg border border-line px-2 py-1 text-[12px] text-ink" />
-          <button onClick={() => setOpen(false)} className="text-[12px] text-ink-3 hover:text-accent">esc</button>
+          <button onClick={() => setOpen(false)} aria-label={tl("Close")} className="text-[12px] text-ink-3 hover:text-accent">esc</button>
         </div>
         <div className="overflow-y-auto p-3 space-y-3">
           {sections.map((s) => (

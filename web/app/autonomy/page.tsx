@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
 import PulseDot from "@/components/PulseDot";
 import { api, humanizeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
+import { invalidate, useQuery } from "@/lib/useQuery";
 import type {
   AutonomyState, SettlementLotRow, SettlementWorkItem, ShadowSummary,
 } from "@/lib/types";
@@ -160,34 +161,28 @@ function age(iso: string | null | undefined): string {
 }
 
 export default function AutonomyPage() {
-  const [state, setState] = useState<AutonomyState | null>(null);
-  const [lots, setLots] = useState<SettlementLotRow[]>([]);
-  const [err, setErr] = useState<unknown>(null);
+  // The daemon dot is a liveness claim, so it re-checks itself; a dot that only reflects page load
+  // would go on saying "live" for as long as the tab stayed open.
+  const stateQ = useQuery(["autonomyState"], () => api.autonomyState(), { pollMs: 60_000 });
+  const lotsQ = useQuery(["settlementLots"], () => api.settlementLots(), { pollMs: 60_000 });
+  const state: AutonomyState | null = stateQ.data ?? null;
+  const lots: SettlementLotRow[] = lotsQ.data ?? [];
+  const err = stateQ.loadState.error ?? lotsQ.loadState.error ?? null;
   const [showAllClasses, setShowAllClasses] = useState(false);
 
+  const reloadState = stateQ.reload;
+  const reloadLots = lotsQ.reload;
   const load = useCallback(async () => {
-    setErr(null);
-    try {
-      const [s, l] = await Promise.all([api.autonomyState(), api.settlementLots()]);
-      setState(s); setLots(l);
-    } catch (e) {
-      setErr(e);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-    // The daemon dot is a liveness claim, so it re-checks itself; a dot that only reflects page load
-    // would go on saying "live" for as long as the tab stayed open.
-    const t = setInterval(load, 60_000);
-    return () => clearInterval(t);
-  }, [load]);
+    await Promise.all([reloadState(), reloadLots()]);
+  }, [reloadState, reloadLots]);
 
   const act = async (fn: () => Promise<unknown>, label: string) => {
     try {
       await fn();
       toast(`${label}: done`);
-      await load();
+      // An ack or a revert moves a lot and can move a class's rung: refresh both here and wherever else
+      // they are cached.
+      await invalidate("autonomyState", "settlementLots");
     } catch (e) {
       toast(`${label}: ${humanizeError(e)}`);
     }

@@ -28,6 +28,13 @@ const SWALLOW = /\.catch\(\(\)\s*=>\s*\{\s*\}\)/g;
 //
 // Each entry is a count rather than a filename, so adding a second swallow to an already-listed file
 // still fails.
+// Counts that went to 0 on 2026-11-24 did so because the read moved into useQuery (lib/useQuery.ts), not
+// because the failure is now shown. Where a page ignored a failed request before, it ignores `q.error` now:
+// the same decision, in a spelling this scan cannot see. Those reads are in app/explore/page.tsx,
+// app/queue/page.tsx, app/import/page.tsx, app/training/page.tsx, app/review/rapid/page.tsx,
+// app/agent/page.tsx, components/explore/EvalDrilldown.tsx, components/training/RunsPanel.tsx,
+// components/console/Panels.tsx and components/agent/AgentPanel.tsx. The entries stay, at 0, so the list
+// still says where to look; surfacing each one is now a matter of rendering an error that is already held.
 const ALLOWED: Record<string, number> = {
   // Optional analytics panels. The page has a real error state for its five REQUIRED calls; these five are
   // supplementary charts that render their own "no data" and whose absence is not the page failing.
@@ -36,28 +43,28 @@ const ALLOWED: Record<string, number> = {
   "app/lidar/linked/page.tsx": 4,
   // Best-effort side panels; the board's own loader reports failures.
   "app/forgyx/page.tsx": 3,
-  "app/agent/page.tsx": 2,
-  "app/explore/page.tsx": 2,
+  "app/agent/page.tsx": 1,
+  "app/explore/page.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
   "app/oraclyx/page.tsx": 2,
   "app/projects/page.tsx": 0,   // fixed: the project list is this page's primary data
-  "app/import/page.tsx": 1,
+  "app/import/page.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
   "app/lidar/annotate/page.tsx": 1,
   "app/sievyx/page.tsx": 1,
-  "app/training/page.tsx": 1,
+  "app/training/page.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
   "app/verdyx/page.tsx": 1,
-  "components/training/RunsPanel.tsx": 1,
+  "components/training/RunsPanel.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
   // The shared client's own best-effort paths (token refresh, the 401 announce).
   "lib/api.ts": 1,
-  "components/explore/EvalDrilldown.tsx": 2,
-  "components/console/Panels.tsx": 2,
-  "components/agent/AgentPanel.tsx": 2,
+  "components/explore/EvalDrilldown.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
+  "components/console/Panels.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
+  "components/agent/AgentPanel.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
   "components/CorrectionModal.tsx": 2,
   "app/frame/[id]/page.tsx": 2,
-  "app/queue/page.tsx": 3,
+  "app/queue/page.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
   "app/annotate/lane/[frameId]/page.tsx": 1,
   "app/flywheel/adaptive/page.tsx": 1,
   "app/ops/page.tsx": 1,
-  "app/review/rapid/page.tsx": 1,
+  "app/review/rapid/page.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
   "app/sanyx/predictive/page.tsx": 1,
 };
 

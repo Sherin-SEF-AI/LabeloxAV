@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { api, humanizeError } from "@/lib/api";
 import type { IssueRow } from "@/lib/types";
 import LoadState from "@/components/shell/LoadState";
+import { useQuery } from "@/lib/useQuery";
 
 // Feedback on your own labels, in a place you can go and look.
 //
@@ -24,26 +25,15 @@ const KIND_TONE: Record<string, string> = {
 
 export default function MyIssues({ limit = 25 }: { limit?: number }) {
   const router = useRouter();
-  const [rows, setRows] = useState<IssueRow[]>([]);
-  const [err, setErr] = useState<unknown>(null);
-  const [loading, setLoading] = useState(true);
   const [openOnly, setOpenOnly] = useState(true);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setErr(null);
-    try {
-      const r = await api.lopIssues({ mine: true, ...(openOnly ? { status: "open" } : {}) });
-      setRows(r.issues.slice(0, limit));
-    } catch (e) {
-      // An empty inbox is good news and a failed fetch is not; they must not look the same.
-      setErr(e);
-    } finally {
-      setLoading(false);
-    }
-  }, [openOnly, limit]);
-
-  useEffect(() => { void load(); }, [load]);
+  // Keyed by the filter, so the inbox paints from the cache on return and refreshes behind it.
+  const params = useMemo(() => ({ mine: true, ...(openOnly ? { status: "open" } : {}) }), [openOnly]);
+  const q = useQuery(["lopIssues", params], () => api.lopIssues(params));
+  const rows: IssueRow[] = (q.data?.issues ?? []).slice(0, limit);
+  // An empty inbox is good news and a failed fetch is not; they must not look the same.
+  const { loading, error: err } = q.loadState;
+  const load = q.reload;
 
   const open = (i: IssueRow) => {
     // The frame is where the object is, and the object is what the issue is about.

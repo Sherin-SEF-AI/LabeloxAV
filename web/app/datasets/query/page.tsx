@@ -5,6 +5,7 @@ import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
 import { toast } from "@/lib/toast";
+import { useQuery } from "@/lib/useQuery";
 
 // Build a dataset by describing it.
 //
@@ -36,16 +37,14 @@ const KIND_TONE: Record<string, string> = {
 
 export default function DatasetQueryPage() {
   const [q, setQ] = useState("night AND vru");
-  const [vocab, setVocab] = useState<Vocab | null>(null);
+  // The vocabulary is the same for every visit; a failure reads as no vocabulary, as it always has.
+  const vocabQuery = useQuery(["datasetVocabulary"], () => api.datasetVocabulary());
+  const vocab: Vocab | null = vocabQuery.error ? null : vocabQuery.data ?? null;
   const [pv, setPv] = useState<Preview | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [building, setBuilding] = useState(false);
   const [built, setBuilt] = useState<{ shards: string[]; samples: number; index_uri: string | null } | null>(null);
-
-  useEffect(() => {
-    api.datasetVocabulary().then(setVocab).catch(() => setVocab(null));
-  }, []);
 
   const run = useCallback(async (query: string) => {
     if (!query.trim()) return;

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import PageShell from "@/components/shell/PageShell";
 import { api } from "@/lib/api";
 import type { ClassRate, Rate, ScorecardsFull } from "@/lib/types";
+import { useQuery } from "@/lib/useQuery";
 
 // How good each labeller is, per class, whether they are a person or a vendor.
 //
@@ -54,15 +55,10 @@ function ClassTable({ rows }: { rows: ClassRate[] }) {
 }
 
 export default function ScorecardsPage() {
-  const [data, setData] = useState<ScorecardsFull | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const q = useQuery(["lopScorecardsFull"], () => api.lopScorecardsFull());
+  const data: ScorecardsFull | null = q.data ?? null;
+  const err: string | null = q.error ? (q.error instanceof Error ? q.error.message : String(q.error)) : null;
   const [open, setOpen] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.lopScorecardsFull()
-      .then(setData)
-      .catch((e) => setErr(e instanceof Error ? e.message : String(e)));
-  }, []);
 
   const rows = [...(data?.people ?? []), ...(data?.vendors ?? [])];
 

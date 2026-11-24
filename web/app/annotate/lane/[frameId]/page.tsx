@@ -7,6 +7,8 @@ import { useConfirm } from "@/components/ConfirmProvider";
 import { api, humanizeError } from "@/lib/api";
 import type { FrameMeta, LaneRow } from "@/lib/types";
 import BackButton from "@/components/BackButton";
+import { pressable } from "@/components/ui/pressable";
+import { T } from "@/lib/i18n";
 
 // M2.1 lane spline editor: propose lanes (CLRerNet on pod / classical local), edit as draggable control
 // points, draw implicit lanes on unmarked roads, pick lane type, mark ego, propagate across frames.
@@ -166,7 +168,7 @@ export default function LaneEditor() {
           <>
             <span className="text-ink-3">{adding.length} pts, finish as:</span>
             {["solid", "implicit"].map((t) => <button key={t} onClick={() => finishAdd(t)} className="border border-line px-2 py-1 hover:border-accent">{t}</button>)}
-            <button onClick={() => setAdding(null)} className="text-ink-3 hover:text-block">cancel</button>
+            <button onClick={() => setAdding(null)} className="text-ink-3 hover:text-block"><T k="action.cancel">cancel</T></button>
           </>
         )}
         <button onClick={() => (bevMode ? setBevMode(false) : void openBev())}
@@ -180,7 +182,7 @@ export default function LaneEditor() {
             map: {mapHint.road_class}{mapHint.lane_count ? ` · ${mapHint.lane_count} lanes` : ""}{mapHint.speed_limit ? ` · ${mapHint.speed_limit}` : ""}
           </span>
         )}
-        <button onClick={save} className="border border-pass text-pass px-2 py-1 hover:bg-pass/10 ml-auto">save</button>
+        <button onClick={save} className="border border-pass text-pass px-2 py-1 hover:bg-pass/10 ml-auto"><T k="action.save">save</T></button>
         {msg && <span className="text-warn">{msg}</span>}
       </header>
 
@@ -188,6 +190,10 @@ export default function LaneEditor() {
           pulling in a second canvas stack for that would be a lot of machinery for a polyline. */}
       {bevMode && bev && (
         <div className="border-b hairline bg-bg-2 p-2 flex gap-3 items-start overflow-auto">
+          {/* A drawing surface: a lane is traced by clicking points on the flattened road. There is no
+              keyboard equivalent for placing a point on an image, so it is declared as what it is rather
+              than dressed up as a button that Enter could not meaningfully press. */}
+          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
           <div ref={bevRef} className="relative shrink-0 border border-line"
             style={{ width: bev.view.width, height: bev.view.height }}
             onClick={(e) => {
@@ -249,7 +255,7 @@ export default function LaneEditor() {
                       finish as {t}
                     </button>
                   ))}
-                  <button onClick={() => setBevDraw(null)} className="text-ink-3 hover:text-block px-1">cancel</button>
+                  <button onClick={() => setBevDraw(null)} className="text-ink-3 hover:text-block px-1"><T k="action.cancel">cancel</T></button>
                 </div>
               </div>
             ) : (
@@ -271,8 +277,9 @@ export default function LaneEditor() {
         <aside className="w-56 border-l hairline p-3 space-y-3 text-[12px]">
           <div className="text-ink-3 uppercase text-[10px]">lanes ({lanes.length})</div>
           {lanes.map((l) => (
-            <div key={l.lane_id} onClick={() => setSel(l.lane_id)} className={`flex items-center gap-1.5 cursor-pointer ${l.lane_id === sel ? "text-ink" : "text-ink-3"}`}>
-              <span className="w-2.5 h-2.5 inline-block" style={{ background: l.is_ego ? "#56D364" : (COLOR[l.source] || "#A0A6AD") }} />
+            <div key={l.lane_id} {...pressable(() => setSel(l.lane_id))} aria-pressed={l.lane_id === sel}
+              className={`flex items-center gap-1.5 cursor-pointer ${l.lane_id === sel ? "text-ink" : "text-ink-3"}`}>
+              <span className="w-2.5 h-2.5 inline-block" aria-hidden style={{ background: l.is_ego ? "#56D364" : (COLOR[l.source] || "#A0A6AD") }} />
               <span className="truncate flex-1">{l.lane_type}{l.is_ego ? " (ego)" : ""}</span>
               <span className="text-ink-3">{l.source[0]}</span>
             </div>
@@ -284,7 +291,7 @@ export default function LaneEditor() {
                 {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
               <button onClick={toggleEgo} className={`w-full border px-2 py-1 ${selLane.is_ego ? "border-pass text-pass" : "border-line text-ink-3"}`}>{selLane.is_ego ? "ego lane ✓" : "mark ego"}</button>
-              <button onClick={del} className="w-full border border-line text-ink-3 px-2 py-1 hover:border-block hover:text-block">delete</button>
+              <button onClick={del} className="w-full border border-line text-ink-3 px-2 py-1 hover:border-block hover:text-block"><T k="action.delete">delete</T></button>
               <button onClick={() => router.push(`/frame/${frameId}`)} className="w-full border border-line text-ink-3 px-2 py-1 hover:border-accent">open frame editor</button>
             </div>
           )}

@@ -1,9 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, apiGet, apiPost, humanizeError } from "@/lib/api";
+import { T } from "@/lib/i18n";
+import { invalidate, useQuery } from "@/lib/useQuery";
 
 // Sample drives a new team can load before they have footage of their own (services/samples.py): real
 // Indian street video from Wikimedia Commons under CC BY-SA 3.0. Each card carries its credit and links to
@@ -20,6 +22,8 @@ type Sample = {
 type ImportJob = { status: string; progress: number; error: string | null; session_id: string | null;
                    counts: Record<string, unknown> };
 
+const ENDED = new Set(["done", "error", "canceled"]);
+
 function SampleCard({ s, onLoaded }: { s: Sample; onLoaded: () => void }) {
   const router = useRouter();
   const [job, setJob] = useState<string | null>(s.session_id ? null : s.job_id);
@@ -27,24 +31,27 @@ function SampleCard({ s, onLoaded }: { s: Sample; onLoaded: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(s.session_id);
 
+  // Follow the import every 2s until it ends one way or the other. A failed request ends it too, with the
+  // reason shown, exactly as the hand-written loop did; the hook stops the poll while the tab is hidden.
+  const jobQ = useQuery(job ? [`/api/imports/${job}`] : null, () => apiGet<ImportJob>(`/api/imports/${job}`),
+    { pollMs: (d, e) => (e || (d && ENDED.has(d.status)) ? 0 : 2000) });
+  const onLoadedRef = useRef(onLoaded);
+  onLoadedRef.current = onLoaded;
   useEffect(() => {
-    if (!job) return;
-    let live = true;
-    const tick = async () => {
-      try {
-        const j = await apiGet<ImportJob>(`/api/imports/${job}`);
-        if (!live) return;
-        setState(j);
-        if (j.status === "done") { setSessionId(j.session_id); setJob(null); onLoaded(); return; }
-        if (j.status === "error" || j.status === "canceled") { setError(j.error ?? j.status); setJob(null); return; }
-        setTimeout(tick, 2000);
-      } catch (e) {
-        if (live) { setError(humanizeError(e)); setJob(null); }
-      }
-    };
-    void tick();
-    return () => { live = false; };
-  }, [job, onLoaded]);
+    const j = jobQ.data;
+    if (!j) return;
+    setState(j);
+    if (j.status === "done") {
+      setSessionId(j.session_id); setJob(null);
+      void invalidate("/api/samples");
+      onLoadedRef.current();
+    } else if (j.status === "error" || j.status === "canceled") {
+      setError(j.error ?? j.status); setJob(null);
+    }
+  }, [jobQ.data]);
+  useEffect(() => {
+    if (jobQ.error) { setError(humanizeError(jobQ.error)); setJob(null); }
+  }, [jobQ.error]);
 
   const load = async () => {
     setError(null);
@@ -76,7 +83,7 @@ function SampleCard({ s, onLoaded }: { s: Sample; onLoaded: () => void }) {
       </div>
       <div className="flex items-center gap-2">
         {sessionId ? (
-          <button className="btn btn-primary" onClick={() => void open()}>Open</button>
+          <button className="btn btn-primary" onClick={() => void open()}><T k="common.open">Open</T></button>
         ) : job ? (
           <span className="text-[12px] text-ink-2">
             {stage === "downloading sample" ? "Downloading from Wikimedia Commons..."
@@ -92,18 +99,17 @@ function SampleCard({ s, onLoaded }: { s: Sample; onLoaded: () => void }) {
 }
 
 export default function SampleDrives({ onLoaded }: { onLoaded?: () => void }) {
-  const [samples, setSamples] = useState<Sample[] | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
-  useEffect(() => {
-    apiGet<{ samples: Sample[] }>("/api/samples").then((r) => setSamples(r.samples))
-      .catch((e) => setFailed(humanizeError(e)));
-  }, []);
+  const samplesQ = useQuery(["/api/samples"], () => apiGet<{ samples: Sample[] }>("/api/samples"));
+  const samples = samplesQ.data?.samples ?? null;
+  const failed = samples || !samplesQ.error ? null : humanizeError(samplesQ.error);
   const loaded = useCallback(() => onLoaded?.(), [onLoaded]);
   if (failed) return <p className="text-[12px] text-ink-3">Sample drives are unavailable: {failed}</p>;
   if (!samples) return null;
   return (
     <div className="grid sm:grid-cols-2 gap-2">
-      {samples.map((s) => <SampleCard key={s.id} s={s} onLoaded={loaded} />)}
+      {/* Keyed on what the server says about the sample, not just its id: a card takes its starting state
+          from these fields, so a cached list refreshed with a newer answer has to remount it. */}
+      {samples.map((s) => <SampleCard key={`${s.id}:${s.session_id ?? ""}:${s.job_id ?? ""}`} s={s} onLoaded={loaded} />)}
     </div>
   );
 }

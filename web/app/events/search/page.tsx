@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
+import { useQuery } from "@/lib/useQuery";
 import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
 import { toast } from "@/lib/toast";
@@ -33,11 +34,11 @@ const SIGNAL_STATES = [
 
 export default function EventSearchPage() {
   const router = useRouter();
-  const [taxonomy, setTaxonomy] = useState<EventTaxonomy | null>(null);
-  const [summary, setSummary] = useState<EventCorpusSummary | null>(null);
-  const [res, setRes] = useState<EventSearchResult | null>(null);
-  const [err, setErr] = useState<unknown>(null);
-  const [busy, setBusy] = useState(false);
+  // Both are absent when they cannot be read, as before.
+  const taxonomyQ = useQuery(["eventTaxonomy"], () => api.eventTaxonomy());
+  const summaryQ = useQuery(["eventCorpusSummary"], () => api.eventCorpusSummary());
+  const taxonomy: EventTaxonomy | null = taxonomyQ.error ? null : taxonomyQ.data ?? null;
+  const summary: EventCorpusSummary | null = summaryQ.error ? null : summaryQ.data ?? null;
 
   const [kind, setKind] = useState("");
   const [severity, setSeverity] = useState("");
@@ -47,29 +48,21 @@ export default function EventSearchPage() {
   const [withState, setWithState] = useState("");
   const [withinMs, setWithinMs] = useState(2000);
 
-  useEffect(() => {
-    api.eventTaxonomy().then(setTaxonomy).catch(() => setTaxonomy(null));
-    api.eventCorpusSummary().then(setSummary).catch(() => setSummary(null));
-  }, []);
-
-  const run = useCallback(async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      setRes(await api.searchEvents({
-        kind: kind || undefined, severity: severity || undefined, state: state || undefined,
-        city: city || undefined, withKind: withKind || undefined,
-        withState: withState || undefined, withinMs: withKind ? withinMs : undefined,
-        limit: 200,
-      }));
-    } catch (e) {
-      setErr(e);
-    } finally {
-      setBusy(false);
-    }
-  }, [kind, severity, state, city, withKind, withState, withinMs]);
-
-  useEffect(() => { void run(); }, [run]);
+  // The search runs whenever a filter changes, and each filter combination is cached. keepPrevious: the
+  // last result stays up while the next one loads.
+  const searchArgs = {
+    kind: kind || undefined, severity: severity || undefined, state: state || undefined,
+    city: city || undefined, withKind: withKind || undefined,
+    withState: withState || undefined, withinMs: withKind ? withinMs : undefined,
+    limit: 200,
+  };
+  const searchQ = useQuery(["searchEvents", searchArgs], () => api.searchEvents(searchArgs), { keepPrevious: true });
+  const res: EventSearchResult | null = searchQ.data ?? null;
+  const busy = searchQ.validating;
+  // A search in flight is not a failed one: the error shows once the request has settled.
+  const err = searchQ.validating ? null : searchQ.error ?? null;
+  const reloadSearch = searchQ.reload;
+  const run = useCallback(async () => { await reloadSearch(); }, [reloadSearch]);
 
   // One click for the question this page was built to answer, so it is discoverable rather than something
   // you have to know how to assemble.

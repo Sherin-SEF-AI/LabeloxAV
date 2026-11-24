@@ -1,6 +1,9 @@
 "use client";
 
-import { createContext, useCallback, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+
+import { useT } from "@/lib/i18n";
+import { useDialog } from "@/components/ui/useDialog";
 
 // A promise-based confirm dialog for destructive actions. Delete a webhook, remove a cuboid, discard a
 // storage source: these were one un-guarded click with no undo. useConfirm() returns an async function that
@@ -29,26 +32,43 @@ export default function ConfirmProvider({ children }: { children: React.ReactNod
     state?.resolve(ok);
     setState(null);
   };
+  const t = useT();
+  // Escape cancels, Tab stays between the two buttons, and focus returns to the control that asked.
+  const dialogRef = useDialog<HTMLDivElement>(state !== null, () => close(false));
+  // Enter confirms, as it always has, except on a focused button: a button does what it says, and Cancel
+  // is the one focused when the dialog opens. It used to confirm from there too, so Enter on "Cancel"
+  // deleted the thing.
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  const open = state !== null;
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement)) closeRef.current(true);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
 
   return (
     <Ctx.Provider value={confirm}>
       {children}
       {state && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50"
-          role="dialog" aria-modal="true" aria-label={state.opts.title}
-          onKeyDown={(e) => { if (e.key === "Escape") close(false); if (e.key === "Enter") close(true); }}>
-          <div className="bg-bg-2 border border-line shadow-2xl w-[min(28rem,92vw)] p-4 font-mono">
-            <div className="text-sm text-ink mb-1">{state.opts.title}</div>
-            {state.opts.body && <div className="text-[12px] text-ink-3 mb-3">{state.opts.body}</div>}
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50">
+          <div ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title"
+            aria-describedby={state.opts.body ? "confirm-body" : undefined} tabIndex={-1}
+            className="bg-bg-2 border border-line shadow-2xl w-[min(28rem,92vw)] p-4 font-mono">
+            <div id="confirm-title" className="text-sm text-ink mb-1">{state.opts.title}</div>
+            {state.opts.body && <div id="confirm-body" className="text-[12px] text-ink-3 mb-3">{state.opts.body}</div>}
             <div className="flex justify-end gap-2 mt-3 text-[12px]">
-              <button onClick={() => close(false)} autoFocus
+              <button onClick={() => close(false)} data-autofocus
                 className="border border-line text-ink-2 px-3 py-1 hover:text-ink">
-                {state.opts.cancelLabel ?? "Cancel"}
+                {state.opts.cancelLabel ?? t("common.cancel", "Cancel")}
               </button>
               <button onClick={() => close(true)}
                 className={`border px-3 py-1 ${state.opts.danger
                   ? "border-block text-block hover:bg-block/10" : "border-accent text-accent hover:bg-accent/10"}`}>
-                {state.opts.confirmLabel ?? "Confirm"}
+                {state.opts.confirmLabel ?? t("common.confirm", "Confirm")}
               </button>
             </div>
           </div>

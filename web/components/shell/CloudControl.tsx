@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api , humanizeError } from "@/lib/api";
 import type { CloudStatus, CloudOrphan } from "@/lib/types";
 import Icon from "@/components/shell/Icon";
+import { T } from "@/lib/i18n";
 import { isLiveState, pollDelay } from "@/lib/pollDelay";
 import { useAnchoredDropdown } from "@/components/shell/useAnchoredDropdown";
+import { useDialog } from "@/components/ui/useDialog";
+import { useQuery } from "@/lib/useQuery";
 
 // The cloud GPU control: a compact status pill (always showing state and, when connected, live uptime and
 // accruing cost) that opens a panel with connect/disconnect, the cost breakdown, and the idle / max-session
@@ -26,8 +29,6 @@ function fmtDur(seconds: number): string {
 }
 
 export default function CloudControl() {
-  const [st, setSt] = useState<CloudStatus | null>(null);
-  const [orphans, setOrphans] = useState<CloudOrphan[]>([]);
   const [open, setOpen] = useState(false);
   // Fixed rather than absolute: the top bar this pill sits in clips its children. See
   // useAnchoredDropdown.
@@ -37,55 +38,46 @@ export default function CloudControl() {
   const [err, setErr] = useState<string | null>(null);
   const [, setTick] = useState(0);
   const lastPoll = useRef<number>(0);
-
-  // Reports whether it reached the backend, so its loop can back off the way the status loop does. It used
-  // to swallow the failure and be driven by a fixed interval, which kept firing at an unreachable API: a
-  // three-minute restart produced 72 ECONNREFUSED errors in the console.
-  const pollOrphans = useCallback(async (): Promise<boolean> => {
-    try { const r = await api.cloudOrphans(); setOrphans(r.orphans); return true; }
-    catch { return false; }   // keep the last list; a blip must not blank the panel
-  }, []);
-  // A one-shot refresh after a connect/disconnect action, so the meter reflects the new state immediately
-  // without waiting for the next adaptive tick.
-  const refresh = useCallback(async () => {
-    try { const s = await api.cloudStatus(); setSt(s); lastPoll.current = Date.now(); } catch { /* keep last */ }
-  }, []);
+  const confirmRef = useDialog<HTMLDivElement>(confirm, () => setConfirm(false));
 
   // Adaptive poll: only a live pod has a cost/uptime meter ticking that needs a 3s refresh. When the GPU is
   // idle or disconnected (the usual state here) poll slowly, and back off further on error, so an idle tab is
-  // not firing a request every 3 seconds and a backend blip does not flood the console with retries.
+  // not firing a request every 3 seconds and a backend blip does not flood the console with retries. A
+  // failed request keeps the last value on screen: a blip must not blank the pill.
+  //
+  // Polled rather than streamed, deliberately. Pod state lives in RunPod's API, not in this database, so
+  // there is no row for the server to watch and push from: an SSE stream here would be the same poll moved
+  // server-side, run once per connected client, against a rate-limited third party. The cadence is
+  // lib/pollDelay, and useQuery stops it while the tab is hidden.
+  const statusQ = useQuery(["cloudStatus"], async () => {
+    const s = await api.cloudStatus();
+    lastPoll.current = Date.now();
+    return s;
+  }, { pollMs: (d, e) => pollDelay({ ok: !e, live: isLiveState(d?.state) }) });
+  // Its own query rather than a shared one: orphans stay on the idle cadence even while a pod is live,
+  // because the meter is what needs a 3s refresh and this is a rate-limited third party behind it.
+  const orphansQ = useQuery(["cloudOrphans"], () => api.cloudOrphans(),
+    { pollMs: (_d, e) => pollDelay({ ok: !e }) });
+  const st: CloudStatus | null = statusQ.data ?? null;
+  const orphans: CloudOrphan[] = orphansQ.data?.orphans ?? [];
+  const setSt = (s: CloudStatus) => { lastPoll.current = Date.now(); statusQ.setData(s); };
+  // A one-shot refresh after a connect/disconnect action, so the meter reflects the new state immediately
+  // without waiting for the next adaptive tick.
+  const refresh = () => { void statusQ.reload(); };
+  const pollOrphans = () => { void orphansQ.reload(); };
+
+  // The panel is a popover, not a modal: Escape closes it and focus goes back to the pill.
   useEffect(() => {
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout>;
-    let orphanTimer: ReturnType<typeof setTimeout>;
-    const loop = async () => {
-      if (!alive) return;
-      let ok = true;
-      let live = false;
-      try {
-        const s = await api.cloudStatus();
-        if (!alive) return;
-        setSt(s); lastPoll.current = Date.now();
-        live = isLiveState(s.state);
-      } catch {
-        ok = false;   // backend unreachable: keep the last value and back off
-      }
-      if (alive) timer = setTimeout(loop, pollDelay({ ok, live }));
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      btnRef.current?.focus();
     };
-    // Its own loop rather than a shared one: orphans stay on the idle cadence even while a pod is live,
-    // because the meter is what needs a 3s refresh and this is a rate-limited third party behind it.
-    const orphanLoop = async () => {
-      if (!alive) return;
-      const ok = await pollOrphans();
-      if (alive) orphanTimer = setTimeout(orphanLoop, pollDelay({ ok }));
-    };
-    loop(); orphanLoop();
-    // The last two timers in the app, and both are deliberate. Pod state lives in RunPod's API, not in this
-    // database, so there is no row for the server to watch and push from: an SSE stream here would be the
-    // same poll moved server-side, run once per connected client, against a rate-limited third party.
-    // Adaptive instead, and it slows to 20s the moment nothing is running.
-    return () => { alive = false; clearTimeout(timer); clearTimeout(orphanTimer); };
-  }, [pollOrphans]);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, btnRef]);
+
   // A 1s tick that interpolates uptime and cost between polls so the meter never looks frozen. Local
   // arithmetic on values already held, not a network call: converting it to an event would mean asking the
   // server what time it is once a second.
@@ -130,8 +122,9 @@ export default function CloudControl() {
       {/* STATUS PILL */}
       <div className="relative">
         <button ref={btnRef} onClick={() => { if (!open) place(); setOpen((o) => !o); }} title="cloud GPU"
+          aria-haspopup="dialog" aria-expanded={open}
           className="flex items-center gap-1.5 h-7 px-2 rounded-md border border-line hover:border-accent">
-          <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} />
+          <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} aria-hidden />
           <span className="text-[12px] text-ink-2">{label}</span>
           {st.connected && (
             <span className="text-[12px] text-ink">{fmtDur(liveUptime)} <span className="text-accent">{fmtCost(liveCost)}</span></span>
@@ -141,8 +134,8 @@ export default function CloudControl() {
         {/* EXPANDED PANEL */}
         {open && (
           <>
-            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-            <div style={style} className="z-50 w-[300px] panel p-3 text-[12px]">
+            <div className="fixed inset-0 z-40" aria-hidden="true" onClick={() => setOpen(false)} />
+            <div style={style} role="group" aria-label="Cloud GPU" className="z-50 w-[300px] panel p-3 text-[12px]">
               <div className="flex items-center gap-2 mb-2">
                 <span className="flex text-ink-3"><Icon name="cuboid" size={15} /></span>
                 <span className="font-display font-semibold text-[12.5px] text-ink">Cloud GPU</span>
@@ -195,11 +188,14 @@ export default function CloudControl() {
 
       {/* CONNECT CONFIRMATION */}
       {confirm && (
-        <div className="fixed inset-0 z-[70] bg-bg/70 flex items-center justify-center" onClick={() => setConfirm(false)}>
-          <div className="w-[380px] panel" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[70] bg-bg/70 flex items-center justify-center">
+          {/* The backdrop takes the outside click. It is not in the tab order: Escape is the keyboard's way out. */}
+          <div className="absolute inset-0" aria-hidden="true" onClick={() => setConfirm(false)} />
+          <div ref={confirmRef} role="dialog" aria-modal="true" aria-labelledby="cloud-confirm-title" tabIndex={-1}
+            className="relative w-[380px] panel">
             <div className="flex items-center gap-2 px-4 py-3 border-b hairline">
               <span className="flex text-accent"><Icon name="info" size={16} /></span>
-              <span className="font-display font-semibold text-[13.5px] text-ink">Fire up the cloud A100</span>
+              <span id="cloud-confirm-title" className="font-display font-semibold text-[13.5px] text-ink">Fire up the cloud A100</span>
             </div>
             <div className="p-4 flex flex-col gap-3 font-mono text-[11.5px] text-ink-2">
               <div className="flex items-baseline justify-between">
@@ -213,7 +209,7 @@ export default function CloudControl() {
               </div>
               <div className="text-ink-3 text-[10.5px]">The pod bills until you disconnect or a guard terminates it. Cost stays in view in the top bar.</div>
               <div className="flex gap-2 pt-1">
-                <button onClick={() => setConfirm(false)} className="flex-1 h-8 rounded-md border border-line text-ink-2 hover:border-accent">Cancel</button>
+                <button onClick={() => setConfirm(false)} className="flex-1 h-8 rounded-md border border-line text-ink-2 hover:border-accent"><T k="common.cancel">Cancel</T></button>
                 <button onClick={doConnect} className="flex-1 h-8 rounded-md bg-accent text-bg font-display font-semibold hover:bg-accent/90">
                   I understand, connect
                 </button>
@@ -225,7 +221,7 @@ export default function CloudControl() {
 
       {/* ORPHAN BANNER */}
       {orphans.length > 0 && (
-        <div className="fixed top-0 left-0 right-0 z-[80] bg-block/15 border-b border-block flex items-center gap-3 px-4 py-2 text-[12px]">
+        <div role="alert" className="fixed top-0 left-0 right-0 z-[80] bg-block/15 border-b border-block flex items-center gap-3 px-4 py-2 text-[12px]">
           <span className="flex text-block"><Icon name="flag" size={15} /></span>
           <span className="text-block font-semibold">
             {orphans.length} cloud GPU pod{orphans.length > 1 ? "s" : ""} running with no session, billing{" "}

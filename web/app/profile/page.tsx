@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import MyIssues from "@/components/labelops/MyIssues";
 import LocalePicker from "@/components/shell/LocalePicker";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "@/lib/toast";
+import { useQuery } from "@/lib/useQuery";
 import { getUser, setUser } from "@/lib/user";
 import type { Profile } from "@/lib/types";
 
@@ -42,7 +43,11 @@ function Field({ label, ...rest }: { label: string } & React.InputHTMLAttributes
 }
 
 export default function ProfilePage() {
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const profileQ = useQuery(["profile"], () => api.profile());
+  const profile: Profile | null = profileQ.data ?? null;
+  const profileErr = profileQ.error;
+  useEffect(() => { if (profileErr) toast(humanizeError(profileErr), "error"); }, [profileErr]);
+  const load = profileQ.reload;
   const [busy, setBusy] = useState(false);
   const confirm = useConfirm();
 
@@ -53,13 +58,6 @@ export default function ProfilePage() {
   const [mfaCode, setMfaCode] = useState("");
   const [recovery, setRecovery] = useState<string[] | null>(null);
   const [disablePw, setDisablePw] = useState("");
-
-  const load = useCallback(async () => {
-    try { setProfile(await api.profile()); }
-    catch (e) { toast(humanizeError(e), "error"); }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
 
   // Several of these actions deliberately invalidate every existing token, which includes the one this tab
   // is holding. The server hands back a fresh one so the page keeps working rather than throwing the user

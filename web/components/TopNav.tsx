@@ -10,6 +10,7 @@ import Icon from "./shell/Icon";
 import NotificationBell from "./shell/NotificationBell";
 import { MENU_DESTINATIONS } from "@/lib/menus";
 import { NAV_DESTINATIONS, activeKey } from "@/lib/sidebar";
+import { useLabel, useT } from "@/lib/i18n";
 
 // The top bar over every page: where you are, then search and the session controls. Navigation itself lives
 // in the sidebar (components/shell/Sidebar.tsx); below the tablet breakpoint the sidebar is a drawer and the
@@ -19,28 +20,30 @@ import { NAV_DESTINATIONS, activeKey } from "@/lib/sidebar";
 
 function Crumb({ active }: { active: string }) {
   const pathname = usePathname();
+  const tl = useLabel();
   // Prefer the real destination label for the current path, so the crumb matches what the menu called it
   // rather than whatever string each page happened to pass.
   const key = activeKey(pathname ?? "/");
   const label = NAV_DESTINATIONS.find((d) => d.key === key && d.href === pathname)?.label
     ?? MENU_DESTINATIONS.find((d) => d.href === pathname)?.label ?? active;
-  return <span className="truncate text-[13px] font-medium text-ink">{label}</span>;
+  return <span className="truncate text-[13px] font-medium text-ink">{tl(label)}</span>;
 }
 
 export default function TopNav({ active, right, showCrumb = true }: {
   active: string; right?: React.ReactNode; showCrumb?: boolean;
 }) {
   const router = useRouter();
+  const t = useT();
   return (
     <header className="flex items-center gap-2 px-3 h-12 bg-bg border-b hairline shrink-0">
       {/* Below the tablet breakpoint the sidebar is a drawer; this opens it. */}
       <button onClick={() => window.dispatchEvent(new Event("lbx:sidebar"))}
-        aria-label="Open navigation" className="side-icon-btn flex md:hidden">
+        aria-label={t("topnav.open_nav", "Open navigation")} className="side-icon-btn flex md:hidden">
         <Icon name="list" size={16} />
       </button>
       <button
         onClick={() => { if (typeof window !== "undefined" && window.history.length > 1) router.back(); else router.push("/"); }}
-        data-tip="Back (Alt+Left)" aria-label="Back"
+        data-tip={t("topnav.back_tip", "Back (Alt+Left)")} aria-label={t("common.back", "Back")}
         className="side-icon-btn hidden md:flex">
         <Icon name="chevL" size={15} />
       </button>
@@ -56,14 +59,14 @@ export default function TopNav({ active, right, showCrumb = true }: {
         {right && <div className="min-w-0 truncate hidden lg:block">{right}</div>}
         <div className="flex items-center gap-2 shrink-0">
         <button onClick={() => window.dispatchEvent(new Event("lbx:palette"))}
-          data-tip="Jump to any page"
-          className="hidden sm:flex items-center gap-2 h-8 w-56 lg:w-64 px-2.5 rounded-md bg-bg-2 border hairline text-[12px] text-ink-3 hover:border-[#383b42] hover:text-ink-2 transition-colors">
+          data-tip={t("topnav.jump", "Jump to any page")}
+          className="hidden sm:flex items-center gap-2 h-8 w-56 lg:w-64 px-2.5 rounded-md bg-bg-2 border hairline text-[12px] text-ink-3 hover:border-line-3 hover:text-ink-2 transition-colors">
           <Icon name="search" size={13} />
-          <span className="flex-1 text-left">Go to...</span>
+          <span className="flex-1 text-left">{t("topnav.goto", "Go to...")}</span>
           <kbd className="text-[11.5px] px-1.5 py-0.5 rounded border hairline text-ink-3">Ctrl K</kbd>
         </button>
         <button onClick={() => window.dispatchEvent(new Event("lbx:palette"))}
-          aria-label="Jump to any page" className="side-icon-btn flex sm:hidden">
+          aria-label={t("topnav.jump", "Jump to any page")} className="side-icon-btn flex sm:hidden">
           <Icon name="search" size={15} />
         </button>
         {/* Before the cloud chip: an upload is something the user started and is waiting on, so it

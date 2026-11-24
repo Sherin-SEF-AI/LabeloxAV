@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { T } from "@/lib/i18n";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useClock } from "@/lib/inspector/clock";
 import { api, type InspectorEvent, type InspectorPanel, type InspectorTopic , humanizeError } from "@/lib/api";
@@ -193,7 +194,7 @@ export default function InspectorWorkspace() {
                     <div className="flex gap-1">
                       <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="layout name"
                         className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-1.5 py-1 text-[11px] text-ink-2 focus:border-accent outline-none" />
-                      <button onClick={saveLayout} className="text-[11px] border border-line px-1.5 rounded hover:border-accent">save</button>
+                      <button onClick={saveLayout} className="text-[11px] border border-line px-1.5 rounded hover:border-accent"><T k="action.save">save</T></button>
                     </div>
                     {layouts.length > 0 && (
                       <select onChange={(e) => e.target.value && loadLayout(e.target.value)} defaultValue=""
