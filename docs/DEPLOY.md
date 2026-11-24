@@ -245,6 +245,71 @@ Or turn the reviewer off with `LBX_MODELS__VLM__ENABLED=false` in `.env`. `docto
 
 ---
 
+## Settings worth knowing on a real deployment
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `LBX_PATHS__IMPORT_ROOTS` | empty | Directories an import **request** may read from, comma-separated. Uploads made through the product land in object storage and need nothing here. Empty means the API will not import from any local path: `source_uri` on `/api/imports/start`, `/api/imports/dry-run` and the workforce return upload is caller-supplied, and without an allowlist a reviewer or an outside vendor could point an import at any directory the server can read. The `make import` command line is an operator at a shell and is not restricted. |
+| `LBX_PATHS__IMPORT_MAX_EXTRACT_BYTES` | 50 GB | The most an imported archive may expand to. Checked from the archive's own listing before anything is extracted. |
+| `LBX_METRICS__TOKEN` | empty | Bearer token a scraper must present to read `/metrics`. Empty leaves it open, which is only acceptable when the port is not reachable from outside. Give Prometheus the same value (`authorization.credentials`). |
+| `LBX_METRICS__DB_GAUGE_TTL_S` | `30` | How long the corpus gauges are reused between scrapes. |
+| `LBX_JOBS__AUTO_RESUME` | `true` | Continue imports and exports that a restart interrupted, at the next startup (see below). |
+
+### What survives a restart
+
+Auto-label and training run in the GPU worker from a durable queue and resume on their own. Imports of
+annotated formats and dataset exports run inside the API; when it restarts, the next start continues them:
+an import writes into the session it already created and skips the frames already stored, an export is
+repeated from its stored request. A job is picked up only if no live process is running it, and at most
+`LBX_JOBS__MAX_ATTEMPTS` (3) times, after which it is failed with a message saying so. Raw media imports
+(video, MCAP, image folders) and agent sweeps are not continued automatically: the first has no cursor to
+continue from and is failed as before, the second starts model inference and is resumed by a person from
+its run page.
+
+Postgres, MinIO, Redis and Redpanda restart on their own after a reboot or a crash, as the application
+services do.
+
+### What the containers run as
+
+The API, the workers and the web app run as an unprivileged user, not root. The Python image still
+starts as root for one step: `docker/app/entrypoint.sh` hands the models and scratch volumes to the
+application user (volumes made by an earlier version are owned by root), then drops to uid 10001 with no
+capabilities and runs the command. An upgrade needs nothing from you; the first start after it takes a
+little longer while a large models volume changes owner, and later starts only touch what is not already
+the application's. A command started with an explicit `--user` (the backup script does this) skips the
+step and runs as that user.
+
+### More than one GPU
+
+One GPU worker owns one card. Its lifetime lock, the GPU slot every model-loading job takes, and the
+"training holds the GPU" lease are per card, so a second card is a second worker:
+
+```bash
+python -m services.gpu_worker --device cuda:1      # beside the default worker on cuda:0
+```
+
+Both drain the same auto-label and training queues, and each requeues only its own card's jobs after a
+crash. `docker-compose.gpu.yml` carries a commented service for the Docker deployment. The API process and
+anything without `--device` use `LBX_GPU__DEVICE` (default `cuda:0`). This is covered by tests against
+two device names on one database; it has not been run on a machine with two cards.
+
+### What the models cost
+
+**Settings > Models and usage** reads `GET /api/system/llm-usage`: calls, tokens, images and failures per day,
+model and purpose, for local and cloud models alike. Cost is only as good as the prices you configure:
+
+```bash
+LBX_LLM__PRICES='{"anthropic:<model>": {"input_per_mtok": 3, "output_per_mtok": 15}}'
+LBX_LLM__DAILY_BUDGET_USD=20      # 0 (the default) means no cap
+```
+
+A cloud model with no price is recorded with its tokens and an unknown cost, and listed as unpriced, never
+as free. Past the daily cap, calls fall back to the local model, the same path a provider outage takes.
+`GET /api/system/models` shows what the API process has loaded on the card and
+`POST /api/system/models/release` frees whatever is idle.
+
+---
+
 ## Upgrading
 
 ```bash
@@ -276,6 +341,34 @@ small, valid `.gz` and a green target, and you found out at restore time. It har
 the half the warning above is about was the half nobody took.
 
 Store the whole timestamped directory off the machine. `MANIFEST` inside it records what was taken.
+
+### Scheduled backups
+
+A backup that depends on somebody remembering is not one, and on a single box the box is the only copy.
+
+```bash
+labeloxav backup-schedule on 02:30     # or: make backup-schedule ARGS="on 02:30"
+labeloxav backup-schedule status       # is it on, when does it next run, did the last one work
+labeloxav backup-schedule off
+```
+
+That installs a daily systemd timer running `scripts/backup_scheduled.sh`. It catches up on a run missed
+while the machine was off, never runs two at once, and exits non-zero on failure so the failure shows in
+`systemctl status labeloxav-backup` and in `backup-schedule status`. Set these in `.env`:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `LBX_BACKUP_DIR` | `.scratch/backups` | Where backups are kept. |
+| `LBX_BACKUP_KEEP` | `7` | How many to keep. Older ones are removed only after a new one has been written and copied. |
+| `LBX_BACKUP_REMOTE` | unset | An rsync destination (`backup@nas:/srv/labelox` or a mounted path). Each backup is copied there. Unset, every run says the backup is on the same disk as the data. |
+
+Every backup directory is complete on its own and restores with `make restore DIR=...`. Stored files that
+have not changed since the previous backup are hard links to it, so keeping seven costs one copy of the
+corpus plus what changed, not seven copies. A run that fails removes its own half-written directory and
+leaves the earlier backups alone.
+
+Run as an ordinary user it installs a user timer, which only fires while that user is logged in unless
+lingering is on (`sudo loginctl enable-linger <user>`); the command says so when it applies.
 
 ---
 

@@ -97,6 +97,24 @@ suite over 71 pages would be slow and flaky, and a flaky gate gets switched off.
 It **skips** when nothing is serving rather than failing, because a suite that goes red on absent infra
 teaches people to ignore red.
 
+```bash
+make e2e-editor     # needs only: make up
+```
+
+The annotation editor and the frame edit lock, in a real browser. The unit tiers test the editor's
+reducer and its key handling; this is the only thing that tests the editor: that an arrow key moves a box
+**and the move is saved**, that a paste on another frame lands, that a second person opening a frame is
+view-only and the server refuses their save, that a reviewer can take a frame over and the person displaced
+is told. Every assertion about an edit reads the objects back from the API, because a box that moved on
+screen and was never saved is the failure worth catching and the page cannot tell you about it.
+
+It is self-contained, which is why it runs in CI when the smoke above does not:
+`scripts/e2e_editor.sh` creates its own database and bucket, migrates, seeds ten synthetic frames and one
+user per role (`scripts/e2e_seed.py`), starts the API and the web app on free ports, runs
+`web/e2e/editor.spec.ts` and `presence.spec.ts`, and removes all of it, pass or fail. No GPU, no model
+weights, no network. `LBX_E2E_KEEP=1` leaves it running to poke at. Each test that edits has a frame to
+itself, since opening a frame takes its lock and a closed browser does not always get to give it back.
+
 Two things learned writing it, both worth keeping:
 
 - **Assert the status, not just that the body has content.** The first version checked
@@ -131,7 +149,7 @@ one, a broken glob turns the whole file into a statement about the empty set, wh
 
 Match what is already there:
 
-- **No mocks of the thing under test.** There is not a single `MagicMock` in 339 files. Substitution is
+- **No mocks of the thing under test.** There is not a single `MagicMock` in the suite (467 files when this was last counted). Substitution is
   `monkeypatch.setattr` with a real function, and assertions land on real database rows.
 - **Assert the property, not the implementation.** `test_containment_not_iou` asserts the IoU is ~0.05 and
   the region still counts as covering, which is the design decision; a test of the threshold constant would

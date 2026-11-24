@@ -9,7 +9,7 @@ the true one in every case that was checked. It also carried a suite size 1,300 
 status document that contradicts itself is worse than none: it costs a reader time and then misleads them,
 and this one is what the README points at.
 
-**Suite as of this rewrite: 2,580 passing, 3 skipped, 4 xfailed** (`make test`, full infra). Plus two GPU
+**Suite as of 2026-11-24: 4,038 passing, 6 skipped, 4 xfailed** (web: 1,249 passing; browser: 8 passing, `make e2e-editor`). As of the 2026-08-18 rewrite it was 2,580 passing, 3 skipped, 4 xfailed (`make test`, full infra). Plus two GPU
 tests that fail only under memory pressure and pass in isolation - see `tests/KNOWN_FAILURES.md`.
 
 ---
@@ -95,6 +95,57 @@ passed in 60s.
 
 ---
 
+## Fixed in the 2026-11-24 round
+
+A whole-codebase pass: four read-only audits, then the fixes. Uncommitted on `feat/complete-gaps` at the
+time of writing. Each row has a test that fails without the fix unless it says otherwise.
+
+### Controls that existed and did not fire
+
+| Gap | Fix | Test |
+| --- | --- | --- |
+| An import request could name any directory or archive the API can read (`Path(source_uri)`, no allowlist). Reachable by a reviewer and by an outside workforce holding a return key | `LBX_PATHS__IMPORT_ROOTS` allowlist, checked after symlinks resolve; empty means no local paths. A cap on what an archive may expand to | `tests/test_import_source_guard.py` |
+| Session erasure deleted the frame images and nothing else. The uploaded source video (the unredacted copy), every mask, raster and point cloud stayed in the bucket under an erasure certificate | Every `*_uri` column on a row tied to the session, found from the schema, plus the session's own key prefixes; shared source media kept until the last session using it goes | `tests/test_retention_erasure.py` |
+| A recording health-gate override, cancel-any-job, replacing a session's calibration, a flywheel dispatch and corpus-wide attribute writes sat at the annotator floor, unattributed | Write-only reviewer floors (a prefix floor would have gated the reads too), and the override, the cancel and calibration changes record who did them | `tests/test_route_auth.py` |
+| Two simultaneous auto-label starts both found the GPU idle; re-detection checked training only; the PII backfill checked nothing and left no row | A transaction-scoped lock around check and insert; the backfill has a run row and the same guards | `tests/test_gpu_start_race.py` |
+| The frame lock did not exist: the second person on a frame edited freely and met a 409 at save | Presence and an edit lock (`services/collab/presence.py`), enforced on the editor's saves by the server (423), with reviewer take-over | `tests/test_presence_*.py`, `web/e2e/presence.spec.ts` |
+| `/api/datasets/blob` confined itself with `"/datasets/" in uri` | Resolved to a key in our bucket and required to start with the prefix | `tests/test_ops_endpoints.py` |
+
+### Things that reported success without doing anything
+
+| Gap | Fix | Test |
+| --- | --- | --- |
+| `pip-audit --strict \|\| true` could not fail (it tries to look the project up on PyPI). The pins had 159 advisories across 21 packages by the time anyone looked | `scripts/audit_deps.py`: fails on any advisory not in `configs/pip_audit_baseline.txt`. **The 159 are baselined, not fixed** | CI |
+| Ruff blocked on nine paths; the other 135 findings were reported and ignored | All fixed; the whole tree gates | CI |
+| Bandit ended in `\|\| true` | Blocking at high severity (clean); medium and low are printed | CI |
+| `POST /training/{id}/cancel` cancelled the job and answered 500 (`MissingGreenlet`) | Refresh before building the response | `tests/test_training_cancel_route.py` |
+| The evidence panel stored a review response as the object it was showing; the response has no frame or image, so the image went blank and the footer threw | The response is merged onto the object; `api.review` is declared with the server's real type | `web/components/inspect/mergeReview.test.ts` |
+| `/api/health`, an unauthenticated probe, created the bucket when it was missing | A read-only probe, off the event loop | `tests/test_ops_endpoints.py` |
+| Nine import adapters read a track id and the importer ignored it; a 3D box rode in provenance and was never written to its column; a real nuScenes release imported with zero objects | Tracks and cuboids are written; the nuScenes adapter reads the standard tables; LIDAR_TOP keyframes are stored | `tests/test_import_tracks_and_cuboids.py`, `tests/test_nuscenes_standard_import.py` |
+
+### Failure modes
+
+| Gap | Fix | Test |
+| --- | --- | --- |
+| `eval_patch.prediction_id` and `.frame_id` (39M rows, cascading) and 49 other foreign keys had no index: the 0122 incident waiting to repeat on the next erasure | Migration 0123, and a test that fails on the next unindexed foreign key | `tests/test_fk_indexes.py` |
+| An import or export in flight when the API restarted was failed ten minutes later and had to be started again, which for an import made a second session | A per-job advisory lock says exactly whether a job's process is alive; the next start continues it (an import into its own session, skipping stored frames) | `tests/test_job_recovery.py` |
+| Thirty-odd handlers did blocking storage reads and image decodes on the event loop of a one-process server | `services/api/offload.py`; a source scan fails on the next one | `tests/test_event_loop_blocking.py` |
+| `/metrics` ran a GROUP BY over the object table per scrape, for anyone who could reach it | Cached for `LBX_METRICS__DB_GAUGE_TTL_S`; optional bearer token | `tests/test_ops_endpoints.py` |
+| 60 `limit` parameters had no upper bound (one defaulted to 200,000) | Bounded with `Annotated[int, Query(le=...)]`, which keeps the default an int for handlers called from Python | suite |
+| No request id on log lines | `X-Request-ID` in, out, and bound to every log line of the request | `tests/test_request_id.py` |
+| The same checkpoint was loaded up to three times in one process (SAM by the editor, the describe tool and Path B), and nothing could free a model somebody else had loaded | `core/model_manager.py`: one instance per model, leases, eviction on demand, one VRAM probe | `tests/test_model_manager.py` |
+| No token or cost accounting for two wired cloud providers | A daily ledger (0125), every model call through `services/llm/ledger.post`, an optional daily cap | `tests/test_llm_ledger.py` |
+| Containers ran as root; the infrastructure had no restart policy; backups ran when somebody remembered | An entrypoint that hands the volumes over and drops to an unprivileged user with no capabilities; `restart: unless-stopped` on the four infra services in the deployment overlay; `labeloxav backup-schedule` | `tests/test_deploy_composition.py`, `tests/test_backup_schedule.py`. The entrypoint was exercised against a root-owned volume in a container; **the full application image was not rebuilt** (the build did not finish on this network) |
+
+### Measured, and not changed
+
+Recorded because each was proposed as a win and is not one here (docs/MEASUREMENT.md, "Where auto-label
+time goes"). Batching the detectors across frames is no faster and changes 7% to 12% of detections at a
+batch of 4 to 8; `gpu.batch_size` exists and defaults to 1. A smaller segmenter input is 1.5x faster at a
+mean mask IoU of 0.80. TensorRT for the detectors could at most recover 24 ms of a 300 ms frame.
+
+---
+
 ## Corrections to the audits
 
 Findings that were wrong. Recorded because acting on them would have caused damage.
@@ -118,8 +169,8 @@ Findings that were wrong. Recorded because acting on them would have caused dama
 | --- | --- |
 | No learned 3D detector in the loop | OpenPCDet or Pointcept and a CUDA device. The KITTI builder is complete; `train()` refuses by name rather than training a 2D model on 3D labels. Also needs real LiDAR - the running path lifts cuboids from monocular depth and inherits its scale error |
 | 3D semantic segmentation is cuboid membership plus a ground plane | PTv3 inference, plus the runtime above |
-| Multi-GPU / distributed training | The worker holds a Postgres advisory lock as a global GPU mutex by design. Changing that needs the scheduling model redesigned and more than one GPU to test on |
-| TensorRT, LiteRT, Hailo export | A device toolchain. The capability gate refuses them by name rather than fabricating a result |
+| Multi-GPU: done in code, untested on hardware | The worker lock, the GPU slot and the training lease are per card since 2026-11-24 (`python -m services.gpu_worker --device cuda:1`), covered by tests against two device names on one database. It has not been run on a machine with two cards. Distributed training of ONE job across cards is still not attempted |
+| TensorRT, LiteRT, Hailo export | A device toolchain. The capability gate refuses them by name rather than fabricating a result. For auto-label throughput specifically TensorRT is not worth wiring: measured 2026-11-24, the detectors are 24 ms of a 300 ms frame and segmentation is the rest (docs/MEASUREMENT.md) |
 | Cloud training/autolabel/relabel park in `queued-cloud` | A provisioned pod. The data-movement contract is implemented and tested |
 
 ### Needs a product decision
@@ -135,12 +186,12 @@ Findings that were wrong. Recorded because acting on them would have caused dama
 | --- | --- |
 | The DPDPA coverage gate is **advisory** | Run `POST /api/agent/reanalyze/all`, watch `coverage_gaps` reach zero in the `dpdpa.gate` log, then set `LBX_PII__COVERAGE_GATE=enforcing`. The whole suite already passes under enforcing |
 | Nothing measures the *realized* precision of the auto-accepted subset against humans | The gate sits at P(correct) ≈ 0.45 and its isotonic curve is fit against a VLM judging the detector, because human review is 223 accepts / 6 rejects. The control-sample machinery exists; the gate does not feed it |
-| No e2e / browser tests | Playwright is on disk and invoked by nothing. The sign-in → annotate → review → export journey has no automated coverage |
+| Browser tests cover the editor and the frame lock, not the whole journey | `make e2e-editor` (in CI) drives the editor against a throwaway database: nudge, undo, cross-frame paste, multi-delete, view-only for the second person, the server refusing their save, take-over. The sign-in → review → export journey is still only the `make e2e` smoke, which needs a deployed stack and is not in CI |
 | No visual regression on the canvas | For a Konva annotation tool this is the highest-value missing test type |
 | 68 of 79 API routers are never imported by a test | The authz matrix now covers the route *table*; the handlers themselves largely are not exercised over HTTP |
-| No API versioning; 3 of 674 routes declare `response_model` | The generated OpenAPI is almost entirely untyped, so no client can be generated from it |
+| No API versioning; 90 of 787 operations declare what they return | Up from 41. The web app's types are generated from the schema (`web/lib/api.generated.ts`, `make clients`) and an undeclared response is typed `unknown`. The 51 typed in 2026-11 are the ones the web app calls most; `tests/test_response_contracts.py` proves no field is dropped. The other 697 are untyped |
 | No soft delete | Zero `deleted_at` columns; all 17 DELETE routes are hard deletes. DPDPA erasure is separate and real |
-| `web/lib/i18n.ts` has four locales and one consumer | The annotator surface is hardcoded English |
+| The shell is translated, page bodies are not | 357 keys in four locales cover the sidebar, menus, command palette, page titles, common buttons and the home page. Page bodies, the editor and format names are English. The Hindi, Kannada and Tamil were machine-written and no native speaker has reviewed them |
 | Shadow/canary serving | `services/verdyx/shadow.py` is a correct accumulator with no producer |
 | ~28 of 48 LiDAR endpoints have no UI; ontology repair is API-only | The UI can grow the vocabulary but not repair it |
 | 45 swallowed `.catch(() => {})` remain | Baselined in `web/lib/noswallow.test.ts` so the count cannot grow. The baseline was measured, not adjudicated |

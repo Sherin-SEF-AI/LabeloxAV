@@ -193,3 +193,29 @@ The 79% is its own finding: most machine labels a reviewer can check against gol
 116 wrong ones have the wrong class (84 with a good box), which is the same naming failure item 9 above
 points at. A pool of 147 is small; the ranking between the formula and the AL score could move with more
 gold, the gap to random is the part that is solid.
+
+## Where auto-label time goes, and two speed-ups that were measured and not taken
+
+Measured 2026-11-24 on corpus frames at 1920 wide, one 16 GB card, models warm.
+
+| Stage 1 step | Time per frame |
+| --- | --- |
+| Closed-set detector (Path A) | 12 ms |
+| Open-vocabulary detector (Path B, 216 concept phrases) | 12 ms |
+| Segmenter, prompted with that frame's boxes (35.5 on average, cap 40) | about 285 ms |
+
+Segmentation is roughly 95% of stage 1. Two changes that looked like obvious wins were tried against that:
+
+- **Batching the detectors across frames.** No faster (12 ms a frame at a batch of 1; 12 to 16 ms at 2, 4
+  and 8), and not identical: of 282 detections made one frame at a time, 279 were reproduced at a batch of
+  2, 263 at 4 and 248 at 8 (same class, IoU at least 0.9, confidence within 0.05). Frames of different
+  shapes are padded to a common one inside a batch, which moves boxes near the padding. The code path
+  exists (`gpu.batch_size`) and defaults to 1.
+- **A smaller segmenter input.** 768 instead of 1024 is 1.5x faster and the masks are not the same masks:
+  mean IoU 0.80 against the full-size result, fifth percentile 0.51, over 568 masks. Not taken. Half
+  precision changed neither the masks (IoU 1.00) nor the time; the predictor ignores the flag.
+
+What did change is where the work runs: frame reads and decodes happen in threads rather than on the event
+loop, the forward pass runs off the loop, and an unreadable frame is skipped and counted instead of ending
+the session. None of that is a throughput claim.
+
