@@ -30,6 +30,19 @@ x-app-image: &app_image
   pull_policy: never
 
 services:
+  # The infrastructure comes back after a reboot or a crash, like the application does. In the base file
+  # these four carry no restart policy, which is right for a developer who starts and stops them by hand
+  # and wrong for a deployment: the API, the web app and the workers all restarted themselves, and then
+  # failed against a database that was still down until somebody ran `labeloxav up`.
+  postgres:
+    restart: unless-stopped
+  minio:
+    restart: unless-stopped
+  redis:
+    restart: unless-stopped
+  redpanda:
+    restart: unless-stopped
+
   # Every service reads its credentials from .env. install.sh generates strong values there, because
   # core/config.py refuses the dev defaults on any non-local deployment: a known signing key lets anyone
   # mint an admin token, so the app will not boot with one rather than run insecurely.

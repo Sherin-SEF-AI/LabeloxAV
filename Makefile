@@ -67,6 +67,10 @@ nuke: ## Stop infra and delete volumes (destroys local data)
 backup: ## Back up Postgres AND the MinIO blobs together, into .scratch/backups/<timestamp>/
 	./scripts/backup.sh
 
+.PHONY: backup-schedule
+backup-schedule: ## Daily backup timer: make backup-schedule ARGS="on 02:30" | ARGS=off | ARGS=status (keeps LBX_BACKUP_KEEP, copies to LBX_BACKUP_REMOTE)
+	./scripts/backup_schedule.sh $(or $(ARGS),status)
+
 .PHONY: restore
 restore: ## Restore both halves from a backup dir: make restore DIR=.scratch/backups/<timestamp>
 	@test -n "$(DIR)" || { echo "usage: make restore DIR=.scratch/backups/<timestamp>" >&2; exit 2; }
@@ -77,6 +81,10 @@ e2e: ## Browser smoke over the golden path (needs the app running: make app-up, 
 	@# Skips rather than fails when nothing is serving, because a suite that goes red on absent infra
 	@# teaches people to ignore red. Start the stack first for it to actually assert anything.
 	cd web && npx playwright test
+
+.PHONY: e2e-editor
+e2e-editor: ## The editor and the frame lock in a real browser, on a throwaway database it builds and removes (needs: make up)
+	./scripts/e2e_editor.sh
 
 .PHONY: e2e-first-run
 e2e-first-run: ## A new team's first hour on a throwaway install: sign in, sample, auto-label, review, export (slow, needs GPU)
@@ -212,6 +220,10 @@ gold: ## Seal a gold set from human-accepted objects. Usage: make gold ARGS="--n
 calibrate: ## Fit isotonic calibration from reviewed auto-labels. Usage: make calibrate ARGS="--gold <id>"
 	$(RUN) python -m services.autolabel.isotonic $(ARGS)
 
+.PHONY: calibrate-gold
+calibrate-gold: ## Fit calibration against a gold set, held out and judged trustworthy or not (needs GPU). Usage: make calibrate-gold ARGS="fit-gold --gold <id>" | ARGS="activate --uri <uri>"
+	$(RUN) python -m services.autolabel.gold_calibrate $(ARGS)
+
 .PHONY: m9
 m9: ## Measure label quality on a gold set (per-class P/R + Safe-mIoU). Usage: make m9 ARGS="--gold <id>"
 	$(RUN) python -m services.analytics.quality $(ARGS)
@@ -295,6 +307,11 @@ lint-web: ## ESLint the frontend (blocking on errors; hook-dependency findings a
 .PHONY: check-gold
 check-gold: ## Fail if the gold set evaluations score against has lost objects (needs a live corpus, not CI)
 	$(RUN) python -m scripts.check_gold_integrity --active-only
+
+.PHONY: clients
+clients: ## Regenerate everything derived from the API schema: the Python client, the web app's types, the docs reference
+	$(RUN) python -m scripts.generate_sdk --out sdk/labelox/generated.py
+	$(RUN) python -m scripts.generate_ts_types --out web/lib/api.generated.ts
 
 .PHONY: docs
 docs: ## Build the documentation site into ./site (regenerates the API reference from the running app)

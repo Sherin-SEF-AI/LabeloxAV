@@ -65,3 +65,61 @@ def test_credentials_must_come_from_the_environment(monkeypatch):
     monkeypatch.delenv("MINIO_ROOT_PASSWORD", raising=False)
     with pytest.raises(SystemExit, match="MINIO_ROOT_USER"):
         mirror._client("http://localhost:9")
+
+
+def test_a_second_mirror_links_unchanged_objects_instead_of_fetching_them(s3, tmp_path):
+    """Nightly backups: seven snapshots must not cost seven copies of the corpus."""
+    client, made = s3
+    src = f"mirror-inc-{uuid.uuid4().hex[:8]}"
+    client.create_bucket(Bucket=src)
+    made.append(src)
+    client.put_object(Bucket=src, Key="frames/a.jpg", Body=b"A" * 2048)
+    client.put_object(Bucket=src, Key="frames/b.jpg", Body=b"B" * 2048)
+
+    first, second = tmp_path / "one", tmp_path / "two"
+    mirror.download(client, src, first / "minio", manifest=first / "minio.manifest.json")
+
+    client.put_object(Bucket=src, Key="frames/b.jpg", Body=b"CHANGED" * 300)     # rewritten in place
+    client.put_object(Bucket=src, Key="frames/c.jpg", Body=b"C" * 10)            # new
+    n = mirror.download(client, src, second / "minio", manifest=second / "minio.manifest.json",
+                        link_dest=first / "minio", prev_manifest=first / "minio.manifest.json")
+    assert n == 3
+
+    a1, a2 = first / "minio/frames/a.jpg", second / "minio/frames/a.jpg"
+    assert a1.stat().st_ino == a2.stat().st_ino, "an unchanged object must be the same file, not a copy"
+    b1, b2 = first / "minio/frames/b.jpg", second / "minio/frames/b.jpg"
+    assert b1.stat().st_ino != b2.stat().st_ino
+    assert b1.read_bytes() == b"B" * 2048, "the older snapshot must keep what it captured"
+    assert b2.read_bytes() == b"CHANGED" * 300
+    assert (second / "minio/frames/c.jpg").read_bytes() == b"C" * 10
+
+
+def test_an_object_deleted_from_the_bucket_is_absent_from_the_next_snapshot_only(s3, tmp_path):
+    client, made = s3
+    src = f"mirror-del-{uuid.uuid4().hex[:8]}"
+    client.create_bucket(Bucket=src)
+    made.append(src)
+    client.put_object(Bucket=src, Key="k/keep.bin", Body=b"1")
+    client.put_object(Bucket=src, Key="k/gone.bin", Body=b"2")
+    first, second = tmp_path / "one", tmp_path / "two"
+    mirror.download(client, src, first / "minio", manifest=first / "minio.manifest.json")
+    client.delete_object(Bucket=src, Key="k/gone.bin")
+    mirror.download(client, src, second / "minio", manifest=second / "minio.manifest.json",
+                    link_dest=first / "minio", prev_manifest=first / "minio.manifest.json")
+    assert (first / "minio/k/gone.bin").exists()
+    assert not (second / "minio/k/gone.bin").exists()
+    assert (second / "minio/k/keep.bin").read_bytes() == b"1"
+
+
+def test_a_truncated_file_in_the_older_snapshot_is_fetched_again_not_carried_forward(s3, tmp_path):
+    client, made = s3
+    src = f"mirror-trunc-{uuid.uuid4().hex[:8]}"
+    client.create_bucket(Bucket=src)
+    made.append(src)
+    client.put_object(Bucket=src, Key="x.bin", Body=b"0123456789")
+    first, second = tmp_path / "one", tmp_path / "two"
+    mirror.download(client, src, first / "minio", manifest=first / "minio.manifest.json")
+    (first / "minio/x.bin").write_bytes(b"0123")                                  # damaged on disk
+    mirror.download(client, src, second / "minio", manifest=second / "minio.manifest.json",
+                    link_dest=first / "minio", prev_manifest=first / "minio.manifest.json")
+    assert (second / "minio/x.bin").read_bytes() == b"0123456789"

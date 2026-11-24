@@ -62,13 +62,32 @@ NET="$(docker compose ps --format '{{.Name}}' postgres | head -1 | sed 's/-postg
 export MINIO_ROOT_USER="$MINIO_USER" MINIO_ROOT_PASSWORD="$MINIO_PASS"
 APP_IMAGE="labeloxav/app:${LBX_VERSION:-latest}"
 DIR_ABS="$(cd "$DEST" && pwd)"
+# An earlier backup to reuse unchanged objects from (scripts/backup_scheduled.sh sets it to the previous
+# night's). Objects whose ETag and size have not changed are hard-linked instead of downloaded again, so a
+# week of nightly backups costs one copy of the corpus plus what changed, and each backup directory is
+# still complete on its own. It has to sit beside this backup, in the same parent directory, because a
+# hard link cannot cross a filesystem and the container sees only the parent it is given.
+PARENT_ABS="$(dirname "$DIR_ABS")"
+NAME="$(basename "$DIR_ABS")"
+LINK_ARGS_HOST=() LINK_ARGS_CTR=()
+PREV="${LBX_BACKUP_LINK_DEST:-}"
+if [ -n "$PREV" ] && [ -d "$PREV/minio" ] && [ -f "$PREV/minio.manifest.json" ]; then
+  PREV_ABS="$(cd "$PREV" && pwd)"
+  if [ "$(dirname "$PREV_ABS")" = "$PARENT_ABS" ]; then
+    PREV_NAME="$(basename "$PREV_ABS")"
+    LINK_ARGS_HOST=(--link-dest "$PREV_ABS/minio" --prev-manifest "$PREV_ABS/minio.manifest.json")
+    LINK_ARGS_CTR=(--link-dest "/backups/$PREV_NAME/minio" --prev-manifest "/backups/$PREV_NAME/minio.manifest.json")
+    echo "    reusing unchanged objects from $PREV_ABS"
+  fi
+fi
 if docker image inspect "$APP_IMAGE" >/dev/null 2>&1; then
   docker run --rm --user "$(id -u):$(id -g)" --network "$NET" -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 \
-    -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD -v "$DIR_ABS:/backup" --entrypoint python "$APP_IMAGE" \
-    /app/scripts/bucket_mirror.py download --endpoint http://minio:9000 --bucket "$BUCKET" --dir /backup/minio
+    -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD -v "$PARENT_ABS:/backups" --entrypoint python "$APP_IMAGE" \
+    /app/scripts/bucket_mirror.py download --endpoint http://minio:9000 --bucket "$BUCKET" \
+    --dir "/backups/$NAME/minio" --manifest "/backups/$NAME/minio.manifest.json" "${LINK_ARGS_CTR[@]}"
 elif [ -x .venv/bin/python ]; then
   .venv/bin/python scripts/bucket_mirror.py download --endpoint "http://localhost:${MINIO_PORT:-9000}" \
-    --bucket "$BUCKET" --dir "$DIR_ABS/minio"
+    --bucket "$BUCKET" --dir "$DIR_ABS/minio" --manifest "$DIR_ABS/minio.manifest.json" "${LINK_ARGS_HOST[@]}"
 else
   echo "ERROR: neither the app image ($APP_IMAGE) nor a .venv is here to run scripts/bucket_mirror.py" >&2
   exit 1

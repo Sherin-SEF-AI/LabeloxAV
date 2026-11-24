@@ -243,3 +243,25 @@ class TestMinioIsBuiltNotPulled:
     def test_the_healthcheck_needs_only_what_the_image_has(self):
         svc = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())["services"]["minio"]
         assert "mc " not in " ".join(svc["healthcheck"]["test"]) and "curl" in " ".join(svc["healthcheck"]["test"])
+
+
+class TestTheInfrastructureComesBack:
+    """The application services restart themselves; the things they depend on must too."""
+
+    @pytest.mark.parametrize("service", ["postgres", "minio", "redis", "redpanda"])
+    def test_it_restarts_after_a_reboot(self, service):
+        assert _services().get(service, {}).get("restart") == "unless-stopped", (
+            f"{service} has no restart policy in the deployment, so after a reboot the API comes back "
+            "and fails against a dependency that did not")
+
+
+class TestBackupsAreSchedulable:
+    def test_the_scheduled_backup_and_its_timer_ship(self):
+        for name in ("backup.sh", "restore.sh", "backup_scheduled.sh", "backup_schedule.sh"):
+            f = REPO_ROOT / "scripts" / name
+            assert f.exists() and f.stat().st_mode & 0o111, f"scripts/{name} is missing or not executable"
+
+    def test_the_packaged_command_exposes_them(self):
+        launcher = (REPO_ROOT / "packaging" / "deb" / "labeloxav").read_text()
+        for word in ("backup)", "restore)", "backup-schedule)"):
+            assert word in launcher, f"`labeloxav {word[:-1]}` is not wired into the packaged command"

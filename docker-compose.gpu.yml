@@ -20,3 +20,23 @@ services:
     <<: *gpu
   embed-worker:
     <<: *gpu
+
+# A second card. Each GPU worker owns one card (its lifetime lock, the GPU slot and the training lease are
+# all per card), so using another GPU means running another worker told which card is its own. Copy this
+# into a docker-compose.override.yml, or uncomment it here:
+#
+#   gpu-worker-1:
+#     extends:
+#       file: docker-compose.app.yml
+#       service: gpu-worker
+#     command: ["python", "-m", "services.gpu_worker", "--device", "cuda:1"]
+#     deploy:
+#       resources:
+#         reservations:
+#           devices:
+#             - driver: nvidia
+#               count: all
+#               capabilities: [gpu]
+#
+# Both workers drain the same queues; a job is claimed by whichever is free. Verified by tests against one
+# database with two device names (tests/test_gpu_per_device.py); not yet run on a machine with two cards.

@@ -30,6 +30,12 @@ COPY pyproject.toml README.md LICENSE ./
 # image that never reads them again.
 RUN uv venv && uv pip install --no-cache -e "."
 COPY . .
+# The application user. /app itself is theirs so the process can create what it writes at run time (a
+# downloaded weights file, a training run directory); the source and the virtualenv stay root-owned and
+# read-only to it. docker/app/entrypoint.sh drops to this user before the command runs.
+RUN useradd --uid 10001 --user-group --create-home --shell /usr/sbin/nologin labelox \
+    && mkdir -p /app/models /app/.scratch /app/runs \
+    && chown labelox:labelox /app /app/models /app/.scratch /app/runs
 
 # PYTHONPATH: running a script by path (`python scripts/x.py`) puts scripts/ on sys.path rather than the
 # working directory, so `import core` fails even though the package is right there. Setting it explicitly
@@ -37,12 +43,14 @@ COPY . .
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
-    LBX_ENV=production
+    LBX_ENV=production \
+    HOME=/home/labelox
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD curl -fsS http://localhost:8000/api/health || exit 1
 
+ENTRYPOINT ["/app/docker/app/entrypoint.sh"]
 CMD ["uvicorn", "services.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 # ---------- gpu (full stack, CUDA) ----------
@@ -66,11 +74,17 @@ COPY . .
 # internet access could not label at all. Runs before LBX_ENV=production is set, because production settings
 # refuse to load without the deployment's secrets, which a build never has.
 RUN PYTHONPATH=/app .venv/bin/python scripts/download_models.py
+# The application user, as in the api target. Non-recursive: the weights and the virtualenv above are
+# several gigabytes, and a recursive chown would copy all of it into a second layer.
+RUN useradd --uid 10001 --user-group --create-home --shell /usr/sbin/nologin labelox \
+    && mkdir -p /app/models /app/.scratch /app/runs \
+    && chown labelox:labelox /app /app/models /app/.scratch /app/runs
 # Hugging Face models (the frame embedders) download on first use. Pointing their cache into the models
 # volume keeps them across container rebuilds.
 ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app PYTHONUNBUFFERED=1 LBX_ENV=production \
-    HF_HOME=/app/models/huggingface
+    HF_HOME=/app/models/huggingface HOME=/home/labelox
 EXPOSE 8000
 # No HEALTHCHECK here: this image also runs the GPU worker, which serves no HTTP, and an image-level check
 # would mark it unhealthy forever. The API's check is on its compose service.
+ENTRYPOINT ["/app/docker/app/entrypoint.sh"]
 CMD ["uvicorn", "services.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

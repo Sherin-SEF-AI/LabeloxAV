@@ -37,6 +37,11 @@ labeloxav <command>
   logs [service]  follow logs, for everything or for one service (api, web, postgres, ...)
   sign-in-link <user>  a link that lets <user> choose a password and sign in (first login, lost password)
   token <user>    mint an API token for a user (prefer API keys in Settings for scripts)
+  backup [dir]    back up the database and every stored file together (default: .scratch/backups/<time>)
+  restore <dir>   restore both from a backup directory (destructive; asks first)
+  backup-schedule on [HH:MM] | off | status
+                  a daily backup that keeps the last 7 (LBX_BACKUP_KEEP) and, when LBX_BACKUP_REMOTE
+                  is set in .env, copies each one off this machine
   doctor          check the installation and say what to fix
   url             print the address to open
   version         print the packaged version
@@ -97,6 +102,19 @@ case "$cmd" in
     [ $# -ge 1 ] || { echo "usage: labeloxav sign-in-link <user>" >&2; exit 1; }
     port="$(sed -n 's/^WEB_PORT=\(.*\)$/\1/p' .env 2>/dev/null | tail -1)"
     compose exec -T api python -m scripts.sign_in_link --name "$1" --url "http://$(hostname -f 2>/dev/null || hostname):${port:-3000}"
+    ;;
+  backup)
+    need_app_dir; need_docker
+    exec ./scripts/backup.sh "$@"
+    ;;
+  restore)
+    need_app_dir; need_docker
+    [ $# -ge 1 ] || { echo "usage: labeloxav restore <backup directory>" >&2; exit 1; }
+    exec ./scripts/restore.sh "$@"
+    ;;
+  backup-schedule)
+    need_app_dir
+    exec ./scripts/backup_schedule.sh "$@"
     ;;
   doctor)
     need_app_dir; need_docker

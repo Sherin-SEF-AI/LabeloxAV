@@ -54,18 +54,74 @@ def _safe_path(root: Path, key: str) -> Path:
     return target
 
 
-def download(s3, bucket: str, root: Path) -> int:
-    root.mkdir(parents=True, exist_ok=True)
+def _objects(s3, bucket: str):
+    """Every object as (key, etag, size)."""
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket):
+        for obj in page.get("Contents", []):
+            if not obj["Key"].endswith("/"):
+                yield obj["Key"], str(obj.get("ETag", "")).strip('"'), int(obj.get("Size", 0))
 
-    def one(key: str) -> None:
+
+def _reuse(prev_file: Path, dest: Path) -> None:
+    """Make `dest` the same file as `prev_file` without copying it when the filesystem allows.
+
+    A hard link, so seven nightly snapshots of a corpus that changed by one drive cost one corpus plus
+    one drive, not seven corpora. Safe against later snapshots: a download never writes into an existing
+    file, it writes a temporary one and renames it over the name, which leaves the linked copy alone.
+    Falls back to a real copy across filesystems, where a link is impossible.
+    """
+    import shutil
+
+    if dest.exists():
+        dest.unlink()
+    try:
+        os.link(prev_file, dest)
+    except OSError:
+        shutil.copy2(prev_file, dest)
+
+
+def download(s3, bucket: str, root: Path, *, manifest: Path | None = None, link_dest: Path | None = None,
+             prev_manifest: Path | None = None) -> int:
+    """Mirror the bucket into `root`.
+
+    With `link_dest` and `prev_manifest` (an earlier mirror and the manifest written beside it), an
+    object whose ETag and size are unchanged is linked from that mirror instead of fetched again. The
+    result is still a complete, self-contained tree: restoring it, or deleting the older snapshot, needs
+    nothing else. `manifest` records what this mirror holds, for the next run to compare against.
+    """
+    import json
+
+    root.mkdir(parents=True, exist_ok=True)
+    prev: dict[str, list] = {}
+    if link_dest is not None and prev_manifest is not None and prev_manifest.is_file():
+        try:
+            prev = json.loads(prev_manifest.read_text())
+        except ValueError:
+            prev = {}
+    reused = [0]
+
+    def one(item: tuple[str, str, int]) -> None:
+        key, etag, size = item
         dest = _safe_path(root, key)
         dest.parent.mkdir(parents=True, exist_ok=True)
+        if link_dest is not None and prev.get(key) == [etag, size]:
+            prev_file = _safe_path(link_dest, key)
+            # The size check is against the file on disk, not the manifest's word for it: a truncated
+            # file in the older snapshot must not be carried forward as if it were whole.
+            if prev_file.is_file() and prev_file.stat().st_size == size:
+                _reuse(prev_file, dest)
+                reused[0] += 1
+                return
         s3.download_file(bucket, key, str(dest))
 
-    keys = list(_keys(s3, bucket))
+    objects = list(_objects(s3, bucket))
     with ThreadPoolExecutor(WORKERS) as pool:
-        list(pool.map(one, keys))
-    return len(keys)
+        list(pool.map(one, objects))
+    if manifest is not None:
+        manifest.write_text(json.dumps({k: [e, sz] for k, e, sz in objects}))
+    if link_dest is not None:
+        print(f"reused {reused[0]} unchanged objects from {link_dest}", file=sys.stderr)
+    return len(objects)
 
 
 def upload(s3, bucket: str, root: Path) -> int:
@@ -91,10 +147,14 @@ def main() -> int:
     ap.add_argument("--endpoint", required=True)
     ap.add_argument("--bucket", required=True)
     ap.add_argument("--dir", required=True, type=Path)
+    ap.add_argument("--manifest", type=Path, help="download: write the list of mirrored objects here")
+    ap.add_argument("--link-dest", type=Path, help="download: an earlier mirror to reuse unchanged objects from")
+    ap.add_argument("--prev-manifest", type=Path, help="download: the manifest written with --link-dest's mirror")
     a = ap.parse_args()
     s3 = _client(a.endpoint)
     if a.direction == "download":
-        n = download(s3, a.bucket, a.dir)
+        n = download(s3, a.bucket, a.dir, manifest=a.manifest, link_dest=a.link_dest,
+                     prev_manifest=a.prev_manifest)
     else:
         if not a.dir.is_dir():
             raise SystemExit(f"no such directory: {a.dir}")

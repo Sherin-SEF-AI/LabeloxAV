@@ -24,6 +24,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
 
       - name: Create venv + install dev deps (no GPU wheels)
         run: make install
@@ -45,21 +47,12 @@ jobs:
         # bridge is packs.registry. This is a structural invariant of the multi-domain refactor, so it gates.
         run: .venv/bin/lint-imports
 
-      - name: Ruff (blocking on the security/measurement modules)
-        # A ratchet: the modules the remediation touched must stay clean, so a lint regression there fails the
-        # build. The rest of the tree still carries pre-existing debt and is reported (not gated) below, fixed
-        # forward. B008 (FastAPI Depends in defaults) is configured off in pyproject for the API layer, since
-        # it is the framework idiom, not a bug.
-        run: >
-          .venv/bin/ruff check
-          core/accel core/version.py services/verdyx services/llm
-          services/api/main.py services/api/deps.py services/api/auth_token.py
-          services/api/routers/predictions.py services/analytics/evaluation.py
-
-      - name: Ruff (informational, whole tree)
-        # Reports the remaining pre-existing debt without gating an unrelated PR. Fix forward and grow the
-        # blocking set above as directories are cleaned.
-        continue-on-error: true
+      - name: Ruff (blocking, whole tree)
+        # The whole tree, and it gates. It used to block on nine paths and report the rest, on the reasoning
+        # that a gate which starts red is a gate nobody turns on. The debt behind that was 135 findings; they
+        # are fixed, so the ratchet is no longer needed and a lint regression anywhere fails the build.
+        # B008 (FastAPI Depends in defaults) is configured off in pyproject for the API layer, since it is
+        # the framework idiom, not a bug.
         run: .venv/bin/ruff check .
 
       - name: Type check (mypy strict, blocking allowlist)
@@ -71,15 +64,25 @@ jobs:
           core/accel/ap.py core/accel/recapture.py core/version.py core/timebase.py
           services/api/auth_token.py services/review_policy.py
           services/anonymize/coverage.py services/training/lineage.py
+          core/model_manager.py services/job_lock.py services/llm/ledger.py services/api/offload.py
 
-      - name: Dependency audit (pip-audit)
-        # Informational: a new advisory should not block an unrelated PR, but it must be visible in the log.
-        continue-on-error: true
-        run: .venv/bin/python -m pip install pip-audit && .venv/bin/pip-audit --strict || true
+      - name: Dependency audit (blocking on new advisories)
+        # `pip-audit --strict || true` was the step, and it could not fail: --strict tries to look the
+        # project itself up on PyPI. The pins carried 159 advisories by the time anybody looked. The script
+        # fails on any advisory not in configs/pip_audit_baseline.txt, so a new pin or a newly published
+        # advisory blocks, while the known backlog is worked down upgrade by upgrade.
+        run: |
+          uv pip install --python .venv/bin/python pip-audit==2.10.1
+          .venv/bin/python scripts/audit_deps.py
 
-      - name: Static security scan (bandit)
-        continue-on-error: true
-        run: .venv/bin/python -m pip install bandit && .venv/bin/bandit -q -r services core db -x tests || true
+      - name: Static security scan (bandit, blocking at high severity)
+        # High severity at medium confidence or better is clean today, so it gates. The medium and low
+        # findings (asserts, subprocess with fixed arguments, try/except/pass) are printed for reading and
+        # do not gate: most are judgement calls, and a gate that argues with every assert gets switched off.
+        run: |
+          uv pip install --python .venv/bin/python bandit==1.9.4
+          .venv/bin/bandit -q -r services core db -x tests --severity-level high --confidence-level medium
+          .venv/bin/bandit -q -r services core db -x tests --severity-level medium || true
 
       - name: Type check (mypy)
         # Informational while the tree is annotated incrementally; surfaces regressions without gating.
@@ -128,6 +131,8 @@ jobs:
       - name: Production build (next build, blocking)
         run: npm run build
 
+      # (The editor and frame-lock end-to-end suite does run, in the test job below, where the
+      # infrastructure it needs is already up.)
       # The e2e smoke needs the API, a migrated database and the web server all up. Standing that whole
       # stack up here would roughly double this job and gate every frontend PR on infra it does not
       # otherwise need, so it is not run in CI today. It runs locally with `make e2e` and skips cleanly
@@ -137,12 +142,14 @@ jobs:
   test:
     needs: lint
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
 
       - name: Create venv + install dev deps (no GPU wheels)
         run: make install
@@ -182,6 +189,23 @@ jobs:
         env:
           LBX_POSTGRES__DB: labeloxav_test
         run: make test
+
+      # The editor in a real browser, on the infrastructure the suite above just used. The web job says
+      # why the older e2e smoke is not run in CI: it needs a whole deployed stack. This one does not. It
+      # builds its own database, seeds ten synthetic frames and three users, starts the API and the web
+      # app on free ports, and removes all of it (scripts/e2e_editor.sh): no GPU, no model weights, no
+      # network. What it checks cannot be checked any other way: that a nudge is saved, that a paste on
+      # another frame lands, that a second person is view-only and the server refuses their save.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Editor and frame-lock end to end (Playwright, blocking)
+        run: |
+          cd web && npm ci && npx playwright install --with-deps chromium && cd ..
+          make e2e-editor
 
       - name: Infra logs on failure
         if: failure()

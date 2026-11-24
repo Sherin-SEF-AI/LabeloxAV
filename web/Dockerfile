@@ -27,5 +27,9 @@ COPY --from=build /web/public ./public
 COPY --from=build /web/node_modules ./node_modules
 COPY --from=build /web/package.json ./package.json
 COPY --from=build /web/next.config.* ./
+# The node image ships an unprivileged `node` user; the server needs nothing root has. It only reads what
+# was copied above, and Next writes its image cache under .next/cache, so that one directory is handed over.
+RUN mkdir -p /web/.next/cache && chown -R node:node /web/.next/cache
+USER node
 EXPOSE 3000
 CMD ["npm", "run", "start"]

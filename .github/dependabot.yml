@@ -1,0 +1,42 @@
+# Dependency updates, opened as pull requests so the CI gates decide whether each one is safe.
+#
+# Nothing watched the pins before. Every Python dependency is pinned with `==` and the web lockfile is
+# exact, which is right for reproducible installs and means a published advisory changes nothing here
+# until somebody notices it. Weekly and grouped, so the result is a few reviewable pull requests rather
+# than one per package; security updates are not grouped or delayed and open as soon as GitHub knows.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # The ML stack moves together and is matched to the CUDA base image; bump it deliberately.
+      - dependency-name: torch
+      - dependency-name: torchvision
+      - dependency-name: ultralytics
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      web-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
