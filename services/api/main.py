@@ -363,10 +363,37 @@ def _is_sse_stream(path: str) -> bool:
     return path in _SSE_STREAM_PATHS or path.startswith(_SSE_STREAM_PREFIXES)
 
 
+# What an annotator may reach under the reviewer-floored /api/objects prefix.
+#
+# The prefix floor made every object route reviewer-only, reads included, so an annotator could draw a
+# box and then neither move, relabel nor delete it, and the editor's "why this label" panel answered 403.
+# Reading one object is nothing an annotator cannot already do through the frame it is on. Changing one
+# is allowed through to the handler, where services/object_access.py decides per object: their own or a
+# machine-made label, not yet reviewed by anyone else, not yet accepted. Listed exactly, so a write route
+# added under the prefix later is reviewer-only until somebody decides otherwise.
+_OBJECT_ID = r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}"
+_ANNOTATOR_OBJECT_WRITES = (
+    ("POST", __import__("re").compile(rf"^/api/objects/{_OBJECT_ID}/review$")),
+    ("POST", __import__("re").compile(r"^/api/objects/bulk-review$")),
+    ("PUT", __import__("re").compile(rf"^/api/objects/{_OBJECT_ID}/mask$")),
+    ("DELETE", __import__("re").compile(rf"^/api/objects/{_OBJECT_ID}$")),
+)
+_OBJECT_READ = __import__("re").compile(rf"^/api/objects/{_OBJECT_ID}(?:/(?:explain|quality|crop|history|similar))?$")
+
+
+def _annotator_object_route(path: str, method: str) -> bool:
+    m = method.upper()
+    if m in _READ_METHODS:
+        return bool(_OBJECT_READ.match(path))
+    return any(m == verb and rx.match(path) for verb, rx in _ANNOTATOR_OBJECT_WRITES)
+
+
 def _required_role(path: str, method: str = "POST") -> str:
     """The role floor for a request. `method` defaults to a write, the stricter answer, so a caller that
     does not say what it is asking about is told the floor for the request that can do damage."""
     if path in _SELF_PATHS:
+        return "annotator"
+    if _annotator_object_route(path, method):
         return "annotator"
     if path.startswith(_ADMIN_PREFIXES):
         return "admin"

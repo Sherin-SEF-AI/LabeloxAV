@@ -15,6 +15,13 @@ someone forgets theirs.
 | Reviewer | also accept and reject others' labels, apply bulk edits, approve the assistant's proposals, start training |
 | Administrator | everything, including the team, API keys, projects and who sees them |
 
+What "their own work" means for an annotator, exactly: they can move, relabel and delete a label they drew,
+and correct or delete a machine-made label nobody has reviewed yet. They cannot change a label another
+person drew or has ruled on, or one that is already accepted; the editor says so and a reviewer can change
+it. An annotator's approval is always a submission to a reviewer, never an acceptance. (Until 2026-11 the
+server refused every one of these edits to annotators, so a box drawn in the wrong place stayed wrong until
+a reviewer got to it.)
+
 Scripts and notebooks use an API key from **Settings > API keys**, not a person's password.
 
 ## Projects: who sees what

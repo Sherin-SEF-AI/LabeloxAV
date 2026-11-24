@@ -62,7 +62,10 @@ def test_role_floors_are_sane():
     assert _required_role("/api/govern/promote") == "admin"
     assert _required_role("/api/users") == "admin"
     assert _required_role("/api/export") == "reviewer"
-    assert _required_role("/api/objects/x/bulk-review") == "reviewer"
+    # Editing objects is open to annotators on the listed routes, with a per-object rule in the handler
+    # (services/object_access.py); every other write under the prefix stays a reviewer's.
+    assert _required_role("/api/objects/bulk-review") == "annotator"
+    assert _required_role("/api/objects/crops") == "reviewer"
     assert _required_role("/api/users/me") == "annotator"  # self-service, not the admin floor of its prefix
     assert _required_role("/api/segment") == "annotator"   # unclassified: authenticated, never anonymous
 

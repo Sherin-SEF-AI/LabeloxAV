@@ -882,7 +882,9 @@ async def update_mask(object_id: str, payload: MaskIn, db: AsyncSession = Depend
     if obj is None:
         raise HTTPException(404, "object not found")
     from services.collab.presence import assert_editor_may_save
+    from services.object_access import assert_may_change
 
+    await assert_may_change(db, [obj], user)
     await assert_editor_may_save([obj.frame_id], user, x_lbx_tab)
     frame = await db.get(Frame, obj.frame_id)
     before = {"mask_uri": obj.mask_uri, "mask_encoding": obj.mask_encoding,
@@ -919,7 +921,10 @@ async def delete_object(object_id: str, db: AsyncSession = Depends(db_session),
     if obj is None:
         raise HTTPException(404, "object not found")
     from services.collab.presence import assert_editor_may_save
+    from services.object_access import assert_may_change
 
+    # An annotator may delete their own or an unreviewed machine label, not somebody else's work.
+    await assert_may_change(db, [obj], user)
     await assert_editor_may_save([obj.frame_id], user, x_lbx_tab)
     await audit_record(
         db, actor=(user.name if user else "anon"), decision="delete_object", subject=str(obj.object_id),

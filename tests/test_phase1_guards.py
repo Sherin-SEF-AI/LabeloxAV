@@ -74,17 +74,25 @@ class TestAnAnnotatorCannotWriteGroundTruth:
 
 
 class TestTheFrameRouteSitsAtTheAnnotatorFloor:
-    """Why the clamp is load-bearing: the middleware floor does not protect this path.
+    """Why the clamp is load-bearing: the middleware floor does not protect these paths.
 
-    /api/objects is a reviewer prefix, but object creation is POST /api/frames/{id}/objects, and
-    /api/frames is not. Reading the floor from the live route table rather than asserting a constant, so
-    this keeps telling the truth if the prefix lists move.
+    Object creation is POST /api/frames/{id}/objects, and /api/frames is not a reviewer prefix. Since
+    2026-11 an annotator also reaches the review path for one object (services/object_access.py decides
+    which objects), so the clamp is what keeps their approval a submission there too. Reading the floor
+    from the live table rather than asserting a constant, so this keeps telling the truth if the lists move.
     """
+
+    OBJECT = "0b6f9c1e-3d2a-4c5b-8e7f-123456789abc"
 
     def test_object_create_is_only_annotator_floored(self):
         assert _required_role("/api/frames/abc/objects") == "annotator"
 
-    def test_while_the_review_path_is_reviewer_floored(self):
+    def test_the_review_path_for_one_object_is_annotator_floored_too(self):
+        assert _required_role(f"/api/objects/{self.OBJECT}/review") == "annotator"
+
+    def test_while_every_other_object_write_is_still_a_reviewers(self):
+        assert _required_role(f"/api/objects/{self.OBJECT}/propagate") == "reviewer"
+        # Not an object id, so not one of the listed routes.
         assert _required_role("/api/objects/abc/review") == "reviewer"
 
 

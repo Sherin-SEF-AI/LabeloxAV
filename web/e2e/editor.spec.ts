@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { AUTOSAVE_MS, openFrame, requireFixture, serverObjects, signature, signedIn } from "./editorFixture";
+import { API, AUTOSAVE_MS, openFrame, requireFixture, serverObjects, signature, signedIn } from "./editorFixture";
 
 // The editor's keyboard editing, checked where it counts: in what the server has afterwards.
 //
@@ -106,6 +106,44 @@ test.describe("keyboard editing in the frame editor", () => {
     await confirm.getByRole("button", { name: /delete|remove/i }).first().click();
     await page.waitForTimeout(AUTOSAVE_MS);
     expect(signature(await serverObjects(fx, to))).toBe(signature(target));
+    await ctx.close();
+  });
+
+  test("an annotator can fix a label nobody has reviewed, and cannot move one a reviewer accepted", async ({ browser }) => {
+    const fx = requireFixture();
+    const frame = fx.frames[7];
+    const before = await serverObjects(fx, frame);
+    expect(before.length).toBeGreaterThan(1);
+
+    // A reviewer accepts one of the frame's labels before the annotator arrives.
+    const settled = before[0];
+    const accept = await fetch(`${API}/api/objects/${settled.object_id}/review`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${fx.users.reviewer.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "accept" }),
+    });
+    expect(accept.status).toBe(200);
+
+    const ctx = await signedIn(browser, fx, "annotator");
+    const page = await openFrame(ctx, frame);
+    await page.mouse.move(800, 500);
+    await page.keyboard.press("Control+a");
+    await page.keyboard.press("ArrowRight");
+    await page.waitForTimeout(AUTOSAVE_MS + 1000);
+
+    const after = await serverObjects(fx, frame, "reviewer");
+    for (const o of after) {
+      const was = before.find((b) => b.object_id === o.object_id)!;
+      if (o.object_id === settled.object_id) {
+        // The reviewer's label is where the reviewer left it.
+        expect(o.bbox[0]).toBeCloseTo(was.bbox[0], 1);
+        expect(o.state).toBe("accepted");
+      } else {
+        // Everything else moved, and an annotator's save is a submission, never an acceptance.
+        expect(o.bbox[0] - was.bbox[0]).toBeCloseTo(1, 1);
+        expect(o.state).not.toBe("accepted");
+      }
+    }
     await ctx.close();
   });
 

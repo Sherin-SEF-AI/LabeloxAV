@@ -98,7 +98,10 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
             continue
         objects.append(obj)
     from services.collab.presence import assert_editor_may_save
+    from services.object_access import assert_may_change
 
+    # An annotator may act on their own and on unreviewed machine labels; all or nothing.
+    await assert_may_change(db, objects, user)
     # From the editor only (see assert_editor_may_save): a bulk action there may not write to a frame
     # another editor holds. The review queue sends no tab token and is not held up by anyone's open tab.
     await assert_editor_may_save([o.frame_id for o in objects], user, x_lbx_tab)
@@ -162,7 +165,9 @@ async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = D
     if obj is None:
         raise HTTPException(404, "object not found")
     from services.collab.presence import assert_editor_may_save
+    from services.object_access import assert_may_change
 
+    await assert_may_change(db, [obj], user)
     await assert_editor_may_save([obj.frame_id], user, x_lbx_tab)
     # Optimistic lock: if the editor's view is stale (someone else edited since), refuse with 409 so the
     # client can reload rather than clobber the other annotator's change.
