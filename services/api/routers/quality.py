@@ -105,7 +105,7 @@ async def seal(payload: GoldSealIn):
     try:
         return await seal_gold(spec)
     except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # Fitting the isotonic curve changes what every confidence in the system means, and the auto-accept
@@ -115,7 +115,7 @@ async def calibrate_fit(payload: CalibrateFitIn):
     try:
         return await fit_isotonic(payload.gold_id, payload.session_id)
     except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # Carrying every past class correction across the rest of the track it was made on.

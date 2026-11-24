@@ -4,8 +4,6 @@ polygons the canvas can draw."""
 
 from __future__ import annotations
 
-import threading
-
 import numpy as np
 
 from core.config import get_settings
@@ -14,21 +12,24 @@ from services.autolabel.paths.path_b_openvocab import polygons_from_mask
 
 log = get_logger("sam_service")
 
-_lock = threading.Lock()
-_model = None
+def _model_key() -> str:
+    from services.autolabel.paths.path_b_openvocab import sam_model_key
+
+    return sam_model_key(get_settings().models.openvocab.seg_weights)
 
 
 def _get_model():
-    global _model
-    if _model is None:
-        with _lock:
-            if _model is None:
-                from ultralytics import SAM
+    """The segmenter, shared with the auto-label path and the describe tool through the registry.
 
-                cfg = get_settings().models.openvocab
-                _model = SAM(cfg.seg_weights)
-                log.info("sam_service.loaded", weights=cfg.seg_weights)
-    return _model
+    It was a module global here and a second and third copy of the same checkpoint there. Idle, it can now
+    be evicted when a job needs the room, and it reloads on the next click.
+    """
+    from core.model_manager import manager
+    from services.autolabel.paths.path_b_openvocab import load_sam
+
+    cfg = get_settings()
+    return manager().get(_model_key(), lambda: load_sam(cfg.models.openvocab.seg_weights),
+                         device=cfg.gpu.device)
 
 
 def segment(
@@ -47,7 +48,11 @@ def segment(
         kwargs["points"] = points
         kwargs["labels"] = labels or [1] * len(points)
 
-    res = model.predict(source=image_bgr, **kwargs)
+    from core.model_manager import manager
+
+    # One prompt at a time on the shared instance: the predictor keeps the embedded image on itself.
+    with manager().infer_lock(_model_key()):
+        res = model.predict(source=image_bgr, **kwargs)
     masks = res[0].masks
     if masks is None or masks.data is None or len(masks.data) == 0:
         return {"polygons": [], "bbox": None}

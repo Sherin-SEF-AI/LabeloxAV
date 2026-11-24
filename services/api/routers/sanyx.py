@@ -5,15 +5,17 @@ capture. Mounted under /api; the platform registry maps /sanyx (and the legacy /
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Session as DbSession
 from db.models import SessionHealth
-from services.api.deps import db_session
+from services.activity import record_activity
+from services.api.deps import db_session, require_role
 from services.sanyx.gate import gate_state, latest_health
 from services.sanyx.run import run_health
 from services.sanyx.trends import rig_trends
@@ -41,7 +43,7 @@ def _report(h: SessionHealth | None) -> dict | None:
 
 
 @router.get("/sanyx/board")
-async def board(limit: int = 100, db: AsyncSession = Depends(db_session)):
+async def board(limit: Annotated[int, Query(ge=1, le=2_000)] = 100, db: AsyncSession = Depends(db_session)):
     """The ingest board: recent sessions with their latest SANYX health score and decision."""
     limit = min(max(limit, 1), 500)
     sessions = (await db.execute(
@@ -89,7 +91,8 @@ class OverrideIn(BaseModel):
 
 
 @router.post("/sanyx/session/{session_id}/override")
-async def override(session_id: uuid.UUID, payload: OverrideIn, db: AsyncSession = Depends(db_session)):
+async def override(session_id: uuid.UUID, payload: OverrideIn, db: AsyncSession = Depends(db_session),
+                   user=Depends(require_role("reviewer"))):
     """Human override of a SANYX decision, with a captured reason. Writes a new health row so the override is
     auditable and the latest decision reflects the human call, without mutating the machine report."""
     if payload.decision not in ("pass", "degraded", "quarantine"):
@@ -100,9 +103,17 @@ async def override(session_id: uuid.UUID, payload: OverrideIn, db: AsyncSession 
     verdict = {"pass": "pass", "degraded": "warn", "quarantine": "fail"}[payload.decision]
     checks = list(prior.checks or []) + [{
         "name": "human_override", "status": payload.decision, "score": None,
-        "detail": payload.reason, "evidence": {"overrides": prior.decision or prior.verdict}}]
+        "detail": payload.reason,
+        # Who made the call. An override re-enables or blocks work on a whole recording; a row that says
+        # only that "a human" did it is not an audit trail.
+        "evidence": {"overrides": prior.decision or prior.verdict, "by": user.name,
+                     "by_user_id": str(user.user_id)}}]
     row = SessionHealth(session_id=session_id, checks=checks, verdict=verdict, score=prior.score,
                         decision=payload.decision, indexer_version="sanyx-override")
     db.add(row)
     await db.commit()
+    await record_activity(db, user=user, verb="sanyx.override", subject_type="session",
+                          subject_id=str(session_id),
+                          summary=f"overrode the recording health gate to {payload.decision}: {payload.reason}",
+                          meta={"decision": payload.decision, "was": prior.decision or prior.verdict})
     return _report(row)

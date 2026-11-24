@@ -102,7 +102,7 @@ async def resolve(db: AsyncSession, plan: dict, *, frame_id: UUID | None = None,
     rows = (await db.execute(q.limit(limit * 4))).all()
 
     matched = []
-    for obj, fid, sid in rows:
+    for obj, fid, _sid in rows:
         if not _matches_attr(obj, plan["attr"]):
             continue
         matched.append({"object_id": str(obj.object_id), "frame_id": str(fid), "class_id": obj.class_id,

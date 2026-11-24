@@ -97,7 +97,6 @@ def _prompt(g: dict) -> str:
 
 def _ollama_generate(image_bgr, prompt: str) -> dict | None:
     import cv2
-    import httpx
 
     cfg = get_settings().models.vlm
     ok, buf = cv2.imencode(".jpg", image_bgr)
@@ -107,7 +106,10 @@ def _ollama_generate(image_bgr, prompt: str) -> dict | None:
                "messages": [{"role": "user", "content": prompt, "images": [base64.b64encode(buf.tobytes()).decode()]}],
                "options": {"num_ctx": cfg.max_context, "temperature": 0.1}}
     try:
-        resp = httpx.post(f"{cfg.ollama_url}/api/chat", json=payload, timeout=cfg.timeout_s)
+        from services.llm import ledger
+
+        resp = ledger.post(f"{cfg.ollama_url}/api/chat", provider="ollama", model=cfg.ollama_tag,
+                           purpose="vlm_dataset", json=payload, timeout=cfg.timeout_s)
         resp.raise_for_status()
         return json.loads(resp.json()["message"]["content"])
     except Exception as exc:  # noqa: BLE001

@@ -28,6 +28,17 @@ log = get_logger("path_b")
 # each phrase maps back to its single ontology class.
 
 
+def sam_model_key(weights: str) -> str:
+    """The registry key for a SAM checkpoint, so every caller of the same file shares one instance."""
+    return f"sam:{weights}"
+
+
+def load_sam(weights: str):
+    from ultralytics import SAM
+
+    return SAM(weights)
+
+
 class OpenVocabSamPath:
     # Frozen: this string is the path identity in 834k objects' provenance and in the
     # fusion/gate/explain dispatch. It predates a model substitution, so it no longer names
@@ -60,13 +71,37 @@ class OpenVocabSamPath:
             f"{self.settings.models.openvocab.detector_weights}+{self.settings.models.openvocab.seg_weights}"
         )
 
+    @property
+    def world_key(self) -> str:
+        # The concept list is part of the key: set_classes() rewrites the detector's text head, so an
+        # instance prompted with this ontology's phrases is not interchangeable with one prompted with
+        # an annotator's free-text phrase (services/autolabel/describe.py keeps its own).
+        import hashlib
+
+        digest = hashlib.sha1("\n".join(self._phrases).encode(), usedforsecurity=False).hexdigest()[:12]
+        return f"yoloworld:{self.settings.models.openvocab.detector_weights}:{digest}"
+
+    @property
+    def sam_key(self) -> str:
+        return sam_model_key(self.settings.models.openvocab.seg_weights)
+
     def load(self) -> None:
-        from ultralytics import SAM, YOLOWorld
+        from core.model_manager import manager
 
         cfg = self.settings.models.openvocab
-        self._world = YOLOWorld(cfg.detector_weights)
-        self._world.set_classes(self._phrases)
-        self._sam = SAM(cfg.seg_weights)
+        dev = self.settings.gpu.device
+
+        def _world():
+            from ultralytics import YOLOWorld
+
+            w = YOLOWorld(cfg.detector_weights)
+            w.set_classes(self._phrases)
+            return w
+
+        self._world = manager().get(self.world_key, _world, device=dev)
+        # The segmenter is one file used by this path, the editor's click-to-segment and the describe
+        # tool. It was loaded once by each; they now share the instance.
+        self._sam = manager().get(self.sam_key, lambda: load_sam(cfg.seg_weights), device=dev)
         log.info(
             "path_b.loaded",
             detector=cfg.detector_weights,
@@ -75,20 +110,42 @@ class OpenVocabSamPath:
         )
 
     def unload(self) -> None:
+        from core.model_manager import manager
+
         self._world = None
         self._sam = None
+        manager().release(self.world_key)
+        # Refused, harmlessly, while the editor is mid-click on the shared segmenter.
+        manager().release(self.sam_key)
 
     def infer(self, image_bgr: np.ndarray) -> list[RawDetection]:
+        return self.infer_batch([image_bgr])[0]
+
+    def infer_batch(self, images: list[np.ndarray]) -> list[list[RawDetection]]:
+        """Open-vocabulary detections for several frames, one list per frame, in order.
+
+        The detector runs once over the batch. Segmentation stays per frame: SAM is prompted with each
+        frame's own boxes against that frame's own embedding, which is not a batched operation.
+        """
         if self._world is None or self._sam is None:
             raise RuntimeError("OpenVocabSamPath not loaded")
+        if not images:
+            return []
+        from core.model_manager import manager
+
         cfg = self.settings.models.openvocab
         dev = self.settings.gpu.device
+        with manager().infer_lock(self.world_key):
+            wres = self._world.predict(
+                source=images if len(images) > 1 else images[0],
+                imgsz=self.settings.models.yolo.imgsz, half=cfg.half,
+                conf=cfg.conf, device=dev, verbose=False,
+            )
+        if len(wres) != len(images):
+            raise RuntimeError(f"open-vocab detector returned {len(wres)} results for {len(images)} frames")
+        return [self._frame_detections(img, r, cfg, dev) for img, r in zip(images, wres, strict=True)]
 
-        wres = self._world.predict(
-            source=image_bgr, imgsz=self.settings.models.yolo.imgsz, half=cfg.half,
-            conf=cfg.conf, device=dev, verbose=False,
-        )
-        r0 = wres[0]
+    def _frame_detections(self, image_bgr: np.ndarray, r0, cfg, dev: str) -> list[RawDetection]:
         if r0.boxes is None or len(r0.boxes) == 0:
             return []
 
@@ -126,7 +183,10 @@ class OpenVocabSamPath:
     def _segment(self, image_bgr: np.ndarray, xyxy: np.ndarray, dev: str) -> np.ndarray | None:
         if len(xyxy) == 0:
             return None
-        sres = self._sam.predict(source=image_bgr, bboxes=xyxy, device=dev, verbose=False)
+        from core.model_manager import manager
+
+        with manager().infer_lock(self.sam_key):
+            sres = self._sam.predict(source=image_bgr, bboxes=xyxy, device=dev, verbose=False)
         m = sres[0].masks
         if m is None or m.data is None:
             return None

@@ -47,7 +47,7 @@ async def associate_session(session_id: UUID, appearance_cos: float = 0.55, tol_
 
             parent = {o["oid"]: o["oid"] for o in objs}
 
-            def find(x):
+            def find(x, parent=parent):
                 while parent[x] != x:
                     parent[x] = parent[parent[x]]
                     x = parent[x]

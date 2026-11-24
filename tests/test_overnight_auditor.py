@@ -49,7 +49,8 @@ def test_token_budget():
 
     b = TokenBudget(3)
     assert not b.exhausted and b.remaining == 3
-    b.charge(); b.charge(2)
+    b.charge()
+    b.charge(2)
     assert b.exhausted and b.remaining == 0
     assert b.as_dict() == {"max_calls": 3, "used": 3, "remaining": 0}
 

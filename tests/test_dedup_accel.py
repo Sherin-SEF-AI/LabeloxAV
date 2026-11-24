@@ -33,7 +33,7 @@ def test_matrix_dedup_matches_loop():
     Hm = hamming_matrix(packed)
     S = vecs @ vecs.T
     dup = (Hm <= ph_thresh) & (S >= cos_thresh)
-    got = set(zip(*(x.tolist() for x in np.where(np.triu(dup, 1)))))
+    got = set(zip(*(x.tolist() for x in np.where(np.triu(dup, 1))), strict=False))
 
     assert got == ref
     assert (1, 2) in got and (10, 11) in got and (30, 45) in got   # the seeded near-dups are found

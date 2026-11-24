@@ -40,8 +40,6 @@ async def ocr_region(payload: RegionOcrIn) -> dict:
     would make the transcription look verified when nobody verified it, which is the mistake the OCR path
     was already fixed once for.
     """
-    import cv2
-    import numpy as np
 
     from services.assets.media import MediaError, read_asset_bytes
     from services.autolabel.ocr.reader import read_text
@@ -60,7 +58,9 @@ async def ocr_region(payload: RegionOcrIn) -> dict:
         raise HTTPException(exc.status, str(exc)) from None
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "could not read that image") from exc
-    img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+    from services.api.offload import decode_image_async
+
+    img = await decode_image_async(raw)
     if img is None:
         raise HTTPException(422, "that image could not be decoded")
 

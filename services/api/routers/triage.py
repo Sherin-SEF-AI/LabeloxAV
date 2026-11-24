@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -115,7 +116,7 @@ async def triage(
     city: str | None = None,
     flywheel: str | None = None,
     control: bool = False,
-    limit: int = 200,
+    limit: Annotated[int, Query(ge=1, le=4_000)] = 200,
     hidden=Depends(caller_hidden_projects),
 ):
     limit = min(max(limit, 1), 1000)

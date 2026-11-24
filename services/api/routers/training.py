@@ -7,21 +7,88 @@ from __future__ import annotations
 
 import csv
 import uuid
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from core.config import get_settings
 from db.models import ModelRun, TrainingJob
 from db.session import get_sessionmaker
-from services.api.deps import TrainingStartIn, current_user, role_rank
+from services.api.deps import ApiOut, TrainingStartIn, current_user, role_rank
 from services.api.project_guard import caller_hidden_projects
 from services.project_access import as_hidden
 from services.training.jobs import TrainJobSpec, enqueue_job
 from services.training.tasks import get_task, list_tasks
 
 router = APIRouter()
+
+
+class TrainingJobOut(ApiOut):
+    """A training job row. The four JSONB columns are passed through as stored: `counts` carries the
+    epoch counters, `metrics` the latest evaluation, `result` the outcome and the gate's verdict, and
+    `config` the request the job was started with."""
+
+    job_id: str
+    status: str                                 # pending | running | done | error | canceled
+    purpose: str
+    task_type: str
+    compute_target: str                         # local | cloud
+    stage: str | None
+    progress: float
+    counts: dict[str, Any] | None
+    metrics: dict[str, Any] | None
+    result: dict[str, Any] | None
+    error: str | None
+    run_id: str | None                          # the model run this job produced, once it has
+    config: dict[str, Any] | None
+    created_at: str | None
+    updated_at: str | None
+
+
+class TrainingTaskOut(ApiOut):
+    task_type: str
+    default_base_weights: str
+
+
+class ModelLineRunOut(ApiOut):
+    run_id: str
+    dataset_name: str
+    epochs: int
+    # Read out of the run's metrics JSON: a number where the task reports one, null where it does not
+    # (a detection run has no safe_miou).
+    map50: int | float | None
+    safe_miou: int | float | None
+    promoted: bool
+    weights_uri: str | None
+    created_at: str | None
+
+
+class ModelLineOut(ApiOut):
+    """The runs recorded for one purpose, newest first, and which of them is live."""
+
+    purpose: str
+    task_type: str
+    runs: list[ModelLineRunOut]
+    promoted: ModelLineRunOut | None            # the latest promoted run; null when none has been
+
+
+class ModelRunOut(ApiOut):
+    run_id: str
+    dataset_name: str
+    purpose: str
+    epochs: int
+    n_train: int
+    n_val: int
+    promoted: bool
+    base_weights: str
+    notes: str | None
+    baseline_metrics: dict[str, Any]
+    metrics: dict[str, Any]
+    gate: dict[str, Any]
+    created_at: str | None
+
 
 # results.csv column -> the short key we expose for per-epoch curves
 _CURVE_COLS = {
@@ -54,7 +121,7 @@ def _job_dict(j: TrainingJob) -> dict:
     }
 
 
-@router.get("/training/tasks")
+@router.get("/training/tasks", response_model=list[TrainingTaskOut], response_model_exclude_unset=True)
 async def tasks():
     return list_tasks()
 
@@ -132,7 +199,7 @@ async def start(payload: TrainingStartIn, user=Depends(current_user), hidden=Dep
     return {"job_id": job_id, "status": "pending"}
 
 
-@router.get("/training/registry")
+@router.get("/training/registry", response_model=list[ModelLineOut], response_model_exclude_unset=True)
 async def registry():
     """Model lines grouped by purpose; the active model per line is its latest promoted run."""
     async with get_sessionmaker()() as db:
@@ -154,8 +221,8 @@ async def registry():
 
 # NB: these literal-prefixed routes must precede /training/{job_id} (a uuid path param) so "runs"
 # is not matched (and 422'd) as a job id.
-@router.get("/training/runs")
-async def runs(limit: int = 50):
+@router.get("/training/runs", response_model=list[ModelRunOut], response_model_exclude_unset=True)
+async def runs(limit: Annotated[int, Query(ge=1, le=1_000)] = 50):
     """Recorded model runs (finetune close-the-loop output), newest first, with baseline vs candidate
     metrics and the promotion gate - the data behind the graphical comparison."""
     limit = min(max(limit, 1), 500)
@@ -193,7 +260,7 @@ async def run_curve(run_id: str):
             "available": bool(epochs)}
 
 
-@router.get("/training/{job_id}")
+@router.get("/training/{job_id}", response_model=TrainingJobOut, response_model_exclude_unset=True)
 async def status(job_id: uuid.UUID):
     async with get_sessionmaker()() as db:
         j = await db.get(TrainingJob, job_id)
@@ -202,8 +269,8 @@ async def status(job_id: uuid.UUID):
     return _job_dict(j)
 
 
-@router.get("/training")
-async def list_jobs(limit: int = 50):
+@router.get("/training", response_model=list[TrainingJobOut], response_model_exclude_unset=True)
+async def list_jobs(limit: Annotated[int, Query(ge=1, le=1_000)] = 50):
     limit = min(max(limit, 1), 1000)
     async with get_sessionmaker()() as db:
         rows = (await db.execute(select(TrainingJob).order_by(TrainingJob.created_at.desc()).limit(limit))).scalars().all()
@@ -221,4 +288,8 @@ async def cancel(job_id: uuid.UUID):
         else:
             j.cancel_requested = True  # honored by the worker at the next epoch boundary
         await db.commit()
+        # The commit expires the row, and `updated_at` is set by the database on update, so reading it
+        # back is a query. Without this the response was built from an expired row outside a greenlet
+        # and every cancel answered 500 after having, in fact, cancelled.
+        await db.refresh(j)
         return _job_dict(j)

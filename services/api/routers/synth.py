@@ -8,8 +8,9 @@ it creates a session and thousands of rows, all of them revertible through the r
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,7 +61,7 @@ async def synth_build(body: BuildIn, db: AsyncSession = Depends(db_session), use
 
 
 @router.get("/synth/runs", dependencies=[Depends(require_role("annotator"))])
-async def synth_runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
+async def synth_runs(limit: Annotated[int, Query(ge=1, le=1_000)] = 50, db: AsyncSession = Depends(db_session)):
     """Builds newest first, each with its batches. `report` is the build's live counts while it runs."""
     limit = max(1, min(limit, 200))
     parents = (await db.execute(select(AgentRun).where(AgentRun.kind == KIND)

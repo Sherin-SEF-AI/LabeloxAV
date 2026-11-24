@@ -5,7 +5,9 @@ queue with no UI change, since they are ordinary review-state objects.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,7 +63,7 @@ async def progress(db: AsyncSession = Depends(db_session)):
 
 
 @router.get("/recall/candidates")
-async def candidates(status: str = "pending", session_id: str | None = None, limit: int = 200,
+async def candidates(status: str = "pending", session_id: str | None = None, limit: Annotated[int, Query(ge=1, le=4_000)] = 200,
                      db: AsyncSession = Depends(db_session), hidden=Depends(caller_hidden_projects)):
     q = select(RecallCandidate).where(RecallCandidate.status == status)
     if session_id:

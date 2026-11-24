@@ -129,7 +129,7 @@ def _ego_hard_brake(pts: list[dict], decel_thresh: float) -> float | None:
     for p in pts:
         sp = p.get("ego_speed")
         ts = p.get("ts_ns")
-        if not isinstance(sp, (int, float)) or ts is None:
+        if not isinstance(sp, int | float) or ts is None:
             prev = None
             continue
         if prev is not None:

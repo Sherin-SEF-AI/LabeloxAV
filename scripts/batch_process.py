@@ -12,7 +12,6 @@ import time
 from pathlib import Path
 from uuid import UUID
 
-from core.config import get_settings
 from core.logging import get_logger, setup_logging
 from core.timebase import now_ns
 from services.autolabel.runner import autolabel_session

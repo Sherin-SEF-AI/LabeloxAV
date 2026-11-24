@@ -58,7 +58,7 @@ def _force_rules(monkeypatch=None):
 @requires_infra
 def test_execute_gates_mutating_step():
     from db.session import get_sessionmaker
-    from services.agent.ops_agent import execute, plan
+    from services.agent.ops_agent import execute
 
     _force_rules()
 

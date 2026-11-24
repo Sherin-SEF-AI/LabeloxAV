@@ -7,6 +7,7 @@ gone.
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -42,7 +43,7 @@ async def save_as(frame_id: UUID, body: CheckpointIn, db: AsyncSession = Depends
 
 @router.get("/frames/{frame_id}/checkpoints")
 async def list_for_frame(frame_id: UUID, include_auto: bool = True,
-                         limit: int = Query(50, ge=1, le=200),
+                         limit: Annotated[int, Query(ge=1, le=200)] = 50,
                          db: AsyncSession = Depends(db_session)):
     """This frame's saves, newest first.
 

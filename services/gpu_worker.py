@@ -145,7 +145,11 @@ async def worker_loop(*, once: bool = False) -> int:
 
     settings = get_settings()
     setup_logging(settings.log_level)
-    key = settings.training.advisory_lock_key
+    from services.training.worker import worker_lock_key
+
+    # One worker per card. The key is per device, so a second worker started for cuda:1 runs beside this
+    # one instead of being told the box is taken, and each drains the queues onto its own card.
+    key = worker_lock_key()
     poll_s = settings.training.worker_poll_s
 
     stop = asyncio.Event()
@@ -160,7 +164,7 @@ async def worker_loop(*, once: bool = False) -> int:
             log.error("gpu_worker.lock_held",
                       note="another GPU or training worker is running on this database; exiting")
             return 1
-        log.info("gpu_worker.start", poll_s=poll_s, advisory_lock=key,
+        log.info("gpu_worker.start", poll_s=poll_s, advisory_lock=key, device=settings.gpu.device,
                  autolabel_executor=settings.jobs.autolabel_executor)
         exit_code = 0
         try:
@@ -212,7 +216,14 @@ async def worker_loop(*, once: bool = False) -> int:
 
 @click.command()
 @click.option("--once", is_flag=True, help="Run whatever is queued, then exit.")
-def main(once: bool) -> None:
+@click.option("--device", default=None,
+              help="The card this worker owns, e.g. cuda:1. Default: gpu.device (LBX_GPU__DEVICE). "
+                   "Start one worker per card to use more than one.")
+def main(once: bool, device: str | None) -> None:
+    if device:
+        # Set before anything loads a model: every model, the VRAM probe, the GPU slot and the lifetime
+        # lock read this one value, which is what makes a second worker a matter of one flag.
+        get_settings().gpu.device = device
     code = asyncio.run(worker_loop(once=once))
     if _training_abandoned:
         import os

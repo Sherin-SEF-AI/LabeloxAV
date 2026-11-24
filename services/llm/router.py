@@ -37,6 +37,7 @@ from services.autolabel.paths.path_c_vlm import (
     VlmResult,
     _build_prompt,
 )
+from services.llm import ledger
 from services.llm.anthropic_client import AnthropicClient, AnthropicError
 from services.llm.groq_client import GroqClient, GroqError
 
@@ -96,7 +97,8 @@ class GroqVlmClient:
         if not ok:
             return VlmResult()
         data = self.client.chat_json(_build_prompt(shortlist, attr_schema), model=self.model,
-                                     image_jpeg=buf.tobytes(), temperature=temperature)
+                                     image_jpeg=buf.tobytes(), temperature=temperature,
+                                     purpose="vlm_verify")
         return VlmResult(
             class_name=data.get("class"),
             attrs=data.get("attributes", {}) or {},
@@ -124,7 +126,8 @@ class AnthropicVlmClient:
         if not ok:
             return VlmResult()
         data = self.client.chat_json(_build_prompt(shortlist, attr_schema), model=self.model,
-                                     image_jpeg=buf.tobytes(), temperature=temperature)
+                                     image_jpeg=buf.tobytes(), temperature=temperature,
+                                     purpose="vlm_verify")
         return VlmResult(
             class_name=data.get("class"),
             attrs=data.get("attributes", {}) or {},
@@ -165,6 +168,7 @@ class RoutedVlmClient:
         cfg = self.settings.models.vlm
         self.ollama = local_vlm_client(self.settings)
         self._breaker = CircuitBreaker(cfg.breaker_threshold, cfg.breaker_cooldown_s)
+        self._budget_logged = False
 
         # The cloud primary is used only when configured AND allowed to see media AND a key exists.
         self._primary = _cloud_vlm(cfg.vision_provider, self.settings) if cfg.allow_cloud_media else None
@@ -177,6 +181,14 @@ class RoutedVlmClient:
         """One cloud attempt under the breaker. Returns None on any provider failure, which is the router's
         single signal to use the local floor instead."""
         if not self._breaker.allow():
+            return None
+        # Over today's cap: the cloud is skipped and the local model answers, the same path a provider
+        # outage takes. Said once per client rather than once per crop.
+        if ledger.cloud_budget_exhausted():
+            if not self._budget_logged:
+                self._budget_logged = True
+                log.warning("router.cloud_budget_exhausted", spent_usd=round(ledger.cloud_spend_today(), 4),
+                            cap_usd=self.settings.llm.daily_budget_usd)
             return None
         try:
             r = client.verify(*args, **kwargs)
@@ -233,39 +245,42 @@ def make_vlm_client(settings: Settings | None = None) -> VlmClient:
     return local_vlm_client(settings)
 
 
-def route_text_json(prompt: str, *, temperature: float = 0.0, settings: Settings | None = None) -> dict | None:
+def route_text_json(prompt: str, *, temperature: float = 0.0, settings: Settings | None = None,
+                    purpose: str = "text") -> dict | None:
     """Route a text (no image) JSON chat to Groq when text_provider=groq and a key exists, else Ollama. Returns
     the parsed object, or None on any failure so the caller (nl.py) falls back to its deterministic parser.
     No media ever leaves the box here: this path only sends text."""
     settings = settings or get_settings()
     vcfg = settings.models.vlm
 
-    if vcfg.text_provider == "groq":
+    over_budget = ledger.cloud_budget_exhausted()
+    if vcfg.text_provider == "groq" and not over_budget:
         client = GroqClient(settings)
         if client.available():
             try:
-                return client.chat_json(prompt, model=settings.groq.text_model, temperature=temperature)
+                return client.chat_json(prompt, model=settings.groq.text_model, temperature=temperature,
+                                        purpose=purpose)
             except GroqError as exc:
                 log.info("router.text_cloud_fallback", provider="groq", error=str(exc))
-    elif vcfg.text_provider == "anthropic":
+    elif vcfg.text_provider == "anthropic" and not over_budget:
         aclient = AnthropicClient(settings)
         if aclient.available():
             try:
-                return aclient.chat_json(prompt, model=settings.anthropic.text_model, temperature=temperature)
+                return aclient.chat_json(prompt, model=settings.anthropic.text_model, temperature=temperature,
+                                         purpose=purpose)
             except AnthropicError as exc:
                 log.info("router.text_cloud_fallback", provider="anthropic", error=str(exc))
 
     # Local fallback: the same Ollama text call nl.py used before (text-only, no images).
     import json
 
-    import httpx
-
     try:
         payload = {"model": vcfg.ollama_tag, "stream": False, "format": "json",
                    "messages": [{"role": "user", "content": prompt}],
                    "options": {"temperature": temperature}}
-        resp = httpx.post(f"{vcfg.ollama_url}/api/chat", json=payload,
-                          timeout=min(getattr(vcfg, "timeout_s", 20), 20))
+        resp = ledger.post(f"{vcfg.ollama_url}/api/chat", provider="ollama", model=vcfg.ollama_tag,
+                           purpose=purpose, json=payload,
+                           timeout=min(getattr(vcfg, "timeout_s", 20), 20))
         resp.raise_for_status()
         return json.loads(resp.json()["message"]["content"])
     except Exception:  # noqa: BLE001

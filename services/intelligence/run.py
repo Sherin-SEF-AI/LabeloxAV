@@ -114,7 +114,7 @@ async def mine_session(session_id: UUID) -> dict:
             # so neither is safe here. POST /tracks/retrack replaces a session's tracks, and says so.
             all_tracks = _tracks_from_rows(existing, dets_by_cam, objects_by_id)
         else:
-            for cam, dets in dets_by_cam.items():
+            for dets in dets_by_cam.values():
                 if backend == "bot_sort":
                     a, tracks, sw = track_camera_botsort(dets)
                     switches_by_track.update(sw)

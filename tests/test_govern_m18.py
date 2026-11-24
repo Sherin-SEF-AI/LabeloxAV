@@ -2,7 +2,7 @@
 detection, consent gate failing closed, retention expiry, and the cloud cost ceilings (per-job cap and window
 remaining)."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from services.govern.consent import export_consent_gate, retention_status
 from services.govern.cost import cost_gate, estimate_job_cost
@@ -42,7 +42,7 @@ def test_consent_gate_fails_closed():
 
 
 def test_retention_expiry():
-    now = datetime(2026, 7, 6, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 6, tzinfo=UTC)
     past = now - timedelta(days=1)
     future = now + timedelta(days=30)
     assert retention_status(past, now)["action"] == "purge"

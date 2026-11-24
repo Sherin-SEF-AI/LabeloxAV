@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import math
 import uuid
+from typing import Annotated, Any
 from uuid import UUID
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -20,7 +21,10 @@ from core.storage import get_object_store
 from core.timebase import now_ns
 from db.models import Frame, Object, ObjectRelationship, Review
 from services.api.deps import (
+    ApiOut,
     CreateObjectIn,
+    FrameObjectOut,
+    FrameOut,
     MaskIn,
     ObjectDetail,
     RelateIn,
@@ -51,6 +55,37 @@ class CuboidProjectionOut(BaseModel):
     corners_uv: list[list[float]]
     edges: list[list[int]]
     any_in_image: bool
+
+
+class FilmstripTileOut(ApiOut):
+    frame_id: str
+    ts_ns: int
+    n_objects: int
+    n_confirmed: int                            # accepted, rejected or settled; auto_accept does not count
+    image_url: str
+    current: bool
+
+
+class FilmstripOut(ApiOut):
+    frame_id: str
+    cam_id: str
+    frames: list[FilmstripTileOut]              # capture order, the open frame among them
+
+
+class FrameContextOut(ApiOut):
+    frame_id: str
+    context: dict[str, Any]
+    context_provenance: dict[str, Any]          # key -> {by, ts_ns}
+
+
+class MaskSavedOut(ApiOut):
+    object_id: str
+    mask_polygons: list[list[float]]            # what was stored, after simplification
+    version: int
+
+
+class ObjectDeletedOut(ApiOut):
+    deleted: str                                # the id, as the caller sent it
 
 
 router = APIRouter()
@@ -377,8 +412,8 @@ async def vlm_dataset_export(session_id: str | None = None):
     return await export_dataset(UUID(session_id) if session_id else None)
 
 
-@router.get("/frames/{frame_id}/objects")
-async def frame_objects(frame_id: str, job_id: str | None = None, limit: int = 2000,
+@router.get("/frames/{frame_id}/objects", response_model=list[FrameObjectOut], response_model_exclude_unset=True)
+async def frame_objects(frame_id: str, job_id: str | None = None, limit: Annotated[int, Query(ge=1, le=40_000)] = 2000,
                         db: AsyncSession = Depends(db_session),
                         user=Depends(current_user)):
     """Every object on a frame, or only this job's when the job is blind.
@@ -541,7 +576,7 @@ async def lint_frame_ep(frame_id: str, payload: LintIn | None = None,
 _SETTLED_STATES = ("accepted", "rejected", "settled")
 
 
-@router.get("/frames/{frame_id}/filmstrip")
+@router.get("/frames/{frame_id}/filmstrip", response_model=FilmstripOut, response_model_exclude_unset=True)
 async def frame_filmstrip(frame_id: str, span: int = 12, db: AsyncSession = Depends(db_session),
                          user=Depends(current_user)):
     """The frames on either side of this one, in capture order, for the editor's filmstrip.
@@ -607,7 +642,7 @@ async def frame_filmstrip(frame_id: str, span: int = 12, db: AsyncSession = Depe
         for fid, ts in tiles]}
 
 
-@router.get("/frames/{frame_id}")
+@router.get("/frames/{frame_id}", response_model=FrameOut, response_model_exclude_unset=True)
 async def get_frame(frame_id: str, job_id: str | None = None,
                     db: AsyncSession = Depends(db_session),
                     user=Depends(current_user)):
@@ -707,7 +742,8 @@ class FrameContextIn(BaseModel):
     attrs: dict
 
 
-@router.patch("/frames/{frame_id}/context", dependencies=[Depends(require_role("reviewer"))])
+@router.patch("/frames/{frame_id}/context", dependencies=[Depends(require_role("reviewer"))],
+              response_model=FrameContextOut, response_model_exclude_unset=True)
 async def set_frame_context(frame_id: str, payload: FrameContextIn,
                             db: AsyncSession = Depends(db_session), user=Depends(current_user)):
     """Record what the whole scene was like, over the top of what the ingest classifier guessed.
@@ -737,7 +773,8 @@ async def set_frame_context(frame_id: str, payload: FrameContextIn,
 
 
 @router.post("/frames/{frame_id}/objects", response_model=ObjectDetail)
-async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession = Depends(db_session),
+                        user=Depends(current_user), x_lbx_tab: Annotated[str | None, Header()] = None):
     """Create a human-drawn object on a frame (source=human). Optional mask.
 
     The requested state is clamped by role, exactly as a review verdict is. This path used to write
@@ -749,6 +786,10 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
     frame = await db.get(Frame, UUID(frame_id))
     if frame is None:
         raise HTTPException(404, "frame not found")
+    from services.collab.presence import assert_editor_may_save
+
+    # An editor that does not hold this frame's lock may not write to it (423), whatever its UI shows.
+    await assert_editor_may_save([frame.frame_id], user, x_lbx_tab)
     onto = get_ontology()
     if not onto.has_name(payload.class_name):
         raise HTTPException(400, f"unknown class '{payload.class_name}'")
@@ -826,9 +867,10 @@ async def create_object(frame_id: str, payload: CreateObjectIn, db: AsyncSession
     return _detail(obj, frame, onto)
 
 
-@router.put("/objects/{object_id}/mask", dependencies=[Depends(require_role("annotator"))])
+@router.put("/objects/{object_id}/mask", dependencies=[Depends(require_role("annotator"))],
+            response_model=MaskSavedOut, response_model_exclude_unset=True)
 async def update_mask(object_id: str, payload: MaskIn, db: AsyncSession = Depends(db_session),
-                      user=Depends(current_user)):
+                      user=Depends(current_user), x_lbx_tab: Annotated[str | None, Header()] = None):
     """Replace an object's mask, and record who replaced it.
 
     Every other geometry change writes a Review row; this one rewrote the mask in place with no reviewer,
@@ -839,6 +881,9 @@ async def update_mask(object_id: str, payload: MaskIn, db: AsyncSession = Depend
     obj = await db.get(Object, UUID(object_id))
     if obj is None:
         raise HTTPException(404, "object not found")
+    from services.collab.presence import assert_editor_may_save
+
+    await assert_editor_may_save([obj.frame_id], user, x_lbx_tab)
     frame = await db.get(Frame, obj.frame_id)
     before = {"mask_uri": obj.mask_uri, "mask_encoding": obj.mask_encoding,
               "source": obj.source, "conf": obj.conf, "state": obj.state, "version": obj.version}
@@ -858,9 +903,10 @@ async def update_mask(object_id: str, payload: MaskIn, db: AsyncSession = Depend
             "version": obj.version}
 
 
-@router.delete("/objects/{object_id}", dependencies=[Depends(require_role("annotator"))])
+@router.delete("/objects/{object_id}", dependencies=[Depends(require_role("annotator"))],
+               response_model=ObjectDeletedOut, response_model_exclude_unset=True)
 async def delete_object(object_id: str, db: AsyncSession = Depends(db_session),
-                        user=Depends(current_user)):
+                        user=Depends(current_user), x_lbx_tab: Annotated[str | None, Header()] = None):
     """Delete an object, leaving a record that outlives it.
 
     Deleting an object cascades its Review rows, so the object and its entire history left the database
@@ -872,6 +918,9 @@ async def delete_object(object_id: str, db: AsyncSession = Depends(db_session),
     obj = await db.get(Object, UUID(object_id))
     if obj is None:
         raise HTTPException(404, "object not found")
+    from services.collab.presence import assert_editor_may_save
+
+    await assert_editor_may_save([obj.frame_id], user, x_lbx_tab)
     await audit_record(
         db, actor=(user.name if user else "anon"), decision="delete_object", subject=str(obj.object_id),
         rationale={"frame_id": str(obj.frame_id), "track_id": str(obj.track_id) if obj.track_id else None,
@@ -1125,8 +1174,9 @@ async def segment(payload: SegmentIn, db: AsyncSession = Depends(db_session)):
     frame = await db.get(Frame, UUID(payload.frame_id))
     if frame is None:
         raise HTTPException(404, "frame not found")
-    buf = np.frombuffer(get_object_store().get_bytes(frame.img_uri), dtype=np.uint8)
-    img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+    from services.api.offload import fetch_image
+
+    img = await fetch_image(frame.img_uri)
     if img is None:
         raise HTTPException(500, "failed to decode frame image")
     try:
@@ -1177,7 +1227,9 @@ async def classify_object(payload: ClassifyIn, db: AsyncSession = Depends(db_ses
         raise HTTPException(404, "frame not found")
     if len(payload.box) != 4:
         raise HTTPException(400, "box must be [x1,y1,x2,y2]")
-    img = cv2.imdecode(np.frombuffer(get_object_store().get_bytes(frame.img_uri), np.uint8), cv2.IMREAD_COLOR)
+    from services.api.offload import fetch_image
+
+    img = await fetch_image(frame.img_uri)
     if img is None:
         raise HTTPException(500, "failed to decode frame image")
     from services.autolabel.classify_crop import classify_crop
@@ -1226,8 +1278,9 @@ async def describe_label(frame_id: UUID, payload: DescribeIn, db: AsyncSession =
     frame = await db.get(Frame, frame_id)
     if frame is None:
         raise HTTPException(404, "frame not found")
-    buf = np.frombuffer(get_object_store().get_bytes(frame.img_uri), dtype=np.uint8)
-    img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+    from services.api.offload import fetch_image
+
+    img = await fetch_image(frame.img_uri)
     if img is None:
         raise HTTPException(500, "failed to decode frame image")
 
@@ -1257,7 +1310,7 @@ async def describe_label(frame_id: UUID, payload: DescribeIn, db: AsyncSession =
 
 @router.get("/frames/{frame_id}/next-object",
             dependencies=[Depends(require_role("annotator"))])
-async def next_object(frame_id: UUID, limit: int = 5, db: AsyncSession = Depends(db_session)):
+async def next_object(frame_id: UUID, limit: Annotated[int, Query(ge=1, le=1_000)] = 5, db: AsyncSession = Depends(db_session)):
     """Which unconfirmed object on this frame is worth a person's attention next, and why.
 
     The order a frame's objects are drawn in is the order the machine happened to emit them, which has

@@ -2,7 +2,11 @@
 recall (critical-object, TTC-weighted, near-miss slice), bootstrap CIs and paired significance, and continuous
 shadow eval with protected-slice regression triage."""
 
-from services.verdyx.safety_recall import critical_object_recall, near_miss_slice, ttc_weighted_recall
+from services.verdyx.safety_recall import (
+    critical_object_recall,
+    near_miss_slice,
+    ttc_weighted_recall,
+)
 from services.verdyx.shadow import ShadowEval, regression_triage
 from services.verdyx.stats import bootstrap_ci, paired_significance
 from services.verdyx.track_metrics import id_switches, time_to_detection, track_fragmentation

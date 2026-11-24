@@ -46,11 +46,12 @@ def test_cluster_splits_two_appearance_groups():
     from services.agent.ontology_steward import _cluster
 
     rng = np.random.default_rng(0)
-    a = _unit(rng, 768); b = _unit(rng, 768)
+    a = _unit(rng, 768)
+    b = _unit(rng, 768)
     rows = []
-    for i in range(20):
+    for _ in range(20):
         rows.append((str(uuid.uuid4()), (a + 0.005 * rng.standard_normal(768)).tolist()))
-    for i in range(20):
+    for _ in range(20):
         rows.append((str(uuid.uuid4()), (b + 0.005 * rng.standard_normal(768)).tolist()))
     clusters = _cluster(rows, sim_thresh=0.8)
     big = sorted((len(c["members"]) for c in clusters), reverse=True)

@@ -20,9 +20,8 @@ pytestmark = pytest.mark.db
 
 async def _track_with_hole(db, onto, *, total: int, present: list[int], class_name: str = "sedan"):
     """A session of `total` frames where the track only has a box on the `present` indices."""
-    from db.models import Frame, Object, OntologyClass, OntologyVersion
+    from db.models import Frame, Object, OntologyClass, OntologyVersion, Track
     from db.models import Session as DbSession
-    from db.models import Track
 
     if await db.get(OntologyVersion, onto.version) is None:
         db.add(OntologyVersion(version=onto.version, hierarchy_levels=3, attributes={}))
@@ -60,9 +59,8 @@ async def _track_with_hole(db, onto, *, total: int, present: list[int], class_na
 async def _cleanup(db, sid, tid, run_id=None):
     from sqlalchemy import select
 
-    from db.models import AgentRun, Frame, Object
+    from db.models import AgentRun, Frame, Object, Track
     from db.models import Session as DbSession
-    from db.models import Track
 
     for o in (await db.execute(select(Object).where(Object.track_id == tid))).scalars().all():
         await db.delete(o)
@@ -163,7 +161,10 @@ async def test_the_sweep_is_one_run_that_deletes_what_it_created():
             # Counted as filled, not failed: a missing counter key once turned every track into a failure
             # after its boxes were written, and twenty of those in a row aborted the corpus sweep.
             assert (run.counts or {}).get("failed") == 0, f"tracks counted as failed: {run.counts}"
-            assert (run.counts or {}).get("tracks") == 1, run.counts
+            # At least this one. The sweep covers the whole database, and in a full suite run other
+            # tests have left gapped tracks behind, so an exact count is true only when this test runs
+            # alone (it read 11 in a full run and failed there).
+            assert (run.counts or {}).get("tracks", 0) >= 1, run.counts
             mine = {k for k in (run.changes or {}) if uuid.UUID(k) in {o.object_id for o in made}}
             assert len(mine) == len(made), "every created box must be recorded for the undo"
             assert all((run.changes or {})[k].get("created") for k in mine)

@@ -125,7 +125,7 @@ def llm_parse(text: str, onto) -> Intent | None:
             f'Command: "{text}". '
             'Respond with JSON only: {"action": "...", "classes": ["..."], "conf_min": null}.'
         )
-        data = route_text_json(prompt, temperature=0.0)
+        data = route_text_json(prompt, temperature=0.0, purpose="nl")
         if not data:
             return None
         action = str(data.get("action", "")).lower()
@@ -135,7 +135,7 @@ def llm_parse(text: str, onto) -> Intent | None:
         class_names = _resolve_classes(phrase, onto)
         class_ids = {c.id for c in onto.classes if c.name in class_names}
         conf = data.get("conf_min")
-        conf_min = float(conf) if isinstance(conf, (int, float)) else None
+        conf_min = float(conf) if isinstance(conf, int | float) else None
         return Intent(action=action, class_names=class_names, class_ids=class_ids,
                       conf_min=conf_min, all_classes=not class_ids)
     except Exception:  # noqa: BLE001 -- any failure -> fall back to the rule parser

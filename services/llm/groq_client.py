@@ -22,6 +22,7 @@ import numpy as np
 
 from core.config import Settings, get_settings
 from core.logging import get_logger
+from services.llm import ledger
 
 log = get_logger("groq")
 
@@ -85,7 +86,7 @@ class GroqClient:
         return bool(self.cfg.api_key)
 
     def chat_json(self, prompt: str, *, model: str, image_jpeg: bytes | None = None,
-                  temperature: float = 0.0) -> dict:
+                  temperature: float = 0.0, purpose: str = "judge") -> dict:
         """One chat turn that must return a JSON object. `image_jpeg`, when given, is sent as an image part
         (data URL), which is what turns this into a vision call. Raises GroqError on any failure."""
         if not self.cfg.api_key:
@@ -110,8 +111,9 @@ class GroqClient:
         headers = {"Authorization": f"Bearer {self.cfg.api_key}", "Content-Type": "application/json"}
         for attempt in range(RATE_LIMIT_RETRIES + 1):
             try:
-                resp = httpx.post(f"{self.cfg.base_url}/chat/completions", json=payload, headers=headers,
-                                  timeout=self.cfg.timeout_s)
+                resp = ledger.post(f"{self.cfg.base_url}/chat/completions", provider="groq", model=model,
+                                   purpose=purpose, json=payload, headers=headers,
+                                   timeout=self.cfg.timeout_s)
             except Exception as exc:  # noqa: BLE001
                 raise GroqError(str(exc)[:160]) from exc
             # Groq reports a rate limit as 429, and sometimes as a 400 whose code is rate_limit_exceeded.

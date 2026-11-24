@@ -12,6 +12,8 @@ domain and permits in the other.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -62,7 +64,7 @@ async def security_pack(pack_id: str = "sec"):
 
 
 @router.get("/security/sessions")
-async def security_sessions(limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
+async def security_sessions(limit: Annotated[int, Query(ge=1, le=500)] = 100, offset: int = Query(0, ge=0),
                             db: AsyncSession = Depends(db_session)):
     """Sessions captured under the security pack.
 
@@ -112,7 +114,7 @@ class WatchlistIn(BaseModel):
 
 
 @router.get("/security/watchlist")
-async def get_watchlist(active_only: bool = True, limit: int = Query(500, ge=1, le=2000),
+async def get_watchlist(active_only: bool = True, limit: Annotated[int, Query(ge=1, le=2000)] = 500,
                         db: AsyncSession = Depends(db_session)):
     from services.anpr.store import list_watchlist
 
@@ -147,7 +149,7 @@ async def delete_watchlist(entry_id: str, db: AsyncSession = Depends(db_session)
 async def get_reads(request: Request, user=Depends(require_role("reviewer")),
                     session_id: str | None = None, camera_id: str | None = None,
                     plate: str | None = None, state_code: str | None = None, hits_only: bool = False,
-                    limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
+                    limit: Annotated[int, Query(ge=1, le=500)] = 100, offset: int = Query(0, ge=0),
                     db: AsyncSession = Depends(db_session)):
     """The read feed, most recent first, filterable and paged.
 
@@ -194,10 +196,7 @@ async def recognize(payload: RecognizeIn, db: AsyncSession = Depends(db_session)
     belongs to is a property of the capture, and letting a caller assert it would make the AV pack's refusal
     bypassable by anyone who could send a request.
     """
-    import cv2
-    import numpy as np
 
-    from core.storage import get_object_store
     from db.models import Frame
     from services.anpr.recognize import recognize_plates
     from services.anpr.store import record_reads
@@ -210,10 +209,12 @@ async def recognize(payload: RecognizeIn, db: AsyncSession = Depends(db_session)
     pack_id = await pack_id_for_session(db, frame.session_id)
 
     try:
-        raw = get_object_store().get_bytes(frame.img_uri)
+        from services.api.offload import decode_image_async, fetch_bytes
+
+        raw = await fetch_bytes(frame.img_uri)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"could not read the frame image: {type(exc).__name__}") from exc
-    img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+    img = await decode_image_async(raw)
     if img is None:
         raise HTTPException(422, "the frame image could not be decoded")
 

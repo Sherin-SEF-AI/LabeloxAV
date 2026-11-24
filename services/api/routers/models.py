@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +15,7 @@ router = APIRouter()
 
 
 @router.get("/models")
-async def list_models(db: AsyncSession = Depends(db_session), limit: int = Query(200, ge=1, le=1000)):
+async def list_models(db: AsyncSession = Depends(db_session), limit: Annotated[int, Query(ge=1, le=1000)] = 200):
     rows = (await db.execute(select(ModelRun).order_by(ModelRun.created_at.desc()).limit(limit))).scalars().all()
     return [
         {

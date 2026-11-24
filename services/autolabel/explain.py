@@ -40,7 +40,7 @@ def _human(path: str) -> str:
 def _conf(p: dict) -> float:
     """A proposal's confidence, coercing a missing or null score to 0 (some paths record no scalar conf)."""
     v = p.get("conf")
-    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0.0
+    return float(v) if isinstance(v, int | float) and not isinstance(v, bool) else 0.0
 
 
 async def explain_object(db: AsyncSession, object_id: UUID) -> dict:
@@ -72,7 +72,7 @@ async def explain_object(db: AsyncSession, object_id: UUID) -> dict:
 
     # the calibrated confidence the CURRENT gate would read for this raw score (consistent with the live gate)
     calibrated = None
-    if isinstance(calibrated_from, (int, float)) and not isinstance(calibrated_from, bool):
+    if isinstance(calibrated_from, int | float) and not isinstance(calibrated_from, bool):
         class_disagree = any(p.get("verdict") == "overruled" for p in proposals) and len(proposals) > 1
         calibrated = round(calibrate_confidence(float(calibrated_from), agreement, class_disagree,
                                                 mask_box_disagree, cfg.calibrate), 3)
@@ -143,7 +143,7 @@ async def explain_object(db: AsyncSession, object_id: UUID) -> dict:
         "agreement": agreement, "mask_box_disagree": mask_box_disagree,
         "vlm": vlm, "overruled_classes": sorted({str(p.get("class_name")) for p in overruled}),
         "calibration": {"raw": round(float(calibrated_from), 4)
-                        if isinstance(calibrated_from, (int, float)) and not isinstance(calibrated_from, bool) else None,
+                        if isinstance(calibrated_from, int | float) and not isinstance(calibrated_from, bool) else None,
                         "calibrated": calibrated, "auto_accept_floor": threshold},
         "quality_flags": quality_flags,
         "machine_decision": decision, "deciding_reason": reason,

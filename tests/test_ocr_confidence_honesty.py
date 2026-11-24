@@ -10,8 +10,8 @@ from __future__ import annotations
 import numpy as np
 
 from core.config import get_settings
-from services.anpr.recognize import PlateRead, recognize_plates
 from services.anpr.india_format import parse_plate
+from services.anpr.recognize import PlateRead, recognize_plates
 
 
 def _img(w: int = 640, h: int = 480) -> np.ndarray:

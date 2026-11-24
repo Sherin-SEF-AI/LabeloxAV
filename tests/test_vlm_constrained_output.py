@@ -154,7 +154,7 @@ def test_ollama_sends_the_schema_rather_than_the_word_json():
         seen.update(json or {})
         return _fake_ollama_response({"class": "scooter", "confident": True})
 
-    with patch("services.autolabel.paths.path_c_vlm.httpx.post", fake_post):
+    with patch("httpx.post", fake_post):
         res = OllamaVlmClient().verify(np.zeros((32, 32, 3), np.uint8), SHORTLIST, ATTRS)
 
     assert isinstance(seen["format"], dict), "format must carry the schema, not the string 'json'"
@@ -171,7 +171,7 @@ def test_ollama_no_longer_puts_the_shortlist_in_the_prompt():
         seen.update(json or {})
         return _fake_ollama_response({"class": "scooter", "confident": True})
 
-    with patch("services.autolabel.paths.path_c_vlm.httpx.post", fake_post):
+    with patch("httpx.post", fake_post):
         OllamaVlmClient().verify(np.zeros((32, 32, 3), np.uint8), SHORTLIST, ATTRS)
 
     prompt = seen["messages"][0]["content"]
@@ -197,7 +197,7 @@ def test_llama_server_asks_for_a_strict_json_schema():
         seen.update(json or {})
         return R()
 
-    with patch("services.autolabel.paths.path_c_vlm.httpx.post", fake_post):
+    with patch("httpx.post", fake_post):
         res = LlamaServerVlmClient().verify(np.zeros((32, 32, 3), np.uint8), SHORTLIST, ATTRS)
 
     rf = seen["response_format"]
@@ -225,7 +225,7 @@ def test_llama_server_sends_the_image_the_way_its_multimodal_stack_expects():
         seen.update(json or {})
         return R()
 
-    with patch("services.autolabel.paths.path_c_vlm.httpx.post", fake_post):
+    with patch("httpx.post", fake_post):
         LlamaServerVlmClient().verify(np.zeros((32, 32, 3), np.uint8), SHORTLIST, ATTRS)
 
     parts = seen["messages"][0]["content"]
@@ -240,7 +240,7 @@ def test_a_dead_llama_server_yields_an_empty_verdict_not_an_exception():
     def boom(url, json=None, timeout=None):  # noqa: A002
         raise ConnectionError("connection refused")
 
-    with patch("services.autolabel.paths.path_c_vlm.httpx.post", boom):
+    with patch("httpx.post", boom):
         res = LlamaServerVlmClient().verify(np.zeros((32, 32, 3), np.uint8), SHORTLIST, ATTRS)
     assert res.class_name is None
 

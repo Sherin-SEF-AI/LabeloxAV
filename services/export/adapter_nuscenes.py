@@ -36,7 +36,7 @@ def _box3d(cuboid: dict | None) -> tuple[list[float], list[float], list[float], 
 
 
 def _tok(kind: str, key: str) -> str:
-    return hashlib.md5(f"{kind}:{key}".encode()).hexdigest()
+    return hashlib.md5(f"{kind}:{key}".encode(), usedforsecurity=False).hexdigest()
 
 
 def _attr_tokens_table(onto: Ontology) -> tuple[list[dict], dict[str, str]]:

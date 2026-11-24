@@ -5,7 +5,9 @@ priority, so the workspace only ever offers samples that are both worth labeling
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,7 +69,7 @@ async def quality_agreement(payload: AgreementIn):
 
 
 @router.get("/labelox/queue")
-async def label_queue(limit: int = 100, db: AsyncSession = Depends(db_session)):
+async def label_queue(limit: Annotated[int, Query(ge=1, le=2_000)] = 100, db: AsyncSession = Depends(db_session)):
     """The gated, SIEVYX-ranked label queue. Samples from SANYX-quarantined or CALYX-blocked sessions are
     excluded; the rest are ordered by the combined priority score."""
     return await build_label_queue(db, limit)

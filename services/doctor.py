@@ -230,9 +230,10 @@ async def gpu_worker_running() -> bool:
 
     key = get_settings().training.advisory_lock_key
     async with get_sessionmaker()() as db:
+        # Any card's worker counts: the lock key is the base key plus the device index.
         held = (await db.execute(text(
             "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted "
-            "AND ((classid::bigint << 32) | objid::bigint) = :k"), {"k": key})).scalar_one()
+            "AND ((classid::bigint << 32) | objid::bigint) BETWEEN :k AND :k + 15"), {"k": key})).scalar_one()
     return bool(held)
 
 
@@ -251,7 +252,8 @@ async def check_gpu_worker() -> list[Check]:
         async with get_sessionmaker()() as db:
             held = (await db.execute(text(
                 "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted "
-                "AND ((classid::bigint << 32) | objid::bigint) = :k"), {"k": key})).scalar_one()
+                "AND ((classid::bigint << 32) | objid::bigint) BETWEEN :k AND :k + 15"),
+                {"k": key})).scalar_one()
             pending = (await db.execute(
                 select(func.count(), func.min(AutolabelJob.created_at))
                 .where(AutolabelJob.status == "pending",

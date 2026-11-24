@@ -334,7 +334,9 @@ async def test_an_mfa_handle_is_single_use():
 
     handle = await _mfa_begin(uuid.uuid4())
     assert await _mfa_take(handle)
-    with pytest.raises(Exception):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException):
         await _mfa_take(handle)
 
 

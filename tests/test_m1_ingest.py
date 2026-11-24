@@ -136,7 +136,7 @@ def _scene_frame(i: int) -> np.ndarray:
 
 @requires_infra
 async def test_mcap_ingest(tmp_path):
-    foxglove = pytest.importorskip("foxglove_schemas_protobuf")
+    pytest.importorskip("foxglove_schemas_protobuf")
     from foxglove_schemas_protobuf.CompressedImage_pb2 import CompressedImage
     from foxglove_schemas_protobuf.LocationFix_pb2 import LocationFix
     from mcap_protobuf.writer import Writer

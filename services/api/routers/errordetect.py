@@ -3,7 +3,9 @@ confirm or dismiss candidates (confirming feeds the correction and retrain path)
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +35,7 @@ async def run(payload: DetectIn, db: AsyncSession = Depends(db_session)):
 
 
 @router.get("/errordetect/candidates")
-async def candidates(status: str = "pending", limit: int = 100, kind: str | None = None,
+async def candidates(status: str = "pending", limit: Annotated[int, Query(ge=1, le=2_000)] = 100, kind: str | None = None,
                      db: AsyncSession = Depends(db_session), hidden=Depends(caller_hidden_projects)):
     """The ranked queue, optionally one detector at a time.
 

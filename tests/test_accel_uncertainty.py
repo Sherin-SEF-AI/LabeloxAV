@@ -7,7 +7,12 @@ import time
 import numpy as np
 import pytest
 
-from core.accel.uncertainty import ensemble_disagreement, entropy_margin, flicker_scores, gpu_available
+from core.accel.uncertainty import (
+    ensemble_disagreement,
+    entropy_margin,
+    flicker_scores,
+    gpu_available,
+)
 
 
 def test_entropy_margin_matches_scipy():

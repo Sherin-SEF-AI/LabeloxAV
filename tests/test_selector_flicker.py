@@ -68,7 +68,6 @@ async def test_track_flicker_distinguishes_jittery_from_stable():
         scored = await score_candidates(db, session_id=str(sid))
         assert scored and "flicker" in scored[0]["scores"]   # the value score exposes the flicker component
         # the jittery track's objects carry a higher flicker score than the stable track's
-        by_track_flicker = {}
         # re-read track per object to attribute (objects in `scored` do not carry track_id, so check the spread)
         flickers = [it["scores"]["flicker"] for it in scored]
         assert max(flickers) > min(flickers)                 # flicker actually varies across the pool

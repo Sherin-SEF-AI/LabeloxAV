@@ -44,9 +44,11 @@ def _coverage(classes: dict, w: int, h: int) -> dict:
 
 
 async def _store_mask(db, frame, classes, width, height, coverage, model, source):
-    store = get_object_store()
+    from services.api.offload import put_bytes
+
     key = f"masks/drivable/{frame.session_id}/{frame.frame_id}.json"
-    uri = store.put_bytes(key, json.dumps({"classes": classes, "width": width, "height": height}).encode(), "application/json")
+    uri = await put_bytes(key, json.dumps({"classes": classes, "width": width, "height": height}).encode(),
+                          "application/json")
     dm = await db.get(DrivableMask, frame.frame_id)
     if dm is None:
         db.add(DrivableMask(frame_id=frame.frame_id, mask_uri=uri, coverage=coverage, source=source, model_version=model))
@@ -80,7 +82,9 @@ async def get_drivable(frame_id: UUID, db: AsyncSession = Depends(db_session)):
     dm = await db.get(DrivableMask, frame_id)
     if dm is None:
         return {"found": False}
-    data = json.loads(get_object_store().get_bytes(dm.mask_uri))
+    from services.api.offload import fetch_bytes
+
+    data = json.loads(await fetch_bytes(dm.mask_uri))
     return {"found": True, "coverage": dm.coverage, "source": dm.source, "model_version": dm.model_version,
             "classes": data["classes"], "width": data["width"], "height": data["height"]}
 

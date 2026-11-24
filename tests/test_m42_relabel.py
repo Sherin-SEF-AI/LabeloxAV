@@ -64,11 +64,11 @@ def test_diff_classifier_protects_human_and_flags_regression():
 
 @requires_infra
 def test_relabel_promotes_applies_safely_and_reverts():
-    from db.models import Frame, Object, RelabelJob, RelabelRun
+    from db.models import Frame, Object, RelabelRun
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
     from services.relabel.apply import revert_run
-    from services.relabel.run import run_relabel_job, start_relabel
+    from services.relabel.run import start_relabel
 
     sid = uuid.uuid4()
     onto = get_ontology()
@@ -88,10 +88,14 @@ def test_relabel_promotes_applies_safely_and_reverts():
             for k in range(3):
                 o = Object(frame_id=f.frame_id, class_id=fb_id, bbox=[k, 0, k + 5, 5], conf=0.8,
                            state="auto_accept", source="auto_accept")
-                db.add(o); await db.flush(); auto_ids.append(o.object_id)
+                db.add(o)
+                await db.flush()
+                auto_ids.append(o.object_id)
             h = Object(frame_id=f.frame_id, class_id=fb_id, bbox=[50, 0, 55, 5], conf=0.95,
                        state="accepted", source="human")
-            db.add(h); await db.flush(); human_id = h.object_id
+            db.add(h)
+            await db.flush()
+            human_id = h.object_id
             await db.commit()
 
         # start a local ontology-promotion relabel: vehicle_fallback -> motorcycle, scoped to this session

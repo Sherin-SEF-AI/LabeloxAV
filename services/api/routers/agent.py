@@ -6,8 +6,9 @@ recorded in one AgentRun; revert restores the exact prior state. Auto-accept is 
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -258,7 +259,7 @@ async def error_sweep(body: ErrorSweepIn, db: AsyncSession = Depends(db_session)
 
 
 @router.get("/agent/errors/queue", dependencies=[Depends(require_role("annotator"))])
-async def error_queue(status: str = "pending", limit: int = 100, db: AsyncSession = Depends(db_session)):
+async def error_queue(status: str = "pending", limit: Annotated[int, Query(ge=1, le=2_000)] = 100, db: AsyncSession = Depends(db_session)):
     """The ranked fix queue: likely-wrong labels the daemon surfaced, worst first."""
     from services.errordetect.queue import list_candidates, summary
 
@@ -847,7 +848,7 @@ async def fleet_order_status(order_id: str, status: str, db: AsyncSession = Depe
 
 
 @router.get("/agent/runs", dependencies=[Depends(require_role("annotator"))])
-async def runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
+async def runs(limit: Annotated[int, Query(ge=1, le=1_000)] = 50, db: AsyncSession = Depends(db_session)):
     return await list_runs(db, limit)
 
 
@@ -866,7 +867,7 @@ _RESUMABLE_KINDS = frozenset({"error_sweep", "relabel_all", "reanalyze_all", "dr
 
 
 @router.get("/agent/runs/interrupted", dependencies=[Depends(require_role("annotator"))])
-async def interrupted_runs(limit: int = 50, db: AsyncSession = Depends(db_session)):
+async def interrupted_runs(limit: Annotated[int, Query(ge=1, le=1_000)] = 50, db: AsyncSession = Depends(db_session)):
     """Jobs whose process stopped before they finished, with the cursor each one left behind.
 
     Declared above /agent/runs/{run_id} because FastAPI matches in order and "interrupted" would otherwise
@@ -981,7 +982,7 @@ async def contamination(min_count: int = 25, refused_only: bool = False,
 
 
 @router.get("/agent/contamination/objects", dependencies=[Depends(require_role("annotator"))])
-async def contamination_objects(from_name: str, to_name: str, limit: int = 60, offset: int = 0,
+async def contamination_objects(from_name: str, to_name: str, limit: Annotated[int, Query(ge=1, le=1_200)] = 60, offset: int = 0,
                                 db: AsyncSession = Depends(db_session)):
     """The objects one class move actually produced, so a lineage can be looked at rather than counted.
 

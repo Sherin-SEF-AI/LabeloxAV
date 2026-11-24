@@ -75,10 +75,16 @@ def read_point_cloud(path: str | Path, ts_ns: int = 0, features: int | None = No
 
 
 def _infer_bin_features(n_floats: int, name: str) -> int:
-    """A KITTI .bin is divisible by 4, nuScenes by 5. When both fit, the filename hints, else default KITTI."""
+    """A KITTI .bin is divisible by 4, nuScenes by 5. When both fit, the filename decides, else default KITTI.
+
+    nuScenes names its sweeps `<log>__LIDAR_TOP__<timestamp>.pcd.bin`, and KITTI `000123.bin`, so the
+    double suffix is the hint. It matters for most real files, not a rare one: a nuScenes sweep whose point
+    count is a multiple of 4 has a float count divisible by both, and was being read as KITTI, with every
+    fifth float (the ring index) landing in x, y, z and intensity in turn."""
     div4, div5 = (n_floats % 4 == 0), (n_floats % 5 == 0)
     if div5 and not div4:
         return 5
     if div4 and not div5:
         return 4
-    return 5 if "nuscenes" in name.lower() else 4
+    lower = name.lower()
+    return 5 if ("nuscenes" in lower or lower.endswith(".pcd.bin")) else 4

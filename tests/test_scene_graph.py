@@ -60,9 +60,9 @@ def test_geometry_single_best_partner_no_explosion():
 
 @requires_infra
 def test_vlm_target_review_gate_and_export():
-    from sqlalchemy import delete, select
+    from sqlalchemy import delete
 
-    from db.models import Frame, Object, ObjectRelationship, VlmTarget
+    from db.models import Frame, VlmTarget
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
     from services.intelligence.vlm_dataset import export_dataset, set_target_status

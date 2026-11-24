@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -31,7 +32,7 @@ async def list_scenarios(
     session_id: str | None = None,
     type: str | None = None,
     city: str | None = None,
-    limit: int = 100,
+    limit: Annotated[int, Query(ge=1, le=2_000)] = 100,
 ):
     limit = min(max(limit, 1), 1000)
     stmt = (
@@ -56,7 +57,7 @@ async def scenarios_search(
     q: str = Query(...),
     city: str | None = None,
     session_id: str | None = None,
-    limit: int = 100,
+    limit: Annotated[int, Query(ge=1, le=2_000)] = 100,
     semantic: bool = False,
 ):
     results = await search_scenarios(db, q, city=city, session_id=session_id, limit=limit, semantic=semantic)

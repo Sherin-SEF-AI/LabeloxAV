@@ -47,7 +47,7 @@ def compute_factors(prov: dict, obj_conf: float | None, track_class_frac: float 
     prov = prov or {}
     cfg = get_settings()
     cf = prov.get("calibrated_from")
-    if isinstance(cf, (int, float)) and not isinstance(cf, bool):
+    if isinstance(cf, int | float) and not isinstance(cf, bool):
         conf = calibrate_confidence(float(cf), bool(prov.get("agreement")),
                                     False, bool(prov.get("mask_box_disagree")), cfg.calibrate)
     elif source == "human":

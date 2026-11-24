@@ -110,7 +110,9 @@ async def test_a_failed_delete_does_not_leave_an_orphan_audit_row():
         await db.rollback()
 
     async with get_sessionmaker()() as db:
-        with pytest.raises(Exception):
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException):
             await delete_object(str(uuid.uuid4()), db=db, user=await _user(db))
         await db.rollback()
 

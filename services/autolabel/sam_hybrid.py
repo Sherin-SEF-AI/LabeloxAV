@@ -50,9 +50,12 @@ def _get_verifier():
         if _verifier is None and not _verifier_failed:
             cfg = get_settings().models.openvocab
             try:
-                from ultralytics import SAM
+                from core.model_manager import manager
+                from services.autolabel.paths.path_b_openvocab import load_sam, sam_model_key
 
-                _verifier = SAM(cfg.seg_verify_weights)
+                _verifier = manager().get(sam_model_key(cfg.seg_verify_weights),
+                                          lambda: load_sam(cfg.seg_verify_weights),
+                                          device=get_settings().gpu.device)
                 log.info("sam_hybrid.verifier_loaded", weights=cfg.seg_verify_weights)
             except Exception as exc:  # noqa: BLE001 - no second opinion is not a failed segmentation
                 _verifier_failed = True

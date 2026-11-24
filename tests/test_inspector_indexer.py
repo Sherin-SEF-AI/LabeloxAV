@@ -7,8 +7,9 @@ import pytest
 pytest.importorskip("mcap")
 pytest.importorskip("mcap_protobuf")
 
-from scripts.make_inspector_fixture import build_mcap
-from services.inspector.indexer import build_index_from_bytes
+# After the importorskip gates above, so a box without mcap skips instead of failing to import.
+from scripts.make_inspector_fixture import build_mcap  # noqa: E402, I001
+from services.inspector.indexer import build_index_from_bytes  # noqa: E402
 
 
 def test_measured_rates_and_topics():

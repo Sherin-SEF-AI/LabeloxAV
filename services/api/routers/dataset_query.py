@@ -7,7 +7,9 @@ path, so what the config records is what the dataset means rather than where som
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +27,32 @@ class BuildIn(BaseModel):
     limit: int = 200_000
 
 
+def _is_dataset_artifact(uri: str) -> bool:
+    """Whether `uri` names an object under this bucket's `datasets/` prefix.
+
+    The check was `"/datasets/" in uri`, which is true of `s3://bucket/frames/x/datasets/../../y` and of
+    any key that merely contains the word: a substring is not a location. This resolves the uri to its
+    key in our bucket and requires the key to start with the prefix, with no parent-directory segment
+    and no other bucket.
+    """
+    from core.storage import get_object_store
+
+    store = get_object_store()
+    if uri.startswith("s3://"):
+        try:
+            bucket, key = store.parse_uri(uri)
+        except Exception:  # noqa: BLE001 - an unparseable uri is simply not ours
+            return False
+        if bucket != store.bucket:
+            return False
+    elif "://" in uri:
+        return False
+    else:
+        key = uri
+    parts = key.split("/")
+    return key.startswith("datasets/") and ".." not in parts and "" not in parts[:-1]
+
+
 @router.get("/datasets/blob")
 async def dataset_blob(uri: str):
     """Fetch a shard or index this API produced.
@@ -33,12 +61,13 @@ async def dataset_blob(uri: str):
     images, the labels and the artifacts alike. Confined to the datasets prefix: the parameter is caller
     supplied, and a blob reader that will fetch any URI it is given is a way to read the whole object store.
     """
-    from core.storage import get_object_store
 
-    if "/datasets/" not in uri:
+    if not _is_dataset_artifact(uri):
         raise HTTPException(400, "this route serves dataset artifacts only")
     try:
-        data = get_object_store().get_bytes(uri)
+        from services.api.offload import fetch_bytes
+
+        data = await fetch_bytes(uri)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "no such dataset artifact") from exc
     media = "application/x-tar" if uri.endswith(".tar") else "application/octet-stream"
@@ -70,7 +99,7 @@ async def compile_only(q: str):
 
 
 @router.get("/datasets/preview")
-async def preview(q: str, version: str | None = None, limit: int = 200_000,
+async def preview(q: str, version: str | None = None, limit: Annotated[int, Query(ge=1, le=200_000)] = 200_000,
                   db: AsyncSession = Depends(db_session)):
     """How many frames and objects the query selects, and the class mix, without writing a byte.
 
@@ -137,7 +166,7 @@ async def publish_lake(db: AsyncSession = Depends(db_session)):
 
 
 @router.get("/datasets/lake/{table}")
-async def read_lake(table: str, limit: int = 100):
+async def read_lake(table: str, limit: Annotated[int, Query(ge=1, le=2_000)] = 100):
     """A sample of a published table, so the lake is checkable without a query engine to hand."""
     from services.datasets.lake import scan
 

@@ -227,3 +227,106 @@ async def test_retention_until_survives_the_api_model():
     deadline = datetime.now(UTC) + timedelta(days=30)
     payload = ConsentIn(session_id=uuid.uuid4(), consent_status="granted", retention_until=deadline)
     assert payload.retention_until == deadline
+
+
+@requires_infra
+@pytest.mark.asyncio
+async def test_erasure_removes_every_stored_file_not_only_the_frame_images():
+    """The frame images were the only blobs erasure deleted. The uploaded source video, which is the
+    unredacted copy, every mask and every raster stayed in the bucket under a certificate saying the
+    session was gone."""
+    from sqlalchemy import select
+
+    from core.storage import get_object_store
+    from db.models import DrivableMask, Frame, Object
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.govern.retention import erase_session
+
+    store = get_object_store()
+    async with get_sessionmaker()() as db:
+        sid = await _seed(db, n_frames=2)
+        frames = (await db.execute(select(Frame).where(Frame.session_id == sid))).scalars().all()
+        fid = frames[0].frame_id
+
+        raw = store.put_bytes(f"uploads/{uuid.uuid4().hex}/drive.mp4", b"raw unredacted video", "video/mp4")
+        sess = await db.get(DbSession, sid)
+        sess.raw_uri = raw
+        mask = store.put_bytes(f"masks/{sid}/{fid}/{uuid.uuid4()}.json", b"{}", "application/json")
+        obj = (await db.execute(select(Object).where(Object.frame_id == fid))).scalars().first()
+        obj.mask_uri = mask
+        drivable = store.put_bytes(f"masks/drivable/{sid}/{fid}.json", b"{}", "application/json")
+        db.add(DrivableMask(frame_id=fid, mask_uri=drivable, coverage=0.5, source="proposed",
+                            model_version="test"))
+        # A blob with no row left pointing at it, as a re-label leaves behind.
+        orphan = store.put_bytes(f"masks/{sid}/{fid}/superseded.json", b"{}", "application/json")
+        # Somebody else's data, which must survive.
+        other = store.put_bytes(f"frames/{uuid.uuid4()}/cam_f/1.jpg", b"not ours", "image/jpeg")
+        await db.commit()
+
+        dry = await erase_session(db, sid, reason="test", dry_run=True)
+        assert dry["blobs"] == 6, dry      # 2 frames, raw video, mask, drivable, orphan
+        assert store.exists(raw), "a dry run deleted something"
+
+        res = await erase_session(db, sid, reason="test")
+        assert res["certificate"]["blobs_deleted"] == 6
+
+    for name, uri in (("source video", raw), ("mask", mask), ("drivable raster", drivable),
+                      ("orphaned mask", orphan), *[("frame image", f.img_uri) for f in frames]):
+        assert not store.exists(uri), f"the {name} survived erasure: {uri}"
+    assert store.exists(other), "erasure deleted another session's frame"
+    store.remove(other)
+
+
+@requires_infra
+@pytest.mark.asyncio
+async def test_source_media_shared_with_another_session_is_kept_until_the_last_one_goes():
+    from core.storage import get_object_store
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.govern.retention import erase_session
+
+    store = get_object_store()
+    async with get_sessionmaker()() as db:
+        a, b = await _seed(db, n_frames=1), await _seed(db, n_frames=1)
+        raw = store.put_bytes(f"uploads/{uuid.uuid4().hex}/shared.mp4", b"video", "video/mp4")
+        for sid in (a, b):
+            (await db.get(DbSession, sid)).raw_uri = raw
+        await db.commit()
+
+        await erase_session(db, a, reason="test")
+        assert store.exists(raw), "the second session's source video was deleted with the first"
+        await erase_session(db, b, reason="test")
+        assert not store.exists(raw)
+
+
+@requires_infra
+@pytest.mark.asyncio
+async def test_erasure_never_deletes_shared_artifacts_or_files_outside_the_bucket():
+    from sqlalchemy import select
+
+    from db.models import Frame
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.govern.retention import _SHARED_URI_COLUMNS, session_blob_keys
+
+    assert "weights_uri" in _SHARED_URI_COLUMNS
+    async with get_sessionmaker()() as db:
+        sid = await _seed(db, n_frames=1)
+        sess = await db.get(DbSession, sid)
+        sess.raw_uri = "/home/someone/drive.mp4"                 # a local path the importer recorded
+        sess.mcap_uri = "s3://another-bucket/drives/x.mcap"      # not ours to delete
+        await db.commit()
+        fids = [f for (f,) in (await db.execute(select(Frame.frame_id).where(Frame.session_id == sid))).all()]
+        keys = await session_blob_keys(db, sid, fids)
+    assert len(keys) == 1 and keys[0].startswith(f"frames/{sid}/")
+    assert not any("drive.mp4" in k or "x.mcap" in k for k in keys)
+
+
+def test_the_store_knows_what_is_its_own():
+    from core.storage import get_object_store
+
+    store = get_object_store()
+    assert store.owns(store.uri("frames/a/b.jpg")) and store.owns("frames/a/b.jpg")
+    assert not store.owns("s3://another-bucket/frames/a/b.jpg")
+    assert not store.owns("/etc/passwd") and not store.owns("http://x/y") and not store.owns("s3://nokey")

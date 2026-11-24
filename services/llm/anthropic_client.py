@@ -26,6 +26,7 @@ import httpx
 
 from core.config import Settings, get_settings
 from core.logging import get_logger
+from services.llm import ledger
 
 log = get_logger("anthropic")
 
@@ -54,7 +55,7 @@ class AnthropicClient:
         return bool(self.cfg.api_key)
 
     def chat_json(self, prompt: str, *, model: str, image_jpeg: bytes | None = None,
-                  temperature: float = 0.0) -> dict:
+                  temperature: float = 0.0, purpose: str = "judge") -> dict:
         """One turn that must return a JSON object. `image_jpeg`, when given, makes it a vision call.
 
         Raises AnthropicError on any failure, so the router can fall back without inspecting the cause.
@@ -80,8 +81,9 @@ class AnthropicClient:
         headers = {"x-api-key": self.cfg.api_key, "anthropic-version": self.cfg.api_version,
                    "content-type": "application/json"}
         try:
-            resp = httpx.post(f"{self.cfg.base_url}/messages", json=payload, headers=headers,
-                              timeout=self.cfg.timeout_s)
+            resp = ledger.post(f"{self.cfg.base_url}/messages", provider="anthropic", model=model,
+                               purpose=purpose, json=payload, headers=headers,
+                               timeout=self.cfg.timeout_s)
             resp.raise_for_status()
             blocks = resp.json().get("content", [])
             text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")

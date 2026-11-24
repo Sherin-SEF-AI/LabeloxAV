@@ -5,9 +5,10 @@ gate stays in services/govern/champion and consumes these verdicts. Mounted unde
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -153,7 +154,7 @@ async def slice_matrix_view(champion: str, challenger: str, slice_metric: str = 
 
 
 @router.get("/verdyx/model/{model_version}/evals")
-async def model_evals(model_version: str, limit: int = 20, db: AsyncSession = Depends(db_session)):
+async def model_evals(model_version: str, limit: Annotated[int, Query(ge=1, le=1_000)] = 20, db: AsyncSession = Depends(db_session)):
     """Per-model evaluation history."""
     rows = (await db.execute(
         select(Evaluation).where(Evaluation.model_version == model_version)
@@ -234,7 +235,7 @@ async def blind_audit_close(audit_id: str, reason: str = "", db: AsyncSession = 
 
 
 @router.get("/verdyx/blind-audits")
-async def blind_audit_list(run_id: str | None = None, limit: int = 50,
+async def blind_audit_list(run_id: str | None = None, limit: Annotated[int, Query(ge=1, le=1_000)] = 50,
                            db: AsyncSession = Depends(db_session)):
     from services.verdyx.blind_audit import list_audits
 

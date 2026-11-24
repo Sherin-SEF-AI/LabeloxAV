@@ -138,8 +138,9 @@ class VramGuard:
         self._warm = torch.zeros(1, device=self.device)
 
     def free_mb(self) -> float:
-        free, _total = self.torch.cuda.mem_get_info(self._index)
-        return free / (1024 * 1024)
+        from core.model_manager import vram_free_mb
+
+        return vram_free_mb(self._index) or 0.0
 
     def reset_peak(self) -> None:
         self.torch.cuda.reset_peak_memory_stats(self._index)
@@ -152,14 +153,21 @@ class VramGuard:
         self.torch.cuda.empty_cache()
 
     def require(self, need_mb: float, name: str) -> None:
-        free = self.free_mb()
+        """Refuse a load that would not fit, after the registry has evicted whatever idle models it can.
+
+        It used to refuse outright. A model somebody else had loaded and finished with (the editor's
+        segmenter, a judge's detector) stayed on the card, and the job that needed the room failed
+        instead of taking it.
+        """
+        from core.model_manager import GpuCapacityError as _Refused
+        from core.model_manager import manager
+
         head = self.settings.gpu.vram_headroom_mb
-        if free - need_mb < head:
-            raise GpuCapacityError(
-                f"refusing to load {name}: need ~{need_mb:.0f} MB, free {free:.0f} MB, "
-                f"headroom {head} MB. Use gpu.mode=sequential or a smaller model."
-            )
-        log.info("vram.check", model=name, need_mb=round(need_mb), free_mb=round(free))
+        try:
+            manager().require(need_mb, name, device=self.device, headroom_mb=head)
+        except _Refused as exc:
+            raise GpuCapacityError(f"{exc}. Use gpu.mode=sequential or a smaller model.") from None
+        log.info("vram.check", model=name, need_mb=round(need_mb), free_mb=round(self.free_mb()))
 
 
 # Rough resident-set estimates for the guard. The guard also reads actual free VRAM, so these are
@@ -201,11 +209,26 @@ class StagedRunner:
         log.info("stage1.close", peak_mb=round(self.guard.peak_mb()), free_mb=round(self.guard.free_mb()))
 
     def run_stage1_frame(self, image_bgr: np.ndarray) -> tuple[list[RawDetection], list[RawDetection]]:
+        return self.run_stage1_batch([image_bgr])[0]
+
+    def run_stage1_batch(
+        self, images: list[np.ndarray]) -> list[tuple[list[RawDetection], list[RawDetection]]]:
+        """Both paths over several frames: one (path A, path B) pair per frame, in order."""
         if self.yolo is None or self.sam is None:
             raise RuntimeError("stage1 not open")
-        dets_a = self.yolo.infer(image_bgr)
-        dets_b = self.sam.infer(image_bgr)
-        return dets_a, dets_b
+        if not images:
+            return []
+        dets_a = self.yolo.infer_batch(images)
+        dets_b = self.sam.infer_batch(images)
+        return list(zip(dets_a, dets_b, strict=True))
+
+
+def _try_load_image(img_uri: str) -> np.ndarray | Exception:
+    """load_image, returning the failure instead of raising it, so one bad frame cannot cancel a batch."""
+    try:
+        return load_image(img_uri)
+    except Exception as exc:  # noqa: BLE001
+        return exc
 
 
 def load_image(img_uri: str) -> np.ndarray:
@@ -339,15 +362,35 @@ async def process_session(
     runner.open_stage1()
     n_a = 0
     n_b = 0
+    n_unreadable = 0
+    batch = max(1, int(getattr(runner.settings.gpu, "batch_size", 1) or 1))
+    done = 0
     try:
-        for i, fm in enumerate(frames, start=1):
-            img = load_image(fm.img_uri)
-            dets_a, dets_b = runner.run_stage1_frame(img)
-            n_a += len(dets_a)
-            n_b += len(dets_b)
-            await on_frame(FrameDetections(frame=fm, image_bgr=img, dets_a=dets_a, dets_b=dets_b))
-            if on_progress is not None:
-                await on_progress(i, len(frames))
+        for start in range(0, len(frames), batch):
+            chunk = frames[start:start + batch]
+            # Reads and decodes run in threads, side by side: they are storage and CPU work, and done
+            # inline they held the event loop for the whole of every frame (which, when the API is the
+            # executor, is the same loop that answers every other request).
+            loaded = await asyncio.gather(*(asyncio.to_thread(_try_load_image, fm.img_uri) for fm in chunk))
+            ok = [img for img in loaded if not isinstance(img, Exception)]
+            # The forward pass is blocking GPU work; a thread keeps the loop free while it runs.
+            results = iter(await asyncio.to_thread(runner.run_stage1_batch, ok) if ok else [])
+            for fm, img in zip(chunk, loaded, strict=True):
+                if isinstance(img, Exception):
+                    # One unreadable frame used to end the session. It is skipped and counted instead;
+                    # the rest of the drive is not hostage to a single bad object.
+                    n_unreadable += 1
+                    log.warning("stage1.frame_unreadable", frame=str(getattr(fm, "frame_id", "?")),
+                                error=str(img)[:160])
+                else:
+                    dets_a, dets_b = next(results)
+                    n_a += len(dets_a)
+                    n_b += len(dets_b)
+                    await on_frame(FrameDetections(frame=fm, image_bgr=img, dets_a=dets_a, dets_b=dets_b))
+                # Still per frame: the watcher's bar should move as frames land, not once per batch.
+                done += 1
+                if on_progress is not None:
+                    await on_progress(done, len(frames))
     finally:
         runner.close_stage1()
 
@@ -356,6 +399,8 @@ async def process_session(
         "frames": len(frames),
         "path_a_detections": n_a,
         "path_b_detections": n_b,
+        "frames_unreadable": n_unreadable,
+        "batch_size": batch,
         "peak_vram_mb": round(runner.guard.peak_mb()),
         "vram_ceiling_mb": runner.settings.gpu.vram_total_mb,
     }

@@ -240,10 +240,10 @@ def test_an_annotator_cannot_seal_the_gold_set_or_force_a_retrain():
     them reviewer prefixes - so any signed-in user could reach them. That test asserts the mechanism is
     wired; this one asserts the server actually says no.
     """
+    from _authutil import auth_headers
     from fastapi.testclient import TestClient
 
     from services.api.main import app
-    from _authutil import auth_headers
 
     ann = auth_headers("annotator")
     rev = auth_headers("reviewer")

@@ -6,6 +6,8 @@ launch a retrain, both of which spend other people's time and a GPU.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +32,7 @@ class CampaignIn(BaseModel):
 
 
 @router.get("/campaigns")
-async def list_campaigns(status: str | None = None, limit: int = Query(100, ge=1, le=500),
+async def list_campaigns(status: str | None = None, limit: Annotated[int, Query(ge=1, le=500)] = 100,
                          db: AsyncSession = Depends(db_session)):
     from services.flywheel.campaign import list_campaigns as _list
 
@@ -228,7 +230,7 @@ async def suggest_keyframes(track_id: str, budget: int = Query(8, ge=1, le=50),
 
 
 @router.get("/tracklets/{track_id}/drift")
-async def track_drift(track_id: str, limit: int = Query(120, ge=1, le=400),
+async def track_drift(track_id: str, limit: Annotated[int, Query(ge=1, le=400)] = 120,
                       db: AsyncSession = Depends(db_session)):
     """Which of this track's machine-filled boxes have slid off the object they were anchored to.
 

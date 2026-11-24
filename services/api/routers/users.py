@@ -5,6 +5,8 @@ user is itself role-gated, so a token can only originate from an already-authori
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,9 +15,23 @@ from core.config import get_settings
 from db.models import Review, User
 from services.activity import record_activity
 from services.api.auth_token import mint_token
-from services.api.deps import UserCreateIn, db_session, require_role
+from services.api.deps import ApiOut, UserCreateIn, db_session, require_role
 
 router = APIRouter()
+
+
+class UserOut(ApiOut):
+    user_id: str
+    name: str
+    role: str                                   # admin | reviewer | annotator
+    reviews: int
+
+
+class UsersOut(ApiOut):
+    total: int
+    offset: int
+    limit: int
+    users: list[UserOut]
 
 _ROLES = {"admin", "reviewer", "annotator"}
 
@@ -43,8 +59,8 @@ async def _with_counts(db: AsyncSession, users: list[User]) -> list[dict]:
             for u in users]
 
 
-@router.get("/users")
-async def list_users(limit: int = Query(200, ge=1, le=500), offset: int = Query(0, ge=0),
+@router.get("/users", response_model=UsersOut, response_model_exclude_unset=True)
+async def list_users(limit: Annotated[int, Query(ge=1, le=500)] = 200, offset: int = Query(0, ge=0),
                      db: AsyncSession = Depends(db_session)):
     """Paginated, and bounded by a ceiling the caller cannot raise. The list was previously unbounded, so it
     grew without limit as the team did and a caller could not page through it.
@@ -59,7 +75,7 @@ async def list_users(limit: int = Query(200, ge=1, le=500), offset: int = Query(
     return {"total": int(total), "offset": offset, "limit": limit, "users": rows}
 
 
-@router.get("/users/me")
+@router.get("/users/me", response_model=UserOut, response_model_exclude_unset=True)
 async def whoami(user=Depends(require_role("annotator")), db: AsyncSession = Depends(db_session)):
     """Resolve the caller's own identity from their Bearer token. Lets the web client turn a pasted token into
     a name/role for display without trusting anything client-side."""

@@ -57,17 +57,20 @@ def test_errordetect_confident_outlier_crosscam_and_feedback():
             for k in range(10):
                 o = Object(frame_id=f.frame_id, class_id=1, bbox=[k, 0, k + 5, 5], conf=0.9,
                            state="accepted", source="human")
-                db.add(o); await db.flush()
+                db.add(o)
+                await db.flush()
                 db.add(ObjectEmbedding(object_id=o.object_id, dino_vec=cluster_vec(1, 1000 + k), model_versions={}))
             for k in range(10):
                 o = Object(frame_id=f.frame_id, class_id=2, bbox=[k, 10, k + 5, 15], conf=0.9,
                            state="accepted", source="human")
-                db.add(o); await db.flush()
+                db.add(o)
+                await db.flush()
                 db.add(ObjectEmbedding(object_id=o.object_id, dino_vec=cluster_vec(2, 2000 + k), model_versions={}))
             # the seeded error: labeled class 1 but its embedding sits squarely in cluster B
             bad = Object(frame_id=f.frame_id, class_id=1, bbox=[0, 20, 5, 25], conf=0.9,
                          state="auto_accept", source="auto_accept")
-            db.add(bad); await db.flush()
+            db.add(bad)
+            await db.flush()
             mislabeled = bad.object_id
             db.add(ObjectEmbedding(object_id=bad.object_id, dino_vec=cluster_vec(2, 2999), model_versions={}))
 
@@ -79,7 +82,8 @@ def test_errordetect_confident_outlier_crosscam_and_feedback():
                         state="accepted", source="human", rig_track_id=rid)
             cc = Object(frame_id=f.frame_id, class_id=1, bbox=[100, 0, 110, 10], conf=0.9,
                         state="accepted", source="human", rig_track_id=rid)
-            db.add_all([ca, cb, cc]); await db.flush()
+            db.add_all([ca, cb, cc])
+            await db.flush()
             crosscam_minority = cb.object_id  # the lone class-2 view among class-1 majority
             await db.commit()
 

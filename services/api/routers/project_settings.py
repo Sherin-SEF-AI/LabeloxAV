@@ -8,6 +8,7 @@ anyone signed in, who sees the projects they may see. Every change is recorded i
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -17,12 +18,91 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import LabelProject, ProjectMember, User
 from db.models import Session as DbSession
 from services.activity import record_activity
-from services.api.deps import current_user, db_session, require_role
+from services.api.deps import ApiOut, current_user, db_session, require_role
 from services.api.project_guard import caller_hidden_projects
 from services.project_access import VISIBILITIES, as_hidden
 from services.project_classes import CUSTOM, TEMPLATES, describe, template_ids, validate
 
 router = APIRouter()
+
+
+class ProjectOut(ApiOut):
+    """One project in the list, with what it labels as services.project_classes.describe puts it.
+
+    `class_set` is the template the project's classes equal, `class_count` how many it labels and `of`
+    how many the ontology has."""
+
+    project_id: str
+    name: str
+    description: str | None
+    visibility: str                             # team | members
+    sessions: int
+    class_set: Literal["india", "generic", "custom"]
+    class_count: int
+    of: int
+    members: int
+    is_member: bool
+    created_at: str | None
+
+
+class ProjectsOut(ApiOut):
+    projects: list[ProjectOut]
+
+
+class ProjectCreatedOut(ApiOut):
+    project_id: str
+    name: str
+    visibility: str
+
+
+class ProjectChangedOut(ApiOut):
+    project_id: str
+    name: str
+    visibility: str
+    description: str | None
+
+
+class ProjectMemberOut(ApiOut):
+    user_id: str
+    name: str
+    role: str
+    added_at: str | None
+
+
+class ProjectMembersOut(ApiOut):
+    project_id: str
+    members: list[ProjectMemberOut]
+
+
+class MembershipOut(ApiOut):
+    """What adding or removing a member answers: the pair, and whether they are a member now."""
+
+    project_id: str
+    user_id: str
+    member: bool
+
+
+class ClassTemplateOut(ApiOut):
+    name: str
+    class_ids: list[int]
+    all: bool                                   # true for the template that is the whole ontology
+
+
+class ClassTemplatesOut(ApiOut):
+    templates: list[ClassTemplateOut]
+
+
+class ProjectClassesOut(ApiOut):
+    project_id: str
+    class_ids: list[int] | None                 # null when the project labels every class
+    class_set: Literal["india", "generic", "custom"]
+    class_count: int
+    of: int
+
+
+class SessionsMovedOut(ApiOut):
+    project_id: str
+    moved: int
 
 
 def _uuid(raw: str, what: str) -> uuid.UUID:
@@ -39,7 +119,8 @@ async def _project(db: AsyncSession, project_id: str) -> LabelProject:
     return p
 
 
-@router.get("/projects", dependencies=[Depends(require_role("annotator"))])
+@router.get("/projects", dependencies=[Depends(require_role("annotator"))],
+            response_model=ProjectsOut, response_model_exclude_unset=True)
 async def list_projects(db: AsyncSession = Depends(db_session), user=Depends(current_user),
                         hidden=Depends(caller_hidden_projects)):
     """The projects the caller may see, with how many sessions and members each has, and whether the caller
@@ -69,7 +150,7 @@ class ProjectIn(BaseModel):
     visibility: str = "team"
 
 
-@router.post("/projects")
+@router.post("/projects", response_model=ProjectCreatedOut, response_model_exclude_unset=True)
 async def create_project(body: ProjectIn, admin=Depends(require_role("admin")),
                          db: AsyncSession = Depends(db_session)):
     if body.visibility not in VISIBILITIES:
@@ -91,7 +172,7 @@ class ProjectPatch(BaseModel):
     description: str | None = Field(default=None, max_length=2000)
 
 
-@router.patch("/projects/{project_id}")
+@router.patch("/projects/{project_id}", response_model=ProjectChangedOut, response_model_exclude_unset=True)
 async def change_project(project_id: str, body: ProjectPatch, admin=Depends(require_role("admin")),
                          db: AsyncSession = Depends(db_session)):
     p = await _project(db, project_id)
@@ -110,7 +191,8 @@ async def change_project(project_id: str, body: ProjectPatch, admin=Depends(requ
             "description": p.description}
 
 
-@router.get("/projects/{project_id}/members", dependencies=[Depends(require_role("admin"))])
+@router.get("/projects/{project_id}/members", dependencies=[Depends(require_role("admin"))],
+            response_model=ProjectMembersOut, response_model_exclude_unset=True)
 async def members(project_id: str, db: AsyncSession = Depends(db_session)):
     p = await _project(db, project_id)
     rows = (await db.execute(select(User.user_id, User.name, User.role, ProjectMember.created_at)
@@ -121,7 +203,7 @@ async def members(project_id: str, db: AsyncSession = Depends(db_session)):
         for uid, name, role, at in rows]}
 
 
-@router.put("/projects/{project_id}/members/{user_id}")
+@router.put("/projects/{project_id}/members/{user_id}", response_model=MembershipOut, response_model_exclude_unset=True)
 async def add_member(project_id: str, user_id: str, admin=Depends(require_role("admin")),
                      db: AsyncSession = Depends(db_session)):
     p = await _project(db, project_id)
@@ -136,7 +218,8 @@ async def add_member(project_id: str, user_id: str, admin=Depends(require_role("
     return {"project_id": str(p.project_id), "user_id": str(u.user_id), "member": True}
 
 
-@router.delete("/projects/{project_id}/members/{user_id}")
+@router.delete("/projects/{project_id}/members/{user_id}", response_model=MembershipOut,
+               response_model_exclude_unset=True)
 async def remove_member(project_id: str, user_id: str, admin=Depends(require_role("admin")),
                         db: AsyncSession = Depends(db_session)):
     p = await _project(db, project_id)
@@ -152,7 +235,8 @@ async def remove_member(project_id: str, user_id: str, admin=Depends(require_rol
     return {"project_id": str(p.project_id), "user_id": str(uid), "member": False}
 
 
-@router.get("/ontology/templates", dependencies=[Depends(require_role("annotator"))])
+@router.get("/ontology/templates", dependencies=[Depends(require_role("annotator"))],
+            response_model=ClassTemplatesOut, response_model_exclude_unset=True)
 async def class_templates():
     """The ready-made class sets a project can start from, with the classes each holds."""
     from services.autolabel.ontology import get_ontology
@@ -171,7 +255,7 @@ class ClassesIn(BaseModel):
     class_ids: list[int] | None = Field(default=None, max_length=5000)
 
 
-@router.put("/projects/{project_id}/classes")
+@router.put("/projects/{project_id}/classes", response_model=ProjectClassesOut, response_model_exclude_unset=True)
 async def set_classes(project_id: str, body: ClassesIn, admin=Depends(require_role("admin")),
                       db: AsyncSession = Depends(db_session)):
     """Choose what a project labels: a template by name, or a list of class ids. Objects already stored keep
@@ -200,7 +284,7 @@ class MoveIn(BaseModel):
     session_ids: list[str] = Field(min_length=1, max_length=1000)
 
 
-@router.post("/projects/{project_id}/sessions")
+@router.post("/projects/{project_id}/sessions", response_model=SessionsMovedOut, response_model_exclude_unset=True)
 async def move_sessions(project_id: str, body: MoveIn, admin=Depends(require_role("admin")),
                         db: AsyncSession = Depends(db_session)):
     """Put sessions in this project. A session is in exactly one project, so this moves it out of its old one,

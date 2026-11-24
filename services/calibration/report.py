@@ -34,7 +34,7 @@ async def validate_session(session_id: UUID, imu_ts_ns: list[int] | None = None)
 
         cam_entries: dict = {}
         results: list[dict] = []
-        for cam_id, width, _t0, _t1 in cam_rows:
+        for cam_id, _width, _t0, _t1 in cam_rows:
             lens = cfg.rig.camera_lens.get(cam_id, "narrow")
             actual = cfg.rig.lenses[lens]
             intr = validate_intrinsics(actual, lens)

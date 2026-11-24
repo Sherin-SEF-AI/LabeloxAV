@@ -9,9 +9,10 @@ and panel-serving endpoints on this same router.
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,7 +56,7 @@ async def lichtblick_link(session_id: str, db: AsyncSession = Depends(db_session
 
 
 @router.get("/inspector/sessions", dependencies=[Depends(require_role("annotator"))])
-async def list_sessions(limit: int = 100, db: AsyncSession = Depends(db_session)) -> list[dict]:
+async def list_sessions(limit: Annotated[int, Query(ge=1, le=2_000)] = 100, db: AsyncSession = Depends(db_session)) -> list[dict]:
     """Sessions there is something to inspect in, each with its latest health verdict for the list chip.
 
     Not only MCAP sessions. That filter was correct when every panel was fed by a recording, and it stopped
@@ -83,10 +84,19 @@ async def list_sessions(limit: int = 100, db: AsyncSession = Depends(db_session)
             select(PointCloud.session_id, func.count())
             .where(PointCloud.session_id.in_(ids)).group_by(PointCloud.session_id))).all()}
 
+    # Each session's latest verdict in one query. This was a query per session, so a page of two hundred
+    # sessions made two hundred round trips to draw one list.
+    verdicts: dict = {}
+    if ids:
+        verdicts = {sid: v for sid, v in (await db.execute(
+            select(SessionHealth.session_id, SessionHealth.verdict)
+            .where(SessionHealth.session_id.in_(ids))
+            .distinct(SessionHealth.session_id)
+            .order_by(SessionHealth.session_id, SessionHealth.created_at.desc()))).all()}
+
     out = []
     for s in rows:
-        h = (await db.execute(select(SessionHealth.verdict).where(SessionHealth.session_id == s.session_id)
-                              .order_by(SessionHealth.created_at.desc()).limit(1))).scalar_one_or_none()
+        h = verdicts.get(s.session_id)
         out.append({"session_id": str(s.session_id), "vehicle_id": s.vehicle_id, "city": s.city,
                     "start_ts_ns": s.start_ts_ns, "end_ts_ns": s.end_ts_ns, "verdict": h,
                     "has_mcap": s.mcap_uri is not None,
@@ -191,7 +201,7 @@ async def get_index(session_id: str, db: AsyncSession = Depends(db_session)) -> 
 
 
 @router.post("/inspector/index/backfill", dependencies=[Depends(require_role("reviewer"))])
-async def index_backfill(limit: int = 500, db: AsyncSession = Depends(db_session)) -> dict:
+async def index_backfill(limit: Annotated[int, Query(ge=1, le=10_000)] = 500, db: AsyncSession = Depends(db_session)) -> dict:
     """Index every MCAP session that is missing a current index."""
     from services.inspector.indexer import backfill
 
@@ -225,7 +235,7 @@ async def get_health(session_id: str, db: AsyncSession = Depends(db_session)) ->
 
 
 @router.post("/inspector/health/sweep", dependencies=[Depends(require_role("reviewer"))])
-async def health_sweep(limit: int = 500, db: AsyncSession = Depends(db_session)) -> dict:
+async def health_sweep(limit: Annotated[int, Query(ge=1, le=10_000)] = 500, db: AsyncSession = Depends(db_session)) -> dict:
     """Run health checks across all MCAP sessions (indexing as needed). Returns the verdict tally."""
     from collections import Counter
 

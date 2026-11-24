@@ -245,6 +245,9 @@ def _fit_report(collected: dict, *, tag: str, storage_key: str, val_frac: float,
         "kind": "isotonic-knots-v1", "source": collected.get("source", tag),
         "x": [round(float(v), 6) for v in kxa], "y": [round(float(v), 6) for v in kya],
         "n_train": int(len(xall)), "weights": collected.get("weights"), "val_ece": round(cal_val_ece, 6),
+        # The verdict travels with the curve, so `activate` can refuse one whose held-out check failed
+        # without anyone having to remember what the fit printed.
+        "trustworthy": trustworthy, "raw_val_ece": round(raw_val_ece, 6),
     }
     uri = get_object_store().put_bytes(storage_key, json.dumps(payload).encode(), "application/json")
 
@@ -314,3 +317,83 @@ def activate_calibration(uri: str) -> dict:
     cfg_path.write_text("\n".join(out) + ("\n" if text.endswith("\n") else ""))
     log.info("gold_cal.activated", uri=uri)
     return {"activated": True, "uri": uri, "note": "restart the backend to apply"}
+
+
+# ---- command line ------------------------------------------------------------------------------------
+#
+# docs/ENGINES.md names this module as the way to fit the curve the gate serves, and until this existed
+# nothing could run it: no command, no route, only its tests imported it. `make calibrate` runs the fit
+# over the review trail (services/autolabel/isotonic.py), which says of itself that it is not trustworthy
+# on this corpus and points here.
+#
+#   python -m services.autolabel.gold_calibrate fit-gold --gold <gold id>
+#   python -m services.autolabel.gold_calibrate fit-vlm  --frames 220
+#   python -m services.autolabel.gold_calibrate activate --uri <isotonic_uri from a trustworthy fit>
+#
+# Fitting never activates. `activate` is its own command, refuses a fit that did not report trustworthy
+# unless told to, and takes effect after the API and workers restart.
+
+
+def _summary(rep: dict) -> dict:
+    keep = ("gold_id", "tag", "n_train", "n_val", "val_positives", "val_negatives", "raw_val_ece",
+            "calibrated_val_ece", "non_degenerate", "improves_over_raw", "trustworthy", "isotonic_uri", "uri")
+    return {k: rep[k] for k in keep if k in rep}
+
+
+def _cli():
+    import asyncio
+
+    import click
+
+    from core.gpu_slot import gpu_slot
+    from core.logging import setup_logging
+
+    @click.group(help=__doc__.split("\n\n")[0])
+    def cli() -> None:
+        setup_logging(get_settings().log_level)
+
+    @cli.command("fit-gold", help="Fit against a gold set by re-running the detector over its frames.")
+    @click.option("--gold", "gold_id", required=True, help="The gold set id (must be exhaustively labelled).")
+    @click.option("--val-frac", default=0.3, show_default=True)
+    @click.option("--iou", "iou_thr", default=0.5, show_default=True)
+    @click.option("--weights", default=None, help="Detector weights; default is the serving detector.")
+    def fit_gold(gold_id: str, val_frac: float, iou_thr: float, weights: str | None) -> None:
+        async def run() -> dict:
+            async with gpu_slot(f"gold_calibrate:{gold_id}", timeout_s=None):
+                return await fit_gold_calibration(gold_id, val_frac, iou_thr, weights)
+
+        click.echo(json.dumps(_summary(asyncio.run(run())), indent=2))
+
+    @cli.command("fit-vlm", help="Fit using the VLM as a per-detection judge (no exhaustive labels needed).")
+    @click.option("--frames", "n_frames", default=220, show_default=True)
+    @click.option("--max-dets", default=320, show_default=True)
+    @click.option("--val-frac", default=0.3, show_default=True)
+    @click.option("--weights", default=None)
+    def fit_vlm(n_frames: int, max_dets: int, val_frac: float, weights: str | None) -> None:
+        async def run() -> dict:
+            async with gpu_slot("gold_calibrate:vlm", timeout_s=None):
+                return await fit_vlm_calibration(n_frames, max_dets, val_frac, weights)
+
+        click.echo(json.dumps(_summary(asyncio.run(run())), indent=2))
+
+    @cli.command("activate", help="Point the live gate at a fitted curve (edits configs/default.yaml).")
+    @click.option("--uri", required=True, help="The stored curve, as a fit reported it.")
+    @click.option("--even-if-untrustworthy", is_flag=True,
+                  help="Activate a curve whose held-out check did not pass. Changes every auto-accept decision.")
+    def activate(uri: str, even_if_untrustworthy: bool) -> None:
+        try:
+            stored = json.loads(get_object_store().get_bytes(uri))
+        except Exception as exc:  # noqa: BLE001
+            raise click.ClickException(f"could not read a fitted curve at {uri}: {exc}") from exc
+        if not stored.get("trustworthy") and not even_if_untrustworthy:
+            raise click.ClickException(
+                "that fit did not report trustworthy (its held-out check failed or it was degenerate), so "
+                "it was not activated. Refit, or pass --even-if-untrustworthy to activate it anyway.")
+        click.echo(json.dumps(activate_calibration(uri), indent=2))
+        click.echo("restart the API and the workers for the gate to read it", err=True)
+
+    return cli
+
+
+if __name__ == "__main__":
+    _cli()()

@@ -34,7 +34,7 @@ def _occluded(r: ExportRecord) -> int:
     occ = r.attrs.get("occlusion")
     if isinstance(occ, bool):
         return 3 if occ else 0
-    if isinstance(occ, (int, float)):
+    if isinstance(occ, int | float):
         if occ >= 75:
             return 3
         if occ >= 40:

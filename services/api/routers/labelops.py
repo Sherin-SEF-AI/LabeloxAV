@@ -6,7 +6,9 @@ projects/tasks and assigning work is a reviewer action, since it directs other p
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -81,7 +83,7 @@ async def create_project(payload: ProjectIn, user=Depends(require_role("reviewer
 
 
 @router.get("/labelops/projects")
-async def list_projects(limit: int = 100, db: AsyncSession = Depends(db_session)):
+async def list_projects(limit: Annotated[int, Query(ge=1, le=2_000)] = 100, db: AsyncSession = Depends(db_session)):
     return {"projects": await job_svc.list_projects(db, limit)}
 
 
@@ -129,7 +131,7 @@ async def create_task(payload: TaskIn, _user=Depends(require_role("reviewer")),
 @router.get("/labelops/jobs")
 async def list_jobs(project_id: str | None = None, task_id: str | None = None,
                     assignee_id: str | None = None, stage: str | None = None, state: str | None = None,
-                    limit: int = 200, db: AsyncSession = Depends(db_session)):
+                    limit: Annotated[int, Query(ge=1, le=4_000)] = 200, db: AsyncSession = Depends(db_session)):
     return {"jobs": await job_svc.list_jobs(db, project_id=project_id, task_id=task_id,
                                             assignee_id=assignee_id, stage=stage, state=state, limit=limit)}
 

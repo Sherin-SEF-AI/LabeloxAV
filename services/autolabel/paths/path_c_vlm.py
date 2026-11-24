@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 import cv2
-import httpx
 import numpy as np
 
 from core.config import Settings, get_settings
@@ -95,7 +94,8 @@ class OllamaVlmClient:
         self.model = self.cfg.ollama_tag
 
     def chat_json(self, prompt: str, *, model: str | None = None, image_jpeg: bytes | None = None,
-                  temperature: float = 0.0, schema: dict | None = None) -> dict:
+                  temperature: float = 0.0, schema: dict | None = None,
+                  purpose: str = "judge") -> dict:
         """One chat turn returning a JSON object, same contract as GroqClient/AnthropicClient.
 
         Raises on failure rather than returning {}, because an empty object reads downstream as a real but
@@ -115,7 +115,10 @@ class OllamaVlmClient:
         }
         if image_jpeg is not None:
             payload["messages"][0]["images"] = [base64.b64encode(image_jpeg).decode()]
-        resp = httpx.post(f"{self.cfg.ollama_url}/api/chat", json=payload, timeout=self.cfg.timeout_s)
+        from services.llm import ledger
+
+        resp = ledger.post(f"{self.cfg.ollama_url}/api/chat", provider="ollama", model=payload["model"],
+                           purpose=purpose, json=payload, timeout=self.cfg.timeout_s)
         resp.raise_for_status()
         return json.loads(resp.json()["message"]["content"])
 
@@ -139,9 +142,11 @@ class OllamaVlmClient:
             "options": {"num_ctx": self.cfg.max_context, "temperature": temperature},
         }
         try:
-            resp = httpx.post(
-                f"{self.cfg.ollama_url}/api/chat", json=payload, timeout=self.cfg.timeout_s
-            )
+            from services.llm import ledger
+
+            resp = ledger.post(f"{self.cfg.ollama_url}/api/chat", provider="ollama",
+                               model=self.cfg.ollama_tag, purpose="vlm_verify", json=payload,
+                               timeout=self.cfg.timeout_s)
             resp.raise_for_status()
             content = resp.json()["message"]["content"]
             data = json.loads(content)
@@ -384,8 +389,11 @@ class LlamaServerVlmClient:
         self.model = self.cfg.llamacpp_model or "local"
 
     def _post(self, payload: dict) -> dict:
-        resp = httpx.post(f"{self.cfg.llamacpp_url}/v1/chat/completions", json=payload,
-                          timeout=self.cfg.timeout_s)
+        from services.llm import ledger
+
+        resp = ledger.post(f"{self.cfg.llamacpp_url}/v1/chat/completions", provider="llamacpp",
+                           model=self.model, purpose="vlm_verify", json=payload,
+                           timeout=self.cfg.timeout_s)
         resp.raise_for_status()
         return json.loads(resp.json()["choices"][0]["message"]["content"])
 
@@ -400,7 +408,8 @@ class LlamaServerVlmClient:
         ]}]
 
     def chat_json(self, prompt: str, *, model: str | None = None, image_jpeg: bytes | None = None,
-                  temperature: float = 0.0, schema: dict | None = None) -> dict:
+                  temperature: float = 0.0, schema: dict | None = None,
+                  purpose: str = "judge") -> dict:
         """One chat turn returning a JSON object, same contract as the other clients.
 
         Raises rather than returning {}, because an empty object reads downstream as a real but empty

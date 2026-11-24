@@ -4,10 +4,14 @@ calibration recovers known intrinsics from a synthetic scene, and cross-session 
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from core.geometry import se3, se3_compose, se3_magnitude
+from core.geometry import se3, se3_compose
 from services.calyx.consensus import fuse_calibrations
 from services.calyx.recover import correct_extrinsic, is_recoverable, recover
-from services.calyx.targetless import calibrate_targetless, focal_from_vanishing_points, pitch_from_horizon
+from services.calyx.targetless import (
+    calibrate_targetless,
+    focal_from_vanishing_points,
+    pitch_from_horizon,
+)
 from services.calyx.uncertainty import calibration_confidence, sample_confidence
 
 

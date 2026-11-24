@@ -15,9 +15,8 @@ pytestmark = pytest.mark.db
 
 
 async def _track(db, boxes, *, classes=None, dt_s=0.33):
-    from db.models import Frame, Object, OntologyClass, OntologyVersion
+    from db.models import Frame, Object, OntologyClass, OntologyVersion, Track
     from db.models import Session as DbSession
-    from db.models import Track
     from services.autolabel.ontology import get_ontology
 
     onto = get_ontology()

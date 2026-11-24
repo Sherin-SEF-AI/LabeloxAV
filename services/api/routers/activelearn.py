@@ -3,7 +3,9 @@ and drive the retrain-selection loop."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +27,7 @@ class SelectIn(BaseModel):
 
 
 @router.get("/activelearn/score")
-async def score(session_id: str | None = None, limit: int = 50, db: AsyncSession = Depends(db_session),
+async def score(session_id: str | None = None, limit: Annotated[int, Query(ge=1, le=1_000)] = 50, db: AsyncSession = Depends(db_session),
                 hidden=Depends(caller_hidden_projects)):
     from services.project_access import as_hidden, drop_hidden
 

@@ -6,7 +6,6 @@ restored exactly and a human-accepted object is never touched."""
 import uuid
 
 import pytest
-from sqlalchemy import select
 
 from core.timebase import now_ns, seconds_to_ns
 from services.agent.runs import revert_run

@@ -37,7 +37,7 @@ def _can_events(mcap_bytes: bytes, can_topics: list[str], *, brake_kmh: float = 
             continue
         sig = str(d.get("signal", "")).lower()
         val = d.get("value")
-        if not isinstance(val, (int, float)):
+        if not isinstance(val, int | float):
             continue
         if "speed" in sig or channel.topic.endswith("/speed"):
             speed.append((int(message.log_time), float(val)))

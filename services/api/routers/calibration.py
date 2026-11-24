@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import CalibrationValidation, Frame
 from db.models import Session as DbSession
-from services.api.deps import db_session
+from services.api.deps import db_session, require_role
 
 router = APIRouter()
 
@@ -37,6 +37,17 @@ class ImportCalibIn(BaseModel):
     dist: list | None = None
 
 
+async def _note(user, verb: str, subject_type: str, subject_id: str, summary: str, meta: dict) -> None:
+    """Record who changed a calibration. Every 3D number downstream (cuboid lift, IPM, cross-camera
+    projection) is computed from it, so a change with no author is a change nobody can be asked about."""
+    from db.session import get_sessionmaker
+    from services.activity import record_activity
+
+    async with get_sessionmaker()() as adb:
+        await record_activity(adb, user=user, verb=verb, subject_type=subject_type, subject_id=subject_id,
+                              summary=summary, meta=meta)
+
+
 @router.post("/calibration/validate")
 async def validate(session_id: str):
     from services.calibration.report import validate_session
@@ -45,19 +56,27 @@ async def validate(session_id: str):
 
 
 @router.post("/calibration/vehicle/{vehicle_id}/calibrate")
-async def calibrate_vehicle(vehicle_id: str, body: SetCalibIn):
+async def calibrate_vehicle(vehicle_id: str, body: SetCalibIn, user=Depends(require_role("reviewer"))):
     """Stamp one known rig spec onto every session of a vehicle (the per-vehicle real-calibration path)."""
     from services.calibration.store import apply_vehicle_calibration
     specs = {c: {**s, "ref_width": s.get("ref_width", body.ref_width),
                  "ref_height": s.get("ref_height", body.ref_height)} for c, s in body.cam_specs.items()}
-    return await apply_vehicle_calibration(vehicle_id, specs, body.source)
+    out = await apply_vehicle_calibration(vehicle_id, specs, body.source)
+    await _note(user, "calibration.set_vehicle", "vehicle", vehicle_id,
+                f"set {body.source} calibration for every session of {vehicle_id}",
+                {"cams": sorted(specs), "source": body.source})
+    return out
 
 
 @router.post("/calibration/{session_id}/calibrate")
-async def calibrate_session(session_id: UUID, body: SetCalibIn):
+async def calibrate_session(session_id: UUID, body: SetCalibIn, user=Depends(require_role("reviewer"))):
     """Set real calibration for one session's cameras from a rig spec (focal/FOV, mount height, pitch)."""
     from services.calibration.store import set_session_calibration
-    return await set_session_calibration(session_id, body.cam_specs, body.source, body.ref_width, body.ref_height)
+    out = await set_session_calibration(session_id, body.cam_specs, body.source, body.ref_width,
+                                        body.ref_height)
+    await _note(user, "calibration.set_session", "session", str(session_id),
+                f"set {body.source} calibration", {"cams": sorted(body.cam_specs), "source": body.source})
+    return out
 
 
 @router.post("/calibration/{session_id}/estimate")
@@ -69,7 +88,7 @@ async def estimate_session(session_id: UUID):
 
 
 @router.post("/calibration/{session_id}/import")
-async def import_calib(session_id: UUID, body: ImportCalibIn):
+async def import_calib(session_id: UUID, body: ImportCalibIn, user=Depends(require_role("reviewer"))):
     """Import dataset intrinsics (KITTI P2 or nuScenes camera_intrinsic) for one camera, stored as
     source=dataset. Exact focal and principal point, a real win over the nominal lens."""
     from fastapi import HTTPException
@@ -89,7 +108,11 @@ async def import_calib(session_id: UUID, body: ImportCalibIn):
         intr = parse_nuscenes_calib(body.camera_intrinsic, body.translation, body.dist)
     else:
         raise HTTPException(422, f"unknown calib format {body.format}")
-    return await import_calibration(session_id, body.cam_id, intr, body.ref_width, body.ref_height)
+    out = await import_calibration(session_id, body.cam_id, intr, body.ref_width, body.ref_height)
+    await _note(user, "calibration.import", "session", str(session_id),
+                f"imported {body.format} intrinsics for {body.cam_id}",
+                {"cam_id": body.cam_id, "format": body.format})
+    return out
 
 
 @router.get("/calibration/sessions")

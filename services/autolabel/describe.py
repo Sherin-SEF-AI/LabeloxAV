@@ -66,18 +66,39 @@ def _models():
     Shared module state rather than a fresh pair per request, because each call is a person waiting on a
     frame and reloading two checkpoints per keystroke would make the tool unusable.
     """
-    if "world" not in _STATE:
-        from ultralytics import SAM, YOLOWorld
+    from core.model_manager import manager
+    from services.autolabel.paths.path_b_openvocab import load_sam
 
-        cfg = get_settings().models.openvocab
-        _STATE["world"] = YOLOWorld(cfg.detector_weights)
-        _STATE["sam"] = SAM(cfg.seg_weights)
-        log.info("describe.loaded", detector=cfg.detector_weights, segmenter=cfg.seg_weights)
-    return _STATE["world"], _STATE["sam"]
+    settings = get_settings()
+    cfg = settings.models.openvocab
+
+    def _world():
+        from ultralytics import YOLOWorld
+
+        return YOLOWorld(cfg.detector_weights)
+
+    # The detector is this tool's own: set_classes() rewrites its text head on every call, so it cannot
+    # be the instance auto-label has prompted with the ontology. The segmenter is prompt-free and shared.
+    world = manager().get(_world_key(), _world, device=settings.gpu.device)
+    sam = manager().get(_sam_key(), lambda: load_sam(cfg.seg_weights), device=settings.gpu.device)
+    return world, sam
+
+
+def _world_key() -> str:
+    return f"yoloworld:{get_settings().models.openvocab.detector_weights}:describe"
+
+
+def _sam_key() -> str:
+    from services.autolabel.paths.path_b_openvocab import sam_model_key
+
+    return sam_model_key(get_settings().models.openvocab.seg_weights)
 
 
 def unload() -> None:
-    _STATE.clear()
+    from core.model_manager import manager
+
+    manager().release(_world_key())
+    manager().release(_sam_key())
 
 
 def propose(image_bgr: np.ndarray, phrase: str, *, max_proposals: int = MAX_PROPOSALS,
@@ -92,9 +113,14 @@ def propose(image_bgr: np.ndarray, phrase: str, *, max_proposals: int = MAX_PROP
     world, sam = _models()
     dev = settings.gpu.device
 
-    world.set_classes([text])
-    res = world.predict(source=image_bgr, imgsz=settings.models.yolo.imgsz,
-                        conf=min_conf, device=dev, verbose=False)
+    from core.model_manager import manager
+
+    # set_classes and the predict that depends on it are one step: two annotators describing different
+    # things at once would otherwise each be answered with the other's phrase.
+    with manager().infer_lock(_world_key()):
+        world.set_classes([text])
+        res = world.predict(source=image_bgr, imgsz=settings.models.yolo.imgsz,
+                            conf=min_conf, device=dev, verbose=False)
     r0 = res[0]
     if r0.boxes is None or len(r0.boxes) == 0:
         return []
@@ -105,7 +131,8 @@ def propose(image_bgr: np.ndarray, phrase: str, *, max_proposals: int = MAX_PROP
 
     masks = None
     try:
-        sres = sam.predict(source=image_bgr, bboxes=xyxy, device=dev, verbose=False)
+        with manager().infer_lock(_sam_key()):
+            sres = sam.predict(source=image_bgr, bboxes=xyxy, device=dev, verbose=False)
         m = sres[0].masks
         if m is not None and m.data is not None:
             masks = m.data.cpu().numpy().astype(bool)

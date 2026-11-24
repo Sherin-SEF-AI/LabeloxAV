@@ -6,7 +6,9 @@ no db dependency is needed here. Mounted at /api by main.py.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from services.analytics import dashboards
 from services.api.deps import current_user, require_role
@@ -44,7 +46,7 @@ async def scenarios(session_id: str | None = None):
 
 
 @router.get("/analytics/geo")
-async def geo(session_id: str | None = None, limit: int = 20000, epsilon: float | None = None,
+async def geo(session_id: str | None = None, limit: Annotated[int, Query(ge=1, le=50_000)] = 20000, epsilon: float | None = None,
               user=Depends(current_user)):
     """Where the corpus was collected, as aggregated cells. Never as raw fixes.
 
@@ -115,7 +117,7 @@ async def growth():
 
 
 @router.get("/analytics/cluster-map")
-async def cluster_map(limit: int = 1500):
+async def cluster_map(limit: Annotated[int, Query(ge=1, le=30_000)] = 1500):
     return await dashboards.cluster_map(limit)
 
 

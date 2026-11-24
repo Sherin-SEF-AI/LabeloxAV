@@ -64,9 +64,12 @@ class RegionAdapter:
 
     def _ensure(self):
         if self._sam is None:
-            from ultralytics import SAM
+            from core.model_manager import manager
+            from services.autolabel.paths.path_b_openvocab import load_sam, sam_model_key
 
-            self._sam = SAM(self.settings.phase4.recall.sam_everything_weights)
+            weights = self.settings.phase4.recall.sam_everything_weights
+            self._sam = manager().get(sam_model_key(weights), lambda: load_sam(weights),
+                                      device=self.settings.gpu.device)
         return self._sam
 
     def propose(self, image_bgr) -> list[tuple]:

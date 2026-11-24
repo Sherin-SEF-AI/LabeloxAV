@@ -71,6 +71,92 @@ async def _session_footprint(db: AsyncSession, session_id: uuid.UUID) -> dict:
             "plate_reads": n_plate_reads, "frame_ids": [str(f) for f in frame_ids]}
 
 
+# Stored-file columns that name something a session does not own: model weights, training manifests,
+# compiled artifacts, reports. A session's rows can point at them; erasing the session must not delete
+# them. Everything else ending in `_uri` on a row tied to the session is that session's data.
+_SHARED_URI_COLUMNS = frozenset({"weights_uri", "data_yaml_uri", "artifact_uri", "package_uri",
+                                 "per_layer_uri", "report_uri"})
+
+# Object-store prefixes that are written per session. Listed as well as followed from the rows, because a
+# blob whose row is already gone (a mask left behind by a re-label, a superseded overlay) is still the
+# session's data and has no row left to find it by.
+_SESSION_PREFIXES = ("frames/{sid}/", "masks/{sid}/", "masks/drivable/{sid}/", "segmentation/{sid}/",
+                     "sessions/{sid}/", "occupancy/{sid}/", "autolabel/{sid}/")
+
+# Source media that more than one session can share: the same upload imported twice. Deleted only when no
+# other session still points at it.
+_SOURCE_COLUMNS = ("raw_uri", "mcap_uri")
+
+
+async def session_blob_keys(db: AsyncSession, session_id: uuid.UUID,
+                            frame_ids: list[uuid.UUID]) -> list[str]:
+    """Every object-store key that holds this session's data, in this store's own bucket.
+
+    Erasure used to delete `Frame.img_uri` and nothing else. The redacted frames went and the rest stayed:
+    the uploaded source video (unredacted, by definition), every mask, the drivable and segmentation
+    rasters, the point clouds. An erasure certificate over that is a certificate for the least sensitive
+    copy of the data.
+
+    Three sources, unioned: every `*_uri` column on any table row that belongs to the session (found from
+    the schema, so a table added later is covered without anyone remembering this function); the
+    session-scoped key prefixes; and the session's source media when no other session shares it.
+    """
+    import asyncio
+
+    from sqlalchemy import or_
+
+    from db.models import Base
+
+    store = get_object_store()
+    uris: set[str] = set()
+
+    for table in Base.metadata.sorted_tables:
+        cols = [c for c in table.columns
+                if c.name.endswith("_uri") and c.name not in _SHARED_URI_COLUMNS
+                and not (table.name == "session" and c.name in _SOURCE_COLUMNS)]
+        if not cols:
+            continue
+        clauses = []
+        if "session_id" in table.columns:
+            clauses.append(table.columns["session_id"] == session_id)
+        if "frame_id" in table.columns and frame_ids:
+            # A subquery, not the literal ids: a long drive is a hundred thousand of them.
+            clauses.append(table.columns["frame_id"].in_(
+                select(Frame.frame_id).where(Frame.session_id == session_id)))
+        if not clauses:
+            continue
+        for row in (await db.execute(select(*cols).where(or_(*clauses)))).all():
+            uris.update(u for u in row if u)
+
+    # Source media, unless another session was made from the same upload.
+    sess = await db.get(DbSession, session_id)
+    for name in _SOURCE_COLUMNS:
+        uri = getattr(sess, name, None) if sess is not None else None
+        if not uri:
+            continue
+        col = getattr(DbSession, name)
+        shared = (await db.execute(select(func.count()).select_from(DbSession)
+                                   .where(col == uri, DbSession.session_id != session_id))).scalar_one()
+        if not shared:
+            uris.add(uri)
+        else:
+            log.info("retention.source_kept_shared", uri=uri, other_sessions=int(shared))
+
+    keys = {store._key(u) for u in uris if store.owns(u)}
+
+    def _listed() -> set[str]:
+        found: set[str] = set()
+        for pattern in _SESSION_PREFIXES:
+            try:
+                found.update(store.list_keys(pattern.format(sid=session_id)))
+            except Exception as exc:  # noqa: BLE001 - a listing that fails must not stop the rest
+                log.warning("retention.prefix_list_failed", prefix=pattern, error=str(exc))
+        return found
+
+    keys |= await asyncio.to_thread(_listed)
+    return sorted(keys)
+
+
 def _certificate(kind: str, session_id: str, footprint: dict, blobs_deleted: int,
                  at: datetime) -> dict:
     """A tamper-evident record of what was erased.
@@ -97,7 +183,8 @@ def _certificate(kind: str, session_id: str, footprint: dict, blobs_deleted: int
 
 async def erase_session(db: AsyncSession, session_id: uuid.UUID, *, reason: str,
                         dry_run: bool = False) -> dict:
-    """Erase one session: its frames, their annotations, its PII audits, and the image blobs.
+    """Erase one session: its frames, their annotations, its PII audits, and every stored file that
+    holds its data (frame images, source media, masks, rasters, point clouds; see session_blob_keys).
 
     dry_run reports the footprint without deleting, because the first thing anyone sensible does before an
     irreversible bulk delete is ask what it would touch.
@@ -108,21 +195,29 @@ async def erase_session(db: AsyncSession, session_id: uuid.UUID, *, reason: str,
 
     footprint = await _session_footprint(db, session_id)
     if dry_run:
-        return {"dry_run": True, "session_id": str(session_id), **{k: v for k, v in footprint.items()
-                                                                   if k != "frame_ids"}}
+        would = await session_blob_keys(db, session_id, [uuid.UUID(f) for f in footprint["frame_ids"]])
+        return {"dry_run": True, "session_id": str(session_id), "blobs": len(would),
+                **{k: v for k, v in footprint.items() if k != "frame_ids"}}
 
     # Blobs first: a database row is the only handle we have on its object-storage key, so deleting the row
     # before the blob orphans the file permanently, which is the opposite of erasure.
+    import asyncio
+
     store = get_object_store()
-    blobs = 0
-    uris = [u for (u,) in (await db.execute(
-        select(Frame.img_uri).where(Frame.session_id == session_id))).all() if u]
-    for uri in uris:
-        try:
-            store.remove(uri)
-            blobs += 1
-        except Exception as exc:  # noqa: BLE001 - a missing blob must not stop the erasure of the rest
-            log.warning("retention.blob_delete_failed", uri=uri, error=str(exc))
+    frame_uuids = [uuid.UUID(f) for f in footprint["frame_ids"]]
+    targets = await session_blob_keys(db, session_id, frame_uuids)
+
+    def _remove_all() -> int:
+        n = 0
+        for key in targets:
+            try:
+                store.remove(key)
+                n += 1
+            except Exception as exc:  # noqa: BLE001 - a missing blob must not stop the erasure of the rest
+                log.warning("retention.blob_delete_failed", key=key, error=str(exc))
+        return n
+
+    blobs = await asyncio.to_thread(_remove_all)
 
     # Frames cascade to objects and pii_audit via their FKs; the session row goes last so a failure part-way
     # leaves the session visible and the erasure obviously incomplete rather than silently half-done.

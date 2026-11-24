@@ -29,7 +29,6 @@ requires_infra = pytest.mark.skipif(not _infra_up(), reason="infra not up (make 
 
 @requires_infra
 def test_explain_from_provenance():
-    from sqlalchemy import delete
 
     from db.models import Frame, Object
     from db.models import Session as DbSession

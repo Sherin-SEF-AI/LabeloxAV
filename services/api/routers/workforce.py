@@ -10,7 +10,10 @@ accounts, and a vendor with a user account can do considerably more than return 
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+import asyncio
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,7 +89,7 @@ async def rating(db: AsyncSession = Depends(db_session)):
 
 
 @router.get("/workforce/{workforce_id}/pending")
-async def pending(workforce_id: str, limit: int = 50,
+async def pending(workforce_id: str, limit: Annotated[int, Query(ge=1, le=1_000)] = 50,
                   x_labelox_signature: str = Header(default=""),
                   db: AsyncSession = Depends(db_session)):
     """Open dispatches, for a workforce that polls rather than hosting a callback endpoint.
@@ -150,9 +153,16 @@ async def submit_return_upload(workforce_id: str, request: Request,
     if str(asg.workforce_id) != str(wf.workforce_id):
         raise HTTPException(status_code=403, detail="assignment belongs to a different workforce")
 
+    from services.imports.run import SourceNotAllowed, check_request_source
+
+    try:
+        check_request_source(payload.source_uri)
+    except SourceNotAllowed as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from None
+
     with TemporaryDirectory() as tmp:
         try:
-            root = _acquire_source(payload.source_uri, Path(tmp))
+            root = await asyncio.to_thread(_acquire_source, payload.source_uri, Path(tmp))
             ingested = await ingest_return(db, assignment_id=payload.assignment_id, fmt=payload.format,
                                            root=root, created_by=wf.name)
         except ReturnIngestError as exc:

@@ -36,10 +36,10 @@ def _attribute_block(rec: ExportRecord, onto: Ontology) -> dict:
     for k, v in (rec.attrs or {}).items():
         if isinstance(v, bool):
             boolean.append({"name": k, "val": v})
-        elif isinstance(v, (int, float)):
+        elif isinstance(v, int | float):
             num.append({"name": k, "val": v})
         else:
-            text.append({"name": k, "val": json.dumps(v) if isinstance(v, (list, dict)) else str(v)})
+            text.append({"name": k, "val": json.dumps(v) if isinstance(v, list | dict) else str(v)})
     block: dict = {}
     if text:
         block["text"] = text

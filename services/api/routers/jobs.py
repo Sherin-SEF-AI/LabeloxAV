@@ -11,16 +11,38 @@ deployment.
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import AutolabelJob, ExportJob, ImportJob, MapFusionJob, RelabelJob, TrainingJob
-from services.api.deps import db_session
+from services.activity import record_activity
+from services.api.deps import ApiOut, JobOut, db_session, require_role
 from services.job_control import QUEUED_CLOUD
 
 router = APIRouter()
+
+
+class JobCancelOut(ApiOut):
+    """What a cancel answers: one of three shapes, each a 200 (services/job_control.cancel_job).
+
+      no such job        canceled false, detail "not found", and no status
+      already finished   canceled false, the status it ended in, detail "already <status>"
+      canceled           canceled true, status "canceled", and `stopped`: true when nothing was running,
+                         false when a live task still has to reach its next checkpoint
+
+    `status` and `stopped` are optional because the first shape has neither and the second has no
+    `stopped`; a caller deciding whether the GPU is free has to read `stopped`, not `canceled`.
+    """
+
+    job_id: str
+    canceled: bool
+    detail: str
+    status: str | None = None
+    stopped: bool | None = None
+
 
 # The kind names this router already emits, mapped back to their tables. Training is deliberately absent:
 # it is drained by a separate worker holding a GPU lease, so it cancels through its own route
@@ -55,8 +77,8 @@ def _import_label(source_uri: str | None, fmt: str | None) -> str:
     return fmt or "import"
 
 
-@router.get("/jobs")
-async def jobs(limit: int = 100, db: AsyncSession = Depends(db_session)):
+@router.get("/jobs", response_model=list[JobOut], response_model_exclude_unset=True)
+async def jobs(limit: Annotated[int, Query(ge=1, le=2_000)] = 100, db: AsyncSession = Depends(db_session)):
     limit = min(max(limit, 1), 1000)
     out: list[dict] = []
 
@@ -122,8 +144,9 @@ async def jobs(limit: int = 100, db: AsyncSession = Depends(db_session)):
     return out[:limit]
 
 
-@router.post("/jobs/{kind}/{job_id}/cancel")
-async def cancel(kind: str, job_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
+@router.post("/jobs/{kind}/{job_id}/cancel", response_model=JobCancelOut, response_model_exclude_unset=True)
+async def cancel(kind: str, job_id: uuid.UUID, db: AsyncSession = Depends(db_session),
+                 user=Depends(require_role("reviewer"))):
     """Cancel a job of any kind. Answers whether it stopped or was only asked to.
 
     A job that never started, or whose process is already gone, is stopped the moment the row changes. A
@@ -138,4 +161,8 @@ async def cancel(kind: str, job_id: uuid.UUID, db: AsyncSession = Depends(db_ses
                             detail=f"unknown job kind {kind!r}; expected one of {sorted(CANCELABLE)}"
                                    + (" (training cancels through /api/training/{id}/cancel)"
                                       if kind == "training" else ""))
-    return await cancel_job(db, model, job_id)
+    out = await cancel_job(db, model, job_id)
+    # Any reviewer can stop any job, so the stop is recorded against whoever asked for it.
+    await record_activity(db, user=user, verb="job.cancel", subject_type=f"{kind}_job",
+                          subject_id=str(job_id), summary=f"cancelled a {kind} job", meta={"result": out})
+    return out

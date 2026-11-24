@@ -153,8 +153,6 @@ def _llm_plan(text: str, budget) -> list[dict] | None:
     try:
         import json
 
-        import httpx
-
         from core.config import get_settings
 
         cfg = get_settings().models.vlm
@@ -168,7 +166,10 @@ def _llm_plan(text: str, budget) -> list[dict] | None:
             f'Request: "{text}"')
         payload = {"model": cfg.ollama_tag, "stream": False, "format": "json",
                    "messages": [{"role": "user", "content": prompt}], "options": {"temperature": 0.0}}
-        resp = httpx.post(f"{cfg.ollama_url}/api/chat", json=payload, timeout=min(getattr(cfg, "timeout_s", 20), 20))
+        from services.llm import ledger
+
+        resp = ledger.post(f"{cfg.ollama_url}/api/chat", provider="ollama", model=cfg.ollama_tag,
+                           purpose="ops_plan", json=payload, timeout=min(getattr(cfg, "timeout_s", 20), 20))
         budget.charge(1)
         resp.raise_for_status()
         data = json.loads(resp.json()["message"]["content"])

@@ -61,12 +61,12 @@ async def pending_counts(db: AsyncSession) -> dict:
 def _free_vram_mb() -> float | None:
     """Free VRAM in MB, or None when there is no CUDA device (a CPU box embeds without a memory gate)."""
     try:
-        import torch
+        from core.config import get_settings
+        from core.model_manager import vram_free_mb
 
-        if not torch.cuda.is_available():
-            return None
-        free, _total = torch.cuda.mem_get_info()
-        return free / (1024 * 1024)
+        # The configured device, not whichever one CUDA calls current: with no index this always read
+        # card 0, which is the wrong card as soon as there is a second.
+        return vram_free_mb(get_settings().gpu.device)
     except Exception:  # noqa: BLE001 - treat any probe failure as "cannot confirm free VRAM"
         return None
 

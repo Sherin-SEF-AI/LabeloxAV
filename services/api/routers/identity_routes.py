@@ -29,11 +29,38 @@ from core.logging import get_logger
 from db.models import User, UserCredential
 from services.api import identity as ident
 from services.api.auth_token import mint_token
-from services.api.deps import db_session, require_user
+from services.api.deps import ApiOut, db_session, require_user
 from services.api.ephemeral import EphemeralStore
 
 router = APIRouter()
 log = get_logger("identity_api")
+
+
+class AuthMethodsOut(ApiOut):
+    """What the sign-in page draws. Configuration only: nothing here says whether an account exists."""
+
+    password: bool
+    self_signup: bool
+    signup_domains: list[str]
+    oidc: bool
+    oidc_issuer: str | None
+    dev_login: bool
+    bootstrap: bool                             # no accounts yet: the first arrival creates the admin
+
+
+class ProfileOut(ApiOut):
+    """services.api.identity.public_state: what the profile page may know. No hash, secret or code."""
+
+    user_id: str
+    name: str
+    role: str
+    email: str | None
+    has_password: bool
+    mfa_enabled: bool
+    sso: bool
+    sso_issuer: str | None
+    recovery_codes_left: int
+    created_at: str | None
 
 # A dummy hash every unknown-user attempt is verified against. Without it, "no such user" returns in
 # microseconds while a real user pays for scrypt, and the difference alone enumerates accounts.
@@ -78,7 +105,7 @@ async def _issue(db: AsyncSession, user: User) -> dict:
 
 # ---------------------------------------------------------------- what the login page renders
 
-@router.get("/auth/methods")
+@router.get("/auth/methods", response_model=AuthMethodsOut, response_model_exclude_unset=True)
 async def auth_methods(db: AsyncSession = Depends(db_session)) -> dict:
     """Which sign-in methods this deployment offers.
 
@@ -293,7 +320,7 @@ async def change_password(payload: ChangePasswordIn, user=Depends(require_user),
     return await _issue(db, user)
 
 
-@router.get("/auth/profile")
+@router.get("/auth/profile", response_model=ProfileOut, response_model_exclude_unset=True)
 async def profile(user=Depends(require_user), db: AsyncSession = Depends(db_session)) -> dict:
     cred = await db.get(UserCredential, user.user_id)
     return ident.public_state(user, cred)

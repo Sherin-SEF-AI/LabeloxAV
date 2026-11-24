@@ -24,7 +24,6 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.db]
 def _cuda_ready() -> bool:
     try:
         import torch  # noqa: F401
-
         import torch as t
 
         return t.cuda.is_available()

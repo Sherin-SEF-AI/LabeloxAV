@@ -34,14 +34,28 @@ class YoloPath:
         self.weights = weights or self.settings.models.yolo.weights
         self.model_version = self.weights
 
-    def load(self) -> None:
-        from ultralytics import YOLO
+    @property
+    def model_key(self) -> str:
+        return f"yolo:{self.weights}"
 
-        self._model = YOLO(self.weights)
+    def load(self) -> None:
+        from core.model_manager import manager
+
+        def _load():
+            from ultralytics import YOLO
+
+            return YOLO(self.weights)
+
+        # Shared through the registry: the same champion weights serve the false-negative sweep and the
+        # prediction plane, and loading them once per caller put two or three copies on the card.
+        self._model = manager().get(self.model_key, _load, device=self.settings.gpu.device)
         log.info("path_a.loaded", weights=self.weights, device=self.settings.gpu.device)
 
     def unload(self) -> None:
+        from core.model_manager import manager
+
         self._model = None
+        manager().release(self.model_key)
 
     def _to_ontology(self, model_name: str) -> tuple[str, int]:
         # A fine-tuned/promoted model emits ontology class names directly; a stock COCO model emits
@@ -56,36 +70,53 @@ class YoloPath:
         return name, self.onto.by_name(name).id
 
     def infer(self, image_bgr: np.ndarray) -> list[RawDetection]:
+        return self.infer_batch([image_bgr])[0]
+
+    def infer_batch(self, images: list[np.ndarray]) -> list[list[RawDetection]]:
+        """Detections for several frames in one forward pass, one list per frame, in order.
+
+        The detector was called once per frame, so a 16 GB card ran at a batch of one and most of each
+        call was fixed overhead. Ultralytics letterboxes a list of frames to a common shape and returns
+        one result per frame; a batch of one is exactly the old call.
+        """
         if self._model is None:
             raise RuntimeError("YoloPath not loaded")
+        if not images:
+            return []
+        from core.model_manager import manager
+
         cfg = self.settings.models.yolo
-        results = self._model.predict(
-            source=image_bgr,
-            imgsz=cfg.imgsz,
-            half=cfg.half,
-            conf=cfg.conf,
-            device=self.settings.gpu.device,
-            verbose=False,
-        )
-        dets: list[RawDetection] = []
-        names = results[0].names if results else {}
+        with manager().infer_lock(self.model_key):
+            results = self._model.predict(
+                source=images if len(images) > 1 else images[0],
+                imgsz=cfg.imgsz,
+                half=cfg.half,
+                conf=cfg.conf,
+                device=self.settings.gpu.device,
+                verbose=False,
+            )
+        if len(results) != len(images):
+            raise RuntimeError(f"detector returned {len(results)} results for {len(images)} frames")
+        out: list[list[RawDetection]] = []
         for r in results:
-            if r.boxes is None:
-                continue
-            for b in r.boxes:
-                xyxy = b.xyxy[0].tolist()
-                conf = float(b.conf[0])
-                coco_name = names.get(int(b.cls[0]), "object")
-                cls_name, cls_id = self._to_ontology(coco_name)
-                dets.append(
-                    RawDetection(
-                        path=self.name,
-                        bbox=(xyxy[0], xyxy[1], xyxy[2], xyxy[3]),
-                        conf=conf,
-                        class_name=cls_name,
-                        class_id=cls_id,
-                        model_version=self.model_version,
-                        extra={"coco_name": coco_name},
+            dets: list[RawDetection] = []
+            names = r.names or {}
+            if r.boxes is not None:
+                for b in r.boxes:
+                    xyxy = b.xyxy[0].tolist()
+                    conf = float(b.conf[0])
+                    coco_name = names.get(int(b.cls[0]), "object")
+                    cls_name, cls_id = self._to_ontology(coco_name)
+                    dets.append(
+                        RawDetection(
+                            path=self.name,
+                            bbox=(xyxy[0], xyxy[1], xyxy[2], xyxy[3]),
+                            conf=conf,
+                            class_name=cls_name,
+                            class_id=cls_id,
+                            model_version=self.model_version,
+                            extra={"coco_name": coco_name},
+                        )
                     )
-                )
-        return dets
+            out.append(dets)
+        return out

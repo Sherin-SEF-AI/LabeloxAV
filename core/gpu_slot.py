@@ -50,10 +50,27 @@ class GpuBusy(RuntimeError):
     """Raised when the slot could not be acquired inside the timeout."""
 
 
+def slot_key(device: str | int | None = None) -> int:
+    """The advisory key for one card's slot.
+
+    One key for the whole box meant a second GPU could never be used: a job on card 1 waited for the job
+    on card 0 to finish. The key is now per device. Card 0 keeps the original key, so a worker from before
+    this change and one from after still exclude each other on the card they share.
+    """
+    from core.config import get_settings
+    from core.model_manager import device_index
+
+    return GPU_SLOT_KEY + device_index(device if device is not None else get_settings().gpu.device)
+
+
 @contextlib.asynccontextmanager
 async def gpu_slot(holder: str, *, timeout_s: float | None = 3600.0,
-                   key: int = GPU_SLOT_KEY) -> AsyncIterator[dict]:
-    """Hold the GPU slot for the duration of the block.
+                   key: int | None = None, device: str | int | None = None) -> AsyncIterator[dict]:
+    """Hold one card's slot for the duration of the block.
+
+    The card is `device`, or this process's configured `gpu.device` when it is not given, which is what
+    every existing caller wants: a worker started for card 1 takes card 1's slot without its call sites
+    knowing there is more than one.
 
     `holder` names the work, so a log line says which job is on the card rather than only that something is.
     `timeout_s=None` waits forever, which is right for a batch job that has nowhere else to be; a request
@@ -64,6 +81,8 @@ async def gpu_slot(holder: str, *, timeout_s: float | None = 3600.0,
     """
     from db.session import get_engine
 
+    if key is None:
+        key = slot_key(device)
     waited = 0.0
     started = time.monotonic()
     async with get_engine().connect() as conn:

@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -197,7 +198,7 @@ async def promote(model_version: str, task: str = "detection", db: AsyncSession 
 # is a governance act: anyone who could write these could move the number the corpus is judged by. Reading
 # is annotator-level because judging them is work an annotator does.
 @router.post("/govern/control/seed", dependencies=[Depends(require_role("reviewer"))])
-async def control_seed(limit: int = 500, rate: float | None = None, db: AsyncSession = Depends(db_session)):
+async def control_seed(limit: Annotated[int, Query(ge=1, le=10_000)] = 500, rate: float | None = None, db: AsyncSession = Depends(db_session)):
     return await seed_from_recent_auto_accepts(db, limit, rate)
 
 
@@ -211,7 +212,7 @@ async def control_verdict(sample_id: str, payload: VerdictIn, db: AsyncSession =
 
 
 @router.get("/govern/control/pending", dependencies=[Depends(require_role("annotator"))])
-async def control_pending(limit: int = 100, db: AsyncSession = Depends(db_session),
+async def control_pending(limit: Annotated[int, Query(ge=1, le=2_000)] = 100, db: AsyncSession = Depends(db_session),
                           hidden=Depends(caller_hidden_projects)):
     """The control samples awaiting a verdict.
 
@@ -301,7 +302,7 @@ async def killswitch_release(db: AsyncSession = Depends(db_session)):
 
 
 @router.get("/govern/audit")
-async def audit(actor: str | None = None, limit: int = 100, db: AsyncSession = Depends(db_session)):
+async def audit(actor: str | None = None, limit: Annotated[int, Query(ge=1, le=2_000)] = 100, db: AsyncSession = Depends(db_session)):
     return await list_audit(db, actor, limit)
 
 
@@ -310,7 +311,7 @@ async def audit(actor: str | None = None, limit: int = 100, db: AsyncSession = D
 # governance act behind reviewer. The two clicks that exist by design - the safety-tier first-lot ack
 # and the killswitch-era revert - live here, next to the switches they answer to.
 @router.get("/govern/settlement/lots", dependencies=[Depends(require_role("annotator"))])
-async def settlement_lots(status: str | None = None, limit: int = 50,
+async def settlement_lots(status: str | None = None, limit: Annotated[int, Query(ge=1, le=1_000)] = 50,
                           db: AsyncSession = Depends(db_session)):
     from sqlalchemy import select
 

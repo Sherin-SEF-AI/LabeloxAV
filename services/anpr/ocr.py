@@ -37,7 +37,6 @@ def default_plate_ocr(crop_bgr: np.ndarray) -> tuple[str, float | None]:
 
 
 def _read_qwen(crop_bgr: np.ndarray) -> tuple[str, float | None]:
-    import httpx
 
     vlm = get_settings().models.vlm
     ok, buf = cv2.imencode(".jpg", crop_bgr)
@@ -45,7 +44,10 @@ def _read_qwen(crop_bgr: np.ndarray) -> tuple[str, float | None]:
         return "", 0.0
     b64 = base64.b64encode(buf.tobytes()).decode()
     try:
-        resp = httpx.post(f"{vlm.ollama_url}/api/chat", timeout=vlm.timeout_s, json={
+        from services.llm import ledger
+
+        resp = ledger.post(f"{vlm.ollama_url}/api/chat", provider="ollama", model=vlm.ollama_tag,
+                           purpose="plate_ocr", timeout=vlm.timeout_s, json={
             "model": vlm.ollama_tag, "stream": False, "format": "json",
             "messages": [{"role": "user", "content": _PROMPT, "images": [b64]}]})
         resp.raise_for_status()

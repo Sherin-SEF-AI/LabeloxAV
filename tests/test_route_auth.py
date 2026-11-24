@@ -100,7 +100,33 @@ _MUST_BE_PRIVILEGED = (
     "/api/hardening/slo",              # the SLO ledger the operations board reads
     "/api/govern/promote",             # which model serves
     "/api/users",                      # account administration
+    "/api/sanyx/session/{session_id}/override",        # re-enables auto-label on a recording that failed health
+    "/api/jobs/{kind}/{job_id}/cancel",                # stops anyone's job
+    "/api/calibration/{session_id}/calibrate",         # every 3D number downstream is computed from it
+    "/api/calibration/vehicle/{vehicle_id}/calibrate",
+    "/api/calibration/{session_id}/import",
+    "/api/oraclyx/object/{object_id}/consensus",       # routes objects to auto-accept
+    "/api/flywheel/adaptive/dispatch",
+    "/api/hdmap/fuse",
+    "/api/mine",                                       # replaces a session's scenarios
+    "/api/attrsweep/apply",                            # corpus-wide attribute writes
+    "/api/lidar/objects3d/batch_correct",
+    "/api/lidar/sessions/{session_id}/build",
 )
+
+
+def test_write_only_floors_leave_the_reads_open_to_annotators():
+    # The jobs page, the map and a calibration report are read by annotators; only changing them is not
+    # theirs. A prefix floor would have gated both, so these floors are scoped to writes.
+    for path in ("/api/jobs", "/api/calibration/sessions", "/api/hdmap/elements", "/api/sanyx/sessions"):
+        assert _required_role(path, "GET") == "annotator", path
+        assert _required_role(path, "POST") == "reviewer", path
+    # The older prefixes still gate reads too; that is their documented behaviour and is unchanged.
+    assert _required_role("/api/export", "GET") == "reviewer"
+
+
+def test_the_floor_defaults_to_the_write_answer():
+    assert _required_role("/api/jobs/import/x/cancel") == "reviewer"
 
 
 def test_the_write_scan_is_not_trivially_green():

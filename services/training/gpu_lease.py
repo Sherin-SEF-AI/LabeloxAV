@@ -33,19 +33,33 @@ log = get_logger("gpu_lease")
 STALE_AFTER = timedelta(hours=1)
 
 
-async def training_holds_gpu(db) -> bool:
-    """Whether a live training job currently owns the GPU.
+def job_device_index(config: dict | None) -> int:
+    """Which card a training job was claimed for. Jobs claimed before devices were recorded read as 0."""
+    from core.model_manager import device_index
+
+    return device_index(((config or {}).get("runtime") or {}).get("device"))
+
+
+async def training_holds_gpu(db, device: str | int | None = None) -> bool:
+    """Whether a live training job currently owns this process's card (or `device`).
 
     A job counts only while its heartbeat is fresh. Rows left at `running` by a process that died are
     ignored, and reported once so the staleness is visible rather than silently routed around.
+
+    Per card: a training run on card 1 does not make card 0 busy. The worker that claims a job records
+    the card it claimed it for (`config.runtime.device`); a job with no record is taken to be on card 0,
+    which is where every job ran before there could be a second.
     """
     from sqlalchemy import select
 
+    from core.config import get_settings
+    from core.model_manager import device_index
     from db.models import TrainingJob
 
-    rows = (await db.execute(
-        select(TrainingJob.job_id, TrainingJob.updated_at, TrainingJob.purpose)
-        .where(TrainingJob.status == "running"))).all()
+    mine = device_index(device if device is not None else get_settings().gpu.device)
+    rows = [(j, u, p) for j, u, p, cfg in (await db.execute(
+        select(TrainingJob.job_id, TrainingJob.updated_at, TrainingJob.purpose, TrainingJob.config)
+        .where(TrainingJob.status == "running"))).all() if job_device_index(cfg) == mine]
     if not rows:
         return False
 

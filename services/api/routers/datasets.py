@@ -3,9 +3,11 @@ and hand back presigned download links. This is how labeled data leaves the engi
 
 from __future__ import annotations
 
+import asyncio
 import uuid
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,10 +16,42 @@ from core.observability import spawn
 from core.storage import get_object_store
 from db.models import DatasetCommit, ExportJob
 from db.session import get_sessionmaker
-from services.api.deps import ExportIn, db_session
+from services.api.deps import ApiOut, ExportIn, db_session
 
 log = get_logger("api_datasets")
 router = APIRouter()
+
+
+class DatasetOut(ApiOut):
+    """One sealed dataset in the list. `name` and `formats` are read out of the commit's slice spec."""
+
+    commit_id: str
+    name: str | None
+    object_count: int
+    formats: list[str]
+    ontology_version: str
+    n_files: int
+    created_at: str | None
+
+
+class DatasetFileOut(ApiOut):
+    path: str
+    url: str | None                             # a presigned link, or null when the object is gone
+    missing: bool
+
+
+class DatasetDetailOut(ApiOut):
+    """One dataset with its files. Not the list row plus two fields: the detail has no `n_files`, since
+    it carries the files themselves."""
+
+    commit_id: str
+    name: str | None
+    object_count: int
+    formats: list[str]
+    ontology_version: str
+    created_at: str | None
+    slice_spec: dict[str, Any] | None
+    files: list[DatasetFileOut]
 
 
 def _iso(dt) -> str | None:
@@ -35,15 +69,23 @@ async def _bump(job_id, **fields) -> None:
 
 async def _run_export(job_id, spec) -> None:
     from services.export.dataset import export_dataset
+    from services.job_lock import job_lock
 
-    await _bump(job_id, status="running", progress=0.1)
-    try:
-        result = await export_dataset(spec)
-        await _bump(job_id, status="done", progress=1.0, commit_id=result["commit_id"], object_count=result["object_count"])
-        log.info("export.job_done", job_id=str(job_id), commit_id=result["commit_id"])
-    except Exception as exc:  # noqa: BLE001
-        log.error("export.job_failed", job_id=str(job_id), error=str(exc))
-        await _bump(job_id, status="error", error=str(exc))
+    # Held for the length of the export, so a restarted API can tell this run from one whose process is
+    # gone (services/job_recovery.py) and two processes never export the same job.
+    async with job_lock(job_id) as mine:
+        if not mine:
+            log.info("export.already_running_elsewhere", job_id=str(job_id))
+            return
+        await _bump(job_id, status="running", progress=0.1)
+        try:
+            result = await export_dataset(spec)
+            await _bump(job_id, status="done", progress=1.0, commit_id=result["commit_id"],
+                        object_count=result["object_count"])
+            log.info("export.job_done", job_id=str(job_id), commit_id=result["commit_id"])
+        except Exception as exc:  # noqa: BLE001
+            log.error("export.job_failed", job_id=str(job_id), error=str(exc))
+            await _bump(job_id, status="error", error=str(exc))
 
 
 @router.post("/datasets/export")
@@ -54,14 +96,15 @@ async def start_export(payload: ExportIn, db: AsyncSession = Depends(db_session)
                      cities=payload.cities, session_id=payload.session_id, min_conf=payload.min_conf,
                      formats=payload.formats, limit=payload.limit)
     job_id = uuid.uuid4()
-    db.add(ExportJob(job_id=job_id, name=payload.name, spec=spec.model_dump(), status="pending"))
+    db.add(ExportJob(job_id=job_id, name=payload.name, spec=spec.model_dump(), status="pending",
+                     checkpoint={"resumable": True, "attempts": 0}))
     await db.commit()
     spawn(_run_export(job_id, spec), name="_run_export")
     return {"job_id": str(job_id), "status": "pending"}
 
 
-@router.get("/datasets")
-async def list_datasets(limit: int = 100, db: AsyncSession = Depends(db_session)):
+@router.get("/datasets", response_model=list[DatasetOut], response_model_exclude_unset=True)
+async def list_datasets(limit: Annotated[int, Query(ge=1, le=2_000)] = 100, db: AsyncSession = Depends(db_session)):
     rows = (await db.execute(select(DatasetCommit).order_by(DatasetCommit.created_at.desc()).limit(limit))).scalars().all()
     return [
         {"commit_id": d.commit_id, "name": (d.slice_spec or {}).get("name"),
@@ -108,7 +151,7 @@ async def dataset_diff(a_id: str, b_id: str, deep: bool = True, sample: int = 20
         raise HTTPException(404, str(exc)) from exc
 
 
-@router.get("/datasets/{commit_id}")
+@router.get("/datasets/{commit_id}", response_model=DatasetDetailOut, response_model_exclude_unset=True)
 async def dataset_detail(commit_id: str, db: AsyncSession = Depends(db_session)):
     d = await db.get(DatasetCommit, commit_id)
     if d is None:
@@ -120,7 +163,7 @@ async def dataset_detail(commit_id: str, db: AsyncSession = Depends(db_session))
         # whose files were written to a since-deleted temp dir) shows the file as missing instead of a
         # broken presigned URL that 404s.
         try:
-            present = store.exists(uri)
+            present = await asyncio.to_thread(store.exists, uri)
             files.append({"path": path, "url": store.presigned_get(uri) if present else None,
                           "missing": not present})
         except Exception:  # noqa: BLE001
@@ -164,7 +207,7 @@ async def download_dataset(commit_id: str):
 
 
 @router.get("/datasets/versions/{name}")
-async def dataset_versions(name: str, limit: int = 20, db: AsyncSession = Depends(db_session)):
+async def dataset_versions(name: str, limit: Annotated[int, Query(ge=1, le=1_000)] = 20, db: AsyncSession = Depends(db_session)):
     """A dataset's versions by name, in order, each with the delta from the one before it.
 
     Distinct from /datasets/{commit_id}/lineage, which walks one commit's parent chain. This is the list a

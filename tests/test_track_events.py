@@ -17,9 +17,8 @@ pytestmark = pytest.mark.db
 
 async def _seed(db, *, n_frames=6, class_name="bus", dt_s=0.5):
     """A session, a track and n frames half a second apart. Returns (session_id, track_id, [frame_ids])."""
-    from db.models import Frame, OntologyClass, OntologyVersion
+    from db.models import Frame, OntologyClass, OntologyVersion, Track
     from db.models import Session as DbSession
-    from db.models import Track
     from services.autolabel.ontology import get_ontology
 
     onto = get_ontology()
@@ -318,8 +317,8 @@ class TestProposers:
 
         from db.models import Frame, Object, ObjectDynamics
         from db.session import get_sessionmaker
-        from services.autolabel.ontology import get_ontology
         from services.autolabel.event_proposals import propose_for_track
+        from services.autolabel.ontology import get_ontology
 
         async with get_sessionmaker()() as db:
             sid, tid, fids = await _seed(db, n_frames=12, dt_s=0.25)

@@ -13,7 +13,9 @@ Two sources of truth:
 
 from __future__ import annotations
 
+import asyncio
 import time
+import weakref
 from collections import defaultdict
 from threading import Lock
 
@@ -86,9 +88,43 @@ async def render(db_gauges: dict[str, float] | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+# The last sample and when it was taken (monotonic seconds). One sampler runs at a time; a scrape that
+# arrives while another is sampling waits for that result instead of starting the same queries again.
+_gauge_cache: tuple[float, dict[str, float]] | None = None
+# One lock per event loop: a module-level asyncio.Lock binds to the first loop that contends on it and
+# raises on any other, and a test suite (or a reloader) gives this module more than one loop in its life.
+_gauge_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = weakref.WeakKeyDictionary()
+
+
+def _gauge_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _gauge_locks.get(loop)
+    if lock is None:
+        lock = _gauge_locks[loop] = asyncio.Lock()
+    return lock
+
+
 async def sample_db_gauges() -> dict[str, float]:
-    """Live corpus gauges for the scrape: review-queue depth and unembedded backlog. Cheap counts; any error
-    yields no gauge rather than failing the scrape."""
+    """Corpus gauges for the scrape, at most `metrics.db_gauge_ttl_s` old."""
+    global _gauge_cache
+    from core.config import get_settings
+
+    ttl = float(get_settings().metrics.db_gauge_ttl_s)
+    cached = _gauge_cache
+    if cached is not None and ttl > 0 and time.monotonic() - cached[0] < ttl:
+        return dict(cached[1])
+    async with _gauge_lock():
+        cached = _gauge_cache
+        if cached is not None and ttl > 0 and time.monotonic() - cached[0] < ttl:
+            return dict(cached[1])
+        fresh = await _sample_db_gauges()
+        _gauge_cache = (time.monotonic(), fresh)
+        return dict(fresh)
+
+
+async def _sample_db_gauges() -> dict[str, float]:
+    """Live corpus gauges: review-queue depth and unembedded backlog. Any error yields no gauge rather
+    than failing the scrape."""
     out: dict[str, float] = {}
     try:
         from sqlalchemy import func, select

@@ -8,6 +8,8 @@ an admin token would satisfy.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -96,7 +98,7 @@ async def evaluate_session(session_id: str, db: AsyncSession = Depends(db_sessio
 async def list_incidents(camera_id: str | None = None, kind: str | None = None,
                          status: str | None = None, severity: str | None = None,
                          since_hours: int | None = None,
-                         limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
+                         limit: Annotated[int, Query(ge=1, le=500)] = 100, offset: int = Query(0, ge=0),
                          db: AsyncSession = Depends(db_session)):
     from services.sec.incidents import list_incidents as _list
 
@@ -137,7 +139,7 @@ async def stitch_plates(session_id: str, db: AsyncSession = Depends(db_session))
 
 @router.get("/sec/identities")
 async def list_identities(min_cameras: int = Query(1, ge=1, le=20),
-                          limit: int = Query(100, ge=1, le=500),
+                          limit: Annotated[int, Query(ge=1, le=500)] = 100,
                           db: AsyncSession = Depends(db_session)):
     """Appearance signatures, never names. The signature itself is never returned."""
     from services.sec.reid import list_identities as _list

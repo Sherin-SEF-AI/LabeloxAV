@@ -4,8 +4,9 @@ confusion view (what the model gets wrong, from the Review audit trail), and emb
 from __future__ import annotations
 
 from collections import Counter
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,7 +66,7 @@ async def suggest(body: SuggestIn, db: AsyncSession = Depends(db_session)):
 
 
 @router.get("/corrections/confusions")
-async def confusions(by: str = "class", limit: int = 30, db: AsyncSession = Depends(db_session)):
+async def confusions(by: str = "class", limit: Annotated[int, Query(ge=1, le=1_000)] = 30, db: AsyncSession = Depends(db_session)):
     """Aggregate the Review audit trail into confusion pairs (old class -> corrected class x count).
     `by=camera|city` additionally groups by that dimension. The learn-from-corrections signal."""
     onto = get_ontology()

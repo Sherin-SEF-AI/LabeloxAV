@@ -34,7 +34,9 @@ def benchmark_onnx_latency(onnx_path: str, input_shape: tuple, provider: str = "
         sess.run(None, {name: x})
         times.append((time.perf_counter() - t0) * 1000.0)
     times.sort()
-    p = lambda q: round(times[min(len(times) - 1, int(q * len(times)))], 3)
+    def p(q: float) -> float:
+        return round(times[min(len(times) - 1, int(q * len(times)))], 3)
+
     mean_ms = sum(times) / len(times)
     return {"p50": p(0.50), "p95": p(0.95), "p99": p(0.99),
             "throughput_fps": round(1000.0 / mean_ms, 2) if mean_ms > 0 else None,

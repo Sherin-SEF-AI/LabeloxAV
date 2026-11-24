@@ -5,6 +5,7 @@ router holds the create/read and the overlay image proxy the editor draws.
 
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -40,9 +41,9 @@ async def auto_segment(frame_id: str, kind: str = "semantic", db: AsyncSession =
     from services.segment2d.semantic import segment_frame
 
     settings, onto, store = get_settings(), get_ontology(), get_object_store()
-    store.ensure_bucket()
+    await asyncio.to_thread(store.ensure_bucket)
     try:
-        img = load_image_bgr(store, frame.img_uri)
+        img = await asyncio.to_thread(load_image_bgr, store, frame.img_uri)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "frame image unavailable") from exc
 
@@ -72,7 +73,7 @@ async def _link_instances(db: AsyncSession, frame: Frame, res: dict, store) -> N
     objs = (await db.execute(select(Object).where(Object.frame_id == frame.frame_id))).scalars().all()
     if not objs or not res["segments"]:
         return
-    inst = _load_npz(store, res["instance_uri"]) if res["instance_uri"] else None
+    inst = (await asyncio.to_thread(_load_npz, store, res["instance_uri"])) if res["instance_uri"] else None
     if inst is None:
         return
     for sid, seg in res["segments"].items():
@@ -155,7 +156,7 @@ async def edit_segment(frame_id: str, body: SegmentEditIn, db: AsyncSession = De
         raise HTTPException(400, "frame has no recorded size, so a raster cannot be sized to it")
 
     onto, store = get_ontology(), get_object_store()
-    store.ensure_bucket()
+    await asyncio.to_thread(store.ensure_bucket)
 
     def name_to_id(name: str):
         return onto.by_name(name).id if onto.has_name(name) else None
@@ -175,7 +176,7 @@ async def edit_segment(frame_id: str, body: SegmentEditIn, db: AsyncSession = De
 
     labels = edit
     if not body.replace and row is not None:
-        base = _load_npz(store, row.labels_uri)
+        base = await asyncio.to_thread(_load_npz, store, row.labels_uri)
         labels = merge_onto_existing(None if base is None else np.asarray(base), edit)
 
     labels_uri, overlay_uri = store_labels(store, frame.session_id, frame.frame_id,
@@ -208,19 +209,21 @@ async def get_segment(frame_id: str, kind: str = "semantic", db: AsyncSession = 
 @router.get("/frames/{frame_id}/segment/labelids.png")
 async def segment_labelids(frame_id: str, kind: str = "semantic", db: AsyncSession = Depends(db_session)):
     """The Cityscapes-style labelIds export: a single-channel PNG whose pixel value is the class id."""
-    import cv2
 
     row = (await db.execute(select(FrameSegmentation).where(
         FrameSegmentation.frame_id == UUID(frame_id), FrameSegmentation.kind == kind))).scalars().first()
     if row is None:
         raise HTTPException(404, "no segmentation")
-    labels = _load_npz(get_object_store(), row.labels_uri)
+    from services.api.offload import encode_image, run_blocking
+
+    labels = await run_blocking(_load_npz, get_object_store(), row.labels_uri)
     if labels is None:
         raise HTTPException(404, "labels unavailable")
-    ok, buf = cv2.imencode(".png", labels.astype("uint16"))
-    if not ok:
+
+    png = await encode_image(".png", labels.astype("uint16"))
+    if png is None:
         raise HTTPException(500, "could not encode labelIds")
-    return Response(content=buf.tobytes(), media_type="image/png")
+    return Response(content=png, media_type="image/png")
 
 
 @router.get("/frames/{frame_id}/segment/panoptic.png")
@@ -234,7 +237,7 @@ async def segment_panoptic_png(frame_id: str, db: AsyncSession = Depends(db_sess
         FrameSegmentation.frame_id == UUID(frame_id), FrameSegmentation.kind == "panoptic"))).scalars().first()
     if row is None or not row.instance_uri:
         raise HTTPException(404, "no panoptic segmentation")
-    inst = _load_npz(get_object_store(), row.instance_uri)
+    inst = await asyncio.to_thread(_load_npz, get_object_store(), row.instance_uri)
     if inst is None:
         raise HTTPException(404, "instance raster unavailable")
     inst = inst.astype(np.int64)
@@ -242,10 +245,12 @@ async def segment_panoptic_png(frame_id: str, db: AsyncSession = Depends(db_sess
     rgb[..., 0] = (inst % 256).astype(np.uint8)            # R
     rgb[..., 1] = ((inst // 256) % 256).astype(np.uint8)   # G
     rgb[..., 2] = ((inst // 65536) % 256).astype(np.uint8)  # B
-    ok, buf = cv2.imencode(".png", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
-    if not ok:
+    from services.api.offload import encode_image
+
+    png = await encode_image(".png", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+    if png is None:
         raise HTTPException(500, "could not encode panoptic png")
-    return Response(content=buf.tobytes(), media_type="image/png")
+    return Response(content=png, media_type="image/png")
 
 
 @router.get("/frames/{frame_id}/segment/overlay")
@@ -255,7 +260,9 @@ async def segment_overlay(frame_id: str, kind: str = "semantic", db: AsyncSessio
     if row is None or not row.overlay_uri:
         raise HTTPException(404, "no overlay")
     try:
-        data = get_object_store().get_bytes(row.overlay_uri)
+        from services.api.offload import fetch_bytes
+
+        data = await fetch_bytes(row.overlay_uri)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "overlay unavailable") from exc
     return Response(content=data, media_type="image/png")

@@ -102,10 +102,13 @@ def _free_vram_mb_from_torch() -> float | None:
     try:
         import torch
 
+        from core.model_manager import vram_free_mb
+
         if not torch.cuda.is_available():
             return None
-        free = min(float(torch.cuda.mem_get_info(i)[0]) for i in range(torch.cuda.device_count()))
-        return free / (1024 * 1024)
+        readings = [vram_free_mb(i) for i in range(torch.cuda.device_count())]
+        readings = [r for r in readings if r is not None]
+        return min(readings) if readings else None
     except Exception:  # noqa: BLE001 - a reading that fails must not decide the job
         return None
 

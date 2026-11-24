@@ -19,9 +19,8 @@ DET = "fused"
 
 async def _track(db, boxes, *, sources=None, classes=None, dt_s=0.33, cam="cam_f"):
     """A session, a track, and one frame per box. `boxes[i] is None` leaves that frame empty (a hole)."""
-    from db.models import Frame, Object, OntologyClass, OntologyVersion
+    from db.models import Frame, Object, OntologyClass, OntologyVersion, Track
     from db.models import Session as DbSession
-    from db.models import Track
     from services.autolabel.ontology import get_ontology
 
     onto = get_ontology()

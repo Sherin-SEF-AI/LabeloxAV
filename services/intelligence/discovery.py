@@ -79,7 +79,7 @@ async def discover_session(session_id: UUID, max_per_kind: int = 60) -> dict:
     for c in cands:
         by_kind[c[1]].append(c)
     kept: list[tuple] = []
-    for kind, items in by_kind.items():
+    for items in by_kind.values():
         kept.extend(sorted(items, key=lambda c: -c[2])[:max_per_kind])
 
     async with maker() as db:

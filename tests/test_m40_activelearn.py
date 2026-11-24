@@ -36,7 +36,6 @@ def test_al_selects_uncertain_diverse_rare_over_easy():
     from services.activelearn.budget import select_batch
 
     sid = uuid.uuid4()
-    rng = np.random.default_rng(11)
 
     def vec(seed):
         v = np.random.default_rng(seed).standard_normal(768).astype("float32")
@@ -57,19 +56,25 @@ def test_al_selects_uncertain_diverse_rare_over_easy():
             for i in range(4):
                 o = Object(frame_id=f.frame_id, class_id=1, bbox=[i, 0, i + 5, 5], conf=0.985,
                            state="auto_accept", source="auto_accept", provenance={"agreement": True})
-                db.add(o); await db.flush(); easy.append(o.object_id)
+                db.add(o)
+                await db.flush()
+                easy.append(o.object_id)
                 db.add(ObjectEmbedding(object_id=o.object_id, dino_vec=vec(100), model_versions={}))  # identical
             # 3 uncertain: mid-conf in the band, path disagreement, common class, diverse embeddings
             for i in range(3):
                 o = Object(frame_id=f.frame_id, class_id=2, bbox=[i, 10, i + 5, 15], conf=0.73,
                            state="review", source="fused", provenance={"agreement": False, "mask_box_disagree": True})
-                db.add(o); await db.flush(); unc.append(o.object_id)
+                db.add(o)
+                await db.flush()
+                unc.append(o.object_id)
                 db.add(ObjectEmbedding(object_id=o.object_id, dino_vec=vec(200 + i), model_versions={}))
             # 2 rare: fallback/india class, diverse embeddings
             for i in range(2):
                 o = Object(frame_id=f.frame_id, class_id=5, bbox=[i, 20, i + 5, 25], conf=0.7,
                            state="review", source="fused", provenance={"agreement": True})
-                db.add(o); await db.flush(); rare.append(o.object_id)
+                db.add(o)
+                await db.flush()
+                rare.append(o.object_id)
                 db.add(ObjectEmbedding(object_id=o.object_id, dino_vec=vec(300 + i), model_versions={}))
             await db.commit()
 

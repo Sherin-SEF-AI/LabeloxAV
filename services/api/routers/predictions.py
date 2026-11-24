@@ -14,13 +14,11 @@ from __future__ import annotations
 from uuid import UUID
 
 import cv2
-import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.storage import get_object_store
 from db.models import Frame, Prediction
 from services.api.deps import db_session, require_role
 
@@ -86,10 +84,11 @@ async def prediction_crop(prediction_id: str, pad: float = 0.15, db: AsyncSessio
     if frame is None:
         raise HTTPException(404, "frame not found")
     try:
-        buf = np.frombuffer(get_object_store().get_bytes(frame.img_uri), dtype=np.uint8)
+        from services.api.offload import encode_image, fetch_image
+
+        img = await fetch_image(frame.img_uri)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "frame image unavailable") from exc
-    img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
     if img is None:
         raise HTTPException(404, "failed to decode frame image")
     h, w = img.shape[:2]
@@ -100,5 +99,7 @@ async def prediction_crop(prediction_id: str, pad: float = 0.15, db: AsyncSessio
     crop = img[cy1:cy2, cx1:cx2]
     if crop.size == 0:
         crop = img
-    _ok, out = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 80])
-    return Response(content=out.tobytes(), media_type="image/jpeg")
+    out = await encode_image(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if out is None:
+        raise HTTPException(500, "failed to encode the crop")
+    return Response(content=out, media_type="image/jpeg")

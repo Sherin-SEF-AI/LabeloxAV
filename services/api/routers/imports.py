@@ -8,18 +8,40 @@ documented cloud seam for horizontal scale and is intentionally not built here.
 from __future__ import annotations
 
 import uuid
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
 from core.observability import spawn
 from db.models import ImportJob
 from db.session import get_sessionmaker
-from services.api.deps import ImportStartIn
+from services.api.deps import ApiOut, ImportStartIn
 from services.imports.records import ImportSpec
 from services.imports.run import ALL_FORMATS, run_import_guarded
 
 router = APIRouter()
+
+
+class ImportJobOut(ApiOut):
+    job_id: str
+    status: str
+    format: str
+    source_uri: str | None
+    target_vehicle: str
+    city: str | None
+    progress: float
+    counts: dict[str, Any] | None               # frames, objects, and whatever else the adapter counted
+    error: str | None
+    session_id: str | None                      # set once the import has created its session
+    created_at: str | None
+    updated_at: str | None
+
+
+class ImportFormatsOut(ApiOut):
+    formats: list[str]                          # everything the importer reads
+    annotated: list[str]                        # the ones that carry labels
+    raw: list[str]                              # raw media: no labels to read
 
 
 @router.get("/ingest/progress")
@@ -48,7 +70,7 @@ def _job_dict(j: ImportJob) -> dict:
     }
 
 
-@router.get("/imports/formats")
+@router.get("/imports/formats", response_model=ImportFormatsOut, response_model_exclude_unset=True)
 async def formats():
     """Every format the importer can actually read, and which of them are raw media.
 
@@ -80,15 +102,28 @@ async def dry_run(payload: ImportStartIn):
         raise HTTPException(status_code=400,
                             detail=f"'{payload.format}' has no annotation adapter to dry-run; "
                                    f"choose one of {sorted(ADAPTERS)}")
+    import asyncio
     import tempfile
     from pathlib import Path
 
-    with tempfile.TemporaryDirectory() as tmp:
-        try:
+    from services.imports.run import SourceNotAllowed, check_request_source
+
+    try:
+        check_request_source(payload.source_uri)
+    except SourceNotAllowed as exc:
+        raise HTTPException(403, str(exc)) from None
+
+    def _parse() -> list:
+        # Download, extraction and parsing are all blocking; on the event loop a large archive stalled
+        # every other request for as long as it took to unpack.
+        with tempfile.TemporaryDirectory() as tmp:
             root = _acquire_source(payload.source_uri, Path(tmp))
-            frames = ADAPTERS[payload.format](root)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(400, f"could not read that source: {exc}") from exc
+            return ADAPTERS[payload.format](root)
+
+    try:
+        frames = await asyncio.to_thread(_parse)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"could not read that source: {exc}") from exc
 
     return {"format": payload.format, "source_uri": payload.source_uri,
             "frames": len(frames),
@@ -99,10 +134,19 @@ async def dry_run(payload: ImportStartIn):
 async def start(payload: ImportStartIn):
     if payload.format not in ALL_FORMATS:
         raise HTTPException(status_code=400, detail=f"unknown format {payload.format}; choose {ALL_FORMATS}")
+    from services.imports.run import SourceNotAllowed, check_request_source
+
+    try:
+        check_request_source(payload.source_uri)
+    except SourceNotAllowed as exc:
+        raise HTTPException(403, str(exc)) from None
     job_id = uuid.uuid4()
     async with get_sessionmaker()() as db:
         db.add(ImportJob(job_id=job_id, status="pending", format=payload.format, source_uri=payload.source_uri,
-                         target_vehicle=payload.target_vehicle, city=payload.city, progress=0.0, counts={}))
+                         target_vehicle=payload.target_vehicle, city=payload.city, progress=0.0, counts={},
+                         # The whole request, so a restart can continue this job (services/job_recovery.py).
+                         spec={"options": payload.options, "project_id": payload.project_id,
+                               "resumable": True, "attempts": 0}))
         await db.commit()
     spec = ImportSpec(format=payload.format, source_uri=payload.source_uri,
                       target_vehicle=payload.target_vehicle, city=payload.city, options=payload.options,
@@ -111,7 +155,7 @@ async def start(payload: ImportStartIn):
     return {"job_id": str(job_id), "status": "pending"}
 
 
-@router.get("/imports/{job_id}")
+@router.get("/imports/{job_id}", response_model=ImportJobOut, response_model_exclude_unset=True)
 async def status(job_id: str):
     async with get_sessionmaker()() as db:
         j = await db.get(ImportJob, uuid.UUID(job_id))
@@ -120,8 +164,8 @@ async def status(job_id: str):
     return _job_dict(j)
 
 
-@router.get("/imports")
-async def list_jobs(limit: int = 50):
+@router.get("/imports", response_model=list[ImportJobOut], response_model_exclude_unset=True)
+async def list_jobs(limit: Annotated[int, Query(ge=1, le=1_000)] = 50):
     async with get_sessionmaker()() as db:
         rows = (await db.execute(select(ImportJob).order_by(ImportJob.created_at.desc()).limit(limit))).scalars().all()
     return [_job_dict(j) for j in rows]

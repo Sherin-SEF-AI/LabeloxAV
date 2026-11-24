@@ -144,8 +144,7 @@ class TestItRunsAfterAuth:
     """
 
     def test_the_limiter_is_registered_before_auth_so_it_sits_inside_it(self):
-        from services.api.main import app
-        from services.api.main import AuthMiddleware
+        from services.api.main import AuthMiddleware, app
 
         names = [m.cls.__name__ for m in app.user_middleware]
         # user_middleware is outermost-first, so the limiter must appear AFTER auth in this list.

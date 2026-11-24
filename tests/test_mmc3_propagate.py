@@ -45,7 +45,7 @@ def _seed_rig(db, sid, calibrated: bool):
 
 @requires_infra
 def test_propagate_projects_and_gates():
-    from sqlalchemy import delete, select
+    from sqlalchemy import delete
 
     from db.models import CalibrationValidation, CameraCalibration, Frame, FrameGroup, Object
     from db.models import Session as DbSession

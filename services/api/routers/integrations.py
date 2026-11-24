@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -75,7 +77,7 @@ async def list_sources(project_id: str | None = None, db: AsyncSession = Depends
 
 
 @router.get("/integrations/sources/{source_id}/preview")
-async def preview_source(source_id: str, limit: int = 50, _user=Depends(require_role("reviewer")),
+async def preview_source(source_id: str, limit: Annotated[int, Query(ge=1, le=1_000)] = 50, _user=Depends(require_role("reviewer")),
                          db: AsyncSession = Depends(db_session)):
     """A bounded key listing, so a human can confirm a source points where they think before importing."""
     try:

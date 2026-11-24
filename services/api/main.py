@@ -6,7 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from uuid import UUID
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -73,6 +73,7 @@ from services.api.routers import (
     ocr,
     op_eval,
     predictions,
+    presence,
     project_settings,
     quality,
     reasoner,
@@ -198,6 +199,16 @@ async def lifespan(app: FastAPI):
         from services.agent.resume import reap_interrupted
         from services.job_reaper import reap_stale_jobs
 
+        # First continue what can be continued (imports and exports whose process is gone), so the sweep
+        # below only fails what is left. Their rows are touched as they restart, which takes them out of
+        # the reaper's staleness window.
+        try:
+            from services.job_recovery import recover_interrupted_jobs
+
+            await recover_interrupted_jobs()
+        except Exception as exc:  # noqa: BLE001 - recovery must never stop the API from starting
+            log.warning("api.job_recovery_failed", error=str(exc))
+
         async with get_sessionmaker()() as db:
             await reap_interrupted(db)
             # The five job tables that are not AgentRun. One of them is not cosmetic: the autolabel router
@@ -263,6 +274,23 @@ _REVIEWER_PREFIXES = (
     # C7: model promotion, paid-GPU control, and corpus-wide re-detection are not annotator actions.
     "/api/training", "/api/cloud", "/api/autolabel",
 )
+
+# Reviewer floor for WRITES only. The prefixes above gate every request under them, reads included, which
+# is wrong for these: an annotator opens the jobs page, the map and a session's calibration report. What
+# they must not do is change them. Each of these mutations changes something every other user's work is
+# measured against, or spends the shared GPU on a whole session or corpus, and all of them sat at the
+# annotator floor because nothing named them: a recording health-gate override, cancelling anyone's job,
+# replacing a session's calibration, dispatching a flywheel cycle, re-mining a session (which replaces its
+# scenarios), corpus-wide attribute writes.
+_REVIEWER_WRITE_PREFIXES = (
+    "/api/calibration", "/api/flywheel", "/api/hdmap", "/api/jobs", "/api/discovery", "/api/mine",
+    "/api/embeddings", "/api/dynamics", "/api/attrsweep", "/api/activelearn", "/api/upload",
+    # The Labs engines. None is part of an annotator's task, and several write gate inputs
+    # (sanyx override, oraclyx consensus routes objects to auto-accept, forgyx rollout).
+    "/api/sanyx", "/api/oraclyx", "/api/calyx", "/api/sievyx", "/api/verdyx", "/api/forgyx",
+    "/api/hardening", "/api/labelox/",
+)
+_READ_METHODS = ("GET", "HEAD")
 
 # Reads fail closed. A GET is open only if its path is in this small allowlist; everything else under /api/
 # needs a valid token. This is the inversion of the old denylist: previously a new read route was open unless
@@ -335,12 +363,16 @@ def _is_sse_stream(path: str) -> bool:
     return path in _SSE_STREAM_PATHS or path.startswith(_SSE_STREAM_PREFIXES)
 
 
-def _required_role(path: str) -> str:
+def _required_role(path: str, method: str = "POST") -> str:
+    """The role floor for a request. `method` defaults to a write, the stricter answer, so a caller that
+    does not say what it is asking about is told the floor for the request that can do damage."""
     if path in _SELF_PATHS:
         return "annotator"
     if path.startswith(_ADMIN_PREFIXES):
         return "admin"
     if path.startswith(_REVIEWER_PREFIXES):
+        return "reviewer"
+    if method.upper() not in _READ_METHODS and path.startswith(_REVIEWER_WRITE_PREFIXES):
         return "reviewer"
     return "annotator"  # any authenticated user (expensive but non-destructive routes)
 
@@ -451,8 +483,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         if role is None:
             return JSONResponse({"detail": "authentication required (Bearer token)"}, status_code=401)
-        if role_rank(role) < role_rank(_required_role(path)):
-            return JSONResponse({"detail": f"requires {_required_role(path)} role or higher"}, status_code=403)
+        floor = _required_role(path, method)
+        if role_rank(role) < role_rank(floor):
+            return JSONResponse({"detail": f"requires {floor} role or higher"}, status_code=403)
         return await call_next(request)
 
 
@@ -496,13 +529,51 @@ from services.api.metrics import MetricsMiddleware  # noqa: E402
 app.middleware("http")(MetricsMiddleware())
 
 
+# One id per request, on every log line the request causes and on the response. Without it a failure in
+# the log could not be tied to the request that hit it: two requests interleave, a background task logs
+# long after its request returned, and the only thing in common was a timestamp. A caller's own id is kept
+# when it sends a sane one, so a trace can be followed across a proxy; anything else is replaced, because
+# the value is written to logs and echoed in a header.
+_REQUEST_ID_OK = __import__("re").compile(r"^[A-Za-z0-9._-]{8,64}$")
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    import uuid as _uuid
+
+    import structlog
+
+    supplied = request.headers.get("x-request-id", "")
+    rid = supplied if _REQUEST_ID_OK.match(supplied) else _uuid.uuid4().hex
+    request.state.request_id = rid
+    structlog.contextvars.bind_contextvars(request_id=rid)
+    try:
+        response = await call_next(request)
+    finally:
+        structlog.contextvars.unbind_contextvars("request_id")
+    response.headers["X-Request-ID"] = rid
+    return response
+
+
 @app.get("/metrics")
-async def metrics_endpoint():
-    """Prometheus scrape target: request rates/latencies (in-process) plus live corpus gauges (review-queue
-    depth, embedding backlog). Unauthenticated like a conventional metrics port; bind it internally in prod."""
+async def metrics_endpoint(request: Request):
+    """Prometheus scrape target: request rates/latencies (in-process) plus corpus gauges (review-queue
+    depth, embedding backlog), the gauges cached for `metrics.db_gauge_ttl_s`.
+
+    Open when `metrics.token` is empty, like a conventional metrics port; with a token set, the scraper
+    must present it as a Bearer credential. Compared in constant time."""
+    import hmac
+
     from fastapi import Response
 
     from services.api.metrics import render, sample_db_gauges
+
+    token = get_settings().metrics.token
+    if token:
+        presented = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+        if not hmac.compare_digest(presented.encode(), token.encode()):
+            return Response("metrics require a bearer token\n", status_code=401,
+                            headers={"WWW-Authenticate": "Bearer"}, media_type="text/plain")
 
     body = await render(await sample_db_gauges())
     return Response(body, media_type="text/plain; version=0.0.4")
@@ -556,7 +627,13 @@ async def health():
             await r.aclose()
 
     async def _minio():
-        get_object_store().ensure_bucket()
+        # A read, off the event loop. This used to call ensure_bucket(), which is blocking and CREATES the
+        # bucket when it is missing: an unauthenticated liveness probe had a write side effect, and a
+        # deployment whose bucket had been removed reported itself healthy while quietly recreating an
+        # empty one.
+        import asyncio
+
+        await asyncio.to_thread(get_object_store().bucket_reachable)
 
     await _check("postgres", _pg())
     await _check("redis", _redis())
@@ -709,3 +786,4 @@ def mount_optional_routers(target, enabled) -> list[str]:
 mount_optional_routers(app, set(get_settings().packs.optional))
 app.include_router(ocr.router, prefix="/api", tags=["ocr"], dependencies=PROJECT_GUARD)
 app.include_router(track_events.router, prefix="/api", tags=["tracks"], dependencies=PROJECT_GUARD)
+app.include_router(presence.router, prefix="/api", tags=["presence"], dependencies=PROJECT_GUARD)

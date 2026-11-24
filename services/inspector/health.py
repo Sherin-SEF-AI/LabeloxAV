@@ -129,7 +129,7 @@ def _gnss_summary_from_bytes(mcap_bytes: bytes, gnss_topics: list[str]) -> dict:
 
     reader = make_reader(io.BytesIO(mcap_bytes))
     total = valid = 0
-    for _schema, channel, message in reader.iter_messages(topics=gnss_topics):
+    for _schema, _channel, message in reader.iter_messages(topics=gnss_topics):
         total += 1
         try:
             d = json.loads(message.data)

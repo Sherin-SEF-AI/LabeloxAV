@@ -5,8 +5,9 @@ Mounted under /api."""
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -75,7 +76,7 @@ async def adaptive_cycle_run(payload: AdaptiveIn, db: AsyncSession = Depends(db_
 
 
 @router.get("/flywheel/adaptive/cycles")
-async def adaptive_cycles(limit: int = 20, db: AsyncSession = Depends(db_session)):
+async def adaptive_cycles(limit: Annotated[int, Query(ge=1, le=1_000)] = 20, db: AsyncSession = Depends(db_session)):
     """The adaptive-cycle history: how the data engine steered its label spend and collection over time."""
     return await recent_cycles(db, limit)
 

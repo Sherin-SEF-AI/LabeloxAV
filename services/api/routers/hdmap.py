@@ -5,6 +5,7 @@ element's provenance to its source frames + calibration + fusion run."""
 from __future__ import annotations
 
 import json
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -59,7 +60,7 @@ async def fuse(session_ids: str = Query(..., description="comma-separated sessio
 
 
 @router.get("/hdmap/commits")
-async def commits(db: AsyncSession = Depends(db_session), limit: int = Query(200, ge=1, le=1000)):
+async def commits(db: AsyncSession = Depends(db_session), limit: Annotated[int, Query(ge=1, le=1000)] = 200):
     rows = (await db.execute(select(MapCommit).order_by(MapCommit.created_at.desc()).limit(limit))).scalars().all()
     return [{"commit_id": c.commit_id, "region": c.region, "element_count": c.element_count,
              "session_ids": c.session_ids, "formats": c.formats, "calibration_version": c.calibration_version,
@@ -94,14 +95,24 @@ async def provenance(element_id: UUID, db: AsyncSession = Depends(db_session)):
     if el is None:
         return {"found": False}
     frames = []
+    fids = []
     for fid in (el.source_frames or []):
         try:
-            f = await db.get(Frame, UUID(fid))
-        except Exception:  # noqa: BLE001
-            f = None
+            fids.append(UUID(fid))
+        except Exception:  # noqa: BLE001 - a malformed id in the element is skipped, as before
+            continue
+    # Two queries for the whole element rather than two per source frame.
+    by_frame = ({f.frame_id: f for f in (await db.execute(
+        select(Frame).where(Frame.frame_id.in_(fids)))).scalars()} if fids else {})
+    sess_ids = {f.session_id for f in by_frame.values()}
+    by_session = ({s.session_id: s for s in (await db.execute(
+        select(DbSession).where(DbSession.session_id.in_(sess_ids)))).scalars()} if sess_ids else {})
+    for fuuid in fids:
+        f = by_frame.get(fuuid)
         if f is None:
             continue
-        sess = await db.get(DbSession, f.session_id)
+        fid = str(fuuid)
+        sess = by_session.get(f.session_id)
         frames.append({"frame_id": fid, "session_id": str(f.session_id), "cam_id": f.cam_id, "ts_ns": f.ts_ns,
                        "vehicle_id": sess.vehicle_id if sess else None,
                        "ontology_version": sess.ontology_version if sess else None})

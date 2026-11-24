@@ -19,6 +19,7 @@ from typing import Any, Protocol
 import httpx
 
 from core.config import Settings, get_settings
+from services.llm import ledger
 
 
 @dataclass
@@ -57,9 +58,12 @@ def _parse_args(raw: Any) -> dict:
 class OpenAICompatible:
     """Ollama (/v1) and Groq."""
 
-    def __init__(self, base_url: str, model: str, api_key: str = "", timeout_s: float = 90.0):
+    def __init__(self, base_url: str, model: str, api_key: str = "", timeout_s: float = 90.0,
+                 provider: str = "ollama"):
         self.base_url, self.model, self.api_key, self.timeout_s = base_url.rstrip("/"), model, api_key, timeout_s
         self.name = model
+        # Which provider this endpoint is, for the usage ledger (services/llm/ledger.py).
+        self.provider = provider
 
     @staticmethod
     def _messages(system: str, messages: list[dict]) -> list[dict]:
@@ -81,7 +85,8 @@ class OpenAICompatible:
                 "tools": [{"type": "function", "function": t} for t in tools], "tool_choice": "auto"}
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         try:
-            r = httpx.post(f"{self.base_url}/chat/completions", json=body, headers=headers, timeout=self.timeout_s)
+            r = ledger.post(f"{self.base_url}/chat/completions", provider=self.provider, model=self.model,
+                            purpose="assistant", json=body, headers=headers, timeout=self.timeout_s)
             r.raise_for_status()
         except httpx.HTTPError as exc:
             raise AssistantUnavailable(f"{self.model}: {exc}") from exc
@@ -127,8 +132,9 @@ class Anthropic:
                           for t in tools]}
         headers = {"x-api-key": self.cfg.api_key, "anthropic-version": self.cfg.api_version}
         try:
-            r = httpx.post(f"{self.cfg.base_url.rstrip('/')}/messages", json=body, headers=headers,
-                           timeout=self.timeout_s)
+            r = ledger.post(f"{self.cfg.base_url.rstrip('/')}/messages", provider="anthropic",
+                            model=self.model, purpose="assistant", json=body, headers=headers,
+                            timeout=self.timeout_s)
             r.raise_for_status()
         except httpx.HTTPError as exc:
             raise AssistantUnavailable(f"{self.model}: {exc}") from exc
@@ -149,7 +155,7 @@ def make_model(settings: Settings | None = None) -> ChatModel:
         if not settings.groq.api_key:
             raise AssistantUnavailable("groq: no API key configured")
         return OpenAICompatible(settings.groq.base_url, cfg.groq_model or settings.groq.text_model,
-                                settings.groq.api_key, cfg.timeout_s)
+                                settings.groq.api_key, cfg.timeout_s, provider="groq")
     if cfg.provider == "anthropic":
         return Anthropic(settings, cfg.anthropic_model, cfg.timeout_s)
     return OpenAICompatible(f"{settings.models.vlm.ollama_url.rstrip('/')}/v1", cfg.ollama_model,

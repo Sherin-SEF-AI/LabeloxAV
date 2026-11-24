@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -12,15 +13,110 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Frame, Object, OntologyClass, Review
 from db.models import Session as DbSession
 from platforms.registry import as_dicts as platform_dicts
-from services.api.deps import OntologyClassOut, current_user, db_session, require_role
+from services.api.deps import (
+    ApiOut,
+    OntologyClassOut,
+    SessionOut,
+    current_user,
+    db_session,
+    require_role,
+)
 from services.api.project_guard import caller_hidden_projects
 from services.autolabel.ontology import add_custom_class, get_ontology
 from services.project_access import scope_visible_sessions
 
 router = APIRouter()
 
+# Every route below that declares an ApiOut is served with response_model_exclude_unset, so the body is
+# the handler's dict key for key. services/api/deps.py (ApiOut) has the reasoning.
 
-@router.get("/platforms")
+
+class PlatformOut(ApiOut):
+    id: str
+    label: str
+    role: str
+    backend_prefix: str
+    legacy_prefixes: list[str]
+    gate: str | None                            # health | calibration | eval | benchmark
+    order: int
+    flywheel_stage: int | None
+
+
+class PlatformsOut(ApiOut):
+    platforms: list[PlatformOut]
+
+
+class ClassCreatedOut(ApiOut):
+    """The class a create call landed on. `existed` is true when the name was already taken and the
+    existing class came back instead of a new one."""
+
+    id: int
+    name: str
+    l0: str
+    l1: str
+    india: bool
+    existed: bool
+
+
+class OntologyAttributeOut(ApiOut):
+    type: str
+    values: list[Any] | None
+    # Bounds as the YAML wrote them, so an integer range stays [0, 12] and does not become [0.0, 12.0].
+    range: list[int | float] | None
+    derived_from: str | None
+
+
+class OntologyClassAliasedOut(ApiOut):
+    """A class as GET /ontology lists it: OntologyClassOut plus its aliases."""
+
+    id: int
+    name: str
+    l0: str
+    l1: str
+    india: bool
+    aliases: list[str]
+
+
+class OntologyOut(ApiOut):
+    active_class_ids: list[int] | None          # null when the project labels every class
+    # services.project_classes.describe names one of exactly three sets, so the three are the type.
+    class_set: Literal["india", "generic", "custom"]
+    version: str
+    hierarchy_levels: int
+    attributes: dict[str, OntologyAttributeOut]
+    classes: list[OntologyClassAliasedOut]
+    attribute_scope: dict[str, list[str]]
+    attribute_scope_class: dict[str, list[str]]
+
+
+class SessionPageOut(ApiOut):
+    total: int
+    offset: int
+    limit: int
+    sessions: list[SessionOut]
+
+
+class SessionStateOut(ApiOut):
+    session_id: str
+    frames: int
+    objects: int
+    reviewed_objects: int
+
+
+class SessionStatsOut(ApiOut):
+    session_id: str
+    frames: int
+    objects: int
+    by_state: dict[str, int]
+    done: int
+    progress: float
+
+
+class FirstFrameOut(ApiOut):
+    frame_id: str
+
+
+@router.get("/platforms", response_model=PlatformsOut, response_model_exclude_unset=True)
 async def list_platforms():
     """The platform registry: the seven platforms the data engine hosts (annotation core + the six folded
     subsystems), in launcher order. The frontend mirror (web/platforms/registry.ts) must match these ids;
@@ -35,7 +131,8 @@ class NewClassIn(BaseModel):
     india: bool = True
 
 
-@router.post("/ontology/classes", dependencies=[Depends(require_role("reviewer"))])
+@router.post("/ontology/classes", dependencies=[Depends(require_role("reviewer"))],
+             response_model=ClassCreatedOut, response_model_exclude_unset=True)
 async def create_class(payload: NewClassIn, db: AsyncSession = Depends(db_session)):
     """Add an annotator-defined custom class. It lands in the custom id block, is marked rare so the gate
     routes it to human review, and is mirrored into the DB ontology table for the current version.
@@ -143,7 +240,7 @@ async def retire_classes(class_ids: list[int], db: AsyncSession = Depends(db_ses
     return retire_from_sidecar(set(class_ids))
 
 
-@router.get("/ontology")
+@router.get("/ontology", response_model=OntologyOut, response_model_exclude_unset=True)
 async def ontology(frame_id: str | None = None, session_id: str | None = None, project_id: uuid.UUID | None = None,
                    db: AsyncSession = Depends(db_session)):
     """The whole ontology, and, given where the caller is working (a frame, a session or a project), the
@@ -178,8 +275,9 @@ async def ontology(frame_id: str | None = None, session_id: str | None = None, p
                 "derived_from": a.derived_from}
             for n, a in onto.attributes.items()
         },
-        # Aliases ride alongside the class rather than inside OntologyClassOut, which is also the response
-        # model for the class-creation endpoints above and has no business gaining a field they cannot set.
+        # Aliases ride alongside the class rather than inside OntologyClassOut, which is also the shape
+        # the class-creation endpoint above answers with and has no business gaining a field it cannot
+        # set. OntologyClassAliasedOut is the declared form of the pair.
         "classes": [{**OntologyClassOut(id=c.id, name=c.name, l0=c.l0, l1=c.l1, india=c.india).model_dump(),
                      "aliases": list(c.aliases)}
                     for c in sorted(onto.classes, key=lambda c: c.id)],
@@ -220,17 +318,17 @@ def _session_row(s) -> dict:
     }
 
 
-@router.get("/sessions")
-async def sessions(db: AsyncSession = Depends(db_session), limit: int = Query(200, ge=1, le=1000),
+@router.get("/sessions", response_model=list[SessionOut], response_model_exclude_unset=True)
+async def sessions(db: AsyncSession = Depends(db_session), limit: Annotated[int, Query(ge=1, le=1000)] = 200,
                    hidden=Depends(caller_hidden_projects)):
     rows = (await db.execute(scope_visible_sessions(select(DbSession), hidden)
                              .order_by(DbSession.created_at.desc()).limit(limit))).scalars().all()
     return [_session_row(s) for s in rows]
 
 
-@router.get("/sessions/page")
+@router.get("/sessions/page", response_model=SessionPageOut, response_model_exclude_unset=True)
 async def sessions_page(db: AsyncSession = Depends(db_session),
-                        limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
+                        limit: Annotated[int, Query(ge=1, le=500)] = 50, offset: int = Query(0, ge=0),
                         vehicle_id: str | None = None, project_id: uuid.UUID | None = None,
                         hidden=Depends(caller_hidden_projects)):
     """Paginated session list with a total, so the browser can page through all 2000+ drives instead of
@@ -248,7 +346,7 @@ async def sessions_page(db: AsyncSession = Depends(db_session),
             "sessions": [_session_row(s) for s in rows]}
 
 
-@router.get("/sessions/states")
+@router.get("/sessions/states", response_model=list[SessionStateOut], response_model_exclude_unset=True)
 async def session_states(db: AsyncSession = Depends(db_session), hidden=Depends(caller_hidden_projects)):
     """One row per session saying what state the work is in, for the editor's drive picker.
 
@@ -292,7 +390,8 @@ async def session_states(db: AsyncSession = Depends(db_session), hidden=Depends(
     return await drop_hidden(db, hidden, rows_out, "session_id")
 
 
-@router.get("/sessions/{session_id}/stats")
+@router.get("/sessions/{session_id}/stats", response_model=SessionStatsOut,
+            response_model_exclude_unset=True)
 async def session_stats(session_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
     """Per-session progress for the Open Annotation browser: frame count + object counts by state, and a
     progress fraction (auto-accepted + human-accepted over total)."""
@@ -310,7 +409,8 @@ async def session_stats(session_id: uuid.UUID, db: AsyncSession = Depends(db_ses
             "progress": round(done / objects, 3) if objects else 0.0}
 
 
-@router.get("/sessions/{session_id}/first-frame")
+@router.get("/sessions/{session_id}/first-frame", response_model=FirstFrameOut,
+            response_model_exclude_unset=True)
 async def first_frame(session_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
     """The chronological first frame of a session, so a card can open it directly in the editor."""
     fid = (await db.execute(select(Frame.frame_id).where(Frame.session_id == session_id)

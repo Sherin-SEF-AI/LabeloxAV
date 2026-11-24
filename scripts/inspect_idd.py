@@ -48,7 +48,7 @@ def main() -> None:
         except Exception:
             continue
 
-    print(f"\n  IDD class names (sampled) -> mapped ontology name:")
+    print("\n  IDD class names (sampled) -> mapped ontology name:")
     from scripts.idd_to_yolo import _map_name
 
     for name, cnt in classes.most_common():

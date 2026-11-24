@@ -1,7 +1,6 @@
 """SANYX M10 tests: root-cause classification on known-fault signatures, rig predictive-maintenance trend
 detection, and mid-stream flagging by the streaming accumulator."""
 
-import numpy as np
 
 from core.config import SanyxSettings
 from services.sanyx.rootcause import classify, feature_vector

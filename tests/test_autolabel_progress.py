@@ -103,8 +103,8 @@ class TestFrameLoopReportsProgress:
             def close_stage1(self):
                 pass
 
-            def run_stage1_frame(self, img):
-                return [], []
+            def run_stage1_batch(self, images):
+                return [([], []) for _ in images]
 
         # Mirrors the real signature: fetch_frames grew only_unlabelled so a bounded run can advance
         # through a drive instead of redoing its first N frames.
@@ -141,8 +141,8 @@ class TestFrameLoopReportsProgress:
             def close_stage1(self):
                 pass
 
-            def run_stage1_frame(self, img):
-                return [], []
+            def run_stage1_batch(self, images):
+                return [([], []) for _ in images]
 
         # Mirrors the real signature: fetch_frames grew only_unlabelled so a bounded run can advance
         # through a drive instead of redoing its first N frames.

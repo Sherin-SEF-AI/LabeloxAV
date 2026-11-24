@@ -10,18 +10,62 @@ is surveillance rather than compliance.
 
 from __future__ import annotations
 
+from typing import Annotated, Any
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.api.deps import db_session, require_role, require_user
+from services.api.deps import ApiOut, db_session, require_role, require_user
 
 router = APIRouter()
 
 
+class NotificationOut(ApiOut):
+    """services/notify.py `_dict`, plus whether this caller has read it."""
+
+    notification_id: str
+    kind: str
+    severity: str                               # info | warn | critical
+    title: str
+    body: str | None
+    href: str | None
+    subject_type: str | None
+    subject_id: str | None
+    role: str | None                            # set on a notification addressed to a role, not a person
+    user_id: str | None
+    meta: dict[str, Any]
+    created_at: str | None
+    read: bool
+
+
+class NotificationsOut(ApiOut):
+    total: int
+    offset: int
+    limit: int
+    notifications: list[NotificationOut]
+
+
+class UnreadCountOut(ApiOut):
+    unread: int
+
+
+class MarkReadOut(ApiOut):
+    """Two shapes from one route, and no key in common but `marked`: a success names the notification, a
+    refusal says why (`not found`, `not addressed to you`). Both are a 200."""
+
+    marked: bool
+    notification_id: str | None = None
+    reason: str | None = None
+
+
+class MarkAllReadOut(ApiOut):
+    marked: int                                 # how many, where the single-notification route answers a bool
+
+
 # ---------------------------------------------------------------- notifications
 
-@router.get("/notifications")
-async def list_notifications(unread_only: bool = False, limit: int = Query(50, ge=1, le=200),
+@router.get("/notifications", response_model=NotificationsOut, response_model_exclude_unset=True)
+async def list_notifications(unread_only: bool = False, limit: Annotated[int, Query(ge=1, le=200)] = 50,
                              offset: int = Query(0, ge=0), user=Depends(require_user),
                              db: AsyncSession = Depends(db_session)):
     from services import notify
@@ -29,7 +73,7 @@ async def list_notifications(unread_only: bool = False, limit: int = Query(50, g
     return await notify.list_for(db, user, unread_only=unread_only, limit=limit, offset=offset)
 
 
-@router.get("/notifications/count")
+@router.get("/notifications/count", response_model=UnreadCountOut, response_model_exclude_unset=True)
 async def count_notifications(user=Depends(require_user), db: AsyncSession = Depends(db_session)):
     """What the bell renders. Cheap enough to call on every page mount."""
     from services import notify
@@ -37,7 +81,8 @@ async def count_notifications(user=Depends(require_user), db: AsyncSession = Dep
     return {"unread": await notify.unread_count(db, user)}
 
 
-@router.post("/notifications/{notification_id}/read")
+@router.post("/notifications/{notification_id}/read", response_model=MarkReadOut,
+             response_model_exclude_unset=True)
 async def read_notification(notification_id: str, user=Depends(require_user),
                             db: AsyncSession = Depends(db_session)):
     from services import notify
@@ -45,7 +90,7 @@ async def read_notification(notification_id: str, user=Depends(require_user),
     return await notify.mark_read(db, user, notification_id)
 
 
-@router.post("/notifications/read-all")
+@router.post("/notifications/read-all", response_model=MarkAllReadOut, response_model_exclude_unset=True)
 async def read_all(user=Depends(require_user), db: AsyncSession = Depends(db_session)):
     from services import notify
 
@@ -57,7 +102,7 @@ async def read_all(user=Depends(require_user), db: AsyncSession = Depends(db_ses
 @router.get("/activity")
 async def list_activity(user_id: str | None = None, verb: str | None = None,
                         since_hours: int | None = None, mine: bool = False,
-                        limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
+                        limit: Annotated[int, Query(ge=1, le=500)] = 100, offset: int = Query(0, ge=0),
                         user=Depends(require_user), db: AsyncSession = Depends(db_session)):
     """The feed. `mine=true` is the "what did I do today" view; without it, the whole team's, which is what
     a lead reads."""
@@ -81,7 +126,7 @@ async def activity_summary(hours: int = Query(24, ge=1, le=720), mine: bool = Tr
 async def pii_access(user_id: str | None = None, subject_id: str | None = None,
                      session_id: str | None = None, action: str | None = None,
                      since_hours: int | None = None,
-                     limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
+                     limit: Annotated[int, Query(ge=1, le=500)] = 100, offset: int = Query(0, ge=0),
                      db: AsyncSession = Depends(db_session)):
     """Who viewed personal data. Admin-only: it is a record about employees as much as about subjects."""
     from services.govern.pii_access import list_access

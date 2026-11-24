@@ -8,6 +8,7 @@ A derived event is a candidate, and a candidate nobody ruled on is not a label.
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -34,7 +35,7 @@ async def taxonomy():
 @router.get("/sessions/{session_id}/driving-events")
 async def list_driving_events(session_id: UUID, kind: str | None = None, state: str | None = None,
                               severity: str | None = None, track_id: UUID | None = None,
-                              limit: int = Query(2000, ge=1, le=20000)):
+                              limit: Annotated[int, Query(ge=1, le=20000)] = 2000):
     """One session's driving events, narrowed by kind, review state, severity, or actor."""
     from services.intelligence.timeline_events import list_events
 
@@ -124,7 +125,7 @@ async def search(kind: str | None = None, severity: str | None = None, state: st
                  min_conf: float | None = None,
                  with_kind: str | None = None, with_state: str | None = None,
                  within_ms: int = 0,
-                 limit: int = Query(200, ge=1, le=1000), offset: int = Query(0, ge=0),
+                 limit: Annotated[int, Query(ge=1, le=1000)] = 200, offset: int = Query(0, ge=0),
                  db: AsyncSession = Depends(db_session)):
     """Behaviour across the whole corpus, not one session.
 

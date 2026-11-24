@@ -7,6 +7,8 @@ model missing entirely.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -105,7 +107,7 @@ async def score_tracking(gold_id: str, run_id: str, iou_thr: float = Query(0.5, 
 
 @router.get("/activelearn/false-negatives")
 async def false_negatives(session_id: str | None = None,
-                          limit: int = Query(4000, ge=1, le=20000),
+                          limit: Annotated[int, Query(ge=1, le=20000)] = 4000,
                           top_k: int = Query(200, ge=1, le=2000),
                           accept_threshold: float = Query(0.5, ge=0.0, le=1.0),
                           db: AsyncSession = Depends(db_session)):

@@ -499,7 +499,7 @@ class _DonorCache:
 
 
 def _seeded_rng(seed: str, frame_id: uuid.UUID) -> random.Random:
-    return random.Random(int(hashlib.md5(f"{_SALT}:{seed}:{frame_id}".encode()).hexdigest()[:16], 16))
+    return random.Random(int(hashlib.md5(f"{_SALT}:{seed}:{frame_id}".encode(), usedforsecurity=False).hexdigest()[:16], 16))
 
 
 async def _new_session(db: AsyncSession, template: Session, *, class_names: list[str], run_id: uuid.UUID) -> Session:
@@ -549,7 +549,7 @@ async def build(run_id: uuid.UUID, *, class_names: list[str], n_frames: int, see
             await db.commit()
 
         cache = _DonorCache(store)
-        rng_pick = random.Random(int(hashlib.md5(f"{_SALT}:{seed}".encode()).hexdigest()[:16], 16))
+        rng_pick = random.Random(int(hashlib.md5(f"{_SALT}:{seed}".encode(), usedforsecurity=False).hexdigest()[:16], 16))
         offset = 0
         ts_seen: list[int] = []
         while report["frames"] < n_frames:

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from db.models import StaticElement
-from services.api.deps import db_session
+from services.api.deps import db_session, require_role
 
 log = get_logger("api_lidar_scene")
 router = APIRouter()
@@ -35,7 +35,7 @@ class Export3DIn(BaseModel):
     export_clouds: bool = False
 
 
-@router.post("/lidar/export3d")
+@router.post("/lidar/export3d", dependencies=[Depends(require_role("reviewer"))])
 async def export3d(body: Export3DIn):
     """Seal a 3D slice into a dataset commit and export it to OpenLABEL, nuScenes, KITTI, Waymo, and raw
     clouds (LAS/PCD), with a provenance sidecar and a pinned commit (M-L3.4)."""
@@ -59,7 +59,7 @@ async def search3d(q: str):
     return await search_clouds_3d(q)
 
 
-@router.post("/lidar/aggregate")
+@router.post("/lidar/aggregate", dependencies=[Depends(require_role("reviewer"))])
 async def aggregate(body: AggregateIn):
     """Register, loop-close, and accumulate the clouds across sessions into a dense map (M-L3.2). Local on the
     box; the A100 burst is the seam for large volumes."""
@@ -121,14 +121,14 @@ async def list_quality3d(cloud_id: uuid.UUID, db: AsyncSession = Depends(db_sess
             "detail": f.detail} for f in rows]}
 
 
-@router.post("/lidar/sessions/{session_id}/scene3d")
+@router.post("/lidar/sessions/{session_id}/scene3d", dependencies=[Depends(require_role("reviewer"))])
 async def scene3d(session_id: uuid.UUID):
     """Classify the 3D structure (tunnel/flyover/open) of a session and merge it into Frame.scene (M-L3.3)."""
     from services.lidar.quality3d import classify_session_3d
     return await classify_session_3d(session_id)
 
 
-@router.post("/lidar/sessions/{session_id}/rare3d")
+@router.post("/lidar/sessions/{session_id}/rare3d", dependencies=[Depends(require_role("reviewer"))])
 async def rare3d(session_id: uuid.UUID):
     """Mine 3D rare cues (flooded road, animal, emergency vehicle, debris) into ScenarioCandidate rows."""
     from services.lidar.quality3d import mine_session_3d

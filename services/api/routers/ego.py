@@ -129,7 +129,6 @@ async def occupancy_voxels(grid_id: uuid.UUID, max_voxels: int = Query(default=6
     them stops being a viewer. When it truncates it says so, so a thin-looking scene reads as a display
     limit rather than as empty road.
     """
-    from core.storage import get_object_store
     from db.models import OccupancyGrid
     from services.lidar.occupancy4d import unpack_grid
 
@@ -137,7 +136,9 @@ async def occupancy_voxels(grid_id: uuid.UUID, max_voxels: int = Query(default=6
     if g is None:
         raise HTTPException(status_code=404, detail="grid not found")
     try:
-        data = unpack_grid(get_object_store().get_bytes(g.grid_uri))
+        from services.api.offload import fetch_bytes, run_blocking
+
+        data = await run_blocking(unpack_grid, await fetch_bytes(g.grid_uri))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"the packed grid could not be read: {exc}") from exc
 

@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -110,7 +111,7 @@ async def _visible(db: AsyncSession, p: AssistantProposal, hidden: frozenset) ->
 
 
 @router.get("/assistant/proposals", dependencies=[Depends(require_role("annotator"))])
-async def proposals(status: str = "pending", limit: int = 50, db: AsyncSession = Depends(db_session),
+async def proposals(status: str = "pending", limit: Annotated[int, Query(ge=1, le=1_000)] = 50, db: AsyncSession = Depends(db_session),
                     hidden=Depends(caller_hidden_projects)):
     q = select(AssistantProposal).order_by(AssistantProposal.created_at.desc()).limit(min(max(limit, 1), 200))
     if status != "all":

@@ -538,7 +538,7 @@ async def settle_lot(db: AsyncSession, lot_id: str, *, created_by: str = "settle
                 obj.version = (obj.version or 0) + 1
                 # The spot mirror: a deterministic 2% by a different hash salt than the acceptance
                 # sample, so the continuous check never re-examines the crops the decision was made on.
-                digest = hashlib.md5(f"{obj.object_id}settle-spot".encode()).hexdigest()
+                digest = hashlib.md5(f"{obj.object_id}settle-spot".encode(), usedforsecurity=False).hexdigest()
                 if int(digest[:8], 16) / 0xFFFFFFFF < SPOT_FRACTION and len(spot_ids) < SPOT_CAP:
                     spot_ids.append(obj.object_id)
                     # Stamped like a mined batch so the grid can serve it; without this the spots

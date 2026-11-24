@@ -72,7 +72,6 @@ def _read_qwen(crop_bgr: np.ndarray) -> tuple[str, str, float | None]:
     """
     import base64
 
-    import httpx
 
     vlm = get_settings().models.vlm
     ok, buf = cv2.imencode(".jpg", crop_bgr)
@@ -82,7 +81,10 @@ def _read_qwen(crop_bgr: np.ndarray) -> tuple[str, str, float | None]:
     prompt = ('Read any text printed on this road sign or board. Reply with strict JSON only: '
               '{"text": "<the text, empty if none>", "lang": "<en|hi|ta|te|kn|other>"}.')
     try:
-        resp = httpx.post(f"{vlm.ollama_url}/api/chat", timeout=vlm.timeout_s, json={
+        from services.llm import ledger
+
+        resp = ledger.post(f"{vlm.ollama_url}/api/chat", provider="ollama", model=vlm.ollama_tag,
+                           purpose="sign_ocr", timeout=vlm.timeout_s, json={
             "model": vlm.ollama_tag, "stream": False, "format": "json",
             "messages": [{"role": "user", "content": prompt, "images": [b64]}]})
         resp.raise_for_status()

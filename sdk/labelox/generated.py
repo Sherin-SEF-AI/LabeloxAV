@@ -2843,6 +2843,26 @@ class LabeloxClient:
         return self._call("GET", f"/api/predictions/{prediction_id}/crop",
                           params={"pad": pad}, json_body=None)
 
+    def post_presence_frames_by_frame_id_heartbeat(self, frame_id: str, body: Any = None) -> Any:
+        """Heartbeat"""
+        return self._call("POST", f"/api/presence/frames/{frame_id}/heartbeat",
+                          params=None, json_body=body)
+
+    def post_presence_frames_by_frame_id_lock_acquire(self, frame_id: str, body: Any = None) -> Any:
+        """Acquire Lock"""
+        return self._call("POST", f"/api/presence/frames/{frame_id}/lock/acquire",
+                          params=None, json_body=body)
+
+    def post_presence_frames_by_frame_id_lock_release(self, frame_id: str, body: Any = None) -> Any:
+        """Release Lock"""
+        return self._call("POST", f"/api/presence/frames/{frame_id}/lock/release",
+                          params=None, json_body=body)
+
+    def post_presence_frames_by_frame_id_lock_takeover(self, frame_id: str, body: Any = None) -> Any:
+        """Take Over Lock"""
+        return self._call("POST", f"/api/presence/frames/{frame_id}/lock/takeover",
+                          params=None, json_body=body)
+
     def get_projects(self) -> Any:
         """List Projects"""
         return self._call("GET", f"/api/projects",
@@ -3498,6 +3518,21 @@ class LabeloxClient:
         return self._call("GET", f"/api/system/features",
                           params=None, json_body=None)
 
+    def get_system_llm_usage(self, days: int | None = 30) -> Any:
+        """Llm Usage"""
+        return self._call("GET", f"/api/system/llm-usage",
+                          params={"days": days}, json_body=None)
+
+    def get_system_models(self) -> Any:
+        """Loaded Models"""
+        return self._call("GET", f"/api/system/models",
+                          params=None, json_body=None)
+
+    def post_system_models_release(self, key: Any | None = None) -> Any:
+        """Release Models"""
+        return self._call("POST", f"/api/system/models/release",
+                          params={"key": key}, json_body=None)
+
     def get_system_resources(self) -> Any:
         """System Resources"""
         return self._call("GET", f"/api/system/resources",
@@ -3926,4 +3961,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 768 routes generated from the server schema.
+# 775 routes generated from the server schema.

@@ -28,23 +28,29 @@ def test_breaker_opens_after_threshold_and_reopens_after_cooldown():
     t = {"now": 0.0}
     b = CircuitBreaker(threshold=2, cooldown_s=10, clock=lambda: t["now"])
     assert b.allow()
-    b.record_failure(); assert b.allow()      # 1 failure, still closed
-    b.record_failure(); assert not b.allow()   # 2 failures, open
+    b.record_failure()
+    assert b.allow()      # 1 failure, still closed
+    b.record_failure()
+    assert not b.allow()   # 2 failures, open
     t["now"] = 11                              # past cooldown
     assert b.allow()                           # half-open probe allowed
-    b.record_success(); assert b.allow()       # a success closes it
+    b.record_success()
+    assert b.allow()       # a success closes it
 
 
 def test_no_cloud_config_returns_plain_ollama(vlm_cfg):
     v, _ = vlm_cfg
-    v.vision_provider = "ollama"; v.escalate_provider = None
+    v.vision_provider = "ollama"
+    v.escalate_provider = None
     from services.autolabel.paths.path_c_vlm import OllamaVlmClient
     assert isinstance(make_vlm_client(), OllamaVlmClient)
 
 
 def test_groq_success_is_used_and_tagged(vlm_cfg, monkeypatch):
     v, g = vlm_cfg
-    v.vision_provider = "groq"; v.allow_cloud_media = True; g.api_key = "test-key"
+    v.vision_provider = "groq"
+    v.allow_cloud_media = True
+    g.api_key = "test-key"
     client = make_vlm_client()
     assert isinstance(client, RoutedVlmClient)
 
@@ -59,7 +65,9 @@ def test_groq_success_is_used_and_tagged(vlm_cfg, monkeypatch):
 
 def test_groq_failure_falls_back_to_ollama(vlm_cfg, monkeypatch):
     v, g = vlm_cfg
-    v.vision_provider = "groq"; v.allow_cloud_media = True; g.api_key = "test-key"
+    v.vision_provider = "groq"
+    v.allow_cloud_media = True
+    g.api_key = "test-key"
     client = make_vlm_client()
 
     monkeypatch.setattr("services.llm.groq_client.GroqClient.chat_json",
@@ -73,7 +81,9 @@ def test_groq_failure_falls_back_to_ollama(vlm_cfg, monkeypatch):
 
 def test_repeated_groq_failure_opens_circuit_and_stops_calling_it(vlm_cfg, monkeypatch):
     v, g = vlm_cfg
-    v.vision_provider = "groq"; v.allow_cloud_media = True; g.api_key = "test-key"
+    v.vision_provider = "groq"
+    v.allow_cloud_media = True
+    g.api_key = "test-key"
     v.__dict__["breaker_threshold"] = 2
     client = make_vlm_client()
 
@@ -93,7 +103,9 @@ def test_repeated_groq_failure_opens_circuit_and_stops_calling_it(vlm_cfg, monke
 
 def test_allow_cloud_media_false_keeps_vision_local(vlm_cfg):
     v, g = vlm_cfg
-    v.vision_provider = "groq"; v.allow_cloud_media = False; g.api_key = "test-key"
+    v.vision_provider = "groq"
+    v.allow_cloud_media = False
+    g.api_key = "test-key"
     from services.autolabel.paths.path_c_vlm import OllamaVlmClient
     # media not allowed out -> the router is not even built; vision stays fully local
     assert isinstance(make_vlm_client(), OllamaVlmClient)
@@ -101,7 +113,10 @@ def test_allow_cloud_media_false_keeps_vision_local(vlm_cfg):
 
 def test_escalate_only_fires_on_a_not_confident_verdict(vlm_cfg, monkeypatch):
     v, g = vlm_cfg
-    v.vision_provider = "ollama"; v.escalate_provider = "groq"; v.allow_cloud_media = True; g.api_key = "test-key"
+    v.vision_provider = "ollama"
+    v.escalate_provider = "groq"
+    v.allow_cloud_media = True
+    g.api_key = "test-key"
     client = make_vlm_client()
     assert isinstance(client, RoutedVlmClient)
 
@@ -114,7 +129,8 @@ def test_escalate_only_fires_on_a_not_confident_verdict(vlm_cfg, monkeypatch):
     # confident primary -> no escalation
     monkeypatch.setattr("services.autolabel.paths.path_c_vlm.OllamaVlmClient.verify",
                         lambda self, *a, **k: VlmResult(class_name="sedan", confident=True, provider="ollama"))
-    client.verify(CROP, ["sedan"], {}); assert esc["n"] == 0
+    client.verify(CROP, ["sedan"], {})
+    assert esc["n"] == 0
 
     # not-confident primary -> escalate is consulted and its answer wins
     monkeypatch.setattr("services.autolabel.paths.path_c_vlm.OllamaVlmClient.verify",
@@ -125,7 +141,8 @@ def test_escalate_only_fires_on_a_not_confident_verdict(vlm_cfg, monkeypatch):
 
 def test_text_route_uses_groq_then_falls_back_to_ollama(vlm_cfg, monkeypatch):
     v, g = vlm_cfg
-    v.text_provider = "groq"; g.api_key = "test-key"
+    v.text_provider = "groq"
+    g.api_key = "test-key"
 
     # groq succeeds -> its answer is used
     monkeypatch.setattr("services.llm.groq_client.GroqClient.chat_json",
@@ -158,7 +175,9 @@ def anthropic_cfg():
 
 def test_anthropic_success_is_used_and_tagged(anthropic_cfg, monkeypatch):
     v, a = anthropic_cfg
-    v.vision_provider = "anthropic"; v.allow_cloud_media = True; a.api_key = "test-key"
+    v.vision_provider = "anthropic"
+    v.allow_cloud_media = True
+    a.api_key = "test-key"
     client = make_vlm_client()
     assert isinstance(client, RoutedVlmClient)
 
@@ -177,7 +196,9 @@ def test_anthropic_failure_falls_back_to_ollama(anthropic_cfg, monkeypatch):
     from services.llm.anthropic_client import AnthropicError
 
     v, a = anthropic_cfg
-    v.vision_provider = "anthropic"; v.allow_cloud_media = True; a.api_key = "test-key"
+    v.vision_provider = "anthropic"
+    v.allow_cloud_media = True
+    a.api_key = "test-key"
     client = make_vlm_client()
 
     monkeypatch.setattr("services.llm.anthropic_client.AnthropicClient.chat_json",
@@ -192,7 +213,10 @@ def test_anthropic_failure_falls_back_to_ollama(anthropic_cfg, monkeypatch):
 def test_no_key_means_the_provider_is_simply_not_configured(anthropic_cfg):
     """Naming a provider without a key must not select it, or local dev breaks on someone else's config."""
     v, a = anthropic_cfg
-    v.vision_provider = "anthropic"; v.escalate_provider = None; v.allow_cloud_media = True; a.api_key = ""
+    v.vision_provider = "anthropic"
+    v.escalate_provider = None
+    v.allow_cloud_media = True
+    a.api_key = ""
     client = make_vlm_client()
     # RoutedVlmClient is still returned (the provider is named), but it holds no cloud primary and so
     # behaves as the local floor.
@@ -207,7 +231,10 @@ def test_an_unknown_provider_degrades_to_local_instead_of_crashing(anthropic_cfg
     raises inside the constructor and takes down every Path C call.
     """
     v, a = anthropic_cfg
-    v.vision_provider = "anthropik"; v.escalate_provider = None; v.allow_cloud_media = True; a.api_key = "k"
+    v.vision_provider = "anthropik"
+    v.escalate_provider = None
+    v.allow_cloud_media = True
+    a.api_key = "k"
     client = RoutedVlmClient()
     assert client._primary is None
 
@@ -218,7 +245,10 @@ def test_data_residency_still_wins_over_a_configured_frontier_provider(anthropic
     from services.autolabel.paths.path_c_vlm import OllamaVlmClient
 
     v, a = anthropic_cfg
-    v.vision_provider = "anthropic"; v.escalate_provider = None; v.allow_cloud_media = False; a.api_key = "k"
+    v.vision_provider = "anthropic"
+    v.escalate_provider = None
+    v.allow_cloud_media = False
+    a.api_key = "k"
     assert isinstance(make_vlm_client(), OllamaVlmClient)
 
 
@@ -228,8 +258,11 @@ def test_escalate_can_be_a_different_provider_than_the_primary(anthropic_cfg, mo
     g = get_settings().groq
     saved_g = g.api_key
     try:
-        v.vision_provider = "groq"; v.escalate_provider = "anthropic"
-        v.allow_cloud_media = True; a.api_key = "ak"; g.api_key = "gk"
+        v.vision_provider = "groq"
+        v.escalate_provider = "anthropic"
+        v.allow_cloud_media = True
+        a.api_key = "ak"
+        g.api_key = "gk"
         client = RoutedVlmClient()
 
         monkeypatch.setattr("services.llm.groq_client.GroqClient.chat_json",

@@ -3,6 +3,7 @@ delete human lanes, and propagate a frame's lanes forward by optical flow (sourc
 
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
 import cv2
@@ -90,20 +91,21 @@ async def frame_bev(frame_id: UUID, db: AsyncSession = Depends(db_session)):
     import base64
 
     frame, cal, view = await _bev_context(db, frame_id)
-    img = _decode(get_object_store(), frame.img_uri)
+    img = await asyncio.to_thread(_decode, get_object_store(), frame.img_uri)
     if img is None:
         raise HTTPException(404, "frame image unavailable")
 
+    from services.api.offload import encode_image, run_blocking
     from services.hdmap.bev_view import render
 
-    bev = render(img, cal, view)
-    ok, buf = cv2.imencode(".jpg", bev, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    if not ok:
+    bev = await run_blocking(render, img, cal, view)
+    jpg = await encode_image(".jpg", bev, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if jpg is None:
         raise HTTPException(500, "failed to encode the bird's-eye view")
     return {
         "frame_id": str(frame_id),
         "view": view.as_dict(),
-        "image": "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode(),
+        "image": "data:image/jpeg;base64," + base64.b64encode(jpg).decode(),
         "calibration": {"source": cal.source, "quality": round(float(cal.quality), 3),
                         "model": cal.model, "cam_id": cal.cam_id},
         # Said plainly rather than left for the annotator to infer from a blurry far edge.
@@ -166,7 +168,7 @@ async def propose(frame_id: UUID, db: AsyncSession = Depends(db_session)):
     frame = await db.get(Frame, frame_id)
     if frame is None:
         raise HTTPException(404, "frame not found")
-    img = _decode(get_object_store(), frame.img_uri)
+    img = await asyncio.to_thread(_decode, get_object_store(), frame.img_uri)
     if img is None:
         raise HTTPException(500, "could not decode frame image")
     from services.autolabel.lane.propose import propose_frame_lanes
@@ -239,15 +241,18 @@ async def propagate(frame_id: UUID, frames: int = 8, db: AsyncSession = Depends(
         select(Frame).where(Frame.session_id == frame.session_id, Frame.cam_id == frame.cam_id,
                             Frame.ts_ns > frame.ts_ns)
         .order_by(Frame.ts_ns).limit(frames))).scalars().all()
-    prev_gray = cv2.cvtColor(_decode(store, frame.img_uri), cv2.COLOR_BGR2GRAY)
+    def _load(uri):
+        img = _decode(store, uri)
+        return (None, None) if img is None else (img, cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+
+    _src, prev_gray = await asyncio.to_thread(_load, frame.img_uri)
     cur = {lane.lane_id: lane.control_points for lane in lanes}
     meta = {lane.lane_id: (lane.lane_type, lane.is_ego, lane.track_ref or lane.lane_id) for lane in lanes}
     created = 0
     for nf in nexts:
-        nimg = _decode(store, nf.img_uri)
+        nimg, cur_gray = await asyncio.to_thread(_load, nf.img_uri)
         if nimg is None:
             break
-        cur_gray = cv2.cvtColor(nimg, cv2.COLOR_BGR2GRAY)
         for lid in list(cur):
             ncp = propagate_control_points(prev_gray, cur_gray, cur[lid])
             if ncp is None:

@@ -5,7 +5,7 @@ URIs plus structured truth. The object table is the join hub for the provenance 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from geoalchemy2 import Geography
 from pgvector.sqlalchemy import Vector
@@ -14,6 +14,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -670,6 +671,28 @@ class MachineVerdict(Base):
     )
 
 
+class LlmUsageDaily(Base):
+    """One day's calls to one model for one purpose (0125). Added to as calls happen by
+    services/llm/ledger.py; never one row per call."""
+
+    __tablename__ = "llm_usage_daily"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32), primary_key=True)
+    model: Mapped[str] = mapped_column(String(128), primary_key=True)
+    purpose: Mapped[str] = mapped_column(String(48), primary_key=True)
+    calls: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    failures: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    input_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    images: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    latency_ms: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    unmetered_calls: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # NULL means no price was configured for the model, which is not the same as free.
+    cost_usd: Mapped[float | None] = mapped_column(Float)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class UsageRecord(Base):
     """One metered, billable delivery.
 
@@ -889,6 +912,8 @@ class EvalPatch(Base):
         Index("ix_eval_patch_eval", "eval_id"),
         Index("ix_eval_patch_cell", "eval_id", "gt_class_id", "pred_class_id"),
         Index("ix_eval_patch_object", "object_id"),
+        Index("ix_eval_patch_prediction_id_fk", "prediction_id"),
+        Index("ix_eval_patch_frame_id_fk", "frame_id"),
     )
 
 
@@ -1677,6 +1702,11 @@ class ImportJob(Base):
     counts: Mapped[dict] = mapped_column(JSONB, default=dict)  # sessions, frames, objects, unmapped, dedup_hits
     error: Mapped[str | None] = mapped_column(Text)
     session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # The rest of the request (options, project_id, route), `attempts`, and `resume` (the session and time
+    # base the first run chose). Empty on rows written before 0124 and on rows nothing should pick back
+    # up; services/job_recovery.py only continues a job whose spec says it may.
+    spec: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict,
+                                       server_default=sql_text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

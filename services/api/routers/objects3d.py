@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 from db.models import Frame, Object3D, PointCloud, PointCloudDerived, PointSegmentation, Track3D
-from services.api.deps import db_session
+from services.api.deps import db_session, require_role
 from services.autolabel.ontology import get_ontology
 from services.lidar.boxes import project_cuboid, snap_to_ground
 from services.lidar.clean.ground import segment_ground
@@ -194,7 +194,7 @@ async def delete_object3d(object_3d_id: uuid.UUID, db: AsyncSession = Depends(db
     return {"deleted": str(object_3d_id)}
 
 
-@router.post("/lidar/sessions/{session_id}/track3d")
+@router.post("/lidar/sessions/{session_id}/track3d", dependencies=[Depends(require_role("reviewer"))])
 async def run_tracking(session_id: uuid.UUID):
     """Track the session's 3D objects across frames into track_3d, linked to the 2D tracks, with a dynamic
     state per track (M-L2.2)."""
@@ -324,7 +324,7 @@ async def object3d_consistency(object_3d_id: uuid.UUID):
     return res
 
 
-@router.post("/lidar/quality3d/bridge")
+@router.post("/lidar/quality3d/bridge", dependencies=[Depends(require_role("reviewer"))])
 async def quality3d_bridge(cloud_id: uuid.UUID | None = None, session_id: uuid.UUID | None = None,
                            commit: bool = False, db: AsyncSession = Depends(db_session)):
     """Put 3D quality flags into the queue annotators actually work.
@@ -472,7 +472,7 @@ async def similar_objects3d(object_3d_id: uuid.UUID, k: int = Query(10, ge=1, le
     return res
 
 
-@router.post("/lidar/objects3d/batch_correct")
+@router.post("/lidar/objects3d/batch_correct", dependencies=[Depends(require_role("reviewer"))])
 async def batch_correct_objects3d(body: BatchCorrectIn):
     """Apply a class or dimension correction to a batch of 3D objects as a human edit."""
     from services.lidar.link import batch_correct

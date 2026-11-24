@@ -33,11 +33,17 @@ async def _reset_orphans() -> None:
     than inferred at train time so the history shows a run was resumed, which matters when reading its curve.
     """
     from core.config import get_settings
+    from core.model_manager import device_index
+    from services.training.gpu_lease import job_device_index
 
     resume = get_settings().training.resume_orphaned_runs
+    # Only this card's jobs. With one worker per card, "every running row is an orphan" stopped being
+    # true: a worker starting on card 1 would have put card 0's live training run back in the queue.
+    mine = device_index(get_settings().gpu.device)
     async with get_sessionmaker()() as db:
-        rows = (await db.execute(
+        rows = [j for j in (await db.execute(
             select(TrainingJob).where(TrainingJob.status == "running"))).scalars().all()
+                if job_device_index(j.config) == mine]
         for j in rows:
             j.status = "pending"
             if resume:
@@ -66,6 +72,9 @@ async def _claim() -> str | None:
             if row is None:
                 return None
             row.status = "running"
+            # Which card this run is on, so the per-card lease and the orphan sweep can tell whose it is.
+            row.config = {**(row.config or {}), "runtime": {**((row.config or {}).get("runtime") or {}),
+                                                            "device": get_settings().gpu.device}}
             return str(row.job_id)
 
 
@@ -93,10 +102,18 @@ claim_training_job = _claim
 vram_preflight = _vram_preflight
 
 
+def worker_lock_key() -> int:
+    """This process's worker-lifetime lock: one worker per card. Card 0 keeps the original key."""
+    from core.model_manager import device_index
+
+    s = get_settings()
+    return s.training.advisory_lock_key + device_index(s.gpu.device)
+
+
 async def worker_loop() -> None:
     settings = get_settings()
     setup_logging(settings.log_level)
-    key = settings.training.advisory_lock_key
+    key = worker_lock_key()
     poll_s = settings.training.worker_poll_s
 
     # Hold the GPU mutex for the worker's lifetime; a second worker refuses to start.

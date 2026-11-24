@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Any
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
@@ -185,6 +186,167 @@ class ObjectDetail(BaseModel):
     ocr_text: str | None = None
     ocr_lang: str | None = None
     ocr_conf: float | None = None
+
+
+def _declared_fields_only(schema: dict) -> None:
+    """Keep `additionalProperties` out of the published schema; see ApiOut."""
+    schema.pop("additionalProperties", None)
+
+
+class ApiOut(BaseModel):
+    """The base for a response a route declares.
+
+    A response model is a filter as well as a description: FastAPI validates what the handler returned
+    into the model and sends the model, so a key the handler returns and the model does not name is
+    dropped from the JSON with no error anywhere. Of 787 operations 41 declared a response, which is how
+    the generated clients came to be untyped on the response side, and that filter is why declaring the
+    rest was never a mechanical job. Three rules make it one, and tests/test_response_contracts.py holds
+    each of them:
+
+      * `extra="allow"`. A key the model does not name is passed through instead of removed. The model
+        is then a statement of what a client may rely on, and a handler that gains a key before its
+        model does costs a missing type rather than a blank panel in the editor.
+      * The schema is published without `additionalProperties`. Pydantic would otherwise advertise the
+        line above as an open object, and the TypeScript generator would give every type an index
+        signature, under which a misspelt field reads as `unknown` instead of failing to compile.
+      * A route that declares one of these is served with `response_model_exclude_unset=True`. Without
+        it every optional field a handler left out would arrive as an explicit null, which is a change
+        to the endpoint: absent and null are different answers, and a cancel that has no `stopped` is
+        not one that stopped nothing. With it the body is the handler's dict, key for key.
+
+    What the model can still do is refuse: a value of the wrong type is a 500 where it used to be served.
+    So a field is typed as narrowly as its source guarantees and no further. A NOT NULL column is its
+    type; a nullable one is `| None`; a JSONB column passed straight through is `dict[str, Any] | None`,
+    because SQLAlchemy stores Python None there as JSON null whatever the column says. A field with a
+    default is one the handler sometimes leaves out, and nothing else.
+    """
+
+    model_config = ConfigDict(extra="allow", json_schema_extra=_declared_fields_only)
+
+
+class SessionOut(ApiOut):
+    """One capture session as the session lists serve it (GET /sessions and /sessions/page)."""
+
+    session_id: str
+    vehicle_id: str | None                      # nullable in the schema; every real row has one
+    city: str | None
+    route: str | None
+    start_ts_ns: int
+    end_ts_ns: int
+    ontology_version: str
+    origin: str                                 # imported | fleet | other, derived from vehicle and uri
+    project_id: str | None
+
+
+class FrameOut(ApiOut):
+    """Frame meta for the editor (GET /frames/{id}).
+
+    Every key is always present. The ones a blind audit withholds (`annotation_source`, `import_format`)
+    are served as null rather than left out, so they are nullable here, not optional.
+    """
+
+    frame_id: str
+    session_id: str
+    width: int
+    height: int
+    ts_ns: int
+    cam_id: str
+    image_url: str
+    n_objects: int
+    has_mcap: bool
+    annotation_source: str | None
+    import_format: str | None
+    prev_frame_id: str | None
+    next_frame_id: str | None
+    is_lidar: bool
+    # Read out of the frame's `lidar` JSONB, which the LiDAR importer writes. Numbers on every row that
+    # has them. `int | float` rather than either alone: the union keeps a stored 120000 an integer and a
+    # stored 0.05 a float, where `float` would re-serialise the point count as 120000.0.
+    lidar_points: int | float | None
+    lidar_res: int | float | None
+    blind_audit_id: str | None
+    context: dict[str, Any]
+    context_provenance: dict[str, Any]
+
+
+class FrameObjectOut(ApiOut):
+    """One object in the editor's frame list (GET /frames/{id}/objects).
+
+    The list row, not ObjectDetail: it carries no frame fields, attrs, source or provenance, and it does
+    carry `quality_score`, which the detail does not. The geometry fields are typed exactly as
+    ObjectDetail types them, since both read the same columns and the same mask blob.
+    """
+
+    object_id: str
+    track_id: str | None
+    class_id: int
+    class_name: str
+    bbox: list[float]
+    conf: float
+    quality_score: float | None
+    state: str
+    mask_polygons: list[list[float]]
+    version: int
+    rot_deg: float
+    bbox_amodal: list[float] | None
+    keypoints: dict | None
+    polyline: list[list[float]] | None
+    cuboid_3d: dict | None
+
+
+class ReviewOut(ApiOut):
+    """What a single review answers with (POST /objects/{id}/review).
+
+    Eleven fields about the object after the write, and not ObjectDetail: there is no frame, no image
+    url, no mask, no confidence and no provenance in it. The web client declared this response as
+    ObjectDetail, so a caller that stores it as the object it is showing (the evidence panel does) is left
+    holding one with no frame. Declared as what the handler returns; widening the handler to match the
+    client would be a change to the endpoint, which declaring a type must never be.
+    """
+
+    object_id: str
+    class_id: int
+    class_name: str
+    bbox: list[float]
+    attrs: dict[str, Any] | None
+    state: str
+    source: str
+    version: int
+    rot_deg: float
+    bbox_amodal: list[float] | None
+    keypoints: dict | None
+
+
+class StaleObjectOut(ApiOut):
+    """An object a bulk review skipped because it had moved on under the caller."""
+
+    object_id: str
+    expected: int
+    current: int
+
+
+class BulkReviewOut(ApiOut):
+    updated: int
+    action: str
+    skipped_missing: list[str]
+    skipped_stale: list[StaleObjectOut]
+    run_id: str | None                          # the handle to revert the batch; null when nothing changed
+
+
+class JobOut(ApiOut):
+    """One row of the unified jobs list (GET /jobs): import, training, autolabel, export, map_fusion and
+    relabel jobs normalised to the same ten fields."""
+
+    job_id: str
+    kind: str
+    status: str
+    progress: float
+    label: str
+    detail: str
+    link: str
+    error: str | None
+    created_at: str | None
+    updated_at: str | None
 
 
 class ReviewIn(BaseModel):

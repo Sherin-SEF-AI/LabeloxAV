@@ -27,7 +27,7 @@ def _load_sidecar(path: Path) -> list[SideChannelSample]:
             rows = list(csv.DictReader(fh))
 
     for r in rows:
-        def _f(key: str) -> float | None:
+        def _f(key: str, r: dict = r) -> float | None:
             v = r.get(key)
             if v is None or v == "":
                 return None

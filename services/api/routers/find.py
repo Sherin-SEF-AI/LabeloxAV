@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Frame, Object, OntologyClass, Track
 from db.models import Session as DbSession
-from services.api.deps import db_session, require_role
+from services.api.deps import ApiOut, db_session, require_role
 from services.api.project_guard import caller_hidden_projects
 from services.project_access import as_hidden, drop_hidden, project_of, scope_visible_sessions
 
@@ -30,6 +30,19 @@ PER_KIND = 6
 # An id prefix this short already narrows a 600k-row table to a handful; anything shorter is a word.
 MIN_ID_PREFIX = 6
 _ID_LIKE = re.compile(r"^[0-9a-f-]+$")
+
+
+class FindResultOut(ApiOut):
+    kind: str                                   # session | frame | object | track
+    id: str
+    label: str
+    detail: str
+    href: str                                   # the page this result opens
+
+
+class FindOut(ApiOut):
+    q: str                                      # the query as searched, trimmed
+    results: list[FindResultOut]
 
 
 def _id_prefix(q: str) -> str | None:
@@ -50,7 +63,8 @@ async def _first_frame(db: AsyncSession, session_id) -> str | None:
     return str(fid) if fid else None
 
 
-@router.get("/find", dependencies=[Depends(require_role("annotator"))])
+@router.get("/find", dependencies=[Depends(require_role("annotator"))],
+            response_model=FindOut, response_model_exclude_unset=True)
 async def find(q: str = Query(min_length=2, max_length=80), db: AsyncSession = Depends(db_session),
                hidden=Depends(caller_hidden_projects)):
     hidden = as_hidden(hidden)

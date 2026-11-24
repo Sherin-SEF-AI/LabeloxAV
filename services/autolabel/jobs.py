@@ -17,6 +17,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config import get_settings
 from core.logging import get_logger
 from db.models import AutolabelJob
 from db.session import get_sessionmaker
@@ -109,6 +110,9 @@ async def claim_autolabel_job(db: AsyncSession) -> uuid.UUID | None:
             return None
         row.status = "running"
         row.progress = max(float(row.progress or 0.0), 0.01)
+        # The card it was claimed for. requeue_orphans reads this: with a worker per card, a job running
+        # on another card is not this worker's orphan.
+        row.params = {**(row.params or {}), "device": get_settings().gpu.device}
         return row.job_id
 
 
@@ -120,8 +124,13 @@ async def requeue_orphans(db: AsyncSession, max_attempts: int) -> dict[str, list
     A requeued job resumes rather than restarts. It is switched to only_unlabelled, so frames the crashed
     run already labelled are skipped instead of being labelled a second time.
     """
-    rows = (await db.execute(
+    from core.model_manager import device_index
+
+    mine = device_index(get_settings().gpu.device)
+    # This card's rows only. A row with no device recorded predates per-card workers and ran on card 0.
+    rows = [r for r in (await db.execute(
         select(AutolabelJob).where(AutolabelJob.status == "running", _worker_rows()))).scalars().all()
+            if device_index((r.params or {}).get("device")) == mine]
     requeued: list[str] = []
     failed: list[str] = []
     for r in rows:

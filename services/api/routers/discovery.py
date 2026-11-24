@@ -3,9 +3,10 @@ human review, and confirm/dismiss/tag them. Feeds active learning and sellable r
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +31,7 @@ async def run(session_id: str):
 
 
 @router.get("/discovery/queue")
-async def queue(state: str = "pending", limit: int = 200, db: AsyncSession = Depends(db_session)):
+async def queue(state: str = "pending", limit: Annotated[int, Query(ge=1, le=4_000)] = 200, db: AsyncSession = Depends(db_session)):
     limit = min(max(limit, 1), 1000)
     rows = (await db.execute(
         select(ScenarioCandidate, Frame.session_id, DbSession.vehicle_id)

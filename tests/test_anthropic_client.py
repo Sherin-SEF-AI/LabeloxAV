@@ -8,7 +8,8 @@ from services.llm.anthropic_client import AnthropicClient, AnthropicError, _unwr
 
 
 def test_no_key_means_unavailable_rather_than_a_failed_call():
-    s = get_settings(); saved = s.anthropic.api_key
+    s = get_settings()
+    saved = s.anthropic.api_key
     try:
         s.anthropic.api_key = ""
         c = AnthropicClient(s)
@@ -40,7 +41,8 @@ def test_the_image_goes_in_a_source_block_not_a_data_url(monkeypatch):
         return _Resp()
 
     monkeypatch.setattr("services.llm.anthropic_client.httpx.post", _post)
-    s = get_settings(); saved = s.anthropic.api_key
+    s = get_settings()
+    saved = s.anthropic.api_key
     try:
         s.anthropic.api_key = "k"
         out = AnthropicClient(s).chat_json("prompt", model="m", image_jpeg=b"\xff\xd8jpeg")
@@ -64,7 +66,8 @@ def test_an_http_error_names_the_status_so_a_bad_key_is_distinguishable_from_a_r
         def raise_for_status(self): raise httpx.HTTPStatusError("x", request=None, response=self)
 
     monkeypatch.setattr("services.llm.anthropic_client.httpx.post", lambda *a, **k: _Resp())
-    s = get_settings(); saved = s.anthropic.api_key
+    s = get_settings()
+    saved = s.anthropic.api_key
     try:
         s.anthropic.api_key = "k"
         with pytest.raises(AnthropicError, match="429"):
@@ -80,7 +83,8 @@ def test_an_empty_reply_is_an_error_not_an_empty_verdict(monkeypatch):
         def json(self): return {"content": []}
 
     monkeypatch.setattr("services.llm.anthropic_client.httpx.post", lambda *a, **k: _Resp())
-    s = get_settings(); saved = s.anthropic.api_key
+    s = get_settings()
+    saved = s.anthropic.api_key
     try:
         s.anthropic.api_key = "k"
         with pytest.raises(AnthropicError):

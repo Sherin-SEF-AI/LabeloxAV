@@ -14,7 +14,6 @@ from services.training.segmentation_dataset import SegBuildSpec, polygon_label_l
 from services.training.tasks import get_task, list_tasks
 from services.training.tasks.pose import SKELETONS, PoseBuildSpec, keypoint_label_line
 
-
 # ---------------- registry ----------------
 
 def test_all_three_task_types_are_registered():

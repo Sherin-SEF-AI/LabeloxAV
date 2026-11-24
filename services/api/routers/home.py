@@ -27,7 +27,7 @@ from db.models import (
     TrainingJob,
 )
 from db.models import Session as DbSession
-from services.api.deps import db_session, require_role
+from services.api.deps import ApiOut, db_session, require_role
 from services.api.project_guard import caller_hidden_projects
 from services.autolabel.ontology import get_ontology
 from services.project_access import as_hidden, scope_visible_sessions, visible_session_ids
@@ -44,11 +44,90 @@ ACTIVE = ("pending", "running")
 ATTENTION_DAYS = 14
 
 
+class HomeCorpusOut(ApiOut):
+    sessions: int
+    frames: int
+    objects: int
+    by_state: dict[str, int]
+    waiting: int
+    settled: int
+
+
+class HomeFailedJobOut(ApiOut):
+    kind: str                                   # autolabel | import | training
+    job_id: str
+    error: str                                  # the first 240 characters; empty when the job recorded none
+    at: str | None
+
+
+class HomeJobsOut(ApiOut):
+    active: dict[str, int]                      # job kind -> pending or running
+    active_total: int
+    running: int
+    failed: list[HomeFailedJobOut]
+    failed_window_days: int
+
+
+class HomeRecentSessionOut(ApiOut):
+    session_id: str
+    vehicle_id: str | None
+    city: str | None
+    start_ts_ns: int
+    frames: int
+    objects: int
+    waiting: int
+
+
+class HomeWaitingOut(ApiOut):
+    """One thing that cannot finish without a person, in one of three kinds that share no field but `kind`.
+
+      blind_audit      audit_id, job_id, frame_id, n_frames, n_labeled, created_at
+      control_samples  count, href
+      settlement_lot   lot_id, class_name, judged, of, population, href
+
+    One model with every other field optional, rather than a tagged union of three, because that is what
+    the handler builds: three dict literals appended to one list. Served with exclude_unset, so a row
+    carries its own kind's keys and not the other two kinds' as nulls.
+    """
+
+    kind: str
+    audit_id: str | None = None
+    job_id: str | None = None
+    frame_id: str | None = None
+    n_frames: int | None = None
+    n_labeled: int | None = None
+    created_at: str | None = None
+    count: int | None = None
+    href: str | None = None
+    lot_id: str | None = None
+    class_name: str | None = None
+    judged: int | None = None
+    of: int | None = None
+    population: int | None = None
+
+
+class HomeStepsOut(ApiOut):
+    data: bool
+    autolabel: bool
+    review: bool
+    export: bool
+    model: bool
+
+
+class HomeOut(ApiOut):
+    corpus: HomeCorpusOut
+    jobs: HomeJobsOut
+    recent_sessions: list[HomeRecentSessionOut]
+    waiting_for_people: list[HomeWaitingOut]
+    steps: HomeStepsOut
+
+
 async def _count(db: AsyncSession, stmt) -> int:
     return int((await db.execute(stmt)).scalar_one() or 0)
 
 
-@router.get("/home", dependencies=[Depends(require_role("annotator"))])
+@router.get("/home", dependencies=[Depends(require_role("annotator"))],
+            response_model=HomeOut, response_model_exclude_unset=True)
 async def home(db: AsyncSession = Depends(db_session), hidden=Depends(caller_hidden_projects)):
     # Counted over what the caller may see (services/project_access.py). With nothing hidden, the plain counts.
     hidden = as_hidden(hidden)

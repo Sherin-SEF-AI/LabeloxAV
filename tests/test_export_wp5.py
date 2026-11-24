@@ -21,9 +21,16 @@ pytestmark = pytest.mark.db
 
 async def _seed(db, *, with_event=True):
     """A frame with scene context, two related objects on a track, and one accepted track event."""
-    from db.models import Frame, Object, ObjectRelationship, OntologyClass, OntologyVersion
+    from db.models import (
+        Frame,
+        Object,
+        ObjectRelationship,
+        OntologyClass,
+        OntologyVersion,
+        Track,
+        TrackEvent,
+    )
     from db.models import Session as DbSession
-    from db.models import Track, TrackEvent
     from services.autolabel.ontology import get_ontology
 
     onto = get_ontology()
@@ -178,9 +185,8 @@ class TestTheNewSliceFilters:
     @pytest.mark.asyncio
     async def test_a_region_filter_matches_the_code_the_fleet_records(self):
         """The session's city is `BLR`. `cities: ["Bengaluru"]` misses it; `regions` does not."""
-        from services.export.dataset import SliceSpec, fetch_records
-
         from db.session import get_sessionmaker
+        from services.export.dataset import SliceSpec, fetch_records
 
         async with get_sessionmaker()() as db:
             sid, _, _, _ = await _seed(db)
@@ -190,9 +196,8 @@ class TestTheNewSliceFilters:
 
     @pytest.mark.asyncio
     async def test_a_context_filter_selects_on_a_scene_axis(self):
-        from services.export.dataset import SliceSpec, fetch_records
-
         from db.session import get_sessionmaker
+        from services.export.dataset import SliceSpec, fetch_records
 
         async with get_sessionmaker()() as db:
             sid, _, _, _ = await _seed(db)
@@ -203,9 +208,8 @@ class TestTheNewSliceFilters:
 
     @pytest.mark.asyncio
     async def test_a_rarity_band_selects_on_the_persisted_score(self):
-        from services.export.dataset import SliceSpec, fetch_records
-
         from db.session import get_sessionmaker
+        from services.export.dataset import SliceSpec, fetch_records
 
         async with get_sessionmaker()() as db:
             sid, _, _, _ = await _seed(db)
@@ -214,9 +218,8 @@ class TestTheNewSliceFilters:
 
     @pytest.mark.asyncio
     async def test_an_event_filter_selects_objects_on_the_tracks_that_carry_it(self):
-        from services.export.dataset import SliceSpec, fetch_records
-
         from db.session import get_sessionmaker
+        from services.export.dataset import SliceSpec, fetch_records
 
         async with get_sessionmaker()() as db:
             sid, _, bike, _ = await _seed(db)

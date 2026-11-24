@@ -19,7 +19,7 @@ def _quantize(obj):
         return round(obj, FLOAT_PRECISION)
     if isinstance(obj, dict):
         return {k: _quantize(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
+    if isinstance(obj, list | tuple):
         return [_quantize(v) for v in obj]
     return obj
 

@@ -33,8 +33,8 @@ def _load_yolo():
 def _load_sam():
     # Proven entry from the smoke test (PASS): build_sam3_image_model(bpe_path=...) + Sam3Processor.
     import sam3.model_builder as _mb
-    from sam3.model_builder import build_sam3_image_model
     from sam3.model.sam3_image_processor import Sam3Processor
+    from sam3.model_builder import build_sam3_image_model
 
     bpe = str(Path(_mb.__file__).parent / "assets" / "bpe_simple_vocab_16e6.txt.gz")
     return Sam3Processor(build_sam3_image_model(bpe_path=bpe))

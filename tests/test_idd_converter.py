@@ -45,7 +45,7 @@ def test_idd_to_yolo_conversion(tmp_path):
 
     # autorickshaw box (100,100,200,200) in 640x480 -> cx=0.234375 cy=0.3125 w=0.15625 h=0.208333
     auto_idx = name_to_idx["autorickshaw"]
-    auto_line = next(l for l in label if int(l.split()[0]) == auto_idx)
+    auto_line = next(ln for ln in label if int(ln.split()[0]) == auto_idx)
     _, cx, cy, bw, bh = auto_line.split()
     assert abs(float(cx) - 0.234375) < 1e-4
     assert abs(float(cy) - 0.3125) < 1e-4

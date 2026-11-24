@@ -6,7 +6,9 @@ job and issue machinery from labelops.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Response
+from typing import Annotated
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -91,7 +93,7 @@ async def create_assets(payload: AssetsIn, _user=Depends(require_role("annotator
 
 @router.get("/projects/{project_id}/assets")
 async def list_assets(project_id: str, state: str | None = None, media_type: str | None = None,
-                      limit: int = 200, offset: int = 0, db: AsyncSession = Depends(db_session)):
+                      limit: Annotated[int, Query(ge=1, le=4_000)] = 200, offset: int = 0, db: AsyncSession = Depends(db_session)):
     return await store.list_assets(db, project_id, state=state, media_type=media_type,
                                    limit=limit, offset=offset)
 

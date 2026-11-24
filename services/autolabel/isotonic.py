@@ -62,9 +62,9 @@ async def _collect_pairs(session_id: str | None = None) -> tuple[np.ndarray, np.
         # it is not the scalar to calibrate. Fall back to raw_conf only when it is a scalar (legacy rows
         # written before calibrated_from existed).
         rc = prov.get("calibrated_from")
-        if not isinstance(rc, (int, float)) or isinstance(rc, bool):
+        if not isinstance(rc, int | float) or isinstance(rc, bool):
             legacy = prov.get("raw_conf")
-            rc = legacy if isinstance(legacy, (int, float)) and not isinstance(legacy, bool) else None
+            rc = legacy if isinstance(legacy, int | float) and not isinstance(legacy, bool) else None
         if rc is None:
             continue
         xs.append(float(rc))

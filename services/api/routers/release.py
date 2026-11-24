@@ -5,7 +5,9 @@ existing services/export; this adds the reproducible content fingerprint and the
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,7 +40,7 @@ async def verify(commit_id: str, db: AsyncSession = Depends(db_session)):
 
 
 @router.get("/release/registry")
-async def registry(limit: int = 100, db: AsyncSession = Depends(db_session)):
+async def registry(limit: Annotated[int, Query(ge=1, le=2_000)] = 100, db: AsyncSession = Depends(db_session)):
     """The Release registry: content-addressed dataset commits with their parent lineage, newest first."""
     rows = (await db.execute(
         select(DatasetCommit).order_by(DatasetCommit.created_at.desc()).limit(min(max(limit, 1), 500)))).scalars().all()

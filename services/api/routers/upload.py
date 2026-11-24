@@ -5,6 +5,7 @@ single-shot presigned PUT for small ones.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from fastapi import APIRouter, HTTPException
@@ -36,9 +37,9 @@ def _require_upload_key(key: str) -> str:
 @router.post("/upload/init")
 async def init(payload: MultipartInitIn):
     store = get_object_store()
-    store.ensure_bucket()
+    await asyncio.to_thread(store.ensure_bucket)
     key = _key(payload.filename)
-    upload_id = store.create_multipart(key, payload.content_type)
+    upload_id = await asyncio.to_thread(store.create_multipart, key, payload.content_type)
     return {"key": key, "upload_id": upload_id}
 
 
@@ -63,7 +64,7 @@ async def abort(payload: MultipartAbortIn):
 @router.post("/upload/presign-put")
 async def presign_put(payload: MultipartInitIn):
     store = get_object_store()
-    store.ensure_bucket()
+    await asyncio.to_thread(store.ensure_bucket)
     key = _key(payload.filename)
     url = store.presigned_put(key, payload.content_type)
     return {"key": key, "url": url, "uri": store.uri(key)}

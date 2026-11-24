@@ -93,6 +93,14 @@ class GpuSettings(BaseModel):
     mode: str = "sequential"  # sequential | concurrent
     vram_total_mb: int = 16000
     vram_headroom_mb: int = 1500
+    # Frames per detector forward pass in the auto-label loop. Left at 1 on purpose.
+    #
+    # Measured on 24 corpus frames (RTX 16 GB, 2026-11-24): the detector takes 12 ms a frame at a batch
+    # of 1 and 12 to 16 ms at 2, 4 or 8, so batching it buys nothing, and because frames of different
+    # shapes are padded to a common one, 7% to 12% of detections moved or changed at batch 4 to 8. The
+    # time is in segmentation, about 285 ms of a 300 ms frame, which is prompted per frame and does not
+    # batch. A larger value is safe to try on a corpus of one frame size; it is not a default.
+    batch_size: int = 1
 
 
 class YoloSettings(BaseModel):
@@ -584,6 +592,45 @@ class JobsSettings(BaseModel):
     # How many times a job orphaned by a worker crash goes back in the queue before it is failed. A job that
     # kills its worker every time would otherwise take the GPU worker down in a loop.
     max_attempts: int = 3
+    # Continue imports and exports that an API restart interrupted, at the next startup. A job is picked
+    # up only when no live process holds its lock (services/job_lock.py), so this is safe with more than
+    # one API process, and at most `max_attempts` times. Off leaves the old behaviour: the reaper fails
+    # the row after its staleness window and a person starts it again.
+    auto_resume: bool = True
+
+
+class LlmPrice(BaseModel):
+    # US dollars per million tokens. Whatever the provider's price list says today; nothing here is a
+    # default, because a price guessed into the code would turn the ledger's cost column into fiction.
+    input_per_mtok: float = 0.0
+    output_per_mtok: float = 0.0
+
+
+class LlmSettings(BaseModel):
+    # Prices by "provider:model", e.g. {"anthropic:claude-...": {"input_per_mtok": 3, "output_per_mtok": 15}}.
+    # A cloud model with no entry is recorded with its tokens and a NULL cost, and the usage page says it
+    # is unpriced. Local models (ollama, llamacpp) are always recorded at zero.
+    #   LBX_LLM__PRICES='{"groq:qwen/qwen3.6-27b": {"input_per_mtok": 0.3, "output_per_mtok": 0.6}}'
+    prices: dict[str, LlmPrice] = {}
+    # Stop sending work to cloud providers once today's recorded spend reaches this many dollars; calls
+    # fall back to the local model exactly as they do when a provider is down. 0 means no cap. Only priced
+    # models count toward it, so a cap with no prices configured caps nothing, and startup says so.
+    daily_budget_usd: float = 0.0
+    # How often the in-memory counters are written to the database.
+    flush_interval_s: float = 20.0
+    enabled: bool = True
+
+
+class MetricsSettings(BaseModel):
+    # Bearer token a scraper must present to read /metrics. Empty leaves it open, which is the
+    # conventional shape for a metrics port and only acceptable when the port is not reachable from
+    # outside: the scrape names every route, its error rate and the size of the review queue.
+    # Set LBX_METRICS__TOKEN and give the same value to Prometheus (`authorization.credentials`).
+    token: str = ""
+    # How long the corpus gauges are reused between scrapes. They cost a GROUP BY over the whole object
+    # table; sampled on every scrape, anyone who could reach the port could keep the database busy with
+    # it, and two scrapers doubled the load for no fresher an answer.
+    db_gauge_ttl_s: float = 30.0
 
 
 class TrainingSettings(BaseModel):
@@ -700,6 +747,21 @@ class PathsSettings(BaseModel):
     #
     # Set LBX_PATHS__MEDIA_ROOTS to a comma-separated list of absolute directories.
     media_roots: list[str] = []
+    # Directories an import REQUEST may name as a local source (a directory, a zip, or a media file).
+    #
+    # `source_uri` on POST /api/imports/start, /api/imports/dry-run and the workforce return upload is
+    # caller-supplied, and the import pipeline will read whatever directory or archive it names. Without
+    # an allowlist a reviewer, or an outside vendor holding a workforce key, could point an import at any
+    # path the API process can read. Uploads made through the product land in object storage (`s3://`)
+    # and are unaffected; this governs only local paths. Empty means none, which is the right default
+    # for a deployment. The CLI (`make import`) is an operator at a shell and is not restricted.
+    #
+    # Set LBX_PATHS__IMPORT_ROOTS to a comma-separated list of absolute directories.
+    import_roots: list[str] = []
+    # The most an imported archive may expand to, in bytes. A zip is a few megabytes on the wire and can
+    # declare terabytes; extraction is refused before the first byte is written when the declared total
+    # exceeds this.
+    import_max_extract_bytes: int = 50 * 1024 ** 3
 
 
 # ---- Phase 3 Multi-Sensor and Spatial ----
@@ -1170,6 +1232,8 @@ class Settings(BaseSettings):
     minio: MinioSettings = MinioSettings()
     redis: RedisSettings = RedisSettings()
     redpanda: RedpandaSettings = RedpandaSettings()
+    metrics: MetricsSettings = MetricsSettings()
+    llm: LlmSettings = LlmSettings()
     ingest: IngestSettings = IngestSettings()
     gpu: GpuSettings = GpuSettings()
     models: ModelsSettings = ModelsSettings()

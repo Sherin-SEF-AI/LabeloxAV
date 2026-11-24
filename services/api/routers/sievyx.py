@@ -7,8 +7,9 @@ priority + composition surface. Mounted under /api."""
 from __future__ import annotations
 
 import json
+from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,7 +47,7 @@ async def odd_gaps(payload: OddIn):
 
 
 @router.get("/sievyx/discover")
-async def discover(limit: int = 400, min_size: int = 2, db: AsyncSession = Depends(db_session)):
+async def discover(limit: Annotated[int, Query(ge=1, le=8_000)] = 400, min_size: int = 2, db: AsyncSession = Depends(db_session)):
     """Unsupervised long-tail discovery: cluster a sample of object embeddings and surface the rarest groups
     for naming, growing the scenario ontology from data."""
     from db.models import ObjectEmbedding
@@ -63,7 +64,7 @@ async def discover(limit: int = 400, min_size: int = 2, db: AsyncSession = Depen
 
 
 @router.get("/sievyx/priority")
-async def priority(session_id: str | None = None, limit: int = 100, db: AsyncSession = Depends(db_session)):
+async def priority(session_id: str | None = None, limit: Annotated[int, Query(ge=1, le=2_000)] = 100, db: AsyncSession = Depends(db_session)):
     """The label queue ranked by the combined priority score (uncertainty + diversity + rarity + error +
     recall value). This is the order a human should label in; SIEVYX feeds it to the LabeloxAV workspace."""
     items = await score_candidates(db, session_id)

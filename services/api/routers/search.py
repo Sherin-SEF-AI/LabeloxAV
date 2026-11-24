@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -99,12 +100,10 @@ async def search_similar(body: SimilarIn, db: AsyncSession = Depends(db_session)
     elif body.image_b64:
         import base64
 
-        import cv2
-        import numpy as np
-
+        from services.api.offload import decode_image_async
         from services.intelligence.embed import dinov3, siglip2
 
-        img = cv2.imdecode(np.frombuffer(base64.b64decode(body.image_b64), np.uint8), cv2.IMREAD_COLOR)
+        img = await decode_image_async(base64.b64decode(body.image_b64))
         if img is None:
             raise HTTPException(400, "could not decode image")
         if body.target == "object":
@@ -132,15 +131,16 @@ async def search_similar(body: SimilarIn, db: AsyncSession = Depends(db_session)
 
 
 async def _decorate_fused_frames(db, nbrs, min_sim: float) -> list[dict]:
-    out = []
-    for fid, score in nbrs:
-        if score < min_sim:
-            continue
-        fr = await db.get(Frame, UUID(fid))
-        if fr is not None:
-            out.append({"frame_id": fid, "image_url": f"/api/frames/{fid}/image",
-                        "scene": fr.scene, "score": round(score, 4)})
-    return out
+    from sqlalchemy import select
+
+    keep = [(fid, score) for fid, score in nbrs if score >= min_sim]
+    if not keep:
+        return []
+    # One query for every neighbour's row, not one each.
+    scenes = {str(fid): scene for fid, scene in (await db.execute(
+        select(Frame.frame_id, Frame.scene).where(Frame.frame_id.in_([UUID(fid) for fid, _s in keep])))).all()}
+    return [{"frame_id": fid, "image_url": f"/api/frames/{fid}/image", "scene": scenes[fid],
+             "score": round(score, 4)} for fid, score in keep if fid in scenes]
 
 
 @router.post("/embeddings/compute")
@@ -154,14 +154,14 @@ async def search_objects(
     db: AsyncSession = Depends(db_session),
     q: str = Query(...),
     session_id: str | None = None,
-    limit: int = 24,
+    limit: Annotated[int, Query(ge=1, le=1_000)] = 24,
 ):
     results = await search_objects_by_text(db, q, limit=limit, session_id=session_id)
     return {"query": q, "count": len(results), "results": results}
 
 
 @router.get("/objects/{object_id}/similar")
-async def objects_similar(object_id: str, db: AsyncSession = Depends(db_session), limit: int = 12):
+async def objects_similar(object_id: str, db: AsyncSession = Depends(db_session), limit: Annotated[int, Query(ge=1, le=1_000)] = 12):
     return {"object_id": object_id, "results": await similar_objects(db, object_id, limit=limit)}
 
 

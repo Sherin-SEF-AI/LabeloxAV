@@ -39,7 +39,6 @@ def test_empty_crop_is_safe():
 
 
 def test_prep_tag_is_recorded():
-    from core.embeddings import model_versions
 
     # model_versions() would call the models; just assert the tag flows into the registry contract
     assert PREP_TAG and isinstance(PREP_TAG, str)

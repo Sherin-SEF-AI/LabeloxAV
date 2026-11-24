@@ -6,7 +6,9 @@ clicking facets can be saved as a cohort and exported without redefining it (ser
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,7 +68,7 @@ async def fit_projection(payload: ProjectionIn, _user=Depends(require_role("revi
 
 
 @router.get("/explore/projections")
-async def list_projections(limit: int = 50, db: AsyncSession = Depends(db_session)):
+async def list_projections(limit: Annotated[int, Query(ge=1, le=1_000)] = 50, db: AsyncSession = Depends(db_session)):
     return {"projections": await proj_svc.list_projections(db, limit)}
 
 
@@ -91,7 +93,7 @@ async def facets(predicate: dict = Body(default={}), db: AsyncSession = Depends(
 
 
 @router.post("/explore/select")
-async def select_ids(predicate: dict = Body(default={}), level: str = "object", limit: int = 5000,
+async def select_ids(predicate: dict = Body(default={}), level: str = "object", limit: Annotated[int, Query(ge=1, le=50_000)] = 5000,
                      db: AsyncSession = Depends(db_session)):
     """Resolve a predicate to concrete ids and a count: what a lasso or a filter currently covers."""
     from sqlalchemy import func
@@ -184,7 +186,7 @@ async def gold_provenance(gold_id: str, _user=Depends(require_role("reviewer")),
 
 
 @router.get("/explore/evals")
-async def list_evals(limit: int = 50, db: AsyncSession = Depends(db_session)):
+async def list_evals(limit: Annotated[int, Query(ge=1, le=1_000)] = 50, db: AsyncSession = Depends(db_session)):
     from services.analytics import evaluation as eval_svc
 
     return {"evals": await eval_svc.list_evaluations(db, limit)}
@@ -199,7 +201,7 @@ async def eval_cells(eval_id: str, db: AsyncSession = Depends(db_session)):
 
 @router.get("/explore/eval/{eval_id}/patches")
 async def eval_patches(eval_id: str, gt_class_id: int | None = None, pred_class_id: int | None = None,
-                       outcome: str | None = None, limit: int = 120,
+                       outcome: str | None = None, limit: Annotated[int, Query(ge=1, le=2_400)] = 120,
                        db: AsyncSession = Depends(db_session)):
     """The crops behind one confusion cell."""
     from services.analytics import evaluation as eval_svc

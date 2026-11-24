@@ -75,6 +75,10 @@ class ObjectStore:
             self._client.create_bucket(Bucket=self.bucket)
             log.info("bucket.created", bucket=self.bucket)
 
+    def bucket_reachable(self) -> None:
+        """Raise unless the bucket answers. Read-only: a probe must not create what it is checking for."""
+        self._client.head_bucket(Bucket=self.bucket)
+
     def uri(self, key: str) -> str:
         return f"s3://{self.bucket}/{key}"
 
@@ -135,6 +139,25 @@ class ObjectStore:
             self._client.delete_object(Bucket=self.bucket, Key=self._key(uri_or_key))
         except ClientError:
             pass
+
+    def list_keys(self, prefix: str) -> list[str]:
+        """Every object key under `prefix`. Paginated, so a session of a hundred thousand frames lists whole."""
+        keys: list[str] = []
+        for page in self._client.get_paginator("list_objects_v2").paginate(Bucket=self.bucket, Prefix=prefix):
+            keys.extend(o["Key"] for o in page.get("Contents", []))
+        return keys
+
+    def owns(self, uri_or_key: str) -> bool:
+        """Whether this names an object in this store's own bucket (as opposed to a local path, another
+        bucket, or a URL). The delete paths use it: `remove` strips the bucket from an s3 uri and would
+        otherwise delete the same key from OUR bucket when handed one that names somebody else's."""
+        if uri_or_key.startswith("s3://"):
+            try:
+                bucket, _key = self.parse_uri(uri_or_key)
+            except ValueError:
+                return False
+            return bucket == self.bucket
+        return "://" not in uri_or_key and not uri_or_key.startswith("/")
 
     def presigned_get(self, uri_or_key: str, expires: int = 3600) -> str:
         return self._sign_client.generate_presigned_url(

@@ -7,6 +7,8 @@ measurements taken against what humans actually decided.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -142,7 +144,7 @@ async def explain(payload: ExplainIn):
 
 
 @router.post("/reasoner/rerun/{session_id}", dependencies=[Depends(require_role("reviewer"))])
-async def rerun(session_id: str, limit: int = Query(500, ge=1, le=5000),
+async def rerun(session_id: str, limit: Annotated[int, Query(ge=1, le=5000)] = 500,
                 apply: bool = False, db: AsyncSession = Depends(db_session)):
     """Reason over a session's existing objects, without re-detecting.
 

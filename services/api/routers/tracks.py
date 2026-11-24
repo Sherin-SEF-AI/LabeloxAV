@@ -435,14 +435,22 @@ async def tube_verdict(track_id: UUID, db: AsyncSession = Depends(db_session)):
     onto = get_ontology()
     seen: set[str] = set()
     groups = []
+    firsts = []
     for r in rows:
         if r.batch_id in seen:
             continue
         seen.add(r.batch_id)
-        obj = await db.get(Object, r.object_id)
+        firsts.append(r)
+    # The class of each group's object in one query, not one per group.
+    obj_ids = {r.object_id for r in firsts if r.object_id is not None}
+    classes = ({oid: cid for oid, cid in (await db.execute(
+        select(Object.object_id, Object.class_id).where(Object.object_id.in_(obj_ids)))).all()}
+               if obj_ids else {})
+    for r in firsts:
+        obj_class = classes.get(r.object_id)
         groups.append({
             "batch_id": r.batch_id,
-            "class_name": onto.by_id(obj.class_id).name if obj else None,
+            "class_name": onto.by_id(obj_class).name if obj_class is not None else None,
             "verdict": r.verdict, "confidence": r.confidence,
             "proposed_class_id": r.proposed_class_id,
             "proposed_class_name": (onto.by_id(r.proposed_class_id).name

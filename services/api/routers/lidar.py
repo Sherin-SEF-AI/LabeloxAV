@@ -20,9 +20,8 @@ from compute.worker.jobs.pointcloud_build import (
     build_session_clouds,
 )
 from core.logging import get_logger
-from core.storage import get_object_store
 from db.models import Frame, Object, PointCloud, PointCloudDerived
-from services.api.deps import db_session
+from services.api.deps import db_session, require_role
 from services.hdmap.georef import bearing
 from services.lidar.bev import bev_box_to_cuboid
 from services.lidar.calib.validate3d import lidar_session_ok, validate_session
@@ -32,7 +31,7 @@ log = get_logger("api_lidar")
 router = APIRouter()
 
 
-@router.post("/lidar/sessions/{session_id}/validate")
+@router.post("/lidar/sessions/{session_id}/validate", dependencies=[Depends(require_role("reviewer"))])
 async def validate_lidar(session_id: uuid.UUID, db: AsyncSession = Depends(db_session)):
     """Run the automatic LiDAR validation: cloud quality across the session plus camera coverage
     consistency. Records a lidar_calibration_validation row; a 'fail' excludes the session from 3D work."""
@@ -84,7 +83,7 @@ class BuildIn(BaseModel):
     max_points: int | None = None
 
 
-@router.post("/lidar/sessions/{session_id}/build")
+@router.post("/lidar/sessions/{session_id}/build", dependencies=[Depends(require_role("reviewer"))])
 async def build_clouds(session_id: uuid.UUID, body: BuildIn | None = None,
                        db: AsyncSession = Depends(db_session)):
     """Build pseudo-LiDAR clouds from a session's camera frames on the local 5080. Bounded to `limit` frame
@@ -182,7 +181,9 @@ async def compute_cuboids(frame_id: uuid.UUID, db: AsyncSession = Depends(db_ses
         raise HTTPException(409, "session excluded from 3D work: it failed LiDAR calibration or cloud "
                                  "quality validation. Re-validate after fixing.")
 
-    pts = np.frombuffer(get_object_store().get_bytes(frame.lidar["pcd_uri"]), dtype=np.float32).reshape(-1, 4)
+    from services.api.offload import fetch_bytes
+
+    pts = np.frombuffer(await fetch_bytes(frame.lidar["pcd_uri"]), dtype=np.float32).reshape(-1, 4)
     bev = frame.lidar["bev"]
     objects = (await db.execute(select(Object).where(Object.frame_id == frame_id))).scalars().all()
     out = []

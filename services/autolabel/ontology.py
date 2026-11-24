@@ -224,7 +224,7 @@ class Ontology:
                 if val not in (spec.values or []):
                     errors.append(f"attribute '{key}'={val!r} not in {spec.values}")
             elif spec.type == "float":
-                if not isinstance(val, (int, float)):
+                if not isinstance(val, int | float):
                     errors.append(f"attribute '{key}' must be float")
                 elif spec.range and not (spec.range[0] <= float(val) <= spec.range[1]):
                     errors.append(f"attribute '{key}'={val} out of range {spec.range}")

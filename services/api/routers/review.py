@@ -4,9 +4,10 @@ active-learning training signal) and updates the object with source=human."""
 from __future__ import annotations
 
 import asyncio
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +16,14 @@ from core.observability import spawn
 from core.storage import get_object_store
 from core.timebase import now_ns
 from db.models import Frame, Object, Review
-from services.api.deps import BulkReviewIn, ReviewIn, current_user, db_session
+from services.api.deps import (
+    BulkReviewIn,
+    BulkReviewOut,
+    ReviewIn,
+    ReviewOut,
+    current_user,
+    db_session,
+)
 from services.api.routers.objects import _write_mask
 from services.autolabel.ontology import get_ontology
 from services.review_apply import AttrRejected, apply_review_batch
@@ -28,7 +36,7 @@ router = APIRouter()
 
 
 @router.post("/qa/vlm")
-async def qa_vlm(session_id: str, limit: int = 40, db: AsyncSession = Depends(db_session)):
+async def qa_vlm(session_id: str, limit: Annotated[int, Query(ge=1, le=1_000)] = 40, db: AsyncSession = Depends(db_session)):
     """Run a VLM auto-QA + auto-attributes pass on a session in the background: flags cross-superclass
     disagreements into the QA queue and pre-fills typed attributes. GPU-light (Ollama), yields to
     training. Flagged objects surface in triage's QA queue (state=submitted)."""
@@ -56,8 +64,9 @@ def _attrib(user, fallback: str) -> tuple[str, object]:
     return (user.name, user.user_id) if user is not None else (fallback, None)
 
 
-@router.post("/objects/bulk-review")
-async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+@router.post("/objects/bulk-review", response_model=BulkReviewOut, response_model_exclude_unset=True)
+async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_session), user=Depends(current_user),
+                      x_lbx_tab: Annotated[str | None, Header()] = None):
     """Apply one review action to many objects at once (accept/reject/relabel a filtered set). Each
     object gets source=human + a Review audit row, exactly like single review."""
     onto = get_ontology()
@@ -76,13 +85,23 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
     from uuid import UUID as _UUID
 
     ids = payload.object_ids
+    # One query for the batch. A bulk review of five hundred objects was five hundred SELECTs before the
+    # first write. Order and duplicates are kept as the caller sent them.
+    want = [_UUID(oid) for oid in ids]
+    found = ({o.object_id: o for o in (await db.execute(
+        select(Object).where(Object.object_id.in_(set(want))))).scalars()} if want else {})
     objects: list[Object] = []
-    for oid in ids:
-        obj = await db.get(Object, _UUID(oid))
+    for oid, key in zip(ids, want, strict=True):
+        obj = found.get(key)
         if obj is None:
             missing.append(oid)
             continue
         objects.append(obj)
+    from services.collab.presence import assert_editor_may_save
+
+    # From the editor only (see assert_editor_may_save): a bulk action there may not write to a frame
+    # another editor holds. The review queue sends no tab token and is not held up by anyone's open tab.
+    await assert_editor_may_save([o.frame_id for o in objects], user, x_lbx_tab)
 
     # The per-object loop lives in services/review_apply.py so the track relabel path gets the same lock,
     # the same role clamp and the same undo instead of a fourth copy of them. Bulk keeps its own behaviour
@@ -136,11 +155,15 @@ async def bulk_review(payload: BulkReviewIn, db: AsyncSession = Depends(db_sessi
             "run_id": run_id}
 
 
-@router.post("/objects/{object_id}/review")
-async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = Depends(db_session), user=Depends(current_user)):
+@router.post("/objects/{object_id}/review", response_model=ReviewOut, response_model_exclude_unset=True)
+async def review_object(object_id: UUID, payload: ReviewIn, db: AsyncSession = Depends(db_session),
+                        user=Depends(current_user), x_lbx_tab: Annotated[str | None, Header()] = None):
     obj = await db.get(Object, object_id)
     if obj is None:
         raise HTTPException(404, "object not found")
+    from services.collab.presence import assert_editor_may_save
+
+    await assert_editor_may_save([obj.frame_id], user, x_lbx_tab)
     # Optimistic lock: if the editor's view is stale (someone else edited since), refuse with 409 so the
     # client can reload rather than clobber the other annotator's change.
     if payload.expected_version is not None and obj.version != payload.expected_version:

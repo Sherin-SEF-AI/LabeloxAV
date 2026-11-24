@@ -1,8 +1,22 @@
 """3D dataset export, extending the seal-and-export driver to the 3D data product. A 3D slice of object_3d is
-sealed into a content-addressed dataset commit and written to OpenLABEL (primary), nuScenes (AV buyers),
-KITTI, and Waymo, with a lossless JSON provenance sidecar; raw clouds export to LAS and PCD. The HD map
-exports to Lanelet2 and OpenDRIVE through the existing pipeline. Every export pins a dataset commit and
-records the box source, model, and calibration (provenance is one walk).
+sealed into a content-addressed dataset commit and written to OpenLABEL (primary), with a lossless JSON
+provenance sidecar; raw clouds export to LAS and PCD. The HD map exports to Lanelet2 and OpenDRIVE through
+the existing pipeline. Every export pins a dataset commit and records the box source, model, and
+calibration (provenance is one walk).
+
+What the other three writers are, exactly. Each borrows a dataset's field names and box convention for the
+boxes alone; none of them produces a dataset that the named dataset's own tooling loads as-is:
+
+  nuscenes     one JSON file of annotation rows using nuScenes' translation / size [w, l, h] / rotation
+               quaternion fields. Not a nuScenes table directory: there are no sample, sample_data,
+               ego_pose or calibrated_sensor tables, and boxes are in the ego frame, not a global one.
+  kitti        one label file per cloud in the KITTI object column order, with the 2D box and alpha set
+               to KITTI's "unknown" values, the 3D box in the ego frame (not KITTI's rectified camera
+               frame), and the confidence as a 16th column.
+  waymo_json   one JSON file listing, per cloud, boxes with the field names of the Waymo Open Dataset
+               `Label.Box` message. It is NOT the Waymo Open Dataset format, which is TFRecord files of
+               serialized `Frame` protobufs; see `write_waymo_style_json_3d`. The format key `waymo` is
+               the older name for the same output and is still accepted.
 """
 
 from __future__ import annotations
@@ -101,7 +115,10 @@ def write_openlabel_3d(records: list[dict], out_dir: Path) -> Path:
 
 
 def write_nuscenes_3d(records: list[dict], out_dir: Path) -> Path:
-    """nuScenes-style sample_annotation: translation, size [w,l,h], rotation quaternion."""
+    """Annotation rows in nuScenes' box convention, as one JSON file: translation, size [w, l, h], and a
+    [w, x, y, z] rotation quaternion carrying the yaw. This is the sample_annotation geometry only, in the
+    ego frame, with the class name and confidence inline; it is not a nuScenes table directory and the
+    devkit will not load it."""
     anns = []
     for r in records:
         anns.append({"sample_annotation_token": r["object_3d_id"], "instance_token": r["object_id"] or r["object_3d_id"],
@@ -114,8 +131,9 @@ def write_nuscenes_3d(records: list[dict], out_dir: Path) -> Path:
 
 
 def write_kitti_3d(records: list[dict], out_dir: Path) -> Path:
-    """KITTI label3d lines: type truncated occluded alpha x1 y1 x2 y2 h w l x y z rotation_y. The 2D bbox is
-    unknown (this is a LiDAR export); the 3D fields carry the ego cuboid."""
+    """KITTI label3d lines: type truncated occluded alpha x1 y1 x2 y2 h w l x y z rotation_y score. The 2D
+    bbox is unknown (this is a LiDAR export); the 3D fields carry the ego cuboid as it is stored, so x y z
+    and rotation_y are in the ego frame (x forward, z up), not KITTI's rectified camera frame."""
     by_cloud: dict[str, list[str]] = {}
     for r in records:
         h_, w_, l_ = r["dims"][2], r["dims"][1], r["dims"][0]
@@ -130,8 +148,26 @@ def write_kitti_3d(records: list[dict], out_dir: Path) -> Path:
     return d
 
 
-def write_waymo_3d(records: list[dict], out_dir: Path) -> Path:
-    """Waymo-style laser labels (JSON): box {center_x/y/z, length, width, height, heading}, type, id."""
+WAYMO_STYLE_JSON_FORMAT = "labelox.waymo_style_laser_labels_json/1"
+
+
+def write_waymo_style_json_3d(records: list[dict], out_dir: Path) -> Path:
+    """Laser labels as one plain JSON file, `waymo_3d.json`, that borrows Waymo's box field names.
+
+    This is NOT the Waymo Open Dataset format. That format is TFRecord files of serialized
+    `waymo.open_dataset.Frame` protobufs, carrying range images, camera images, calibrations and poses
+    beside the labels, and nothing here writes it: waymo-open-dataset tooling cannot read this file.
+
+    What it is: {"format", "note", "frames": [{"context_name", "laser_labels": [...]}]}, one frame per
+    cloud (context_name is the cloud id), each label being
+
+        {"id": <object_3d id>, "type": <ontology class name>, "score": <confidence>,
+         "box": {"center_x", "center_y", "center_z", "length", "width", "height", "heading"}}
+
+    with the box keys named as in Waymo's `Label.Box`, metres and radians, in the ego frame. `type` is the
+    LabeloxAV ontology class name, not Waymo's Label.Type enum, and `score` is not a field Waymo's ground
+    truth labels have.
+    """
     frames: dict[str, list[dict]] = {}
     for r in records:
         frames.setdefault(r["cloud_id"], []).append({
@@ -140,9 +176,15 @@ def write_waymo_3d(records: list[dict], out_dir: Path) -> Path:
                     "length": r["dims"][0], "width": r["dims"][1], "height": r["dims"][2], "heading": r["yaw"]},
             "score": r["conf"]})
     path = out_dir / "waymo_3d.json"
-    path.write_text(json.dumps({"frames": [{"context_name": k, "laser_labels": v} for k, v in frames.items()]},
-                               indent=2))
+    path.write_text(json.dumps({
+        "format": WAYMO_STYLE_JSON_FORMAT,
+        "note": "Plain JSON using Waymo Label.Box field names. Not a Waymo Open Dataset TFRecord.",
+        "frames": [{"context_name": k, "laser_labels": v} for k, v in frames.items()]}, indent=2))
     return path
+
+
+# The name this writer had while it was described as a Waymo export. Kept so existing imports keep working.
+write_waymo_3d = write_waymo_style_json_3d
 
 
 def write_las(cloud, path: Path) -> Path:
@@ -165,13 +207,21 @@ def write_pcd(cloud, path: Path) -> Path:
     return path
 
 
+# "waymo" is the older key for the Waymo-style JSON and stays accepted (the API's default format list and
+# stored export_uris use it); "waymo_json" says what the file is.
 _FORMAT_WRITERS = {"openlabel": write_openlabel_3d, "nuscenes": write_nuscenes_3d,
-                   "kitti": write_kitti_3d, "waymo": write_waymo_3d}
+                   "kitti": write_kitti_3d, "waymo_json": write_waymo_style_json_3d,
+                   "waymo": write_waymo_style_json_3d}
 
 
 async def export_3d_dataset(spec: Slice3D, formats: list[str] | None = None, out_root: Path | None = None,
                             export_clouds: bool = False) -> dict:
-    """Seal a 3D slice into a dataset commit and write it to each requested format with a provenance sidecar."""
+    """Seal a 3D slice into a dataset commit and write it to each requested format with a provenance sidecar.
+
+    Formats: openlabel, nuscenes, kitti, waymo_json (alias: waymo). See the module docstring for what each
+    file is; in particular waymo_json / waymo is a JSON file with Waymo's box field names, not a Waymo Open
+    Dataset TFRecord. The default list keeps the key `waymo` so the export_uris of existing callers do not
+    change shape."""
     formats = formats or ["openlabel", "nuscenes", "kitti", "waymo"]
     import tempfile
 

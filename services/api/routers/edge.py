@@ -11,6 +11,8 @@ progress that somebody watches.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,7 +82,7 @@ async def ingest_telemetry(payload: TelemetryIn, db: AsyncSession = Depends(db_s
 # ---------------------------------------------------------------- reading it back
 
 @router.get("/edge/devices", dependencies=[Depends(require_role("reviewer"))])
-async def list_devices(fleet: str | None = None, limit: int = Query(200, ge=1, le=1000),
+async def list_devices(fleet: str | None = None, limit: Annotated[int, Query(ge=1, le=1000)] = 200,
                        db: AsyncSession = Depends(db_session)):
     from services.forgyx.edge_feedback import list_devices as _list
 
@@ -135,7 +137,7 @@ async def export_progress(job_id: str, db: AsyncSession = Depends(db_session)):
 
 
 @router.get("/exports/resumable", dependencies=[Depends(require_role("reviewer"))])
-async def list_resumable(limit: int = Query(50, ge=1, le=200),
+async def list_resumable(limit: Annotated[int, Query(ge=1, le=200)] = 50,
                          db: AsyncSession = Depends(db_session)):
     """Failed exports that still have a usable checkpoint."""
     from services.export.resumable import list_resumable as _list
@@ -165,7 +167,7 @@ async def resume_export(job_id: str, db: AsyncSession = Depends(db_session)):
 async def champion_sweep(session_id: str | None = None,
                          conf_floor: float = Query(0.05, ge=0.0, le=0.5),
                          accept_threshold: float = Query(0.5, ge=0.0, le=1.0),
-                         limit: int = Query(500, ge=1, le=5000),
+                         limit: Annotated[int, Query(ge=1, le=5000)] = 500,
                          top_k: int = Query(100, ge=1, le=1000),
                          db: AsyncSession = Depends(db_session)):
     """Run the champion at a very low confidence over frames it currently reports nothing in.

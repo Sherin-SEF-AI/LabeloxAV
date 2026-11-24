@@ -31,7 +31,6 @@ from db.models import (
     JobAgreement,
     LabelJob,
     LabelProject,
-    LabelTask,
     Object,
     OntologyClass,
     OntologyVersion,

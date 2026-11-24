@@ -27,7 +27,6 @@ import math
 
 def _build_pose_graph(drives):
     import gtsam
-    import numpy as np
 
     graph = gtsam.NonlinearFactorGraph()
     initial = gtsam.Values()

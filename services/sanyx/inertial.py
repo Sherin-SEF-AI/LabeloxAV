@@ -65,7 +65,7 @@ async def extract_inertial(db, session_id) -> dict:
     out: dict = {"imu_ts": [], "gnss_ts": [], "pps_ts": [], "accel": [], "gyro": [],
                  "fix_types": [], "hdop": [], "rtk_flags": []}
     reader = make_reader(io.BytesIO(raw), decoder_factories=_decoder_factories())
-    for schema, channel, message, decoded in reader.iter_decoded_messages(topics=list(selected)):
+    for _schema, channel, message, decoded in reader.iter_decoded_messages(topics=list(selected)):
         kind = selected.get(channel.topic)
         ts = int(message.log_time)
         if kind == "imu":
