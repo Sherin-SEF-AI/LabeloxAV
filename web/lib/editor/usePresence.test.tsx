@@ -76,6 +76,37 @@ describe("opening a frame", () => {
     expect(result.current.canTakeOver).toBe(false);
   });
 
+  it("after a reload, does not show 'your other tab' while the old page's release is still landing", async () => {
+    // The page that was reloaded released the lock, and that release arrives a moment after this page's
+    // request for it. For that moment the server truthfully says the holder is this user's other tab.
+    const heldByMyOldPage = (f: string) => state(f, { lock: { mine: false, holder: me }, can_take_over: true });
+    let landed = false;
+    const t = transport((f) => (landed ? mine(f) : heldByMyOldPage(f)));
+    const { result } = mount(t);
+    await flush();
+    // Asked once, told "your other tab", and not showing it: still connecting, not a view-only banner.
+    expect(t.acquire).toHaveBeenCalledTimes(1);
+    expect(result.current.lock.holder).toBeNull();
+
+    landed = true;
+    await tick(600);
+    expect(t.heartbeat).toHaveBeenCalledTimes(1);
+    expect(result.current.lock.mine).toBe(true);
+    expect(result.current.readOnly).toBe(false);
+  });
+
+  it("a second tab that really is open is still reported, after the retries", async () => {
+    const heldByMyOtherTab = (f: string) => state(f, { lock: { mine: false, holder: me }, can_take_over: true });
+    const t = transport(heldByMyOtherTab);
+    const { result } = mount(t);
+    await flush();
+    await tick(600 * 3 + 50);
+    expect(t.acquire.mock.calls.length + t.heartbeat.mock.calls.length).toBe(4);
+    expect(result.current.readOnly).toBe(true);
+    expect(result.current.lock.holder?.same_user).toBe(true);
+    expect(result.current.canTakeOver).toBe(true);
+  });
+
   it("presents one token, in the alphabet the server accepts, on every call", async () => {
     const t = transport();
     mount(t);

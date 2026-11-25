@@ -50,6 +50,11 @@ export type Presence = {
   model: PresenceModel;
 };
 
+// How many times, and how far apart, opening a frame asks again when the holder is this user's own other
+// tab. Four tries over about two seconds covers the release of a page that was just reloaded.
+const OWN_TAB_RETRIES = 4;
+const OWN_TAB_RETRY_MS = 600;
+
 // One token for the life of the page, shared by every frame this tab visits.
 let tabToken: string | null = null;
 const thisTab = () => (tabToken ??= newTabToken());
@@ -90,8 +95,9 @@ export function usePresence(frameId: string, opts: UsePresenceOptions = {}): Pre
     let inFlight = false;
     let answered = false;
 
-    const beat = async () => {
-      if (!live || inFlight) return;
+    // `hush` keeps one answer off the screen: "held by your own other tab". See `open` below.
+    const beat = async (hush = false): Promise<PresenceState | null> => {
+      if (!live || inFlight) return null;
       inFlight = true;
       try {
         // The first call is the explicit "I am opening this to edit"; every later one is a heartbeat
@@ -101,13 +107,30 @@ export function usePresence(frameId: string, opts: UsePresenceOptions = {}): Pre
           ? await transport.heartbeat(frameId, tab, true)
           : await transport.acquire(frameId, tab);
         answered = true;
-        if (live) dispatch({ t: "answer", frameId, state });
+        const ownOtherTab = !state.lock.mine && !!state.lock.holder?.same_user;
+        if (live && !(hush && ownOtherTab)) dispatch({ t: "answer", frameId, state });
+        return state;
       } catch {
         // Counted, not swallowed: the reducer turns enough of these in a row into `degraded`, which the
         // editor shows. One dropped request changes nothing on screen, on purpose.
         if (live) dispatch({ t: "failed", frameId });
+        return null;
       } finally {
         inFlight = false;
+      }
+    };
+
+    // Opening the frame. Reloading a page that holds the lock is a race: the old page's release and this
+    // page's request for the lock leave together, and when the request arrives first the frame is "being
+    // edited by you in another tab" for a whole heartbeat, on a tab that no longer exists. So that one
+    // answer is not believed at once: it is asked again a few times, a moment apart, and only shown if it
+    // is still true, which is what a second tab that really is open looks like.
+    const open = async () => {
+      for (let attempt = 0; attempt < OWN_TAB_RETRIES && live; attempt++) {
+        const last = attempt === OWN_TAB_RETRIES - 1;
+        const state = await beat(!last);
+        if (!state || state.lock.mine || !state.lock.holder?.same_user) return;
+        if (!last) await new Promise((resolve) => setTimeout(resolve, OWN_TAB_RETRY_MS));
       }
     };
 
@@ -137,7 +160,7 @@ export function usePresence(frameId: string, opts: UsePresenceOptions = {}): Pre
     // Restored from the back/forward cache: the release above already went, so start again.
     const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) onVisibility(); };
 
-    if (!document.hidden) void beat().then(arm);
+    if (!document.hidden) void open().then(arm);
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("pagehide", onPageHide);
     window.addEventListener("pageshow", onPageShow);
