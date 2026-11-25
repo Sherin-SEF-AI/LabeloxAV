@@ -130,26 +130,54 @@ FILMS = {
         tour=ROOT / ".scratch/demo/india/tour", work=ROOT / ".scratch/demo/india/pro",
         transcript=ROOT / ".scratch/demo/india/tour/transcript/demo.srt", scenes_module="india_scenes",
         blurbs={
-            "Real Indian roads": "A junction in Cuttack and a herd of cattle in Delhi, both Creative Commons",
-            "Manual annotation": "Boxes, polygons and edits, drawn in the editor",
+            "Real Indian roads": "A dashcam drive through Bengaluru, and a herd of cattle in Delhi",
+            "Manual annotation": "Boxes, polygons, edits and the keyboard, in the editor",
             "AI assist": "Masks from a click, a box or a wand, then corrected stroke by stroke",
             "Beyond boxes": "Occlusion, polylines, pose, attributes, measurement and adverse regions",
             "Checking the machine": "The models' proposals, accepted, rejected or corrected",
-            "Across frames": "One animal followed through time, and fixed once",
+            "Across frames": "Copied to the next frame, and one animal fixed through a whole track",
+            "Working together": "Two people on one frame, and nothing overwritten",
             "Delivering the data": "Sealed datasets in the formats training expects",
         },
         card_backdrop={},
         intro_stills=("box_autos", "frame_review", "polygon", "keypoints"),
         outro_stills=("confirm", "frame_review", "track"),
         tagline="Annotating real Indian roads, tool by tool",
-        chips=("Manual annotation", "AI assist", "Pose and polylines", "Review", "Tracks", "Export"),
-        footnote="Recorded live in the running product, on Creative Commons footage from Cuttack and Delhi",
+        chips=("Manual annotation", "AI assist", "Pose and polylines", "Review", "Tracks", "Teamwork"),
+        footnote="Recorded live in the running product, on a Bengaluru dashcam drive and a clip from Delhi",
         outro_note="Every annotation in this film is a row the system now holds, checked after each scene.",
         music_plan=(("Intro", "Inspired", 0.0), ("Checking the machine", "Wholesome", 0.0),
                     ("Delivering the data", "Inspired", 150.0)),
-        credit=("Footage: \u201cMoving vehicles in Link road, Cuttack, Odisha\u201d by Psubhashish and "
-                "\u201cStray Cattle in Lutyens Delhi\u201d by Fowler&fowler, Wikimedia Commons, CC BY-SA 3.0. "
+        credit=("Footage: the operator's own dashcam drive in Bengaluru, and \u201cStray Cattle in Lutyens "
+                "Delhi\u201d by Fowler&fowler, Wikimedia Commons, CC BY-SA 3.0. "
                 f"Music: \u201cInspired\u201d, \u201cWholesome\u201d {_KM}")),
+    "features": Film(
+        name="features", title="LabeloxAV feature tour: how to use it",
+        out_name="labeloxav-feature-tour.mp4",
+        tour=ROOT / ".scratch/demo/features/tour", work=ROOT / ".scratch/demo/features/pro",
+        transcript=ROOT / ".scratch/demo/features/tour/transcript/demo.srt", scenes_module="feature_scenes",
+        blurbs={
+            "Getting started": "Home, the command palette and the system check",
+            "Setting up": "A project, its classes, and the people who work in it",
+            "Bringing data in": "Upload footage, import labels, and watch the jobs",
+            "Labelling": "Check the models' proposals, add what they missed, fix a whole track",
+            "Reviewing": "Your queue, many crops at once, and suspected errors",
+            "Finding data": "Search in plain words, and describe a dataset",
+            "Delivering and training": "Sealed exports, and a model trained on them",
+            "Getting answers": "Ask the assistant about the data",
+        },
+        card_backdrop={},
+        intro_stills=("proposals", "grid", "search", "upload"),
+        outro_stills=("draw", "grid", "dataset_query"),
+        tagline="Every feature you use day to day, and how to use it",
+        chips=("Projects", "Upload", "Auto-labelling", "Review", "Search", "Export and training"),
+        footnote="Recorded live in the running product, on a Bengaluru dashcam drive uploaded on camera",
+        outro_note="Every upload, label and verdict in this film is a row the system now holds.",
+        music_plan=(("Intro", "Clean Soul", 0.0), ("Labelling", "Airport Lounge", 0.0),
+                    ("Finding data", "Dreamer", 0.0)),
+        credit=("Footage: the operator's own dashcam drive in Bengaluru, and “Stray Cattle in Lutyens "
+                "Delhi” by Fowler&fowler, Wikimedia Commons, CC BY-SA 3.0. "
+                f"Music: “Clean Soul”, “Airport Lounge”, “Dreamer” {_KM}")),
     "youtube": Film(
         name="youtube", title="LabeloxAV: a data engine for Indian roads",
         out_name="labeloxav-youtube-2026.mp4",
@@ -211,9 +239,23 @@ def q(seconds: float) -> float:
 
 
 def run(cmd: list[str]) -> None:
+    """Run ffmpeg, writing its output under a temporary name and renaming it only once ffmpeg has finished.
+
+    Clips, stills and the music bed are cached by existence: a file that is there is taken as done. A
+    render killed mid-encode used to leave a clip that was there and two seconds long, and the next run
+    reused it, which cut 75 seconds out of the middle of a film without an error anywhere.
+    """
+    out = Path(cmd[-1]) if cmd and cmd[0] == "ffmpeg" else None
+    part = out.with_name(f"{out.stem}.part{out.suffix}") if out else None
+    if part:
+        cmd = [*cmd[:-1], str(part)]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
+        if part:
+            part.unlink(missing_ok=True)
         raise RuntimeError(f"{' '.join(cmd[:6])} ... failed:\n{r.stderr[-2500:]}")
+    if part:
+        part.replace(out)
 
 
 def probe(path: Path) -> float:

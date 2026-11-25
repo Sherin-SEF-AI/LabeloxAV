@@ -1,11 +1,15 @@
-"""Scenes for the hands-on demo: two Creative Commons clips of Indian roads, labelled in the product.
+"""Scenes for the hands-on demo: real Indian roads seen from the driver's seat, labelled in the product.
 
 The footage:
-  Cuttack, Odisha: "Moving vehicles in Link road, Cuttack, Odisha", by User:Psubhashish,
-    Wikimedia Commons, CC BY-SA 3.0, 2013. An elevated view of a junction: city buses, auto-rickshaws,
-    goods carriers, two-wheelers and pedestrians.
+  Bengaluru: the operator's own dashcam drive, 24 consecutive frames at three a second, following a city
+    bus past an auto-rickshaw and a motorcycle. Two copies are imported: BLR-DEMO-01, which no model has
+    touched and is annotated by hand, and BLR-DEMO-02, which the auto-labeller is run on. The number plates
+    in both copies were blurred before import (they were 25 pixels wide and the redaction pass missed them).
   Delhi: "Stray Cattle in Lutyens Delhi", by User:Fowler&fowler, Wikimedia Commons, CC BY-SA 3.0, 2017.
     Filmed from a car at a roundabout while a herd of cattle crosses in front of it.
+
+An earlier cut of this film annotated an elevated view of a junction in Cuttack. A driving product is
+better shown from where a vehicle's camera sits, so the hand-annotation scenes moved to the dashcam drive.
 
 Each scene is a route, a sentence or two of narration, and the mouse and keyboard work done on that page.
 Image coordinates are in the frame's own pixels (1920 wide) and are converted to the screen at the moment
@@ -16,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.request
 
 from annotate import OUT, Demo, Scene
 from sqlalchemy import text
@@ -25,10 +30,19 @@ from db.session import get_engine
 ROUTE = "india-demo-2026"
 CUTTACK = "INDIA-CTC-01"
 DELHI = "INDIA-DEL-01"
+# The dashcam frames, twice: a copy no model has run on, annotated by hand, and a copy the auto-labeller
+# is run on, shown as what the models make of the same instant.
+MANUAL = "BLR-DEMO-01"
+MACHINE = "BLR-DEMO-02"
+# Which of the 24 frames: the bus, the auto-rickshaw, a motorcycle and a jeep are all well inside the frame.
+MANUAL_INDEX, SHARED_INDEX = 4, 9
+# The second person in the two-people scene: a reviewer who takes the frame over through the same API the
+# editor uses. Created on first use; she is a row in app_user and nothing else.
+COLLEAGUE = "meera"
 EDITOR = "div.konvajs-content canvas"
 
 CHAPTERS = ["Real Indian roads", "Manual annotation", "AI assist", "Beyond boxes", "Checking the machine",
-            "Across frames", "Delivering the data"]
+            "Across frames", "Working together", "Delivering the data"]
 
 
 async def _one(sql: str, **kw):
@@ -38,15 +52,20 @@ async def _one(sql: str, **kw):
 
 async def facts() -> dict:
     """Every number the narration quotes, read from the database now."""
-    frames = await _one("""select count(*) from frame f join session s using(session_id) where s.route=:r""", r=ROUTE)
-    ctc = await _one("""select count(*) from frame f join session s using(session_id) where s.vehicle_id=:v""", v=CUTTACK)
+    blr = await _one("""select count(*) from frame f join session s using(session_id) where s.vehicle_id=:v""", v=MANUAL)
     dl = await _one("""select count(*) from frame f join session s using(session_id) where s.vehicle_id=:v""", v=DELHI)
     faces = await _one("""select coalesce(sum(p.n_faces), 0) from pii_audit p join session s using(session_id)
-                           where s.route=:r""", r=ROUTE)
+                           where s.vehicle_id=:v""", v=DELHI)
     plates = await _one("""select coalesce(sum(p.n_plates), 0) from pii_audit p join session s using(session_id)
-                            where s.route=:r""", r=ROUTE)
-    return {"frames": f"{frames:,}", "cuttack_frames": f"{ctc:,}", "delhi_frames": f"{dl:,}",
-            "faces": f"{faces:,}", "plates": f"{plates:,}"}
+                            where s.vehicle_id=:v""", v=DELHI)
+    twin = await _one("""
+        select f.frame_id from frame f join session s using(session_id)
+        where s.vehicle_id=:v order by f.ts_ns offset :o limit 1""", v=MACHINE, o=MANUAL_INDEX)
+    proposals = await _one("select count(*) from object where frame_id=:f and source <> 'human'", f=twin)
+    machine_objects = await _one("""select count(*) from object o join frame f using(frame_id)
+                                    join session s using(session_id) where s.vehicle_id=:v""", v=MACHINE)
+    return {"blr_frames": f"{blr:,}", "delhi_frames": f"{dl:,}", "faces": f"{faces:,}", "plates": f"{plates:,}",
+            "proposals": f"{proposals:,}", "machine_objects": f"{machine_objects:,}"}
 
 
 async def ids() -> dict:
@@ -55,7 +74,19 @@ async def ids() -> dict:
     # the foreground, and it lies beyond the forty frames the auto-labeller was run on, so it starts empty.
     manual = await _one("""
         select f.frame_id::text from frame f join session s using(session_id)
-        where s.vehicle_id=:v order by f.ts_ns offset 197 limit 1""", v=CUTTACK)
+        where s.vehicle_id=:v order by f.ts_ns offset :o limit 1""", v=MANUAL, o=MANUAL_INDEX)
+    # The frame after it, which the copied annotations are pasted onto, and one further on that two people
+    # open at once. Both are in the unlabelled copy, so they start empty too.
+    manual_next = await _one("""
+        select f.frame_id::text from frame f join session s using(session_id)
+        where s.vehicle_id=:v order by f.ts_ns offset :o limit 1""", v=MANUAL, o=MANUAL_INDEX + 1)
+    shared = await _one("""
+        select f.frame_id::text from frame f join session s using(session_id)
+        where s.vehicle_id=:v order by f.ts_ns offset :o limit 1""", v=MANUAL, o=SHARED_INDEX)
+    # The same instant in the copy the models labelled.
+    machine = await _one("""
+        select f.frame_id::text from frame f join session s using(session_id)
+        where s.vehicle_id=:v order by f.ts_ns offset :o limit 1""", v=MACHINE, o=MANUAL_INDEX)
     # The 42nd frame of the Delhi clip: seven cattle proposals, and among the other proposals several that
     # are wrong in ways worth showing, a reflection in the car window read as a pedestrian among them.
     review = await _one("""
@@ -67,7 +98,8 @@ async def ids() -> dict:
         join ontology_class c on c.id = o.class_id and c.version = (select max(version) from ontology_class)
         where s.vehicle_id=:v and c.name='cattle' and o.track_id is not null
         group by o.track_id order by count(*) desc, o.track_id limit 1""", v=DELHI)
-    return {"manual_frame": manual, "review_frame": review, "track": track,
+    return {"manual_frame": manual, "manual_next": manual_next, "shared_frame": shared,
+            "machine_frame": machine, "review_frame": review, "track": track,
             "cuttack": await _one("select session_id::text from session where vehicle_id=:v", v=CUTTACK),
             "delhi": await _one("select session_id::text from session where vehicle_id=:v", v=DELHI)}
 
@@ -99,10 +131,11 @@ async def reset(d: Demo, i: dict) -> str:
     is touched: its hand-drawn objects and its hand-drawn adverse regions. The machine's labels elsewhere
     are never changed.
     """
+    frames = [i["manual_frame"], i["manual_next"], i["shared_frame"]]
     async with get_engine().connect() as c:
         objs = [r[0] for r in (await c.execute(text(
-            "select object_id::text from object where frame_id = cast(:f as uuid) and source = 'human'"),
-            {"f": i["manual_frame"]})).all()]
+            "select object_id::text from object where frame_id = any(cast(:f as uuid[])) and source = 'human'"),
+            {"f": frames})).all()]
         regions = [r[0] for r in (await c.execute(text(
             "select region_id::text from adverse_region where frame_id = cast(:f as uuid) and source = 'human'"),
             {"f": i["manual_frame"]})).all()]
@@ -272,14 +305,13 @@ async def open_editor(d: Demo, i: dict) -> None:
 
 async def box_bus(d: Demo, i: dict) -> None:
     await d.pick_class("bus")
-    await draw_box(d, "bus", (549, 690, 925, 813), ms=1100)
+    await draw_box(d, "bus", (621, 430, 816, 647), ms=1100)
     await save(d)
 
 
 async def box_autos(d: Demo, i: dict) -> None:
     await d.pick_class("autorickshaw")
-    await draw_box(d, "autorickshaw", (1054, 874, 1241, 992))
-    await draw_box(d, "autorickshaw", (1276, 922, 1372, 1034))
+    await draw_box(d, "autorickshaw", (156, 546, 386, 803), ms=1000)
     await save(d)
 
 
@@ -293,96 +325,98 @@ async def fix_class(d: Demo, cls: str, at: tuple[float, float]) -> None:
 
 
 async def box_more(d: Demo, i: dict) -> None:
-    await d.pick_class("hatchback")
-    await draw_box(d, "hatchback", (1000, 985, 1215, 1076))
-    await d.pick_class("pickup")
-    await draw_box(d, "pickup", (745, 886, 990, 1004))
-    # Zoom about the feet rather than the middle: the wheel zooms about the pointer, and this pedestrian
-    # stands near the bottom of the frame, so zooming about their middle pushes their feet off the canvas.
-    await d.zoom_at(695, 1040, 9)
-    await d.pick_class("pedestrian")
-    await draw_box(d, "pedestrian", (678, 946, 713, 1040), ms=700)
+    await d.pick_class("suv")
+    # Zoom about the jeep: it is 76 pixels wide, and a box drawn at fit-to-view is a guess at its edges.
+    await d.zoom_at(945, 572, 8)
+    await draw_box(d, "suv", (907, 535, 983, 609), ms=800)
     await d.key("f", "fit to view", label="F", after=500)
+    await d.pick_class("sedan")
+    await draw_box(d, "sedan", (1619, 554, 1834, 673))
     await save(d)
 
 
 async def polygon(d: Demo, i: dict) -> None:
-    await d.pick_class("temp_barricade")
+    await d.pick_class("median")
     await d.key("g", "polygon", label="G", after=300)
-    pts = [(1398, 757), (1650, 766), (1918, 796), (1918, 884), (1830, 882), (1650, 862), (1480, 848)]
+    # The planted median, clockwise from its near end on the road side.
+    pts = [(1036, 568), (1330, 588), (1640, 612), (1760, 640), (1750, 700), (1560, 690), (1300, 640), (1050, 596)]
     for x, y in pts:
         await d.click_img(x, y, ms=320, pause=120)
-    await d.dblclick_img(1400, 832)
+    await d.dblclick_img(1036, 584)
     await d.wait(900)
-    await fix_class(d, "temp_barricade", (1700, 810))
+    await fix_class(d, "median", (1400, 630))
     await save(d)
 
 
 async def edit(d: Demo, i: dict) -> None:
     """Resize from a handle and undo it, then copy, paste and delete the copy."""
     await d.key("v", "select", label="V", after=200)
-    await d.click_img(700, 740, ms=400)
+    await d.click_img(718, 500, ms=400)
     await d.wait(400)
-    await d.drag_img(925, 813, 945, 826, ms=600)
+    await d.drag_img(816, 647, 838, 662, ms=600)
     await d.wait(700)
     await d.key("Control+z", "undo", label="Ctrl Z", after=900)
-    await d.click_img(700, 740, ms=300)
+    await d.click_img(718, 500, ms=300)
     await d.key("Control+c", "copy", label="Ctrl C", after=400)
     await d.key("Control+v", "paste", label="Ctrl V", after=900)
     await d.key("Delete", "delete the copy", label="Del", after=900)
     await save(d)
     bus = [o for o in await human_objects(i["manual_frame"]) if o[0] == "bus"]
-    if bus and abs(bus[0][2][2] - 925) > 3:
+    if bus and abs(bus[0][2][2] - 816) > 3:
         raise RuntimeError(f"the undo did not restore the bus box: {bus[0][2]}")
 
 
 async def sam_point(d: Demo, i: dict) -> None:
-    await d.pick_class("bus")
+    await d.pick_class("motorcycle")
+    await d.zoom_at(546, 640, 6)
     await d.key("s", "SAM point", label="S", after=300)
-    await d.click_img(1090, 740, ms=500)
+    await d.click_img(546, 662, ms=500)
     await d.wait(2500)                                    # the mask comes back from the GPU model
     before = (await panel(d))["count"]
     await d.key("Enter", "accept mask", label="Enter", after=300)
     await created(d, before, "the SAM point mask")
-    await finish(d, "bus", (1090, 740))
+    await finish(d, "motorcycle", (546, 662))
+    await d.key("f", "fit to view", label="F", after=400)
     await save(d)
 
 
 async def sam_box(d: Demo, i: dict) -> None:
-    await d.pick_class("bus")
+    await d.pick_class("truck")
     await d.key("m", "SAM box", label="M", after=300)
-    await d.drag_img(188, 682, 364, 779, ms=800)
+    await d.drag_img(3, 505, 118, 733, ms=800)
     await d.wait(2500)
     before = (await panel(d))["count"]
     await d.key("Enter", "accept mask", label="Enter", after=300)
     await created(d, before, "the SAM box mask")
-    await finish(d, "bus", (276, 730))
+    await finish(d, "truck", (55, 620))
     await save(d)
 
 
 async def wand(d: Demo, i: dict) -> None:
-    await d.pick_class("sedan")
+    await d.pick_class("rider")
+    await d.zoom_at(546, 620, 6)
     await d.key("w", "magic wand", label="W", after=300)
     before = (await panel(d))["count"]
-    await d.click_img(1415, 915, ms=500)
+    await d.click_img(547, 592, ms=500)
     await d.wait(2500)
     await created(d, before, "the wand")
-    await finish(d, "sedan", (1420, 912))
+    await finish(d, "rider", (547, 590))
+    await d.key("f", "fit to view", label="F", after=400)
     await save(d)
 
 
 async def brush(d: Demo, i: dict) -> None:
     await d.key("v", "select", label="V", after=200)
-    await d.click_img(1420, 912, ms=400)
+    await d.zoom_at(546, 630, 7)
+    await d.click_img(547, 590, ms=400)
     await settle(d, limit_ms=1500)
-    if (await panel(d))["name"] != "sedan":
-        raise RuntimeError("the brush scene did not select the sedan")
-    await d.zoom_at(1340, 928, 6)
+    if (await panel(d))["name"] != "rider":
+        raise RuntimeError("the brush scene did not select the rider")
     await d.key("p", "brush", label="P", after=300)
-    await d.stroke_img([(1250, 955), (1290, 962), (1330, 966), (1370, 964), (1410, 958)], ms_per_seg=220)
+    await d.stroke_img([(534, 600), (540, 612), (548, 620), (556, 612), (561, 600)], ms_per_seg=220)
     await d.wait(1200)
     await d.key("e", "eraser", label="E", after=300)
-    await d.stroke_img([(1420, 900), (1432, 925), (1440, 950)], ms_per_seg=220)
+    await d.stroke_img([(572, 584), (576, 596), (578, 608)], ms_per_seg=220)
     await d.wait(1200)
     await d.key("f", "fit to view", label="F", after=400)
     await save(d)
@@ -390,34 +424,35 @@ async def brush(d: Demo, i: dict) -> None:
 
 async def amodal(d: Demo, i: dict) -> None:
     await d.key("v", "select", label="V", after=200)
-    await d.click_img(1325, 1005, ms=400)
+    await d.click_img(1690, 600, ms=400)
     await settle(d, limit_ms=1500)
-    if (await panel(d))["name"] != "autorickshaw":
-        raise RuntimeError("the amodal scene did not select the auto-rickshaw")
+    if (await panel(d))["name"] != "sedan":
+        raise RuntimeError("the amodal scene did not select the car behind the hedge")
     await d.key("k", "whole extent", label="K", after=300)
-    await d.drag_img(1276, 918, 1402, 1046, ms=900)
+    await d.drag_img(1604, 548, 1906, 730, ms=900)
     await d.wait(700)
     await save(d)
 
 
 async def polyline(d: Demo, i: dict) -> None:
-    await d.pick_class("guardrail")
+    await d.pick_class("curb")
     await d.key("l", "polyline", label="L", after=300)
-    for x, y in [(205, 806), (330, 858), (450, 905)]:
+    for x, y in [(1000, 600), (1210, 655), (1440, 716)]:
         await d.click_img(x, y, ms=380, pause=150)
-    await d.dblclick_img(590, 962)
+    await d.dblclick_img(1700, 790)
     await d.wait(900)
     await save(d)
 
 
 async def keypoints(d: Demo, i: dict) -> None:
     await d.key("Shift+5", "pose mode", label="Shift 5", after=700)
-    await d.pick_class("pedestrian")
-    await d.zoom_at(695, 1040, 11)
+    await d.pick_class("rider")
+    await d.zoom_at(546, 630, 11)
     await d.key("k", "keypoint", label="K", after=300)
-    skeleton = [(695, 953), (698, 951), (692, 951), (701, 953), (689, 953), (704, 966), (686, 966),
-                (708, 982), (682, 982), (709, 997), (681, 997), (701, 996), (689, 996), (702, 1016),
-                (688, 1016), (703, 1035), (687, 1035)]
+    # The rider, seen from behind: head, shoulders, arms forward on the bars, hips, legs on the pegs.
+    skeleton = [(547, 578), (550, 576), (544, 576), (553, 579), (541, 579), (563, 597), (531, 597),
+                (568, 617), (526, 617), (566, 634), (528, 634), (557, 641), (537, 641), (562, 662),
+                (532, 662), (560, 683), (534, 683)]
     # The seventeenth point completes the skeleton and creates the object, so no Enter is needed.
     for x, y in skeleton:
         await d.click_img(x, y, ms=220, pause=90)
@@ -428,26 +463,26 @@ async def keypoints(d: Demo, i: dict) -> None:
 
 async def attributes(d: Demo, i: dict) -> None:
     await d.key("v", "select", label="V", after=200)
-    await d.click_img(1147, 915, ms=400)
+    await d.click_img(1690, 600, ms=400)
     await d.wait(800)
-    await d.select_option(d.page.locator('label:has(> span:text-is("occlusion")) select'), "25", "occlusion 25%")
+    await d.select_option(d.page.locator('label:has(> span:text-is("occlusion")) select'), "50", "occlusion 50%")
     await d.wait(600)
     await save(d)
 
 
 async def measure(d: Demo, i: dict) -> None:
     await d.key("r", "measure", label="R", after=300)
-    await d.drag_img(612, 962, 1000, 986, ms=1300)
+    await d.drag_img(386, 720, 655, 650, ms=1300)
     await d.wait(1800)
 
 
 async def adverse(d: Demo, i: dict) -> None:
     await d.key("d", "adverse region", label="D", after=400)
     await d.select_option(d.page.get_by_title("adverse condition to tag"), "shadow", "condition")
-    # The shaded footpath along the left edge, clockwise, so the outline never crosses itself.
-    for x, y in [(2, 700), (130, 700), (360, 850), (575, 960)]:
+    # The carriageway under the trees on the left, clockwise, so the outline never crosses itself.
+    for x, y in [(400, 690), (610, 650), (640, 720), (470, 800)]:
         await d.click_img(x, y, ms=380, pause=150)
-    await d.dblclick_img(575, 1076)
+    await d.dblclick_img(380, 790)
     await d.wait(900)
     await save(d)
 
@@ -708,12 +743,12 @@ async def verify_grid(d: Demo, i: dict) -> str:
 # ------------------------------------------------------------------ opening, tracks and delivery
 
 async def sessions(d: Demo, i: dict) -> None:
-    for name in ("INDIA-CTC-01", "INDIA-DEL-01"):
+    for name in (MANUAL, MACHINE, DELHI):
         card = d.page.get_by_text(name, exact=True).first
         box = await card.bounding_box()
         if box:
             await d.move(box["x"] + 120, box["y"] + 40, ms=700)
-            await d.wait(1500)
+            await d.wait(1300)
 
 
 async def import_page(d: Demo, i: dict) -> None:
@@ -764,22 +799,202 @@ async def datasets(d: Demo, i: dict) -> None:
     await d.wait(800)
 
 
+# ------------------------------------------------------------------ keyboard editing, and work across frames
+async def nudge(d: Demo, i: dict) -> None:
+    """Select the jeep and walk it with the arrow keys, then walk it back: one pixel, then ten."""
+    await d.key("v", "select", label="V", after=200)
+    await d.zoom_at(945, 572, 6)
+    await d.click_img(945, 572, ms=450)
+    await d.wait(500)
+    for _ in range(4):
+        await d.key("ArrowRight", "nudge 1 px", label="→", after=170)
+    await d.key("Shift+ArrowUp", "nudge 10 px", label="Shift ↑", after=700)
+    await d.key("Shift+ArrowDown", "and back", label="Shift ↓", after=350)
+    for _ in range(4):
+        await d.key("ArrowLeft", "nudge 1 px", label="←", after=170)
+    await d.wait(400)
+    await deselect(d)
+    await d.key("f", "fit to view", label="F", after=400)
+    await save(d)
+
+
+async def shortcuts(d: Demo, i: dict) -> None:
+    """Open the shortcut sheet, point at a binding that can be changed, close it."""
+    await d.key("Shift+Slash", "shortcuts", label="?", after=900)
+    hint = d.page.get_by_text("click a key to change it").first
+    await hint.wait_for(state="visible", timeout=8000)
+    box = await hint.bounding_box()
+    if box:
+        await d.move(box["x"] + 60, box["y"] + 8, ms=700)
+        await d.wait(1400)
+    reset_btn = d.page.get_by_role("button", name="Reset to defaults").first
+    rb = await reset_btn.bounding_box()
+    if rb:
+        await d.move(rb["x"] + rb["width"] / 2, rb["y"] + rb["height"] / 2, ms=700)
+        await d.wait(1200)
+    await d.key("Escape", "close", label="Esc", after=500)
+
+
+async def machine_frame(d: Demo, i: dict) -> None:
+    """The same instant, labelled by the models: fit, then lean in on the bus and the auto-rickshaw."""
+    await d.key("f", "fit to view", label="F", after=900)
+    await d.move(*(await d.img(718, 540)), ms=800)
+    await d.wait(1300)
+    await d.zoom_at(420, 660, 4)
+    await d.wait(1500)
+    await d.move(*(await d.img(270, 680)), ms=700)
+    await d.wait(1200)
+    await d.move(*(await d.img(546, 640)), ms=700)
+    await d.wait(1200)
+    await d.key("f", "fit to view", label="F", after=900)
+
+
+async def paste_next(d: Demo, i: dict) -> None:
+    """Copy every object on this frame, step to the next frame, paste, and nudge the bus to where it now is."""
+    await d.key("v", "select", label="V", after=200)
+    await d.key("Control+a", "select all", label="Ctrl A", after=800)
+    await d.key("Control+c", "copy all", label="Ctrl C", after=700)
+    await d.key("BracketRight", "next frame", label="]", after=400)
+    await d.page.wait_for_url(f"**/frame/{i['manual_next']}", timeout=20_000)
+    await d.page.wait_for_selector(EDITOR, timeout=30_000)
+    await d.wait(1800)
+    before = (await panel(d))["count"]
+    await d.key("Control+v", "paste on this frame", label="Ctrl V", after=1200)
+    after = (await settle(d))["count"]
+    if after <= before:
+        raise RuntimeError(f"the paste added nothing on the next frame ({before} -> {after})")
+    await d.wait(900)
+    # Everything pasted is selected, so the arrows move all of it at once. A third of a second on, the
+    # traffic ahead sits a couple of dozen pixels to the left.
+    for _ in range(2):
+        await d.key("Shift+ArrowLeft", "nudge all, 10 px", label="Shift ←", after=450)
+    await d.wait(500)
+    await deselect(d)
+    await save(d)
+
+
+async def verify_paste(d: Demo, i: dict) -> str:
+    src = await human_objects(i["manual_frame"])
+    dst = await human_objects(i["manual_next"])
+    if not dst or len(dst) != len(src):
+        raise RuntimeError(f"pasted {len(dst)} objects onto the next frame, the source frame has {len(src)}")
+    return f"{len(dst)} objects copied to the next frame and saved there"
+
+
+# ------------------------------------------------------------------ two people on one frame
+async def _colleague() -> dict:
+    """The reviewer who takes the frame over, as the API knows her: a user row and a signed token."""
+    import uuid as _uuid
+
+    from core.config import get_settings
+    from services.api.auth_token import mint_token
+
+    async with get_engine().begin() as c:
+        row = (await c.execute(text("select user_id::text, token_version from app_user where name=:n"),
+                               {"n": COLLEAGUE})).first()
+        if row is None:
+            uid = str(_uuid.uuid4())
+            await c.execute(text("insert into app_user (user_id, name, role) values (cast(:u as uuid), :n, 'reviewer')"),
+                            {"u": uid, "n": COLLEAGUE})
+            row = (uid, 1)
+    token = mint_token(row[0], get_settings().auth.signing_key, token_version=int(row[1] or 1), ttl_seconds=3600)
+    return {"user_id": row[0], "token": token, "tab": "demo-colleague-tab-0001"}
+
+
+def _presence(colleague: dict, frame_id: str, action: str) -> dict:
+    """One presence call as the colleague, straight to the API the editor itself uses."""
+    from annotate import API
+
+    req = urllib.request.Request(
+        f"{API}/api/presence/frames/{frame_id}/{action}", method="POST",
+        data=json.dumps({"tab": colleague["tab"], "acquire": True}).encode(),
+        headers={"content-type": "application/json", "authorization": f"Bearer {colleague['token']}"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return json.loads(resp.read())
+
+
+# The bus on the shared frame, five frames on: nearer and larger than on the hand-annotated frame.
+SHARED_BUS = (495, 418, 705, 652)
+
+
+async def two_people(d: Demo, i: dict) -> None:
+    """We are editing; a reviewer takes the frame over; we are told and switched to view-only; we take it back."""
+    import asyncio
+
+    who = await _colleague()
+    fid = i["shared_frame"]
+    await d.key("f", "fit to view", label="F", after=700)
+    await d.pick_class("bus")
+    await draw_box(d, "bus", SHARED_BUS, ms=1000)
+    await save(d)
+    await d.wait(600)
+
+    # Meera opens the same frame and takes it over. From here she heartbeats like any open editor would.
+    await asyncio.to_thread(_presence, who, fid, "lock/takeover")
+    alive = True
+
+    async def keep_alive() -> None:
+        while alive:
+            await asyncio.sleep(4)
+            if alive:
+                await asyncio.to_thread(_presence, who, fid, "heartbeat")
+
+    beat = asyncio.ensure_future(keep_alive())
+    try:
+        banner = d.page.get_by_role("status").filter(has_text="view only").first
+        await banner.wait_for(state="visible", timeout=20_000)
+        bb = await banner.bounding_box()
+        if bb:
+            await d.move(bb["x"] + 200, bb["y"] + bb["height"] / 2, ms=800)
+        await d.wait(3200)
+        # A view-only editor does not move things: the arrows are pressed and nothing happens.
+        await d.key("Control+a", "select all", label="Ctrl A", after=500)
+        await d.key("ArrowRight", "view only: nothing moves", label="→", after=1300)
+        take = d.page.get_by_role("button", name="Take over").first
+        await d.click(take, ms=700, after=900)
+        confirm_box = d.page.get_by_role("alertdialog")
+        await confirm_box.wait_for(state="visible", timeout=8000)
+        await d.wait(2200)
+        await d.click(confirm_box.get_by_role("button", name="Take over"), ms=600, after=1200)
+    finally:
+        alive = False
+        beat.cancel()
+    await d.page.get_by_role("button", name="Take over").first.wait_for(state="hidden", timeout=15_000)
+    await d.wait(600)
+    # The frame is ours again, and editing works.
+    await d.key("Control+a", "select all", label="Ctrl A", after=400)
+    await d.key("ArrowRight", "ours again", label="→", after=500)
+    await d.key("ArrowLeft", "", label="←", after=400)
+    await deselect(d)
+    await save(d)
+
+
+async def verify_two_people(d: Demo, i: dict) -> str:
+    n = len(await human_objects(i["shared_frame"]))
+    took = await _one("""select count(*) from activity_event where verb = 'took_over_frame'
+                          and subject_id = :f""", f=i["shared_frame"])
+    if not n or not took:
+        raise RuntimeError(f"expected a saved box and a recorded take-over, found {n} objects and {took} events")
+    return f"{n} object saved on the shared frame; {took} take-overs recorded in the activity log"
+
+
+
 SCENES = [
-    Scene("sessions", "Real Indian roads", "Two real clips",
+    Scene("sessions", "Real Indian roads", "Real footage",
           "/annotations",
-          "Two clips of real Indian roads, both from Wikimedia Commons under Creative Commons licences: a busy "
-          "junction in Cuttack, Odisha, and a herd of cattle crossing a road in Delhi. They were imported as "
-          "{frames} frames, and {faces} faces and {plates} number plates were blurred before anything was "
-          "stored.",
-          ready="text=INDIA-DEL-01", run=sessions),
+          "Real Indian roads, seen the way a vehicle sees them. A dashcam drive through Bengaluru, following "
+          "a city bus past an auto-rickshaw and a motorcycle, and a herd of cattle crossing a road in Delhi, "
+          "filmed from a car. Faces and number plates are blurred before anything is stored. One copy of the "
+          "Bengaluru frames is left unlabelled, for annotating by hand.",
+          ready=f"text={DELHI}", run=sessions),
     Scene("import", "Real Indian roads", "Import",
           "/import",
           "Footage arrives here. A video, a folder of images or a sensor recording is split into frames, "
           "checked for quality and anonymised on the way in.",
-          ready="text=Import Dataset", run=import_page),
+          ready="select", run=import_page),
     Scene("editor_open", "Manual annotation", "An empty frame",
           "/frame/{manual_frame}",
-          "This frame is from the Cuttack junction, and no model has labelled it. Every object on it is "
+          "This frame is from the Bengaluru drive, and no model has labelled it. Every object on it is "
           "annotated manually in the editor, through the same mouse gestures and shortcuts an annotator uses.",
           ready=EDITOR, run=open_editor, verify=_count_human(), before=reset),
     Scene("box_bus", "Manual annotation", "Box tool",
@@ -792,52 +1007,63 @@ SCENES = [
           "Auto-rickshaws are their own class here, not cars. The ontology has two hundred classes built for "
           "Indian roads, from auto-rickshaws and goods carriers to cattle.",
           ready=EDITOR, run=box_autos, verify=_count_human("autorickshaw")),
-    Scene("box_more", "Manual annotation", "Every class that matters",
+    Scene("box_more", "Manual annotation", "Small and half hidden",
           "/frame/{manual_frame}",
-          "A hatchback, a pickup carrying goods, and a pedestrian. Small objects get a zoom first, with the "
-          "scroll wheel, so the box is drawn at the edge of the person rather than roughly around them.",
+          "The jeep ahead is small, so it gets a zoom first, with the scroll wheel, and the box is drawn at "
+          "its edges rather than roughly around it. Then the white car half hidden behind the median hedge.",
           ready=EDITOR, run=box_more, verify=_count_human()),
     Scene("polygon", "Manual annotation", "Polygon tool",
           "/frame/{manual_frame}",
           "Not everything is a box. G draws a polygon, one click per corner, and a double click closes it. "
-          "This is a temporary roadworks barricade, a class of its own.",
-          ready=EDITOR, run=polygon, verify=_count_human("temp_barricade")),
+          "This is the planted median that divides the road, a class of its own.",
+          ready=EDITOR, run=polygon, verify=_count_human("median")),
     Scene("edit", "Manual annotation", "Editing",
           "/frame/{manual_frame}",
           "Boxes resize from their handles, and every change can be undone. Objects can be copied, pasted "
           "and deleted from the keyboard.",
           ready=EDITOR, run=edit, verify=_count_human()),
+    Scene("nudge", "Manual annotation", "Arrow keys",
+          "/frame/{manual_frame}",
+          "A box that is nearly right does not need the mouse. The arrow keys move the selection one pixel "
+          "at a time, and ten with Shift held down.",
+          ready=EDITOR, run=nudge, verify=_count_human()),
+    Scene("shortcuts", "Manual annotation", "Your own shortcuts",
+          "/frame/{manual_frame}",
+          "Every tool and action has a key, and the question mark lists them. Any of them can be changed "
+          "to suit the annotator, by clicking the key and pressing a new one.",
+          ready=EDITOR, run=shortcuts),
     Scene("sam_point", "AI assist", "Segment from one click",
           "/frame/{manual_frame}",
-          "S turns one click into a pixel mask. The model proposes the outline, Enter accepts it, and the "
-          "annotator still decides what it is.",
-          ready=EDITOR, run=sam_point, verify=_count_human("bus")),
+          "S turns one click into a pixel mask. Here it is the motorcycle. The model proposes the outline, "
+          "Enter accepts it, and the annotator still decides what it is.",
+          ready=EDITOR, run=sam_point, verify=_count_human("motorcycle")),
     Scene("sam_box", "AI assist", "Segment from a box",
           "/frame/{manual_frame}",
-          "M does the same from a rough box, which is quicker for large vehicles like this bus.",
-          ready=EDITOR, run=sam_box, verify=_count_human("bus")),
+          "M does the same from a rough box, which is quicker for a large vehicle like the truck at the "
+          "left edge.",
+          ready=EDITOR, run=sam_box, verify=_count_human("truck")),
     Scene("wand", "AI assist", "Magic wand",
           "/frame/{manual_frame}",
-          "The wand creates the object and its mask in a single click, with no accept step.",
-          ready=EDITOR, run=wand, verify=_count_human("sedan")),
+          "The wand creates the object and its mask in a single click, with no accept step. This is the rider.",
+          ready=EDITOR, run=wand, verify=_count_human("rider")),
     Scene("brush", "AI assist", "Brush and eraser",
           "/frame/{manual_frame}",
           "Where a mask is not quite right, the brush adds to it and the eraser takes away, stroke by stroke.",
-          ready=EDITOR, run=brush, verify=_count_human("sedan")),
+          ready=EDITOR, run=brush, verify=_count_human("rider")),
     Scene("amodal", "Beyond boxes", "Occluded extent",
           "/frame/{manual_frame}",
-          "This auto-rickshaw is partly hidden behind the truck. K records its whole extent, as well as the "
+          "The white car is partly hidden behind the hedge. K records its whole extent, as well as the "
           "part that is visible, which is what a planner needs.",
           ready=EDITOR, run=amodal, verify=_has("amodal")),
     Scene("polyline", "Beyond boxes", "Polylines",
           "/frame/{manual_frame}",
-          "L draws polylines, for things with length and no area: kerbs, lane markings, and this roadside "
-          "railing.",
+          "L draws polylines, for things with length and no area: lane markings, railings, and this "
+          "painted kerb along the median.",
           ready=EDITOR, run=polyline, verify=_has("polyline")),
     Scene("keypoints", "Beyond boxes", "Pose keypoints",
           "/frame/{manual_frame}",
-          "Pose mode places the seventeen body keypoints of a pedestrian, which is how intent to cross is "
-          "labelled.",
+          "Pose mode places the seventeen body keypoints of a person, here the motorcycle rider, which is "
+          "how posture and intent are labelled.",
           ready=EDITOR, run=keypoints, verify=_has("keypoints")),
     Scene("attributes", "Beyond boxes", "Attributes",
           "/frame/{manual_frame}",
@@ -849,13 +1075,20 @@ SCENES = [
           ready=EDITOR, run=measure),
     Scene("adverse", "Beyond boxes", "Adverse regions",
           "/frame/{manual_frame}",
-          "D marks a region the model should not be judged on. Here the footpath lies in deep shadow.",
+          "D marks a region the model should not be judged on. Here the road lies in deep shadow under the trees.",
           ready=EDITOR, run=adverse, verify=_adverse_saved),
     Scene("confirm", "Beyond boxes", "Confirm the frame",
           "/frame/{manual_frame}",
           "When every object has been checked, Confirm and next records the human verdict and moves on to "
           "the next frame.",
           ready=EDITOR, run=confirm, verify=_count_human()),
+    Scene("machine_frame", "Checking the machine", "What the models proposed",
+          "/frame/{machine_frame}",
+          "This is the same instant, in the copy the models labelled. Nobody drew these. Three detectors "
+          "proposed {proposals} objects on this one frame, and {machine_objects} across the {blr_frames} "
+          "frames of the clip, along with the drivable road in green. They also called the bonnet of this "
+          "car a sedan, which is why a proposal is not a label until a person has checked it.",
+          ready=EDITOR, run=machine_frame),
     Scene("frame_review", "Checking the machine", "Reviewing proposals",
           "/frame/{review_frame}",
           "This Delhi frame was labelled by the models, not by hand. Review mode checks each proposal. The cows "
@@ -874,11 +1107,22 @@ SCENES = [
           "traffic island, so they are selected together and rejected with one key. The two crops of the man "
           "walking past are accepted the same way.",
           ready='button[title^="pedestrian"]', run=grid, verify=verify_grid, before=restore_for("grid")),
+    Scene("paste_next", "Across frames", "Copy to the next frame",
+          "/frame/{manual_frame}",
+          "The next frame of a clip is nearly the same picture. So everything drawn here is copied, pasted "
+          "onto the next frame, and nudged into place with the arrow keys, rather than drawn again.",
+          ready=EDITOR, run=paste_next, verify=verify_paste),
     Scene("track", "Across frames", "One fix, every frame",
           "/track/{track}",
           "Detections are linked into tracks. This is one cow, followed through twenty-eight seconds. The model "
           "called it a light goods vehicle in one frame, and relabelling the track fixes every frame at once.",
           ready="text=relabel entire track", run=track_relabel, verify=verify_track, before=restore_for("track")),
+    Scene("two_people", "Working together", "Two people, one frame",
+          "/frame/{shared_frame}",
+          "Only one person edits a frame at a time. While this box is being drawn, a reviewer called Meera "
+          "takes the frame over. The editor says so at once and becomes view only, so nothing is "
+          "overwritten. Taking a frame from someone asks first, and is recorded.",
+          ready=EDITOR, run=two_people, verify=verify_two_people),
     Scene("datasets", "Delivering the data", "Export",
           "/datasets",
           "What a person has checked leaves as a sealed, versioned dataset, in the format the training pipeline "

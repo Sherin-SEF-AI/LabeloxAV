@@ -53,10 +53,12 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import record as R  # noqa: E402
 from resource_watch import wait_while_paused  # noqa: E402
 
-OUT = ROOT / ".scratch/demo/india/tour"
+# Overridable so a second film (the feature tour) records beside the first rather than over it.
+OUT = Path(os.environ.get("LBX_DEMO_OUT", str(ROOT / ".scratch/demo/india/tour")))
 FLAG = ROOT / ".scratch/watch/PAUSE.json"
-WEB = "http://127.0.0.1:3000"
-API = "http://127.0.0.1:8000"
+# Overridable, like the tour's recorder: port 8000 is not always this product's to bind on a shared box.
+WEB = os.environ.get("LBX_TOUR_WEB", "http://127.0.0.1:3000")
+API = os.environ.get("LBX_TOUR_API", "http://127.0.0.1:8000")
 W, H = 1920, 1080
 # Drawing is motion, and at the tour's 15 fps a dragged box stutters. 30 matches the finished film.
 FPS = 30
@@ -350,6 +352,48 @@ async def _ready(page, scene: Scene) -> None:
         raise
 
 
+async def _editable(page, path: str, *, limit_ms: int = 25_000) -> None:
+    """On an editor page, wait until this tab holds the frame, so a scene never starts view-only.
+
+    Before the cut point, like everything else that is preparation. A lock left by an earlier scene lapses
+    within fifteen seconds and the editor takes it on its next heartbeat; the scene about two people on a
+    frame is the one that wants a view-only editor, and it makes its own.
+    """
+    if not path.startswith("/frame/"):
+        return
+    banner = page.get_by_role("status").filter(has_text="view only")
+    waited = 0
+    while waited < limit_ms and await banner.count():
+        await page.wait_for_timeout(500)
+        waited += 500
+
+
+async def _image_drawn(page, path: str, *, limit_ms: int = 15_000) -> None:
+    """On an editor page, wait until the frame's picture is on the canvas, not just the canvas.
+
+    The ready selector finds the canvas element, which exists at once; the picture arrives from object
+    storage up to three and a half seconds later and is painted into it. Every editor scene of the first
+    full recording opened on an empty dark canvas with the boxes floating on it. A canvas cannot be asked
+    whether it has drawn an image (the picture comes from another origin, so its pixels cannot be read
+    back), so this looks at it: a screenshot of the middle of the road, which is dark and flat until the
+    picture is there.
+    """
+    if not path.startswith("/frame/"):
+        return
+    from io import BytesIO
+
+    from PIL import Image, ImageStat
+
+    waited = 0
+    while waited < limit_ms:
+        png = await page.screenshot(clip={"x": 300, "y": 350, "width": 900, "height": 500})
+        if ImageStat.Stat(Image.open(BytesIO(png)).convert("L")).mean[0] > 45:
+            await page.wait_for_timeout(300)  # a beat on the finished picture before anything moves
+            return
+        await page.wait_for_timeout(250)
+        waited += 250
+
+
 async def _run_scene(browser, user: dict, scene: Scene, facts: dict, ids: dict, *, capture: bool,
                      speech_s: float, n: int) -> tuple[Entry, Path | None, float]:
     raw = OUT / "raw" / scene.key
@@ -367,6 +411,8 @@ async def _run_scene(browser, user: dict, scene: Scene, facts: dict, ids: dict, 
         await page.reload(wait_until="domcontentloaded")
         await _ready(page, scene)
     await page.wait_for_timeout(scene.settle_ms)
+    await _editable(page, path)
+    await _image_drawn(page, path)
     await page.mouse.move(W * 0.62, H * 0.55)
     lead = time.monotonic() - opened
     t0 = time.monotonic()
@@ -388,6 +434,18 @@ async def _run_scene(browser, user: dict, scene: Scene, facts: dict, ids: dict, 
             verified = (verified + "; " if verified else "") + await scene.verify(demo, ids)
         except Exception as exc:  # noqa: BLE001
             verified = f"verify failed: {type(exc).__name__}: {exc}"
+    # Give the frame back before the tab goes. An editor holds the frame's edit lock and releases it on
+    # `pagehide`; closing a browser context fires no such event, so the lock outlived the scene by its
+    # fifteen seconds and the next scene opened the same frame view-only, "being edited by you in another
+    # tab". The first dry run on this editor drew nothing in four scenes for exactly that reason.
+    # Leaving the page for real, rather than announcing a pagehide and staying: the editor's heartbeat
+    # asks for the lock every five seconds, and a page still alive after its release can take it straight
+    # back. The blank page is after the scene's last frame, so it is never in the cut.
+    try:
+        await page.goto("about:blank")
+        await page.wait_for_timeout(500)
+    except Exception:  # noqa: BLE001  a page that has already gone has nothing left to release
+        pass
     await ctx.close()
     entry = Entry(scene.key, scene.chapter, scene.title, n, path, _fill(scene.narration, facts), 0.0, dur,
                   round(action_s, 2), round(speech_s, 2), verified, note)
@@ -424,6 +482,8 @@ async def run(mode: str, only: list[str] | None, script: str) -> None:
         for scene in scenes:
             if not wait_while_paused(FLAG, timeout_s=1800):
                 raise SystemExit(f"stopping before {scene.key}: resources over their limits: {FLAG.read_text()}")
+            # Re-read per scene: a scene can create the rows a later scene opens (the feature tour's upload).
+            ids = await mod.ids()
             wav = OUT / "audio" / f"{scene.key}.wav"
             speech = R.synth(_fill(scene.narration, facts), wav) if capture else 0.0
             index = [s.key for s in mod.SCENES].index(scene.key) + 1
