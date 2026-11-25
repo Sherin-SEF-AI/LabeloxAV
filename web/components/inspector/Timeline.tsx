@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useClock, useClockTick } from "@/lib/inspector/clock";
 import type { InspectorEvent, InspectorTopic } from "@/lib/api";
+import { fromNs } from "@/lib/format";
 
 // The session timeline: the full ts_ns range with a scrubber that moves the one shared clock, a per-sensor
 // health strip (gaps rendered as colored bands from the index), and typed event markers. The scrubber and
@@ -71,15 +72,15 @@ export default function Timeline({ topics, gaps, events, onMarkerClick }: {
   return (
     <div className="border-t hairline bg-panel px-3 py-2 select-none">
       <div className="flex items-center gap-3 mb-2 text-[12px]">
-        <button onClick={() => clock.step(-1 / 30)} className="border border-line px-1.5 rounded hover:border-accent" title="step back" aria-label="step back one frame">{"|<"}</button>
-        <button onClick={() => clock.toggle()} className="border border-accent/50 bg-accent/10 text-accent px-3 rounded hover:bg-accent/20">{playing ? "pause" : "play"}</button>
-        <button onClick={() => clock.step(1 / 30)} className="border border-line px-1.5 rounded hover:border-accent" title="step forward" aria-label="step forward one frame">{">|"}</button>
-        <select onChange={(e) => clock.setSpeed(Number(e.target.value))} defaultValue="1" aria-label="playback speed" className="bg-bg-2 border border-line rounded px-1 text-ink-2">
+        <button onClick={() => clock.step(-1 / 30)} className="btn px-2" data-tip="Step back one frame" aria-label="step back one frame">{"|<"}</button>
+        <button onClick={() => clock.toggle()} className="btn btn-primary min-w-[64px]">{playing ? "Pause" : "Play"}</button>
+        <button onClick={() => clock.step(1 / 30)} className="btn px-2" data-tip="Step forward one frame" aria-label="step forward one frame">{">|"}</button>
+        <select onChange={(e) => clock.setSpeed(Number(e.target.value))} defaultValue="1" aria-label="playback speed" className="field text-[12px]">
           {[0.25, 0.5, 1, 2, 4].map((x) => <option key={x} value={x}>{x}x</option>)}
         </select>
         <span ref={hudRef} className="text-accent tabular-nums">00:00.00</span>
         <span className="text-ink-3">/ {fmt(dur)}</span>
-        <span className="ml-auto text-ink-3">ts_ns base {startNs.toString()}</span>
+        <span className="ml-auto text-ink-3" data-tip={`Clock origin: ${startNs.toString()} ns`}>Recorded {fromNs(startNs.toString())}</span>
       </div>
 
       {/* scrub track with event markers */}
@@ -118,12 +119,12 @@ export default function Timeline({ topics, gaps, events, onMarkerClick }: {
       <div className="mt-1.5 space-y-0.5">
         {topics.map((t) => (
           <div key={t.name} className="flex items-center gap-2">
-            <span className="w-32 shrink-0 text-[10.5px] text-ink-3 truncate" title={`${t.name} @ ${t.rate}Hz`}>{t.name}</span>
+            <span className="w-32 shrink-0 text-[11px] text-ink-3 truncate" title={`${t.name} @ ${t.rate}Hz`}>{t.name}</span>
             <div className="relative flex-1 h-1.5 rounded bg-pass/30">
               {(gaps[t.name] ?? []).map((g, i) => {
                 const lo = pctOfNs(g[0]);
                 const w = Math.max(0.3, pctOfNs(g[1]) - lo);
-                return <div key={i} style={{ left: `${lo}%`, width: `${w}%` }} className="absolute top-0 bottom-0 bg-block rounded" title="gap / dropout" />;
+                return <div key={i} style={{ left: `${lo}%`, width: `${w}%` }} className="absolute top-0 bottom-0 bg-block rounded" title="Gap or dropout" />;
               })}
             </div>
           </div>

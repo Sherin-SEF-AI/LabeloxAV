@@ -1764,7 +1764,7 @@ export default function FrameEditor() {
       </div>
     </div>
   );
-  if (!meta || !onto) return <div className="min-h-screen flex items-center justify-center font-mono text-ink-3">loading frame...</div>;
+  if (!meta || !onto) return <div role="status" className="min-h-screen flex items-center justify-center text-[13px] text-ink-3">Loading frame...</div>;
 
   // The focused annotation canvas, hoisted so single-frame and rig (M-MC.1) views share one instance and every
   // tool behaves identically in both. In rig view this element renders inside the focused camera tile.
@@ -1823,7 +1823,7 @@ export default function FrameEditor() {
       {/* TOP BAR: identity, frame context, global actions, confirm (the design's 46px top bar) */}
       <header className="flex items-center gap-3 px-3 h-[46px] border-b hairline shrink-0
                          min-w-0 overflow-x-auto no-scrollbar">
-        <BackButton />
+        <BackButton label="Back" />
         <button onClick={() => router.push("/")} className="flex items-baseline gap-px" title="Home">
           <span className="font-display font-bold text-[15px] tracking-tight text-ink">Labelox</span>
           <span className="font-mono font-semibold text-[12px] text-accent tracking-tight">AV</span>
@@ -1835,8 +1835,8 @@ export default function FrameEditor() {
         <MenuBar menus={EDITOR_MENUS} compact fixed />
         <span className="w-px h-5 bg-line" />
         <div className="flex flex-col leading-tight shrink-0">
-          <span className="text-[12px] text-ink">FRAME {String(id).slice(0, 8)}</span>
-          <span className="text-[10.5px] text-ink-3">{st.objects.length} objects{meta.is_lidar ? " · lidar" : ""}</span>
+          <span className="text-[12px] text-ink">Frame <span className="font-mono text-ink-2" title={String(id)}>{String(id).slice(0, 8)}</span></span>
+          <span className="text-[11px] text-ink-3">{st.objects.length} object{st.objects.length === 1 ? "" : "s"}{meta.is_lidar ? " · LiDAR" : ""}</span>
         </div>
         {/* The drive this frame belongs to. The bar named the frame and not the session, so on a fleet of
             377 there was no way to tell which one you were in, or to reach another without going out to
@@ -1873,7 +1873,7 @@ export default function FrameEditor() {
                    + "until it finishes. Boxes, masks drawn by hand and review all work without it."}
             className="flex items-center gap-1.5 text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide px-1.5 py-0.5 border border-warn/60 text-warn whitespace-nowrap">
             <PulseDot tone="warn" size="sm" />
-            gpu busy
+            GPU busy
           </span>
         )}
         <button onClick={() => router.push(`/search?frame=${id}`)} title="find visually similar frames (DINOv3)"
@@ -1886,7 +1886,7 @@ export default function FrameEditor() {
           <button onClick={() => router.push(`/search?object=${selected.id}`)}
             title="find objects that look like this one, and label them together"
             className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink text-[12px]">
-            similar
+            Similar
           </button>
         )}
         {/* Fill the gaps in the selected object's track without leaving the frame where the gap was
@@ -1895,7 +1895,7 @@ export default function FrameEditor() {
           <button onClick={() => void interpolateTrack()} disabled={interpolating || readOnly}
             title="fill the gaps between this track's keyframes with interpolated boxes, then re-read this frame"
             className="flex items-center justify-center h-[30px] px-2 rounded-md text-ink-3 hover:bg-line/50 hover:text-ink text-[12px] whitespace-nowrap disabled:opacity-40">
-            {interpolating ? "interpolating..." : "interpolate track"}
+            {interpolating ? "Interpolating..." : "Interpolate track"}
           </button>
         )}
         {meta.has_mcap && (
@@ -2110,13 +2110,14 @@ export default function FrameEditor() {
             extra={
               <>
                 <select value={segKind} onChange={(e) => setSegKind(e.target.value as "semantic" | "panoptic")}
-                  title="dense segmentation kind" className="w-full bg-bg border border-line px-1 py-0.5 text-ink-3">
-                  <option value="semantic">semantic</option>
-                  <option value="panoptic">panoptic</option>
+                  title="dense segmentation kind" aria-label="dense segmentation kind"
+                  className="w-full bg-bg border border-line rounded px-1.5 py-1 text-[12px] text-ink-2">
+                  <option value="semantic">Semantic</option>
+                  <option value="panoptic">Panoptic</option>
                 </select>
                 <button title="run dense segmentation (SAM-everything + VLM) on this frame"
                   onClick={async () => { if (viewOnly()) return; flash("segmenting..."); try { const r = await api.autoSegment(id, segKind); setSegUrl(`/api/frames/${id}/segment/overlay?kind=${segKind}&t=${Date.now()}`); flash(`segmented ${segKind} (${Object.keys(r.coverage).length} classes${r.n_instances ? ", " + r.n_instances + " instances" : ""})`); } catch (e) { flash("segment failed: " + humanizeError(e)); } }}
-                  className="w-full border border-line px-1 py-0.5 text-ink-3 hover:border-accent">auto-seg</button>
+                  className="btn w-full mt-1">Auto-segment</button>
               </>
             } />}
           {/* Review mode: a quiet bottom-center action bar so the reviewer accepts/rejects without leaving the canvas */}
@@ -2298,7 +2299,7 @@ export default function FrameEditor() {
           <div className="w-8 shrink-0 border-l hairline flex flex-col items-center pt-2 bg-bg">
             <button onClick={() => setRightCollapsed(false)} title="expand panel"
               className="w-6 h-6 flex items-center justify-center rounded text-ink-3 hover:bg-line/50 hover:text-ink"><Icon name="chevL" size={14} /></button>
-            <span className="mt-2 [writing-mode:vertical-rl] font-display text-[10px] uppercase tracking-wider text-ink-3">Properties</span>
+            <span className="mt-2 [writing-mode:vertical-rl] font-display text-[10.5px] uppercase tracking-wider text-ink-3">Properties</span>
           </div>
         ) : (
           // Fixed width on a desktop, an overlay on anything narrower. At 340px fixed, a 768px tablet is

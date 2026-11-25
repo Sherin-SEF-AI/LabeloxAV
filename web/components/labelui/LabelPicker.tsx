@@ -13,7 +13,7 @@ export function LabelChips({ config, value, onChange, kind }: {
   // will reject.
   const labels = (config.labels ?? []).filter((l) => !kind || !l.kinds.length || l.kinds.includes(kind));
   if (!labels.length) {
-    return <span className="text-[12px] text-ink-3">no labels declared for this project</span>;
+    return <span className="text-[12px] text-ink-3">No labels declared for this project</span>;
   }
   return (
     <div className="flex items-center gap-1 flex-wrap">

@@ -26,7 +26,7 @@ export default function AttrControl({ name, spec, value, onChange }: {
         {label}
         <span className="flex-1 text-[12px] text-ink-3">
           {value == null ? "-" : String(value)}
-          <span className="ml-1.5 text-[9px] uppercase tracking-wide text-ink-3/70">derived</span>
+          <span className="ml-1.5 text-[10.5px] uppercase tracking-wide text-ink-3/70">derived</span>
         </span>
       </label>
     );

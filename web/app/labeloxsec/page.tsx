@@ -10,6 +10,10 @@ import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "@/lib/toast";
 import { invalidate, useQuery } from "@/lib/useQuery";
 import type { SecPack, SecSession, SecStats, WatchlistEntry, PlateReadRow } from "@/lib/types";
+import EmptyState from "@/components/ui/EmptyState";
+import LoadState from "@/components/shell/LoadState";
+import { Badge, Stat } from "@/components/ui/kit";
+import { ago, humanize, num, pct, shortId } from "@/lib/format";
 
 // The LabeloxSec console: the security domain's own surface.
 //
@@ -24,31 +28,25 @@ import type { SecPack, SecSession, SecStats, WatchlistEntry, PlateReadRow } from
 const SEVERITIES = ["info", "warn", "critical"] as const;
 
 // Severity earns colour because it is live operational state, not decoration. Everything else stays graphite.
+const SEV_BADGE: Record<string, "muted" | "warn" | "block"> = { info: "muted", warn: "warn", critical: "block" };
 const SEV_CLASS: Record<string, string> = {
   info: "text-ink-2",
   warn: "text-warn",
   critical: "text-block",
 };
 
-function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
+function Section({ title, count, children, right, flush = false }: {
+  title: string; count?: number; children: React.ReactNode; right?: React.ReactNode; flush?: boolean;
+}) {
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-        <span>{title}</span>
-        {right && <span className="ml-auto normal-case">{right}</span>}
+      <div className="panel-head flex-wrap">
+        <h2 className="section-title">{title}</h2>
+        {count != null && <span className="text-[12px] text-ink-3 tabular-nums">{num(count)}</span>}
+        {right && <div className="ml-auto flex items-center gap-2">{right}</div>}
       </div>
-      <div className="p-3">{children}</div>
+      <div className={flush ? "" : "p-3.5"}>{children}</div>
     </section>
-  );
-}
-
-function Stat({ label, value, hint }: { label: string; value: number | string; hint?: string }) {
-  return (
-    <div className="panel px-3 py-2 min-w-[120px]">
-      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</div>
-      <div className="text-[18px] font-semibold text-ink tabular-nums">{value}</div>
-      {hint && <div className="text-[11px] text-ink-3">{hint}</div>}
-    </div>
   );
 }
 
@@ -111,11 +109,11 @@ function LabeloxSecBody() {
   const loadRest = useCallback(() => invalidate("secStats", "secWatchlist", "secSessions"), []);
 
   const addWatch = async () => {
-    if (!newPlate.trim()) { toast("enter a registration mark", "error"); return; }
+    if (!newPlate.trim()) { toast("Enter a registration number", "error"); return; }
     setBusy(true);
     try {
       const e = await api.secAddWatch(newPlate.trim(), newReason.trim() || null, newSeverity);
-      toast(`watching ${e.plate}`, "success");
+      toast(`Watching ${e.plate}`, "success");
       setNewPlate(""); setNewReason("");
       await Promise.all([loadRest(), loadReads()]);
     } catch (e) {
@@ -131,7 +129,7 @@ function LabeloxSecBody() {
     }))) return;
     try {
       await api.secRemoveWatch(e.entry_id);
-      toast(`${e.plate} deactivated`, "success");
+      toast(`Stopped watching ${e.plate}`, "success");
       await loadRest();
     } catch (err) { toast(humanizeError(err), "error"); }
   };
@@ -150,216 +148,212 @@ function LabeloxSecBody() {
 
   return (
     <PageShell
-      active="LABELOXSEC"
-      title="LabeloxSec"
-      subtitle="security domain: plate reads, watchlist, static-camera sessions"
-      right={pack ? (
-        <span className="text-[12px] text-ink-3">
-          pack <span className={authorised ? "text-pass" : "text-block"}>{pack.pack_id}</span>
-        </span>
-      ) : null}
+      active="Security console"
+      title="Security console"
+      subtitle="Number-plate reads, the watchlist and fixed-camera sessions."
+      meta={pack ? <Badge state={authorised ? "pass" : "block"}>{authorised ? "Plate reading on" : "Plate reading off"}</Badge> : undefined}
     >
-      <div className="p-4 space-y-4 max-w-6xl">
+      <div className="page-wrap space-y-4">
         {/* the pack gate */}
-        {packErr && (
-          <div className="panel border border-block p-3 text-[12px] text-block">{packErr}</div>
-        )}
+        {packErr && <LoadState error={packQ.error} onRetry={() => void packQ.reload()} />}
         {pack && !authorised && (
-          <div className="panel border border-block p-3 space-y-1">
-            <div className="text-[12px] text-block">
-              ANPR is not authorised under the {pack.pack_id} pack
+          <div role="alert" className="panel border-block/40 bg-block/5 p-4 space-y-1.5">
+            <div className="text-[13px] font-medium text-block">
+              Plate reading is not allowed on this deployment
             </div>
-            <div className="text-[11.5px] text-ink-3">
-              Reading a registration mark is a security-domain capability. Under the AV pack a plate is personal
-              data that the privacy plane blurs and never reads, so every action below would be refused by the
-              server. Packs available on this deployment: {pack.available_packs.join(", ")}.
-            </div>
+            <p className="text-[12.5px] text-ink-2 max-w-[75ch]">
+              Reading number plates is only for authorised security deployments. Here a plate is personal data
+              that is blurred and never read, so the server will refuse every action below.
+              Packages available: {pack.available_packs.join(", ")}.
+            </p>
           </div>
         )}
         {pack && authorised && (
-          <div className="panel p-3 flex items-start gap-4 flex-wrap">
-            <div>
-              <div className="text-[12px] text-ink">{pack.name}</div>
-              <div className="text-[11px] text-ink-3">
-                capabilities: {pack.capabilities.join(", ")}
+          <div className="panel p-3.5 flex items-start gap-6 flex-wrap">
+            <div className="min-w-0">
+              <div className="text-[13px] text-ink font-medium">{pack.name}</div>
+              <div className="text-[12px] text-ink-3 mt-0.5">
+                Can do: {pack.capabilities.map((c) => humanize(c).toLowerCase()).join(", ")}
               </div>
             </div>
             {pack.safety_classes.length > 0 && (
               <div className="ml-auto">
-                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">safety-critical classes</div>
-                <div className="text-[11.5px] text-ink-2">{pack.safety_classes.join(", ")}</div>
+                <div className="label-caps">Safety-critical classes</div>
+                <div className="text-[12.5px] text-ink-2 mt-0.5">{pack.safety_classes.map(humanize).join(", ")}</div>
               </div>
             )}
           </div>
         )}
 
         {stats && (
-          <div className="flex gap-2 flex-wrap">
-            <Stat label="reads" value={stats.reads} />
-            <Stat label="watchlist hits" value={stats.watchlist_hits} />
-            <Stat label="valid format" value={stats.valid_format}
-              hint={stats.reads ? `${Math.round((stats.valid_format / stats.reads) * 100)}% of reads` : undefined} />
-            <Stat label="watching" value={stats.watchlist_size} />
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+            <Stat label="Plate reads" value={num(stats.reads)} />
+            <Stat label="Watchlist hits" value={num(stats.watchlist_hits)} tone={stats.watchlist_hits ? "warn" : undefined} />
+            <Stat label="Valid format" value={num(stats.valid_format)}
+              sub={stats.reads ? `${pct(stats.valid_format / stats.reads)} of reads` : undefined} />
+            <Stat label="Plates watched" value={num(stats.watchlist_size)} />
             {/* Surfaced rather than hidden: it tells the operator a confidence filter is meaningless on those
                 rows, because the local reader exposes no calibrated score. */}
-            <Stat label="unscored" value={stats.unscored_reads} hint="no OCR confidence measured" />
+            <Stat label="Without a confidence" value={num(stats.unscored_reads)} sub="the reader gave no score" />
           </div>
         )}
 
         {stats && Object.keys(stats.top_states).length > 0 && (
-          <Section title="reads by issuing state">
-            <div className="flex gap-1 flex-wrap">
+          <Section title="Reads by state" right={<span className="text-[12px] text-ink-3">Select a state to filter the reads below</span>}>
+            <div className="flex gap-1.5 flex-wrap">
               {/* A facet, not a legend: clicking a state filters the feed below, and clicking it again clears
                   the filter. A count that looks clickable and is not is worse than no affordance at all. */}
               {Object.entries(stats.top_states).map(([code, n]) => (
-                <button key={code}
+                <button key={code} type="button" aria-pressed={stateFilter === code}
                   onClick={() => setStateFilter((s) => (s === code ? "" : code))}
-                  className={`border px-1.5 py-0.5 text-[11.5px] ${
-                    stateFilter === code ? "border-accent text-ink" : "border-line text-ink-2 hover:text-ink"}`}>
-                  {code} <span className="text-ink-3">{n}</span>
+                  className={`chip ${stateFilter === code ? "chip-on" : ""}`}>
+                  {code} <span className="text-ink-3 tabular-nums">{num(n)}</span>
                 </button>
               ))}
               {stateFilter && (
-                <button onClick={() => setStateFilter("")}
-                  className="px-1.5 py-0.5 text-[11.5px] text-ink-3 hover:text-ink"><T k="action.clear">clear</T></button>
+                <button type="button" onClick={() => setStateFilter("")} className="link text-[12px] px-1">
+                  <T k="action.clear">Clear</T>
+                </button>
               )}
             </div>
           </Section>
         )}
 
-        <Section title={`watchlist (${watchlist.length} active)`}>
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-[12px] flex-wrap">
-              <input value={newPlate} onChange={(e) => setNewPlate(e.target.value)}
-                placeholder="KA 01 AB 1234"
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink w-40" />
-              <input value={newReason} onChange={(e) => setNewReason(e.target.value)}
-                placeholder="reason (optional)"
-                className="flex-1 min-w-[200px] bg-bg border border-line px-1.5 py-0.5 text-ink" />
-              <select value={newSeverity} onChange={(e) => setNewSeverity(e.target.value)}
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink">
-                {SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <button onClick={addWatch} disabled={busy || !authorised}
-                className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
-                watch
+        <Section title="Watchlist" count={watchlist.length} flush>
+          <form className="p-3.5 space-y-2" onSubmit={(e) => { e.preventDefault(); void addWatch(); }}>
+            <div className="flex items-end gap-2 text-[12.5px] flex-wrap">
+              <label className="flex flex-col gap-1.5"><span className="text-[12px] text-ink-2">Registration number</span>
+                <input value={newPlate} onChange={(e) => setNewPlate(e.target.value)}
+                  placeholder="KA 01 AB 1234" className="field w-44 font-mono" />
+              </label>
+              <label className="flex flex-col gap-1.5 flex-1 min-w-[220px]"><span className="text-[12px] text-ink-2">Reason (optional)</span>
+                <input value={newReason} onChange={(e) => setNewReason(e.target.value)}
+                  placeholder="Why this plate is watched" className="field w-full" />
+              </label>
+              <label className="flex flex-col gap-1.5"><span className="text-[12px] text-ink-2">Severity</span>
+                <select value={newSeverity} onChange={(e) => setNewSeverity(e.target.value)} className="field">
+                  {SEVERITIES.map((s) => <option key={s} value={s}>{humanize(s)}</option>)}
+                </select>
+              </label>
+              <button type="submit" disabled={busy || !authorised} className="btn btn-primary">
+                Watch plate
               </button>
             </div>
-            <div className="text-[11px] text-ink-3">
-              stored on the normalised mark, so KA 01 AB 1234, ka-01-ab-1234 and KA01AB1234 are one entry
-            </div>
+            <p className="section-desc">
+              Spacing and dashes do not matter: KA 01 AB 1234, ka-01-ab-1234 and KA01AB1234 are the same entry.
+            </p>
+          </form>
 
-            {watchlist.length > 0 && (
-              <table className="w-full text-[12px] mt-2">
-                <thead>
-                  <tr className="text-ink-3 text-left border-b hairline">
-                    <th className="py-1">plate</th><th>severity</th><th>reason</th><th>added by</th><th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {watchlist.map((w) => (
-                    <tr key={w.entry_id} className="border-b hairline">
-                      <td className="py-1 text-ink">{w.plate}</td>
-                      <td className={SEV_CLASS[w.severity] ?? "text-ink-2"}>{w.severity}</td>
-                      <td className="text-ink-3 truncate max-w-[320px]">{w.reason ?? "-"}</td>
-                      <td className="text-ink-3">{w.added_by ?? "-"}</td>
-                      <td className="text-right">
-                        <button onClick={() => removeWatch(w)} className="text-ink-3 hover:text-block">
-                          stop watching
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </Section>
-
-        <Section title={`plate reads (${reads.length} of ${readTotal})`}
-          right={
-            <span className="flex items-center gap-2 text-[12px]">
-              <input value={plateFilter} onChange={(e) => setPlateFilter(e.target.value)}
-                placeholder="plate"
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink w-32" />
-              <input value={cameraFilter} onChange={(e) => setCameraFilter(e.target.value)}
-                placeholder="camera"
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink w-28" />
-              <label className="flex items-center gap-1 text-ink-3">
-                <input type="checkbox" checked={hitsOnly} onChange={(e) => setHitsOnly(e.target.checked)} />
-                hits only
-              </label>
-            </span>
-          }>
-          {reads.length === 0 ? (
-            <div className="text-[12px] text-ink-3">
-              no reads recorded. A read is produced by POST /api/security/recognize over a frame and its plate
-              regions, and every one is stored against its session so an erasure request takes the plate text
-              with it.
-            </div>
-          ) : (
-            <table className="w-full text-[12px]">
+          {watchlist.length > 0 ? (
+            <table className="data-table border-t hairline">
               <thead>
-                <tr className="text-ink-3 text-left border-b hairline">
-                  <th className="py-1">plate</th><th>type</th><th>state</th><th>camera</th>
-                  <th>det</th><th>ocr</th><th>format</th><th>when</th>
-                </tr>
+                <tr><th>Plate</th><th>Severity</th><th>Reason</th><th>Added by</th><th></th></tr>
               </thead>
               <tbody>
-                {reads.map((r) => (
-                  <tr key={r.read_id}
-                    className={`border-b hairline ${r.watchlist_hit ? "bg-block/10" : ""}`}>
-                    <td className={`py-1 ${r.watchlist_hit ? SEV_CLASS[r.watchlist_severity ?? "warn"] : "text-ink"}`}>
-                      {r.plate || r.plate_raw}
-                      {r.watchlist_hit && (
-                        <span className="ml-1 text-[10px] uppercase">
-                          {r.watchlist_severity ?? "hit"}
-                        </span>
-                      )}
+                {watchlist.map((w) => (
+                  <tr key={w.entry_id}>
+                    <td className="text-ink font-mono">{w.plate}</td>
+                    <td><Badge state={SEV_BADGE[w.severity] ?? "muted"}>{humanize(w.severity)}</Badge></td>
+                    <td className="truncate max-w-[320px]">{w.reason ?? "-"}</td>
+                    <td>{w.added_by ?? "-"}</td>
+                    <td className="text-right">
+                      <button type="button" onClick={() => removeWatch(w)} className="btn btn-danger">
+                        Stop watching
+                      </button>
                     </td>
-                    <td className="text-ink-3">{r.plate_type}</td>
-                    <td className="text-ink-3">{r.state_code ?? "-"}</td>
-                    <td className="text-ink-3">{r.camera_id ?? "-"}</td>
-                    <td className="text-ink-3 tabular-nums">{r.det_conf.toFixed(2)}</td>
-                    {/* A dash, not a zero: the reader measured nothing and inventing a number here would make
-                        the column look sortable in a way it is not. */}
-                    <td className="text-ink-3 tabular-nums">
-                      {r.ocr_conf == null ? "-" : r.ocr_conf.toFixed(2)}
-                    </td>
-                    <td className={r.valid ? "text-pass tabular-nums" : "text-ink-3 tabular-nums"}>
-                      {r.format_confidence.toFixed(2)}
-                    </td>
-                    <td className="text-ink-3">{r.created_at?.slice(0, 19).replace("T", " ") ?? "-"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          ) : (
+            <p className="px-3.5 pb-3.5 text-[12.5px] text-ink-3">No plates are being watched.</p>
           )}
         </Section>
 
-        <Section title={`security sessions (${sessions.length})`}>
-          {sessions.length === 0 ? (
-            <div className="text-[12px] text-ink-3">
-              no sessions are routed to the sec pack. A session records the pack it belongs to at ingest, which
-              is what keeps a dashcam drive out of this list and out of the ANPR path.
-            </div>
+        <Section title="Plate reads" count={readTotal} flush
+          right={
+            <>
+              <input value={plateFilter} onChange={(e) => setPlateFilter(e.target.value)}
+                placeholder="Plate" aria-label="Filter by plate" className="field w-36 font-mono" />
+              <input value={cameraFilter} onChange={(e) => setCameraFilter(e.target.value)}
+                placeholder="Camera" aria-label="Filter by camera" className="field w-32" />
+              <label className="flex items-center gap-1.5 text-[12.5px] text-ink-2">
+                <input type="checkbox" checked={hitsOnly} onChange={(e) => setHitsOnly(e.target.checked)} />
+                Watchlist hits only
+              </label>
+            </>
+          }>
+          {reads.length === 0 ? (
+            <EmptyState compact icon="eye" title={readsQ.loading ? "Loading reads..." : "No plate reads"}>
+              {plateFilter || cameraFilter || hitsOnly || stateFilter
+                ? "Nothing matches these filters. Clear a filter to see more."
+                : "Reads appear here once plates are recognised in a security session's frames. Each read is stored with its session, so deleting a session removes its plates too."}
+            </EmptyState>
           ) : (
-            <table className="w-full text-[12px]">
+            <>
+              {reads.length < readTotal && (
+                <p className="section-desc px-3.5 pt-2.5">Showing the newest {num(reads.length)} of {num(readTotal)}.</p>
+              )}
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Plate</th><th>Type</th><th>State</th><th>Camera</th>
+                    <th className="num" data-tip="How sure the detector was that this is a plate">Detection</th>
+                    <th className="num" data-tip="How sure the reader was of the characters">Reading</th>
+                    <th className="num" data-tip="How well the text matches an Indian plate format">Format</th>
+                    <th>When</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reads.map((r) => (
+                    <tr key={r.read_id} className={r.watchlist_hit ? "bg-block/10" : ""}>
+                      <td className={`font-mono ${r.watchlist_hit ? SEV_CLASS[r.watchlist_severity ?? "warn"] : "text-ink"}`}>
+                        {r.plate || r.plate_raw}
+                        {r.watchlist_hit && (
+                          <span className="ml-2 font-body"><Badge state={SEV_BADGE[r.watchlist_severity ?? "warn"] ?? "warn"}>
+                            {r.watchlist_severity ? `Watched: ${r.watchlist_severity}` : "Watched"}
+                          </Badge></span>
+                        )}
+                      </td>
+                      <td>{humanize(r.plate_type)}</td>
+                      <td>{r.state_code ?? "-"}</td>
+                      <td>{r.camera_id ?? "-"}</td>
+                      <td className="num">{r.det_conf.toFixed(2)}</td>
+                      {/* A dash, not a zero: the reader measured nothing and inventing a number here would make
+                          the column look sortable in a way it is not. */}
+                      <td className="num">{r.ocr_conf == null ? "-" : r.ocr_conf.toFixed(2)}</td>
+                      <td className={`num ${r.valid ? "text-pass" : ""}`}>{r.format_confidence.toFixed(2)}</td>
+                      <td className="text-ink-3 whitespace-nowrap" title={r.created_at ?? undefined}>{r.created_at ? ago(r.created_at) : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </Section>
+
+        <Section title="Security sessions" count={sessions.length} flush>
+          {sessions.length === 0 ? (
+            <EmptyState compact icon="folder" title="No security sessions">
+              Recordings from fixed security cameras appear here. A session is marked as security or driving
+              footage when it is uploaded, which keeps dashcam drives out of plate reading.
+            </EmptyState>
+          ) : (
+            <table className="data-table">
               <thead>
-                <tr className="text-ink-3 text-left border-b hairline">
-                  <th className="py-1">session</th><th>camera</th><th>city</th><th>reads</th>
-                </tr>
+                <tr><th>Session</th><th>Camera</th><th>City</th><th className="num">Plate reads</th></tr>
               </thead>
               <tbody>
                 {sessions.map((s) => (
-                  <tr key={s.session_id} className="border-b hairline">
-                    <td className="py-1 text-ink-2">
-                      <button onClick={() => openSession(s.session_id)}
-                        className="hover:text-accent">{s.session_id.slice(0, 8)}</button>
+                  <tr key={s.session_id}>
+                    <td>
+                      <button type="button" onClick={() => openSession(s.session_id)} className="link font-mono text-[12px]">
+                        {shortId(s.session_id)}
+                      </button>
                     </td>
-                    <td className="text-ink-3">{s.camera_id ?? "-"}</td>
-                    <td className="text-ink-3">{s.city ?? "-"}</td>
-                    <td className="text-ink-3 tabular-nums">{s.plate_reads}</td>
+                    <td>{s.camera_id ?? "-"}</td>
+                    <td>{s.city ?? "-"}</td>
+                    <td className="num">{num(s.plate_reads)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -375,7 +369,7 @@ function LabeloxSecBody() {
 export default function LabeloxSecPageRoute() {
   return (
     <PackGate pack="sec" title="Security console"
-      what="LabeloxSec, for authorised security deployments: registration-plate reading, watchlists, zones and cross-camera re-identification">
+      what="LabeloxSec, for authorised security deployments: number-plate reading, watchlists, zones and following a person across cameras">
       <LabeloxSecPage />
     </PackGate>
   );

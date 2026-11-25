@@ -8,6 +8,12 @@ import BackButton from "@/components/BackButton";
 import PageHeaderBar from "@/components/shell/PageHeaderBar";
 import Inspector from "@/components/shell/Inspector";
 import { StateBadge } from "@/components/StateBadge";
+import LoadState from "@/components/shell/LoadState";
+import { Stat } from "@/components/ui/kit";
+import { humanize, num, shortId } from "@/lib/format";
+
+// Ontology class names read as words ("two wheeler") but keep their case: "suv" is not "Suv".
+const classLabel = (n: string | null | undefined) => (n ?? "").replace(/_/g, " ");
 
 // M2.5 keyframe + interpolation video workspace: a track scrubber with keyframe markers, interpolated
 // frames shown distinctly from human ones, and one-action edit-propagation across a segment.
@@ -55,27 +61,35 @@ export default function TimelineWorkspace() {
   const [sel, setSel] = useState<number>(0);
   const [method, setMethod] = useState<"linear" | "cubic">("linear");
   const [msg, setMsg] = useState<string | null>(null);
+  const [loadErr, setLoadErr] = useState<unknown>(null);
 
   const load = useCallback(async () => {
-    const t = await api.track(trackId);
+    let t: Track;
+    try {
+      t = await api.track(trackId);
+    } catch (e) {
+      setLoadErr(e);
+      return;
+    }
+    setLoadErr(null);
     setTrack(t);
     setSel((s) => Math.min(s, t.items.length - 1));
     // The two keyframe-economy calls, which had no consumer anywhere in the app. Failures are said out
     // loud: a silently absent budget looks identical to a track where no frame is worth correcting.
     api.tracklet(trackId).then(setStats)
-      .catch((e) => setMsg(`keyframe stats unavailable: ${humanizeError(e)}`));
+      .catch((e) => setMsg(`Keyframe stats unavailable: ${humanizeError(e)}`));
     api.suggestKeyframes(trackId)
       .then((r) => setSuggested(new Set(r.suggestions.map((s) => s.object_id))))
-      .catch((e) => setMsg(`keyframe suggestions unavailable: ${humanizeError(e)}`));
+      .catch((e) => setMsg(`Keyframe suggestions unavailable: ${humanizeError(e)}`));
   }, [trackId]);
 
   useEffect(() => { load(); }, [load]);
 
   const it = track?.items[sel];
 
-  const interpolate = async () => { const r = await api.interpolateKeyframed(trackId, method); setMsg(`interpolated ${r.created} frames (${r.method}, ${r.keyframes} keyframes)`); await load(); };
-  const markKeyframe = async () => { if (!it) return; await api.setKeyframe(it.object_id, !(it.is_keyframe || it.source === "human")); setMsg("keyframe set - open the frame to adjust its box, then re-interpolate"); await load(); };
-  const reinterpolate = async () => { if (!it) return; const r = await api.reinterpolate(it.object_id, method); setMsg(`re-interpolated ${r.created} frames in the adjacent segments`); await load(); };
+  const interpolate = async () => { const r = await api.interpolateKeyframed(trackId, method); setMsg(`Interpolated ${r.created} frames (${r.method}, ${r.keyframes} keyframes)`); await load(); };
+  const markKeyframe = async () => { if (!it) return; await api.setKeyframe(it.object_id, !(it.is_keyframe || it.source === "human")); setMsg("Keyframe set. Open the frame to adjust its box, then re-interpolate."); await load(); };
+  const reinterpolate = async () => { if (!it) return; const r = await api.reinterpolate(it.object_id, method); setMsg(`Re-interpolated ${r.created} frames in the adjacent segments`); await load(); };
 
   /**
    * Ask which machine-filled boxes have slid off their anchor.
@@ -85,7 +99,7 @@ export default function TimelineWorkspace() {
    */
   const checkDrift = async () => {
     setDriftBusy(true);
-    setMsg("checking appearance against each box's nearest anchor...");
+    setMsg("Checking appearance against each box's nearest anchor...");
     try {
       const r = await api.trackDrift(trackId);
       const by: Record<string, DriftRow> = {};
@@ -97,7 +111,7 @@ export default function TimelineWorkspace() {
         : `${r.counts?.drifted ?? 0} of ${r.checked} machine-filled boxes have drifted`
           + `${r.counts?.unknown ? `, ${r.counts.unknown} could not be measured` : ""}`);
     } catch (e) {
-      setMsg(`drift check failed: ${humanizeError(e)}`);
+      setMsg(`Drift check failed: ${humanizeError(e)}`);
     } finally {
       setDriftBusy(false);
     }
@@ -115,133 +129,173 @@ export default function TimelineWorkspace() {
   }, [stats, track, kfCount]);
 
   const selDrift = it ? drift?.[it.object_id] : undefined;
+  const isKey = (x: TrackItem) => !!(x.is_keyframe || x.source === "human");
+  // Messages that report a failure read as a warning; progress and results read as plain status.
+  const msgIsBad = !!msg && /unavailable|failed/i.test(msg);
 
   return (
     <div className="min-h-screen flex flex-col">
       <PageHeaderBar
         title="Timeline"
-        subtitle={trackId.slice(0, 8)}
+        subtitle={track ? `${classLabel(track.dominant)} track · ${shortId(trackId)}` : shortId(trackId)}
         meta={
           <>
             {/* Same: with no history, the track this timeline is of is the right destination, not "/". */}
-            <BackButton fallback={`/track/${trackId}`} label="track" />
-            {track && <span>{track.n_frames} frames · {kfCount} keyframes · {interpCount} interpolated</span>}
-            {/* The economy figure. Median across the corpus is one touched frame per 93-frame track, so
-                this number starts very high and coming down is the work. */}
-            {perKeyframe != null && (
-              <span className={perKeyframe > 40 ? "text-warn" : "text-accent"}
-                title="frames covered by each keyframe. One correction propagates across its segment, so this is what a correction is worth here.">
-                {perKeyframe.toFixed(1)} frames per keyframe
-              </span>
-            )}
-            <span className="ml-1">method:</span>
-            {(["linear", "cubic"] as const).map((m) => (
-              <button key={m} onClick={() => setMethod(m)} className={`border px-2 py-1 ${method === m ? "border-accent text-accent" : "border-line text-ink-3"}`}>{m}</button>
-            ))}
+            <BackButton fallback={`/track/${trackId}`} label="Track" />
+            <span className="ml-2">Interpolation</span>
+            <span className="inline-flex" role="group" aria-label="interpolation method">
+              {(["linear", "cubic"] as const).map((m) => (
+                <button key={m} type="button" onClick={() => setMethod(m)} aria-pressed={method === m}
+                  className={`btn ${method === m ? "btn-on" : ""} ${m === "linear" ? "rounded-r-none" : "rounded-l-none -ml-px"}`}>
+                  {m === "linear" ? "Linear" : "Cubic"}
+                </button>
+              ))}
+            </span>
           </>
         }
-        right={msg && <span className="text-warn">{msg}</span>}
+        right={msg && <span className={`max-w-[520px] truncate ${msgIsBad ? "text-warn" : "text-ink-2"}`} title={msg}>{msg}</span>}
         primaryAction={
           <span className="flex items-center gap-2">
-            <button onClick={checkDrift} disabled={driftBusy}
+            <button type="button" onClick={checkDrift} disabled={driftBusy}
               title="compare each machine-filled box to its nearest anchor crop (uses the GPU, yields to training)"
-              className="border border-line px-2 py-1 hover:border-accent disabled:opacity-40">
-              {driftBusy ? "checking..." : "check drift"}
+              className="btn">
+              {driftBusy ? "Checking..." : "Check drift"}
             </button>
-            <button onClick={interpolate} className="border border-line px-2 py-1 hover:border-accent">interpolate between keyframes</button>
+            <button type="button" onClick={interpolate} className="btn btn-primary">Interpolate between keyframes</button>
           </span>
         }
       />
 
       <div className="flex-1 flex min-h-0">
         <main className="flex-1 overflow-auto p-4 space-y-4 min-w-0">
+          {(loadErr || !track) && (
+            <LoadState loading={!track && !loadErr} error={loadErr} rows={4} onRetry={() => { setLoadErr(null); load(); }} />
+          )}
+
+          {track && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <Stat label="Frames" value={num(track.n_frames)} sub={classLabel(track.dominant)} />
+              <Stat label="Keyframes" value={num(kfCount)} sub="drawn or confirmed by a person" tone={kfCount ? "pass" : undefined} />
+              <Stat label="Interpolated" value={num(interpCount)} sub="filled between keyframes" />
+              {/* The economy figure. Median across the corpus is one touched frame per 93-frame track, so
+                  this number starts very high and coming down is the work. */}
+              <Stat label="Frames per keyframe" value={perKeyframe != null ? perKeyframe.toFixed(1) : "-"}
+                tone={perKeyframe == null ? undefined : perKeyframe > 40 ? "warn" : "accent"}
+                sub="what one correction is worth here; lower is better" />
+            </div>
+          )}
+
           {/* scrubber */}
-          <div className="panel p-3">
-          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">source</div>
-          <div className="flex items-end gap-px h-12 overflow-x-auto">
-            {track?.items.map((x, i) => (
-              <button key={x.object_id} onClick={() => setSel(i)}
-                title={`${x.source}${x.is_keyframe ? " (keyframe)" : ""}`
+          {track && (
+          <section className="panel">
+          <div className="panel-head">
+            <h2 className="section-title">Where each box came from</h2>
+            <span className="ml-auto text-[12px] text-ink-3">Click a frame to inspect it</span>
+          </div>
+          <div className="p-3.5">
+          <div className="flex items-end gap-px h-24 overflow-x-auto pt-2">
+            {track.items.map((x, i) => (
+              <button key={x.object_id} type="button" onClick={() => setSel(i)}
+                aria-label={`frame ${i + 1}: ${x.source ?? "detected"}${isKey(x) ? ", keyframe" : ""}`}
+                aria-pressed={i === sel}
+                title={`frame ${i + 1}: ${x.source}${x.is_keyframe ? " (keyframe)" : ""}`
                        + `${suggested.has(x.object_id) ? " - correcting this frame buys the most" : ""}`}
-                style={{ background: cellColor(x), height: x.is_keyframe || x.source === "human" ? "100%" : "60%", outline: i === sel ? "2px solid #E7E9EB" : "none" }}
-                className="w-2 shrink-0 relative">
+                style={{ background: cellColor(x), height: isKey(x) ? "100%" : "60%", outline: i === sel ? "2px solid rgb(var(--c-ink))" : "none" }}
+                className="flex-1 min-w-[6px] max-w-[24px] shrink-0 relative rounded-[1px]">
                 {/* Where the next correction is worth the most, from the curvature of the trajectory.
                     Computed by suggest_keyframes since it was written and never rendered anywhere. */}
                 {suggested.has(x.object_id) && (
-                  <span className="absolute -top-1.5 left-0 w-full text-center text-[8px] leading-none text-accent">▾</span>
+                  <span className="absolute -top-3 left-0 w-full text-center text-[11px] leading-none text-accent" aria-hidden>▾</span>
                 )}
               </button>
             ))}
           </div>
-          <div className="flex gap-4 mt-2 text-[11px] text-ink-3">
-            <span><span className="inline-block w-2 h-2 mr-1" style={{ background: "#56D364" }} />human keyframe</span>
-            <span><span className="inline-block w-2 h-2 mr-1" style={{ background: "#E3B341" }} />interpolated</span>
-            <span><span className="inline-block w-2 h-2 mr-1" style={{ background: "#58A6FF" }} />propagated</span>
-            <span><span className="inline-block w-2 h-2 mr-1" style={{ background: "#6C727A" }} />detected</span>
-            {suggested.size > 0 && <span className="text-accent">▾ correcting here buys the most frames</span>}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-[12px] text-ink-3">
+            <span><span className="inline-block w-2.5 h-2.5 mr-1.5 rounded-sm align-[-1px]" style={{ background: "#56D364" }} />Human keyframe</span>
+            <span><span className="inline-block w-2.5 h-2.5 mr-1.5 rounded-sm align-[-1px]" style={{ background: "#E3B341" }} />Interpolated</span>
+            <span><span className="inline-block w-2.5 h-2.5 mr-1.5 rounded-sm align-[-1px]" style={{ background: "#58A6FF" }} />Propagated</span>
+            <span><span className="inline-block w-2.5 h-2.5 mr-1.5 rounded-sm align-[-1px]" style={{ background: "#6C727A" }} />Detected</span>
+            {suggested.size > 0 && <span className="text-accent">▾ Correcting here buys the most frames</span>}
           </div>
 
           {/* drift lane: a second view over the same columns, answering a different question */}
-          {drift && (
-            <div className="mt-3 pt-3 border-t hairline">
-              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">
-                still on the object?
-              </div>
-              <div className="flex items-end gap-px h-4 overflow-x-auto">
-                {track?.items.map((x, i) => {
+          {drift ? (
+            <div className="mt-4 pt-3 border-t hairline">
+              <div className="section-title mb-2">Still on the object?</div>
+              <div className="flex items-end gap-px h-5 overflow-x-auto">
+                {track.items.map((x, i) => {
                   const d = drift[x.object_id];
                   return (
-                    <button key={x.object_id} onClick={() => setSel(i)} aria-pressed={i === sel}
+                    <button key={x.object_id} type="button" onClick={() => setSel(i)} aria-pressed={i === sel}
                       aria-label={`frame ${i + 1}: ${d ? `${d.verdict}, ${d.why}` : "an anchor, not machine fill"}`}
                       title={d ? `${d.verdict}: ${d.why}` : "an anchor, not machine fill: nothing to check"}
                       style={{ background: d ? DRIFT_COLOR[d.verdict] : "transparent",
-                               outline: i === sel ? "2px solid #E7E9EB" : "none" }}
-                      className="w-2 h-full shrink-0" />
+                               outline: i === sel ? "2px solid rgb(var(--c-ink))" : "none" }}
+                      className="flex-1 min-w-[6px] max-w-[24px] h-full shrink-0 rounded-[1px]" />
                   );
                 })}
               </div>
-              <div className="flex gap-4 mt-2 text-[11px] text-ink-3">
-                <span><span className="inline-block w-2 h-2 mr-1" style={{ background: DRIFT_COLOR.drifted }} />drifted{driftCounts ? ` (${driftCounts.drifted})` : ""}</span>
-                <span><span className="inline-block w-2 h-2 mr-1" style={{ background: DRIFT_COLOR.ok }} />still on it{driftCounts ? ` (${driftCounts.ok})` : ""}</span>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[12px] text-ink-3">
+                <span><span className="inline-block w-2.5 h-2.5 mr-1.5 rounded-sm align-[-1px]" style={{ background: DRIFT_COLOR.drifted }} />Drifted{driftCounts ? ` (${driftCounts.drifted})` : ""}</span>
+                <span><span className="inline-block w-2.5 h-2.5 mr-1.5 rounded-sm align-[-1px]" style={{ background: DRIFT_COLOR.ok }} />Still on it{driftCounts ? ` (${driftCounts.ok})` : ""}</span>
                 {/* Never folded into "drifted". Unmeasurable is a different answer from wrong, and
                     painting it red would tell an annotator that good boxes are bad because a GPU is busy. */}
-                <span><span className="inline-block w-2 h-2 mr-1" style={{ background: DRIFT_COLOR.unknown }} />not measurable{driftCounts ? ` (${driftCounts.unknown})` : ""}</span>
-                <span className="text-ink-3">anchors are blank: there is nothing to check on a box somebody drew</span>
+                <span><span className="inline-block w-2.5 h-2.5 mr-1.5 rounded-sm align-[-1px]" style={{ background: DRIFT_COLOR.unknown }} />Not measurable{driftCounts ? ` (${driftCounts.unknown})` : ""}</span>
+                <span className="text-ink-3">Anchors are blank: there is nothing to check on a box somebody drew.</span>
               </div>
             </div>
+          ) : (
+            <p className="section-desc mt-4 pt-3 border-t hairline">
+              Check drift compares every machine-filled box with its nearest keyframe and adds a lane showing
+              which boxes have slid off the object.
+            </p>
           )}
-        </div>
+          </div>
+        </section>
+          )}
+
+          {track && (
+            <details className="panel px-3.5 py-2.5 text-[12.5px] text-ink-2">
+              <summary className="cursor-pointer text-ink-2 hover:text-ink">How this works</summary>
+              <div className="mt-2 space-y-1.5 section-desc">
+                <p>A keyframe is a frame where a person drew or confirmed the box. Every other frame is filled by
+                  machine: propagated from a neighbour, or interpolated between two keyframes.</p>
+                <p>Correcting a frame and marking it as a keyframe re-fills the segments on either side, so one
+                  correction fixes many frames. The ▾ markers show where the trajectory turns hardest, which is where
+                  interpolation is furthest from the truth.</p>
+              </div>
+            </details>
+          )}
         </main>
 
         {/* selected frame */}
         {it && (
-          <Inspector title="frame" side="right">
+          <Inspector title="Selected frame" side="right">
             <div className="p-3 flex flex-col gap-4">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <button type="button" className="block w-full" aria-label={`open this ${it.class_name} in the frame editor`}
                 onClick={() => router.push(`/frame/${it.frame_id}?focus=${it.object_id}`)}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={it.crop_url} alt="" className="w-full h-32 object-cover bg-bg-2 border border-line cursor-pointer" />
               </button>
-              <div className="text-[12px] space-y-1">
-                <div className="text-ink-2">{it.class_name} <span className="text-ink-3">frame {sel + 1}/{track?.n_frames}</span></div>
-                <div className="text-ink-3">source: <span style={{ color: cellColor(it) }}>{it.source}{it.interp_source ? ` (${it.interp_source})` : ""}</span></div>
-                <div className="text-ink-3">state: <StateBadge state={it.state} /></div>
+              <div className="text-[12.5px] space-y-1.5">
+                <div className="text-ink">{classLabel(it.class_name)} <span className="text-ink-3">· frame {sel + 1} of {track?.n_frames}</span></div>
+                <div className="text-ink-3">Source: <span style={{ color: cellColor(it) }}>{humanize(it.source ?? "detected")}{it.interp_source ? ` (${humanize(it.interp_source)})` : ""}</span></div>
+                <div className="text-ink-3 flex items-center gap-1.5">State: <StateBadge state={it.state} /></div>
                 {selDrift && (
                   <div className="text-ink-3">
-                    appearance: <span style={{ color: DRIFT_COLOR[selDrift.verdict] }}>{selDrift.why}</span>
+                    Appearance: <span style={{ color: DRIFT_COLOR[selDrift.verdict] }}>{selDrift.why}</span>
                   </div>
                 )}
                 {suggested.has(it.object_id) && (
                   <div className="text-accent">
-                    correcting this frame buys the most: the box turns hardest here, so the segments either
-                    side are where interpolation is furthest from the truth
+                    Correcting this frame buys the most: the box turns hardest here, so the segments either
+                    side are where interpolation is furthest from the truth.
                   </div>
                 )}
                 <div className="flex flex-wrap gap-2 pt-2">
-                  <button onClick={markKeyframe} className={`border px-2 py-1 ${it.is_keyframe || it.source === "human" ? "border-pass text-pass" : "border-line hover:border-accent"}`}>{it.is_keyframe || it.source === "human" ? "keyframe ✓" : "mark keyframe"}</button>
-                  <button onClick={reinterpolate} className="border border-line px-2 py-1 hover:border-accent">re-interpolate segment</button>
-                  <button onClick={() => router.push(`/frame/${it.frame_id}?focus=${it.object_id}`)} className="border border-line px-2 py-1 hover:border-accent">edit box</button>
+                  <button type="button" onClick={() => router.push(`/frame/${it.frame_id}?focus=${it.object_id}`)} className="btn btn-primary">Edit box</button>
+                  <button type="button" onClick={markKeyframe} className={`btn ${isKey(it) ? "btn-on" : ""}`}>{isKey(it) ? "Keyframe ✓" : "Mark keyframe"}</button>
+                  <button type="button" onClick={reinterpolate} className="btn">Re-interpolate segment</button>
                 </div>
               </div>
             </div>

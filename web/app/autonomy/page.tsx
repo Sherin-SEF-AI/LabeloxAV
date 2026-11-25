@@ -5,6 +5,8 @@ import { useCallback, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
 import PulseDot from "@/components/PulseDot";
+import EmptyState from "@/components/ui/EmptyState";
+import { ago, humanize, num, pct, shortId } from "@/lib/format";
 import { api, humanizeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { invalidate, useQuery } from "@/lib/useQuery";
@@ -25,24 +27,35 @@ import type {
 // different thing from yesterday's wearing the same digits.
 
 const LEVEL_LABEL: Record<number, string> = {
-  0: "propose only", 1: "auto-accept band", 2: "settlement",
+  0: "Proposes only", 1: "Accepts confident labels", 2: "Settles whole batches",
 };
+
+// A panel header in the shared style, with an optional right-hand note.
+function Head({ title, note, children }: { title: string; note?: React.ReactNode; children?: React.ReactNode }) {
+  return (
+    <div className="panel-head">
+      <h2 className="section-title">{title}</h2>
+      {note != null && <span className="text-[12px] text-ink-3">{note}</span>}
+      {children && <div className="ml-auto flex items-center gap-2">{children}</div>}
+    </div>
+  );
+}
 
 // The log-likelihood ratio between its two bounds: left is accept, right is reject, the middle is
 // "keep asking". Drawn rather than printed because a person reading -1.7 has to remember which way
 // is good; a marker two thirds of the way to the accept edge does not need remembering.
 function LlrBar({ llr, lo, hi }: { llr: number | null; lo: number | null; hi: number | null }) {
   if (llr == null || lo == null || hi == null || hi <= lo) {
-    return <span className="text-ink-3">not computed</span>;
+    return <span className="text-ink-3">No verdicts yet</span>;
   }
   const pct = Math.max(0, Math.min(100, ((llr - lo) / (hi - lo)) * 100));
   return (
-    <span className="inline-flex items-center gap-1" title={`llr ${llr.toFixed(2)} in [${lo.toFixed(2)}, ${hi.toFixed(2)}]`}>
-      <span className="text-[9px] text-pass">accept</span>
-      <span className="relative inline-block h-[6px] w-[72px] rounded-sm bg-bg-2 border hairline">
+    <span className="inline-flex items-center gap-1.5" data-tip={`Evidence so far ${llr.toFixed(2)}, accept at ${lo.toFixed(2)}, reject at ${hi.toFixed(2)}`}>
+      <span className="text-[11px] text-pass">accept</span>
+      <span className="relative inline-block h-[6px] w-[80px] rounded-sm bg-bg-2 border hairline">
         <span className="absolute top-[-2px] h-[10px] w-[2px] bg-ink" style={{ left: `calc(${pct}% - 1px)` }} />
       </span>
-      <span className="text-[9px] text-block">reject</span>
+      <span className="text-[11px] text-block">reject</span>
     </span>
   );
 }
@@ -50,51 +63,49 @@ function LlrBar({ llr, lo, hi }: { llr: number | null; lo: number | null; hi: nu
 function Worklist({ items, minutes }: { items: SettlementWorkItem[]; minutes: number }) {
   return (
     <section className="panel">
-      <div className="uppercase text-[10px] text-ink-3 border-b hairline px-3 py-2 flex justify-between">
-        <span>verdict worklist · where the next minute goes</span>
-        <span>{minutes} min open</span>
-      </div>
+      <Head title="Waiting for your verdicts" note="Batches that need a person to judge a sample before they can be settled">
+        <span className="text-[12px] text-ink-3">About {num(minutes)} min of judging left</span>
+      </Head>
+      {items.length === 0 ? (
+        <EmptyState compact icon="check" title="Nothing to judge">No batch is waiting for verdicts right now.</EmptyState>
+      ) : (
       <div className="overflow-x-auto">
-        <table className="w-full text-[11px]">
-          <thead><tr className="text-ink-3 text-left">
-            <th className="px-3 py-1">class</th><th>evidence</th><th>llr</th>
-            <th>still to judge</th><th>objects / min</th><th></th>
+        <table className="data-table">
+          <thead><tr>
+            <th>Class</th><th>Sample so far</th><th>Leaning</th>
+            <th>Left to judge</th><th className="num" title="How many objects one minute of judging settles">Objects per minute</th><th></th>
           </tr></thead>
           <tbody>
             {items.map((w) => (
-              <tr key={w.lot_id} className="border-t hairline">
-                <td className="px-3 py-1 text-ink-2">{w.class_name}</td>
-                <td className="text-ink-3">
-                  {w.sample_n ? `${w.defects}/${w.sample_n}` : "0 verdicts"} · {w.drawn}
-                  {w.rule === "sprt" && w.cap_n ? ` of ${w.cap_n}` : ""} drawn
+              <tr key={w.lot_id}>
+                <td className="text-ink">{humanize(w.class_name)}</td>
+                <td>
+                  {w.sample_n ? `${num(w.defects)} wrong of ${num(w.sample_n)} judged` : "None judged"} · {num(w.drawn)}
+                  {w.rule === "sprt" && w.cap_n ? ` of ${num(w.cap_n)}` : ""} drawn
                 </td>
                 <td><LlrBar llr={w.llr} lo={w.bound_accept} hi={w.bound_reject} /></td>
-                <td className="text-ink-3">~{w.remaining_verdicts} verdicts · {w.minutes} min</td>
-                <td className="text-ink-2 tabular-nums" title={w.oc != null ? `P(accept) ${w.oc}` : undefined}>
+                <td>About {num(w.remaining_verdicts)} verdicts · {num(w.minutes)} min</td>
+                <td className="num text-ink" data-tip={w.oc != null ? `Chance it passes: ${pct(w.oc)}` : undefined}>
                   {w.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </td>
-                <td className="px-2">
-                  {w.review_at && <a className="text-accent hover:underline" href={w.review_at}>judge</a>}
+                <td className="text-right">
+                  {w.review_at && <a className="btn btn-primary" href={w.review_at}>Judge</a>}
                 </td>
               </tr>
             ))}
-            {items.length === 0 && (
-              <tr><td className="px-3 py-2 text-ink-3" colSpan={6}>
-                no lot is asking for verdicts
-              </td></tr>
-            )}
           </tbody>
         </table>
       </div>
+      )}
     </section>
   );
 }
 
 const KIND_LABEL: Record<string, string> = {
-  champion_miss: "champion missed",
-  challenger_miss: "challenger missed",
-  class_flip: "read as another class",
-  conf_gap: "same box, different confidence",
+  champion_miss: "Live model missed",
+  challenger_miss: "Candidate missed",
+  class_flip: "Read as another class",
+  conf_gap: "Same box, different confidence",
 };
 
 function ShadowPanel({ shadow }: { shadow: ShadowSummary | undefined }) {
@@ -104,60 +115,57 @@ function ShadowPanel({ shadow }: { shadow: ShadowSummary | undefined }) {
   const last = shadow?.sweeps?.[0];
   return (
     <section className="panel">
-      <div className="uppercase text-[10px] text-ink-3 border-b hairline px-3 py-2 flex justify-between">
-        <span>shadow mode · where two models read the same pixels differently</span>
-        <span>{open} open</span>
-      </div>
+      <Head title="Live model against the candidate" note="Where two models read the same frames differently">
+        <span className="text-[12px] text-ink-3">{num(open)} disagreements open</span>
+      </Head>
       {!shadow?.sweeps?.length ? (
-        <div className="px-3 py-2 text-[11px] text-ink-3">
-          no sweep has run. gold is frozen, so nothing yet compares the models on the sessions
-          ingested since it was sealed.
-        </div>
+        <EmptyState compact icon="layers" title="No comparison has run">
+          Nothing yet compares the live model with a candidate on the recordings added since the gold set
+          was frozen.
+        </EmptyState>
       ) : (
-        <div className="px-3 py-2 text-[11px] space-y-2">
+        <div className="p-3.5 text-[12.5px] space-y-3">
           <div className="text-ink-3">
-            last sweep {age(last?.created_at)} · {String(last?.status ?? "")}
+            Last compared {since(last?.created_at)} · {humanize(String(last?.status ?? ""))}
           </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1">
+          <div className="flex flex-wrap gap-x-5 gap-y-1">
             {kinds.map(([k, n]) => (
               <span key={k} className="text-ink-2">
-                {KIND_LABEL[k] ?? k} <span className="tabular-nums text-ink-3">{n}</span>
+                {KIND_LABEL[k] ?? humanize(k)} <span className="tabular-nums text-ink font-medium">{num(n)}</span>
               </span>
             ))}
-            {kinds.length === 0 && <span className="text-ink-3">no disagreement recorded</span>}
+            {kinds.length === 0 && <span className="text-ink-3">No disagreement recorded.</span>}
           </div>
-          <div className="space-y-1">
-            {(shadow?.win_shares ?? []).map((w) => (
-              <div key={w.challenger_run_id} className="flex justify-between gap-3">
-                <span className="text-ink-3 truncate">{w.challenger_run_id.slice(0, 8)}</span>
-                {w.measured ? (
-                  <span className="text-ink-2 tabular-nums">
-                    challenger won {w.challenger_right}/{w.discordant}
-                    {w.share != null && ` · ${(w.share * 100).toFixed(0)}%`}
-                    {w.lo != null && w.hi != null &&
-                      ` [${(w.lo * 100).toFixed(0)}, ${(w.hi * 100).toFixed(0)}]`}
-                  </span>
-                ) : (
-                  // Unmeasured, said out loud. A win share of zero and nobody having looked are
-                  // different facts and this panel refuses to draw them the same way.
-                  <span className="text-ink-3">unmeasured · {w.reason ?? "nobody has ruled yet"}</span>
-                )}
-              </div>
-            ))}
-          </div>
+          {(shadow?.win_shares ?? []).length > 0 && (
+            <div className="space-y-1 border-t hairline pt-2.5">
+              {(shadow?.win_shares ?? []).map((w) => (
+                <div key={w.challenger_run_id} className="flex justify-between gap-3">
+                  <span className="text-ink-3 truncate">Candidate <span className="font-mono">{shortId(w.challenger_run_id)}</span></span>
+                  {w.measured ? (
+                    <span className="text-ink-2 tabular-nums">
+                      Candidate right in {num(w.challenger_right)} of {num(w.discordant)}
+                      {w.share != null && ` · ${(w.share * 100).toFixed(0)}%`}
+                      {w.lo != null && w.hi != null &&
+                        ` (likely ${(w.lo * 100).toFixed(0)}-${(w.hi * 100).toFixed(0)}%)`}
+                    </span>
+                  ) : (
+                    // Unmeasured, said out loud. A win share of zero and nobody having looked are
+                    // different facts and this panel refuses to draw them the same way.
+                    <span className="text-ink-3">Not measured: {w.reason ?? "nobody has ruled yet"}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </section>
   );
 }
 
-function age(iso: string | null | undefined): string {
-  if (!iso) return "never";
-  const s = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (s < 90) return `${Math.round(s)}s ago`;
-  if (s < 5400) return `${Math.round(s / 60)}m ago`;
-  if (s < 172800) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
+// "never" for a measurement that has not happened, rather than the dash ago() gives an absent time.
+function since(iso: string | null | undefined): string {
+  return iso ? ago(iso) : "never";
 }
 
 export default function AutonomyPage() {
@@ -197,123 +205,141 @@ export default function AutonomyPage() {
   const settle = state?.settlement;
   const acks = lots.filter((l) => l.status === "accepted" && !l.decision?.human_ack);
 
+  const live = daemon?.alive;
+  const Switch = ({ label, on, onText = "On", offText = "Off", tip }: { label: string; on: boolean | undefined; onText?: string; offText?: string; tip?: string }) => (
+    <span className="flex items-center gap-1.5" data-tip={tip}>
+      <span className="text-ink-3">{label}</span>
+      <span className={on ? "text-ink" : "text-ink-2"}>{sw ? (on ? onText : offText) : "-"}</span>
+    </span>
+  );
+
   return (
     <PageShell active="AUTONOMY" title="AUTONOMY"
-      subtitle="what the machine may do right now, per class, and the evidence behind it">
-      <div className="p-4 space-y-4 text-[12px]">
+      subtitle="What the system may do without a person, class by class, and the evidence that earned it">
+      <div className="page-wrap space-y-4 text-[12.5px]">
         {err != null && <LoadState error={err} onRetry={() => void load()} />}
 
         {/* the switches and the heartbeat */}
-        <div className="panel p-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-          <span className="flex items-center gap-1.5">
-            <PulseDot tone={daemon ? (daemon.alive ? "live" : "bad") : "idle"}
-              label={daemon?.alive
-                ? `daemon live, last tick ${age(daemon.last_tick_at)}`
-                : `daemon STALE - last tick ${age(daemon?.last_tick_at)}`} />
-            <span className={daemon?.alive ? "text-ink-2" : "text-block"}>
-              daemon {daemon ? (daemon.alive ? "live" : `stale (${age(daemon.last_tick_at)})`) : "…"}
+        <div className="panel px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+          <span className="flex items-center gap-2">
+            <PulseDot tone={daemon ? (live ? "live" : "bad") : "idle"}
+              label={live
+                ? `background agent running, last ran ${since(daemon?.last_tick_at)}`
+                : `background agent stopped, last ran ${since(daemon?.last_tick_at)}`} />
+            <span className={daemon && !live ? "text-block font-medium" : "text-ink font-medium"}>
+              {daemon ? (live ? "Background agent running" : "Background agent stopped") : "Background agent"}
             </span>
+            {daemon && <span className="text-ink-3">last ran {since(daemon.last_tick_at)}</span>}
           </span>
-          <span className="text-ink-3">loop {sw?.loop_enabled ? "on" : "OFF"}</span>
-          <span className="text-ink-3">auto-accept {sw?.auto_accept_enabled ? "on" : "off"}</span>
-          <span className="text-ink-3">
-            promote {sw?.auto_promote_enabled ? "autonomous" : "by approval"}
-          </span>
-          <span className={sw?.settlement_enabled ? "text-pass" : "text-ink-3"}>
-            settlement {sw?.settlement_enabled ? "ARMED" : "off"}
-          </span>
-          {sw?.paused_reason && <span className="text-warn">{sw.paused_reason}</span>}
+          {Switch({ label: "Improvement loop", on: sw?.loop_enabled, tip: "Mines, labels and retrains on its own" })}
+          {Switch({ label: "Auto-accept", on: sw?.auto_accept_enabled, tip: "Confident machine labels are accepted without review" })}
+          {Switch({ label: "Model promotion", on: sw?.auto_promote_enabled, onText: "Automatic", offText: "Needs approval" })}
+          {Switch({ label: "Batch settlement", on: sw?.settlement_enabled, onText: "Armed", offText: "Off",
+            tip: "Whole batches of a class can be accepted from a judged sample" })}
+          {sw?.paused_reason && <span className="text-warn" data-tip="Why the loop is paused">Paused: {sw.paused_reason}</span>}
         </div>
 
         {/* one-click acks the agent is waiting on */}
         {acks.length > 0 && (
-          <div className="panel p-3 border-warn space-y-1">
-            <div className="uppercase text-[10px] text-warn">awaiting a person</div>
-            {acks.map((l) => (
-              <div key={l.lot_id} className="flex items-center gap-2">
-                <span className="text-ink-2">
-                  {l.class_name} lot passed (far {l.far_bound}, {l.sample_n} verdicts,
-                  {" "}{l.defects} defects)
-                </span>
-                {l.tier !== "default" && <span className="text-warn">{l.tier}</span>}
-                <button className="border border-line px-2 py-0.5 hover:border-accent"
-                  onClick={() => act(() => api.settlementAck(l.lot_id), `ack ${l.class_name}`)}>
-                  ack settle
-                </button>
-              </div>
-            ))}
-          </div>
+          <section className="panel border-warn/50">
+            <Head title="Waiting for you" note="These batches passed their sample check and need a person to sign off" />
+            <div className="p-3.5 space-y-2">
+              {acks.map((l) => (
+                <div key={l.lot_id} className="flex flex-wrap items-center gap-3">
+                  <span className="text-ink">{humanize(l.class_name)}</span>
+                  <span className="text-ink-3">
+                    passed: {num(l.defects)} wrong in {num(l.sample_n)} judged (allowed error {l.far_bound})
+                  </span>
+                  {l.tier !== "default" && <span className="text-warn">{humanize(l.tier)}</span>}
+                  <button type="button" className="btn btn-primary ml-auto"
+                    onClick={() => act(() => api.settlementAck(l.lot_id), `Sign off ${humanize(l.class_name)}`)}>
+                    Sign off and settle
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* the ladder */}
-          <section className="panel lg:col-span-2">
-            <div className="uppercase text-[10px] text-ink-3 border-b hairline px-3 py-2 flex justify-between">
-              <span>per-class ladder</span>
-              <button className="text-ink-3 hover:text-ink-1"
+          <section className="panel lg:col-span-2 min-w-0">
+            <Head title="What each class may do">
+              <button type="button" className="link text-[12px]"
                 onClick={() => setShowAllClasses((v) => !v)}>
-                {showAllClasses ? "raised only" : `all ${ladder.length} classes`}
+                {showAllClasses ? "Show raised classes only" : `Show all ${num(ladder.length)} classes`}
               </button>
-            </div>
+            </Head>
+            {shown.length === 0 ? (
+              <EmptyState compact icon="target" title="Every class still needs a person">
+                No class may act on its own yet. A class earns &ldquo;accepts confident labels&rdquo; once its
+                precision has been measured, and &ldquo;settles whole batches&rdquo; once a judged sample passes.
+              </EmptyState>
+            ) : (
             <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
-              <table className="w-full text-[11px]">
-                <thead><tr className="text-ink-3 text-left">
-                  <th className="px-3 py-1">class</th><th>level</th><th>set by</th><th>basis</th>
+              <table className="data-table">
+                <thead><tr>
+                  <th>Class</th><th>Allowed to</th><th>Set by</th><th>Why</th>
                 </tr></thead>
                 <tbody>
                   {shown.map((r) => (
-                    <tr key={r.class_name} className="border-t hairline align-top">
-                      <td className="px-3 py-1 text-ink-2">
-                        {r.class_name}{r.pinned ? " 📌" : ""}
+                    <tr key={r.class_name} className="align-top">
+                      <td className="text-ink">
+                        {humanize(r.class_name)}{r.pinned ? <span className="text-ink-3" data-tip="Pinned by a person"> (pinned)</span> : null}
                       </td>
-                      <td className={r.level === 2 ? "text-pass" : r.level === 1 ? "text-ink-2" : "text-ink-3"}>
-                        L{r.level} {LEVEL_LABEL[r.level]}
+                      <td className={r.level === 2 ? "text-pass" : r.level === 1 ? "text-ink" : "text-ink-3"}>
+                        {LEVEL_LABEL[r.level] ?? `Level ${r.level}`}
                       </td>
-                      <td className="text-ink-3">{r.set_by}</td>
-                      <td className="text-ink-3 max-w-[26rem]">
+                      <td>{humanize(r.set_by)}</td>
+                      <td className="max-w-[26rem]">
                         {String(r.basis?.reason ?? r.basis?.step_down_reason ?? "")}
-                        {r.cooldown_until && <span className="text-warn"> · cooldown until {r.cooldown_until.slice(0, 10)}</span>}
+                        {r.cooldown_until && <span className="text-warn"> · paused until {r.cooldown_until.slice(0, 10)}</span>}
                       </td>
                     </tr>
                   ))}
-                  {shown.length === 0 && (
-                    <tr><td className="px-3 py-2 text-ink-3" colSpan={4}>
-                      no class is above propose-only; a rung is earned by a measured threshold (L1)
-                      and a passed lot (L2)
-                    </td></tr>
-                  )}
                 </tbody>
               </table>
             </div>
+            )}
           </section>
 
           {/* measurements + their age */}
-          <section className="panel p-3 space-y-2">
-            <div className="uppercase text-[10px] text-ink-3">the evidence, and its age</div>
-            <div className="text-ink-2">
-              auto-accept precision{" "}
-              {meas?.control_precision.precision != null
-                ? `${meas.control_precision.precision} (${meas.control_precision.interval.lo.toFixed(2)}-${meas.control_precision.interval.hi.toFixed(2)})`
-                : "unmeasured"}
-              <span className="text-ink-3"> · {meas?.control_precision.pending ?? 0} pending · measured {age(meas?.control_precision.measured_at)}</span>
-            </div>
-            <div className="text-ink-2">
-              judge calibration
-              <span className="text-ink-3"> · {meas?.judge_calibration.verdicts ?? 0} verdicts · {age(meas?.judge_calibration.measured_at)}</span>
-            </div>
-            <div className="text-ink-2">
-              fitted thresholds active: {meas?.active_fitted_thresholds ?? 0}
-              {(meas?.active_fitted_thresholds ?? 0) === 0 &&
-                <span className="text-warn"> (no class can hold L1 without one)</span>}
-            </div>
-            <div className="uppercase text-[10px] text-ink-3 pt-2">class precision, oldest first</div>
-            <div className="max-h-[180px] overflow-y-auto space-y-0.5">
-              {(meas?.class_precision ?? []).map((c) => (
-                <div key={c.class_name} className="flex justify-between text-ink-3">
-                  <span>{c.class_name}</span>
-                  <span className={c.age_days > 14 ? "text-warn" : ""}>{c.age_days}d</span>
+          <section className="panel min-w-0">
+            <Head title="The evidence, and how old it is" />
+            <div className="p-3.5 space-y-2.5">
+              <div>
+                <div className="text-ink">Auto-accept precision</div>
+                <div className="text-ink-3">
+                  {meas?.control_precision.precision != null
+                    ? `${pct(meas.control_precision.precision)} (likely ${pct(meas.control_precision.interval.lo)}-${pct(meas.control_precision.interval.hi)})`
+                    : "Not measured yet"}
+                  {" "}· {num(meas?.control_precision.pending ?? 0)} checks waiting · measured {since(meas?.control_precision.measured_at)}
                 </div>
-              ))}
+              </div>
+              <div>
+                <div className="text-ink">Judge model calibration</div>
+                <div className="text-ink-3">{num(meas?.judge_calibration.verdicts ?? 0)} verdicts · {since(meas?.judge_calibration.measured_at)}</div>
+              </div>
+              <div>
+                <div className="text-ink">Per-class thresholds in use: {num(meas?.active_fitted_thresholds ?? 0)}</div>
+                {(meas?.active_fitted_thresholds ?? 0) === 0 &&
+                  <div className="text-warn">No class can accept labels on its own until one is fitted.</div>}
+              </div>
+              <div className="border-t hairline pt-2.5">
+                <div className="label-caps mb-1.5">Class precision, oldest first</div>
+                <div className="max-h-[180px] overflow-y-auto space-y-1">
+                  {(meas?.class_precision ?? []).map((c) => (
+                    <div key={c.class_name} className="flex justify-between gap-3">
+                      <span className="text-ink-2 truncate">{humanize(c.class_name)}</span>
+                      <span className={`shrink-0 tabular-nums ${c.age_days > 14 ? "text-warn" : "text-ink-3"}`}
+                        data-tip={c.age_days > 14 ? "Older than two weeks" : undefined}>
+                        {Math.round(c.age_days)} days old
+                      </span>
+                    </div>
+                  ))}
+                  {(meas?.class_precision ?? []).length === 0 && <div className="text-ink-3">No class measured yet.</div>}
+                </div>
+              </div>
             </div>
           </section>
         </div>
@@ -324,68 +350,70 @@ export default function AutonomyPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* lots */}
-          <section className="panel lg:col-span-2">
-            <div className="uppercase text-[10px] text-ink-3 border-b hairline px-3 py-2">
-              settlement lots · {settle?.settled_objects ?? 0} objects settled
-              {settle?.revert_rate != null && ` · revert rate ${settle.revert_rate}`}
-            </div>
+          <section className="panel lg:col-span-2 min-w-0">
+            <Head title="Batches" note={<>
+              {num(settle?.settled_objects ?? 0)} objects settled
+              {settle?.revert_rate != null && ` · ${pct(settle.revert_rate)} reverted`}
+            </>} />
+            {lots.length === 0 ? (
+              <EmptyState compact icon="layers" title="No batches yet">
+                Each night the agent plans a batch for the best-measured class that qualifies.
+              </EmptyState>
+            ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-[11px]">
-                <thead><tr className="text-ink-3 text-left">
-                  <th className="px-3 py-1">class</th><th>tier</th><th>population</th>
-                  <th>sample</th><th>status</th><th></th>
+              <table className="data-table">
+                <thead><tr>
+                  <th>Class</th><th>Risk tier</th><th className="num">Objects</th>
+                  <th>Sample</th><th>Status</th><th></th>
                 </tr></thead>
                 <tbody>
                   {lots.map((l) => (
-                    <tr key={l.lot_id} className="border-t hairline">
-                      <td className="px-3 py-1 text-ink-2">{l.class_name}</td>
-                      <td className={l.tier === "critical" ? "text-block" : l.tier === "safety" ? "text-warn" : "text-ink-3"}>{l.tier}</td>
-                      <td className="text-ink-3">{l.population.toLocaleString()}</td>
-                      <td className="text-ink-3">
-                        {l.sample_n ? `${l.defects}/${l.sample_n} defects` : `${l.sample_drawn} awaiting verdicts`}
-                        {l.rule === "sprt" && l.cap_n ? ` · ${l.sample_drawn}/${l.cap_n} drawn` : ""}
+                    <tr key={l.lot_id}>
+                      <td className="text-ink">{humanize(l.class_name)}</td>
+                      <td className={l.tier === "critical" ? "text-block" : l.tier === "safety" ? "text-warn" : "text-ink-3"}>{humanize(l.tier)}</td>
+                      <td className="num">{num(l.population)}</td>
+                      <td>
+                        {l.sample_n ? `${num(l.defects)} wrong of ${num(l.sample_n)}` : `${num(l.sample_drawn)} waiting for verdicts`}
+                        {l.rule === "sprt" && l.cap_n ? ` · ${num(l.sample_drawn)} of ${num(l.cap_n)} drawn` : ""}
                       </td>
-                      <td className="text-ink-3">{l.status}</td>
-                      <td className="px-2 whitespace-nowrap">
+                      <td>{humanize(l.status)}</td>
+                      <td className="text-right whitespace-nowrap space-x-3">
                         {l.review_at && l.status === "judging" && (
-                          <a className="text-accent hover:underline" href={l.review_at}>judge</a>
+                          <a className="link" href={l.review_at}>Judge</a>
                         )}
                         {l.spot_review_at && l.status === "settled" && (
-                          <a className="text-accent hover:underline mr-2" href={l.spot_review_at}>spot check</a>
+                          <a className="link" href={l.spot_review_at}>Spot check</a>
                         )}
                         {l.status === "settled" && (
-                          <button className="text-warn hover:underline"
-                            onClick={() => act(() => api.settlementRevert(l.lot_id, "manual"), `revert ${l.class_name}`)}>
-                            revert
+                          <button type="button" className="text-block hover:underline"
+                            data-tip="Undo the settlement: every object in the batch goes back to needing review"
+                            onClick={() => act(() => api.settlementRevert(l.lot_id, "manual"), `Revert ${humanize(l.class_name)}`)}>
+                            Revert
                           </button>
                         )}
                       </td>
                     </tr>
                   ))}
-                  {lots.length === 0 && (
-                    <tr><td className="px-3 py-2 text-ink-3" colSpan={6}>
-                      no lots yet; the nightly agent plans one for the best-measured eligible class
-                    </td></tr>
-                  )}
                 </tbody>
               </table>
             </div>
+            )}
           </section>
 
           {/* the journal */}
-          <section className="panel">
-            <div className="uppercase text-[10px] text-ink-3 border-b hairline px-3 py-2">agent journal</div>
+          <section className="panel min-w-0">
+            <Head title="Agent activity" />
             <div className="max-h-[300px] overflow-y-auto">
               {(state?.journal ?? []).map((j) => (
-                <div key={j.run_id} className="flex justify-between px-3 py-1 border-t hairline">
-                  <span className="text-ink-2">{j.kind}</span>
-                  <span className={j.status === "error" ? "text-block" : "text-ink-3"}>
-                    {j.status} · {age(j.created_at)}
+                <div key={j.run_id} className="flex justify-between gap-3 px-3.5 py-2 border-t hairline first:border-t-0">
+                  <span className="text-ink-2 truncate">{humanize(j.kind)}</span>
+                  <span className={`shrink-0 ${j.status === "error" ? "text-block" : "text-ink-3"}`}>
+                    {humanize(j.status)} · {since(j.created_at)}
                   </span>
                 </div>
               ))}
               {(state?.journal ?? []).length === 0 && (
-                <div className="px-3 py-2 text-ink-3">no agent has run yet</div>
+                <EmptyState compact icon="robot" title="No agent has run yet" />
               )}
             </div>
           </section>

@@ -2,6 +2,7 @@
 
 import PageShell from "./PageShell";
 import LoadState from "./LoadState";
+import EmptyState from "@/components/ui/EmptyState";
 import { packEnabled, useFeaturesState } from "@/lib/features";
 
 // A page that belongs to an optional pack renders only where that pack is installed. Opened by URL on an
@@ -15,19 +16,22 @@ export default function PackGate({ pack, title, what, children }: {
   if (loaded && packEnabled(features, pack)) return <>{children}</>;
   return (
     <PageShell active={title} title={title}>
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-10">
+      <div className="page-wrap-narrow">
         {!loaded ? (
           <LoadState loading />
         ) : (
-          <section className="panel p-5">
-            <h2 className="text-[15px] font-semibold text-ink">Not installed on this server</h2>
-            <p className="mt-2 text-[13px] text-ink-2 max-w-[65ch]">
+          <section className="panel">
+            <EmptyState icon="shield" title="Not installed on this server"
+              action={<a href="/" className="btn">Back to home</a>}>
               {title} is part of an optional package: {what}. It is off unless an administrator installs it.
-            </p>
-            <p className="mt-3 text-[12.5px] text-ink-3">To install it, add the package in the server&apos;s .env and restart:</p>
-            <code className="mt-1.5 block text-[12.5px] text-ink-2 bg-bg-2 border hairline rounded px-3 py-2">
-              LBX_PACKS__OPTIONAL=[&quot;{pack}&quot;]
-            </code>
+              <details className="mt-4 text-left">
+                <summary className="cursor-pointer text-ink-2">For administrators</summary>
+                <p className="mt-2">Add the package to the server&apos;s .env and restart:</p>
+                <code className="mt-1.5 block text-[12.5px] text-ink-2 bg-bg-2 border hairline rounded px-3 py-2 font-mono">
+                  LBX_PACKS__OPTIONAL=[&quot;{pack}&quot;]
+                </code>
+              </details>
+            </EmptyState>
           </section>
         )}
       </div>

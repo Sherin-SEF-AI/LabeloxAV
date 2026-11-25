@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
 import type { IssueRow } from "@/lib/types";
 import LoadState from "@/components/shell/LoadState";
+import EmptyState from "@/components/ui/EmptyState";
+import { humanize, shortId } from "@/lib/format";
 import { useQuery } from "@/lib/useQuery";
 
 // Feedback on your own labels, in a place you can go and look.
@@ -43,41 +45,42 @@ export default function MyIssues({ limit = 25 }: { limit?: number }) {
 
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-        <span>feedback on my labels</span>
-        <label className="ml-auto normal-case flex items-center gap-1 text-ink-3">
-          <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} />
-          open only
+      <div className="panel-head">
+        <h2 className="section-title">Feedback on my labels</h2>
+        <label className="ml-auto flex items-center gap-1.5 text-[12px] text-ink-2 cursor-pointer">
+          <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} className="accent-primary" />
+          Open only
         </label>
-        <button onClick={() => void load()} className="normal-case border border-line px-2 py-0.5 hover:border-accent">
-          refresh
+        <button type="button" onClick={() => void load()} className="btn">
+          Refresh
         </button>
       </div>
       <div className="p-3">
         {err != null ? (
           <LoadState error={err} onRetry={() => void load()} />
         ) : loading ? (
-          <div className="text-[12.5px] text-ink-3/50 animate-pulse py-4 text-center">loading...</div>
+          <LoadState loading rows={2} />
         ) : rows.length === 0 ? (
-          <div className="text-[12.5px] text-ink-3 py-4 text-center">
-            {openOnly ? "nothing outstanding on your labels" : "no feedback on your labels yet"}
-          </div>
+          <EmptyState compact icon="comment" title={openOnly ? "Nothing outstanding on your labels" : "No feedback on your labels yet"}>
+            When a reviewer flags one of your labels, it shows here with a link to the frame.
+          </EmptyState>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             {rows.map((i) => (
-              <button key={i.issue_id} onClick={() => open(i)}
-                className="w-full text-left flex items-center gap-2 border border-line hover:border-accent px-2 py-1.5">
-                <span className={`text-[10px] leading-none px-1.5 py-1 rounded border ${KIND_TONE[i.kind] ?? KIND_TONE.comment}`}>
-                  {i.kind.replace(/_/g, " ")}
+              <button key={i.issue_id} type="button" onClick={() => open(i)}
+                className="w-full text-left flex items-center gap-2.5 rounded border border-line hover:border-accent/60 hover:bg-head/50 px-2.5 py-2">
+                <span className={`text-[11px] leading-none px-1.5 py-1 rounded border ${KIND_TONE[i.kind] ?? KIND_TONE.comment}`}>
+                  {humanize(i.kind)}
                 </span>
-                <span className="text-[12px] text-ink-2 truncate">
-                  {i.object_id ? `object ${i.object_id.slice(0, 8)}` : `frame ${(i.frame_id ?? "").slice(0, 8)}`}
+                <span className="text-[12.5px] text-ink-2 truncate">
+                  {i.object_id ? "On an object" : "On a frame"}
+                  <span className="ml-1.5 font-mono text-[11.5px] text-ink-3">{shortId(i.object_id ?? i.frame_id)}</span>
                 </span>
-                {i.n_comments ? <span className="text-[11px] text-ink-3">{i.n_comments} comment{i.n_comments === 1 ? "" : "s"}</span> : null}
-                <span className={`ml-auto text-[11px] ${i.status === "open" ? "text-warn" : "text-pass"}`}>
-                  {i.status}
+                {i.n_comments ? <span className="text-[12px] text-ink-3">{i.n_comments} comment{i.n_comments === 1 ? "" : "s"}</span> : null}
+                <span className={`ml-auto text-[12px] ${i.status === "open" ? "text-warn" : "text-pass"}`}>
+                  {humanize(i.status)}
                 </span>
-                <span className="text-[11px] text-ink-3">
+                <span className="text-[12px] text-ink-3">
                   {i.created_at ? new Date(i.created_at).toLocaleDateString() : ""}
                 </span>
               </button>

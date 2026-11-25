@@ -7,6 +7,7 @@ import { level, mb, uptime, workInFlight } from "@/lib/console";
 import type { AgentRunRow } from "@/lib/types";
 import type { JobStream, SystemStream } from "@/lib/useEventStream";
 import { useQuery } from "@/lib/useQuery";
+import { ago, humanize, num, plural, shortId } from "@/lib/format";
 
 // The console's panels, as pieces rather than a page.
 //
@@ -37,17 +38,17 @@ export function GpuPanel({ sys }: { sys: SystemStream | null }) {
   const gpu = sys?.gpus?.[0];
   if (!gpu) {
     return (
-      <div className="text-[12px] text-ink-3">
-        no GPU visible to this process. Auto-labelling and training refuse without one.
+      <div className="text-[12.5px] text-ink-3 leading-relaxed">
+        No GPU is visible to this process. Auto-labelling and training will not start without one.
       </div>
     );
   }
   return (
     <div className="space-y-3">
-      <div className="text-[12px] text-ink-3">{gpu.name}</div>
-      <Meter label="memory" frac={gpu.memory_used_frac}
+      <div className="text-[12.5px] text-ink-2">{gpu.name}</div>
+      <Meter label="Memory" frac={gpu.memory_used_frac}
         detail={`${mb(gpu.memory_used_mb)} / ${mb(gpu.memory_total_mb)}`} />
-      <Meter label="utilisation" frac={(gpu.utilization_pct ?? 0) / 100}
+      <Meter label="Utilisation" frac={(gpu.utilization_pct ?? 0) / 100}
         detail={`${Math.round(gpu.utilization_pct ?? 0)}%`} />
       <div className="text-[12px] text-ink-3">
         {gpu.temperature_c != null && <span>{Math.round(gpu.temperature_c)}°C</span>}
@@ -58,7 +59,7 @@ export function GpuPanel({ sys }: { sys: SystemStream | null }) {
       {gpu.processes.length > 0 && (
         <div className="pt-2 border-t hairline space-y-0.5">
           {gpu.processes.map((p) => (
-            <div key={`${p.pid}-${p.name}`} className="flex justify-between text-[11px]">
+            <div key={`${p.pid}-${p.name}`} className="flex justify-between text-[12px]">
               <span className="text-ink-3 truncate" title={p.name}>{p.name.split("/").pop()}</span>
               <span className="text-ink-2 shrink-0 ml-2">{mb(p.used_mb)}</span>
             </div>
@@ -71,36 +72,37 @@ export function GpuPanel({ sys }: { sys: SystemStream | null }) {
 
 export function HostPanel({ sys }: { sys: SystemStream | null }) {
   const host = sys?.host;
-  if (!host) return <div className="text-[12px] text-ink-3">no reading</div>;
+  if (!host) return <NoReading />;
   return (
     <div className="space-y-3">
-      <div className="text-[12px] text-ink-3">
-        load {host.load["1m"]} over {host.cpu_count} cores
+      <div className="text-[12.5px] text-ink-2">
+        Load {host.load["1m"]} across {host.cpu_count} cores
       </div>
-      <Meter label="memory" frac={host.memory_used_frac}
+      <Meter label="Memory" frac={host.memory_used_frac}
         detail={`${mb(host.memory_used_mb)} / ${mb(host.memory_total_mb)}`} />
-      <Meter label="cpu" frac={(host.cpu_pct ?? 0) / 100} detail={`${Math.round(host.cpu_pct)}%`} />
-      <Meter label="disk" frac={host.disk.used_frac}
+      <Meter label="CPU" frac={(host.cpu_pct ?? 0) / 100} detail={`${Math.round(host.cpu_pct)}%`} />
+      <Meter label="Disk" frac={host.disk.used_frac}
         detail={`${mb(host.disk.used_mb)} / ${mb(host.disk.total_mb)}`} />
-      <div className="text-[11px] text-ink-3 truncate" title={host.disk.path}>{host.disk.path}</div>
+      <div className="text-[11.5px] text-ink-3 font-mono truncate" title={host.disk.path}>{host.disk.path}</div>
     </div>
   );
 }
 
 export function ProcessPanel({ sys, waitingTotal }: { sys: SystemStream | null; waitingTotal: number }) {
-  if (!sys) return <div className="text-[12px] text-ink-3">no reading</div>;
+  if (!sys) return <NoReading />;
   return (
-    <div className="text-[12px] space-y-1 text-ink-3">
+    <div className="text-[12.5px] space-y-1.5 text-ink-3">
       {/* Its own share, so "the machine is busy" can be told from "we are busy". */}
-      <div className="flex justify-between"><span>pid</span><span className="text-ink-2">{sys.process.pid}</span></div>
-      <div className="flex justify-between"><span>resident</span>
-        <span className="text-ink-2">{mb(sys.process.rss_mb)}</span></div>
-      <div className="flex justify-between"><span>threads</span>
-        <span className="text-ink-2">{sys.process.threads}</span></div>
-      <div className="flex justify-between"><span>uptime</span>
+      <div className="flex justify-between"><span>Memory in use</span>
+        <span className="text-ink-2 tabular-nums">{mb(sys.process.rss_mb)}</span></div>
+      <div className="flex justify-between"><span>Uptime</span>
         <span className="text-ink-2">{uptime(sys.process.uptime_s)}</span></div>
-      <div className="flex justify-between"><span>queued work</span>
-        <span className={waitingTotal ? "text-warn" : "text-ink-2"}>{waitingTotal}</span></div>
+      <div className="flex justify-between"><span>Queued jobs</span>
+        <span className={`tabular-nums ${waitingTotal ? "text-warn" : "text-ink-2"}`}>{num(waitingTotal)}</span></div>
+      <div className="flex justify-between"><span>Threads</span>
+        <span className="text-ink-2 tabular-nums">{sys.process.threads}</span></div>
+      <div className="flex justify-between"><span>Process id</span>
+        <span className="text-ink-3 font-mono">{sys.process.pid}</span></div>
     </div>
   );
 }
@@ -109,19 +111,19 @@ export function RunningNowPanel({ jobs }: { jobs: JobStream | null }) {
   const { running, waitingTotal } = workInFlight(jobs);
   if (!running.length) {
     return (
-      <div className="py-6 text-center text-[12px] text-ink-3">
+      <div className="py-6 text-center text-[12.5px] text-ink-3">
         {waitingTotal
-          ? `nothing running. ${waitingTotal} queued, mostly parked for hardware that is not here.`
-          : "nothing running."}
+          ? `Nothing is running. ${plural(waitingTotal, "job")} queued, mostly waiting for hardware that is not connected.`
+          : "Nothing is running."}
       </div>
     );
   }
   return (
     <div className="divide-y divide-line">
       {running.map((w) => (
-        <div key={w.id} className="flex items-center gap-3 py-2 text-[12px]">
-          <span className="text-ink-2 w-20">{w.kind}</span>
-          <span className="text-ink-3 w-20 truncate">{w.id.slice(0, 8)}</span>
+        <div key={w.id} className="flex items-center gap-3 py-2.5 text-[12.5px]">
+          <span className="text-ink w-24">{humanize(w.kind)}</span>
+          <span className="text-ink-3 font-mono text-[11.5px] w-20 truncate" title={w.id}>{shortId(w.id)}</span>
           <span className="flex-1 h-1.5 bg-line rounded overflow-hidden">
             {/* Unmeasured progress shows no bar at all. A bar at zero reads as stalled, which is a
                 different claim from "this job does not report progress". */}
@@ -130,7 +132,7 @@ export function RunningNowPanel({ jobs }: { jobs: JobStream | null }) {
                 style={{ width: `${Math.round(w.progress * 100)}%` }} />
             )}
           </span>
-          <span className="text-ink-3 w-12 text-right">
+          <span className="text-ink-2 w-12 text-right tabular-nums">
             {w.progress != null ? `${Math.round(w.progress * 100)}%` : "-"}
           </span>
         </div>
@@ -150,22 +152,22 @@ export function RunningNowPanel({ jobs }: { jobs: JobStream | null }) {
 export function GatePanel() {
   // A failed read renders as "no reading", which is what it is; the error is deliberately not shown here.
   const { data: p } = useQuery(["governPrecision"], () => api.governPrecision());
-  if (!p) return <div className="text-[12px] text-ink-3">no reading</div>;
+  if (!p) return <NoReading />;
   return (
-    <div className="text-[12px] space-y-1 text-ink-3">
+    <div className="text-[12.5px] space-y-1.5 text-ink-3">
       <div className="flex justify-between">
-        <span>gate precision</span>
+        <span>Gate precision</span>
         {p.precision == null
-          ? <span className="text-warn">unmeasured</span>
-          : <span className="text-ink-2">{(p.precision * 100).toFixed(1)}% over {p.reviewed} judged</span>}
+          ? <span className="text-warn">Not measured yet</span>
+          : <span className="text-ink-2">{(p.precision * 100).toFixed(1)}% over {num(p.reviewed)} judged</span>}
       </div>
       <div className="flex justify-between">
-        <span>awaiting a verdict</span>
-        <span className={p.pending ? "text-warn" : "text-ink-2"}>{p.pending}</span>
+        <span>Awaiting a verdict</span>
+        <span className={`tabular-nums ${p.pending ? "text-warn" : "text-ink-2"}`}>{num(p.pending)}</span>
       </div>
       {p.precision == null && p.pending > 0 && (
-        <a href="/review/queue" className="block pt-1 text-accent hover:underline">
-          judge them in the review queue
+        <a href="/review/queue" className="link block pt-1">
+          Judge them in the review queue
         </a>
       )}
     </div>
@@ -202,26 +204,54 @@ export function countText(k: string, v: unknown): string {
   return `${k} ${String(v)}`;
 }
 
+/** The same entry as a phrase a person reads: `objects: 7` -> "7 objects", `findings: [..]` -> "2 findings". */
+export function countPhrase(k: string, v: unknown): string {
+  const name = humanize(k).toLowerCase();
+  if (Array.isArray(v)) return `${num(v.length)} ${name}`;
+  if (typeof v === "number") return `${num(v)} ${name}`;
+  if (v && typeof v === "object") return `${name}: ${Object.keys(v).length}`;
+  return `${name}: ${String(v)}`;
+}
+
+const RUN_TONE: Record<string, string> = {
+  running: "text-accent-2 border-accent/50", planned: "text-ink-2 border-line",
+  error: "text-block border-block/40", interrupted: "text-block border-block/40",
+  committed: "text-pass border-pass/40", reverted: "text-ink-3 border-line",
+};
+
 export function BackgroundPanel({ runs }: { runs: AgentRunRow[] }) {
   if (!runs.length) {
-    return <div className="py-6 text-center text-[12px] text-ink-3">no agent runs recorded.</div>;
+    return (
+      <div className="py-6 text-center text-[12.5px] text-ink-3">
+        No background runs yet. Corpus sweeps, relabels and review batches appear here while they run.
+      </div>
+    );
   }
   return (
     <div className="divide-y divide-line">
       {runs.slice(0, 10).map((r) => (
-        <div key={r.run_id} className="flex items-center gap-3 py-1.5 text-[12px]">
-          <span className="text-ink-2 w-32 truncate">{r.kind}</span>
-          <span className={`w-24 ${r.status === "running" ? "text-accent"
-            : r.status === "error" || r.status === "interrupted" ? "text-block" : "text-ink-3"}`}>
-            {r.status}
+        <div key={r.run_id} className="flex items-center gap-3 py-2 text-[12.5px]">
+          <span className="text-ink w-40 truncate" title={r.kind}>{humanize(r.kind)}</span>
+          <span className="w-28 shrink-0">
+            <span className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[11.5px] ${
+              RUN_TONE[r.status] ?? "text-ink-3 border-line"}`}>
+              {humanize(r.status)}
+            </span>
           </span>
-          <span className="text-ink-3 flex-1 truncate">
-            {Object.entries(r.counts ?? {}).slice(0, 3).map(([k, v]) => countText(k, v)).join(" · ")}
+          <span className="text-ink-2 flex-1 truncate">
+            {Object.entries(r.counts ?? {}).slice(0, 3).map(([k, v]) => countPhrase(k, v)).join(" · ")}
+          </span>
+          <span className="text-ink-3 text-[12px] shrink-0 text-right whitespace-nowrap">
+            {[r.created_by, r.created_at ? ago(r.created_at) : null].filter(Boolean).join(" · ")}
           </span>
         </div>
       ))}
     </div>
   );
+}
+
+function NoReading() {
+  return <div className="text-[12.5px] text-ink-3">No reading yet. It updates every few seconds once the stream connects.</div>;
 }
 
 const DOT: Record<CanvasOp["status"], string> = { running: "bg-accent", ok: "bg-pass", failed: "bg-block" };
@@ -232,8 +262,8 @@ export function CanvasPanel() {
   useEffect(() => subscribeOps(setOps), []);
   if (!ops.length) {
     return (
-      <div className="py-6 text-center text-[12px] text-ink-3">
-        nothing from the canvas. Open a frame and segment, propagate or save.
+      <div className="py-6 text-center text-[12.5px] text-ink-3">
+        Nothing from the canvas yet. Open a frame and segment, propagate or save, and the steps show here.
       </div>
     );
   }

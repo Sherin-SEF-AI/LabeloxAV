@@ -59,7 +59,7 @@ export default function PanelHeader({
         <span className="w-4 h-4 shrink-0 rounded-sm border border-line/60"
           style={{ background: currentClass ? classColor(currentClass.id) : "#333" }} />
         <div className="flex flex-col min-w-0">
-          <span className="text-[10px] font-medium uppercase tracking-[0.06em]r text-ink-3">painting as</span>
+          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">painting as</span>
           <span className="font-mono text-[11.5px] text-ink truncate">{currentClass?.name ?? "-"}</span>
         </div>
         <button ref={anchorRef} onClick={() => setOpen((o) => !o)}

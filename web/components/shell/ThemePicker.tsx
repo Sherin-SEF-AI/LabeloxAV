@@ -11,19 +11,19 @@ export default function ThemePicker({ compact = false }: { compact?: boolean }) 
   const fallback: Record<ThemePref, string> = { system: "System", dark: "Dark", light: "Light" };
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <label htmlFor={compact ? "theme-menu" : "theme"} className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">
-        <T k="prefs.theme">theme</T>
+      <label htmlFor={compact ? "theme-menu" : "theme"} className="text-[12.5px] font-medium text-ink-2">
+        <T k="prefs.theme">Theme</T>
       </label>
       <select
         id={compact ? "theme-menu" : "theme"}
         value={pref}
         onChange={(e) => setThemePref(e.target.value as ThemePref)}
-        className="bg-bg border border-line px-1.5 py-0.5 text-ink text-[12.5px]"
+        className="field"
       >
         {THEME_PREFS.map((p) => <option key={p} value={p}>{t(`prefs.theme.${p}`, fallback[p])}</option>)}
       </select>
       {!compact && (
-        <span className="text-[11px] text-ink-3">
+        <span className="text-[12px] text-ink-3">
           <T k="prefs.theme_note">saved in this browser; System follows this device</T>
         </span>
       )}

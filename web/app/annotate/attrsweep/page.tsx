@@ -11,6 +11,18 @@ import {
 } from "@/lib/gridSelection";
 import { toast } from "@/lib/toast";
 import type { AttrCoverage, AttrQueue } from "@/lib/types";
+import EmptyState from "@/components/ui/EmptyState";
+import { humanize } from "@/lib/format";
+
+// An attribute's stored name as a person reads it: `occlusion_pct` -> "Occlusion (%)", `pole_id` -> "Pole ID".
+// Display only; the stored name is what goes to the API.
+function attrLabel(code: string): string {
+  return humanize(code.replace(/_pct$/, "").replace(/_id$/, "")) +
+    (code.endsWith("_pct") ? " (%)" : code.endsWith("_id") ? " ID" : "");
+}
+
+// A key cap for the shortcut hints.
+const KBD = "inline-block min-w-[18px] text-center px-1 py-px rounded border hairline bg-head text-[11px] text-ink-2 font-mono";
 
 // Attribute sweep: one attribute, a grid of crops, one key per answer.
 //
@@ -147,12 +159,12 @@ function AttrSweep() {
       if (res.updated === 0) {
         // Not silence. A sweep working a shrinking queue will hit "already answered", and "did nothing"
         // and "done" are different outcomes.
-        toast(res.reason ?? "nothing to write", "info");
+        toast(res.reason ?? "Nothing to write", "info");
         setCovered((c) => c - willCover);
         setDecided((d) => d - rows.length);
       } else if (res.run_id) {
-        toast(`${res.updated} objects set to ${String(value)}`, "success", 12000,
-              { label: "undo", run: () => api.agentRevert(res.run_id!).then(() => { void loadQueue(); }) });
+        toast(`${res.updated} objects set to ${Array.isArray(value) ? value.map(String).map(humanize).join(" + ") : humanize(String(value))}`, "success", 12000,
+              { label: "Undo", run: () => api.agentRevert(res.run_id!).then(() => { void loadQueue(); }) });
       }
     } catch (e) {
       toast(humanizeError(e), "error");
@@ -230,72 +242,78 @@ function AttrSweep() {
 
   return (
     <PageShell active="ATTR SWEEP" title="Attribute sweep"
-      subtitle="one attribute, one key, and the track as the unit where the attribute allows it">
-      <div className="p-3 flex gap-3 items-start">
+      subtitle="Fill in one attribute across many objects, one key per answer">
+      <div className="p-4 flex gap-4 items-start">
         {/* what work exists */}
-        <aside className="panel w-72 shrink-0 max-h-[80vh] overflow-auto">
-          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-            unanswered
+        <aside className="panel w-80 shrink-0 max-h-[calc(100dvh-140px)] overflow-auto">
+          <div className="panel-head sticky top-0 z-10">
+            <h2 className="section-title">Attributes to fill in</h2>
           </div>
-          {!cov && <div className="px-3 py-3 text-[12px] text-ink-3">counting...</div>}
+          {!cov && (
+            <div className="px-3.5 py-3 space-y-3" role="status" aria-label="Counting">
+              {[60, 45, 70, 50, 55].map((w, i) => <span key={i} className="block h-3 skeleton" style={{ width: `${w}%` }} />)}
+            </div>
+          )}
           {cov?.filter((c) => c.missing > 0).map((c) => (
             <button key={c.attribute} onClick={() => { setAttr(c.attribute); setKlass(""); }}
-              className={`w-full text-left px-3 py-1.5 text-[12px] border-b hairline hover:bg-bg-2 ${
-                c.attribute === attr ? "bg-bg-2 text-ink" : "text-ink-2"}`}>
+              aria-pressed={c.attribute === attr}
+              className={`w-full text-left px-3.5 py-2.5 border-b hairline hover:bg-head ${
+                c.attribute === attr ? "bg-head text-ink shadow-[inset_2px_0_0_rgb(var(--c-accent))]" : "text-ink-2"}`}>
               <div className="flex items-center gap-2">
-                <span className="truncate">{c.attribute}</span>
-                <span className={`ml-auto text-[9px] uppercase ${c.track_constant ? "text-accent" : "text-ink-3"}`}>
-                  {c.track_constant ? "track" : "frame"}
+                <span className="truncate text-[13px]" title={c.attribute}>{attrLabel(c.attribute)}</span>
+                <span className={`ml-auto shrink-0 text-[11px] ${c.track_constant ? "text-accent-2" : "text-ink-3"}`}
+                  title={c.track_constant ? "Describes the object, so one answer covers its whole track" : "Can change from frame to frame, so each object is answered on its own"}>
+                  {c.track_constant ? "Per track" : "Per frame"}
                 </span>
               </div>
-              <div className="text-ink-3 text-[10px]">
-                {c.missing.toLocaleString()} of {c.in_scope.toLocaleString()} unanswered
+              <div className="mt-0.5 text-ink-3 text-[11.5px] tabular-nums">
+                {c.missing.toLocaleString()} of {c.in_scope.toLocaleString()} not filled in
               </div>
             </button>
           ))}
           {cov && !cov.some((c) => c.missing > 0) && (
-            <div className="px-3 py-3 text-[12px] text-ink-3">
-              Every attribute in scope is answered.
-            </div>
+            <EmptyState compact icon="check" title="All filled in">Every attribute in scope has an answer.</EmptyState>
           )}
         </aside>
 
-        <div className="flex-1 min-w-0 space-y-2">
+        <div className="flex-1 min-w-0 space-y-3">
           {!attr && (
-            <div className="panel px-3 py-6 text-[12px] text-ink-3 text-center">
-              Pick an attribute on the left. The list is ordered by how much of it is unanswered.
+            <div className="panel">
+              <EmptyState icon="list" title="Pick an attribute to start">
+                The list on the left is ordered by how much is still unanswered. Crops appear here, and one key
+                answers the crop under the cursor or every selected crop.
+              </EmptyState>
             </div>
           )}
 
           {queue && (
             <>
-              <div className="flex flex-wrap items-center gap-3 text-[12px] text-ink-3">
-                <span className="text-ink">{queue.attribute}</span>
-                <span className={queue.unit === "track" ? "text-accent" : ""}>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] text-ink-3">
+                <h2 className="text-[15px] font-semibold text-ink" title={queue.attribute}>{attrLabel(queue.attribute)}</h2>
+                <span className={queue.unit === "track" ? "text-accent-2" : ""}>
                   {queue.unit === "track" ? "one answer per track" : "one answer per object"}
                 </span>
                 <span>{queue.remaining.toLocaleString()} unanswered</span>
                 {decided > 0 && <span>{decided} answered, covering {covered.toLocaleString()} objects</span>}
-                {perMin != null && <span className="text-accent">{perMin}/min</span>}
+                {perMin != null && <span className="text-accent-2">{perMin} a minute</span>}
                 {selection.size > 0 && <span className="text-warn">{selection.size} selected</span>}
                 {queue.unit === "track" && queue.untracked > 0 && (
-                  <span className="text-warn" title="objects with no track cannot be swept track-wise">
-                    {queue.untracked.toLocaleString()} untracked
+                  <span className="text-warn" title="Objects with no track are answered one by one">
+                    {queue.untracked.toLocaleString()} not in a track
                   </span>
                 )}
                 {/* Class filter, from the classes that actually have work. */}
-                {klass && <span className="text-ink-2">class: {klass}
-                  <button onClick={() => setKlass("")} aria-label={`clear the class filter ${klass}`} className="ml-1 text-ink-3 hover:text-block">x</button>
+                {klass && <span className="chip chip-on">{humanize(klass)}
+                  <button onClick={() => setKlass("")} aria-label={`Clear the class filter ${klass}`} className="ml-0.5 hover:text-block">×</button>
                 </span>}
               </div>
 
               {!klass && (cov?.find((c) => c.attribute === attr)?.classes.length ?? 0) > 0 && (
-                <div className="flex flex-wrap gap-1 text-[11px]">
-                  <span className="text-ink-3 py-0.5">narrow to a class:</span>
+                <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
+                  <span className="text-ink-3 mr-0.5">Narrow to a class:</span>
                   {cov!.find((c) => c.attribute === attr)!.classes.slice(0, 8).map((c) => (
-                    <button key={c.class_id} onClick={() => setKlass(c.class_name)}
-                      className="border border-line px-1.5 py-0.5 rounded text-ink-2 hover:border-accent">
-                      {c.class_name} <span className="text-ink-3">{c.missing.toLocaleString()}</span>
+                    <button key={c.class_id} onClick={() => setKlass(c.class_name)} className="chip" title={c.class_name}>
+                      {humanize(c.class_name)} <span className="text-ink-3 tabular-nums">{c.missing.toLocaleString()}</span>
                     </button>
                   ))}
                 </div>
@@ -303,50 +321,63 @@ function AttrSweep() {
 
               {/* the answer keys */}
               {keymap ? (
-                <div className="panel px-3 py-2 flex flex-wrap items-center gap-2 text-[12px]">
+                <div className="panel px-3.5 py-2.5 flex flex-wrap items-center gap-2 text-[12.5px]">
                   {keymap.keys.map((b) => (
                     <button key={b.key} onClick={() => (keymap.multi
                       ? setMultiPick((p) => (p.includes(b.value) ? p.filter((v) => v !== b.value) : [...p, b.value]))
                       : void answer(b.value))}
-                      className={`border px-2 py-1 rounded hover:border-accent ${
-                        keymap.multi && multiPick.includes(b.value)
-                          ? "border-accent text-accent bg-accent/10" : "border-line text-ink-2"}`}>
-                      <b className="text-accent">{b.key}</b> {b.label}
+                      className={`btn ${keymap.multi && multiPick.includes(b.value) ? "btn-on" : ""}`}>
+                      <kbd className={KBD}>{b.key.toUpperCase()}</kbd> {humanize(b.label)}
                     </button>
                   ))}
                   {keymap.multi && (
                     <button onClick={() => multiPick.length && void answer([...multiPick])}
                       disabled={!multiPick.length}
-                      className="border border-pass/60 text-pass px-2 py-1 rounded hover:bg-pass/10 disabled:opacity-40">
-                      <b>enter</b> commit {multiPick.length ? `(${multiPick.length})` : ""}
+                      className="btn text-pass border-pass/45">
+                      <kbd className={KBD}>Enter</kbd> Save {multiPick.length ? `(${multiPick.length})` : ""}
                     </button>
                   )}
                   <span className="ml-auto text-ink-3">
                     {targets.length === 1
-                      ? `answers 1 crop, ${willCover.toLocaleString()} object${willCover === 1 ? "" : "s"}`
-                      : `answers ${targets.length} crops, ${willCover.toLocaleString()} objects`}
+                      ? `Answers 1 crop, ${willCover.toLocaleString()} object${willCover === 1 ? "" : "s"}`
+                      : `Answers ${targets.length} crops, ${willCover.toLocaleString()} objects`}
                   </span>
                 </div>
               ) : (
-                <div className="panel px-3 py-2 text-[12px] text-warn">
-                  No keyboard for {queue.attribute}: {noKeymapReason({ type: queue.type, range: queue.range })}.
+                <div className="panel px-3.5 py-2.5 text-[12.5px] text-warn">
+                  No answer keys for {attrLabel(queue.attribute).toLowerCase()}: {noKeymapReason({ type: queue.type, range: queue.range })}.
                   Press <b className="text-ink">O</b> to open the frame editor on the crop under the cursor.
                 </div>
               )}
 
-              {loading && <div className="text-[12px] text-ink-3">loading the grid...</div>}
+              {/* The keys, above the grid so they stay in view while it is worked. */}
+              <div className="text-[12px] text-ink-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span><kbd className={KBD}>←↑↓→</kbd> move</span>
+                <span><kbd className={KBD}>Shift</kbd> + move: range</span>
+                <span><kbd className={KBD}>Space</kbd> select</span>
+                <span><kbd className={KBD}>S</kbd> skip without answering</span>
+                <span><kbd className={KBD}>O</kbd> open the frame</span>
+                <span><kbd className={KBD}>Esc</kbd> clear</span>
+                {current && <span className="ml-auto text-ink-2" title={current.class_name}>{humanize(current.class_name)}</span>}
+              </div>
+
+              {loading && <div className="text-[13px] text-ink-3" role="status">Loading the grid...</div>}
 
               {!loading && !items.length && (
-                <div className="panel px-3 py-6 text-[12px] text-ink-3 text-center">
-                  {queue.remaining > 0
-                    ? <>This page is done. <button onClick={() => void loadQueue()}
-                        className="text-accent underline">load the next {queue.remaining.toLocaleString()}</button></>
-                    : queue.reason ?? "Nothing left unanswered in this scope."}
+                <div className="panel">
+                  {queue.remaining > 0 ? (
+                    <EmptyState compact icon="check" title="This page is done"
+                      action={<button onClick={() => void loadQueue()} className="btn btn-primary">Load the next {queue.remaining.toLocaleString()}</button>} />
+                  ) : (
+                    <EmptyState compact icon="check" title="Nothing left to fill in">
+                      {queue.reason ?? "Every object in this scope has an answer."}
+                    </EmptyState>
+                  )}
                 </div>
               )}
 
               {sheet && items.length > 0 && (
-                <div className="panel p-2 overflow-x-auto">
+                <div className="panel p-2 overflow-x-auto w-fit max-w-full">
                   <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${cols}, ${CELL}px)` }}>
                     {items.map((row, i) => {
                       const p = placements[row.object_id];
@@ -365,7 +396,9 @@ function AttrSweep() {
                             }
                             setCursor(i);
                           }}
-                          title={`${row.class_name} · covers ${row.covers} object${row.covers === 1 ? "" : "s"}`}
+                          title={`${humanize(row.class_name)} · covers ${row.covers} object${row.covers === 1 ? "" : "s"}`}
+                          aria-label={`${humanize(row.class_name)}, covers ${row.covers}${isSel ? ", selected" : ""}`}
+                          aria-pressed={isSel}
                           className={`relative block ${isCursor ? "ring-2 ring-accent" : isSel ? "ring-2 ring-warn" : "ring-1 ring-line"}`}
                           style={{ width: CELL, height: CELL }}>
                           {p?.ok ? (
@@ -375,17 +408,18 @@ function AttrSweep() {
                                 backgroundPosition: `-${p.col * CELL}px -${p.row * CELL}px`,
                               }} />
                           ) : (
-                            <span className="flex w-full h-full items-center justify-center text-[9px] text-ink-3">
-                              no crop
+                            <span className="flex w-full h-full items-center justify-center text-center px-2 text-[11px] text-ink-3 bg-bg-2">
+                              No image for this object
                             </span>
                           )}
                           {/* What this one answer covers, so the leverage is visible before the key. */}
                           {row.covers > 1 && (
-                            <span className="absolute bottom-0 left-0 bg-accent/80 text-bg text-[9px] px-1">
-                              x{row.covers}
+                            <span className="absolute bottom-1 left-1 rounded bg-accent text-bg text-[11px] font-medium px-1 leading-4"
+                              title={`One answer covers ${row.covers} objects`}>
+                              ×{row.covers}
                             </span>
                           )}
-                          {isSel && <span className="absolute top-0 right-0 bg-warn text-bg text-[9px] px-1">+</span>}
+                          {isSel && <span className="absolute top-1 right-1 rounded-full bg-warn text-bg text-[11px] font-semibold w-4 h-4 leading-4 text-center" aria-hidden>✓</span>}
                         </button>
                       );
                     })}
@@ -393,15 +427,6 @@ function AttrSweep() {
                 </div>
               )}
 
-              <div className="text-[11px] text-ink-3 flex flex-wrap gap-3">
-                <span><b className="text-ink">arrows</b> move</span>
-                <span><b className="text-ink">shift+move</b> range</span>
-                <span><b className="text-ink">space</b> select</span>
-                <span><b className="text-ink">S</b> skip without answering</span>
-                <span><b className="text-ink">O</b> open the frame</span>
-                <span><b className="text-ink">esc</b> clear</span>
-                {current && <span className="text-ink-2">{current.class_name}</span>}
-              </div>
             </>
           )}
         </div>
@@ -412,7 +437,7 @@ function AttrSweep() {
 
 export default function Page() {
   return (
-    <Suspense fallback={<div className="p-4 text-[12px] text-ink-3">loading...</div>}>
+    <Suspense fallback={<div className="p-6 text-[13px] text-ink-3" role="status">Loading...</div>}>
       <AttrSweep />
     </Suspense>
   );

@@ -26,57 +26,74 @@ export default function RecoveryPage() {
   const cons = useRun<Consensus>();
 
   return (
-    <PageShell active="CALYX" title="Calibration recovery"
-      subtitle="targetless recovery from scene cues, and rig-consensus priors">
-      <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-5xl">
+    <PageShell active="CALYX" title="Recovery"
+      subtitle="Recalibrate a camera from what it recorded, without a calibration target">
+      <div className="page-wrap grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         {/* targetless */}
-        <Panel title="targetless calibration" hint="vanishing points + horizon">
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 mb-2">
-            <NumField label="vp1 x" value={vp1x} onChange={setVp1x} w="w-20" />
-            <NumField label="vp1 y" value={vp1y} onChange={setVp1y} w="w-20" />
-            <NumField label="vp2 x" value={vp2x} onChange={setVp2x} w="w-20" />
-            <NumField label="vp2 y" value={vp2y} onChange={setVp2y} w="w-20" />
-            <NumField label="horizon y" value={horizon} onChange={setHorizon} w="w-20" />
-            <NumField label="cx" value={cx} onChange={setCx} w="w-20" />
-            <NumField label="cy" value={cy} onChange={setCy} w="w-20" />
-          </div>
+        <Panel title="From the scene" hint="Two vanishing points and the horizon, in image pixels">
+          <p className="section-desc mb-3">
+            Mark where two sets of parallel lines meet (for example lane edges and building edges) and the
+            horizon height. The camera&apos;s focal length and pitch are worked out from them.
+          </p>
+          <fieldset className="grid grid-cols-2 gap-x-5 gap-y-2 mb-3">
+            <legend className="label-caps mb-1.5">First vanishing point</legend>
+            <NumField label="Across (x)" value={vp1x} onChange={setVp1x} w="w-24" />
+            <NumField label="Down (y)" value={vp1y} onChange={setVp1y} w="w-24" />
+          </fieldset>
+          <fieldset className="grid grid-cols-2 gap-x-5 gap-y-2 mb-3">
+            <legend className="label-caps mb-1.5">Second vanishing point</legend>
+            <NumField label="Across (x)" value={vp2x} onChange={setVp2x} w="w-24" />
+            <NumField label="Down (y)" value={vp2y} onChange={setVp2y} w="w-24" />
+          </fieldset>
+          <fieldset className="grid grid-cols-2 gap-x-5 gap-y-2 mb-3">
+            <legend className="label-caps mb-1.5">Horizon and image centre</legend>
+            <NumField label="Horizon height (y)" value={horizon} onChange={setHorizon} w="w-24" />
+            <span aria-hidden />
+            <NumField label="Centre across (x)" value={cx} onChange={setCx} w="w-24" />
+            <NumField label="Centre down (y)" value={cy} onChange={setCy} w="w-24" />
+          </fieldset>
           <RunButton busy={tl.busy}
             onClick={() => tl.run(() => runJSON<Targetless>("/api/calyx/targetless",
-              { vp1: [vp1x, vp1y], vp2: [vp2x, vp2y], horizon_y: horizon, cx, cy }))} label="recover" />
+              { vp1: [vp1x, vp1y], vp2: [vp2x, vp2y], horizon_y: horizon, cx, cy }))} label="Recalibrate" />
           <ErrLine err={tl.err} />
           {tl.out && (
-            <div className="mt-3">
+            <div className="mt-3 border-t hairline pt-3">
               {tl.out.ok
                 ? (<>
-                    <KV k="focal px" v={tl.out.focal?.toFixed(1)} tone="pass" />
-                    <KV k="pitch deg" v={tl.out.pitch_deg?.toFixed(2)} tone="ink" />
-                    <KV k="confidence" v={tl.out.confidence?.toFixed(3)} tone="ink-3" />
+                    <KV k="Focal length" v={tl.out.focal != null ? `${tl.out.focal.toFixed(1)} px` : "-"} tone="pass" />
+                    <KV k="Pitch" v={tl.out.pitch_deg != null ? `${tl.out.pitch_deg.toFixed(2)}°` : "-"} tone="ink" />
+                    <KV k="Confidence" v={tl.out.confidence?.toFixed(2)} tone="ink-3" />
                   </>)
-                : <div className="text-[12px] text-block">refused: {tl.out.reason}</div>}
+                : <div className="text-[12.5px] text-block">Could not recalibrate: {tl.out.reason}</div>}
             </div>
           )}
         </Panel>
 
         {/* rig consensus */}
-        <Panel title="rig consensus prior" hint="fuse per-session overrides">
-          <label className="flex items-center gap-2 text-[12px] mb-2">
-            <span className="text-ink-3">vehicle</span>
-            <input value={vehicle} onChange={(e) => setVehicle(e.target.value)}
-              className="flex-1 bg-bg-2 border border-line px-1.5 py-0.5 text-ink outline-none focus:border-accent" />
+        <Panel title="From past corrections" hint="Combine one vehicle's manual fixes into one best guess">
+          <p className="section-desc mb-3">
+            Each time someone corrected this vehicle&apos;s calibration by hand, it was recorded. Combining them
+            gives a starting point for new drives, and shows how much they disagree.
+          </p>
+          <label className="flex items-center gap-3 text-[12px] mb-3">
+            <span className="text-ink-2">Vehicle</span>
+            <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} className="field flex-1" />
           </label>
           <RunButton busy={cons.busy}
-            onClick={() => cons.run(() => getJSON<Consensus>(`/api/calyx/rig/${encodeURIComponent(vehicle)}/consensus`))} label="fuse" />
+            onClick={() => cons.run(() => getJSON<Consensus>(`/api/calyx/rig/${encodeURIComponent(vehicle)}/consensus`))} label="Combine" />
           <ErrLine err={cons.err} />
           {cons.out && (
-            <div className="mt-3">
-              <KV k="overrides fused" v={cons.out.n_overrides} tone="ink" />
-              <KV k="effective n" v={cons.out.prior.n} tone="ink-3" />
-              <KV k="rpy deg" v={cons.out.prior.rpy_deg ? cons.out.prior.rpy_deg.map((x) => x.toFixed(2)).join(", ") : "-"} tone="ink" />
-              <KV k="xyz m" v={cons.out.prior.xyz_m ? cons.out.prior.xyz_m.map((x) => x.toFixed(2)).join(", ") : "-"} tone="ink" />
-              <KV k="confidence" v={cons.out.prior.confidence.toFixed(3)}
-                tone={cons.out.prior.confidence >= 0.7 ? "pass" : cons.out.prior.confidence > 0 ? "warn" : "ink-3"} />
-              {cons.out.n_overrides === 0 &&
-                <div className="text-[11px] text-ink-3 mt-1">no overrides recorded for this vehicle yet</div>}
+            <div className="mt-3 border-t hairline pt-3">
+              {cons.out.n_overrides === 0 ? (
+                <div className="text-[12.5px] text-ink-3">No manual corrections recorded for {cons.out.vehicle_id || vehicle} yet.</div>
+              ) : (<>
+                <KV k="Corrections combined" v={cons.out.n_overrides} tone="ink" />
+                <KV k="Effective sample size" v={cons.out.prior.n} tone="ink-3" />
+                <KV k="Roll, pitch, yaw" v={cons.out.prior.rpy_deg ? cons.out.prior.rpy_deg.map((x) => `${x.toFixed(2)}°`).join(", ") : "-"} tone="ink" />
+                <KV k="Position x, y, z" v={cons.out.prior.xyz_m ? cons.out.prior.xyz_m.map((x) => `${x.toFixed(2)} m`).join(", ") : "-"} tone="ink" />
+                <KV k="Confidence" v={cons.out.prior.confidence.toFixed(2)}
+                  tone={cons.out.prior.confidence >= 0.7 ? "pass" : cons.out.prior.confidence > 0 ? "warn" : "ink-3"} />
+              </>)}
             </div>
           )}
         </Panel>

@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import PageShell from "@/components/shell/PageShell";
 import Icon from "@/components/shell/Icon";
 import LoadState from "@/components/shell/LoadState";
+import EmptyState from "@/components/ui/EmptyState";
 import SessionSelect from "@/components/shell/SessionSelect";
 import ProjectClasses, { type ClassSet } from "@/components/settings/ProjectClasses";
 import { useConfirm } from "@/components/ConfirmProvider";
@@ -33,8 +34,8 @@ const SESSION_PAGE = 50;
 
 function VisibilityPill({ v }: { v: Project["visibility"] }) {
   return v === "members"
-    ? <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] bg-warn/10 text-warn border border-warn/30"><Icon name="shield" size={11} />Members only</span>
-    : <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] bg-bg-2 text-ink-2 border hairline"><Icon name="person" size={11} />Whole team</span>;
+    ? <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11.5px] bg-warn/10 text-warn border border-warn/30"><Icon name="shield" size={11} />Members only</span>
+    : <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11.5px] bg-bg-2 text-ink-2 border hairline"><Icon name="person" size={11} />Whole team</span>;
 }
 
 function sessionLabel(s: SessionRow): string {
@@ -124,7 +125,7 @@ function ProjectDetail({ project, users, onChanged }: { project: Project; users:
       </header>
 
       <fieldset className="flex flex-col gap-2">
-        <legend className="text-[12px] text-ink-2 mb-1.5">Who sees its sessions</legend>
+        <legend className="section-title mb-2">Who sees its sessions</legend>
         {([
           ["team", "The whole team", "Everyone signed in. The default, and right for most labs."],
           ["members", "Members only", "Its members and administrators. Everyone else does not see it exists."],
@@ -141,7 +142,7 @@ function ProjectDetail({ project, users, onChanged }: { project: Project; users:
       </fieldset>
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-[12px] text-ink-2">Description</span>
+        <span className="section-title">Description</span>
         <textarea className="field min-h-[60px]" value={description} maxLength={2000}
                   onChange={(e) => setDescription(e.target.value)} onBlur={() => void saveDescription()}
                   placeholder="What this project holds, and who it is for" />
@@ -154,7 +155,7 @@ function ProjectDetail({ project, users, onChanged }: { project: Project; users:
 
       {members && (
         <div className="flex flex-col gap-2">
-          <h3 className="text-[13px] font-semibold text-ink">Members ({members.length})</h3>
+          <h3 className="section-title">Members <span className="ml-0.5 font-normal text-ink-3 tabular-nums">({members.length})</span></h3>
           {project.visibility === "team" && (
             <p className="text-[12px] text-ink-3">The project is visible to the whole team, so membership changes nothing yet. It takes effect when you make it members only.</p>
           )}
@@ -164,7 +165,7 @@ function ProjectDetail({ project, users, onChanged }: { project: Project; users:
                 <li key={m.user_id} className="flex items-center gap-3 px-3 py-2 text-[12.5px]">
                   <span className="text-ink">{m.name}</span>
                   <span className="text-ink-3 capitalize">{m.role}</span>
-                  <button className="btn ml-auto" onClick={() => void removeMember(m)}><T k="common.remove">Remove</T></button>
+                  <button className="btn btn-danger ml-auto" onClick={() => void removeMember(m)}><T k="common.remove">Remove</T></button>
                 </li>
               ))}
             </ul>
@@ -184,13 +185,13 @@ function ProjectDetail({ project, users, onChanged }: { project: Project; users:
 
       {sessions && (
         <div className="flex flex-col gap-2">
-          <h3 className="text-[13px] font-semibold text-ink">Sessions ({sessions.total.toLocaleString()})</h3>
+          <h3 className="section-title">Sessions <span className="ml-0.5 font-normal text-ink-3 tabular-nums">({sessions.total.toLocaleString()})</span></h3>
           {sessions.rows.length > 0 && (
             <ul className="flex flex-col divide-y divide-line border hairline rounded max-h-64 overflow-y-auto">
               {sessions.rows.map((s) => (
                 <li key={s.session_id} className="flex items-center gap-3 px-3 py-1.5 text-[12.5px]">
-                  <button className="text-left text-ink hover:text-accent truncate" onClick={() => void openSession(s.session_id)}>{sessionLabel(s)}</button>
-                  <span className="ml-auto font-mono text-[11px] text-ink-3">{s.session_id.slice(0, 8)}</span>
+                  <button className="text-left text-ink hover:text-accent-2 hover:underline underline-offset-2 truncate" onClick={() => void openSession(s.session_id)}>{sessionLabel(s)}</button>
+                  <span className="ml-auto font-mono text-[11.5px] text-ink-3">{s.session_id.slice(0, 8)}</span>
                 </li>
               ))}
             </ul>
@@ -254,8 +255,12 @@ export default function ProjectSettingsPage() {
   if (me && me.role !== "admin") {
     return (
       <PageShell active="Projects" title="Projects">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-          <section className="panel p-5 text-[13px] text-ink-2">Projects and who can see them are managed by administrators.</section>
+        <div className="page-wrap-narrow">
+          <section className="panel">
+            <EmptyState icon="shield" title="Administrators manage projects">
+              Which projects exist and who can see their sessions is set by an administrator.
+            </EmptyState>
+          </section>
         </div>
       </PageShell>
     );
@@ -264,33 +269,37 @@ export default function ProjectSettingsPage() {
   const current = projects?.find((p) => p.project_id === selected) ?? null;
 
   return (
-    <PageShell active="Projects" title="Projects" subtitle="who sees which sessions">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 flex flex-col gap-5">
+    <PageShell active="Projects" title="Projects" subtitle="Group sessions and decide who sees them">
+      <div className="page-wrap flex flex-col gap-4">
         <form onSubmit={create} className="panel p-5 grid gap-4 sm:grid-cols-[1fr_1fr_auto] items-end">
           <div className="sm:col-span-3">
-            <h2 className="text-[14px] font-semibold text-ink">New project</h2>
+            <h2 className="section-title text-[14px]">New project</h2>
             <p className="mt-0.5 text-[12.5px] text-ink-3">Group sessions that belong together, for a client, a study or a partner whose data not everyone should see.</p>
           </div>
           <label className="flex flex-col gap-1.5">
-            <span className="text-[12px] text-ink-2">Name</span>
+            <span className="text-[12.5px] text-ink-2">Name</span>
             <input className="field" value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} placeholder="e.g. Pune pilot" />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-[12px] text-ink-2">Visible to</span>
+            <span className="text-[12.5px] text-ink-2">Visible to</span>
             <select className="field" value={visibility} onChange={(e) => setVisibility(e.target.value as Project["visibility"])}>
               <option value="team">The whole team</option>
               <option value="members">Members only</option>
             </select>
           </label>
           <button className="btn btn-primary" type="submit" disabled={busy || !name.trim()}>
-            <Icon name="plus" size={13} />{busy ? "Creating" : "Create"}
+            <Icon name="plus" size={13} />{busy ? "Creating…" : "Create project"}
           </button>
         </form>
 
         <LoadState loading={!projects && !error} error={error} onRetry={() => void load()} />
 
         {projects && projects.length === 0 && (
-          <section className="panel p-5 text-[13px] text-ink-2">No projects yet. Sessions you import go into the default project once one exists; create one above.</section>
+          <section className="panel">
+            <EmptyState icon="folder" title="No projects yet">
+              Sessions you import go into the default project once one exists. Create one above to start.
+            </EmptyState>
+          </section>
         )}
 
         {projects && projects.length > 0 && (

@@ -27,7 +27,7 @@ export default function PanelSection({ title, badge, defaultOpen = false, accent
         <span className={`text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide ${accent ? "text-ink-2" : "text-ink-3"}`}>{title}</span>
         <span className="flex items-center gap-2">
           {badge != null && <span className="text-[11px] text-ink-3">{badge}</span>}
-          <span className={`text-ink-3 group-hover:text-ink w-3 text-center text-[9px] leading-none transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▸</span>
+          <span className={`text-ink-3 group-hover:text-ink w-3 text-center text-[10.5px] leading-none transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▸</span>
         </span>
       </button>
       {open && <div className="px-2 pb-2 reveal">{children}</div>}

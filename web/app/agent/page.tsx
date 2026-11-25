@@ -18,6 +18,9 @@ import { Spinner } from "@/components/Spinner";
 import { invalidate, useQuery } from "@/lib/useQuery";
 import { REVIEW_QUEUE_KEY } from "@/lib/queryKeys";
 import { T } from "@/lib/i18n";
+import EmptyState from "@/components/ui/EmptyState";
+import Thumb from "@/components/engine/Thumb";
+import { ago, humanize, num } from "@/lib/format";
 
 // The Agent Console: the corpus-level home for the autonomous agent. Self-healing QA (the error daemon
 // sweep + temporal auto-repair) and the ranked fix queue it produces. Programs 3-5 (data intelligence,
@@ -33,18 +36,63 @@ const NO_PROPS: PromotionProposalRow[] = [];
 const NO_ORDERS: { order_id: string; priority: number; summary: string; status: string }[] = [];
 
 const KIND_LABEL: Record<string, string> = {
-  critic_flag: "consistency", near_dup_inconsistent: "near-dup", policy_violation: "policy",
-  track_inconsistent: "track flip", cross_cam_inconsistent: "cross-cam", embedding_outlier: "outlier",
-  confident_learning: "confident-wrong",
+  critic_flag: "Inconsistent", near_dup_inconsistent: "Near-copy differs", policy_violation: "Breaks a rule",
+  track_inconsistent: "Class flips in track", cross_cam_inconsistent: "Cameras disagree", embedding_outlier: "Looks unusual",
+  confident_learning: "Confidently wrong",
   // Was missing, so every one of these rendered as the raw slug. It is also the kind that dominates the
   // queue, because the error sweep never clears it (services/errordetect/queue.py scopes its delete by
   // the kinds it was asked to run, and this is not one of them).
-  vlm_confusion: "vlm disagrees",
+  vlm_confusion: "Vision model disagrees",
   // The bulk of this queue and it rendered as a raw slug. Its claim ("another box covers the same object
   // with higher confidence") is the reason the panel draws the frame's other boxes: one box cannot show
   // a duplicate.
-  reanalyze: "re-check",
+  reanalyze: "Re-check",
 };
+
+// Server-written notes name classes by their stored codes ("traffic_sign"); shown as words.
+function wordsOf(text: string): string {
+  return text.replace(/\b([a-z0-9]+(?:_[a-z0-9]+)+)\b/g, (m) => m.replace(/_/g, " "));
+}
+
+// One automated action: what it does in a sentence, the rest behind "How this works", and its button(s).
+function ActionCard({ title, desc, more, action, children, className = "" }: {
+  title: string; desc: string; more?: React.ReactNode; action?: React.ReactNode; children?: React.ReactNode; className?: string;
+}) {
+  return (
+    <section className={`panel p-4 flex flex-col gap-2.5 ${className}`}>
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <h3 className="section-title">{title}</h3>
+          <p className="section-desc mt-1">{desc}</p>
+        </div>
+        {action && <div className="shrink-0 flex flex-wrap gap-2 justify-end">{action}</div>}
+      </div>
+      {more && (
+        <details className="text-[12px] text-ink-3">
+          <summary className="cursor-pointer select-none text-ink-2 hover:text-ink w-fit">How this works</summary>
+          <div className="mt-1.5 leading-relaxed">{more}</div>
+        </details>
+      )}
+      {children}
+    </section>
+  );
+}
+
+// A titled group of cards, so the page reads as a handful of sections rather than one long column.
+function Group({ title, desc, right, children }: { title: string; desc?: string; right?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-end gap-3">
+        <div className="min-w-0">
+          <h2 className="section-title">{title}</h2>
+          {desc && <p className="section-desc mt-0.5">{desc}</p>}
+        </div>
+        {right && <div className="ml-auto shrink-0">{right}</div>}
+      </div>
+      {children}
+    </div>
+  );
+}
 
 export default function AgentConsole() {
   const router = useRouter();
@@ -103,7 +151,7 @@ export default function AgentConsole() {
     try {
       const r = await api.agentAuditRun({ sample_size: 200, vlm_calls: 60 });
       showResult("audit", "overnight audit", r);
-      setMsg("overnight audit running in the background - sampling auto-accepts, VLM + critic spot-checks");
+      setMsg("Audit running in the background: spot-checking today's auto-accepted labels");
       const poll = async (n: number) => {
         const a = await api.agentAuditLatest(); setAudit(a);
         if (a.status === "committed" || a.status === "error") { load(); return; }
@@ -119,7 +167,7 @@ export default function AgentConsole() {
     try {
       const r = await api.agentErrorSweep(8);
       showResult("sweep", "error sweep", r);
-      setMsg("error sweep running in the background: the fix queue refreshes as sessions complete");
+      setMsg("Error sweep running in the background. The fix queue refreshes as each session finishes.");
       // poll a couple of times for results
       setTimeout(load, 6000); setTimeout(load, 15000);
       void r;
@@ -134,7 +182,7 @@ export default function AgentConsole() {
     try {
       const r = await api.agentRelabelAll({ max_frames: 300 });
       showResult("relabel", "relabel the corpus", r);
-      setMsg("relabel running across the corpus: an independent model is re-reading every box");
+      setMsg("Relabel running: a second model is re-reading every machine-drawn box");
       // poll progress until the background run reports committed
       const poll = async (n: number) => {
         try {
@@ -153,7 +201,7 @@ export default function AgentConsole() {
     setBusy("ego"); setMsg(null);
     try {
       const r = await api.estimateEgoMasks();
-      setMsg(`ego-hood masks: ${r.with_hood}/${r.cameras} cameras have a detected hood${r.no_hood.length ? ` (no hood: ${r.no_hood.slice(0, 4).join(", ")})` : ""}`);
+      setMsg(`Bonnet masks: ${r.with_hood} of ${r.cameras} cameras show the vehicle's own bonnet${r.no_hood.length ? ` (no hood: ${r.no_hood.slice(0, 4).join(", ")})` : ""}`);
       // The line truncates no_hood at four cameras. Which cameras have no detected hood is the actionable
       // part, so the panel gets all of them.
       showResult("ego", "estimate ego-hood masks", r);
@@ -165,7 +213,7 @@ export default function AgentConsole() {
     try {
       const r = await api.piiBackfill(2000);
       showResult("pii", "PII backfill", r);
-      setMsg("PII backfill running in the background: blurring faces/plates on pre-gate frames, overwriting the stored image in place");
+      setMsg("Blurring faces and number plates on older frames in the background");
     } catch (e) { failed("PII backfill", e); }
     finally { setBusy(null); }
   };
@@ -174,7 +222,7 @@ export default function AgentConsole() {
     try {
       const r = await api.redetectAll(true);
       showResult("redetect", "full re-detection", r);
-      setMsg(`full re-detection started (run ${r.run_id.slice(0, 8)}): PII backfill, then re-run every session with thing/stuff + ego-hood + de-dup + oversize gates, one at a time on the GPU`);
+      setMsg(`Re-detection started: blurring first, then every session re-detected one at a time on the GPU (run ${r.run_id.slice(0, 8)})`);
     } catch (e) { failed("re-detection", e); }
     finally { setBusy(null); }
   };
@@ -184,9 +232,9 @@ export default function AgentConsole() {
     try {
       const p = await api.agentTemporalRepairPlan();
       showResult("repair", "temporal repair plan", p);
-      if (!p.counts.relabels) { setMsg(`no safe track-flip relabels (scanned ${p.counts.tracks} tracks, ${p.counts.flipped_tracks} flipped, ${p.counts.skipped_static ?? 0} corrupt)`); return; }
+      if (!p.counts.relabels) { setMsg(`Nothing safe to repair: ${p.counts.tracks} tracks checked, ${p.counts.flipped_tracks} flip class, ${p.counts.skipped_static ?? 0} left for a person`); return; }
       const r = await api.agentTemporalRepair();
-      setMsg(`temporal auto-repair: relabeled ${r.relabeled} outliers to their track majority (reversible, run ${r.run_id.slice(0, 8)})`);
+      setMsg(`Track repair: ${r.relabeled} labels changed to match the rest of their track (can be undone, run ${r.run_id.slice(0, 8)})`);
     } catch (e) { failed("repair", e); }
     finally { setBusy(null); }
   };
@@ -214,12 +262,12 @@ export default function AgentConsole() {
     try {
       if (what === "scenarios") {
         const r = await api.agentMineScenarios();
-        setMsg(`mined ${r.persisted} safety scenarios (${Object.entries(r.by_kind).map(([k, n]) => `${k}:${n}`).join(", ") || "none"})`);
+        setMsg(`Found ${r.persisted} safety scenarios${Object.keys(r.by_kind).length ? ` (${Object.entries(r.by_kind).map(([k, n]) => `${n} ${humanize(k).toLowerCase()}`).join(", ")})` : ""}`);
         showResult("scenarios", "mine safety scenarios", r,
           { href: "/scenarios", label: `open the ${r.persisted} scenarios` });
       } else {
         const r = await api.agentMineDisagreements();
-        setMsg(`mined ${r.persisted} model-disagreement frames${r.top[0] ? ` (top: ${r.top[0].tag})` : ""}`);
+        setMsg(`Found ${r.persisted} frames where the models disagree${r.top[0] ? ` (most common: ${humanize(r.top[0].tag).toLowerCase()})` : ""}`);
         showResult("disagreements", "mine disagreements", r,
           { href: "/scenarios", label: `open the ${r.persisted} disagreement frames` });
       }
@@ -243,7 +291,7 @@ export default function AgentConsole() {
     setBusy("cycle"); setMsg(null);
     try {
       const r = await api.agentTrainingCycle(true);
-      setMsg(`flywheel cycle (dry-run): would auto-accept ${r.tick.auto_accept}, review ${r.tick.review}, annotate ${r.tick.annotate} across ${r.tick.frames} top-value frames`);
+      setMsg(`Preview of one loop turn: across ${r.tick.frames} high-value frames it would accept ${r.tick.auto_accept}, send ${r.tick.review} to review and ${r.tick.annotate} to labelling`);
       showResult("cycle", "flywheel cycle (dry-run)", r);
     }
     catch (e) { failed("cycle", e); }
@@ -254,10 +302,10 @@ export default function AgentConsole() {
     try {
       const r = await api.agentGoldDrift();
       showResult("drift", "gold-drift check", r);
-      setMsg(r.status === "rolled_back" ? `GOLD DRIFT: champion regressed ${r.baseline_map}→${r.current_map}, rolled back + paused loop`
-        : r.status === "healthy" ? `champion healthy on gold (${r.current_map} vs baseline ${r.baseline_map})`
-        : r.status === "cannot_evaluate" ? `champion ${r.champion} (baseline mAP ${r.baseline_map}), gold set not materialized here`
-        : "no champion registered");
+      setMsg(r.status === "rolled_back" ? `Live model got worse on the gold set (${r.baseline_map} to ${r.current_map}): rolled back and paused the loop`
+        : r.status === "healthy" ? `Live model is healthy on the gold set (${r.current_map}, was ${r.baseline_map})`
+        : r.status === "cannot_evaluate" ? `Cannot check live model ${r.champion}: the gold set is not available here (last score ${r.baseline_map})`
+        : "No live model registered yet");
     } catch (e) { failed("gold-drift check", e); }
     finally { setBusy(null); }
   };
@@ -336,8 +384,8 @@ export default function AgentConsole() {
     try {
       const r = await api.agentDriftInvestigate();
       showResult("driftinv", "drift investigation", r);
-      if (!r.breached.length) { setMsg("no drift breach right now - governance is holding within tolerance"); return; }
-      setMsg(`drift breach (${r.breached.join(", ")}) - investigating root cause in the background`);
+      if (!r.breached.length) { setMsg("No drift right now: everything is within tolerance"); return; }
+      setMsg(`Drift found (${r.breached.map(humanize).join(", ")}): looking for the cause in the background`);
       // The diagnosis arrives after the investigation runs, so replace the panel with it rather than
       // leaving the panel showing the request that started it.
       setTimeout(() => api.agentDriftLatest().then((d) => {
@@ -353,7 +401,7 @@ export default function AgentConsole() {
     setBusy("doc"); setMsg(null); setDoc(null);
     try {
       const r = kind === "datasheet" ? await api.agentDocDatasheet() : await api.agentDocWeekly();
-      setDoc(r.markdown); setMsg(`${kind} drafted and stored (${r.uri.split("/").slice(-2).join("/")})`);
+      setDoc(r.markdown); setMsg(`${kind === "datasheet" ? "Datasheet" : "Weekly report"} drafted and saved (${r.uri.split("/").slice(-2).join("/")})`);
     } catch (e) { failed("doc generation", e); }
     finally { setBusy(null); }
   };
@@ -367,7 +415,7 @@ export default function AgentConsole() {
     try {
       const r = await api.agentOntologyScan(40);
       showResult("ontscan", "scan for ontology gaps", r);
-      setMsg(`scanned ${r.scanned} fallbacks -> ${r.proposals} promotion proposals`);
+      setMsg(`Looked at ${r.scanned} catch-all labels: ${r.proposals} could become new classes`);
       await loadProps();
     }
     catch (e) { failed("ontology scan", e); }
@@ -378,13 +426,13 @@ export default function AgentConsole() {
     try {
       if (action === "approve") {
         const nm = (names[id] || props.find((p) => p.proposal_id === id)?.suggested_name || "").trim();
-        if (!nm) { setMsg("give the new class a name first"); return; }
+        if (!nm) { setMsg("Give the new class a name first"); return; }
         const r = await api.agentOntologyApprove(id, nm);
         showResult("ontology", `mint ${nm}`, r);
-        setMsg(`minted ${r.name} (#${r.class_id}), relabeled ${r.relabeled} - reversible run ${r.run_id.slice(0, 8)}`);
+        setMsg(`Added class ${r.name} and moved ${r.relabeled} objects into it (can be undone, run ${r.run_id.slice(0, 8)})`);
         // A new class exists and objects moved into it: the cached ontology and run lists are stale.
         void invalidate("ontology", "agentRuns");
-      } else { await api.agentOntologyReject(id); setMsg("proposal rejected"); }
+      } else { await api.agentOntologyReject(id); setMsg("Proposal rejected"); }
       await loadProps();
     } catch (e) { failed("decision", e); }
     finally { setBusy(null); }
@@ -398,7 +446,7 @@ export default function AgentConsole() {
     try {
       const r = await api.agentFleetPlan();
       showResult("fleet", "plan fleet collection", r);
-      setMsg(`fused ${r.gaps} gaps + ${r.vehicles} vehicles -> ${r.orders} collection orders`);
+      setMsg(`Planned ${r.orders} collection orders from ${r.gaps} gaps and ${r.vehicles} vehicles`);
       await loadOrders();
     }
     catch (e) { failed("fleet plan", e); }
@@ -416,7 +464,7 @@ export default function AgentConsole() {
   const askBuyer = async (confirm = false) => {
     if (!buyer.trim()) return;
     setBusy("buyer"); setMsg(null);
-    try { setBuyerRes(await api.agentBuyerSpec(buyer.trim(), confirm, confirm ? "buyer-" + Date.now() : undefined)); if (confirm) setMsg("slice composed, sealed export launched, datasheet drafted"); }
+    try { setBuyerRes(await api.agentBuyerSpec(buyer.trim(), confirm, confirm ? "buyer-" + Date.now() : undefined)); if (confirm) setMsg("Dataset assembled, sealed export started, datasheet drafted"); }
     catch (e) { failed("buyer spec", e); }
     finally { setBusy(null); }
   };
@@ -431,271 +479,111 @@ export default function AgentConsole() {
     finally { setBusy(null); }
   };
 
+  const btn = (key: string, idle: string, working: string, onClick: () => void, primary = false) => (
+    <button type="button" onClick={onClick} disabled={!!busy} className={primary ? "btn btn-primary" : "btn"}>
+      {busy === key ? working : idle}
+    </button>
+  );
+
   return (
-    <PageShell active="AGENT" subtitle="CONSOLE" right={loading ? <Spinner label="loading" /> : <span className="text-[12.5px] text-ink-3">{queue.length} in fix queue</span>}>
+    <PageShell active="AGENT" title="Agent console"
+      subtitle="Automated checks that find likely-wrong labels and fix the obvious ones. Everything it does can be undone."
+      right={loading ? <Spinner label="loading" /> : <span className="text-[12.5px] text-ink-3">{num(queue.length)} in fix queue</span>}>
       <div className="flex h-full min-h-0">
         <div className="flex-1 min-w-0 overflow-auto">
-        <div className="max-w-5xl mx-auto p-6 space-y-5">
-          <div>
-            <h1 className="text-xl text-ink font-semibold">Agent Console</h1>
-            <p className="text-ink-3 text-sm mt-1 max-w-2xl">Autonomous QA over the whole corpus: the agent finds likely-wrong labels and fixes the obvious ones itself. Everything it does is reversible and provenance-stamped.</p>
-          </div>
+        <div className="max-w-5xl mx-auto px-6 py-5 space-y-7">
 
           {/* Overnight Auditor: standing watchdog + morning report */}
-          <div className="panel p-4 border border-accent/30">
+          <section className="panel p-4 border-accent/40">
             <div className="flex items-start gap-3">
-              <div className="flex-1">
-                <div className="text-ink font-medium">Overnight Auditor <span className="text-[11px] text-accent">morning report</span></div>
-                <div className="text-ink-3 text-xs mt-1">Patrols the day&apos;s auto-accepted labels within a token budget: VLM spot-checks + cross-frame consistency + control-sample precision. Suspects are queued to review (reversible). Runs nightly off-hours; run it now below.</div>
-                {audit?.report?.notes ? (
-                  <div className="mt-2 text-[12px] text-ink-2 space-y-0.5">
-                    {audit.report.notes.map((n, i) => <div key={i}>· {n}</div>)}
-                    <div className="text-ink-3 mt-1">
-                      sampled {audit.report.sampled ?? 0} · vlm-checked {audit.report.vlm_checked ?? 0} · <span className="text-warn">{audit.report.vlm_disagreements ?? 0} vlm-disagree</span> · budget {audit.report.budget?.used ?? 0}/{audit.report.budget?.max_calls ?? 0}
-                      {audit.created_at ? ` · ${new Date(audit.created_at).toLocaleString()}` : ""}
-                    </div>
-                    {(audit.report.confusion_movers?.length ?? 0) > 0 && (
-                      <div className="text-ink-3">movers: {audit.report.confusion_movers.map((m) => `${m.from}->${m.to} (${m.n})${m.concentrated_in ? ` in ${m.concentrated_in}` : ""}`).join(", ")}</div>
-                    )}
+              <div className="flex-1 min-w-0">
+                <h2 className="section-title">Overnight audit</h2>
+                <p className="section-desc mt-1">Each night a sample of the day&apos;s auto-accepted labels is double-checked; anything suspect goes to review.</p>
+              </div>
+              <button type="button" onClick={runAudit} disabled={!!busy} className="btn btn-primary shrink-0">
+                {busy === "audit" ? "Auditing..." : "Run audit now"}
+              </button>
+            </div>
+            {audit?.report?.notes ? (
+              <div className="mt-3 border-t hairline pt-3 space-y-2">
+                <div className="flex items-baseline gap-2">
+                  <span className="label-caps">Last report</span>
+                  {audit.created_at && <span className="text-[12px] text-ink-3">{ago(audit.created_at)}</span>}
+                </div>
+                <ul className="text-[12.5px] text-ink-2 space-y-1 list-disc pl-5 marker:text-ink-3">
+                  {audit.report.notes.map((n, i) => <li key={i}>{wordsOf(n)}</li>)}
+                </ul>
+                <div className="text-[12px] text-ink-3">
+                  {num(audit.report.sampled ?? 0)} labels sampled · {num(audit.report.vlm_checked ?? 0)} checked by the vision model ·{" "}
+                  <span className="text-warn">{num(audit.report.vlm_disagreements ?? 0)} disagreed</span> ·{" "}
+                  {num(audit.report.budget?.used ?? 0)} of {num(audit.report.budget?.max_calls ?? 0)} checks used
+                </div>
+                {(audit.report.confusion_movers?.length ?? 0) > 0 && (
+                  <div className="text-[12px] text-ink-3">
+                    Most confused: {audit.report.confusion_movers.map((m) => `${humanize(m.from)} → ${humanize(m.to).toLowerCase()} (${m.n})`).join(", ")}
                   </div>
-                ) : <div className="mt-2 text-[12px] text-ink-3">{audit?.status === "running" ? "audit running..." : "no audit yet"}</div>}
+                )}
               </div>
-              <button onClick={runAudit} disabled={!!busy} className="shrink-0 text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "audit" ? "auditing..." : "run audit now"}</button>
-            </div>
-          </div>
+            ) : (
+              <div className="mt-3 text-[12.5px] text-ink-3">{audit?.status === "running" ? "Audit running..." : "No audit has run yet."}</div>
+            )}
+          </section>
 
-          {/* Ask the dataset (conversational corpus query) */}
-          <div className="panel p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-ink font-medium text-sm">Ask the dataset</span>
-              <span className="text-[11px] text-ink-3">plain-language corpus query</span>
-              <button onClick={doReport} disabled={!!busy} className="ml-auto text-[11px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "report" ? "…" : "dataset report"}</button>
-            </div>
-            <div className="flex items-center gap-2">
-              <input value={ask} onChange={(e) => setAsk(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doAsk(); }}
-                placeholder="e.g. two-wheelers going against traffic at night on the highway"
-                className="flex-1 bg-bg-2 border border-line rounded px-2.5 py-1.5 text-[12px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
-              <button onClick={doAsk} disabled={!!busy || !ask.trim()} className="text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "ask" ? "…" : "ask"}</button>
-            </div>
-            {askResult ? <div className="mt-2 text-[12px] text-ink-2"><span className="text-pass">{askResult.count} frames</span> · understood as <span className="text-ink-3">{askResult.understood}</span></div> : null}
-            {report ? (
-              <div className="mt-3 border-t hairline pt-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
-                <div><div className="text-ink-3 text-[10px] uppercase">objects</div><div className="text-ink text-base tabular-nums">{report.size.objects.toLocaleString()}</div><div className="text-ink-3">{report.size.human_labeled.toLocaleString()} human</div></div>
-                <div><div className="text-ink-3 text-[10px] uppercase">sessions</div><div className="text-ink text-base tabular-nums">{report.size.sessions.toLocaleString()}</div></div>
-                <div><div className="text-ink-3 text-[10px] uppercase">coverage gaps</div><div className="text-warn text-base tabular-nums">{report.coverage_gaps.length}</div></div>
-                <div><div className="text-ink-3 text-[10px] uppercase">fix queue</div><div className="text-block text-base tabular-nums">{report.fix_queue_total}</div><div className="text-ink-3">{Object.values(report.scenarios).reduce((a, b) => a + b, 0)} scenarios</div></div>
-              </div>
-            ) : null}
-          </div>
-
-          {/* Relabel: the reasoning layer improves accuracy across the corpus */}
-          <div className="panel p-4 border border-accent/30">
-            <div className="flex items-start gap-3">
-              <div className="flex-1">
-                <div className="text-ink font-medium">Relabel all frames <span className="text-[11px] text-accent">AI reasoning</span></div>
-                <div className="text-ink-3 text-xs mt-1">Re-read every machine-labelled box with an independent model and correct the class wherever it decisively disagrees with the current label. Decisive corrections are applied and kept; moderate ones are applied but routed to review. One reversible run per frame, so it can be undone wholesale. To relabel a single frame, use the Agent panel in the editor.</div>
-              </div>
-              <button onClick={relabelAll} disabled={!!busy} className="shrink-0 text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "relabel" ? "starting..." : "relabel all frames"}</button>
-            </div>
-            {relabel ? (
-              <div className="mt-3 text-[12px] text-ink-2">
-                {relabelDone ? "done" : "running"} · scanned {relabel.frames} frames · <span className="text-pass">{relabel.relabel_keep} fixed</span> · <span className="text-warn">{relabel.relabel_review} routed to review</span>
-              </div>
-            ) : null}
-          </div>
-
-          {/* Corpus re-detection: fix existing frames with the new detection gates */}
-          <div className="panel p-4 border border-line">
-            <div className="text-ink font-medium">Corpus re-detection <span className="text-[11px] text-ink-3">label quality</span></div>
-            <div className="text-ink-3 text-xs mt-1">The detection pipeline now enforces thing/stuff (no boxed trees, barriers, sky), an auto-estimated ego-hood mask (no self-labeling), fusion de-duplication (one object, one box), and an oversize reviewer rule (no frame-spanning boxes). Those shape new labels; run this to fix the frames already in the corpus. Sequential on one GPU, yields to training.</div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button onClick={estimateEgo} disabled={!!busy} className="text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "ego" ? "estimating..." : "1. estimate ego-hood masks"}</button>
-              <button onClick={backfillPii} disabled={!!busy} className="text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "pii" ? "starting..." : "2. PII backfill (pre-gate frames)"}</button>
-              <button onClick={redetectAll} disabled={!!busy} className="text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "redetect" ? "starting..." : "3. re-detect all frames"}</button>
-            </div>
-          </div>
-
-          {/* Self-healing actions */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="panel p-4">
-              <div className="text-ink font-medium">Error sweep</div>
-              <div className="text-ink-3 text-xs mt-1">Run every detector across the corpus (consistency critic, embedding outliers, near-duplicate divergence, policy violations, confident-wrong) and refresh the ranked fix queue.</div>
-              <button onClick={sweep} disabled={!!busy} className="mt-3 text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "sweep" ? "sweeping..." : "run error sweep"}</button>
-            </div>
-            <div className="panel p-4">
-              <div className="text-ink font-medium">Temporal auto-repair</div>
-              <div className="text-ink-3 text-xs mt-1">Relabel track class-flip outliers to their strong track majority automatically. Corrupt tracks (static-class majority) are left for a human. Reversible.</div>
-              <button onClick={repair} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "repair" ? "repairing..." : "run temporal repair"}</button>
-            </div>
-          </div>
-
-          {/* Data intelligence: the system finds what is worth labeling */}
-          <div>
-            <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 mb-2">Data intelligence: find what matters</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="panel p-4">
-                <div className="text-ink font-medium text-sm">Safety scenarios</div>
-                <div className="text-ink-3 text-xs mt-1">Mine near-misses (low TTC), high-risk interactions, and hard-brake events into the scenario queue.</div>
-                <button onClick={() => mine("scenarios")} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "scenarios" ? "mining..." : "mine safety scenarios"}</button>
-              </div>
-              <div className="panel p-4">
-                <div className="text-ink font-medium text-sm">Model disagreement</div>
-                <div className="text-ink-3 text-xs mt-1">Surface frames where the champion and challenger detectors voted different classes ,  the highest-value labels + a regression signal.</div>
-                <button onClick={() => mine("disagreements")} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "disagreements" ? "mining..." : "mine disagreements"}</button>
-              </div>
-              <div className="panel p-4">
-                <div className="text-ink font-medium text-sm">Coverage gaps</div>
-                <div className="text-ink-3 text-xs mt-1">Profile the corpus and name the thin cells (rare classes, missing weather/time/road coverage).</div>
-                <button onClick={coverage} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "coverage" ? "analyzing..." : "coverage report"}</button>
-              </div>
-            </div>
-            {gaps ? (
-              <div className="panel mt-3 p-4">
-                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1.5">coverage gaps ({gaps.length})</div>
-                <ul className="space-y-0.5">{gaps.slice(0, 10).map((g, i) => <li key={i} className="text-[12px] text-ink-2">· {g}</li>)}</ul>
-              </div>
-            ) : null}
-          </div>
-
-          {/* Self-improving loop */}
-          <div>
-            <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 mb-2">Self-improving loop</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="panel p-4">
-                <div className="text-ink font-medium text-sm">Flywheel cycle</div>
-                <div className="text-ink-3 text-xs mt-1">One turn of the loop: mine the highest-value frames, auto-accept the sure ones, escalate the rest; retrains when enough corrections accumulate. Dry-run preview.</div>
-                <button onClick={cycle} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "cycle" ? "running..." : "run flywheel cycle"}</button>
-              </div>
-              <div className="panel p-4">
-                <div className="text-ink font-medium text-sm">Gold-drift monitor</div>
-                <div className="text-ink-3 text-xs mt-1">Re-evaluate the serving champion on the gold set; if it has regressed beyond tolerance, roll back to the prior champion and pause the loop.</div>
-                <button onClick={drift} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "drift" ? "checking..." : "check gold drift"}</button>
-              </div>
-              <div className="panel p-4">
-                <div className="text-ink font-medium text-sm">Drift Investigator</div>
-                <div className="text-ink-3 text-xs mt-1">On a drift breach, root-cause it: the affected slice, worst classes/scenes/sessions, a common factor, and a proposed action. Proposes only.</div>
-                {driftDiag?.report ? (
-                  <div className="mt-2 text-[11.5px] text-ink-2">
-                    <div>{driftDiag.report.hypothesis}</div>
-                    <div className="text-ink-3 mt-0.5">proposed: {driftDiag.report.proposed_action.kind}</div>
-                  </div>
-                ) : null}
-                <button onClick={investigateDrift} disabled={!!busy} className="mt-3 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "driftinv" ? "investigating..." : "investigate drift"}</button>
-              </div>
-            </div>
-          </div>
-
-          {/* Documentation agent */}
-          <div>
-            <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 mb-2">Documentation</h2>
-            <div className="panel p-4">
-              <div className="flex items-center gap-2">
-                <div className="flex-1 text-ink-3 text-xs">Auto-draft the buyer-diligence artifacts from the platform&apos;s own metrics: dataset datasheet (composition, coverage, known gaps) and the weekly quality report (precision, drift, promotions). Model cards are drafted per model via the API.</div>
-                <button onClick={() => genDoc("datasheet")} disabled={!!busy} className="shrink-0 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">{busy === "doc" ? "..." : "datasheet"}</button>
-                <button onClick={() => genDoc("weekly")} disabled={!!busy} className="shrink-0 text-[12px] border border-line px-3 py-1.5 rounded hover:border-accent disabled:opacity-40">weekly report</button>
-              </div>
-              {doc ? <pre className="mt-3 max-h-64 overflow-auto no-scrollbar bg-bg-2 rounded p-3 text-[11.5px] text-ink-2 whitespace-pre-wrap">{doc.slice(0, 4000)}</pre> : null}
-            </div>
-          </div>
-
-          {/* Fleet Dispatch */}
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">Fleet dispatch: collect what the corpus lacks</h2>
-              <button onClick={planFleet} disabled={!!busy} className="ml-auto text-[11px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "fleet" ? "planning..." : "plan collection orders"}</button>
-            </div>
-            {orders.length ? (
-              <div className="panel divide-y divide-line/50">
-                {orders.map((o) => (
-                  <div key={o.order_id} className="flex items-center gap-2 px-3 py-2">
-                    <span className="text-[11px] text-accent w-8">{o.priority.toFixed(1)}</span>
-                    <span className="text-[11.5px] text-ink-2 flex-1">{o.summary}</span>
-                    <button onClick={() => dispatchOrder(o.order_id)} disabled={!!busy} className="text-[11px] border border-accent/40 text-accent px-2 py-0.5 rounded disabled:opacity-40">dispatch</button>
-                  </div>
+          {/* Fix queue: the page's working list, first after the audit that feeds it */}
+          <section className="panel">
+            <div className="panel-head flex-wrap">
+              <h2 className="section-title">Fix queue</h2>
+              <span className="text-[12px] text-ink-3">Labels most likely to be wrong, worst first</span>
+              <div className="ml-auto flex flex-wrap gap-1.5">
+                {Object.entries(summary).map(([k, n]) => (
+                  <span key={k} className="text-[11px] border border-line rounded px-1.5 py-px text-ink-3">
+                    {KIND_LABEL[k] || humanize(k)} <span className="text-ink-2 tabular-nums">{num(n)}</span>
+                  </span>
                 ))}
               </div>
-            ) : <div className="panel p-4 text-ink-3 text-sm">No collection orders. Plan orders to turn the coverage gaps into fleet acquisition tasks.</div>}
-          </div>
-
-          {/* Buyer Curation Agent */}
-          <div>
-            <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 mb-2">Buyer curation: spec to sealed dataset</h2>
-            <div className="panel p-4">
-              <div className="flex items-center gap-1.5">
-                <input value={buyer} onChange={(e) => setBuyer(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") askBuyer(false); }}
-                  placeholder="e.g. 10k night-rain frames with an autorickshaw and a VRU, balanced across cities"
-                  className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-2 py-1.5 text-[12px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
-                <button onClick={() => askBuyer(false)} disabled={!!busy || !buyer.trim()} className="text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "buyer" ? "checking..." : "check"}</button>
-              </div>
-              {buyerRes?.fulfillment ? (
-                <div className="mt-3 text-[12px] text-ink-2">
-                  <div className="text-ink-3">{buyerRes.understood}</div>
-                  <div className="mt-1">requested {buyerRes.fulfillment.requested ?? "any"} · <span className="text-pass">{buyerRes.fulfillment.available} available</span>{buyerRes.fulfillment.shortfall ? <span className="text-warn"> · short {buyerRes.fulfillment.shortfall}</span> : <span className="text-pass"> · fully fulfillable</span>}</div>
-                  {buyerRes.guidance ? <div className="text-warn mt-1">{buyerRes.guidance}</div> : null}
-                  {buyerRes.fulfillment.available > 0 && buyerRes.status === "analyzed" ? (
-                    <button onClick={() => askBuyer(true)} disabled={!!busy} className="mt-2 text-[11px] border border-accent/40 bg-accent/10 text-accent px-2 py-1 rounded disabled:opacity-40">compose slice &amp; export</button>
-                  ) : null}
-                  {buyerRes.datasheet_uri ? <div className="text-ink-3 mt-1">datasheet: {buyerRes.datasheet_uri.split("/").slice(-2).join("/")}</div> : null}
-                </div>
-              ) : null}
             </div>
-          </div>
-
-          {/* Operations Agent */}
-          <div>
-            <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3 mb-2">Ask LabeloxAV: operate in sentences</h2>
-            <div className="panel p-4">
-              <div className="flex items-center gap-1.5">
-                <input value={ops} onChange={(e) => setOps(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") askOps(false); }}
-                  placeholder="e.g. show coverage gaps · list sessions in BLR · export accepted frames to coco"
-                  className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-2 py-1.5 text-[12px] text-ink-2 placeholder:text-ink-3/60 focus:border-accent outline-none" />
-                <button onClick={() => askOps(false)} disabled={!!busy || !ops.trim()} className="text-[12px] border border-accent/50 bg-accent/10 text-accent px-3 py-1.5 rounded hover:bg-accent/20 disabled:opacity-40">{busy === "ops" ? "planning..." : "ask"}</button>
-              </div>
-              {opsRes ? (
-                <div className="mt-3 text-[11.5px] text-ink-2">
-                  <div className="text-ink-3">plan ({opsRes.plan.source}): {opsRes.plan.steps.map((s) => s.tool).join(" -> ") || "no plan"}</div>
-                  {opsRes.results?.map((r, i) => (
-                    <pre key={i} className="mt-1 bg-bg-2 rounded p-2 whitespace-pre-wrap max-h-40 overflow-auto no-scrollbar">{r.tool}: {JSON.stringify(r.result).slice(0, 600)}</pre>
+            {loading && !queue.length ? <div className="p-6"><Spinner label="loading" /></div> : queue.length ? (
+              <div className="max-h-[520px] overflow-y-auto">
+              <table className="data-table">
+                <thead>
+                  <tr><th className="w-40">Problem</th><th className="w-16 num">Score</th><th>Why</th><th className="w-44"></th></tr>
+                </thead>
+                <tbody>
+                  {queue.map((c, i) => (
+                    <tr key={c.candidate_id} onClick={() => open(c, i)}
+                      title="show the object this is about"
+                      className={`cursor-pointer ${i === cursor ? "bg-accent/10" : ""}`}>
+                      <td><span className="text-[11.5px] border border-line px-1.5 py-0.5 rounded text-ink-2 whitespace-nowrap">{KIND_LABEL[c.kind] || humanize(c.kind)}</span></td>
+                      <td className="num font-mono text-ink-3">{c.score.toFixed(2)}</td>
+                      <td>{wordsOf(reason(c))}{c.proposed_label?.class_name ? <span className="text-pass"> → {humanize(c.proposed_label.class_name)}</span> : null}</td>
+                      <td className="text-right whitespace-nowrap space-x-1.5">
+                        {/* stopPropagation: acting on a row must not also re-open it, which would refetch
+                            the object that just left the queue. */}
+                        <button type="button" onClick={(e) => { e.stopPropagation(); act(c, "confirm"); }} className="btn text-pass"
+                          data-tip="The label is wrong: apply the fix"><T k="action.confirm_short">Confirm</T></button>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); act(c, "dismiss"); }} className="btn"
+                          data-tip="The label is fine: drop this from the queue"><T k="action.dismiss">Dismiss</T></button>
+                      </td>
+                    </tr>
                   ))}
-                  {opsRes.pending ? (
-                    <div className="mt-2 flex items-center gap-2">
-                      <span className="text-warn">step &quot;{opsRes.pending.tool}&quot; mutates data.</span>
-                      <button onClick={() => askOps(true)} disabled={!!busy} className="text-[11px] border border-warn text-warn px-2 py-1 rounded disabled:opacity-40">confirm &amp; run</button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          {/* Ontology Steward */}
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <h2 className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">Ontology Steward: grow the ontology</h2>
-              <button onClick={scanOntology} disabled={!!busy} className="ml-auto text-[11px] border border-line px-2 py-1 rounded hover:border-accent disabled:opacity-40">{busy === "ontscan" ? "scanning..." : "scan fallback clusters"}</button>
-            </div>
-            {props.length ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {props.map((p) => (
-                  <div key={p.proposal_id} className="panel p-3">
-                    <div className="flex gap-1 mb-2">
-                      {p.sample_object_ids.slice(0, 6).map((oid) => (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img key={oid} src={`/api/objects/${oid}/crop`} alt="" className="w-12 h-12 object-cover rounded bg-bg-2" />
-                      ))}
-                    </div>
-                    <div className="text-[11.5px] text-ink-2">{p.member_count} in {p.from_class} · looks like {p.confusion_classes.map((c) => `${c.class} ${Math.round(c.share * 100)}%`).join(", ") || "nothing known"}</div>
-                    <div className="flex items-center gap-1.5 mt-2">
-                      <input value={names[p.proposal_id] ?? p.suggested_name ?? ""} onChange={(e) => setNames((s) => ({ ...s, [p.proposal_id]: e.target.value }))}
-                        placeholder="new class name" className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-1.5 py-1 text-[11.5px] text-ink-2 focus:border-accent outline-none" />
-                      <button onClick={() => decide(p.proposal_id, "approve")} disabled={!!busy} className="text-[11px] border border-pass text-pass px-2 py-1 rounded disabled:opacity-40">approve</button>
-                      <button onClick={() => decide(p.proposal_id, "reject")} disabled={!!busy} className="text-[11px] border border-line text-ink-3 px-2 py-1 rounded hover:text-ink disabled:opacity-40"><T k="action.reject">reject</T></button>
-                    </div>
-                  </div>
-                ))}
+                </tbody>
+              </table>
               </div>
-            ) : <div className="panel p-4 text-ink-3 text-sm">No promotion proposals. Scan the fallback clusters to find classes that have earned their way in.</div>}
-          </div>
+            ) : (
+              <EmptyState compact icon="check" title="Fix queue is empty"
+                action={btn("sweep", "Run error sweep", "Sweeping...", sweep, true)}>
+                No label is currently suspected of being wrong. An error sweep checks the whole corpus again.
+              </EmptyState>
+            )}
+            {queue.length > 0 && (
+              <div className="border-t hairline px-4 py-2 text-[12px] text-ink-3 flex flex-wrap gap-x-4 gap-y-1">
+                <span><kbd className="font-mono text-ink-2">J</kbd> / <kbd className="font-mono text-ink-2">K</kbd> next / previous</span>
+                <span><kbd className="font-mono text-pass">C</kbd> confirm</span>
+                <span><kbd className="font-mono text-block">D</kbd> dismiss</span>
+                <span><kbd className="font-mono text-ink-2">Esc</kbd> close</span>
+              </div>
+            )}
+          </section>
 
           <InterruptedRuns onResumed={load} />
 
@@ -703,61 +591,235 @@ export default function AgentConsole() {
 
           <ActivityLog log={log} onClear={() => setLog((l) => ({ entries: [], seq: l.seq }))} />
 
+          {/* Self-healing: corpus-wide fixes */}
+          <Group title="Fix labels across the corpus" desc="Every run is recorded and can be undone from Agent jobs.">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <ActionCard title="Error sweep" desc="Re-run every mistake detector across the corpus and refresh the fix queue."
+                more="Looks for labels that disagree with their near-copies, break a class rule, flip class within a track, look unlike the rest of their class, or that the model is confident are wrong."
+                action={btn("sweep", "Run error sweep", "Sweeping...", sweep)} />
+              <ActionCard title="Track repair" desc="Where one frame of a track has a different class from the rest, change it to match."
+                more="Only changes a label when most of the track clearly agrees. Tracks that are inconsistent throughout are left for a person."
+                action={btn("repair", "Repair tracks", "Repairing...", repair)} />
+              <ActionCard title="Relabel all frames" className="md:col-span-2"
+                desc="A second model re-reads every machine-drawn box and corrects the class where it clearly disagrees."
+                more={<>Clear corrections are applied and kept; less certain ones are applied but also sent to review. Each frame is one run, so the whole pass can be undone. To relabel a single frame, use the Agent panel in the editor.</>}
+                action={btn("relabel", "Relabel all frames", "Starting...", relabelAll)}>
+                {relabel ? (
+                  <div className="text-[12.5px] text-ink-2">
+                    {relabelDone ? "Done" : "Running"} · {num(relabel.frames)} frames checked · <span className="text-pass">{num(relabel.relabel_keep)} fixed</span> · <span className="text-warn">{num(relabel.relabel_review)} sent to review</span>
+                  </div>
+                ) : null}
+              </ActionCard>
+              <ActionCard title="Re-detect with the current rules" className="md:col-span-2"
+                desc="Bring frames detected under older rules up to date. Run the three steps in order; it uses the GPU one session at a time."
+                more="Newer detection skips scenery such as trees and sky, ignores the vehicle's own bonnet, keeps one box per object and refuses boxes that cover the whole frame. Older frames were labelled before those rules existed. The run steps aside when training needs the GPU.">
+                <div className="flex flex-wrap gap-2">
+                  {btn("ego", "1. Find the bonnet in each camera", "Finding...", estimateEgo)}
+                  {btn("pii", "2. Blur faces and plates on older frames", "Starting...", backfillPii)}
+                  {btn("redetect", "3. Re-detect all frames", "Starting...", redetectAll)}
+                </div>
+              </ActionCard>
+            </div>
+          </Group>
+
+          {/* Data intelligence: the system finds what is worth labeling */}
+          <Group title="Find what is worth labelling">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <ActionCard title="Safety scenarios" desc="Find near-misses, risky interactions and hard braking, and add them to Scenarios."
+                action={btn("scenarios", "Find", "Searching...", () => mine("scenarios"))} />
+              <ActionCard title="Model disagreement" desc="Find frames where the live and candidate models chose different classes: the most useful labels to check."
+                action={btn("disagreements", "Find", "Searching...", () => mine("disagreements"))} />
+              <ActionCard title="Coverage gaps" desc="List what the corpus is short of: rare classes, weather, time of day, road types."
+                action={btn("coverage", "Report", "Analysing...", coverage)} />
+            </div>
+            {gaps ? (
+              <div className="panel p-4">
+                <div className="label-caps mb-1.5">Coverage gaps ({num(gaps.length)})</div>
+                <ul className="space-y-0.5 list-disc pl-5 marker:text-ink-3">{gaps.slice(0, 10).map((g, i) => <li key={i} className="text-[12.5px] text-ink-2">{wordsOf(g)}</li>)}</ul>
+              </div>
+            ) : null}
+          </Group>
+
+          {/* Self-improving loop */}
+          <Group title="Keep the model improving">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <ActionCard title="Preview one loop turn" desc="See what one turn of the improvement loop would accept, review and send to labelling. Changes nothing."
+                action={btn("cycle", "Preview", "Running...", cycle)} />
+              <ActionCard title="Gold-set check" desc="Re-score the live model on the gold set. If it has got worse, roll back and pause the loop."
+                action={btn("drift", "Check now", "Checking...", drift)} />
+              <ActionCard title="Investigate drift" desc="When the data drifts, find the likely cause and propose a fix. Proposes only."
+                action={btn("driftinv", "Investigate", "Investigating...", investigateDrift)}>
+                {driftDiag?.report ? (
+                  <div className="text-[12.5px] text-ink-2 border-t hairline pt-2">
+                    <div>{driftDiag.report.hypothesis}</div>
+                    <div className="text-ink-3 mt-0.5">Proposed: {humanize(driftDiag.report.proposed_action.kind).toLowerCase()}</div>
+                  </div>
+                ) : null}
+              </ActionCard>
+            </div>
+          </Group>
+
+          {/* Questions in plain language */}
+          <Group title="Ask in plain language">
+            <div className="space-y-3">
+              <section className="panel p-4 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <h3 className="section-title">Ask the dataset</h3>
+                  <span className="section-desc">Count frames matching a description</span>
+                  <button type="button" onClick={doReport} disabled={!!busy} className="btn ml-auto">{busy === "report" ? "Loading..." : "Dataset summary"}</button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input value={ask} onChange={(e) => setAsk(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doAsk(); }}
+                    aria-label="Describe the frames to find"
+                    placeholder="e.g. two-wheelers going against traffic at night on the highway"
+                    className="field flex-1" />
+                  <button type="button" onClick={doAsk} disabled={!!busy || !ask.trim()} className="btn btn-primary">{busy === "ask" ? "Asking..." : "Ask"}</button>
+                </div>
+                {askResult ? <div className="text-[12.5px] text-ink-2"><span className="text-pass">{num(askResult.count)} frames</span> · understood as <span className="text-ink-3">{askResult.understood}</span></div> : null}
+                {report ? (
+                  <div className="border-t hairline pt-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
+                    <div><div className="label-caps">Objects</div><div className="text-ink text-[18px] font-semibold tabular-nums">{num(report.size.objects)}</div><div className="text-ink-3">{num(report.size.human_labeled)} by people</div></div>
+                    <div><div className="label-caps">Sessions</div><div className="text-ink text-[18px] font-semibold tabular-nums">{num(report.size.sessions)}</div></div>
+                    <div><div className="label-caps">Coverage gaps</div><div className="text-warn text-[18px] font-semibold tabular-nums">{num(report.coverage_gaps.length)}</div></div>
+                    <div><div className="label-caps">Fix queue</div><div className="text-block text-[18px] font-semibold tabular-nums">{num(report.fix_queue_total)}</div><div className="text-ink-3">{num(Object.values(report.scenarios).reduce((a, b) => a + b, 0))} scenarios</div></div>
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="panel p-4 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <h3 className="section-title">Ask LabeloxAV to do something</h3>
+                  <span className="section-desc">Anything that changes data asks you first</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input value={ops} onChange={(e) => setOps(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") askOps(false); }}
+                    aria-label="What should LabeloxAV do"
+                    placeholder="e.g. show coverage gaps · list sessions in BLR · export accepted frames to COCO"
+                    className="field flex-1 min-w-0" />
+                  <button type="button" onClick={() => askOps(false)} disabled={!!busy || !ops.trim()} className="btn btn-primary">{busy === "ops" ? "Planning..." : "Ask"}</button>
+                </div>
+                {opsRes ? (
+                  <div className="text-[12.5px] text-ink-2">
+                    <div className="text-ink-3">Plan: {opsRes.plan.steps.map((s) => humanize(s.tool)).join(" → ") || "nothing to do"}</div>
+                    {opsRes.results?.map((r, i) => (
+                      <pre key={i} className="mt-1.5 bg-bg-2 rounded p-2 text-[12px] whitespace-pre-wrap max-h-40 overflow-auto no-scrollbar">{humanize(r.tool)}: {JSON.stringify(r.result).slice(0, 600)}</pre>
+                    ))}
+                    {opsRes.pending ? (
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="text-warn">&ldquo;{humanize(opsRes.pending.tool)}&rdquo; will change data.</span>
+                        <button type="button" onClick={() => askOps(true)} disabled={!!busy} className="btn btn-danger">Confirm and run</button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="panel p-4 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <h3 className="section-title">Build a dataset from a request</h3>
+                  <span className="section-desc">Check what is available, then assemble and export it</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input value={buyer} onChange={(e) => setBuyer(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") askBuyer(false); }}
+                    aria-label="Describe the dataset"
+                    placeholder="e.g. 10k night-rain frames with an autorickshaw and a pedestrian, balanced across cities"
+                    className="field flex-1 min-w-0" />
+                  <button type="button" onClick={() => askBuyer(false)} disabled={!!busy || !buyer.trim()} className="btn btn-primary">{busy === "buyer" ? "Checking..." : "Check"}</button>
+                </div>
+                {buyerRes?.fulfillment ? (
+                  <div className="text-[12.5px] text-ink-2">
+                    <div className="text-ink-3">{buyerRes.understood}</div>
+                    <div className="mt-1">Asked for {buyerRes.fulfillment.requested != null ? num(buyerRes.fulfillment.requested) : "any number"} · <span className="text-pass">{num(buyerRes.fulfillment.available)} available</span>{buyerRes.fulfillment.shortfall ? <span className="text-warn"> · {num(buyerRes.fulfillment.shortfall)} short</span> : <span className="text-pass"> · can be met in full</span>}</div>
+                    {buyerRes.guidance ? <div className="text-warn mt-1">{buyerRes.guidance}</div> : null}
+                    {buyerRes.fulfillment.available > 0 && buyerRes.status === "analyzed" ? (
+                      <button type="button" onClick={() => askBuyer(true)} disabled={!!busy} className="btn btn-primary mt-2">Assemble and export</button>
+                    ) : null}
+                    {buyerRes.datasheet_uri ? <div className="text-ink-3 mt-1">Datasheet: {buyerRes.datasheet_uri.split("/").slice(-2).join("/")}</div> : null}
+                  </div>
+                ) : null}
+              </section>
+            </div>
+          </Group>
+
+          {/* Ontology Steward */}
+          <Group title="New classes" desc="Catch-all labels that keep collecting the same kind of object may deserve a class of their own."
+            right={btn("ontscan", "Look for new classes", "Looking...", scanOntology)}>
+            {props.length ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {props.map((p) => (
+                  <div key={p.proposal_id} className="panel p-3.5">
+                    <div className="flex gap-1.5 mb-2.5">
+                      {p.sample_object_ids.slice(0, 6).map((oid) => (
+                        <Thumb key={oid} src={`/api/objects/${oid}/crop`} className="w-12 h-12 rounded" />
+                      ))}
+                    </div>
+                    <div className="text-[12.5px] text-ink-2">
+                      {num(p.member_count)} objects labelled {humanize(p.from_class).toLowerCase()} · look like {p.confusion_classes.map((c) => `${humanize(c.class).toLowerCase()} ${Math.round(c.share * 100)}%`).join(", ") || "nothing known"}
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-2.5">
+                      <input value={names[p.proposal_id] ?? p.suggested_name ?? ""} onChange={(e) => setNames((s) => ({ ...s, [p.proposal_id]: e.target.value }))}
+                        aria-label="Name for the new class"
+                        placeholder="New class name" className="field flex-1 min-w-0" />
+                      <button type="button" onClick={() => decide(p.proposal_id, "approve")} disabled={!!busy} className="btn btn-primary">Add class</button>
+                      <button type="button" onClick={() => decide(p.proposal_id, "reject")} disabled={!!busy} className="btn"><T k="action.reject">Reject</T></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="panel">
+                <EmptyState compact icon="objects" title="No new classes proposed">
+                  Look for new classes to check whether any catch-all label has grown a group worth naming.
+                </EmptyState>
+              </div>
+            )}
+          </Group>
+
+          {/* Fleet Dispatch */}
+          <Group title="Collection orders" desc="Turn coverage gaps into requests for vehicles to record what is missing."
+            right={btn("fleet", "Plan orders", "Planning...", planFleet)}>
+            {orders.length ? (
+              <div className="panel divide-y divide-line/50">
+                {orders.map((o) => (
+                  <div key={o.order_id} className="flex items-center gap-3 px-4 py-2.5">
+                    <span className="text-[12px] text-accent-2 w-20 shrink-0 tabular-nums" data-tip="Higher is more urgent">Priority {o.priority.toFixed(1)}</span>
+                    <span className="text-[12.5px] text-ink-2 flex-1">{o.summary}</span>
+                    <button type="button" onClick={() => dispatchOrder(o.order_id)} disabled={!!busy} className="btn">Send to fleet</button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="panel">
+                <EmptyState compact icon="route" title="No collection orders">
+                  Plan orders to turn today&apos;s coverage gaps into recording requests for the fleet.
+                </EmptyState>
+              </div>
+            )}
+          </Group>
+
+          {/* Documentation agent */}
+          <Group title="Documents">
+            <ActionCard title="Draft a document" desc="Write a dataset datasheet or this week's quality report from the platform's own numbers."
+              more="The datasheet covers composition, coverage and known gaps. The weekly report covers precision, drift and model promotions. Model cards are drafted per model through the API."
+              action={<>
+                <button type="button" onClick={() => genDoc("datasheet")} disabled={!!busy} className="btn">{busy === "doc" ? "Drafting..." : "Datasheet"}</button>
+                <button type="button" onClick={() => genDoc("weekly")} disabled={!!busy} className="btn">Weekly report</button>
+              </>}>
+              {doc ? <pre className="max-h-64 overflow-auto no-scrollbar bg-bg-2 rounded p-3 text-[12px] text-ink-2 whitespace-pre-wrap">{doc.slice(0, 4000)}</pre> : null}
+            </ActionCard>
+          </Group>
+
           {/* What a past relabel run did, grouped by the decision rather than by the object. Fifty
               thousand individual rewrites are not reviewable; the hundred decisions behind them are. */}
           <ContaminationPanel
             onInspect={(l) => { setLineage(l); setSubject(null); setCursor(-1); }}
             inspecting={lineage ? `${lineage.from_name}->${lineage.to_name}` : null} />
-
-          {/* Fix queue */}
-          <div className="panel">
-            <div className="flex items-center gap-3 px-4 py-3 border-b hairline">
-              <div className="text-ink font-medium">Fix queue</div>
-              <div className="text-ink-3 text-xs">likely-wrong labels, worst first</div>
-              <div className="ml-auto text-[11px] text-ink-3">{Object.entries(summary).map(([k, n]) => `${k}:${n}`).join("  ")}</div>
-            </div>
-            {loading && !queue.length ? <div className="p-6"><Spinner label="loading" /></div> : queue.length ? (
-              <table className="w-full text-sm">
-                <thead className="text-ink-3 text-[10.5px] font-medium uppercase tracking-[0.06em] border-b hairline">
-                  <tr><th className="text-left font-normal px-3 py-2 w-28">kind</th><th className="text-left font-normal px-3 py-2 w-16">score</th><th className="text-left font-normal px-3 py-2">why</th><th className="px-3 py-2 w-40"></th></tr>
-                </thead>
-                <tbody>
-                  {queue.map((c, i) => (
-                    <tr key={c.candidate_id} onClick={() => open(c, i)}
-                      title="show the object this is about"
-                      className={`border-b hairline cursor-pointer ${i === cursor ? "bg-accent/10" : "hover:bg-bg-2"}`}>
-                      <td className="px-3 py-2"><span className="text-[11px] border border-line px-1.5 py-0.5 rounded text-ink-2">{KIND_LABEL[c.kind] || c.kind}</span></td>
-                      <td className="px-3 py-2 font-mono text-ink-3">{c.score.toFixed(2)}</td>
-                      <td className="px-3 py-2 text-ink-2 text-xs">{reason(c)}{c.proposed_label?.class_name ? <span className="text-pass"> → {c.proposed_label.class_name}</span> : null}</td>
-                      <td className="px-3 py-2 text-right text-[11px]">
-                        {/* stopPropagation: acting on a row must not also re-open it, which would refetch
-                            the object that just left the queue. */}
-                        <button onClick={(e) => { e.stopPropagation(); act(c, "confirm"); }} className="border border-pass text-pass px-1.5 py-0.5 rounded mr-1"><T k="action.confirm_short">confirm</T></button>
-                        <button onClick={(e) => { e.stopPropagation(); act(c, "dismiss"); }} className="border border-line text-ink-3 px-1.5 py-0.5 rounded hover:text-ink"><T k="action.dismiss">dismiss</T></button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : <div className="px-4 py-10 text-center text-ink-3 text-sm">Fix queue is empty. Run an error sweep to scan the corpus.</div>}
-            {queue.length > 0 && (
-              <div className="border-t hairline px-4 py-1.5 text-[11px] text-ink-3">
-                <span className="text-ink-2">j</span>/<span className="text-ink-2">k</span> move
-                <span className="mx-2">·</span>
-                <span className="text-pass">c</span> confirm
-                <span className="mx-2">·</span>
-                <span className="text-block">d</span> dismiss
-                <span className="mx-2">·</span>
-                <span className="text-ink-2">esc</span> close
-              </div>
-            )}
-          </div>
         </div>
         </div>
         {/* One rail, three things it can be showing: the result of the last action, the objects behind a
             lineage, or the evidence for one object. They are exclusive because they answer the same
             question - "what is this about" - and stacking them would bury whichever you asked for last. */}
-        <Inspector title={result ? "result" : lineage ? "lineage" : "evidence"} side="right" width="w-[26rem]"
+        <Inspector title={result ? "Result" : lineage ? "Objects changed" : "Evidence"} side="right" width="w-[26rem]"
           meta={result ? undefined : lineage ? undefined
             : (cursor >= 0 && queue.length ? `${cursor + 1}/${queue.length}` : undefined)}>
           {result ? (
@@ -771,8 +833,8 @@ export default function AgentConsole() {
                 selectedId={subject?.objectId ?? null}
                 onPick={(objectId) => setSubject({
                   objectId,
-                  text: `Moved by a past relabel run: ${lineage.from_name} -> ${lineage.to_name}.`,
-                  kind: "relabel lineage",
+                  text: `Moved by a past relabel run: ${humanize(lineage.from_name)} → ${humanize(lineage.to_name).toLowerCase()}.`,
+                  kind: "Past relabel",
                   // No suggestion button here. Reverting the whole lineage is the row's own action and
                   // is a bulk decision; offering a per-object relabel beside it would be two ways to
                   // undo the same thing that do not agree on scope.
@@ -784,10 +846,10 @@ export default function AgentConsole() {
             subject={subject}
             onResolved={() => load()}
             actions={cursor >= 0 && queue[cursor] ? [
-              { key: "confirm", label: "confirm", tone: "accept" as const,
+              { key: "confirm", label: "Confirm", tone: "accept" as const,
                 hint: "the label is wrong; apply the proposed class and mark it reviewed",
                 run: async () => { await api.errorConfirm(queue[cursor].candidate_id); void invalidate("agentErrorQueue", REVIEW_QUEUE_KEY); } },
-              { key: "dismiss", label: "dismiss", tone: "reject" as const,
+              { key: "dismiss", label: "Dismiss", tone: "reject" as const,
                 hint: "the label is fine; this candidate was a false alarm",
                 run: async () => { await api.errorDismiss(queue[cursor].candidate_id); void invalidate("agentErrorQueue", REVIEW_QUEUE_KEY); } },
             ] : []}

@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import { T } from "@/lib/i18n";
+import EmptyState from "@/components/ui/EmptyState";
 import { useRouter } from "next/navigation";
 import { api, humanizeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { invalidate, useQuery } from "@/lib/useQuery";
+import { humanize } from "@/lib/format";
 
 // What a past relabel run did to the corpus, grouped by the decision rather than by the object.
 //
@@ -89,51 +91,54 @@ export default function ContaminationPanel({ onInspect, inspecting }: {
 
   return (
     <div className="panel">
-      <div className="flex items-center gap-3 px-4 py-3 border-b hairline">
-        <div className="text-ink font-medium">Relabel lineages</div>
-        <div className="text-ink-3 text-xs">what a past run changed, grouped by the decision</div>
-        <label className="ml-auto flex items-center gap-1.5 text-[12px] text-ink-3 cursor-pointer">
+      <div className="panel-head flex-wrap">
+        <h2 className="section-title">Past relabels, grouped</h2>
+        <span className="text-[12px] text-ink-3">Every class change a past relabel run made, one row per from-to pair</span>
+        <label className="ml-auto flex items-center gap-1.5 text-[12px] text-ink-2 cursor-pointer">
           <input type="checkbox" checked={refusedOnly} className="accent-accent"
             onChange={(e) => setRefusedOnly(e.target.checked)} />
-          only ones refused today
+          Only changes the class rules now forbid
         </label>
       </div>
 
       {summary && (
-        <div className="px-4 py-2 border-b hairline text-[12px] text-ink-3">
+        <div className="px-4 py-2.5 border-b hairline text-[12.5px] text-ink-3">
           {/* The work first, the history second. Leading with what the run once did meant the board still
               read 3,057 outstanding immediately after 3,010 of them had been put right. */}
           {summary.refused_outstanding > 0 ? (
             <span className="text-block">
-              {summary.refused_outstanding.toLocaleString()} objects still carry a class the ontology refuses
+              {summary.refused_outstanding.toLocaleString()} objects still carry a class the rules forbid
             </span>
           ) : (
-            <span className="text-pass">nothing outstanding</span>
+            <span className="text-pass">Nothing left to fix</span>
           )}
           <span className="text-ink-3">
-            {" "}· {summary.objects.toLocaleString()} moved in all, across {summary.lineages} lineages
+            {" "}· {summary.objects.toLocaleString()} moved in all, across {summary.lineages} class pairs
           </span>
           {/* When the filter is on, the table below is a subset and the sentence above is about the whole
               corpus. Saying both is the only way "in all" stays true: it used to be computed on the
               filtered list, so it described the subset while claiming to describe everything. */}
           {refusedOnly && shown && shown.lineages !== summary.lineages && (
             <span className="text-ink-3">
-              {" "}· showing {shown.lineages} refused ({shown.objects.toLocaleString()} objects)
+              {" "}· showing the {shown.lineages} forbidden ({shown.objects.toLocaleString()} objects)
             </span>
           )}
         </div>
       )}
 
-      {err ? <div className="px-4 py-6 text-center text-block text-xs font-mono">{err}</div>
-        : loading ? <div className="px-4 py-6 text-center text-ink-3 text-xs font-mono">loading...</div>
-        : rows.length ? (
-          <table className="w-full text-sm">
-            <thead className="text-ink-3 text-[10.5px] font-medium uppercase tracking-[0.06em] border-b hairline">
+      {err ? <div role="alert" className="px-4 py-6 text-center text-block text-[12.5px]">Could not load: {err}</div>
+        : loading ? (
+          <div className="px-4 py-4 space-y-2.5" role="status" aria-label="loading">
+            {[60, 45, 70].map((w) => <span key={w} className="skeleton h-3 block" style={{ width: `${w}%` }} />)}
+          </div>
+        ) : rows.length ? (
+          <table className="data-table">
+            <thead>
               <tr>
-                <th className="text-left font-normal px-3 py-2 w-28">still wrong</th>
-                <th className="text-left font-normal px-3 py-2">move</th>
-                <th className="text-left font-normal px-3 py-2">why it would be refused</th>
-                <th className="px-3 py-2 w-40"></th>
+                <th className="w-32">Still to fix</th>
+                <th>Change</th>
+                <th>Why it is forbidden</th>
+                <th className="w-44"></th>
               </tr>
             </thead>
             <tbody>
@@ -141,33 +146,33 @@ export default function ContaminationPanel({ onInspect, inspecting }: {
                 <tr key={`${l.from_name}->${l.to_name}`}
                   onClick={onInspect ? () => onInspect(l) : undefined}
                   title={onInspect ? "show the objects this move produced" : undefined}
-                  className={`border-b hairline ${onInspect ? "cursor-pointer" : ""} ${
-                    inspecting === `${l.from_name}->${l.to_name}` ? "bg-accent/10" : "hover:bg-bg-2"}`}>
-                  <td className="px-3 py-2 font-mono">
+                  className={`${onInspect ? "cursor-pointer" : ""} ${
+                    inspecting === `${l.from_name}->${l.to_name}` ? "bg-accent/10" : ""}`}>
+                  <td className="tabular-nums">
                     <span className={l.outstanding ? "text-ink-2" : "text-pass"}>
                       {l.outstanding.toLocaleString()}
                     </span>
-                    <span className="text-ink-3/60"> / {l.count.toLocaleString()}</span>
+                    <span className="text-ink-3"> of {l.count.toLocaleString()}</span>
                   </td>
-                  <td className="px-3 py-2 text-[12px]">
-                    <span className="text-ink-3">{l.from_name}</span>
+                  <td>
+                    <span className="text-ink-3">{humanize(l.from_name)}</span>
                     <span className="text-ink-3"> → </span>
-                    <span className={l.refused_now ? "text-block" : "text-ink-2"}>{l.to_name}</span>
+                    <span className={l.refused_now ? "text-block" : "text-ink-2"}>{humanize(l.to_name)}</span>
                   </td>
-                  <td className="px-3 py-2 text-ink-3 text-xs">{l.reason ?? "-"}</td>
-                  <td className="px-3 py-2 text-right text-[11px] whitespace-nowrap">
+                  <td className="text-ink-3">{l.reason ?? "-"}</td>
+                  <td className="text-right whitespace-nowrap space-x-1.5">
                     {l.examples[0] && (
-                      <button onClick={(e) => { e.stopPropagation(); open(l); }}
+                      <button type="button" onClick={(e) => { e.stopPropagation(); open(l); }}
                         title="open an example, where one correction can be applied to the rest"
-                        className="border border-line px-1.5 py-0.5 rounded text-ink-3 hover:border-accent">
-                        <T k="action.open">open</T>
+                        className="btn">
+                        <T k="action.open">Open</T>
                       </button>
                     )}
                     {l.refused_now && l.outstanding > 0 && (
-                      <button onClick={(e) => { e.stopPropagation(); revert(l); }} disabled={busy !== null}
+                      <button type="button" onClick={(e) => { e.stopPropagation(); revert(l); }} disabled={busy !== null}
                         title={`put the remaining ${l.outstanding} back to ${l.from_name} and route them to review`}
-                        className="ml-1 border border-line px-1.5 py-0.5 rounded text-ink-3 hover:border-block hover:text-block disabled:opacity-40">
-                        {busy === `${l.from_name}->${l.to_name}` ? "..." : "revert"}
+                        className="btn btn-danger">
+                        {busy === `${l.from_name}->${l.to_name}` ? "Undoing..." : "Undo"}
                       </button>
                     )}
                   </td>
@@ -176,11 +181,11 @@ export default function ContaminationPanel({ onInspect, inspecting }: {
             </tbody>
           </table>
         ) : (
-          <div className="px-4 py-10 text-center text-ink-3 text-sm">
+          <EmptyState compact icon="check" title={refusedOnly ? "No forbidden changes" : "No relabels yet"}>
             {refusedOnly
-              ? "No relabel lineage would be refused by the ontology guard."
-              : "No relabel run has rewritten this corpus."}
-          </div>
+              ? "Every class change a past relabel made is allowed by today's class rules."
+              : "No relabel run has changed any labels in this corpus."}
+          </EmptyState>
         )}
     </div>
   );

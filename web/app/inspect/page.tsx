@@ -5,13 +5,17 @@ import { api } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { Spinner } from "@/components/Spinner";
 import { useQuery } from "@/lib/useQuery";
+import LoadState from "@/components/shell/LoadState";
+import EmptyState from "@/components/ui/EmptyState";
+import { Badge } from "@/components/ui/kit";
+import { duration, plural, shortId } from "@/lib/format";
 
 // The Session Inspector home: pick an MCAP session to inspect. The health verdict chip answers "did my
 // recording work" before a single panel is opened.
 
-type Row = { session_id: string; vehicle_id: string; city: string | null; start_ts_ns: number; end_ts_ns: number; verdict: string | null };
+type Row = { session_id: string; vehicle_id: string; city: string | null; start_ts_ns: number; end_ts_ns: number; verdict: string | null; has_mcap?: boolean; n_clouds?: number };
 
-const V: Record<string, string> = { pass: "text-pass border-pass", warn: "text-warn border-warn", fail: "text-block border-block" };
+const V: Record<string, "pass" | "warn" | "block"> = { pass: "pass", warn: "warn", fail: "block" };
 
 export default function InspectorHome() {
   const router = useRouter();
@@ -21,27 +25,60 @@ export default function InspectorHome() {
   const loading = q.loading;
 
   return (
-    <PageShell active="INSPECT" title="Session Inspector" subtitle="MCAP" right={loading ? <Spinner label="loading" /> : <span className="text-[12.5px] text-ink-3">{rows.length} sessions</span>}>
-      <div className="h-full overflow-auto">
-        <div className="max-w-4xl mx-auto p-6">
-          <p className="text-ink-3 text-sm mb-4 max-w-2xl">Foxglove-class MCAP inspection inside LabeloxAV: one ts_ns clock across camera, IMU, CAN, GPS, and raw messages, with annotation overlays and session-health verdicts. Open any session below, or use the Lichtblick escape hatch for the long tail.</p>
-          {rows.length === 0 && !loading ? (
-            <div className="panel p-6 text-center text-ink-3 text-sm">No MCAP sessions yet. Ingest an .mcap on the Import page.</div>
-          ) : (
-            <div className="panel divide-y divide-line/50">
-              {rows.map((r) => (
-                <button key={r.session_id} onClick={() => router.push(`/inspect/${r.session_id}`)}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-bg-2 text-left">
-                  <span className="text-[12.5px] text-ink-2">{r.vehicle_id}</span>
-                  <span className="text-[11px] text-ink-3">{r.city || ""}</span>
-                  <span className="text-[10.5px] text-ink-3/70 truncate">{r.session_id}</span>
-                  {r.verdict && <span className={`ml-auto border px-1.5 rounded uppercase text-[11px] ${V[r.verdict] || "border-line text-ink-3"}`}>{r.verdict}</span>}
-                  <span className={r.verdict ? "text-[11px] text-accent" : "ml-auto text-[11px] text-accent"}>inspect →</span>
-                </button>
-              ))}
+    <PageShell active="INSPECT" title="Session Inspector"
+      subtitle="Play back a recording on one clock: camera, IMU, CAN, GPS, point clouds and raw messages, with labels on top."
+      right={loading ? <Spinner label="Loading" /> : <span className="text-[12.5px] text-ink-3">{plural(rows.length, "session")}</span>}>
+      <div className="page-wrap-narrow">
+        {q.error ? (
+          <LoadState error={q.error} onRetry={() => void q.reload()} />
+        ) : loading && rows.length === 0 ? (
+          <LoadState loading rows={8} />
+        ) : rows.length === 0 ? (
+          <div className="panel">
+            <EmptyState icon="grid" title="No sessions to inspect yet"
+              action={<a href="/import" className="btn btn-primary">Import a recording</a>}>
+              A session appears here once it has an MCAP recording or point clouds. Import an .mcap file to add one.
+            </EmptyState>
+          </div>
+        ) : (
+          <section className="panel overflow-hidden">
+            <div className="panel-head">
+              <h2 className="section-title">Sessions</h2>
             </div>
-          )}
-        </div>
+            <ul className="divide-y divide-line/60">
+              {rows.map((r) => {
+                const secs = (r.end_ts_ns - r.start_ts_ns) / 1e9;
+                const what = [
+                  r.has_mcap ? "MCAP recording" : null,
+                  r.n_clouds ? plural(r.n_clouds, "point cloud") : null,
+                ].filter(Boolean).join(" · ");
+                return (
+                  <li key={r.session_id}>
+                    <button onClick={() => router.push(`/inspect/${r.session_id}`)}
+                      className="w-full flex items-center gap-4 px-4 py-3 hover:bg-head/60 text-left group">
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline gap-2">
+                          <span className="text-[13px] text-ink font-medium">{r.vehicle_id}</span>
+                          {r.city && <span className="text-[12px] text-ink-3">{r.city}</span>}
+                        </span>
+                        <span className="block text-[11.5px] text-ink-3 mt-0.5 truncate">
+                          {[what, Number.isFinite(secs) && secs > 0 ? duration(secs) : null].filter(Boolean).join(" · ")}
+                          <span className="font-mono ml-2 text-ink-3/80">{shortId(r.session_id)}</span>
+                        </span>
+                      </span>
+                      {r.verdict && (
+                        <Badge state={V[r.verdict] ?? "muted"}>
+                          {r.verdict === "fail" ? "Health check failed" : r.verdict === "warn" ? "Health warning" : "Healthy"}
+                        </Badge>
+                      )}
+                      <span className="text-[12.5px] link shrink-0">Inspect &rarr;</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
       </div>
     </PageShell>
   );

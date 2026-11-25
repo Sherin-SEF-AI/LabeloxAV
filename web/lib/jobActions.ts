@@ -14,7 +14,7 @@ import type { JobRow } from "./types";
 
 // Terminal, in the sense that nothing more will happen. Cancelling one would rewrite history rather than
 // stop work.
-const FINISHED = new Set(["done", "error", "canceled", "cancelled"]);
+const FINISHED = new Set(["done", "completed", "error", "failed", "canceled", "cancelled"]);
 
 // Training is not in the unified cancel route: it is drained by a separate worker holding a GPU lease, so it
 // cancels through its own endpoint, which asks the worker rather than writing the row.

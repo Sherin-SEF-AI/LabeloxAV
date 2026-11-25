@@ -3,7 +3,7 @@ import { objectSource, sessionOrigin } from "@/lib/source";
 
 export function Badge({ label, cls }: { label: string; cls: string }) {
   return (
-    <span className={`inline-block px-1.5 py-[1px] border rounded-sm text-[9px] font-mono uppercase tracking-wide leading-tight ${cls}`}>
+    <span className={`inline-block px-1.5 py-[1px] border rounded-sm text-[10.5px] font-mono uppercase tracking-wide leading-tight ${cls}`}>
       {label}
     </span>
   );

@@ -30,7 +30,7 @@ export default function CuboidPanel({
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 text-[12px]">
       <div className="flex items-center justify-between">
-        <span className="text-ink-3 uppercase text-[10px]">cuboids ({cuboids.length})</span>
+        <span className="text-ink-3 uppercase text-[10.5px]">cuboids ({cuboids.length})</span>
         <button onClick={onAdd} disabled={!hasCloud} className="border border-line text-ink-3 px-1.5 py-0.5 hover:border-accent disabled:opacity-40">+ box</button>
       </div>
       <button onClick={onAiLift} disabled={!hasCloud} className="w-full border border-line text-ink-2 px-2 py-1 hover:border-accent disabled:opacity-40">AI lift 2D to 3D</button>
@@ -44,7 +44,7 @@ export default function CuboidPanel({
       {!cuboids.length && <div className="text-ink-3 py-4 text-center">{message ?? "no cuboids. lift or + box."}</div>}
       {sel && (
         <div className="border-t hairline pt-2 space-y-2">
-          <div className="text-ink-3 uppercase text-[10px]">selected ({sel.source})</div>
+          <div className="text-ink-3 uppercase text-[10.5px]">selected ({sel.source})</div>
           <select value={sel.class_id}
             onChange={(e) => { const cid = Number(e.target.value); onPatch(sel.object_3d_id, { class_id: cid, class_name: allClasses.find((x) => x.id === cid)?.name }); onSave(sel.object_3d_id, { class_id: cid }); }}
             className="w-full bg-bg border border-line px-1 py-0.5 text-ink">

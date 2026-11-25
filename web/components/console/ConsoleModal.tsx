@@ -120,7 +120,7 @@ export default function ConsoleModal() {
           <div className="flex-1 overflow-auto px-2 pb-2 space-y-3">
             {groups.map((g) => (
               <div key={g.group}>
-                <div className="px-2 py-1 font-display font-semibold text-[10px] uppercase tracking-wider text-ink-3">
+                <div className="px-2 py-1 label-caps">
                   {g.group}
                 </div>
                 {g.items.map((s) => (
@@ -193,7 +193,7 @@ export default function ConsoleModal() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="font-display font-semibold text-[11px] uppercase tracking-wider text-ink-3 mb-2">
+      <div className="section-title mb-2">
         {title}
       </div>
       {children}

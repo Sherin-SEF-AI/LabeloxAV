@@ -22,24 +22,27 @@ function Section({ title, children, hint }: {
 }) {
   return (
     <section className="panel">
-      <div className="border-b hairline px-3 py-2">
-        <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{title}</div>
-        {hint && <div className="text-[11px] text-ink-3">{hint}</div>}
+      <div className="panel-head"><h2 className="section-title">{title}</h2></div>
+      <div className="p-4 space-y-3">
+        {hint && <p className="section-desc">{hint}</p>}
+        {children}
       </div>
-      <div className="p-3 space-y-2">{children}</div>
     </section>
   );
 }
 
 function Field({ label, ...rest }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
-    <label className="block space-y-1">
-      <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</span>
-      <input {...rest}
-        className="w-full max-w-sm bg-bg border border-line px-2 py-1 text-[12.5px] text-ink
-                   focus:border-accent outline-none" />
+    <label className="block space-y-1.5">
+      <span className="block text-[12.5px] text-ink-2">{label}</span>
+      <input {...rest} className="field w-full max-w-sm" />
     </label>
   );
+}
+
+function Pill({ tone, children }: { tone: "pass" | "warn" | "muted"; children: React.ReactNode }) {
+  const cls = tone === "pass" ? "border-pass/40 text-pass" : tone === "warn" ? "border-warn/40 text-warn" : "border-line text-ink-3";
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[12px] ${cls}`}>{children}</span>;
 }
 
 export default function ProfilePage() {
@@ -118,115 +121,115 @@ export default function ProfilePage() {
 
   return (
     <PageShell active="PROFILE" title="Your account"
-      subtitle="feedback on your work, password, second factor, and sessions">
-      <div className="p-4 space-y-4 max-w-3xl">
-        {/* Feedback on your own labels. Issues were creatable in the editor and readable nowhere, and the
-            notification they raise is addressed to the reviewer rota rather than to the person who drew
-            the label - so this is where an annotator can actually go and look. */}
-        <MyIssues />
-
-        {/* Four locales were implemented and reachable only from inside the onboarding tour, which a user
-            sees once. A setting you can only get to from a thing you have already dismissed is not a
-            setting. */}
-        <section className="panel p-3">
-          <LocalePicker />
-        </section>
+      subtitle="Feedback on your work, password, two-factor authentication and sessions">
+      <div className="page-wrap-narrow space-y-4">
         {profile && (
-          <section className="panel p-3 flex items-center gap-4 flex-wrap">
-            <div>
-              <div className="font-mono text-[13px] text-ink">{profile.name}</div>
-              <div className="text-[11px] text-ink-3">
-                {profile.role}{profile.email ? ` · ${profile.email}` : ""}
+          <section className="panel px-4 py-3.5 flex items-center gap-3.5 flex-wrap">
+            <span className="w-10 h-10 rounded-full bg-accent/15 text-accent-2 flex items-center justify-center text-[16px] font-semibold uppercase" aria-hidden>
+              {profile.name.slice(0, 1)}
+            </span>
+            <div className="min-w-0">
+              <div className="text-[15px] font-semibold text-ink">{profile.name}</div>
+              <div className="text-[12.5px] text-ink-3">
+                <span className="capitalize">{profile.role}</span>{profile.email ? ` · ${profile.email}` : ""}
               </div>
             </div>
-            <div className="ml-auto flex gap-2 text-[11px]">
-              <span className={profile.has_password ? "text-pass" : "text-ink-3"}>
-                {profile.has_password ? "password set" : "no password"}
-              </span>
-              <span className={profile.mfa_enabled ? "text-pass" : "text-warn"}>
-                {profile.mfa_enabled ? `2FA on · ${profile.recovery_codes_left} recovery codes left` : "2FA off"}
-              </span>
-              {profile.sso && <span className="text-ink-3">SSO via {profile.sso_issuer}</span>}
+            <div className="ml-auto flex gap-2 flex-wrap">
+              <Pill tone={profile.has_password ? "pass" : "muted"}>
+                {profile.has_password ? "Password set" : "No password"}
+              </Pill>
+              <Pill tone={profile.mfa_enabled ? "pass" : "warn"}>
+                {profile.mfa_enabled ? `Two-factor on · ${profile.recovery_codes_left} recovery codes left` : "Two-factor off"}
+              </Pill>
+              {profile.sso && <Pill tone="muted">SSO via {profile.sso_issuer}</Pill>}
             </div>
           </section>
         )}
 
         {recovery && (
-          <Section title="your recovery codes" hint="shown once, never again">
-            <div className="grid grid-cols-2 gap-1 text-[12.5px] text-ink select-all max-w-md">
-              {recovery.map((c) => <div key={c} className="border border-line px-2 py-1">{c}</div>)}
+          <Section title="Your recovery codes" hint="Shown once and never again. Each code signs you in once if you lose your authenticator.">
+            <div className="grid grid-cols-2 gap-1.5 font-mono text-[13px] text-ink select-all max-w-md">
+              {recovery.map((c) => <div key={c} className="rounded border border-line bg-bg-2 px-2.5 py-1.5">{c}</div>)}
             </div>
-            <button onClick={() => setRecovery(null)}
-              className="border border-line px-2 py-0.5 text-[12px] text-ink-2 hover:border-accent">
+            <button type="button" onClick={() => setRecovery(null)} className="btn btn-primary">
               I have saved them
             </button>
           </Section>
         )}
 
-        <Section title="password"
-          hint="changing it signs out every other session, which is the point of changing it">
+        {/* Feedback on your own labels. Issues were creatable in the editor and readable nowhere, and the
+            notification they raise is addressed to the reviewer rota rather than to the person who drew
+            the label - so this is where an annotator can actually go and look. */}
+        <MyIssues />
+
+        <Section title="Password"
+          hint="Changing it signs out every other session, which is the point of changing it.">
           {profile?.has_password && (
-            <Field label="current password" type="password" value={current} autoComplete="current-password"
+            <Field label="Current password" type="password" value={current} autoComplete="current-password"
               onChange={(e) => setCurrent(e.target.value)} />
           )}
-          <Field label="new password" type="password" value={next} autoComplete="new-password"
+          <Field label="New password" type="password" value={next} autoComplete="new-password"
             onChange={(e) => setNext(e.target.value)} />
-          <div className="text-[11px] text-ink-3">
-            at least 12 characters; length matters more than symbols
-          </div>
-          <button onClick={changePassword} disabled={busy || !next}
-            className="border border-line px-2 py-0.5 text-[12px] text-ink-2
-                       hover:border-accent disabled:opacity-40">
-            {profile?.has_password ? "change password" : "set a password"}
+          <p className="text-[12px] text-ink-3">
+            At least 12 characters. Length matters more than symbols.
+          </p>
+          <button type="button" onClick={changePassword} disabled={busy || !next} className="btn btn-primary">
+            {profile?.has_password ? "Change password" : "Set a password"}
           </button>
         </Section>
 
-        <Section title="two-factor authentication"
-          hint="an authenticator app code in addition to your password">
+        <Section title="Two-factor authentication"
+          hint="A code from an authenticator app, asked for in addition to your password.">
           {profile?.mfa_enabled ? (
             <>
-              <div className="text-[12px] text-pass">enrolled</div>
-              <Field label="password (to remove it)" type="password" value={disablePw}
+              <div className="flex items-center gap-2 text-[12.5px] text-pass">
+                <span className="w-1.5 h-1.5 rounded-full bg-pass" aria-hidden />Turned on
+              </div>
+              <Field label="Password, to turn it off" type="password" value={disablePw}
                 autoComplete="current-password" onChange={(e) => setDisablePw(e.target.value)} />
-              <button onClick={disableMfa} disabled={busy || !disablePw}
-                className="border border-line px-2 py-0.5 text-[12px] text-ink-3
-                           hover:text-block hover:border-block disabled:opacity-40">
-                remove two-factor authentication
+              <button type="button" onClick={disableMfa} disabled={busy || !disablePw} className="btn btn-danger">
+                Remove two-factor authentication
               </button>
             </>
           ) : mfaSecret ? (
             <>
-              <div className="text-[11px] text-ink-3">
-                Add this to your authenticator, then enter the code it shows.
-              </div>
-              <div className="text-[12.5px] text-ink border border-line px-2 py-1 max-w-sm break-all select-all">
+              <p className="text-[12.5px] text-ink-2">
+                Add this key to your authenticator app, then enter the six-digit code it shows.
+              </p>
+              <div className="font-mono text-[13px] text-ink rounded border border-line bg-bg-2 px-2.5 py-1.5 max-w-sm break-all select-all">
                 {mfaSecret}
               </div>
-              <div className="text-[10.5px] text-ink-3 break-all max-w-lg">{mfaUri}</div>
-              <Field label="code" value={mfaCode} inputMode="numeric" autoComplete="one-time-code"
+              {mfaUri && (
+                <details className="text-[12px] text-ink-3 max-w-lg">
+                  <summary className="cursor-pointer hover:text-ink-2">Setup link, for apps that accept one</summary>
+                  <div className="mt-1.5 font-mono text-[11.5px] break-all select-all">{mfaUri}</div>
+                </details>
+              )}
+              <Field label="Code" value={mfaCode} inputMode="numeric" autoComplete="one-time-code"
                 onChange={(e) => setMfaCode(e.target.value)} />
-              <button onClick={confirmMfa} disabled={busy || mfaCode.trim().length < 6}
-                className="border border-accent px-2 py-0.5 text-[12px] text-accent
-                           hover:bg-accent/10 disabled:opacity-40">
-                activate
+              <button type="button" onClick={confirmMfa} disabled={busy || mfaCode.trim().length < 6} className="btn btn-primary">
+                Turn on
               </button>
             </>
           ) : (
-            <button onClick={startMfa} disabled={busy}
-              className="border border-line px-2 py-0.5 text-[12px] text-ink-2
-                         hover:border-accent disabled:opacity-40">
-              set up two-factor authentication
+            <button type="button" onClick={startMfa} disabled={busy} className="btn btn-primary">
+              Set up two-factor authentication
             </button>
           )}
         </Section>
 
-        <Section title="sessions"
-          hint="a token is stateless, so this is how a lost or stolen one is actually taken away">
-          <button onClick={revoke} disabled={busy}
-            className="border border-line px-2 py-0.5 text-[12px] text-ink-2
-                       hover:border-accent disabled:opacity-40">
-            sign out everywhere else
+        <Section title="Sessions"
+          hint="Signs out every other browser and device you are signed in on. Use it if a device is lost or a sign-in may have leaked.">
+          <button type="button" onClick={revoke} disabled={busy} className="btn">
+            Sign out everywhere else
           </button>
+        </Section>
+
+        {/* Four locales were implemented and reachable only from inside the onboarding tour, which a user
+            sees once. A setting you can only get to from a thing you have already dismissed is not a
+            setting. */}
+        <Section title="Language">
+          <LocalePicker />
         </Section>
       </div>
     </PageShell>

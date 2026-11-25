@@ -16,19 +16,35 @@ import EmbeddingMap, { type ColorBy } from "@/components/explore/EmbeddingMap";
 import FacetRail from "@/components/explore/FacetRail";
 import { useQueryParam } from "@/lib/useQueryParam";
 import { invalidate, useQuery } from "@/lib/useQuery";
+import EmptyState from "@/components/ui/EmptyState";
+import { humanize, num, shortId } from "@/lib/format";
 
 // The Explore workspace: see the corpus as structure, cut it by facets, lasso what looks alike, and act on
 // the selection in bulk. The filter you build here IS a saved view and an export spec, because it is the same
 // predicate a CurationSlice stores.
 
 const COLOR_MODES: { key: ColorBy; label: string }[] = [
-  { key: "cluster", label: "cluster" },
-  { key: "class", label: "class" },
-  { key: "state", label: "state" },
-  { key: "source", label: "source" },
-  { key: "conf", label: "conf" },
-  { key: "tag", label: "tag" },
+  { key: "cluster", label: "Cluster" },
+  { key: "class", label: "Class" },
+  { key: "state", label: "State" },
+  { key: "source", label: "Source" },
+  { key: "conf", label: "Confidence" },
+  { key: "tag", label: "Tag" },
 ];
+
+// A saved view's predicate as a sentence fragment for its tooltip, rather than the raw JSON it is stored as.
+function describePredicate(p: ExplorePredicate | null | undefined): string {
+  if (!p) return "Everything";
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(p)) {
+    if (v == null) continue;
+    if (k === "object_ids" && Array.isArray(v)) { parts.push(`${v.length} lassoed objects`); continue; }
+    if (k === "min_conf" || k === "max_conf") continue;
+    parts.push(`${humanize(k)}: ${Array.isArray(v) ? v.join(", ") : String(v)}`);
+  }
+  if (p.min_conf != null || p.max_conf != null) parts.push(`Confidence ${p.min_conf ?? 0}-${p.max_conf ?? 1}`);
+  return parts.length ? parts.join(" · ") : "Everything";
+}
 
 export default function ExplorePage() {
   // useSearchParams (via useQueryParam) forces a CSR bailout Next requires be under Suspense.
@@ -111,14 +127,14 @@ function ExploreBody() {
 
   const applyTags = async (remove: boolean) => {
     const tags = tagText.split(",").map((t) => t.trim()).filter(Boolean);
-    if (!tags.length) { flash("type a tag first"); return; }
+    if (!tags.length) { flash("Type a tag first"); return; }
     setBusy("tag");
     try {
       const r = await api.exploreTag({
         level: "object", predicate: actionPredicate(),
         add: remove ? [] : tags, remove: remove ? tags : [],
       });
-      flash(`${remove ? "removed" : "tagged"} ${r.matched} objects`);
+      flash(`${remove ? "Removed the tag from" : "Tagged"} ${num(r.matched)} objects`);
       setTagText("");
       // Tags are a facet and a point attribute, so every cached cut and layout is stale, not only the
       // ones on screen.
@@ -127,19 +143,19 @@ function ExploreBody() {
   };
 
   const saveView = async () => {
-    const name = window.prompt("save this filter as a view named:");
+    const name = window.prompt("Save this filter as a view named:");
     if (!name) return;
     setBusy("view");
     try {
       await api.exploreSaveView(name, actionPredicate());
       await viewsQ.reload();
-      flash(`saved view "${name}"`);
+      flash(`Saved view "${name}"`);
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(null); }
   };
 
   const fitProjection = async () => {
     setBusy("fit");
-    flash("fitting projection, this can take a minute on a large corpus...");
+    flash("Fitting the projection; this can take a minute on a large corpus...");
     try {
       const r = await api.exploreFitProjection({
         kind: "object", space: "dino",
@@ -148,19 +164,19 @@ function ExploreBody() {
       if (r.error) { flash(r.error); return; }
       await projQ.reload();
       if (r.projection_id) setProjId(r.projection_id);
-      flash(`fitted ${r.n} points with ${r.method}${r.clusters ? `, ${r.clusters} clusters` : ""}`);
+      flash(`Fitted ${num(r.n)} points with ${(r.method ?? "").toUpperCase()}${r.clusters ? `, ${r.clusters} clusters` : ""}`);
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(null); }
   };
 
   const sendToReview = async () => {
     const ids = Array.from(selected);
-    if (!ids.length) { flash("lasso a region first"); return; }
+    if (!ids.length) { flash("Lasso a region on the map first"); return; }
     setBusy("review");
     try {
       // Reuse the existing bulk-review path rather than inventing a second one. "confirm" with state=review
       // routes the selection into the review queue without changing any label.
       await api.bulkReview(ids, "confirm", undefined, "review");
-      flash(`sent ${ids.length} objects to review`);
+      flash(`Sent ${num(ids.length)} objects to review`);
       // Their state changed, which is a facet here and a row in every review queue.
       void invalidate("exploreFacets", "exploreProjectionPoints", "triage", "/api/home");
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(null); }
@@ -168,116 +184,162 @@ function ExploreBody() {
 
   const selCount = selected.size || facets?.total || 0;
 
+  const filtered = Object.keys(predicate).length > 0;
+  const pointsLoading = !!projId && pointsQ.loading;
+  const mapEmpty = projQ.loading || pointsLoading ? (
+    <span className="inline-flex items-center gap-2"><span className="running-dot" />Loading the projection...</span>
+  ) : pointsQ.error ? (
+    <EmptyState icon="info" title="Could not load the projection"
+      action={<button type="button" className="btn" onClick={() => void pointsQ.reload()}>Retry</button>}>
+      {humanizeError(pointsQ.error)}
+    </EmptyState>
+  ) : !projId ? (
+    <EmptyState icon="scan" title="No projection yet"
+      action={<button type="button" className="btn btn-primary" onClick={fitProjection} disabled={busy === "fit"}>
+        {busy === "fit" ? "Fitting..." : "Fit projection"}</button>}>
+      A projection lays the corpus out by visual similarity, so look-alike objects sit together and odd ones
+      stand apart. Fitting one takes about a minute.
+    </EmptyState>
+  ) : points.length > 0 ? (
+    <EmptyState icon="scan" title="No points match these filters"
+      action={<button type="button" className="btn" onClick={() => setPredicate({})}>Clear filters</button>}>
+      The facets on the left exclude every point in this projection.
+    </EmptyState>
+  ) : undefined;
+
   return (
     <PageShell
       active="EXPLORE"
       title="Explore"
-      subtitle="see the corpus by similarity, cut it by facets, act on what you lasso"
+      subtitle="See the corpus by similarity, cut it by facets, act on what you lasso."
       meta={<span className="text-[12px] text-ink-3">
-        {activeProj ? `${activeProj.method} - ${activeProj.n.toLocaleString()} pts` : "no projection"}
+        {activeProj ? `${activeProj.method.toUpperCase()} · ${num(activeProj.n)} points` : "No projection"}
       </span>}
       primaryAction={
         <button onClick={fitProjection} disabled={busy === "fit"}
-          className="h-[30px] px-3 rounded-md bg-accent text-bg font-display font-semibold text-[12.5px] disabled:opacity-40">
-          {busy === "fit" ? "fitting..." : "Fit projection"}
+          className="btn btn-primary"
+          data-tip="Lay out the current objects by visual similarity (UMAP over DINO embeddings)">
+          {busy === "fit" && <span className="running-dot mr-1" />}
+          {busy === "fit" ? "Fitting..." : "Fit projection"}
         </button>
       }
     >
       <div className="flex h-full min-h-0">
         {/* facet rail */}
-        <aside className="w-60 shrink-0 border-r hairline overflow-auto no-scrollbar">
+        <aside className="w-64 shrink-0 border-r hairline overflow-auto no-scrollbar bg-rail/40" aria-label="Filters">
           <FacetRail facets={facets} predicate={predicate} onChange={setPredicate} />
         </aside>
 
         {/* map + actions */}
         <section className="flex-1 min-w-0 flex flex-col">
-          <div className="flex items-center gap-2 px-3 py-1.5 border-b hairline text-[12px] overflow-x-auto no-scrollbar">
-            <select value={projId} onChange={(e) => setProjId(e.target.value)}
-              className="bg-bg border border-line px-1.5 py-0.5 text-ink max-w-[240px]">
-              <option value="">no projection</option>
-              {projections.map((p) => (
-                <option key={p.projection_id} value={p.projection_id}>
-                  {p.kind}/{p.space} {p.method} - {p.n} pts
-                </option>
-              ))}
-            </select>
+          <div className="flex items-center gap-3 px-3 py-2 border-b hairline text-[12px] overflow-x-auto no-scrollbar">
+            <label className="flex items-center gap-2 shrink-0">
+              <span className="text-ink-3">Projection</span>
+              <select value={projId} onChange={(e) => setProjId(e.target.value)}
+                className="field py-0.5 max-w-[260px]">
+                <option value="">None</option>
+                {projections.map((p) => (
+                  <option key={p.projection_id} value={p.projection_id}>
+                    {humanize(p.kind)}s · {p.space.toUpperCase()} {p.method.toUpperCase()} · {num(p.n)} points
+                  </option>
+                ))}
+              </select>
+            </label>
 
-            <span className="text-ink-3">colour</span>
-            {COLOR_MODES.map((m) => (
-              <button key={m.key} onClick={() => setColorBy(m.key)}
-                className={`px-1.5 py-0.5 border ${colorBy === m.key ? "border-accent text-ink" : "border-line text-ink-3 hover:text-ink-2"}`}>
-                {m.label}
-              </button>
-            ))}
+            <span className="w-px h-5 bg-line shrink-0" aria-hidden />
+            <span className="text-ink-3 shrink-0">Colour by</span>
+            <div className="flex items-center gap-1 shrink-0" role="group" aria-label="Colour points by">
+              {COLOR_MODES.map((m) => (
+                <button key={m.key} onClick={() => setColorBy(m.key)} aria-pressed={colorBy === m.key}
+                  className={`chip ${colorBy === m.key ? "chip-on" : ""}`}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
             {colorBy === "tag" && (
               <select value={tagFilter ?? ""} onChange={(e) => setTagFilter(e.target.value || null)}
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink">
-                <option value="">pick a tag</option>
+                aria-label="Tag to highlight"
+                className="field py-0.5 shrink-0">
+                <option value="">Pick a tag</option>
                 {(facets?.tags ?? []).map((t) => <option key={t.value} value={t.value}>{t.value}</option>)}
               </select>
             )}
 
-            <span className="ml-auto text-ink-3">
-              {selected.size ? `${selected.size} lassoed` : `${shownPoints.length} shown`}
+            <span className="ml-auto text-ink-2 tabular-nums shrink-0">
+              {selected.size ? `${num(selected.size)} lassoed` : `${num(shownPoints.length)} shown`}
             </span>
             {selected.size > 0 && (
               <button onClick={() => setSelected(new Set())}
-                className="px-1.5 py-0.5 border border-line text-ink-3 hover:text-ink-2"><T k="action.clear">clear</T></button>
+                className="btn shrink-0"><T k="action.clear">Clear</T></button>
             )}
           </div>
 
           <div className="flex-1 min-h-0 relative">
             <EmbeddingMap points={shownPoints} colorBy={colorBy} tagFilter={tagFilter}
-              selected={selected} onSelect={onSelect} onHover={setHover} />
+              selected={selected} onSelect={onSelect} onHover={setHover} empty={mapEmpty} />
             {hover && (
-              <div className="absolute top-2 left-2 panel px-2 py-1 text-[11px] text-ink-2 pointer-events-none">
-                <div>{hover.id.slice(0, 8)}</div>
-                {hover.state && <div className="text-ink-3">{hover.state} - {hover.source}</div>}
-                {hover.conf != null && <div className="text-ink-3">conf {hover.conf}</div>}
-                {!!(hover.tags ?? []).length && <div className="text-accent">{(hover.tags ?? []).join(", ")}</div>}
+              <div className="absolute top-2 left-2 panel px-2.5 py-1.5 text-[12px] text-ink-2 pointer-events-none space-y-0.5">
+                <div className="font-mono text-ink">{shortId(hover.id)}</div>
+                {hover.state && <div className="text-ink-3">{humanize(hover.state)} · {humanize(hover.source)}</div>}
+                {hover.conf != null && <div className="text-ink-3">Confidence {Number(hover.conf).toFixed(2)}</div>}
+                {!!(hover.tags ?? []).length && <div className="text-accent-2">{(hover.tags ?? []).join(", ")}</div>}
+              </div>
+            )}
+            {shownPoints.length > 0 && !selected.size && (
+              <div className="absolute bottom-2 left-2 text-[11.5px] text-ink-3 bg-panel/80 border hairline rounded px-2 py-1 pointer-events-none">
+                Drag to lasso points · Shift to add to the selection
               </div>
             )}
           </div>
 
           {/* selection action bar */}
-          <div className="border-t hairline px-3 py-2 flex items-center gap-2 text-[12px] flex-wrap">
-            <span className="text-ink-3">acting on</span>
-            <span className="text-ink">{selCount.toLocaleString()}</span>
-            <span className="text-ink-3">{selected.size ? "lassoed" : "matching"} objects</span>
+          <div className="border-t hairline px-3 py-2.5 flex items-center gap-2 text-[12.5px] flex-wrap bg-panel">
+            <span className="text-ink-3">Acting on</span>
+            <span className="text-ink font-semibold tabular-nums">{num(selCount)}</span>
+            <span className="text-ink-3">{selected.size ? "lassoed" : filtered ? "matching" : ""} objects</span>
 
+            <span className="w-px h-5 bg-line mx-1" aria-hidden />
             <input value={tagText} onChange={(e) => setTagText(e.target.value)}
-              placeholder="tag, comma separated"
-              className="ml-2 bg-bg border border-line px-1.5 py-0.5 text-ink min-w-[180px]" />
+              onKeyDown={(e) => { if (e.key === "Enter") void applyTags(false); }}
+              aria-label="Tags to add or remove, comma separated"
+              placeholder="Tags, comma separated"
+              className="field py-0.5 min-w-[180px]" />
             <button onClick={() => applyTags(false)} disabled={!!busy}
-              className="px-2 py-0.5 border border-line text-ink-2 hover:border-accent disabled:opacity-40">add tag</button>
+              className="btn">Add tag</button>
             <button onClick={() => applyTags(true)} disabled={!!busy}
-              className="px-2 py-0.5 border border-line text-ink-3 hover:border-accent disabled:opacity-40"><T k="action.remove">remove</T></button>
+              className="btn"><T k="action.remove">Remove</T></button>
 
+            <span className="w-px h-5 bg-line mx-1" aria-hidden />
             <button onClick={saveView} disabled={!!busy}
-              className="px-2 py-0.5 border border-line text-ink-2 hover:border-accent disabled:opacity-40">save view</button>
+              className="btn">Save view</button>
             <button onClick={sendToReview} disabled={!!busy || !selected.size}
-              className="px-2 py-0.5 border border-line text-ink-2 hover:border-accent disabled:opacity-40">send to review</button>
+              data-tip={!selected.size ? "Lasso a region on the map first" : undefined}
+              className="btn btn-on">Send to review</button>
             <button onClick={() => router.push("/analytics")}
-              className="px-2 py-0.5 border border-line text-ink-3 hover:border-accent">eval drill-down</button>
+              className="link ml-1">Evaluation drill-down →</button>
 
-            {msg && <span className="ml-auto text-accent">{msg}</span>}
+            {msg && <span className="ml-auto text-accent-2" role="status">{msg}</span>}
           </div>
         </section>
 
         {/* saved views */}
-        <aside className={`w-52 shrink-0 border-l hairline overflow-auto no-scrollbar p-1.5 ${
-          focusViews ? "ring-1 ring-accent bg-head/30" : ""}`}>
-          <div className={`text-[10.5px] font-medium uppercase tracking-[0.06em] px-1.5 py-1 ${
-            focusViews ? "text-accent" : "text-ink-3"}`}>saved views</div>
-          {views.length === 0 && (
-            <div className="px-1.5 text-[12px] text-ink-3">
-              none yet. filter, then save.
+        <aside className={`w-56 shrink-0 border-l hairline overflow-auto no-scrollbar p-2 ${
+          focusViews ? "ring-1 ring-accent bg-head/30" : ""}`} aria-label="Saved views">
+          <div className={`section-title px-2 py-1.5 ${focusViews ? "text-accent-2" : ""}`}>Saved views</div>
+          {viewsQ.loading ? (
+            <div className="px-2 py-1 space-y-2">
+              <span className="skeleton h-3 w-3/4 block" /><span className="skeleton h-3 w-1/2 block" />
+            </div>
+          ) : views.length === 0 && (
+            <div className="px-2 py-2 text-[12px] text-ink-3 leading-relaxed">
+              No saved views yet. Pick facets or lasso a region, then use <span className="text-ink-2">Save view</span> to
+              come back to the same cut later.
             </div>
           )}
           {views.map((v) => (
             <button key={v.slice_id} onClick={() => { setPredicate(v.predicate ?? {}); setSelected(new Set()); }}
-              title={JSON.stringify(v.predicate)}
-              className="w-full text-left px-1.5 py-1 text-[12px] text-ink-3 hover:text-ink">
+              title={describePredicate(v.predicate)}
+              className="w-full text-left px-2 py-1.5 rounded text-[12.5px] text-ink-2 hover:text-ink hover:bg-head/60 truncate">
               {v.name}
             </button>
           ))}

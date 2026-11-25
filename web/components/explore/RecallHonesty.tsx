@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { apiGet } from "@/lib/api";
 import LoadState from "@/components/shell/LoadState";
 import { useQuery } from "@/lib/useQuery";
+import { ago, humanize } from "@/lib/format";
 
 // How far the reported recall can be trusted, which is a different question from what the recall is.
 //
@@ -64,12 +65,12 @@ const pct = (v: number | null | undefined) => (v == null ? "n/a" : `${(v * 100).
 function Bar({ label, value, tone }: { label: string; value: number | null; tone: string }) {
   return (
     <div className="space-y-0.5">
-      <div className="flex justify-between text-[11px] text-ink-3">
+      <div className="flex justify-between text-[12px] text-ink-3">
         <span>{label}</span>
         <span className="text-ink tabular-nums">{pct(value)}</span>
       </div>
-      <div className="h-2 w-full border hairline overflow-hidden">
-        <div className={tone} style={{ width: `${Math.max(0, Math.min(100, (value ?? 0) * 100))}%` }} />
+      <div className="h-2 w-full bg-line rounded-sm overflow-hidden">
+        <div className={`h-full ${tone}`} style={{ width: `${Math.max(0, Math.min(100, (value ?? 0) * 100))}%` }} />
       </div>
     </div>
   );
@@ -100,13 +101,13 @@ export default function RecallHonesty() {
 
   if (err != null) return <LoadState error={err} onRetry={() => void load()} />;
   if (audits == null) {
-    return <div className="text-[12.5px] text-ink-3/50 animate-pulse py-4 text-center">loading...</div>;
+    return <LoadState loading rows={3} />;
   }
 
   if (audits.length === 0) {
     return (
       <div className="space-y-2 text-[12px] text-ink-3">
-        <div className="text-ink">gold recall on this page has never been checked against an independent observer.</div>
+        <div className="text-ink text-[13px]">The gold recall on this page has never been checked by an independent observer.</div>
         <p className="leading-relaxed">
           Gold recall counts the objects somebody already found. Confirming a machine box takes one click and
           drawing a missed one takes half a minute, so the sealed set leans toward what the model already
@@ -117,7 +118,10 @@ export default function RecallHonesty() {
           prediction withheld, and the two independent observations give recall against a denominator the
           model did not help build.
         </p>
-        <div className="text-ink-3">POST /api/verdyx/blind-audit/seed with a run_id to start one.</div>
+        <details className="text-ink-3">
+          <summary className="cursor-pointer select-none">For administrators</summary>
+          <div className="mt-1">Start one with <span className="font-mono">POST /api/verdyx/blind-audit/seed</span> and a run_id.</div>
+        </details>
       </div>
     );
   }
@@ -133,11 +137,12 @@ export default function RecallHonesty() {
           <button
             key={a.audit_id}
             onClick={() => setSelected(a.audit_id)}
-            className={`border px-2 py-0.5 ${a.audit_id === selected ? "border-accent text-ink" : "border-line text-ink-3 hover:border-accent"}`}
+            className={`chip ${a.audit_id === selected ? "chip-on" : ""}`}
+            title={a.audit_id}
           >
-            {a.audit_id.slice(0, 8)}
-            <span className="text-ink-3 ml-1.5">
-              {a.status === "scored" ? "scored" : `${a.n_labeled}/${a.n_frames} labelled`}
+            Audit {a.created_at ? ago(a.created_at) : a.audit_id.slice(0, 8)}
+            <span className="text-ink-3 ml-1">
+              {a.status === "scored" ? "· scored" : `· ${a.n_labeled} of ${a.n_frames} frames labelled`}
             </span>
           </button>
         ))}
@@ -146,13 +151,14 @@ export default function RecallHonesty() {
       {pooled == null ? (
         <div className="text-[12px] text-ink-3 py-3">
           {est == null
-            ? "loading estimate..."
-            : "this audit has not been scored yet, so there is no estimate to show. Nothing here is a "
+            ? (selected ? "Loading the estimate..."
+              : "No audit has been scored yet, so there is no estimate to show. Pick an audit above to see how far its labelling has got.")
+            : "This audit has not been scored yet, so there is no estimate to show. Nothing here is a "
               + "statement about the model until the frames are labelled and scored."}
         </div>
       ) : !pooled.measured ? (
         <div className="space-y-1.5 text-[12px]">
-          <div className="text-warn">the audit ran and could not conclude</div>
+          <div className="text-warn">The audit ran and could not reach a conclusion.</div>
           <div className="text-ink-3 leading-relaxed">{pooled.reason}</div>
           <div className="text-ink-3">
             Found by both {pooled.n_both}, by the model alone {pooled.n_model_only}, by the auditor alone{" "}
@@ -163,56 +169,56 @@ export default function RecallHonesty() {
       ) : (
         <div className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Bar label="gold recall (what this page reports)" value={pooled.gold_recall} tone="bg-ink-3" />
-            <Bar label="recall against the estimated population" value={pooled.model_recall} tone="bg-accent" />
+            <Bar label="Gold recall (what this page reports)" value={pooled.gold_recall} tone="bg-ink-3" />
+            <Bar label="Recall against the estimated true population" value={pooled.model_recall} tone="bg-accent" />
           </div>
 
           {pooled.overstatement != null && (
-            <div className={`text-[12px] px-2 py-1.5 border hairline ${pooled.overstatement > 0.15 ? "text-block" : "text-ink"}`}>
-              gold recall overstates measured recall by {(pooled.overstatement * 100).toFixed(1)} points
-              {pooled.overstatement > 0.15 && " - past the promotion tolerance, so the gate refuses on it"}
+            <div className={`text-[12.5px] px-3 py-2 border rounded ${pooled.overstatement > 0.15 ? "text-block border-block/40 bg-block/5" : "text-ink hairline"}`}>
+              Gold recall overstates measured recall by {(pooled.overstatement * 100).toFixed(1)} points
+              {pooled.overstatement > 0.15 && ", past the promotion tolerance, so the gate refuses on it."}
             </div>
           )}
 
-          <div className="text-[12px] text-ink-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="text-[12.5px] text-ink-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
-              <div className="text-ink-3 uppercase text-[10px]">estimated population</div>
+              <div className="label-caps">Estimated population</div>
               <div className="text-ink tabular-nums">{pooled.population?.toFixed(1)}</div>
               <div className="text-ink-3 tabular-nums">
                 {pooled.lo?.toFixed(0)} to {pooled.hi?.toFixed(0)} at 95%
               </div>
             </div>
             <div>
-              <div className="text-ink-3 uppercase text-[10px]">found by both</div>
+              <div className="label-caps">Found by both</div>
               <div className="text-ink tabular-nums">{pooled.n_both}</div>
             </div>
             <div>
-              <div className="text-ink-3 uppercase text-[10px]">model only</div>
+              <div className="label-caps">Model only</div>
               <div className="text-ink tabular-nums">{pooled.n_model_only}</div>
             </div>
             <div>
-              <div className="text-ink-3 uppercase text-[10px]">auditor only</div>
+              <div className="label-caps">Auditor only</div>
               <div className="text-ink tabular-nums">{pooled.n_human_only}</div>
             </div>
           </div>
 
           {strata.length > 0 && (
             <div className="space-y-1">
-              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">by scene density</div>
+              <div className="section-title">By scene density</div>
               <div className="overflow-x-auto">
                 <table className="w-full text-[12px]">
                   <thead className="text-ink-3">
                     <tr className="text-left">
-                      <th className="py-1 pr-3 font-normal">stratum</th>
-                      <th className="py-1 pr-3 font-normal">recall</th>
-                      <th className="py-1 pr-3 font-normal">population</th>
-                      <th className="py-1 pr-3 font-normal">both / model / auditor</th>
+                      <th className="py-1 pr-3 font-normal">Density</th>
+                      <th className="py-1 pr-3 font-normal">Recall</th>
+                      <th className="py-1 pr-3 font-normal">Population</th>
+                      <th className="py-1 pr-3 font-normal">Both / model / auditor</th>
                     </tr>
                   </thead>
                   <tbody>
                     {strata.map((s) => (
                       <tr key={s.stratum} className="border-t hairline">
-                        <td className="py-1 pr-3 text-ink">{s.stratum}</td>
+                        <td className="py-1 pr-3 text-ink">{humanize(String(s.stratum))}</td>
                         <td className="py-1 pr-3 tabular-nums text-ink">
                           {s.measured ? `${pct(s.model_recall)} (${pct(s.recall_lo)} to ${pct(s.recall_hi)})` : "not measurable"}
                         </td>
@@ -232,7 +238,7 @@ export default function RecallHonesty() {
 
           {classes.length > 0 && (
             <div className="space-y-1">
-              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">by class</div>
+              <div className="section-title">By class</div>
               <div className="flex flex-wrap gap-1">
                 {classes.map((s) => (
                   <span
@@ -240,15 +246,15 @@ export default function RecallHonesty() {
                     title={s.measured
                       ? `${s.n_both} found by both, ${s.n_model_only} model only, ${s.n_human_only} auditor only`
                       : (s.reason ?? "not measurable")}
-                    className={`border hairline px-1.5 py-0.5 text-[11px] ${s.measured ? "text-ink" : "text-ink-3"}`}
+                    className={`chip cursor-default ${s.measured ? "text-ink" : "text-ink-3"}`}
                   >
-                    {s.class_name ?? s.class_id} {s.measured ? pct(s.model_recall) : "n/a"}
+                    {s.class_name ? humanize(s.class_name) : s.class_id} {s.measured ? pct(s.model_recall) : "n/a"}
                   </span>
                 ))}
               </div>
-              <div className="text-[11px] text-ink-3">
-                class rows are class-aware (a box found under the wrong name is a miss for that class), so
-                they deliberately do not sum to the pooled figure above
+              <div className="text-[12px] text-ink-3">
+                Class rows are class-aware (a box found under the wrong name is a miss for that class), so
+                they deliberately do not sum to the pooled figure above.
               </div>
             </div>
           )}
@@ -256,7 +262,7 @@ export default function RecallHonesty() {
       )}
 
       {est?.caveat && (
-        <div className="text-[11px] text-ink-3 leading-relaxed border-t hairline pt-2">
+        <div className="text-[12px] text-ink-3 leading-relaxed border-t hairline pt-2">
           {est.caveat}
         </div>
       )}

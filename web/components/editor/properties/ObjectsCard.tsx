@@ -58,7 +58,7 @@ export default function ObjectsCard({ objects, selectedIds, dispatch, filters, r
       <button onClick={() => setOpen(!open)} aria-expanded={open}
         className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-line/30 group transition-colors">
         <span aria-hidden
-          className={`text-ink-3 group-hover:text-ink w-3 text-center text-[9px] leading-none transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▸</span>
+          className={`text-ink-3 group-hover:text-ink w-3 text-center text-[10.5px] leading-none transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▸</span>
         <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-2">objects</span>
         <span className="text-[11px] text-ink-3 bg-line/50 rounded px-1.5">{objects.length}</span>
         {low > 0 && (
@@ -147,7 +147,7 @@ export default function ObjectsCard({ objects, selectedIds, dispatch, filters, r
                             title={`${ordinal(risk.rank[o.id] + 1)} most likely to be wrong on this frame: `
                                    + `${risk.score[o.id]?.reasons.slice(0, 3).join("; ") || "no specific flag"}`
                                    + ` (ranked on ${Math.round(risk.coverage * 100)}% of the available signals)`}
-                            className="shrink-0 px-1 rounded bg-warn/20 text-warn text-[9px] tabular-nums">
+                            className="shrink-0 px-1 rounded bg-warn/20 text-warn text-[10.5px] tabular-nums">
                             #{risk.rank[o.id] + 1}
                           </span>
                         )}

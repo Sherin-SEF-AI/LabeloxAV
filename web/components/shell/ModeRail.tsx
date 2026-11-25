@@ -22,8 +22,8 @@ export default function ModeRail({ mode, onMode }: { mode: string; onMode: (key:
             className={`relative w-[50px] flex flex-col items-center gap-1 pt-2 pb-1.5 rounded-md ${active ? "text-accent bg-accent/10" : "text-ink-3 hover:text-ink-2 hover:bg-line/40"}`}>
             {active && <span className="absolute left-0 top-1 bottom-1 w-0.5 rounded-full bg-accent" />}
             <Icon name={MODE_ICON[m.key] ?? "box"} size={19} />
-            <span className="font-display text-[8.5px] font-medium tracking-wide">{short}</span>
-            <span className="absolute top-1.5 right-1.5 font-mono text-[8px] text-ink-3/70">{m.hotkey}</span>
+            <span className="font-display text-[10px] font-medium whitespace-nowrap max-w-[46px] truncate">{short}</span>
+            <span className="absolute top-1.5 right-1.5 font-mono text-[9px] text-ink-3/70">{m.hotkey}</span>
           </button>
         );
       })}

@@ -7,6 +7,8 @@ import { useQuery } from "@/lib/useQuery";
 import { useRouter } from "next/navigation";
 
 import Icon from "./Icon";
+import EmptyState from "@/components/ui/EmptyState";
+import { ago, humanize } from "@/lib/format";
 import { api, humanizeError } from "@/lib/api";
 import { useEventStream } from "@/lib/useEventStream";
 import type { NotificationRow } from "@/lib/types";
@@ -32,15 +34,6 @@ const SEV_DOT: Record<string, string> = {
 // different one a moment later, which React reports as a hydration mismatch. `mounted` below defers the
 // relative form until after hydration; the absolute time is shown first, which is correct rather than a
 // placeholder.
-function ago(iso: string | null): string {
-  if (!iso) return "";
-  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
-}
-
 export default function NotificationBell() {
   const router = useRouter();
   const t = useT();
@@ -126,18 +119,18 @@ export default function NotificationBell() {
       {open && (
         <div style={style} role="group" aria-label={t("notify.title", "Notifications")} className="z-50 w-[min(26rem,92vw)] panel shadow-lg">
           <div className="flex items-center gap-2 px-3 py-2 border-b hairline text-[12px]">
-            <span className="uppercase text-ink-3">{t("notify.title_lc", "notifications")}</span>
+            <span className="section-title">{t("notify.title", "Notifications")}</span>
             {unread > 0 && (
-              <button onClick={markAll} className="ml-auto text-ink-3 hover:text-accent">
+              <button onClick={markAll} className="ml-auto link text-[12px]">
                 {t("notify.mark_all", "mark all read")}
               </button>
             )}
           </div>
 
           {rows.length === 0 ? (
-            <div className="p-4 text-[12px] text-ink-3">
-              {t("notify.empty_long", "Nothing yet. Assignments, raised issues, blocked promotions and drift breaches land here.")}
-            </div>
+            <EmptyState compact icon="bell" title={t("notify.empty", "You are all caught up")}>
+              {t("notify.empty_long", "Assignments, raised issues, blocked promotions and drift alerts will appear here.")}
+            </EmptyState>
           ) : (
             <ul className="max-h-[60vh] overflow-auto">
               {rows.map((n) => (
@@ -148,10 +141,10 @@ export default function NotificationBell() {
                     <div className="flex items-start gap-2">
                       <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${SEV_DOT[n.severity] ?? "bg-ink-3"}`} aria-hidden />
                       <div className="min-w-0 flex-1">
-                        <div className="font-mono text-[11.5px] text-ink truncate">{n.title}</div>
-                        {n.body && <div className="text-[11.5px] text-ink-3 line-clamp-2">{n.body}</div>}
-                        <div className="text-[10.5px] text-ink-3">
-                          {n.kind.replace(/_/g, " ")} · {mounted ? ago(n.created_at) : ""}
+                        <div className="text-[12.5px] font-medium text-ink truncate">{n.title}</div>
+                        {n.body && <div className="text-[12px] text-ink-3 line-clamp-2 mt-0.5">{n.body}</div>}
+                        <div className="text-[11px] text-ink-3 mt-1">
+                          {humanize(n.kind)}{mounted ? ` · ${ago(n.created_at)}` : ""}
                         </div>
                       </div>
                     </div>
@@ -162,8 +155,8 @@ export default function NotificationBell() {
           )}
 
           <button onClick={() => { setOpen(false); router.push("/activity"); }}
-            className="w-full px-3 py-2 text-[11.5px] text-ink-3 hover:text-accent text-left">
-            {t("notify.open_feed", "open the activity feed")}
+            className="w-full px-3 py-2.5 text-[12px] link text-left">
+            {t("notify.open_feed", "Open the activity feed")}
           </button>
         </div>
       )}

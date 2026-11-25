@@ -140,7 +140,7 @@ export default function CanvasMenu({ at, target, classes, onClose, onAction }: C
                   <span className="truncate flex-1">{it.label}</span>
                   {it.submenu && <span className="text-ink-3 shrink-0" aria-hidden>›</span>}
                   {it.hint && !it.submenu && (
-                    <span className="text-ink-3/70 shrink-0 text-[10px]">{it.hint}</span>
+                    <span className="text-ink-3/70 shrink-0 text-[10.5px]">{it.hint}</span>
                   )}
                 </button>
               );

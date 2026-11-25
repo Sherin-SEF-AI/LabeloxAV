@@ -7,6 +7,9 @@ import PageShell from "@/components/shell/PageShell";
 import { toast } from "@/lib/toast";
 import { useQuery } from "@/lib/useQuery";
 import type { LineageGraph, LineageNode } from "@/lib/types";
+import EmptyState from "@/components/ui/EmptyState";
+import { Stat } from "@/components/ui/kit";
+import { humanize, num, plural } from "@/lib/format";
 
 // The lineage graph: sessions to labels to gold to trainset to model to promotion.
 //
@@ -34,20 +37,21 @@ function Column({ kind, nodes, onPick, selected }: {
 }) {
   if (!nodes.length) return null;
   return (
-    <div className="min-w-[13rem] space-y-1">
-      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">
-        {kind.replace(/_/g, " ")} ({nodes.length})
+    <div className="min-w-[13rem] max-w-[16rem] space-y-1.5">
+      <div className="label-caps">
+        {humanize(kind)} ({nodes.length})
       </div>
       {nodes.map((n) => (
         <button key={n.id} onClick={() => onPick(n)}
-          className={`block w-full text-left border px-2 py-1 text-[11.5px]
+          aria-pressed={selected === n.id} title={n.label}
+          className={`block w-full text-left border rounded px-2.5 py-1.5 text-[12.5px] hover:bg-head
                       ${KIND_TONE[n.kind] ?? "border-line text-ink-2"}
-                      ${selected === n.id ? "bg-panel-2" : ""}
+                      ${selected === n.id ? "bg-head ring-1 ring-accent" : ""}
                       ${n.incomplete ? "border-dashed opacity-70" : ""}`}>
           <div className="truncate">{n.label}</div>
           {n.incomplete && (
             // Rendered as a break rather than dropped: a missing gold set is a fact about the lineage.
-            <div className="text-[9px] text-block">record is gone</div>
+            <div className="text-[11px] text-block">Record is gone</div>
           )}
         </button>
       ))}
@@ -81,43 +85,52 @@ function LineageBody() {
   const edgesFor = (id: string) =>
     (graph?.edges ?? []).filter((e) => e.source === id || e.target === id);
 
+  const placeholder = mode === "model" ? "Model version" : mode === "session" ? "Session id" : "Dataset commit id";
   return (
-    <PageShell active="LINEAGE" title="Lineage"
-      subtitle="what a model is made of, and what a session ended up in"
+    <PageShell active="Lineage" title="Lineage"
+      subtitle="What a model is made of, and everything a session ended up in."
       filters={
         <>
+          <span className="text-ink-3">Trace a</span>
           {(["model", "session", "dataset"] as const).map((m) => (
-            <button key={m} onClick={() => setMode(m)}
-              className={`px-2 py-0.5 border ${
-                mode === m ? "border-accent text-ink" : "border-line text-ink-3 hover:text-ink-2"}`}>
-              {m}
+            <button key={m} type="button" onClick={() => setMode(m)} aria-pressed={mode === m}
+              className={`chip ${mode === m ? "chip-on" : ""}`}>
+              {humanize(m)}
             </button>
           ))}
           <input value={target} onChange={(e) => setTarget(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") load(mode, target); }}
-            placeholder={mode === "model" ? "model version"
-              : mode === "session" ? "session id" : "dataset commit id"}
-            className="bg-bg border border-line px-1.5 py-0.5 text-ink w-72" />
-          <button onClick={() => load(mode, target)} disabled={busy || !target.trim()}
-            className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
-            {busy ? "loading..." : "trace"}
+            placeholder={placeholder} aria-label={placeholder}
+            className="field w-80 font-mono" />
+          <button type="button" onClick={() => load(mode, target)} disabled={busy || !target.trim()}
+            className="btn btn-primary">
+            {busy ? "Tracing..." : "Trace"}
           </button>
         </>
       }>
-      <div className="p-4 space-y-4">
+      <div className="page-wrap space-y-4">
         {!graph ? (
-          <div className="panel p-4 text-[12px] text-ink-3 max-w-3xl space-y-2">
-            <div>Trace a model backwards to the footage it is made of, or a session forwards to
-              everything it ended up in.</div>
-            <div className="text-ink-3">
-              The forward direction is what an erasure request asks: if a subject withdraws consent for a
-              session, this is what has to be re-examined. Answering it by hand meant reading every dataset
-              commit&apos;s slice spec.
-            </div>
+          <div className="panel">
+            <EmptyState icon="route" title={busy ? "Tracing..." : "Trace a model or a session"}>
+              Enter a model version to see the footage it was trained on, or a session id to see every dataset
+              and model it ended up in. When someone withdraws consent for a session, the forward trace is the
+              list of what has to be re-examined.
+            </EmptyState>
           </div>
         ) : (
           <>
-            <div className="panel p-3 overflow-x-auto">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <Stat label="Items" value={num(graph.nodes.length)} />
+              <Stat label="Links" value={num(graph.edges.length)} />
+              {graph.sessions_truncated && (
+                <Stat label="Truncated" tone="warn" value={num(graph.sessions_shown)}
+                  sub="sessions shown; the model draws on more" className="lg:col-span-2" />
+              )}
+            </div>
+
+            {graph.detail && <p className="section-desc max-w-4xl">{graph.detail}</p>}
+
+            <div className="panel p-4 overflow-x-auto">
               <div className="flex gap-6 items-start min-w-max">
                 {graph.kinds.map((kind) => (
                   <Column key={kind} kind={kind} selected={picked?.id ?? null}
@@ -127,53 +140,28 @@ function LineageBody() {
               </div>
             </div>
 
-            <div className="flex gap-4 flex-wrap">
-              <div className="panel px-3 py-2">
-                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">nodes</div>
-                <div className="text-[18px] font-semibold text-ink tabular-nums">{graph.nodes.length}</div>
-              </div>
-              <div className="panel px-3 py-2">
-                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">edges</div>
-                <div className="text-[18px] font-semibold text-ink tabular-nums">{graph.edges.length}</div>
-              </div>
-              {graph.sessions_truncated && (
-                <div className="panel px-3 py-2 border border-warn">
-                  <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-warn">truncated</div>
-                  <div className="text-[11.5px] text-ink-3 max-w-sm">
-                    showing {graph.sessions_shown} sessions; the model draws on more
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {graph.detail && (
-              <div className="panel p-3 text-[11.5px] text-ink-3 max-w-4xl">
-                {graph.detail}
-              </div>
-            )}
-
-            {picked && (
+            {picked ? (
               <section className="panel">
-                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-                  {picked.kind.replace(/_/g, " ")} · {picked.label}
+                <div className="panel-head">
+                  <span className="label-caps">{humanize(picked.kind)}</span>
+                  <h2 className="section-title truncate">{picked.label}</h2>
                 </div>
-                <div className="p-3 space-y-2">
+                <div className="p-3.5 space-y-3">
                   {Object.keys(picked.meta).length > 0 && (
-                    <div className="flex gap-1 flex-wrap">
+                    <div className="flex gap-1.5 flex-wrap">
                       {Object.entries(picked.meta).map(([k, v]) => (
-                        <span key={k}
-                          className="border border-line px-1.5 py-0.5 text-[11px] text-ink-2">
-                          {k} <span className="text-ink-3">{String(v).slice(0, 40)}</span>
+                        <span key={k} className="chip">
+                          {humanize(k)} <span className="text-ink-3">{String(v).slice(0, 40)}</span>
                         </span>
                       ))}
                     </div>
                   )}
-                  <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">connections</div>
-                  <ul className="space-y-0.5">
+                  <div className="label-caps">{plural(edgesFor(picked.id).length, "connection")}</div>
+                  <ul className="space-y-1">
                     {edgesFor(picked.id).map((e, i) => (
-                      <li key={i} className="text-[11.5px] text-ink-2">
-                        {e.source === picked.id ? "→" : "←"} {e.kind.replace(/_/g, " ")}{" "}
-                        <span className="text-ink-3">
+                      <li key={i} className="text-[12.5px] text-ink-2">
+                        <span className="text-ink-3" aria-hidden>{e.source === picked.id ? "→" : "←"}</span> {humanize(e.kind)}{" "}
+                        <span className="text-ink">
                           {(graph.nodes.find(
                             (n) => n.id === (e.source === picked.id ? e.target : e.source))?.label)
                             ?? "?"}
@@ -183,6 +171,8 @@ function LineageBody() {
                   </ul>
                 </div>
               </section>
+            ) : (
+              <p className="section-desc">Select an item above to see its details and what it connects to.</p>
             )}
           </>
         )}

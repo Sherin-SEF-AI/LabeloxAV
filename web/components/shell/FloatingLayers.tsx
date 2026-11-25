@@ -21,8 +21,8 @@ export default function FloatingLayers({ layers, onToggle, extra, meta }: {
     <div className="absolute top-3 right-3 z-20 w-[190px] panel overflow-hidden">
       <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 w-full px-2.5 py-2 border-b hairline">
         <span className="flex text-ink-3"><Icon name="layers" size={14} /></span>
-        <span className="font-display font-semibold text-[10px] uppercase tracking-wider text-ink-2">Layers</span>
-        <span className="ml-auto text-[10.5px] text-ink-3/70">{open ? "view state" : "show"}</span>
+        <span className="font-display font-semibold text-[12px] text-ink">Layers</span>
+        <span className="ml-auto text-[10.5px] text-ink-3/70">{open ? "Hide" : "Show"}</span>
       </button>
       {open && (
         <div className="p-1">
@@ -35,8 +35,8 @@ export default function FloatingLayers({ layers, onToggle, extra, meta }: {
                 <span className={`flex ${on ? "text-ink-2" : "text-ink-3/60"}`}><Icon name={on ? "eye" : "eyeOff"} size={14} /></span>
                 <span className={`w-2 h-2 rounded-sm shrink-0 ${on ? "bg-accent" : "bg-line"}`} />
                 <span className="flex-1 min-w-0 text-left">
-                  <span className="block font-body text-[11.5px] leading-tight">{k}</span>
-                  {prov && <span className="block text-[10.5px] leading-tight text-ink-3/80 truncate">{prov}</span>}
+                  <span className="block font-body text-[12px] leading-tight">{k.charAt(0).toUpperCase() + k.slice(1)}</span>
+                  {prov && <span className="block text-[11px] leading-tight text-ink-3/80 truncate">{prov}</span>}
                 </span>
               </button>
             );

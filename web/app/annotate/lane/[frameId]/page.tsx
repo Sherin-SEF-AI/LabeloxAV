@@ -9,6 +9,8 @@ import type { FrameMeta, LaneRow } from "@/lib/types";
 import BackButton from "@/components/BackButton";
 import { pressable } from "@/components/ui/pressable";
 import { T } from "@/lib/i18n";
+import EmptyState from "@/components/ui/EmptyState";
+import { humanize, shortId } from "@/lib/format";
 
 // M2.1 lane spline editor: propose lanes (CLRerNet on pod / classical local), edit as draggable control
 // points, draw implicit lanes on unmarked roads, pick lane type, mark ego, propagate across frames.
@@ -42,6 +44,7 @@ export default function LaneEditor() {
   const [sel, setSel] = useState<string | null>(null);
   const [adding, setAdding] = useState<number[][] | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [drivable, setDrivable] = useState<Record<string, number[][]> | null>(null);
   const [mapHint, setMapHint] = useState<{ road_class?: string; lane_count?: number | null; speed_limit?: number | null } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -64,7 +67,7 @@ export default function LaneEditor() {
     im.onload = () => setImg(im);
   }, [frameId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load().catch((e) => setMsg(`Could not load this frame: ${humanizeError(e)}`)); }, [load]);
   useEffect(() => {
     api.framePriors(frameId).then((p) => setMapHint(p.has_map ? { road_class: p.road_class, lane_count: p.lane_count, speed_limit: p.speed_limit } : null)).catch(() => {});
   }, [frameId]);
@@ -91,18 +94,24 @@ export default function LaneEditor() {
     for (const l of lanes.filter((x) => x.dirty)) {
       await api.updateLane(l.lane_id, { control_points: l.control_points, lane_type: l.lane_type, is_ego: l.is_ego });
     }
-    setMsg("saved");
+    setMsg("Saved");
     await load();
   };
 
-  const segDrivable = async () => {
+  // Each of these is a server round trip of a second or more (a model runs for the first two), so the button
+  // says it is working, and a failure is reported rather than left as an unhandled rejection.
+  const run = async (what: string, fn: () => Promise<void>) => {
+    setBusy(what);
+    try { await fn(); } catch (e) { setMsg(`${what} failed: ${humanizeError(e)}`); } finally { setBusy(null); }
+  };
+  const segDrivable = () => run("Drivable area", async () => {
     await api.segmentDrivable(frameId);
     const d = await api.getDrivable(frameId);
     setDrivable(d.found ? d.classes! : null);
-    setMsg(d.found ? `drivable ${Math.round((d.coverage!.drivable || 0) * 100)}%` : "no surface");
-  };
-  const propose = async () => { const r = await api.proposeLanes(frameId); setMsg(`proposed ${r.proposed} (${r.model})`); await load(); };
-  const propagate = async () => { const r = await api.propagateLanes(frameId, 8); setMsg(`propagated to ${r.created} lane-frames`); };
+    setMsg(d.found ? `Drivable area: ${Math.round((d.coverage!.drivable || 0) * 100)}% of the frame` : "No drivable surface found");
+  });
+  const propose = () => run("Propose lanes", async () => { const r = await api.proposeLanes(frameId); setMsg(`Proposed ${r.proposed} lane${r.proposed === 1 ? "" : "s"} (${r.model})`); await load(); });
+  const propagate = () => run("Propagate", async () => { const r = await api.propagateLanes(frameId, 8); setMsg(`Propagated to ${r.created} lanes on the following frames`); });
   const finishAdd = async (type: string) => {
     if (!adding || adding.length < 2) { setAdding(null); return; }
     await api.createLane(frameId, { control_points: adding, lane_type: type, is_ego: false });
@@ -123,7 +132,7 @@ export default function LaneEditor() {
   };
 
   const openBev = useCallback(async () => {
-    setMsg("flattening the road...");
+    setMsg("Flattening the road...");
     try {
       const [v, ls] = await Promise.all([api.frameBev(frameId), api.lanesInBev(frameId)]);
       setBev(v);
@@ -137,7 +146,7 @@ export default function LaneEditor() {
         : v.caveat);
     } catch (e) {
       setBevMode(false);
-      setMsg(`no bird's-eye view: ${humanizeError(e)}`);
+      setMsg(`No bird's-eye view: ${humanizeError(e)}`);
     }
   }, [frameId]);
 
@@ -154,36 +163,52 @@ export default function LaneEditor() {
   };
 
   const selLane = lanes.find((l) => l.lane_id === sel);
+  const msgIsBad = !!msg && /failed|could not|^no /i.test(msg);
 
   return (
     <div className="min-h-screen flex flex-col">
-      <h1 className="sr-only">Lane and drivable annotation</h1>
-      <header className="flex items-center gap-3 px-3 h-11 border-b hairline shrink-0 text-[12px]">
-        <BackButton />
-        <span className="text-ink-3">/ LANES <span className="text-ink-2">{frameId.slice(0, 8)}</span></span>
-        <button onClick={propose} className="border border-line px-2 py-1 hover:border-accent">propose lanes</button>
-        <button onClick={segDrivable} className="border border-line px-2 py-1 hover:border-accent">drivable</button>
-        <button onClick={() => setAdding([])} className={`border px-2 py-1 ${adding ? "border-accent text-accent" : "border-line hover:border-accent"}`}>+ lane</button>
+      <header className="flex items-center gap-2 px-3 h-12 border-b hairline shrink-0 text-[12px]">
+        <BackButton label="Back" />
+        <h1 className="text-[15px] font-semibold tracking-tight text-ink ml-1">
+          Lanes <span className="sr-only">and drivable annotation</span>
+        </h1>
+        <span className="text-[12.5px] text-ink-3 mr-2 font-mono" title={frameId}>{shortId(frameId)}</span>
+        <button type="button" onClick={propose} disabled={!!busy} className="btn"
+          title="detect the lane markings on this frame and add them as proposed lanes">
+          {busy === "Propose lanes" ? "Proposing..." : "Propose lanes"}
+        </button>
+        <button type="button" onClick={segDrivable} disabled={!!busy} className="btn"
+          title="segment the drivable road surface and overlay it">
+          {busy === "Drivable area" ? "Segmenting..." : "Drivable area"}
+        </button>
+        <button type="button" onClick={() => setAdding([])} aria-pressed={!!adding}
+          title="click points along a lane on the image, then pick its type"
+          className={`btn ${adding ? "btn-on" : ""}`}>+ Add lane</button>
         {adding && (
           <>
-            <span className="text-ink-3">{adding.length} pts, finish as:</span>
-            {["solid", "implicit"].map((t) => <button key={t} onClick={() => finishAdd(t)} className="border border-line px-2 py-1 hover:border-accent">{t}</button>)}
-            <button onClick={() => setAdding(null)} className="text-ink-3 hover:text-block"><T k="action.cancel">cancel</T></button>
+            <span className="text-ink-3">{adding.length} point{adding.length === 1 ? "" : "s"}, finish as:</span>
+            {["solid", "implicit"].map((t) => <button key={t} type="button" onClick={() => finishAdd(t)} className="btn">{humanize(t)}</button>)}
+            <button type="button" onClick={() => setAdding(null)} className="btn"><T k="action.cancel">Cancel</T></button>
           </>
         )}
-        <button onClick={() => (bevMode ? setBevMode(false) : void openBev())}
+        <span className="w-px h-5 bg-line mx-1" aria-hidden />
+        <button type="button" onClick={() => (bevMode ? setBevMode(false) : void openBev())}
           title="flatten the road: parallel lanes look parallel and a curve looks like a curve"
-          className={`border px-2 py-1 ${bevMode ? "border-accent text-accent" : "border-line hover:border-accent"}`}>
-          {bevMode ? "camera view" : "bird's-eye"}
+          aria-pressed={bevMode}
+          className={`btn ${bevMode ? "btn-on" : ""}`}>
+          {bevMode ? "Camera view" : "Bird's-eye view"}
         </button>
-        <button onClick={propagate} className="border border-line px-2 py-1 hover:border-accent">propagate →</button>
+        <button type="button" onClick={propagate} disabled={!!busy} className="btn"
+          title="copy these lanes forward onto the next 8 frames">
+          {busy === "Propagate" ? "Propagating..." : "Propagate →"}
+        </button>
         {mapHint && (
-          <span className="text-info border border-line px-2 py-0.5" title="OSM map prior (a hint, confirm against the markings)">
-            map: {mapHint.road_class}{mapHint.lane_count ? ` · ${mapHint.lane_count} lanes` : ""}{mapHint.speed_limit ? ` · ${mapHint.speed_limit}` : ""}
+          <span className="text-info border border-line rounded px-2 py-1" title="OSM map prior (a hint, confirm against the markings)">
+            Map: {humanize(mapHint.road_class)}{mapHint.lane_count ? ` · ${mapHint.lane_count} lanes` : ""}{mapHint.speed_limit ? ` · ${mapHint.speed_limit} km/h` : ""}
           </span>
         )}
-        <button onClick={save} className="border border-pass text-pass px-2 py-1 hover:bg-pass/10 ml-auto"><T k="action.save">save</T></button>
-        {msg && <span className="text-warn">{msg}</span>}
+        {msg && <span role="status" className={`ml-auto truncate max-w-[480px] text-[12px] ${msgIsBad ? "text-warn" : "text-ink-2"}`} title={msg}>{msg}</span>}
+        <button type="button" onClick={save} className={`btn btn-primary ${msg ? "" : "ml-auto"}`}><T k="action.save">Save</T></button>
       </header>
 
       {/* The BEV drawing strip. Plain DOM rather than Konva: it is one image with an overlaid SVG, and
@@ -234,7 +259,7 @@ export default function LaneEditor() {
             </svg>
           </div>
           <div className="text-[12px] space-y-2 min-w-[16rem]">
-            <div className="text-ink-3 uppercase text-[10px]">bird&apos;s-eye</div>
+            <div className="section-title">Bird&apos;s-eye view</div>
             <div className="text-ink-3">
               {bev.view.near_m}&ndash;{bev.view.far_m} m ahead, &plusmn;{bev.view.half_width_m} m across,
               at {bev.view.px_per_m} px/m
@@ -242,57 +267,70 @@ export default function LaneEditor() {
             {/* A nominal calibration and a measured one produce views that look identical and mean
                 different things. An annotator drawing metric lanes should know which they have. */}
             <div className={bev.calibration.source === "nominal" ? "text-warn" : "text-ink-3"}>
-              calibration: {bev.calibration.source} ({bev.calibration.model})
+              Calibration: {bev.calibration.source} ({bev.calibration.model})
             </div>
             <div className="text-ink-3">{bev.caveat}</div>
             {bevDraw ? (
               <div className="space-y-1.5">
-                <div className="text-accent">{bevDraw.length} point{bevDraw.length === 1 ? "" : "s"} - click to add</div>
+                <div className="text-accent">{bevDraw.length} point{bevDraw.length === 1 ? "" : "s"}. Click the road to add more.</div>
                 <div className="flex gap-1.5 flex-wrap">
                   {["solid", "dashed", "implicit"].map((t) => (
-                    <button key={t} onClick={() => void finishBevDraw(t)} disabled={bevDraw.length < 2}
-                      className="border border-line px-2 py-1 hover:border-accent disabled:opacity-40">
-                      finish as {t}
+                    <button key={t} type="button" onClick={() => void finishBevDraw(t)} disabled={bevDraw.length < 2}
+                      className="btn">
+                      Finish as {t}
                     </button>
                   ))}
-                  <button onClick={() => setBevDraw(null)} className="text-ink-3 hover:text-block px-1"><T k="action.cancel">cancel</T></button>
+                  <button type="button" onClick={() => setBevDraw(null)} className="btn"><T k="action.cancel">Cancel</T></button>
                 </div>
               </div>
             ) : (
-              <button onClick={() => setBevDraw([])}
-                className="border border-line px-2 py-1 hover:border-accent">draw a lane here</button>
+              <button type="button" onClick={() => setBevDraw([])}
+                className="btn">Draw a lane here</button>
             )}
           </div>
         </div>
       )}
 
       <div className="flex flex-1 min-h-0">
-        <div ref={wrapRef} className="flex-1 overflow-hidden bg-bg-2">
+        <div ref={wrapRef} className="flex-1 overflow-hidden bg-bg-2 relative">
+          {!img && (
+            <div className="absolute inset-0 flex items-center justify-center text-[12.5px] text-ink-3" role="status">
+              {msgIsBad ? msg : "Loading frame..."}
+            </div>
+          )}
           {img && meta && (
             <LaneCanvas img={img} meta={meta} scale={scale} lanes={lanes} sel={sel} drivable={drivable}
               adding={adding} onStageClick={onStageClick} onSelect={setSel} onDragPoint={dragPoint} />
           )}
         </div>
 
-        <aside className="w-56 border-l hairline p-3 space-y-3 text-[12px]">
-          <div className="text-ink-3 uppercase text-[10px]">lanes ({lanes.length})</div>
+        <aside className="w-64 border-l hairline p-3 space-y-3 text-[12.5px] overflow-y-auto">
+          <h2 className="section-title">Lanes <span className="font-normal text-ink-3">({lanes.length})</span></h2>
+          {img && lanes.length === 0 && !adding && (
+            <EmptyState compact icon="info" title="No lanes on this frame"
+              action={<button type="button" onClick={propose} disabled={!!busy} className="btn">Propose lanes</button>}>
+              Propose them from the lane markings, or use Add lane to click points along one by hand.
+            </EmptyState>
+          )}
+          <div className="space-y-0.5">
           {lanes.map((l) => (
             <div key={l.lane_id} {...pressable(() => setSel(l.lane_id))} aria-pressed={l.lane_id === sel}
-              className={`flex items-center gap-1.5 cursor-pointer ${l.lane_id === sel ? "text-ink" : "text-ink-3"}`}>
-              <span className="w-2.5 h-2.5 inline-block" aria-hidden style={{ background: l.is_ego ? "#56D364" : (COLOR[l.source] || "#A0A6AD") }} />
-              <span className="truncate flex-1">{l.lane_type}{l.is_ego ? " (ego)" : ""}</span>
-              <span className="text-ink-3">{l.source[0]}</span>
+              className={`flex items-center gap-2 px-1.5 py-1 rounded cursor-pointer ${l.lane_id === sel ? "text-ink bg-accent/10" : "text-ink-2 hover:bg-head"}`}>
+              <span className="w-2.5 h-2.5 inline-block rounded-sm" aria-hidden style={{ background: l.is_ego ? "#56D364" : (COLOR[l.source] || "#A0A6AD") }} />
+              <span className="truncate flex-1">{humanize(l.lane_type)}{l.is_ego ? " (ego)" : ""}</span>
+              <span className="text-ink-3 text-[11px]">{humanize(l.source)}</span>
             </div>
           ))}
+          </div>
           {selLane && (
-            <div className="border-t hairline pt-2 space-y-2">
-              <div className="text-ink-3 uppercase text-[10px]">selected lane</div>
-              <select value={selLane.lane_type} onChange={(e) => setType(e.target.value)} className="w-full bg-bg border border-line px-1 py-0.5 text-ink">
-                {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            <div className="border-t hairline pt-3 space-y-2">
+              <div className="section-title">Selected lane</div>
+              <select value={selLane.lane_type} onChange={(e) => setType(e.target.value)} aria-label="lane type" className="field w-full">
+                {TYPES.map((t) => <option key={t} value={t}>{humanize(t)}</option>)}
               </select>
-              <button onClick={toggleEgo} className={`w-full border px-2 py-1 ${selLane.is_ego ? "border-pass text-pass" : "border-line text-ink-3"}`}>{selLane.is_ego ? "ego lane ✓" : "mark ego"}</button>
-              <button onClick={del} className="w-full border border-line text-ink-3 px-2 py-1 hover:border-block hover:text-block"><T k="action.delete">delete</T></button>
-              <button onClick={() => router.push(`/frame/${frameId}`)} className="w-full border border-line text-ink-3 px-2 py-1 hover:border-accent">open frame editor</button>
+              <button type="button" onClick={toggleEgo} aria-pressed={!!selLane.is_ego} className={`btn w-full ${selLane.is_ego ? "btn-on" : ""}`}>{selLane.is_ego ? "Ego lane ✓" : "Mark as ego lane"}</button>
+              <button type="button" onClick={() => router.push(`/frame/${frameId}`)} className="btn w-full">Open frame editor</button>
+              <button type="button" onClick={del} className="btn btn-danger w-full mt-2"><T k="action.delete">Delete</T></button>
             </div>
           )}
         </aside>

@@ -10,6 +10,7 @@ import { useState } from "react";
 import PageShell from "@/components/shell/PageShell";
 import { Panel, KV, Bar, RunButton, useRun, ErrLine, NumField } from "@/components/engine/prim";
 import { runJSON, parseInput } from "@/lib/engine";
+import { humanize } from "@/lib/format";
 
 type Unc = { uncertainty: number; soft_target: number };
 type Depth = { depth_m: number | null; uncertainty?: number; priors?: string[]; reason?: string };
@@ -38,79 +39,85 @@ export default function PseudoGtPage() {
   const rank = useRun<Ranked>();
 
   return (
-    <PageShell active="ORACLYX" title="4D uncertainty-aware pseudo-GT"
-      subtitle="calibrated soft targets, monocular depth priors, and the info-gain review queue">
-      <div className="p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 max-w-6xl">
+    <PageShell active="ORACLYX" title="4D pseudo ground truth"
+      subtitle="Try out how machine labels are weighted for training, before any person checks them">
+      <div className="page-wrap grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
         {/* uncertainty */}
-        <Panel title="pseudo-label uncertainty" hint="consensus to soft target">
-          <div className="space-y-2 mb-2">
-            <NumField label="consensus" value={cons} onChange={setCons} w="w-20" />
-            <NumField label="n views" value={views} onChange={setViews} w="w-20" />
-            <NumField label="calib conf" value={calib} onChange={setCalib} w="w-20" />
-            <NumField label="depth unc" value={depthU} onChange={setDepthU} w="w-20" />
+        <Panel title="How much to trust a label" hint="From model agreement to training weight">
+          <p className="section-desc mb-3">A label the models agree on, seen from several cameras, counts for more in training.</p>
+          <div className="space-y-2 mb-3">
+            <NumField label="Model agreement (0 to 1)" value={cons} onChange={setCons} w="w-20" />
+            <NumField label="Cameras that saw it" value={views} onChange={setViews} w="w-20" />
+            <NumField label="Calibration trust (0 to 1)" value={calib} onChange={setCalib} w="w-20" />
+            <NumField label="Depth doubt (0 to 1)" value={depthU} onChange={setDepthU} w="w-20" />
           </div>
           <RunButton busy={unc.busy}
             onClick={() => unc.run(() => runJSON<Unc>("/api/oraclyx/uncertainty",
-              { consensus_score: cons, n_views: views, calib_confidence: calib, depth_uncertainty: depthU }))} label="calibrate" />
+              { consensus_score: cons, n_views: views, calib_confidence: calib, depth_uncertainty: depthU }))} label="Work it out" />
           <ErrLine err={unc.err} />
           {unc.out && (
-            <div className="mt-3">
-              <div className="flex items-center gap-2 text-[11px] mb-1">
-                <span className="w-20 text-ink-3">uncertainty</span>
+            <div className="mt-3 border-t hairline pt-3 space-y-1.5">
+              <div className="flex items-center gap-2 text-[12px]">
+                <span className="w-28 text-ink-3">Doubt</span>
                 <Bar frac={unc.out.uncertainty} tone={unc.out.uncertainty > 0.5 ? "block" : "warn"} />
-                <span className="w-10 text-right text-ink-2">{unc.out.uncertainty}</span>
+                <span className="w-12 text-right text-ink-2 tabular-nums">{unc.out.uncertainty}</span>
               </div>
-              <div className="flex items-center gap-2 text-[11px]">
-                <span className="w-20 text-ink-3">soft target</span>
+              <div className="flex items-center gap-2 text-[12px]">
+                <span className="w-28 text-ink-3">Training weight</span>
                 <Bar frac={unc.out.soft_target} tone="pass" />
-                <span className="w-10 text-right text-ink-2">{unc.out.soft_target}</span>
+                <span className="w-12 text-right text-ink-2 tabular-nums">{unc.out.soft_target}</span>
               </div>
             </div>
           )}
         </Panel>
 
         {/* mono depth */}
-        <Panel title="monocular metric depth" hint="refuses without a prior">
-          <div className="space-y-2 mb-2">
-            <NumField label="box height px" value={boxH} onChange={setBoxH} w="w-20" />
-            <NumField label="class id" value={cls} onChange={setCls} w="w-20" />
-            <NumField label="focal px" value={focal} onChange={setFocal} w="w-20" />
-            <NumField label="cam height m" value={camH} onChange={setCamH} w="w-20" />
+        <Panel title="Distance from one camera" hint="Needs a known object size or camera height">
+          <p className="section-desc mb-3">Estimates how far away an object is from its box height in a single image. It declines rather than guess when it lacks a reference.</p>
+          <div className="space-y-2 mb-3">
+            <NumField label="Box height (px)" value={boxH} onChange={setBoxH} w="w-20" />
+            <NumField label="Class number" value={cls} onChange={setCls} w="w-20" />
+            <NumField label="Focal length (px)" value={focal} onChange={setFocal} w="w-20" />
+            <NumField label="Camera height (m)" value={camH} onChange={setCamH} w="w-20" />
           </div>
           <RunButton busy={depth.busy}
             onClick={() => depth.run(() => runJSON<Depth>("/api/oraclyx/mono-depth",
-              { box: [0, 720 - boxH, 40, 720], class_id: cls, focal_px: focal, cy: 360, cam_height_m: camH }))} label="recover" />
+              { box: [0, 720 - boxH, 40, 720], class_id: cls, focal_px: focal, cy: 360, cam_height_m: camH }))} label="Estimate distance" />
           <ErrLine err={depth.err} />
           {depth.out && (
-            <div className="mt-3">
+            <div className="mt-3 border-t hairline pt-3">
               {depth.out.depth_m === null
-                ? <div className="text-[12px] text-block">refused: {depth.out.reason}</div>
+                ? <div className="text-[12.5px] text-block">Could not estimate: {depth.out.reason}</div>
                 : (<>
-                    <KV k="depth" v={`${depth.out.depth_m} m`} tone="pass" />
-                    <KV k="uncertainty" v={depth.out.uncertainty} tone="ink-3" />
-                    <KV k="priors" v={depth.out.priors?.join(" + ")} tone="ink-3" />
+                    <KV k="Distance" v={`${depth.out.depth_m} m`} tone="pass" />
+                    <KV k="Doubt" v={depth.out.uncertainty} tone="ink-3" />
+                    <KV k="Based on" v={depth.out.priors?.map(humanize).join(" + ")} tone="ink-3" />
                   </>)}
             </div>
           )}
         </Panel>
 
         {/* info-gain ranking */}
-        <Panel title="disagreement review queue" hint="ranked by info gain">
-          <textarea value={queue} placeholder={EXAMPLE_QUEUE} onChange={(e) => setQueue(e.target.value)} rows={8}
-            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
-          <div className="mt-2"><RunButton busy={rank.busy}
-            onClick={() => rank.run(() => runJSON<Ranked>("/api/oraclyx/disagreements/rank", { items: parseInput(queue, "queue") }))}
-            label="rank" /></div>
+        <Panel title="What to review first" hint="Where a person's check teaches the model most">
+          <label className="block">
+            <span className="block text-[12px] text-ink-2 mb-1">Disagreements as JSON</span>
+            <textarea value={queue} placeholder={EXAMPLE_QUEUE} onChange={(e) => setQueue(e.target.value)} rows={8}
+              className="field w-full font-mono text-[12px]" />
+          </label>
+          <div className="mt-2.5"><RunButton busy={rank.busy}
+            onClick={() => rank.run(() => runJSON<Ranked>("/api/oraclyx/disagreements/rank", { items: parseInput(queue, "the disagreements") }))}
+            label="Rank them" /></div>
           <ErrLine err={rank.err} />
           {rank.out && (
-            <div className="mt-3 space-y-1">
+            <div className="mt-3 border-t hairline pt-3 space-y-1.5">
               {rank.out.ranked.map((r, i) => {
                 const max = Math.max(0.0001, ...rank.out!.ranked.map((x) => x.info_gain));
                 return (
-                  <div key={r.id ?? i} className="flex items-center gap-2 text-[11px]">
-                    <span className="w-16 shrink-0 truncate text-ink-2">{r.id ?? `#${i}`}</span>
+                  <div key={r.id ?? i} className="flex items-center gap-2 text-[12px]" data-tip={`Value of reviewing: ${r.info_gain}`}>
+                    <span className="w-6 shrink-0 text-ink-3 tabular-nums">{i + 1}.</span>
+                    <span className="w-20 shrink-0 truncate text-ink-2">{r.id ?? `Item ${i + 1}`}</span>
                     <Bar frac={r.info_gain / max} tone="accent" />
-                    <span className="w-12 shrink-0 text-right text-ink-3">{r.info_gain}</span>
+                    <span className="w-12 shrink-0 text-right text-ink-3 tabular-nums">{r.info_gain}</span>
                   </div>
                 );
               })}

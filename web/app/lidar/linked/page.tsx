@@ -12,6 +12,13 @@ import type { OntologyClass } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import Inspector from "@/components/shell/Inspector";
 import SessionPicker from "@/components/lidar/SessionPicker";
+import EmptyState from "@/components/ui/EmptyState";
+import { fromNs, humanize, num, shortId } from "@/lib/format";
+
+// Ontology class names read as words ("two wheeler") but keep their case: "suv" is not "Suv".
+const classLabel = (n: string | null | undefined) => (n ?? "").replace(/_/g, " ");
+const fmt = (v: unknown, digits = 1) =>
+  typeof v === "number" && Number.isFinite(v) ? v.toFixed(digits) : v == null ? "-" : String(v);
 
 const PointCloudViewer = dynamic(() => import("@/components/lidar/PointCloudViewer"), { ssr: false });
 
@@ -110,68 +117,86 @@ export default function LinkedWorkspacePage() {
   };
 
   return (
-    <PageShell active="LINKED 2D-3D" title="Linked 2D-3D"
-      meta={err ? <span className="text-block">{err}</span> : undefined}>
+    <PageShell active="LINKED 2D-3D" title="Linked 2D-3D">
       <div data-theme="dark" className="flex h-full bg-[#0a0e14] text-ink">
-        <Inspector title="Controls" side="left" width="w-80">
+        <Inspector title="3D to camera" side="left" width="w-80">
           <div className="flex flex-col gap-3 p-4">
             <SessionPicker value={sessionId} onChange={setSessionId} onLoad={(id) => {
-              if (!id.trim()) { setErr("select or enter a session id"); return; }
-              api.lidarClouds(id.trim()).then((r) => setClouds(r.clouds)).catch((x) => setErr(String(x)));
+              if (!id.trim()) { setErr("Choose a session first."); return; }
+              setErr(null);
+              api.lidarClouds(id.trim()).then((r) => {
+                setClouds(r.clouds);
+                if (!r.clouds.length) setErr("No point clouds in this session. Build pseudo-LiDAR for it on the Point clouds page.");
+              }).catch((x) => setErr(humanizeError(x)));
             }} />
 
             {clouds.length > 0 && (
               <div className="flex max-h-28 flex-col gap-1 overflow-y-auto">
                 {clouds.map((c) => (
-                  <button key={c.cloud_id} onClick={() => openCloud(c)}
-                    className={`rounded border px-2 py-1 text-left text-xs ${cloud?.cloud_id === c.cloud_id ? "border-accent/60 bg-accent/15" : "border-line bg-bg-2"}`}>
-                    {c.source} | {c.point_count.toLocaleString()} pts
+                  <button key={c.cloud_id} type="button" onClick={() => openCloud(c)} aria-pressed={cloud?.cloud_id === c.cloud_id}
+                    title={`${c.cloud_id} · ts_ns ${c.ts_ns}`}
+                    className={`rounded border px-2.5 py-1.5 text-left text-[12px] ${cloud?.cloud_id === c.cloud_id ? "border-accent/60 bg-accent/15" : "border-line bg-bg-2 hover:border-line-3"}`}>
+                    <div className="flex justify-between">
+                      <span className="font-medium">{c.source === "lidar" ? "LiDAR" : humanize(c.source)}</span>
+                      <span className="text-ink-3 tabular-nums">{num(c.point_count)} points</span>
+                    </div>
+                    <div className="truncate text-[11px] text-ink-3">{fromNs(c.ts_ns)} · <span className="font-mono">{shortId(c.cloud_id)}</span></div>
                   </button>
                 ))}
               </div>
             )}
 
             {cloud && (
-              <button onClick={link} className="rounded bg-pass/25 px-2 py-1.5 text-xs hover:bg-pass/35">
+              <button type="button" onClick={link} className="btn btn-primary"
+                title="match each 3D box to the 2D box it projects onto in the camera image">
                 Link cuboids to 2D objects
               </button>
             )}
 
             {selected && (
-              <div className="flex flex-col gap-2 rounded border border-line bg-bg-2 p-2 text-xs">
-                <div className="text-ink-2">Selected {selected.class_name}</div>
-                <div className="text-ink-3">2D object: {selected.object_id ? selected.object_id.slice(0, 8) : "unlinked"}</div>
+              <div className="flex flex-col gap-2 rounded border border-line bg-bg-2 p-2.5 text-[12px]">
+                <div className="font-medium text-ink">Selected: {classLabel(selected.class_name)}</div>
+                <div className="text-ink-3">2D object: {selected.object_id ? <span className="font-mono">{shortId(selected.object_id)}</span> : "not linked yet"}</div>
                 {props && (
                   <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-ink-2">
-                    <span>distance</span><span className="text-right">{props.distance_m} m</span>
-                    <span>heading</span><span className="text-right">{props.heading_deg} deg</span>
-                    <span>velocity</span><span className="text-right">{props.velocity_mps} m/s</span>
-                    <span>occlusion</span><span className="text-right">{props.occlusion}</span>
+                    <span>Distance</span><span className="text-right tabular-nums">{fmt(props.distance_m)} m</span>
+                    <span>Heading</span><span className="text-right tabular-nums">{fmt(props.heading_deg, 0)}°</span>
+                    <span>Speed</span><span className="text-right tabular-nums">{fmt(props.velocity_mps)} m/s</span>
+                    <span>Occlusion</span><span className="text-right tabular-nums">{fmt(props.occlusion, 2)}</span>
                   </div>
                 )}
                 {linked && (
-                  <div className="text-ink-3">visible in: {Object.keys(linked).join(", ") || "none"}</div>
+                  <div className="text-ink-3">Visible in: {Object.keys(linked).join(", ") || "no camera"}</div>
                 )}
                 {similar.length > 0 && (
                   <div>
-                    <div className="mb-1 text-ink-2">{similar.length} similar. Batch correct to:</div>
+                    <div className="mb-1.5 text-ink-2">{similar.length} similar boxes. Correct them all to:</div>
                     <div className="flex flex-wrap gap-1">
                       {classes.filter((c) => ["sedan", "suv", "truck", "bus", "autorickshaw"].includes(c.name)).map((c) => (
-                        <button key={c.id} onClick={() => batchCorrect(c.id)}
-                          className="rounded bg-head px-2 py-0.5 hover:bg-primary-3">{c.name}</button>
+                        <button key={c.id} type="button" onClick={() => batchCorrect(c.id)}
+                          className="chip">{classLabel(c.name)}</button>
                       ))}
                     </div>
                   </div>
                 )}
               </div>
             )}
-            {err && <div className="rounded border border-block/40 bg-block/10 p-2 text-xs text-block">{err}</div>}
+            {err && <div role="alert" className="rounded border border-block/40 bg-block/10 p-2.5 text-[12px] text-block">{err}</div>}
           </div>
         </Inspector>
 
         <div className="flex flex-1 min-w-0">
           <div className="relative flex-1 border-r border-line">
-            <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-ink-3">Cloud</div>
+            <div className="absolute left-3 top-3 z-10 text-[12px] font-medium text-ink-3">Point cloud</div>
+            {!data && (
+              <div className="flex h-full items-center justify-center">
+                <EmptyState icon="link" title={clouds.length ? "Pick a cloud" : "No cloud loaded"}>
+                  {clouds.length
+                    ? "Choose a cloud on the left. Select a box here or on the camera image and the other view follows."
+                    : "Choose a session on the left, then a cloud. Each 3D box is shown with its projection on the camera image."}
+                </EmptyState>
+              </div>
+            )}
             {data && (
               <PointCloudViewer points={data.points} count={data.count} colorBy="height"
                 intensityRange={[data.intensityMin, data.intensityMax]} source={data.source} mode="perspective"
@@ -179,7 +204,7 @@ export default function LinkedWorkspacePage() {
             )}
           </div>
           <div className="relative w-1/2 bg-black">
-            <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-ink-3">Camera (cam_f)</div>
+            <div className="absolute left-3 top-3 z-10 text-[12px] font-medium text-ink-3">Front camera <span className="font-mono font-normal">cam_f</span></div>
             {frameId && (
               <div className="relative h-full w-full">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -201,7 +226,11 @@ export default function LinkedWorkspacePage() {
                 </svg>
               </div>
             )}
-            {!frameId && <div className="flex h-full items-center justify-center text-sm text-ink-3">Pick a cloud with cuboids.</div>}
+            {!frameId && (
+              <div className="flex h-full items-center justify-center px-6 text-center text-[12.5px] text-ink-3">
+                {cloud ? "This cloud has no 3D boxes yet. Create them on the 3D cuboids page, then link them here." : "The camera image appears here once a cloud with 3D boxes is open."}
+              </div>
+            )}
           </div>
         </div>
       </div>

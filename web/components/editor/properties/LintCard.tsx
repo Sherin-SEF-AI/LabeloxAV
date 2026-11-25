@@ -68,7 +68,7 @@ export default function LintCard({ lint, selectedIds, onSelect, onOpenIssues }: 
       <button onClick={() => setOpen(!open)} aria-expanded={open}
         className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-line/30 group transition-colors">
         <span aria-hidden
-          className={`text-ink-3 group-hover:text-ink w-3 text-center text-[9px] leading-none transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▸</span>
+          className={`text-ink-3 group-hover:text-ink w-3 text-center text-[10.5px] leading-none transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▸</span>
         <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-2">checks</span>
         {!lint ? (
           <span className="text-[11px] text-ink-3">running...</span>
@@ -111,7 +111,7 @@ export default function LintCard({ lint, selectedIds, onSelect, onOpenIssues }: 
                   <span className={`shrink-0 ${SEVERITY_CLASS[f.severity] ?? "text-ink-3"}`}>●</span>
                   <span className="flex-1 min-w-0">
                     <span className="block truncate text-ink-2">{f.label}</span>
-                    <span className="block truncate text-ink-3 text-[10px]">{f.reason}</span>
+                    <span className="block truncate text-ink-3 text-[10.5px]">{f.reason}</span>
                   </span>
                 </button>
               ))}
@@ -147,7 +147,7 @@ export default function LintCard({ lint, selectedIds, onSelect, onOpenIssues }: 
               <button onClick={onOpenIssues}
                 title="open these as issue threads in the panel below, so they survive leaving this frame"
                 className="text-[11px] border border-line rounded px-2 py-1 text-ink-2 hover:border-accent hover:text-accent">
-                open {findings.length} as issue{findings.length === 1 ? "" : "s"}
+                Open {findings.length} as issue{findings.length === 1 ? "" : "s"}
               </button>
               {lint?.issues && (
                 <span className="ml-2 text-[11px] text-pass">

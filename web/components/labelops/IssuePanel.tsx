@@ -79,10 +79,10 @@ export default function IssuePanel({ frameId, objectId }: { frameId: string; obj
   return (
     <div className="p-2 space-y-2 text-[12px]">
       <div className="flex items-center gap-2">
-        <span className="uppercase text-[10px] text-ink-3">issues</span>
+        <span className="section-title">Issues</span>
         <label className="ml-auto flex items-center gap-1 text-ink-3 cursor-pointer">
           <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />
-          show resolved
+          Show resolved
         </label>
       </div>
 
@@ -91,21 +91,21 @@ export default function IssuePanel({ frameId, objectId }: { frameId: string; obj
         <div className="flex items-center gap-1 flex-wrap">
           {KINDS.map((k) => (
             <button key={k} onClick={() => setKind(k)}
-              className={`px-1.5 py-0.5 border ${kind === k ? "border-accent text-ink" : "border-line text-ink-3 hover:text-ink-2"}`}>
-              {k.replace("_", " ")}
+              className={`chip ${kind === k ? "chip-on" : ""}`}>
+              {k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, " ")}
             </button>
           ))}
         </div>
         <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={2}
-          placeholder={objectId ? "problem with the selected object" : "problem with this frame"}
-          className="w-full bg-bg border border-line px-1.5 py-1 text-ink resize-none" />
+          placeholder={objectId ? "Describe the problem with the selected object" : "Describe the problem with this frame"}
+          className="field w-full resize-none" />
         <div className="flex items-center gap-2">
           <span className="text-ink-3">
             {objectId ? `on object ${objectId.slice(0, 8)}` : "on this frame"}
           </span>
           <button onClick={create} disabled={busy}
-            className="ml-auto px-2 py-0.5 border border-line text-ink-2 hover:border-accent disabled:opacity-40">
-            raise
+            className="ml-auto btn btn-primary">
+            Raise issue
           </button>
         </div>
       </div>
@@ -141,10 +141,10 @@ export default function IssuePanel({ frameId, objectId }: { frameId: string; obj
                       onKeyDown={(e) => { if (e.key === "Enter") addComment(); }}
                       className="flex-1 min-w-0 bg-bg border border-line px-1.5 py-0.5 text-ink" />
                     <button onClick={addComment} disabled={busy}
-                      className="px-1.5 border border-line text-ink-2 hover:border-accent disabled:opacity-40">send</button>
+                      className="btn">Send</button>
                     <button onClick={() => toggleResolve(i)} disabled={busy}
                       className="px-1.5 border border-line text-ink-3 hover:border-accent disabled:opacity-40">
-                      {i.status === "resolved" ? "reopen" : "resolve"}
+                      {i.status === "resolved" ? "Reopen" : "Resolve"}
                     </button>
                   </div>
                 </div>

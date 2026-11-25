@@ -4,12 +4,17 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSmartBack } from "@/lib/nav";
-import { api, type SimilarObject } from "@/lib/api";
+import { api, humanizeError, type SimilarObject } from "@/lib/api";
 import type { ObjectDetail, Ontology } from "@/lib/types";
 import { StateBadge, ConfBar } from "@/components/StateBadge";
 import BackButton from "@/components/BackButton";
 import PageHeaderBar from "@/components/shell/PageHeaderBar";
 import Inspector from "@/components/shell/Inspector";
+import LoadState from "@/components/shell/LoadState";
+import { fromNs, humanize, shortId } from "@/lib/format";
+
+// Ontology class names read as words ("two wheeler") but keep their case: "suv" is not "Suv".
+const classLabel = (n: string | null | undefined) => (n ?? "").replace(/_/g, " ");
 
 const AnnotationCanvas = dynamic(() => import("@/components/AnnotationCanvas"), { ssr: false });
 
@@ -25,17 +30,21 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
   const [flash, setFlash] = useState(false);
   const [similar, setSimilar] = useState<SimilarObject[] | null>(null);
   const [t0] = useState<number>(() => Date.now());
+  const [loadErr, setLoadErr] = useState<unknown>(null);
+  const [similarBusy, setSimilarBusy] = useState(false);
+  const [similarErr, setSimilarErr] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
-    api.ontology().then(setOnto);
-  }, []);
+    api.ontology().then(setOnto).catch(setLoadErr);
+  }, [reload]);
   useEffect(() => {
     api.object(params.id).then((o) => {
       setObj(o);
       setCls(o.class_name);
       setAttrs(o.attrs ?? {});
-    });
-  }, [params.id]);
+    }).catch(setLoadErr);
+  }, [params.id, reload]);
 
   const shortlist = useMemo(() => {
     if (!onto || !obj) return [];
@@ -86,29 +95,39 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [save, shortlist, router]);
 
-  if (!obj || !onto) return <div className="p-6 text-ink-3">loading…</div>;
+  if (!obj || !onto) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <PageHeaderBar title="Object" subtitle={shortId(params.id)} meta={<BackButton label="Back" />} />
+        <div className="page-wrap-narrow">
+          <LoadState loading={!loadErr} error={loadErr} rows={4}
+            onRetry={() => { setLoadErr(null); setReload((n) => n + 1); }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`min-h-screen flex flex-col ${flash ? "confirm-flash" : ""}`}>
       <PageHeaderBar
         title="Object"
-        subtitle={obj.object_id.slice(0, 8)}
+        subtitle={shortId(obj.object_id)}
         meta={
           <>
-            <BackButton />
-            <span>{obj.cam_id} · ts {String(obj.ts_ns).slice(0, 13)}</span>
-            <span className="text-ink-3">{cls}</span>
+            <BackButton label="Back" />
+            <span title={`ts_ns ${obj.ts_ns}`}><span className="font-mono">{obj.cam_id}</span> · {fromNs(obj.ts_ns)}</span>
+            <span className="text-ink-2">{classLabel(cls)}</span>
             <ConfBar conf={obj.conf} />
             <StateBadge state={obj.state} />
           </>
         }
         primaryAction={
           <div className="flex gap-2">
-            <button onClick={save} className="border border-pass text-pass px-3 py-1 font-mono hover:bg-pass/10">
-              SAVE ⏎
+            <button type="button" onClick={goBack} className="btn" title="skip without saving (Space)">
+              Skip <kbd className="text-ink-3 font-normal">Space</kbd>
             </button>
-            <button onClick={goBack} className="border border-line text-ink-2 px-3 py-1 font-mono hover:text-ink">
-              SKIP ␣
+            <button type="button" onClick={save} className="btn btn-primary" title="accept with this class and these attributes (Enter)">
+              Save <kbd className="opacity-80 font-normal">Enter</kbd>
             </button>
           </div>
         }
@@ -127,35 +146,38 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
             onPointClick={onPointClick}
           />
           <div className="text-[12px] text-ink-3 mt-2">
-            click-to-segment (SAM) · click the object to propose a mask
+            Click the object to propose a mask (SAM click-to-segment).
           </div>
         </main>
 
-        <Inspector title="object" side="right">
+        <Inspector title="Object" side="right">
           <div className="p-4 space-y-5">
           <section>
-            <div className="text-[12px] text-ink-3 uppercase mb-2">class</div>
+            <h2 className="section-title mb-2">Class</h2>
             <div className="space-y-1">
               {shortlist.map((name, i) => (
                 <button
                   key={name}
                   onClick={() => setCls(name)}
-                  className={`block w-full text-left text-sm px-2 py-1 font-mono ${
-                    cls === name ? "text-accent border-l-2 border-accent" : "text-ink-2 hover:text-ink"
+                  type="button"
+                  aria-pressed={cls === name}
+                  className={`flex items-center gap-2 w-full text-left text-[13px] px-2 py-1 rounded ${
+                    cls === name ? "text-accent bg-accent/10 border-l-2 border-accent" : "text-ink-2 hover:text-ink hover:bg-head"
                   }`}
                 >
-                  <span className="text-ink-3">[{i + 1}]</span> {name}
+                  <kbd className="w-4 text-center text-[11px] text-ink-3 font-mono">{i + 1}</kbd> {classLabel(name)}
                 </button>
               ))}
             </div>
             <select
               value={cls}
               onChange={(e) => setCls(e.target.value)}
-              className="mt-2 w-full bg-panel border hairline text-ink text-xs px-2 py-1 font-mono"
+              aria-label="any class"
+              className="field mt-2 w-full"
             >
               {onto.classes.map((c) => (
                 <option key={c.id} value={c.name}>
-                  {c.name}
+                  {classLabel(c.name)}
                   {c.india ? " *" : ""}
                 </option>
               ))}
@@ -163,7 +185,7 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
           </section>
 
           <section>
-            <div className="text-[12px] text-ink-3 uppercase mb-2">attributes</div>
+            <h2 className="section-title mb-2">Attributes</h2>
             <div className="space-y-2">
               {Object.entries(onto.attributes).map(([name, spec]) => (
                 <AttrControl
@@ -183,25 +205,25 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
               "no type" and "not looked at" are different facts. */}
           {(obj.sign_type || obj.ocr_text || obj.class_name === "traffic_sign") && (
             <section>
-              <div className="text-[12px] text-ink-3 uppercase mb-2">sign</div>
-              <div className="text-[12px] space-y-1">
+              <h2 className="section-title mb-2">Sign</h2>
+              <div className="text-[12.5px] space-y-1">
                 <div className="flex justify-between">
-                  <span className="text-ink-2">type</span>
+                  <span className="text-ink-2">Type</span>
                   {obj.sign_type
-                    ? <span className="text-ink">{obj.sign_type}</span>
+                    ? <span className="text-ink">{humanize(obj.sign_type)}</span>
                     : <span className="text-ink-3">
                         {(obj.provenance?.sign as { rejected?: boolean } | undefined)?.rejected
-                          ? "declined" : "not typed"}
+                          ? "Declined" : "Not typed"}
                       </span>}
                 </div>
                 {obj.sign_category && (
                   <div className="flex justify-between">
-                    <span className="text-ink-2">category</span><span className="text-ink">{obj.sign_category}</span>
+                    <span className="text-ink-2">Category</span><span className="text-ink">{humanize(obj.sign_category)}</span>
                   </div>
                 )}
                 {(obj.provenance?.sign as { margin?: number } | undefined)?.margin != null && (
                   <div className="flex justify-between">
-                    <span className="text-ink-2">margin over &quot;not a sign&quot;</span>
+                    <span className="text-ink-2">Margin over &quot;not a sign&quot;</span>
                     <span className="text-ink tabular-nums">
                       {((obj.provenance!.sign as { margin: number }).margin).toFixed(3)}
                     </span>
@@ -214,13 +236,13 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
                 )}
                 {obj.ocr_text && (
                   <div className="pt-1 border-t hairline mt-1">
-                    <div className="text-ink-2">text read {obj.ocr_lang ? `(${obj.ocr_lang})` : ""}</div>
+                    <div className="text-ink-2">Text read {obj.ocr_lang ? `(${obj.ocr_lang})` : ""}</div>
                     <div className="text-ink">{obj.ocr_text}</div>
                     {/* Null conf is unmeasured, not zero. The local VLM returns no calibrated score, and
                         showing 0.00 would read as a bad result rather than an absent one. */}
                     <div className="text-ink-3">
-                      {obj.ocr_conf == null ? "confidence unmeasured, needs verification"
-                        : `confidence ${obj.ocr_conf.toFixed(2)}`}
+                      {obj.ocr_conf == null ? "Confidence unmeasured, needs verification"
+                        : `Confidence ${obj.ocr_conf.toFixed(2)}`}
                     </div>
                   </div>
                 )}
@@ -229,29 +251,39 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
           )}
 
           <section>
-            <div className="text-[12px] text-ink-3 uppercase mb-2">provenance</div>
-            <div className="text-[12px] space-y-1">
+            <h2 className="section-title mb-2">Where it came from</h2>
+            <div className="text-[12.5px] space-y-1">
               {(obj.provenance?.proposals as { path: string; verdict: string }[] | undefined)?.map(
                 (p, i) => (
                   <div key={i} className="flex justify-between">
-                    <span className="text-ink-2">{p.path.replace("path_", "")}</span>
-                    <span className="text-ink-3">{p.verdict}</span>
+                    <span className="text-ink-2">Path {p.path.replace("path_", "").toUpperCase()}</span>
+                    <span className="text-ink-3">{humanize(p.verdict)}</span>
                   </div>
                 ),
-              ) ?? <span className="text-ink-3">none</span>}
+              ) ?? <span className="text-ink-3">No model proposals recorded for this object.</span>}
             </div>
           </section>
 
           <section>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[12px] text-ink-3 uppercase">similar (CLIP)</span>
+              <h2 className="section-title">Similar objects</h2>
               <button
-                onClick={async () => setSimilar(await api.objectSimilar(obj.object_id).then((r) => r.results))}
-                className="text-[12px] text-ink-3 hover:text-accent"
+                type="button"
+                disabled={similarBusy}
+                title="find objects that look like this one (CLIP embeddings)"
+                onClick={async () => {
+                  setSimilarBusy(true);
+                  setSimilarErr(null);
+                  try { setSimilar(await api.objectSimilar(obj.object_id).then((r) => r.results)); }
+                  catch (e) { setSimilar(null); setSimilarErr(humanizeError(e)); }
+                  finally { setSimilarBusy(false); }
+                }}
+                className="btn"
               >
-                find
+                {similarBusy ? "Searching..." : "Find"}
               </button>
             </div>
+            {similarErr && <div role="alert" className="text-[12px] text-block">Could not search: {similarErr}</div>}
             {similar && (
               <div className="grid grid-cols-3 gap-1">
                 {similar.map((s) => (
@@ -262,13 +294,21 @@ export default function ObjectPage({ params }: { params: { id: string } }) {
                     title={`${s.class_name} ${s.score.toFixed(2)}`}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={s.image_url} alt={s.class_name} className="w-full h-full object-cover" />
-                    <span className="absolute bottom-0 right-0 bg-bg/80 text-[10.5px] px-0.5">
+                    <img src={s.image_url} alt={s.class_name} className="w-full h-full object-cover bg-bg-2" />
+                    <span className="absolute bottom-0 right-0 bg-bg/80 text-[11px] px-1 tabular-nums">
                       {s.score.toFixed(2)}
                     </span>
                   </button>
                 ))}
-                {!similar.length && <span className="text-ink-3 text-[11px] col-span-3">no embeddings yet (run make embed)</span>}
+                {!similar.length && (
+                  <div className="col-span-3 text-[12px] text-ink-3 space-y-1.5">
+                    <p>No similar objects found. Object embeddings have not been computed for this corpus yet.</p>
+                    <details>
+                      <summary className="cursor-pointer hover:text-ink-2">For administrators</summary>
+                      <p className="mt-1">Compute them with <code className="font-mono text-ink-2">make embed</code> on the server.</p>
+                    </details>
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -290,7 +330,7 @@ function AttrControl({
   value: unknown;
   onChange: (v: unknown) => void;
 }) {
-  const label = <span className="text-[12.5px] text-ink-2">{name}</span>;
+  const label = <span className="text-[12.5px] text-ink-2" title={name}>{humanize(name)}</span>;
   if (spec.type === "enum") {
     return (
       <label className="flex items-center justify-between gap-2">
@@ -298,12 +338,12 @@ function AttrControl({
         <select
           value={String(value ?? "")}
           onChange={(e) => onChange(e.target.value === "" ? undefined : isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value))}
-          className="bg-panel border hairline text-ink text-xs px-1 py-0.5 font-mono"
+          className="field py-1 max-w-[9.5rem]"
         >
           <option value="">–</option>
           {spec.values?.map((v) => (
             <option key={String(v)} value={String(v)}>
-              {String(v)}
+              {typeof v === "string" ? humanize(v) : String(v)}
             </option>
           ))}
         </select>
@@ -327,7 +367,7 @@ function AttrControl({
           value={value === undefined ? "" : Number(value)}
           step={spec.type === "float" ? 0.01 : 1}
           onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
-          className="w-20 bg-panel border hairline text-ink text-xs px-1 py-0.5 font-mono"
+          className="field py-1 w-20 tabular-nums"
         />
       </label>
     );
@@ -335,7 +375,7 @@ function AttrControl({
   return (
     <div className="flex items-center justify-between gap-2">
       {label}
-      <span className="text-[12px] text-ink-3">per-rider</span>
+      <span className="text-[12px] text-ink-3">Set per rider</span>
     </div>
   );
 }

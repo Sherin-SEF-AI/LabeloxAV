@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 // In-app back navigation: returns to wherever you came from (triage, curation, a track, ...), falling
 // back to a sensible route when there is no history (deep link / fresh tab). Operational Materialism:
 // grey until hovered, no motion.
-export default function BackButton({ fallback = "/", label = "back" }: { fallback?: string; label?: string }) {
+export default function BackButton({ fallback = "/", label = "Back" }: { fallback?: string; label?: string }) {
   const router = useRouter();
   const goBack = () => {
     if (typeof window !== "undefined" && window.history.length > 1) router.back();

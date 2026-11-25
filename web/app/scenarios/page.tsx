@@ -2,13 +2,16 @@
 
 import { useState } from "react";
 import { T } from "@/lib/i18n";
+import { api, humanizeError } from "@/lib/api";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { useQuery } from "@/lib/useQuery";
 import type { Scenario } from "@/lib/types";
 import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
 import ScoreBar from "@/components/shell/ScoreBar";
+import EmptyState from "@/components/ui/EmptyState";
+import { duration, fromNs, humanize, pct, plural, shortId } from "@/lib/format";
 
 // Scenario mining surface (the second moat): NL search over behaviourally-defined scenarios,
 // ranked by criticality (TTC/PET-derived).
@@ -50,18 +53,34 @@ export default function ScenariosPage() {
     else setAsked(next);
   };
 
+  // A scenario is a window on a session's clock; the frame nearest its start is what a person wants to see.
+  const openAt = async (s: Scenario) => {
+    try {
+      const f = await api.inspectorFrameAt(s.session_id, s.t_in_ns);
+      if (f.frame_id) router.push(`/frame/${f.frame_id}`);
+      else toast("No frame was captured at this moment", "error");
+    } catch (e) { toast(humanizeError(e), "error"); }
+  };
+
+  // Every cut-in the miner finds today scores the same maximum, so a bar per row repeats one fact 200 times.
+  // Say it once in the header and show the bar only when the rows actually differ.
+  const crits = new Set(rows.map((s) => s.criticality.toFixed(2)));
+  const uniformCrit = rows.length > 1 && crits.size === 1 ? rows[0].criticality : null;
+
   return (
     <PageShell
       active="SCENARIOS"
       title="Scenarios"
+      subtitle="Behaviours mined from drives (cut-ins, near misses, hard braking), ranked by how critical they were."
       right={
-        <>
-          <span className="border border-line px-2 py-0.5">{rows.length} found</span>
-          <span className={`w-2 h-2 rounded-full ${loading ? "bg-warn" : "bg-pass"}`} />
-        </>
+        <span className="inline-flex items-center gap-2 text-[12px] text-ink-2">
+          <span className={`w-2 h-2 rounded-full ${loading ? "bg-warn" : "bg-pass"}`} aria-hidden />
+          {loading ? "Searching..." : plural(rows.length, "scenario")}
+        </span>
       }
-      filters={
-        <div className="w-full">
+    >
+      <div className="page-wrap space-y-4">
+        <section className="panel p-4 space-y-2">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -72,70 +91,102 @@ export default function ScenariosPage() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder='e.g. "wrong-side autorickshaw cutting in at night on wet road"'
-              className="flex-1 bg-panel border hairline text-ink text-sm px-3 py-2 font-mono"
+              aria-label="Describe the scenario to find"
+              placeholder='Describe a scenario, e.g. "wrong-side autorickshaw cutting in at night on wet road"'
+              className="field flex-1 text-[13px] py-2"
             />
-            <button className="border border-accent text-accent px-4 text-sm font-mono hover:bg-accent/10">
-              <T k="action.search">search</T>
+            <button className="btn btn-primary px-4">
+              <T k="action.search">Search</T>
             </button>
           </form>
-          <div className="flex items-center justify-between mt-1">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-[12px] text-ink-3">
-              parsed into structured filters over the scenario index (type, actor class, light, surface)
+              Your words are turned into filters on type, actor, light and road surface.
             </div>
-            <label className="text-[12px] text-ink-2 flex items-center gap-1.5 cursor-pointer">
+            <label className="text-[12px] text-ink-2 flex items-center gap-1.5 cursor-pointer"
+              data-tip="Also match by image similarity (CLIP), not only by the parsed filters">
               <input type="checkbox" checked={semantic} onChange={(e) => setSemantic(e.target.checked)} />
-              semantic (CLIP)
+              Match by image similarity
             </label>
           </div>
-        </div>
-      }
-    >
-      {loadErr != null && (
-        <div className="p-3"><LoadState error={loadErr} onRetry={() => void load()} /></div>
-      )}
-      <table className="w-full text-sm">
-          <thead className="text-ink-3 text-[10.5px] font-medium uppercase tracking-[0.06em] border-b hairline sticky top-0 bg-bg">
-            <tr>
-              <th className="text-left font-normal px-3 py-2 w-40">type</th>
-              <th className="text-left font-normal px-3 py-2 w-40">criticality</th>
-              <th className="text-left font-normal px-3 py-2">actors / tags</th>
-              <th className="text-left font-normal px-3 py-2 w-28">city</th>
-              <th className="text-left font-normal px-3 py-2 w-44">window (ts_ns)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((s) => (
-              <tr key={s.scenario_id} className="border-b hairline hover:bg-bg-2">
-                <td className="px-3 py-2">
-                  <span className={`text-[10.5px] font-medium uppercase tracking-[0.06em] border px-1.5 py-0.5 ${TYPE_COLOR[s.type] ?? "text-ink-2 border-line"}`}>
-                    {s.type}
-                  </span>
-                </td>
-                <td className="px-3 py-2">
-                  <ScoreBar value={s.criticality} tone="warn" />
-                </td>
-                <td className="px-3 py-2 text-[12.5px] text-ink-2">
-                  {(s.meta?.actor_classes as string[] | undefined)?.join(", ") ||
-                    (s.meta?.class as string) ||
-                    "ego"}
-                  <span className="text-ink-3"> · {s.tags.join(" ")}</span>
-                </td>
-                <td className="px-3 py-2 text-[12.5px]">{s.city ?? "?"}</td>
-                <td className="px-3 py-2 text-[12px] text-ink-3">
-                  {String(s.t_in_ns).slice(0, 13)}
-                </td>
-              </tr>
-            ))}
-            {!rows.length && (
-              <tr>
-                <td colSpan={5} className="px-3 py-8 text-center text-ink-3">
-                  no scenarios. mine a session: <span className="font-mono">make mine ARGS=&quot;--session &lt;uuid&gt;&quot;</span>
-                </td>
-              </tr>
+        </section>
+
+        {loadErr != null && <LoadState error={loadErr} onRetry={() => void load()} />}
+
+        {!found && loading ? (
+          <LoadState loading rows={8} />
+        ) : !rows.length ? (
+          <div className="panel">
+            <EmptyState icon="route" title={asked.q ? "No scenarios match that search" : "No scenarios mined yet"}>
+              {asked.q
+                ? "Try fewer words, or turn on image similarity to match by what the frames look like."
+                : "Scenarios appear here once a session has been mined for cut-ins, near misses and other behaviours."}
+            </EmptyState>
+            {!asked.q && (
+              <details className="px-4 pb-4 text-[12px] text-ink-3">
+                <summary className="cursor-pointer select-none">For administrators</summary>
+                <div className="mt-1.5">Mine a session from a terminal: <span className="font-mono">make mine ARGS=&quot;--session &lt;uuid&gt;&quot;</span></div>
+              </details>
             )}
-          </tbody>
-        </table>
+          </div>
+        ) : (
+        <section className="panel overflow-x-auto">
+          {uniformCrit !== null && (
+            <div className="panel-head text-[12px] font-normal">
+              All {plural(rows.length, "scenario")} shown have the same criticality ({pct(uniformCrit)}), so it is not repeated on each row.
+            </div>
+          )}
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th className="w-36">Type</th>
+                {uniformCrit === null && <th className="w-36">Criticality</th>}
+                <th>Actors</th>
+                <th className="w-48">Session</th>
+                <th className="w-48">Starts</th>
+                <th className="w-24 num">Lasts</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((s) => {
+                const actors = (s.meta?.actor_classes as string[] | undefined) ??
+                  (s.meta?.class ? [s.meta.class as string] : []);
+                // Tags repeat the type and the actor class in storage form; show only what they add.
+                const extra = s.tags.filter((t) => t !== s.type && !actors.includes(t));
+                const lasts = (s.t_out_ns - s.t_in_ns) / 1e9;
+                return (
+                <tr key={s.scenario_id}>
+                  <td>
+                    <span className={`inline-flex text-[12px] font-medium border rounded px-1.5 py-0.5 whitespace-nowrap ${TYPE_COLOR[s.type] ?? "text-ink-2 border-line"}`}>
+                      {humanize(s.type)}
+                    </span>
+                  </td>
+                  {uniformCrit === null && (
+                    <td>
+                      <ScoreBar value={s.criticality} tone="warn" />
+                    </td>
+                  )}
+                  <td className="text-ink">
+                    {actors.length ? actors.map(humanize).join(", ") : "Ego vehicle"}
+                    {extra.length > 0 && <span className="text-ink-3"> · {extra.map(humanize).join(", ")}</span>}
+                  </td>
+                  <td>
+                    <button type="button" onClick={() => void openAt(s)} className="link"
+                      data-tip="Open the frame where this scenario starts">
+                      {s.vehicle_id ?? shortId(s.session_id)}
+                    </button>
+                    {s.city && <span className="text-ink-3"> · {s.city}</span>}
+                  </td>
+                  <td className="text-ink-2 whitespace-nowrap">{fromNs(s.t_in_ns)}</td>
+                  <td className="num text-ink-3">{Number.isFinite(lasts) && lasts > 0 ? duration(lasts) : "-"}</td>
+                </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+        )}
+      </div>
     </PageShell>
   );
 }

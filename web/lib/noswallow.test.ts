@@ -45,11 +45,10 @@ const ALLOWED: Record<string, number> = {
   "app/forgyx/page.tsx": 3,
   "app/agent/page.tsx": 1,
   "app/explore/page.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
-  "app/oraclyx/page.tsx": 2,
+  "app/oraclyx/page.tsx": 1,   // the distillation count only; the board itself now shows its failure
   "app/projects/page.tsx": 0,   // fixed: the project list is this page's primary data
   "app/import/page.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
   "app/lidar/annotate/page.tsx": 1,
-  "app/sievyx/page.tsx": 1,
   "app/training/page.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
   "app/verdyx/page.tsx": 1,
   "components/training/RunsPanel.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
@@ -65,7 +64,6 @@ const ALLOWED: Record<string, number> = {
   "app/flywheel/adaptive/page.tsx": 1,
   "app/ops/page.tsx": 1,
   "app/review/rapid/page.tsx": 0,   // migrated to useQuery: see the note above ALLOWED
-  "app/sanyx/predictive/page.tsx": 1,
 };
 
 function walk(dir: string, out: string[] = []): string[] {

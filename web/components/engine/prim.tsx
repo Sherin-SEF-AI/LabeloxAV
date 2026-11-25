@@ -10,15 +10,21 @@ export function Panel({ title, hint, right, children, className = "" }: {
   title: string; hint?: string; right?: React.ReactNode; children: React.ReactNode; className?: string;
 }) {
   return (
-    <section className={`bg-panel border border-line rounded ${className}`}>
+    <section className={`panel ${className}`}>
       <div className="panel-head">
-        <span className="uppercase tracking-wide text-[10px] text-ink-2 font-medium">{title}</span>
-        {hint && <span className="text-[10px] text-ink-3">{hint}</span>}
+        <h2 className="section-title">{sentence(title)}</h2>
+        {hint && <span className="text-[12px] text-ink-3 truncate">{hint}</span>}
         {right && <span className="ml-auto">{right}</span>}
       </div>
-      <div className="p-3">{children}</div>
+      <div className="p-3.5">{children}</div>
     </section>
   );
+}
+
+// Titles and button labels arrive written in lower case from a dozen pages; the heading and the button are
+// where sentence case belongs, so it is applied here once rather than at every call site.
+function sentence(s: string): string {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
 export function KV({ k, v, tone = "ink" }: { k: string; v: React.ReactNode; tone?: Tone }) {
@@ -85,13 +91,13 @@ export function useRun<T>() {
 
 export function RunButton({ busy, onClick, label = "run" }: { busy: boolean; onClick: () => void; label?: string }) {
   return (
-    <button onClick={onClick} disabled={busy} className="btn btn-primary">
-      {busy ? "running..." : label}
+    <button type="button" onClick={onClick} disabled={busy} className="btn btn-primary">
+      {busy ? "Running..." : sentence(label)}
     </button>
   );
 }
 
 export function ErrLine({ err }: { err: string | null }) {
   if (!err) return null;
-  return <div className="text-[11px] text-block border border-block/30 rounded px-2 py-1 mt-2 break-all bg-block/5">{err}</div>;
+  return <div role="alert" className="text-[12px] text-block border border-block/30 rounded px-2.5 py-1.5 mt-2 break-words bg-block/5">{err}</div>;
 }

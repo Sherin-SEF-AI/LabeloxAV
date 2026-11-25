@@ -7,6 +7,8 @@ import { useClock } from "@/lib/inspector/clock";
 import { api, type InspectorEvent, type InspectorPanel, type InspectorTopic , humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { Spinner } from "@/components/Spinner";
+import EmptyState from "@/components/ui/EmptyState";
+import { Badge } from "@/components/ui/kit";
 import { ClockProvider } from "@/lib/inspector/clock";
 import { McapProvider } from "@/lib/inspector/mcapContext";
 import { SessionMcap } from "@/lib/inspector/mcap";
@@ -141,7 +143,7 @@ export default function InspectorWorkspace() {
       await api.inspectorSaveLayout(name, panels.map((p) => ({ id: "", ...toSaved(p) })), true);
       setLayouts((await api.inspectorLayouts()).layouts);
       setSaveName("");
-    } catch (e) { setErr("save layout failed: " + humanizeError(e)); }
+    } catch (e) { setErr("Could not save the layout: " + humanizeError(e)); }
   };
   const loadLayout = (id: string) => {
     const l = layouts.find((x) => x.layout_id === id);
@@ -150,38 +152,45 @@ export default function InspectorWorkspace() {
 
   const openLichtblick = useCallback(async () => {
     try { const r = await api.inspectorLichtblick(sessionId); window.open(r.url, "_blank", "noopener"); }
-    catch (e) { setErr("Open in Lichtblick failed: " + humanizeError(e)); }
+    catch (e) { setErr("Could not open Lichtblick: " + humanizeError(e)); }
   }, [sessionId]);
 
-  const vColor = verdict === "pass" ? "text-pass border-pass" : verdict === "warn" ? "text-warn border-warn" : verdict === "fail" ? "text-block border-block" : "text-ink-3 border-line";
+  const vState = verdict === "pass" ? "pass" : verdict === "warn" ? "warn" : verdict === "fail" ? "block" : "muted";
+  const vLabel = verdict === "pass" ? "Healthy" : verdict === "warn" ? "Health warning" : verdict === "fail" ? "Health check failed" : verdict ?? "";
 
   const right = useMemo(() => (
     <div className="flex items-center gap-2 text-[12px]">
-      {verdict && <span className={`border px-1.5 rounded uppercase ${vColor}`}>{verdict}</span>}
+      {verdict && <Badge state={vState}>{vLabel}</Badge>}
       {curFrame?.frameId && (
-        <button onClick={() => router.push(`/frame/${curFrame.frameId}`)} title="open the frame at the current time in the annotation workspace"
-          className="border border-accent/50 bg-accent/10 text-accent px-2 py-0.5 rounded hover:bg-accent/20">open frame in workspace</button>
+        <button onClick={() => router.push(`/frame/${curFrame.frameId}`)} data-tip="Open the frame at the current time in the annotation workspace"
+          className="btn btn-primary">Open frame in workspace</button>
       )}
       {/* Only 1 of 342 sessions in this corpus carries an MCAP, so offering this unconditionally meant the
           button answered 409 for almost every session somebody opened. The precondition is knowable here:
           the page already loaded the recording, or failed to. Say so on the control instead of on a toast
           after the request. */}
-      <button onClick={openLichtblick} disabled={!mcap}
-        title={mcap ? "open this session's MCAP in Lichtblick"
-                    : "this session has no MCAP recording to inspect"}
-        className={`border px-2 py-0.5 rounded ${mcap ? "border-line hover:border-accent"
-                                                     : "border-line/40 text-ink-3 cursor-not-allowed"}`}>
-        open in lichtblick
-      </button>
+      {!err && !loading && <button onClick={openLichtblick} disabled={!mcap || noRecording}
+        data-tip={mcap && !noRecording ? "Open this session's MCAP recording in Lichtblick"
+                    : "This session has no MCAP recording to open"}
+        className="btn">
+        Open in Lichtblick
+      </button>}
     </div>
-  ), [verdict, curFrame, router, mcap, openLichtblick, vColor]);
+  ), [verdict, curFrame, router, mcap, noRecording, openLichtblick, vState, vLabel, err, loading]);
 
   return (
-    <PageShell active="INSPECT" subtitle="SESSION" right={right}>
+    <PageShell active="INSPECT" title="Session inspector" right={right}>
       {loading ? (
-        <div className="h-full flex items-center justify-center"><Spinner label="opening session mcap" /></div>
+        <div className="h-full flex items-center justify-center"><Spinner label="Opening the session recording..." /></div>
       ) : err ? (
-        <div className="h-full flex items-center justify-center text-[13.5px] font-medium text-block px-6 text-center">{err}</div>
+        <div className="h-full flex items-center justify-center px-6">
+          <EmptyState icon="grid" title={/^Could not/.test(err) ? "Something went wrong" : "Nothing to inspect in this session"}
+            action={<a href="/inspect" className="btn">Back to sessions</a>}>
+            {/^session has no mcap$/i.test(err)
+              ? "This session has no MCAP recording and no point clouds, so there is nothing to play back here."
+              : err}
+          </EmptyState>
+        </div>
       ) : mcap && range ? (
         <ClockProvider startNs={range[0]} endNs={range[1]}>
           <McapProvider mcap={mcap} sessionId={sessionId}>
@@ -192,14 +201,16 @@ export default function InspectorWorkspace() {
                 <div className="w-56 shrink-0 border-r hairline flex flex-col min-h-0">
                   <div className="p-2 border-b hairline space-y-1.5">
                     <div className="flex gap-1">
-                      <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="layout name"
-                        className="flex-1 min-w-0 bg-bg-2 border border-line rounded px-1.5 py-1 text-[11px] text-ink-2 focus:border-accent outline-none" />
-                      <button onClick={saveLayout} className="text-[11px] border border-line px-1.5 rounded hover:border-accent"><T k="action.save">save</T></button>
+                      <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="Layout name"
+                        aria-label="Layout name"
+                        className="field flex-1 min-w-0 text-[12px]" />
+                      <button onClick={saveLayout} className="btn" data-tip="Save the current panels as your default layout"><T k="action.save">Save</T></button>
                     </div>
                     {layouts.length > 0 && (
                       <select onChange={(e) => e.target.value && loadLayout(e.target.value)} defaultValue=""
-                        className="w-full bg-bg-2 border border-line rounded px-1 py-1 text-[11px] text-ink-2">
-                        <option value="">load layout...</option>
+                        aria-label="Load a saved layout"
+                        className="field w-full text-[12px]">
+                        <option value="">Load layout...</option>
                         {layouts.map((l) => <option key={l.layout_id} value={l.layout_id}>{l.name}{l.is_default ? " (default)" : ""}</option>)}
                       </select>
                     )}
@@ -209,7 +220,7 @@ export default function InspectorWorkspace() {
                       offer it. */}
                   <div className="px-2 py-1.5 border-b hairline">
                     <button onClick={() => addPanel("scene3d")}
-                      className="w-full text-[11px] border border-line rounded px-1.5 py-1 text-ink-2 hover:border-accent hover:text-ink">
+                      className="btn w-full">
                       + 3D point cloud
                     </button>
                   </div>
@@ -217,9 +228,9 @@ export default function InspectorWorkspace() {
                     {noRecording ? (
                       // Said plainly, because an empty topic list otherwise reads as a failed load rather
                       // than as a session that was never recorded to an .mcap.
-                      <div className="p-2 text-[11px] text-ink-3 leading-relaxed">
-                        no .mcap recording for this session, so there are no topics to browse. The 3D and
-                        camera panels read this session&apos;s own timeline and work regardless.
+                      <div className="p-3 text-[12px] text-ink-3 leading-relaxed">
+                        This session has no MCAP recording, so there are no topics to browse. The 3D and
+                        camera panels read the session&apos;s own timeline and work regardless.
                       </div>
                     ) : (
                       <TopicBrowser topics={topics} onAdd={addPanel} />
@@ -229,7 +240,11 @@ export default function InspectorWorkspace() {
                 {/* panel grid */}
                 <div className="flex-1 min-h-0 overflow-auto p-2">
                   {panels.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-[12.5px] text-ink-3">add a panel from the topic list</div>
+                    <div className="h-full flex items-center justify-center">
+                      <EmptyState icon="grid" title="No panels open">
+                        Add a panel from the topic list on the left, or add a 3D point cloud view.
+                      </EmptyState>
+                    </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-2 auto-rows-[minmax(200px,1fr)]">
                       {panels.map((p, i) => (
@@ -261,7 +276,12 @@ export default function InspectorWorkspace() {
           </McapProvider>
         </ClockProvider>
       ) : (
-        <div className="h-full flex items-center justify-center text-[13.5px] font-medium text-ink-3">no MCAP for this session</div>
+        <div className="h-full flex items-center justify-center">
+          <EmptyState icon="grid" title="No recording for this session"
+            action={<a href="/inspect" className="btn">Back to sessions</a>}>
+            This session has no MCAP recording to play back.
+          </EmptyState>
+        </div>
       )}
     </PageShell>
   );

@@ -159,7 +159,7 @@ describe("the low-conf figure in the header", () => {
     // nothing on screen explains the gap.
     render(card([obj("a1", { conf: 0.4 }), obj("b2", { conf: 0.49 }), obj("c3", { conf: 0.5 })]));
     expect(screen.getByText("2 low conf")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "conf < 0.5" }));
+    await userEvent.click(screen.getByRole("button", { name: "Conf < 0.5" }));
     expect(dispatch).toHaveBeenCalledWith({ t: "selectBy", how: "lowConf", value: 0.5 });
   });
 

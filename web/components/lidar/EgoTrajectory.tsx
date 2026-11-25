@@ -83,7 +83,7 @@ export default function EgoTrajectory(
             fill="none" stroke="#ffffff" strokeWidth={0.9} />
         )}
       </svg>
-      <div className="px-1 text-[10px] text-ink-3">
+      <div className="px-1 text-[10.5px] text-ink-3">
         {trajectory.poses} poses ·{" "}
         {trajectory.measured > 0
           ? `${trajectory.measured} measured`

@@ -18,20 +18,21 @@ import type { Action, SelectHow } from "../useEditor";
 export const SELECTIONS: {
   how: SelectHow; label: string; value?: string | number; hint: string; key?: string;
 }[] = [
-  { how: "all", label: "all", hint: "every visible, unlocked object", key: "⌘A" },
-  { how: "none", label: "none", hint: "clear the selection", key: "Esc" },
-  { how: "invert", label: "invert", hint: "everything not currently selected", key: "⌘I" },
-  { how: "sameClass", label: "same class", hint: "everything of the selected object's class", key: "⌘⇧A" },
-  { how: "unreviewed", label: "unreviewed", hint: "still in review: the queue you are working" },
-  { how: "new", label: "new", hint: "drawn here and not yet saved" },
-  { how: "lowConf", label: `conf < ${LOW_CONF}`, value: LOW_CONF, hint: "the model was unsure about these" },
-  { how: "state", label: "rejected", value: "rejected", hint: "already rejected" },
+  { how: "all", label: "All", hint: "every visible, unlocked object", key: "⌘A" },
+  { how: "none", label: "None", hint: "clear the selection", key: "Esc" },
+  { how: "invert", label: "Invert", hint: "everything not currently selected", key: "⌘I" },
+  { how: "sameClass", label: "Same class", hint: "everything of the selected object's class", key: "⌘⇧A" },
+  { how: "unreviewed", label: "Unreviewed", hint: "still in review: the queue you are working" },
+  { how: "new", label: "New", hint: "drawn here and not yet saved" },
+  { how: "lowConf", label: `Conf < ${LOW_CONF}`, value: LOW_CONF, hint: "the model was unsure about these" },
+  { how: "state", label: "Rejected", value: "rejected", hint: "already rejected" },
 ];
 
 export default function SelectionFilters({ dispatch }: { dispatch: Dispatch<Action> }) {
   return (
     <div className="px-2 py-1.5 border-t hairline">
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="text-[11px] text-ink-3 mr-0.5">Select</span>
         {SELECTIONS.map((sel) => (
           <button
             key={sel.how + String(sel.value ?? "")}

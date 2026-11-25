@@ -13,6 +13,7 @@ import { toast } from "@/lib/toast";
 import { invalidate, useQuery } from "@/lib/useQuery";
 import { useCurrentUser } from "@/lib/user";
 import SampleDrives from "@/components/SampleDrives";
+import { humanize, pct } from "@/lib/format";
 
 // Home: what is waiting, what is running, where work was last happening, and, for a new team, the five steps
 // from an empty install to a trained model. Every number comes from GET /api/home, which counts the tables
@@ -95,7 +96,7 @@ function Card({ title, action, children }: { title: string; action?: React.React
   return (
     <section className="panel flex flex-col min-w-0">
       <header className="flex items-center justify-between gap-3 px-4 pt-3.5 pb-2.5">
-        <h2 className="text-[13.5px] font-semibold text-ink">{title}</h2>
+        <h2 className="section-title">{title}</h2>
         {action}
       </header>
       <div className="px-4 pb-4 min-w-0">{children}</div>
@@ -240,51 +241,72 @@ export default function HomePage() {
 
   return (
     <PageShell active="Home" title="Home">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 flex flex-col gap-5">
+      <div className="page-wrap flex flex-col gap-5">
         <LoadState loading={home.loading} error={home.loadState.error} onRetry={() => void load()} />
 
         {data && !setupDone && <Setup steps={data.steps} recent={data.recent_sessions} onChange={() => void load()} />}
 
         {data && (data.waiting_for_people ?? []).length > 0 && (
-          <section className="panel p-4 flex flex-col gap-2.5" aria-label={t("home.waiting.title", "Waiting for a person")}>
-            <h2 className="text-[14px] font-semibold text-ink">{t("home.waiting.title", "Waiting for a person")}</h2>
+          <section className="panel" aria-label={t("home.waiting.title", "Waiting for you")}>
+            <div className="panel-head">
+              <h2 className="section-title">{t("home.waiting.title", "Waiting for you")}</h2>
+              <span className="ml-auto text-[12px] text-ink-3 tabular-nums">{data.waiting_for_people.length}</span>
+            </div>
+            <ul className="grid gap-3 p-3.5 grid-cols-[repeat(auto-fill,minmax(300px,1fr))]">
             {data.waiting_for_people.map((w) => {
-              const row = (key: string, title: string, why: string, href: string, label: string) => (
-                <div key={key} className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                  <div className="flex-1 min-w-[260px]">
-                    <div className="text-[13px] text-ink">{title}</div>
-                    <div className="text-[12px] text-ink-3 max-w-[80ch]">{why}</div>
+              // Each task is a card: what to do, one plain sentence on why, its progress when it has any, and
+              // the button directly beneath, so the action is never a wide empty gap away from what it does.
+              const row = (key: string, icon: string, title: string, why: string, href: string, label: string,
+                progress?: { done: number; of: number }) => (
+                <li key={key} className="flex flex-col gap-2 rounded-md border hairline bg-head/40 px-3.5 py-3">
+                  <div className="flex items-start gap-2.5">
+                    <span className="shrink-0 mt-0.5 text-ink-3" aria-hidden><Icon name={icon} size={15} /></span>
+                    <div className="min-w-0">
+                      <div className="text-[13.5px] text-ink font-medium leading-snug">{title}</div>
+                      <div className="mt-1 text-[12.5px] text-ink-3 leading-relaxed">{why}</div>
+                    </div>
                   </div>
-                  <Link href={href} className="btn btn-primary shrink-0">{label}</Link>
-                </div>
+                  <div className="mt-auto pt-1 flex items-center gap-3">
+                    <Link href={href} className="btn btn-primary shrink-0">{label}</Link>
+                    {progress && progress.of > 0 && (
+                      <span className="flex-1 flex items-center gap-2 min-w-0" aria-hidden>
+                        <span className="flex-1 h-1.5 rounded-full bg-line overflow-hidden">
+                          <span className="block h-full bg-accent" style={{ width: `${Math.min(100, (progress.done / progress.of) * 100)}%` }} />
+                        </span>
+                        <span className="text-[11.5px] text-ink-3 tabular-nums">{pct(progress.done / progress.of)}</span>
+                      </span>
+                    )}
+                  </div>
+                </li>
               );
               if (w.kind === "blind_audit") {
                 // Two whole sentences rather than one with a clause bolted on: where "done so far" goes is
                 // the translator's call, and a suffix concatenated in English order would take it away.
-                const why = "The model's detections are hidden while you label, on purpose. Comparing the two afterwards is the only " +
-                  "measurement that says whether recall on gold is real or the gold set is missing most of what is there. " +
-                  "It can be split across people and sittings";
-                return row(w.audit_id,
-                  t("home.audit.title", "Blind audit: label {remaining} of {total} frames from scratch",
+                const why = "The model's boxes are hidden while you label. Comparing your labels with the model's " +
+                  "afterwards shows how much it misses. You can split the work across people and sittings";
+                return row(w.audit_id, "flag",
+                  t("home.audit.title", "Label {remaining} of {total} frames from scratch (blind check)",
                     { remaining: w.n_frames - w.n_labeled, total: w.n_frames }),
                   w.n_labeled ? t("home.audit.why_progress", `${why}; {n} done so far.`, { n: w.n_labeled })
                     : t("home.audit.why", `${why}.`),
                   `/frame/${w.frame_id}?job=${w.job_id}`,
-                  w.n_labeled ? t("home.audit.continue", "Continue labelling") : t("home.audit.start", "Start labelling"));
+                  w.n_labeled ? t("home.audit.continue", "Continue labelling") : t("home.audit.start", "Start labelling"),
+                  { done: w.n_labeled, of: w.n_frames });
               }
               if (w.kind === "control_samples") {
-                return row("controls", t("home.controls.title", "Check {n} auto-accepted labels", { n: n(w.count) }),
-                  t("home.controls.why", "A random sample of what the gate accepted without a person. Your verdicts are the only measured " +
-                    "precision the auto-accept gate has; until they exist it runs on an assumption. One key per label."),
+                return row("controls", "check", t("home.controls.title", "Check {n} labels that were accepted without a person", { n: n(w.count) }),
+                  t("home.controls.why", "A random sample of labels the system accepted on its own. Your answers show how often it gets them right. One key per label."),
                   w.href, t("home.controls.go", "Check them"));
               }
-              return row(w.lot_id,
-                t("home.lot.title", "Settle a lot of {population} {klass} labels: {judged} of {of} sample verdicts",
-                  { population: n(w.population), klass: w.class_name, judged: w.judged, of: w.of }),
-                t("home.lot.why", "A random sample from the lot. Its verdicts decide whether the whole lot is accepted or sent back, " +
-                  "so the sample is served in draw order."),
-                w.href, w.judged ? t("home.lot.continue", "Continue") : t("home.lot.start", "Start"));
+              // The class name is stored as `traffic_sign`; the sentence reads "traffic sign".
+              return row(w.lot_id, "layers",
+                t("home.lot.title", "Check {of} sample {klass} labels from a batch of {population} ({judged} done)",
+                  { population: n(w.population), klass: humanize(w.class_name).toLowerCase(), judged: w.judged, of: w.of }),
+                t("home.lot.why", "Your answers decide whether the whole batch is accepted or sent back. One key per label."),
+                w.href, w.judged ? t("home.lot.continue", "Continue") : t("home.lot.start", "Start"),
+                { done: w.judged, of: w.of });
             })}
+            </ul>
           </section>
         )}
 
@@ -292,14 +314,14 @@ export default function HomePage() {
           <>
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
               <Stat label={t("shell.sessions", "Sessions")} value={n(c.sessions)} href="/annotations" sub={t("home.stat.sessions_sub", "recordings and uploads")} />
-              <Stat label={t("home.stat.frames", "Frames")} value={n(c.frames)} sub={t("home.stat.frames_sub", "stored, faces and plates blurred")} />
+              <Stat label={t("home.stat.frames", "Frames")} value={n(c.frames)} sub={t("home.stat.frames_sub", "faces and plates blurred")} />
               <Stat label={t("home.stat.objects", "Objects")} value={n(c.objects)} href="/explore" sub={t("home.stat.objects_sub", "{n} settled", { n: n(c.settled) })} />
               <Stat label={t("home.stat.waiting", "Waiting for review")} value={n(c.waiting)} href="/review/queue" tone={c.waiting ? "accent" : undefined}
                 sub={c.objects ? t("home.stat.waiting_sub", "{pct}% of all objects", { pct: Math.round((c.waiting / c.objects) * 100) })
                   : t("home.stat.nothing", "nothing yet")} />
               <Stat label={t("home.stat.jobs", "Jobs queued or running")} value={n(data.jobs.active_total)} href="/jobs"
                 sub={data.jobs.active_total
-                  ? t("home.stat.jobs_sub", "{n} running: {list}", { n: n(data.jobs.running),
+                  ? t("home.stat.jobs_sub", "{list} ({n} running)", { n: n(data.jobs.running),
                       list: Object.entries(data.jobs.active).filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(", ") })
                   : t("home.stat.none", "none")} />
             </div>
@@ -323,7 +345,7 @@ export default function HomePage() {
                         {data.recent_sessions.map((s) => (
                           <tr key={s.session_id} className="border-b hairline last:border-0">
                             <td className="px-1 py-2 text-ink">{s.vehicle_id}{s.city && <span className="text-ink-3"> · {s.city}</span>}</td>
-                            <td className="px-1 py-2 text-ink-2">{new Date(s.start_ts_ns / 1e6).toLocaleDateString()}</td>
+                            <td className="px-1 py-2 text-ink-2">{new Date(s.start_ts_ns / 1e6).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</td>
                             <td className="px-1 py-2 text-right text-ink-2">{n(s.frames)}</td>
                             <td className="px-1 py-2 text-right text-ink-2">{n(s.objects)}</td>
                             <td className={`px-1 py-2 text-right ${s.waiting ? "text-ink" : "text-ink-3"}`}>{n(s.waiting)}</td>

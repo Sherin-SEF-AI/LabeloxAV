@@ -41,13 +41,13 @@ export default function ReviewPanel({
           </div>
         </div>
       ) : <div className="text-ink-3 border-b hairline pb-2">click an object on the canvas to accept or reject it.</div>}
-      <div className="text-ink-3 uppercase text-[10px]">value queue ({alItems.length})</div>
+      <div className="text-ink-3 uppercase text-[10.5px]">value queue ({alItems.length})</div>
       {alItems.slice(0, 60).map((it) => (
         <button key={it.object_id} onClick={() => onPickItem(it)}
           className={`block w-full text-left border-b hairline pb-1.5 ${it.object_id === selectedId ? "text-ink" : "text-ink-3 hover:text-ink-2"}`}>
           <div className="flex items-center gap-1.5">
             <span className="truncate flex-1">{it.class_name}</span>
-            {it.frame_id !== frameId && <span className="text-info text-[10px]">other frame</span>}
+            {it.frame_id !== frameId && <span className="text-info text-[10.5px]">other frame</span>}
             <span className="text-accent">{it.value.toFixed(3)}</span>
           </div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
@@ -63,7 +63,7 @@ export default function ReviewPanel({
       {!alItems.length && !reviewError && <div className="text-ink-3 py-2 text-center">{reviewLoaded ? "value queue empty" : "loading value queue..."}</div>}
       {errItems.length > 0 && (
         <>
-          <div className="text-ink-3 uppercase text-[10px] pt-1">error candidates ({errItems.length})</div>
+          <div className="text-ink-3 uppercase text-[10.5px] pt-1">error candidates ({errItems.length})</div>
           {errItems.slice(0, 40).map((ec) => (
             <div key={ec.candidate_id} className="border-b hairline pb-1.5 space-y-0.5">
               <div className="flex items-center gap-1.5">

@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { type Placeholder, placeholder, statValue, titleCount } from "@/lib/emptyState";
+import { type Placeholder, placeholder } from "@/lib/emptyState";
+import { Segmented, Stat } from "@/components/ui/kit";
+import { compact, duration, humanize, num, pct, plural } from "@/lib/format";
 import { useRouter } from "next/navigation";
 import {
   analyticsApi,
@@ -20,7 +22,6 @@ import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
 import EvalDrilldown from "@/components/explore/EvalDrilldown";
 import RecallHonesty from "@/components/explore/RecallHonesty";
-import ScoreBar from "@/components/shell/ScoreBar";
 import { api, humanizeError } from "@/lib/api";
 import type { ProductivityReport } from "@/lib/types";
 import type { Confusions } from "@/lib/types";
@@ -30,37 +31,42 @@ import { apiGet } from "@/lib/api";
 // (auto-accepted vs human-touched), scenario coverage, and the review-agreement loop signal.
 // Color only encodes state; bars are plain divs (no chart library).
 
-// Draws whichever of the three states `placeholder` chose. A wait is dimmed and pulsing so it reads as
-// pending, an emptiness is stated plainly, and data draws nothing here at all.
+// Draws whichever of the three states `placeholder` chose. A wait shows placeholder rows, an emptiness is
+// stated plainly, and data draws nothing here at all.
 function Blank({ p }: { p: Placeholder }) {
   if (!p) return null;
-  return (
-    <div className={`text-[12.5px] py-4 text-center ${p.kind === "loading" ? "text-ink-3/50 animate-pulse" : "text-ink-3"}`}>
-      {p.text}
-    </div>
-  );
-}
-
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="panel px-3 py-3">
-      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</div>
-      <div className="text-2xl font-semibold text-ink mt-1">{value}</div>
-      {sub && <div className="text-[12px] text-ink-3 mt-0.5">{sub}</div>}
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="panel">
-      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-        {title}
+  if (p.kind === "loading") {
+    return (
+      <div className="space-y-2.5 py-1" role="status" aria-label="loading">
+        {[62, 48, 70, 40].map((w, i) => <span key={i} className="skeleton h-3 block" style={{ width: `${w}%` }} />)}
       </div>
-      <div className="p-3">{children}</div>
+    );
+  }
+  return <div className="text-[12.5px] py-4 text-center text-ink-3">{p.text}</div>;
+}
+
+// A tile value: a skeleton while the overview is in flight rather than "..." or "-", both of which read as
+// a measured nothing.
+function tile(loading: boolean, v: React.ReactNode | null | undefined): React.ReactNode {
+  if (v !== null && v !== undefined) return v;
+  return loading ? <span className="skeleton inline-block h-[22px] w-24 align-middle" aria-label="loading" /> : "-";
+}
+
+function Section({ title, right, children, className = "" }: {
+  title: string; right?: React.ReactNode; children: React.ReactNode; className?: string;
+}) {
+  return (
+    <section className={`panel min-w-0 ${className}`}>
+      <div className="panel-head">
+        <h2 className="section-title">{title}</h2>
+        {right && <div className="ml-auto flex items-center gap-2 font-normal text-[12px] text-ink-3">{right}</div>}
+      </div>
+      <div className="p-4">{children}</div>
     </section>
   );
 }
+
+const CONFUSION_ROWS = 15;
 
 export default function AnalyticsPage() {
   const router = useRouter();
@@ -82,9 +88,12 @@ export default function AnalyticsPage() {
   const [growth, setGrowth] = useState<GrowthPoint[]>([]);
   const [cluster, setCluster] = useState<ClusterMap | null>(null);
   const [prod, setProd] = useState<ProductivityReport | null>(null);
+  const [confLoading, setConfLoading] = useState(true);
+  const [allConfusions, setAllConfusions] = useState(false);
 
   useEffect(() => {
-    api.confusions(confBy).then(setConfusions).catch(() => setConfusions(null));
+    setConfLoading(true);
+    api.confusions(confBy).then(setConfusions).catch(() => setConfusions(null)).finally(() => setConfLoading(false));
   }, [confBy]);
 
   useEffect(() => {
@@ -155,60 +164,64 @@ export default function AnalyticsPage() {
   const maxScenario = scenarios.reduce((m, s) => Math.max(m, s.count), 1);
   const mix = overview?.source_mix;
 
+  const confRows = confusions?.confusions ?? [];
+  const shownConf = allConfusions ? confRows : confRows.slice(0, CONFUSION_ROWS);
+
   return (
     <PageShell
       active="ANALYTICS"
+      subtitle="What the corpus holds, how it was labelled, and how far the labels and the model can be trusted."
       primaryAction={
-        <button onClick={exportReport} className="border border-line px-2 py-0.5 hover:border-accent" title="export the quality sheet as JSON">export report</button>
+        <button onClick={exportReport} className="btn" data-tip="Download the quality sheet as a JSON file">Export report</button>
       }
       right={
-        <>
-          <span className="border border-line px-2 py-0.5">{overview ? `${overview.objects} objects` : "..."}</span>
-          <span className={`w-2 h-2 rounded-full ${loading ? "bg-warn" : "bg-pass"}`} />
-        </>
+        <span className="inline-flex items-center gap-2 text-[12px] text-ink-2">
+          <span className={`w-2 h-2 rounded-full ${loading ? "bg-warn" : "bg-pass"}`} aria-hidden />
+          {overview ? `${compact(overview.objects)} objects` : "Loading..."}
+        </span>
       }
     >
-      <div className="p-4 space-y-4">
+      <div className="page-wrap space-y-4">
         {/* A failure says so and offers a retry. Every panel below renders its empty copy when a fetch
             fails, so without this banner a dead backend is indistinguishable from an empty corpus. */}
         {err != null && <LoadState error={err} onRetry={() => void load()} />}
 
         {/* Top stat cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          <Stat label="frames" value={statValue(loading, overview?.frames)} />
-          <Stat label="objects" value={statValue(loading, overview?.objects)} />
-          <Stat label="tracks" value={statValue(loading, overview?.tracks)} />
-          <Stat label="scenarios" value={statValue(loading, overview?.scenarios)} />
+          <Stat label="Frames" value={tile(loading, overview ? num(overview.frames) : null)} />
+          <Stat label="Objects" value={tile(loading, overview ? num(overview.objects) : null)} />
+          <Stat label="Tracks" value={tile(loading, overview ? num(overview.tracks) : null)} />
+          <Stat label="Scenarios" value={tile(loading, overview ? num(overview.scenarios) : null)} />
           <Stat
-            label="auto-accepted"
-            value={statValue(loading, overview ? `${overview.auto_accepted_pct}%` : null)}
-            sub={overview ? `${overview.human_touched_pct}% human-touched` : undefined}
+            label="Auto-accepted"
+            value={tile(loading, overview ? `${overview.auto_accepted_pct}%` : null)}
+            sub={overview ? `${overview.human_touched_pct}% touched by a person` : undefined}
           />
           <Stat
-            label="long-tail coverage"
-            value={statValue(loading, overview
-              ? `${overview.long_tail.covered_classes}/${overview.long_tail.total_classes}`
+            label="Long-tail coverage"
+            value={tile(loading, overview
+              ? `${overview.long_tail.covered_classes} / ${overview.long_tail.total_classes}`
               : null)}
-            sub={overview ? `${overview.long_tail.coverage_pct}% of ontology` : undefined}
+            sub={overview ? `${overview.long_tail.coverage_pct}% of classes have examples` : undefined}
           />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Class distribution */}
-          <Section title={`class distribution (${titleCount(loading, present.length, !!classes.length || !loading)} classes present)`}>
-            <div className="space-y-1">
+          <Section title="Class distribution"
+            right={present.length ? <>{plural(present.length, "class", "classes")} present · <span className="text-accent-2">highlighted</span> = India-specific</> : null}>
+            <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
               {present.map((c) => (
-                <div key={c.class_id} className="flex items-center gap-2">
+                <div key={c.class_id} className="flex items-center gap-3">
                   <div
-                    className={`w-32 shrink-0 text-[12px] truncate ${
-                      c.india ? "text-accent" : "text-ink-2"
+                    className={`w-36 shrink-0 text-[12.5px] truncate ${
+                      c.india ? "text-accent-2" : "text-ink-2"
                     }`}
-                    title={`${c.name}${c.india ? " (india)" : ""}`}
+                    title={`${c.name}${c.india ? " (India-specific)" : ""}`}
                   >
-                    {c.india ? "* " : ""}
-                    {c.name}
+                    {humanize(c.name)}
                   </div>
-                  <div className="flex-1 h-3 bg-line relative">
+                  <div className="flex-1 h-2.5 bg-line rounded-sm relative overflow-hidden">
                     <div
                       className={`absolute left-0 top-0 h-full ${
                         c.india ? "bg-accent" : "bg-info"
@@ -216,82 +229,89 @@ export default function AnalyticsPage() {
                       style={{ width: `${(c.count / maxCount) * 100}%` }}
                     />
                   </div>
-                  <div className="w-12 text-right text-[12px] text-ink-2">{c.count}</div>
+                  <div className="w-16 text-right text-[12px] text-ink-2 tabular-nums">{compact(c.count)}</div>
                 </div>
               ))}
-              <Blank p={placeholder(loading, present.length, "no objects yet")} />
+              <Blank p={placeholder(loading, present.length, "No objects yet.")} />
             </div>
           </Section>
 
           {/* Label-source mix */}
-          <Section title="label-source mix">
+          <Section title="Where the labels came from">
             {mix && mix.total > 0 ? (
-              <div className="space-y-3">
-                <div className="flex h-6 w-full overflow-hidden border hairline">
+              <div className="space-y-4">
+                <div className="flex h-5 w-full overflow-hidden rounded-sm bg-line">
                   <div
-                    className="bg-pass flex items-center justify-center"
+                    className="bg-pass"
                     style={{ width: `${mix.auto_accepted_pct}%` }}
-                    title={`auto ${mix.auto_accepted_pct}%`}
+                    title={`auto-accepted ${mix.auto_accepted_pct}%`}
                   />
                   <div
-                    className="bg-warn flex items-center justify-center"
+                    className="bg-warn"
                     style={{ width: `${mix.human_touched_pct}%` }}
-                    title={`human ${mix.human_touched_pct}%`}
+                    title={`touched by a person ${mix.human_touched_pct}%`}
                   />
                 </div>
-                <div className="flex flex-wrap items-center gap-4">
-                  <ScoreBar label="auto-accepted" value={mix.auto_accepted_pct / 100} tone="info" />
-                  <ScoreBar label="human-touched" value={mix.human_touched_pct / 100} tone="warn" />
+                <div className="flex flex-wrap items-center gap-5 text-[12.5px]">
+                  <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-pass" />Auto-accepted {mix.auto_accepted_pct}%</span>
+                  <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-warn" />Touched by a person {mix.human_touched_pct}%</span>
+                  <span className="inline-flex items-center gap-1.5 text-ink-3"><span className="w-2.5 h-2.5 rounded-sm bg-line" />Neither yet {Math.max(0, 100 - mix.auto_accepted_pct - mix.human_touched_pct).toFixed(2)}%</span>
                 </div>
-                <div className="text-[12px] text-ink-3 grid grid-cols-2 gap-x-6 gap-y-0.5">
-                  {Object.entries(mix.by_state).map(([k, v]) => (
-                    <div key={k} className="flex justify-between">
-                      <span>state: {k}</span>
-                      <span className="text-ink-2">{v}</span>
-                    </div>
-                  ))}
-                  {Object.entries(mix.by_source).map(([k, v]) => (
-                    <div key={k} className="flex justify-between">
-                      <span>source: {k}</span>
-                      <span className="text-ink-2">{v}</span>
-                    </div>
-                  ))}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-[12.5px]">
+                  <div>
+                    <div className="label-caps mb-1">By review state</div>
+                    {Object.entries(mix.by_state).map(([k, v]) => (
+                      <div key={k} className="flex justify-between py-0.5">
+                        <span className="text-ink-3">{humanize(k)}</span>
+                        <span className="text-ink-2 tabular-nums">{num(v)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <div className="label-caps mb-1">By source</div>
+                    {Object.entries(mix.by_source).map(([k, v]) => (
+                      <div key={k} className="flex justify-between py-0.5">
+                        <span className="text-ink-3">{humanize(k)}</span>
+                        <span className="text-ink-2 tabular-nums">{num(v)}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             ) : (
-              <Blank p={placeholder(loading, mix?.total ?? 0, "no objects yet")} />
+              <Blank p={placeholder(loading, mix?.total ?? 0, "No objects yet.")} />
             )}
           </Section>
 
           {/* Scenario coverage */}
-          <Section title="scenario coverage">
-            <div className="space-y-1">
+          <Section title="Scenario coverage" right={scenarios.length ? "count · mean criticality" : null}>
+            <div className="space-y-1.5">
               {scenarios.map((s) => (
-                <div key={s.type} className="flex items-center gap-2">
-                  <div className="w-32 shrink-0 text-[12px] text-ink-2 truncate">
-                    {s.type}
+                <div key={s.type} className="flex items-center gap-3">
+                  <div className="w-36 shrink-0 text-[12.5px] text-ink-2 truncate">
+                    {humanize(s.type)}
                   </div>
-                  <div className="flex-1 h-3 bg-line relative">
+                  <div className="flex-1 h-2.5 bg-line rounded-sm relative overflow-hidden">
                     <div
                       className="absolute left-0 top-0 h-full bg-accent"
                       style={{ width: `${(s.count / maxScenario) * 100}%` }}
                     />
                   </div>
-                  <div className="w-12 text-right text-[12px] text-ink-2">{s.count}</div>
-                  <div className="w-16 text-right text-[12px] text-ink-3">
-                    crit {s.mean_criticality.toFixed(2)}
+                  <div className="w-14 text-right text-[12px] text-ink-2 tabular-nums">{compact(s.count)}</div>
+                  <div className="w-12 text-right text-[12px] text-ink-3 tabular-nums" data-tip="Mean criticality">
+                    {s.mean_criticality.toFixed(2)}
                   </div>
                 </div>
               ))}
-              <Blank p={placeholder(loading, scenarios.length, "no scenarios mined")} />
+              <Blank p={placeholder(loading, scenarios.length, "No scenarios mined yet.")} />
             </div>
           </Section>
 
           {/* Review agreement (the loop signal) */}
-          <Section title="review agreement (loop signal)">
+          <Section title="Review agreement" right="Did reviewers keep the proposed class?">
             {agreement && agreement.total_reviews > 0 ? (
-              <div className="space-y-3">
-                <div className="flex h-6 w-full overflow-hidden border hairline">
+              <div className="space-y-4">
+                <div className="flex h-5 w-full overflow-hidden rounded-sm">
                   <div
                     className="bg-pass"
                     style={{ width: `${agreement.confirmed_pct}%` }}
@@ -303,51 +323,54 @@ export default function AnalyticsPage() {
                     title={`reclassified ${agreement.reclassified_pct}%`}
                   />
                 </div>
-                <div className="flex flex-wrap items-center gap-4">
-                  <ScoreBar label="confirmed" value={agreement.confirmed_pct / 100} tone="info" />
-                  <ScoreBar label="reclassified" value={agreement.reclassified_pct / 100} tone="warn" />
-                </div>
-                <div className="text-[12px] text-ink-3">
-                  {agreement.total_reviews} reviews, mean {agreement.mean_time_spent_ms}ms each
+                <div className="flex flex-wrap items-center gap-5 text-[12.5px]">
+                  <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-pass" />Confirmed {agreement.confirmed_pct}%</span>
+                  <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-block" />Reclassified {agreement.reclassified_pct}%</span>
+                  <span className="text-ink-3">
+                    {plural(agreement.total_reviews, "review")}
+                    {agreement.mean_time_spent_ms > 0 ? `, ${duration(agreement.mean_time_spent_ms / 1000)} each on average` : ""}
+                  </span>
                 </div>
                 {agreement.per_class.length > 0 && (
-                  <div className="text-[12px] text-ink-3 space-y-0.5 pt-1 border-t hairline">
-                    {agreement.per_class.slice(0, 8).map((p) => (
-                      <div key={p.class_id} className="flex justify-between">
-                        <span className="text-ink-2">{p.name}</span>
-                        <span>
-                          {p.confirmed}/{p.reviews} confirmed ({p.confirmed_pct}%)
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  <table className="data-table">
+                    <thead><tr><th>Class</th><th className="num">Confirmed</th><th className="num">Rate</th></tr></thead>
+                    <tbody>
+                      {agreement.per_class.slice(0, 8).map((p) => (
+                        <tr key={p.class_id}>
+                          <td className="text-ink">{humanize(p.name)}</td>
+                          <td className="num">{num(p.confirmed)} of {num(p.reviews)}</td>
+                          <td className="num">{p.confirmed_pct}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 )}
               </div>
             ) : (
-              <Blank p={placeholder(loading, agreement ? 1 : 0, "no reviews yet")} />
+              <Blank p={placeholder(loading, agreement ? 1 : 0, "No reviews yet.")} />
             )}
           </Section>
 
           {/* M-F.4 productivity + QA analytics (DataOps view; non-punitive) */}
           {prod && (
-            <Section title={`operations: productivity + QA (${prod.n_reviewers} reviewers)`}>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
-                <Stat label="human hours" value={String(prod.cost.human_hours)} sub={`$${prod.cost.human_cost_usd}`} />
-                <Stat label="gpu hours" value={String(prod.cost.gpu_hours)} />
-                <Stat label="cost / frame" value={prod.cost.cost_per_frame_usd != null ? `$${prod.cost.cost_per_frame_usd}` : "-"} sub={prod.cost.cost_per_object_usd != null ? `$${prod.cost.cost_per_object_usd}/obj` : undefined} />
-                <Stat label="auto-accept saved" value={`$${prod.cost.auto_accept_saved_usd}`} sub={`${prod.cost.n_auto_accept} objects`} />
+            <Section title="Team productivity and cost" right={plural(prod.n_reviewers, "reviewer")}>
+              <div className="grid grid-cols-2 xl:grid-cols-4 gap-2 mb-4">
+                <Stat label="Human hours" value={num(prod.cost.human_hours)} sub={`$${num(prod.cost.human_cost_usd)}`} />
+                <Stat label="GPU hours" value={num(prod.cost.gpu_hours)} />
+                <Stat label="Cost per frame" value={prod.cost.cost_per_frame_usd != null ? `$${prod.cost.cost_per_frame_usd}` : "-"} sub={prod.cost.cost_per_object_usd != null ? `$${prod.cost.cost_per_object_usd} per object` : undefined} />
+                <Stat label="Saved by auto-accept" value={`$${num(prod.cost.auto_accept_saved_usd)}`} sub={plural(prod.cost.n_auto_accept, "object")} />
               </div>
-              <div className="text-[12px] text-ink-3 mb-2">
-                inter-annotator agreement: {prod.interannotator.agreement_rate != null
-                  ? <span className="text-pass">{(prod.interannotator.agreement_rate * 100).toFixed(0)}%</span>
-                  : "-"} over {prod.interannotator.shared_objects} shared objects
+              <div className="text-[12.5px] text-ink-3 mb-3">
+                Agreement between annotators: {prod.interannotator.agreement_rate != null
+                  ? <span className="text-pass">{pct(prod.interannotator.agreement_rate)}</span>
+                  : "-"} over {plural(prod.interannotator.shared_objects, "shared object")}
               </div>
               {/* throughput + agreement trend over time (one bar per active day) */}
               {prod.trend.length > 0 && (() => {
                 const maxR = Math.max(...prod.trend.map((d) => d.reviews), 1);
                 return (
-                  <div className="mb-3">
-                    <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">throughput trend (reviews/day, bar height; agreement, green tint)</div>
+                  <div className="mb-4">
+                    <div className="text-[12px] text-ink-2 mb-1.5">Reviews per day <span className="text-ink-3">(greener means more agreement)</span></div>
                     <div className="flex items-end gap-0.5 h-12">
                       {prod.trend.map((d) => (
                         <div key={d.day} title={`${d.reviews} reviews, agreement ${d.agreement != null ? (d.agreement * 100).toFixed(0) + "%" : "-"}`}
@@ -357,58 +380,64 @@ export default function AnalyticsPage() {
                   </div>
                 );
               })()}
-              <table className="w-full text-[12px]">
-                <thead><tr className="text-ink-3 text-left border-b hairline"><th className="py-1">reviewer</th><th>reviews</th><th>correction rate</th><th>agreement</th><th>obj/hr</th></tr></thead>
+              <table className="data-table">
+                <thead><tr><th>Reviewer</th><th className="num">Reviews</th><th className="num">Corrected</th><th className="num">Agreement</th><th className="num">Objects / hour</th></tr></thead>
                 <tbody>
                   {prod.reviewers.filter((r) => r.reviews >= 5).slice(0, 12).map((r) => (
-                    <tr key={r.reviewer} className="border-b hairline">
-                      <td className="py-1 text-ink-2">{r.reviewer}</td>
-                      <td>{r.reviews}</td>
-                      <td className={r.correction_rate != null && r.correction_rate > 0.5 ? "text-warn" : "text-ink-2"}>{r.correction_rate != null ? `${(r.correction_rate * 100).toFixed(0)}%` : "-"}</td>
-                      <td className={r.agreement != null && r.agreement >= 0.8 ? "text-pass" : "text-ink-2"}>{r.agreement != null ? `${(r.agreement * 100).toFixed(0)}%` : "-"}</td>
-                      <td className="text-ink-3">{r.objects_per_hour ?? "-"}</td>
+                    <tr key={r.reviewer}>
+                      <td className="text-ink">{r.reviewer}</td>
+                      <td className="num">{num(r.reviews)}</td>
+                      <td className={`num ${r.correction_rate != null && r.correction_rate > 0.5 ? "text-warn" : ""}`}>{r.correction_rate != null ? pct(r.correction_rate) : "-"}</td>
+                      <td className={`num ${r.agreement != null && r.agreement >= 0.8 ? "text-pass" : ""}`}>{r.agreement != null ? pct(r.agreement) : "-"}</td>
+                      <td className="num text-ink-3">{r.objects_per_hour ?? "-"}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <div className="text-[11px] text-ink-3 mt-2 leading-snug">{prod.note}</div>
+              <div className="text-[12px] text-ink-3 mt-3 leading-snug">{prod.note}</div>
             </Section>
           )}
 
-          <Section title={`model confusions - learn from corrections (${confusions?.total_corrections ?? 0} total)`}>
-            <div className="flex items-center gap-2 mb-2 text-[12px]">
-              <span className="text-ink-3">group by:</span>
-              {(["class", "camera", "city"] as const).map((b) => (
-                <button key={b} onClick={() => setConfBy(b)}
-                  className={`border px-2 py-0.5 ${confBy === b ? "border-accent text-accent" : "border-line text-ink-3 hover:text-ink-2"}`}>{b}</button>
-              ))}
+          <Section title="What reviewers corrected"
+            right={confusions ? `${num(confusions.total_corrections)} corrections` : null}>
+            <div className="flex items-center gap-2 mb-3 text-[12.5px]">
+              <span className="text-ink-3">Group by</span>
+              <Segmented value={confBy} onChange={(v) => setConfBy(v as "class" | "camera" | "city")}
+                options={(["class", "camera", "city"] as const).map((b) => ({ value: b, label: humanize(b) }))} />
             </div>
-            {confusions && confusions.confusions.length ? (
-              <table className="w-full text-[12px]">
-                <thead>
-                  <tr className="text-ink-3 text-left border-b hairline">
-                    <th className="py-1">model said</th><th>human corrected to</th>
-                    {confBy !== "class" && <th>{confBy}</th>}<th className="text-right">count</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {confusions.confusions.map((c, i) => (
-                    <tr key={i} className="border-b hairline">
-                      <td className="py-1 text-block">{c.old_class}</td>
-                      <td className="text-pass">{c.new_class}</td>
-                      {confBy !== "class" && <td className="text-ink-3">{c.group ?? "-"}</td>}
-                      <td className="text-right text-ink">{c.count}</td>
+            {confRows.length ? (
+              <>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Model said</th><th>Corrected to</th>
+                      {confBy !== "class" && <th>{humanize(confBy)}</th>}<th className="num">Count</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {shownConf.map((c, i) => (
+                      <tr key={i}>
+                        <td className="text-block">{humanize(c.old_class)}</td>
+                        <td className="text-pass">{humanize(c.new_class)}</td>
+                        {confBy !== "class" && <td className="text-ink-3">{c.group ?? "-"}</td>}
+                        <td className="num text-ink">{num(c.count)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {confRows.length > CONFUSION_ROWS && (
+                  <button onClick={() => setAllConfusions((v) => !v)} className="link text-[12.5px] mt-2">
+                    {allConfusions ? "Show the top 15" : `Show all ${num(confRows.length)} pairs`}
+                  </button>
+                )}
+              </>
             ) : (
-              <div className="text-[12.5px] text-ink-3 py-4 text-center">no corrections recorded yet</div>
+              <Blank p={placeholder(confLoading, 0, "No corrections recorded yet.")} />
             )}
           </Section>
 
           {/* Model vs sealed gold: the same question from the other side, with the crops behind each cell. */}
-          <Section title="model vs gold - open a cell to see the crops">
+          <Section title="Model against the gold set" right="Open a cell to see the crops" className="lg:col-span-2">
             <EvalDrilldown />
           </Section>
         </div>
@@ -417,15 +446,15 @@ export default function AnalyticsPage() {
             sealed set was built by people confirming machine boxes, so it leans toward what the model
             already sees. This is the only panel measured against a denominator the model did not help
             build, which is why it sits directly under the gold comparison rather than in a corner. */}
-        <Section title="is the recall above real? (blind audit, capture-recapture)">
+        <Section title="Is that recall real?" right="Blind audit, capture-recapture">
           <RecallHonesty />
         </Section>
 
         {/* DPDPA / PII anonymization evidence (Gate A) */}
-        <Section title="PII anonymization (DPDPA gate A)">
+        <Section title="Faces and plates anonymized" right="DPDPA gate A">
           {pii && pii.total_frames > 0 ? (
-            <div className="space-y-3">
-              <div className="flex h-6 w-full overflow-hidden border hairline">
+            <div className="space-y-4">
+              <div className="flex h-5 w-full overflow-hidden rounded-sm">
                 <div
                   className="bg-pass"
                   style={{ width: `${pii.coverage_pct}%` }}
@@ -437,55 +466,57 @@ export default function AnalyticsPage() {
                   title={`unprotected ${(100 - pii.coverage_pct).toFixed(1)}%`}
                 />
               </div>
-              <div className="flex flex-wrap items-center gap-4 text-[12.5px]">
-                <ScoreBar label="anonymized" value={pii.coverage_pct / 100} tone="info" />
+              <div className="flex flex-wrap items-center gap-5 text-[12.5px]">
+                <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-pass" />Anonymized {pii.coverage_pct}%</span>
                 <span className="text-ink-3">
-                  {pii.frames_anonymized}/{pii.total_frames} frames, {pii.faces_blurred} faces, {pii.plates_blurred} plates blurred
+                  {num(pii.frames_anonymized)} of {num(pii.total_frames)} frames; {num(pii.faces_blurred)} faces and {num(pii.plates_blurred)} plates blurred
                 </span>
               </div>
-              <div className="text-[12px] text-ink-3 space-y-0.5 pt-1 border-t hairline">
+              <div className="text-[12.5px] space-y-0.5 pt-2 border-t hairline">
+                <div className="label-caps mb-1">By redactor version</div>
                 {Object.entries(pii.method_versions).map(([k, v]) => (
                   <div key={k} className="flex justify-between">
                     <span className="text-ink-2 truncate">{k}</span>
-                    <span>{v} frames</span>
+                    <span className="text-ink-3 tabular-nums">{plural(v, "frame")}</span>
                   </div>
                 ))}
               </div>
             </div>
+          ) : loading ? (
+            <Blank p={placeholder(true, 0, "")} />
           ) : (
             <div className="text-[12.5px] text-ink-3 py-4 text-center">
-              {loading ? "loading..." : piiFailed ? "could not read the anonymization audit" : "no anonymized frames yet"}
+              {piiFailed ? "Could not read the anonymization audit." : "No anonymized frames yet."}
             </div>
           )}
         </Section>
 
         {/* Geo capture density: released as noised 250 m cells, on request, against a privacy budget */}
-        <Section title={geo ? `geo capture density (${geo.n_cells} cells)` : "geo capture density"}>
+        <Section title="Where the data was captured" right={geo ? plural(geo.n_cells, "cell") : null}>
           {geo ? (
-            <div className="space-y-2">
-              <div className="text-[12px] text-ink-3">
-                {geo.n_cells} cells of {geo.cell_m} m released, {geo.suppressed_cells} thin cells
-                ({geo.suppressed_points} fixes) withheld under k={geo.k_anonymity}; this release cost
-                epsilon {geo.epsilon}, {geo.budget.remaining} of {geo.budget.epsilon_total} left.
+            <div className="space-y-3">
+              <div className="text-[12.5px] text-ink-3">
+                {num(geo.n_cells)} cells of {geo.cell_m} m released. {num(geo.suppressed_cells)} thin cells
+                ({num(geo.suppressed_points)} fixes) were withheld to keep at least {geo.k_anonymity} per cell. This
+                release used {geo.epsilon} of the privacy budget; {geo.budget.remaining} of {geo.budget.epsilon_total} is left.
               </div>
               <div className="text-[12px] text-ink-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-0.5 max-h-48 overflow-auto">
                 {geo.cells.slice(0, 200).map((c) => (
                   <div key={c.cell_id} className="flex justify-between gap-2">
-                    <span className="text-ink-2">{c.lat.toFixed(3)}, {c.lon.toFixed(3)}</span>
-                    <span>{Math.round(c.count)}</span>
+                    <span className="text-ink-2 tabular-nums">{c.lat.toFixed(3)}, {c.lon.toFixed(3)}</span>
+                    <span className="tabular-nums">{Math.round(c.count)}</span>
                   </div>
                 ))}
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-2 py-3 text-[12.5px] text-ink-3">
-              <span>
-                {geoErr ?? "Where the corpus was collected, as noised 250 m cells. Each release is charged against the privacy budget."}
+            <div className="flex flex-col items-center gap-3 py-3 text-[12.5px] text-ink-3 text-center">
+              <span className="max-w-xl">
+                {geoErr ?? "Capture locations, released as noised 250 m cells. Each release spends part of the privacy budget, so it is shown only when asked for."}
               </span>
               {!geoErr && (
-                <button onClick={releaseGeo} disabled={geoBusy}
-                  className="border border-line px-2 py-0.5 hover:border-accent disabled:opacity-50">
-                  {geoBusy ? "releasing..." : "release capture density"}
+                <button onClick={releaseGeo} disabled={geoBusy} className="btn">
+                  {geoBusy ? "Releasing..." : "Show capture density"}
                 </button>
               )}
             </div>
@@ -493,54 +524,62 @@ export default function AnalyticsPage() {
         </Section>
 
         {/* Data Intelligence Layer (M1.7) */}
-        <Section title="scene splits (zero-shot SigLIP 2)">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {scenes && Object.entries(scenes).map(([axis, vals]) => {
-              const tot = Object.values(vals).reduce((a, b) => a + b, 0) || 1;
-              return (
-                <div key={axis}>
-                  <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">{axis.replace("_", " ")}</div>
-                  {Object.entries(vals).map(([v, n]) => (
-                    <div key={v} className="text-[12px] flex items-center gap-1.5 mb-0.5">
-                      <span className="w-16 text-ink-2 truncate">{v}</span>
-                      <div className="flex-1 h-2 bg-bg-2"><div className="h-2 bg-accent" style={{ width: `${(100 * n) / tot}%` }} /></div>
-                      <span className="text-ink-3 w-8 text-right">{n}</span>
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
+        <Section title="Scene conditions" right="Zero-shot SigLIP 2">
+          {scenes ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              {Object.entries(scenes).map(([axis, vals]) => {
+                const tot = Object.values(vals).reduce((a, b) => a + b, 0) || 1;
+                return (
+                  <div key={axis}>
+                    <div className="label-caps mb-1.5">{humanize(axis)}</div>
+                    {Object.entries(vals).map(([v, n]) => (
+                      <div key={v} className="text-[12px] flex items-center gap-2 mb-1">
+                        <span className="w-20 text-ink-2 truncate" title={v}>{humanize(v)}</span>
+                        <div className="flex-1 h-2 bg-line rounded-sm overflow-hidden"><div className="h-2 bg-accent" style={{ width: `${(100 * n) / tot}%` }} /></div>
+                        <span className="text-ink-3 w-12 text-right tabular-nums">{compact(n)}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          ) : <Blank p={placeholder(true, 0, "")} />}
         </Section>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <Section title="duplicate rate (M1.1 dedup)">
-            <div className="p-2 font-mono">
-              <div className="text-2xl text-ink">{dedup ? `${(dedup.rate * 100).toFixed(1)}%` : "-"}</div>
-              <div className="text-[11px] text-ink-3 mt-1">{dedup ? `${dedup.redundant} redundant / ${dedup.total} frames, ${dedup.groups} groups` : ""}</div>
-            </div>
+          <Section title="Duplicate frames">
+            <div className="text-[22px] font-semibold text-ink tabular-nums">{dedup ? `${(dedup.rate * 100).toFixed(1)}%` : <span className="skeleton inline-block h-[22px] w-20" />}</div>
+            <div className="text-[12px] text-ink-3 mt-1.5">{dedup ? `${num(dedup.redundant)} of ${num(dedup.total)} frames are near-copies, in ${plural(dedup.groups, "group")}` : ""}</div>
           </Section>
-          <Section title="dataset growth (frames/day)">
-            <div className="flex items-end gap-0.5 h-24 p-2">
+          <Section title="Frames added per day" right={growth.length ? `${num(growth[growth.length - 1].cumulative)} in total` : null}>
+            <div className="flex items-end gap-0.5 h-24">
               {growth.slice(-40).map((g, i) => {
                 const max = Math.max(...growth.map((x) => x.frames), 1);
-                return <div key={i} title={`${g.date}: ${g.frames}`} className="flex-1 bg-info/70 min-w-[2px]" style={{ height: `${(100 * g.frames) / max}%` }} />;
+                return <div key={i} title={`${g.date}: ${g.frames}`} className="flex-1 bg-info/70 min-w-[2px] rounded-t-sm" style={{ height: `${(100 * g.frames) / max}%` }} />;
               })}
             </div>
-            <div className="text-[11px] text-ink-3 px-2">{growth.length ? `${growth[growth.length - 1].cumulative} frames total` : ""}</div>
+            {growth.length > 0 && (
+              <div className="flex justify-between text-[11px] text-ink-3 mt-1.5">
+                <span>{growth.slice(-40)[0].date}</span><span>{growth[growth.length - 1].date}</span>
+              </div>
+            )}
           </Section>
-          <Section title="long-tail (rare classes)">
-            <div className="p-2 text-[12px] text-ink-3">
-              {overview ? <span>{overview.long_tail.coverage_pct}% coverage ({overview.long_tail.covered_classes}/{overview.long_tail.total_classes} classes)</span> : "-"}
-            </div>
+          <Section title="Rare classes covered">
+            {overview ? (
+              <>
+                <div className="text-[22px] font-semibold text-ink tabular-nums">{overview.long_tail.coverage_pct}%</div>
+                <div className="text-[12px] text-ink-3 mt-1.5">{overview.long_tail.covered_classes} of {overview.long_tail.total_classes} classes have at least one example</div>
+              </>
+            ) : <span className="skeleton inline-block h-[22px] w-20" />}
           </Section>
         </div>
 
-        <Section title={`embedding cluster map (UMAP of DINOv3, ${cluster?.n ?? 0} frames, ${cluster?.clusters ?? 0} clusters)`}>
+        <Section title="Frames clustered by appearance"
+          right={cluster ? `${num(cluster.n)} frames, ${plural(cluster.clusters, "cluster")} · click a dot to open the frame` : null}>
           {cluster && cluster.points.length ? (
             <ClusterScatter cluster={cluster} onPick={(fid) => router.push(`/frame/${fid}`)} />
           ) : (
-            <div className="text-[12.5px] text-ink-3 py-8 text-center">computing projection…</div>
+            <div className="text-[12.5px] text-ink-3 py-8 text-center">{cluster ? "No frames have embeddings yet." : "Computing the projection..."}</div>
           )}
         </Section>
       </div>

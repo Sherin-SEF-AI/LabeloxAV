@@ -37,7 +37,7 @@ export function PresenceAvatars({ others, degraded }: { others: PresenceUser[]; 
         <li key={p.user_id}
           title={`${p.name} (${p.role})${p.editing ? ", editing this frame" : ", viewing"}`}
           className={`flex items-center justify-center w-[24px] h-[24px] rounded-full border bg-panel
-                      text-[10px] font-semibold select-none
+                      text-[10.5px] font-semibold select-none
                       ${p.editing ? "border-accent text-accent" : "border-line text-ink-2"}`}>
           <span aria-hidden="true">{initialsOf(p.name)}</span>
           <span className="sr-only">{p.name}{p.editing ? " (editing)" : ""}</span>
@@ -45,7 +45,7 @@ export function PresenceAvatars({ others, degraded }: { others: PresenceUser[]; 
       ))}
       {more > 0 && (
         <li title={others.slice(MAX_AVATARS).map((p) => p.name).join(", ")}
-          className="flex items-center justify-center h-[24px] px-1.5 rounded-full border border-line bg-panel text-[10px] text-ink-3">
+          className="flex items-center justify-center h-[24px] px-1.5 rounded-full border border-line bg-panel text-[10.5px] text-ink-3">
           +{more}
         </li>
       )}

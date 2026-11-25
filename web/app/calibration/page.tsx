@@ -8,6 +8,8 @@ import type { CalibDetail, CalibResolved, CalibSession, SessionRow } from "@/lib
 import PageShell from "@/components/shell/PageShell";
 import Inspector from "@/components/shell/Inspector";
 import { StateBadge } from "@/components/StateBadge";
+import EmptyState from "@/components/ui/EmptyState";
+import { humanize, shortId } from "@/lib/format";
 
 // M3.0 calibration validation report viewer: per-camera reprojection + FOV check + time offset, with a
 // clear pass/fail. A failing session is excluded from 3D and multi-camera work.
@@ -56,23 +58,25 @@ export default function CalibrationPage() {
 
   const ingest = async (fn: () => Promise<unknown>, label: string) => {
     setIng(label + "...");
-    try { await fn(); await loadResolved(pick); setIng(label + " done"); }
+    try { await fn(); await loadResolved(pick); setIng(label + ": done"); }
     catch (e) { setIng(label + " failed: " + humanizeError(e)); }
   };
   const applySpec = () => ingest(() => api.calibrationSetSpec(pick, { [specCam]: {
     ...(focalMode === "fov" ? { hfov_deg: Number(focalVal) } : { fx: Number(focalVal) }),
-    height_m: Number(heightVal), pitch_deg: Number(pitchVal) } }, "measured"), "set spec");
-  const runEstimate = () => ingest(() => api.calibrationEstimate(pick), "estimate");
+    height_m: Number(heightVal), pitch_deg: Number(pitchVal) } }, "measured"), "Measured values");
+  const runEstimate = () => ingest(() => api.calibrationEstimate(pick), "Estimate from road lines");
   const runExtrinsics = async () => {
-    setIng("extrinsics...");
+    setIng("Checking cameras against each other...");
     try {
       const r = await api.calibrationExtrinsics(pick);
-      setIng(r.checked ? `extrinsics: worst ${r.worst_sampson_px ?? "-"} px Sampson` : `extrinsics: ${r.reason}`);
-    } catch (e) { setIng("extrinsics failed: " + humanizeError(e)); }
+      setIng(r.checked ? `Cameras agree to within ${r.worst_sampson_px ?? "-"} px (worst pair)` : `Could not check: ${r.reason}`);
+    } catch (e) { setIng("Camera check failed: " + humanizeError(e)); }
   };
-  const runImport = () => ingest(() => api.calibrationImport(pick, { cam_id: impCam, format: "kitti", calib_text: impText }), "import");
+  const runImport = () => ingest(() => api.calibrationImport(pick, { cam_id: impCam, format: "kitti", calib_text: impText }), "Import");
 
   const SRC_DOT: Record<string, string> = { measured: "bg-pass", dataset: "bg-info", estimated: "bg-warn", nominal: "bg-ink-3" };
+  // Where a camera's numbers came from, best first. "Nominal" is a default nobody measured.
+  const SRC_LABEL: Record<string, string> = { measured: "Measured", dataset: "From the dataset", estimated: "Estimated", nominal: "Default guess" };
 
   const validate = async () => {
     if (!pick) return;
@@ -88,109 +92,139 @@ export default function CalibrationPage() {
   const open = async (sid: string) => setDetail(await api.calibrationDetail(sid));
 
   const validateAction = (
-    <button onClick={validate} disabled={busy || !pick} className="border border-accent text-accent px-2 py-1 text-[12px] hover:bg-accent/10 disabled:opacity-50">{busy ? "..." : "validate"}</button>
+    <button type="button" onClick={validate} disabled={busy || !pick} className="btn btn-primary">{busy ? "Validating..." : "Validate session"}</button>
   );
 
   return (
-    <PageShell active="CALIBRATION" title="Calibration" primaryAction={validateAction}>
+    <PageShell active="CALIBRATION" title="Calibration" primaryAction={validateAction}
+      subtitle="Check each camera's calibration before a session is used for 3D or multi-camera work">
       <div className="flex h-full min-h-0">
         <Inspector side="left" title="Sessions">
-          <div className="p-2 space-y-3 text-[12px]">
-            <div className="space-y-1">
-              <span className="block text-ink-3">validate calibration on</span>
-              <select value={pick} onChange={(e) => setPick(e.target.value)} className="w-full bg-bg border border-line px-2 py-1 text-ink">
-                {sessions.map((s) => <option key={s.session_id} value={s.session_id}>{s.vehicle_id} / {s.session_id.slice(0, 8)}</option>)}
+          <div className="p-3 space-y-4 text-[12.5px]">
+            <label className="block space-y-1.5">
+              <span className="block text-ink-2">Session to validate</span>
+              <select value={pick} onChange={(e) => setPick(e.target.value)} className="field w-full">
+                {sessions.map((s) => <option key={s.session_id} value={s.session_id}>{s.vehicle_id} · {shortId(s.session_id)}</option>)}
               </select>
-              <span className="block text-ink-3">a failing session is excluded from 3D + multi-camera work</span>
-            </div>
+              <span className="block text-[12px] text-ink-3">A session that fails is left out of 3D and multi-camera work.</span>
+            </label>
             <div className="space-y-1">
-              <div className="uppercase text-ink-3 border-b hairline pb-1">validated sessions</div>
+              <h2 className="section-title border-b hairline pb-1.5">Already validated</h2>
               {validated.length ? validated.map((s) => (
-                <button key={s.session_id} onClick={() => open(s.session_id)} className="w-full flex items-center gap-2 px-1 py-0.5 hover:bg-line text-left">
-                  <span className={`w-2 h-2 rounded-full ${s.overall === "fail" ? "bg-block" : "bg-pass"}`} />
-                  <span className="text-ink-2 truncate flex-1">{s.vehicle_id} / {s.session_id.slice(0, 8)}</span>
-                  <span className="text-ink-3">{s.cameras} cam</span>
+                <button key={s.session_id} type="button" onClick={() => open(s.session_id)}
+                  className={`w-full flex items-center gap-2 px-1.5 py-1.5 rounded text-left ${detail?.session_id === s.session_id ? "bg-accent/15" : "hover:bg-head"}`}>
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${s.overall === "fail" ? "bg-block" : "bg-pass"}`}
+                    aria-label={s.overall === "fail" ? "failed" : "passed"} />
+                  <span className="text-ink-2 truncate flex-1">{s.vehicle_id} <span className="font-mono text-[11px] text-ink-3">{shortId(s.session_id)}</span></span>
+                  <span className="text-ink-3 text-[12px] shrink-0">{s.cameras === 1 ? "1 camera" : `${s.cameras} cameras`}</span>
                 </button>
-              )) : <div className="text-ink-3 text-center py-4">none validated yet</div>}
+              )) : <div className="text-ink-3 py-3">None validated yet.</div>}
             </div>
           </div>
         </Inspector>
 
-        <section className="flex-1 min-h-0 overflow-auto p-4">
+        <section className="flex-1 min-w-0 min-h-0 overflow-auto">
+          <div className="page-wrap">
           <div className="panel">
-            <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2 flex items-center gap-2">
-              report {detail && <StateBadge state={detail.overall} />}
+            <div className="panel-head">
+              <h2 className="section-title">Validation report</h2>
+              {detail && <StateBadge state={detail.overall} />}
             </div>
             {detail ? (
-              <table className="w-full text-[12px]">
-                <thead><tr className="text-ink-3 text-left border-b hairline"><th className="px-3 py-1">camera</th><th>model</th><th>reproj px</th><th>implied FOV</th><th>expected</th><th>time offset</th><th className="text-right pr-3">status</th></tr></thead>
+              <table className="data-table">
+                <thead><tr><th>Camera</th><th>Lens model</th><th className="num">Reprojection error</th><th className="num">Field of view</th><th className="num">Expected</th><th className="num">Time offset</th><th className="text-right">Result</th></tr></thead>
                 <tbody>
                   {(detail.validations ?? []).map((c) => (
-                    <tr key={c.cam_id} className="border-b hairline">
-                      <td className="px-3 py-1 text-ink-2">{c.cam_id}</td>
-                      <td className="text-ink-3">{c.model}</td>
-                      <td className="text-ink-3">{c.reproj_error_px != null ? c.reproj_error_px.toFixed(2) : "-"}</td>
-                      <td className={c.fov_check.ok ? "text-ink-3" : "text-block"}>{c.fov_check.implied_fov_deg}&deg;</td>
-                      <td className="text-ink-3">{c.fov_check.expected_fov_deg ?? "-"}&deg;</td>
-                      <td className="text-ink-3">{c.time_offset_ns != null ? `${(c.time_offset_ns / 1e6).toFixed(2)} ms` : "-"}</td>
-                      <td className="text-right pr-3"><StateBadge state={c.status} /></td>
+                    <tr key={c.cam_id}>
+                      <td className="text-ink">{c.cam_id}</td>
+                      <td>{humanize(c.model)}</td>
+                      <td className="num">{c.reproj_error_px != null ? `${c.reproj_error_px.toFixed(2)} px` : "-"}</td>
+                      <td className={`num ${c.fov_check.ok ? "" : "text-block"}`}>{c.fov_check.implied_fov_deg}&deg;</td>
+                      <td className="num">{c.fov_check.expected_fov_deg != null ? <>{c.fov_check.expected_fov_deg}&deg;</> : "-"}</td>
+                      <td className="num">{c.time_offset_ns != null ? `${(c.time_offset_ns / 1e6).toFixed(2)} ms` : "-"}</td>
+                      <td className="text-right"><StateBadge state={c.status} /></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             ) : (
-              <div className="text-[12.5px] text-ink-3 py-10 text-center">validate a session, or pick one from the list.</div>
+              <EmptyState icon="ruler" title="No report open"
+                action={<button type="button" onClick={validate} disabled={busy || !pick} className="btn btn-primary">{busy ? "Validating..." : "Validate session"}</button>}>
+                Validate the session picked on the left, or open one that was already validated. The report
+                checks each camera&apos;s lens fit, field of view and clock offset.
+              </EmptyState>
             )}
+          </div>
           </div>
         </section>
 
-        <Inspector side="right" title="Real calibration">
-          <div className="p-2 space-y-3 text-[12px]">
+        <Inspector side="right" title="Camera settings" width="w-80">
+          <div className="p-3 space-y-4 text-[12.5px]">
             {resolved && (
-              <div className="flex items-center gap-2">
-                <span className="text-ink-3">trust</span>
+              <div className="flex items-center gap-2" data-tip="How much the current numbers can be trusted, from where they came from">
+                <span className="text-ink-3">Trust</span>
                 <span className={`w-2 h-2 rounded-full ${SRC_DOT[resolved.trust.level] ?? "bg-ink-3"}`} />
-                <span className="text-ink-2">{resolved.trust.level}</span>
-                <span className="ml-auto text-ink-3">mean q {resolved.trust.mean_quality}</span>
+                <span className="text-ink-2">{SRC_LABEL[resolved.trust.level] ?? humanize(resolved.trust.level)}</span>
+                <span className="ml-auto text-ink-3">quality {resolved.trust.mean_quality}</span>
               </div>
             )}
-            <div className="space-y-1">
-              <div className="uppercase text-ink-3 border-b hairline pb-1">resolved cameras</div>
+            <div className="space-y-1.5">
+              <h2 className="section-title border-b hairline pb-1.5">Cameras in this session</h2>
               {resolved?.cameras.length ? resolved.cameras.map((c) => (
                 <div key={c.cam_id} className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${SRC_DOT[c.source] ?? "bg-ink-3"}`} />
-                  <span className="text-ink-2 w-12 truncate">{c.cam_id}</span>
-                  <span className="text-ink-3">{c.source}</span>
-                  <span className="ml-auto text-ink-3">fx {c.fx} / {c.pitch_deg}&deg;</span>
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${SRC_DOT[c.source] ?? "bg-ink-3"}`} />
+                  <span className="text-ink-2 truncate min-w-0" data-tip={c.cam_id}>{c.cam_id}</span>
+                  <span className="ml-auto shrink-0 text-ink-3 text-[12px]" data-tip={`Focal length ${c.fx} px, pitch ${c.pitch_deg}°`}>
+                    {SRC_LABEL[c.source] ?? humanize(c.source)}
+                  </span>
                 </div>
-              )) : <div className="text-ink-3 text-center py-2">pick a session</div>}
+              )) : <div className="text-ink-3">Pick a session to see its cameras.</div>}
             </div>
-            <div className="space-y-1.5 border-t hairline pt-2">
-              <div className="uppercase text-ink-3">set rig spec (measured)</div>
-              <select value={specCam} onChange={(e) => setSpecCam(e.target.value)} className="w-full bg-bg border border-line px-2 py-1 text-ink">
-                {resolved?.cameras.map((c) => <option key={c.cam_id} value={c.cam_id}>{c.cam_id}</option>)}
-              </select>
-              <div className="flex gap-1">
-                <select value={focalMode} onChange={(e) => setFocalMode(e.target.value as "fov" | "fx")} className="bg-bg border border-line px-1 text-ink">
-                  <option value="fov">FOV&deg;</option><option value="fx">fx px</option>
+            <div className="space-y-2 border-t hairline pt-3">
+              <h2 className="section-title">Enter measured values</h2>
+              <label className="block space-y-1">
+                <span className="block text-[12px] text-ink-3">Camera</span>
+                <select value={specCam} onChange={(e) => setSpecCam(e.target.value)} className="field w-full">
+                  {resolved?.cameras.map((c) => <option key={c.cam_id} value={c.cam_id}>{c.cam_id}</option>)}
                 </select>
-                <input value={focalVal} onChange={(e) => setFocalVal(e.target.value)} className="flex-1 bg-bg border border-line px-2 py-1 text-ink" />
+              </label>
+              <div className="flex gap-2 items-end">
+                <label className="block space-y-1">
+                  <span className="block text-[12px] text-ink-3">Measure as</span>
+                  <select value={focalMode} onChange={(e) => setFocalMode(e.target.value as "fov" | "fx")} className="field">
+                    <option value="fov">Field of view (&deg;)</option><option value="fx">Focal length (px)</option>
+                  </select>
+                </label>
+                <label className="block flex-1 space-y-1">
+                  <span className="block text-[12px] text-ink-3">Value</span>
+                  <input value={focalVal} onChange={(e) => setFocalVal(e.target.value)} className="field w-full" />
+                </label>
               </div>
-              <div className="flex gap-1">
-                <label className="flex-1 flex items-center gap-1"><span className="text-ink-3">h m</span><input value={heightVal} onChange={(e) => setHeightVal(e.target.value)} className="w-full bg-bg border border-line px-1 py-1 text-ink" /></label>
-                <label className="flex-1 flex items-center gap-1"><span className="text-ink-3">pitch&deg;</span><input value={pitchVal} onChange={(e) => setPitchVal(e.target.value)} className="w-full bg-bg border border-line px-1 py-1 text-ink" /></label>
+              <div className="flex gap-2">
+                <label className="flex-1 block space-y-1"><span className="block text-[12px] text-ink-3">Height (m)</span><input value={heightVal} onChange={(e) => setHeightVal(e.target.value)} className="field w-full" /></label>
+                <label className="flex-1 block space-y-1"><span className="block text-[12px] text-ink-3">Pitch (&deg;)</span><input value={pitchVal} onChange={(e) => setPitchVal(e.target.value)} className="field w-full" /></label>
               </div>
-              <button onClick={applySpec} disabled={!pick || !specCam} className="w-full border border-accent text-accent py-1 hover:bg-accent/10 disabled:opacity-50">apply to session</button>
+              <button type="button" onClick={applySpec} disabled={!pick || !specCam} className="btn w-full">Save to session</button>
             </div>
-            <button onClick={runEstimate} disabled={!pick} className="w-full border border-line text-ink-2 py-1 hover:border-accent disabled:opacity-50">estimate from road lines</button>
-            <button onClick={runExtrinsics} disabled={!pick} className="w-full border border-line text-ink-2 py-1 hover:border-accent disabled:opacity-50">check extrinsics (multi-cam)</button>
-            <div className="space-y-1.5 border-t hairline pt-2">
-              <div className="uppercase text-ink-3">import KITTI calib (dataset)</div>
-              <input value={impCam} onChange={(e) => setImpCam(e.target.value)} placeholder="cam_id" className="w-full bg-bg border border-line px-2 py-1 text-ink" />
-              <textarea value={impText} onChange={(e) => setImpText(e.target.value)} placeholder="paste calib.txt (P2: fx 0 cx ...)" rows={3} className="w-full bg-bg border border-line px-2 py-1 text-ink resize-none" />
-              <button onClick={runImport} disabled={!pick || !impText} className="w-full border border-line text-ink-2 py-1 hover:border-accent disabled:opacity-50"><T k="action.import">import</T></button>
+            <div className="space-y-2 border-t hairline pt-3">
+              <h2 className="section-title">Work it out automatically</h2>
+              <button type="button" onClick={runEstimate} disabled={!pick} className="btn w-full">Estimate from road lines</button>
+              <button type="button" onClick={runExtrinsics} disabled={!pick} className="btn w-full"
+                data-tip="Checks that the cameras of a multi-camera rig agree about where things are">Check cameras against each other</button>
             </div>
-            {ing && <div className="text-ink-3">{ing}</div>}
+            <div className="space-y-2 border-t hairline pt-3">
+              <h2 className="section-title">Import a KITTI calibration file</h2>
+              <label className="block space-y-1">
+                <span className="block text-[12px] text-ink-3">Camera id</span>
+                <input value={impCam} onChange={(e) => setImpCam(e.target.value)} placeholder="cam_id" className="field w-full" />
+              </label>
+              <label className="block space-y-1">
+                <span className="block text-[12px] text-ink-3">Contents of calib.txt</span>
+                <textarea value={impText} onChange={(e) => setImpText(e.target.value)} placeholder="P2: fx 0 cx ..." rows={3} className="field w-full resize-none font-mono text-[12px]" />
+              </label>
+              <button type="button" onClick={runImport} disabled={!pick || !impText} className="btn w-full"><T k="action.import">Import</T></button>
+            </div>
+            {ing && <div role="status" className="text-ink-2 text-[12px] border-t hairline pt-2">{ing}</div>}
           </div>
         </Inspector>
       </div>

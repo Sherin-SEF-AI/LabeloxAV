@@ -314,6 +314,7 @@ export const HI: Dict = {
   "error.unknown": "अज्ञात त्रुटि",
   "error.back_triage": "छँटाई पर वापस",
   "error.back_home": "होम पर वापस",
+  "error.details": "तकनीकी विवरण",
   // home
   "home.step.data.title": "डेटा लाएँ",
   "home.step.data.body": "डैशकैम वीडियो या चित्र अपलोड करें, या COCO, YOLO, KITTI, nuScenes, CVAT आदि में पहले से लेबल किया गया डेटासेट आयात करें। फ़्रेम सहेजते समय चेहरे और नंबर प्लेट धुँधले कर दिए जाते हैं।",

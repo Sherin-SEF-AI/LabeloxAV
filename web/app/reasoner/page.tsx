@@ -8,6 +8,9 @@ import Inspector from "@/components/shell/Inspector";
 import EvidencePanel, { type EvidenceSubject } from "@/components/inspect/EvidencePanel";
 import { toast } from "@/lib/toast";
 import { invalidate, useQuery } from "@/lib/useQuery";
+import EmptyState from "@/components/ui/EmptyState";
+import { Stat } from "@/components/ui/kit";
+import { humanize, num, pct, plural } from "@/lib/format";
 import type { ReasonerAttribution, ReasonerRerun, ReasoningTrace } from "@/lib/types";
 
 // The reasoning layer, and whether it is any good.
@@ -29,6 +32,12 @@ const CHECK_BLURB: Record<string, string> = {
   corpus_memory: "what humans decided about the nearest-looking reviewed crops",
 };
 
+const CHECK_NAME: Record<string, string> = {
+  physics: "Physical size", geometry: "Geometry", temporal: "Consistency over time", scene: "Scene fit",
+  cross_model: "Model agreement", corpus_memory: "Past human decisions",
+};
+const checkName = (c: string) => CHECK_NAME[c] ?? humanize(c);
+
 const DECISION_TONE: Record<string, string> = {
   accept: "text-pass",
   abstain: "text-ink-3",
@@ -36,18 +45,6 @@ const DECISION_TONE: Record<string, string> = {
   adjudicate: "text-accent",
   reject: "text-block",
 };
-
-function Stat({ label, value, hint, tone }: {
-  label: string; value: string | number; hint?: string; tone?: string;
-}) {
-  return (
-    <div className="panel px-3 py-2 min-w-[130px]">
-      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</div>
-      <div className={`font-mono text-[18px] tabular-nums ${tone ?? "text-ink"}`}>{value}</div>
-      {hint && <div className="text-[11px] text-ink-3">{hint}</div>}
-    </div>
-  );
-}
 
 export default function ReasonerPage() {
   // The rerun table says the reasoner disagreed with a label and names what it would suggest instead.
@@ -90,13 +87,13 @@ export default function ReasonerPage() {
   };
 
   const doRerun = (apply: boolean) => async () => {
-    if (!sessionId.trim()) { toast("paste a session id", "error"); return; }
+    if (!sessionId.trim()) { toast("Choose a session first", "error"); return; }
     setBusy(true);
     try {
       const r = await api.reasonerRerun(sessionId.trim(), apply);
       setRerun(r);
       if (apply) {
-        toast(`demoted ${r.applied} labels`, "success");
+        toast(`Sent ${r.applied} labels back to review`, "success");
         // Applying demotes labels, which is what the outcome and coverage tables count.
         void invalidate("reasonerAttribution", "reasonerOutcomes", "reasonerCoverage");
       }
@@ -105,171 +102,162 @@ export default function ReasonerPage() {
 
   const acceptError = outcomes?.by_decision?.accept?.error_rate;
 
+  const fieldCls = "field";
   return (
-    <PageShell active="REASONER" title="Reasoning layer"
-      subtitle="what ran before each label, and whether it was right">
+    <PageShell active="Reasoning trace" title="Reasoning trace"
+      subtitle="The checks that run before each auto-label, and how often they were right.">
       <div className="flex h-full min-h-0">
       <div className="flex-1 min-w-0 overflow-auto">
-      <div className="p-4 space-y-4 max-w-6xl">
-        <div className="flex gap-2 flex-wrap">
-          <Stat label="corpus reasoned" value={`${((coverage?.fraction ?? 0) * 100).toFixed(1)}%`}
-            hint={`${coverage?.reasoned_in_sample ?? 0} of ${coverage?.sampled ?? 0} sampled`} />
-          <Stat label="traces" value={attribution?.reasoned ?? 0}
-            hint={`${attribution?.reviewed ?? 0} since reviewed`} />
-          <Stat label="accept error rate"
-            value={acceptError == null ? "-" : `${(acceptError * 100).toFixed(1)}%`}
-            tone={acceptError == null ? undefined : acceptError > 0.1 ? "text-block" : "text-pass"}
-            hint="accepted, then corrected by a human" />
-          <Stat label="priors" value={priors?.classes_with_height.length ?? 0}
-            hint="classes with a height band" />
+      <div className="page-wrap space-y-4">
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <Stat label="Corpus checked" value={coverage?.sampled ? pct(coverage.fraction ?? 0, 1) : "-"}
+            sub={`${num(coverage?.reasoned_in_sample ?? 0)} of ${num(coverage?.sampled ?? 0)} sampled`} />
+          <Stat label="Reasoning traces" value={num(attribution?.reasoned ?? 0)}
+            sub={`${num(attribution?.reviewed ?? 0)} reviewed by a person since`} />
+          <Stat label="Accepted, then corrected"
+            value={acceptError == null ? "-" : pct(acceptError, 1)}
+            tone={acceptError == null ? undefined : acceptError > 0.1 ? "block" : "pass"}
+            sub="auto-accepted labels a person later fixed" />
+          <Stat label="Size priors" value={num(priors?.classes_with_height.length ?? 0)}
+            sub="classes with a known real-world height" />
         </div>
 
         {outcomes && Object.keys(outcomes.by_decision ?? {}).length > 0 && (
           <section className="panel">
-            <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-              did its decisions hold up
-            </div>
-            <div className="p-3 space-y-2">
-              <table className="w-full text-[12px]">
-                <thead>
-                  <tr className="text-ink-3 text-left border-b hairline">
-                    <th className="py-1">decision</th><th>objects</th><th>since reviewed</th>
-                    <th>corrected</th><th>error rate</th>
+            <div className="panel-head"><h2 className="section-title">Did its decisions hold up?</h2></div>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Decision</th><th className="num">Objects</th><th className="num">Reviewed since</th>
+                  <th className="num">Corrected</th><th className="num">Error rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(outcomes.by_decision).map(([d, b]) => (
+                  <tr key={d}>
+                    <td className={DECISION_TONE[d] ?? "text-ink-2"}>{humanize(d)}</td>
+                    <td className="num">{num(b.total)}</td>
+                    <td className="num">{num(b.reviewed)}</td>
+                    <td className="num">{num(b.corrected)}</td>
+                    <td className="num text-ink">{b.error_rate == null ? "-" : pct(b.error_rate, 1)}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(outcomes.by_decision).map(([d, b]) => (
-                    <tr key={d} className="border-b hairline">
-                      <td className={`py-1 ${DECISION_TONE[d] ?? "text-ink-2"}`}>{d}</td>
-                      <td className="text-ink-3 tabular-nums">{b.total}</td>
-                      <td className="text-ink-3 tabular-nums">{b.reviewed}</td>
-                      <td className="text-ink-3 tabular-nums">{b.corrected}</td>
-                      <td className="text-ink tabular-nums">
-                        {b.error_rate == null ? "-" : `${(b.error_rate * 100).toFixed(1)}%`}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="text-[11px] text-ink-3">{outcomes.headline}</div>
-            </div>
+                ))}
+              </tbody>
+            </table>
+            {outcomes.headline && <p className="section-desc px-3.5 py-2.5 border-t hairline">{outcomes.headline}</p>}
           </section>
         )}
 
         <section className="panel">
-          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-            which checks actually catch errors
-          </div>
-          <div className="p-3 space-y-2">
-            {!attribution || Object.keys(attribution.checks).length === 0 ? (
-              <div className="text-[12px] text-ink-3">
-                Nothing measured yet. Precision is computed by joining each reasoning trace against what a
-                human later decided, so it appears once reasoned objects have been reviewed.
-              </div>
-            ) : (
-              <table className="w-full text-[12px]">
+          <div className="panel-head"><h2 className="section-title">Which checks catch real errors</h2></div>
+          {!attribution || Object.keys(attribution.checks).length === 0 ? (
+            <EmptyState compact icon="chart" title="Nothing measured yet">
+              Each check is scored against what a reviewer later decided, so its precision appears once
+              reasoned objects have been reviewed.
+            </EmptyState>
+          ) : (
+            <>
+              <table className="data-table">
                 <thead>
-                  <tr className="text-ink-3 text-left border-b hairline">
-                    <th className="py-1">check</th><th>what it asks</th>
-                    <th>objected</th><th>was right</th><th>precision</th>
+                  <tr>
+                    <th>Check</th><th>What it asks</th>
+                    <th className="num">Objected</th><th className="num">Was right</th><th className="num">Precision</th>
                   </tr>
                 </thead>
                 <tbody>
                   {Object.entries(attribution.checks).map(([name, c]) => (
-                    <tr key={name} className="border-b hairline">
-                      <td className="py-1 text-ink">{name}</td>
-                      <td className="text-ink-3 max-w-[22rem]">{CHECK_BLURB[name] ?? ""}</td>
-                      <td className="text-ink-3 tabular-nums">{c.fired_against}</td>
-                      <td className="text-ink-3 tabular-nums">{c.correct_against}</td>
-                      <td className={`tabular-nums ${
+                    <tr key={name}>
+                      <td className="text-ink">{checkName(name)}</td>
+                      <td className="max-w-[22rem]">{CHECK_BLURB[name] ?? ""}</td>
+                      <td className="num">{num(c.fired_against)}</td>
+                      <td className="num">{num(c.correct_against)}</td>
+                      <td className={`num ${
                         !c.measured ? "text-ink-3"
                           : (c.precision_against ?? 0) > 0.7 ? "text-pass" : "text-warn"}`}>
-                        {c.precision_against == null ? "-"
-                          : `${(c.precision_against * 100).toFixed(0)}%`}
-                        {!c.measured && " (thin)"}
+                        {c.precision_against == null ? "-" : pct(c.precision_against)}
+                        {!c.measured && " (too few)"}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            )}
-            {attribution?.caveat && (
-              // Said out loud rather than buried: review is not a random sample, so these numbers describe
-              // the checks' behaviour on hard cases rather than on the corpus as a whole.
-              <div className="text-[11px] text-ink-3 border-l-2 border-line pl-2">
-                {attribution.caveat}
-              </div>
-            )}
-          </div>
+              {attribution.caveat && (
+                // Said out loud rather than buried: review is not a random sample, so these numbers describe
+                // the checks' behaviour on hard cases rather than on the corpus as a whole.
+                <p className="section-desc px-3.5 py-2.5 border-t hairline">{attribution.caveat}</p>
+              )}
+            </>
+          )}
         </section>
 
         <section className="panel">
-          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-            try a detection
-          </div>
-          <div className="p-3 space-y-2">
-            <div className="text-[11px] text-ink-3">
-              Adjusting a height band and seeing what it does to a known-bad detection is far more useful
-              than reading the weights. Nothing is written; this runs Tier 1 and returns every finding.
-            </div>
-            <div className="flex items-center gap-2 text-[12px] flex-wrap">
-              <input value={cls} onChange={(e) => setCls(e.target.value)} placeholder="class"
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink w-40" />
-              <input value={bbox} onChange={(e) => setBbox(e.target.value)} placeholder="x1,y1,x2,y2"
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink w-44" />
-              <label className="flex items-center gap-1 text-ink-3">conf
+          <div className="panel-head"><h2 className="section-title">Try a detection</h2></div>
+          <div className="p-3.5 space-y-3">
+            <p className="section-desc">
+              Describe a detection and see which checks object to it and why. Nothing is saved.
+            </p>
+            <div className="flex items-end gap-3 text-[12.5px] flex-wrap">
+              <label className="flex flex-col gap-1.5"><span className="text-ink-2 text-[12px]">Class</span>
+                <input value={cls} onChange={(e) => setCls(e.target.value)} placeholder="pedestrian"
+                  className={`${fieldCls} w-40`} />
+              </label>
+              <label className="flex flex-col gap-1.5"><span className="text-ink-2 text-[12px]">Box (x1, y1, x2, y2)</span>
+                <input value={bbox} onChange={(e) => setBbox(e.target.value)} placeholder="x1,y1,x2,y2"
+                  className={`${fieldCls} w-44 font-mono`} />
+              </label>
+              <label className="flex flex-col gap-1.5"><span className="text-ink-2 text-[12px]">Confidence</span>
                 <input type="number" step="0.05" min="0" max="1" value={conf}
                   onChange={(e) => setConf(Number(e.target.value))}
-                  className="bg-bg border border-line px-1.5 py-0.5 text-ink w-20" />
+                  className={`${fieldCls} w-24`} />
               </label>
-              <label className="flex items-center gap-1 text-ink-3">depth m
+              <label className="flex flex-col gap-1.5"><span className="text-ink-2 text-[12px]">Distance (m)</span>
                 <input value={depth} onChange={(e) => setDepth(e.target.value)}
-                  className="bg-bg border border-line px-1.5 py-0.5 text-ink w-20" />
+                  className={`${fieldCls} w-24`} />
               </label>
-              <select value={roadType} onChange={(e) => setRoadType(e.target.value)}
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink">
-                {["urban", "highway", "rural", "service_road", ""].map((r) => (
-                  <option key={r || "none"} value={r}>{r || "no scene"}</option>
-                ))}
-              </select>
-              <button onClick={explain} disabled={busy}
-                className="border border-accent px-2 py-0.5 text-accent hover:bg-accent/10 disabled:opacity-40">
-                reason
+              <label className="flex flex-col gap-1.5"><span className="text-ink-2 text-[12px]">Road type</span>
+                <select value={roadType} onChange={(e) => setRoadType(e.target.value)} className={fieldCls}>
+                  {["urban", "highway", "rural", "service_road", ""].map((r) => (
+                    <option key={r || "none"} value={r}>{r ? humanize(r) : "Unknown"}</option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" onClick={explain} disabled={busy} className="btn btn-primary">
+                Check it
               </button>
             </div>
 
             {explained && (
-              <div className="space-y-1">
-                <div className="text-[12.5px]">
-                  <span className={DECISION_TONE[explained.decision] ?? "text-ink"}>
-                    {explained.decision}
+              <div className="rounded border border-line bg-bg-2/50 p-3 space-y-1.5">
+                <div className="text-[13px]">
+                  <span className={`font-medium ${DECISION_TONE[explained.decision] ?? "text-ink"}`}>
+                    {humanize(explained.decision)}
                   </span>
                   <span className="text-ink-3"> · score {explained.score} · conflict {explained.conflict}</span>
                   {explained.suggested_class && (
-                    <span className="text-warn"> · suggests {explained.suggested_class}</span>
+                    <span className="text-warn"> · suggests {humanize(explained.suggested_class)}</span>
                   )}
                 </div>
                 {explained.findings.length === 0 ? (
-                  <div className="text-[11.5px] text-ink-3">
+                  <div className="text-[12.5px] text-ink-3">
                     No check could be applied, so the reasoner abstains and the gate decides on confidence
-                    alone. That is deliberately different from having assessed it and found nothing.
+                    alone. That is different from having checked it and found nothing.
                   </div>
                 ) : (
-                  <ul className="space-y-0.5">
+                  <ul className="space-y-1">
                     {explained.findings.map((f, i) => (
-                      <li key={i} className="text-[11.5px]">
-                        <span className={f.weight < 0 ? "text-block" : "text-pass"}>
+                      <li key={i} className="text-[12.5px]">
+                        <span className={`tabular-nums ${f.weight < 0 ? "text-block" : "text-pass"}`}>
                           {f.weight > 0 ? "+" : ""}{f.weight.toFixed(2)}
                         </span>{" "}
-                        <span className="text-ink-2">{f.check}</span>{" "}
+                        <span className="text-ink-2">{checkName(f.check)}</span>{" "}
                         <span className="text-ink-3">{f.detail}</span>
                       </li>
                     ))}
                   </ul>
                 )}
                 {explained.question && (
-                  <div className="text-[11.5px] text-accent">
-                    would ask the adjudicator: {explained.question}
+                  <div className="text-[12.5px] text-accent-2">
+                    Would ask a reviewer: {explained.question}
                   </div>
                 )}
               </div>
@@ -278,78 +266,74 @@ export default function ReasonerPage() {
         </section>
 
         <section className="panel">
-          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-            reason over a session already annotated
-          </div>
-          <div className="p-3 space-y-2">
-            <div className="flex items-center gap-2 text-[12px] flex-wrap">
-              <SessionSelect value={sessionId} onChange={setSessionId} className="w-80" />
-              <button onClick={doRerun(false)} disabled={busy}
-                className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
-                {busy ? "reasoning..." : "dry run"}
+          <div className="panel-head"><h2 className="section-title">Re-check a labelled session</h2></div>
+          <div className="p-3.5 space-y-3">
+            <p className="section-desc">
+              Runs the checks over boxes that already exist, without detecting again. Decisions a person made
+              are never overwritten.
+            </p>
+            <div className="flex items-center gap-2 text-[12.5px] flex-wrap">
+              <SessionSelect value={sessionId} onChange={setSessionId} className="w-96" />
+              <button type="button" onClick={doRerun(false)} disabled={busy} className="btn">
+                {busy ? "Checking..." : "Preview"}
               </button>
               {rerun && !rerun.dry_run === false && rerun.would_demote > 0 && (
-                <button onClick={doRerun(true)} disabled={busy}
-                  className="border border-warn px-2 py-0.5 text-warn hover:bg-warn/10 disabled:opacity-40">
-                  apply ({rerun.would_demote} demotions)
+                <button type="button" onClick={doRerun(true)} disabled={busy} className="btn btn-primary"
+                  data-tip="Moves these auto-accepted labels back into the review queue">
+                  Send {plural(rerun.would_demote, "label")} back to review
                 </button>
               )}
             </div>
-            <div className="text-[11px] text-ink-3">
-              Applies the reasoning to boxes that already exist, without re-detecting. Human decisions are
-              never overwritten: an object a person accepted or rejected is settled.
-            </div>
 
             {rerun && (
-              <div className="space-y-2">
-                <div className="flex gap-2 flex-wrap">
-                  <Stat label="objects" value={rerun.objects} hint={`${rerun.frames} frames`} />
-                  <Stat label="auto-accepted" value={rerun.auto_accepted}
-                    hint="were going into training unreviewed" />
-                  <Stat label="disagreed with" value={rerun.would_demote}
-                    tone={rerun.would_demote ? "text-warn" : "text-pass"}
-                    hint={rerun.demote_rate_of_auto_accepted == null ? undefined
-                      : `${(rerun.demote_rate_of_auto_accepted * 100).toFixed(0)}% of them`} />
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <Stat label="Objects" value={num(rerun.objects)} sub={plural(rerun.frames, "frame")} />
+                  <Stat label="Auto-accepted" value={num(rerun.auto_accepted)}
+                    sub="were going into training unreviewed" />
+                  <Stat label="Disagreed with" value={num(rerun.would_demote)}
+                    tone={rerun.would_demote ? "warn" : "pass"}
+                    sub={rerun.demote_rate_of_auto_accepted == null ? undefined
+                      : `${pct(rerun.demote_rate_of_auto_accepted)} of the auto-accepted`} />
                 </div>
-                <div className="flex gap-1 flex-wrap">
+                <div className="flex gap-1.5 flex-wrap">
                   {Object.entries(rerun.decisions).map(([d, n]) => (
-                    <span key={d}
-                      className={`border border-line px-1.5 py-0.5 text-[11.5px] ${
-                        DECISION_TONE[d] ?? "text-ink-2"}`}>
-                      {d} <span className="text-ink-3">{n}</span>
+                    <span key={d} className={`chip ${DECISION_TONE[d] ?? ""}`}>
+                      {humanize(d)} <span className="text-ink-3 tabular-nums">{num(n)}</span>
                     </span>
                   ))}
                 </div>
                 {rerun.examples.length > 0 && (
-                  <table className="w-full text-[12px]">
-                    <thead>
-                      <tr className="text-ink-3 text-left border-b hairline">
-                        <th className="py-1">class</th><th>was</th><th>verdict</th>
-                        <th>suggests</th><th>why</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rerun.examples.map((e) => (
-                        <tr key={e.object_id}
-                          onClick={() => setSubject({
-                            objectId: e.object_id,
-                            suggestion: e.suggested_class
-                              ? { class_id: 0, class_name: e.suggested_class } : null,
-                            text: e.reasons.join(" · "),
-                            kind: `reasoner: ${e.decision}`,
-                          })}
-                          title="show the object this verdict is about"
-                          className={`border-b hairline cursor-pointer ${
-                            subject?.objectId === e.object_id ? "bg-accent/10" : "hover:bg-bg-2"}`}>
-                          <td className="py-1 text-ink">{e.class_name}</td>
-                          <td className="text-ink-3">{e.state}</td>
-                          <td className={DECISION_TONE[e.decision] ?? "text-ink-2"}>{e.decision}</td>
-                          <td className="text-warn">{e.suggested_class ?? "-"}</td>
-                          <td className="text-ink-3 truncate max-w-[24rem]">{e.reasons[0]}</td>
+                  <div className="panel overflow-hidden">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Class</th><th>Was</th><th>Verdict</th>
+                          <th>Suggests</th><th>Why</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {rerun.examples.map((e) => (
+                          <tr key={e.object_id}
+                            onClick={() => setSubject({
+                              objectId: e.object_id,
+                              suggestion: e.suggested_class
+                                ? { class_id: 0, class_name: e.suggested_class } : null,
+                              text: e.reasons.join(" · "),
+                              kind: `reasoner: ${e.decision}`,
+                            })}
+                            title="show the object this verdict is about"
+                            className={`cursor-pointer ${subject?.objectId === e.object_id ? "bg-accent/10" : ""}`}>
+                            <td className="text-ink">{humanize(e.class_name)}</td>
+                            <td>{humanize(e.state)}</td>
+                            <td className={DECISION_TONE[e.decision] ?? "text-ink-2"}>{humanize(e.decision)}</td>
+                            <td className="text-warn">{e.suggested_class ? humanize(e.suggested_class) : "-"}</td>
+                            <td className="truncate max-w-[24rem]">{e.reasons[0]}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             )}
@@ -357,7 +341,7 @@ export default function ReasonerPage() {
         </section>
       </div>
       </div>
-      <Inspector title="evidence" side="right" width="w-[26rem]">
+      <Inspector title="Evidence" side="right" width="w-[26rem]">
         <EvidencePanel subject={subject} />
       </Inspector>
       </div>

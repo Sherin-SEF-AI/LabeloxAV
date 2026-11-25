@@ -26,28 +26,28 @@ export const MODES: EditorMode[] = [
   {
     key: "objects", label: "Objects", rail: "OBJ", hotkey: "1", canvas: "konva",
     groups: [
-      { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
+      { key: "select", label: "Select", tools: [{ key: "select", label: "Select", hotkey: "V" }] },
       { key: "draw", label: "Draw", tools: [
-        { key: "box", label: "box", hotkey: "B" },
-        { key: "polygon", label: "polygon", hotkey: "G" },
-        { key: "polyline", label: "polyline", hotkey: "L" },
+        { key: "box", label: "Box", hotkey: "B" },
+        { key: "polygon", label: "Polygon", hotkey: "G" },
+        { key: "polyline", label: "Polyline", hotkey: "L" },
         // The whole extent of a partly hidden object. Draws into bbox_amodal, never into bbox: the
         // visible box is what every existing consumer means by "the box".
-        { key: "amodal", label: "whole extent", hotkey: "K" },
+        { key: "amodal", label: "Whole extent", hotkey: "K" },
       ] },
       { key: "ai", label: "AI assist", tools: [
-        { key: "sam-point", label: "sam point", hotkey: "S" },
-        { key: "sam-box", label: "sam box", hotkey: "M" },
-        { key: "magic-wand", label: "wand", hotkey: "W" },
+        { key: "sam-point", label: "SAM point", hotkey: "S" },
+        { key: "sam-box", label: "SAM box", hotkey: "M" },
+        { key: "magic-wand", label: "Wand", hotkey: "W" },
       ] },
       { key: "mask", label: "Mask edit", tools: [
-        { key: "brush", label: "brush", hotkey: "P" },
-        { key: "eraser", label: "eraser", hotkey: "E" },
-        { key: "superpixel", label: "cells", hotkey: "U" },
+        { key: "brush", label: "Brush", hotkey: "P" },
+        { key: "eraser", label: "Eraser", hotkey: "E" },
+        { key: "superpixel", label: "Cells", hotkey: "U" },
       ] },
-      { key: "region", label: "Region", tools: [{ key: "adverse", label: "adverse", hotkey: "D" }] },
-      { key: "cuboid", label: "3D box", tools: [{ key: "cuboid", label: "cuboid", hotkey: "C" }] },
-      { key: "measure", label: "Measure", tools: [{ key: "measure", label: "measure", hotkey: "R" }] },
+      { key: "region", label: "Region", tools: [{ key: "adverse", label: "Region", hotkey: "D" }] },
+      { key: "cuboid", label: "3D box", tools: [{ key: "cuboid", label: "Cuboid", hotkey: "C" }] },
+      { key: "measure", label: "Measure", tools: [{ key: "measure", label: "Measure", hotkey: "R" }] },
     ],
   },
   {
@@ -57,33 +57,33 @@ export const MODES: EditorMode[] = [
     // nothing. A tool belongs in this registry when the canvas dispatches it and not before.
     key: "lanes", label: "Lanes and drivable", rail: "LANE", hotkey: "2", canvas: "konva",
     groups: [
-      { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
+      { key: "select", label: "Select", tools: [{ key: "select", label: "Select", hotkey: "V" }] },
     ],
   },
   {
     key: "semantic", label: "Semantic", rail: "SEM", hotkey: "3", canvas: "konva",
     groups: [
-      { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
+      { key: "select", label: "Select", tools: [{ key: "select", label: "Select", hotkey: "V" }] },
       // A region drawn for a class and a region drawn for an instance are the same gesture, so semantic
       // reuses the object canvas's polygon and eraser rather than teaching a second pair.
       { key: "semantic", label: "Semantic", tools: [
-        { key: "sem-region", label: "region", hotkey: "G" },
-        { key: "sem-erase", label: "erase", hotkey: "E" },
+        { key: "sem-region", label: "Region", hotkey: "G" },
+        { key: "sem-erase", label: "Erase", hotkey: "E" },
       ] },
     ],
   },
   {
     key: "events", label: "Events", rail: "EVT", hotkey: "4", canvas: "table",
     groups: [
-      { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
+      { key: "select", label: "Select", tools: [{ key: "select", label: "Select", hotkey: "V" }] },
     ],
   },
   {
     key: "pose", label: "Pose and behavior", rail: "POSE", hotkey: "5", canvas: "konva",
     groups: [
-      { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
-      { key: "pose", label: "Pose", tools: [{ key: "keypoint", label: "keypoint", hotkey: "K" }] },
-      { key: "measure", label: "Measure", tools: [{ key: "measure", label: "measure", hotkey: "R" }] },
+      { key: "select", label: "Select", tools: [{ key: "select", label: "Select", hotkey: "V" }] },
+      { key: "pose", label: "Pose", tools: [{ key: "keypoint", label: "Keypoint", hotkey: "K" }] },
+      { key: "measure", label: "Measure", tools: [{ key: "measure", label: "Measure", hotkey: "R" }] },
     ],
   },
   {
@@ -91,13 +91,13 @@ export const MODES: EditorMode[] = [
     // rule applies here as to lanes: Select alone until a tool actually reaches the canvas.
     key: "lidar3d", label: "3D and LiDAR", rail: "3D", hotkey: "6", canvas: "three",
     groups: [
-      { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
+      { key: "select", label: "Select", tools: [{ key: "select", label: "Select", hotkey: "V" }] },
     ],
   },
   {
     key: "review", label: "Review", rail: "QA", hotkey: "7", canvas: "konva",
     groups: [
-      { key: "select", label: "Select", tools: [{ key: "select", label: "select", hotkey: "V" }] },
+      { key: "select", label: "Select", tools: [{ key: "select", label: "Select", hotkey: "V" }] },
     ],
   },
 ];

@@ -8,6 +8,8 @@ import PageShell from "@/components/shell/PageShell";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "@/lib/toast";
 import { invalidate, useQuery } from "@/lib/useQuery";
+import { humanize } from "@/lib/format";
+import EmptyState from "@/components/ui/EmptyState";
 
 // Outbound integrations: webhook subscriptions and registered storage buckets.
 //
@@ -25,17 +27,29 @@ type Source = {
   uri: string; credential_profile: string | null; last_object_count: number | null;
 };
 
-function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
+function Section({ title, count, desc, children, right }: {
+  title: string; count?: number; desc?: string; children: React.ReactNode; right?: React.ReactNode;
+}) {
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-        <span>{title}</span>
-        {right && <span className="ml-auto normal-case">{right}</span>}
+      <div className="panel-head">
+        <h2 className="section-title">
+          {title}{count !== undefined && <span className="ml-1 font-normal text-ink-3 tabular-nums">({count})</span>}
+        </h2>
+        {right && <span className="ml-auto">{right}</span>}
       </div>
-      <div className="p-3">{children}</div>
+      <div className="p-4 space-y-3">
+        {desc && <p className="section-desc">{desc}</p>}
+        {children}
+      </div>
     </section>
   );
 }
+
+// `annotation.created` -> "Annotation created", `anpr.watchlist_hit` -> "ANPR watchlist hit". The event name
+// itself is what a receiver matches on, so it stays in the tooltip and is what the API is sent.
+const eventLabel = (e: string) => humanize(e.replace(/\./g, " ")).replace(/^Anpr\b/, "ANPR");
+
 
 export default function IntegrationsPage() {
   // useSearchParams forces a client-side-render bailout, which Next requires be under a Suspense boundary or
@@ -82,7 +96,7 @@ function IntegrationsBody() {
   const refresh = useCallback(() => invalidate("integrationEvents", "storageSources", "webhooks"), []);
 
   const addHook = async () => {
-    if (!url.trim()) { flash("give the webhook a url"); return; }
+    if (!url.trim()) { flash("Give the webhook an address"); return; }
     setBusy(true);
     try {
       const wh = await api.createWebhook(url.trim(), picked);
@@ -93,7 +107,7 @@ function IntegrationsBody() {
   };
 
   const addSource = async () => {
-    if (!sName.trim() || !sBucket.trim()) { flash("name and bucket are required"); return; }
+    if (!sName.trim() || !sBucket.trim()) { flash("A name and a bucket are required"); return; }
     setBusy(true);
     try {
       await api.registerSource({
@@ -102,7 +116,7 @@ function IntegrationsBody() {
       });
       setSName(""); setSBucket(""); setSPrefix(""); setSProfile("");
       await refresh();
-      flash("source registered");
+      flash("Source registered");
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
@@ -121,134 +135,147 @@ function IntegrationsBody() {
     <PageShell
       active="INTEGRATIONS"
       title="Integrations"
-      subtitle="outbound webhooks and registered storage buckets"
-      right={msg ? <span className="text-[12px] text-accent">{msg}</span> : null}
+      subtitle="Webhooks that tell other systems what happened, and storage buckets to import from"
+      right={msg ? <span className="text-[12px] text-accent-2" role="status">{msg}</span> : null}
     >
-      <div className="p-4 space-y-4 max-w-5xl">
+      <div className="page-wrap-narrow space-y-4">
         {/* the one-time secret */}
         {freshSecret && (
-          <div className="panel border border-accent p-3 space-y-1">
-            <div className="text-[12px] text-accent">
-              copy this signing secret now, it is not shown again
-            </div>
-            <div className="text-[12px] text-ink-3">{freshSecret.url}</div>
-            <div className="text-[12.5px] text-ink break-all select-all">{freshSecret.secret}</div>
-            <div className="text-[11px] text-ink-3">
-              verify each delivery: X-Labelox-Signature = sha256=HMAC(secret, raw body)
-            </div>
-            <button onClick={() => setFreshSecret(null)}
-              className="mt-1 border border-line px-2 py-0.5 text-[12px] text-ink-2 hover:border-accent">
-              <T k="action.dismiss">dismiss</T>
+          <section className="panel border-accent/60 p-4 space-y-2" role="alert">
+            <h2 className="section-title">Copy this signing secret now. It is not shown again.</h2>
+            <div className="text-[12.5px] text-ink-3">For {freshSecret.url}</div>
+            <div className="font-mono text-[13px] text-ink rounded border border-line bg-bg-2 px-3 py-2 break-all select-all">{freshSecret.secret}</div>
+            <p className="text-[12px] text-ink-3">
+              Your receiver verifies each delivery by checking that the <code className="font-mono text-ink-2">X-Labelox-Signature</code> header
+              equals <code className="font-mono text-ink-2">sha256=HMAC(secret, raw body)</code>.
+            </p>
+            <button type="button" onClick={() => setFreshSecret(null)} className="btn">
+              <T k="action.dismiss">Dismiss</T>
             </button>
-          </div>
+          </section>
         )}
 
-        <Section title={`webhooks (${hooks.length})`}
-          right={highlight ? <span className="text-[12px] text-accent">from the menu</span> : null}>
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-[12px] flex-wrap">
+        <Section title="Webhooks" count={hooks.length}
+          desc="Each event is sent as a signed POST to the address you give, so a pipeline can react without polling."
+          right={highlight ? <span className="text-[12px] text-accent-2">Opened from the menu</span> : null}>
+          <label className="block space-y-1.5">
+            <span className="block text-[12.5px] text-ink-2">Address</span>
+            <div className="flex items-center gap-2 flex-wrap">
               <input value={url} onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://your-pipeline/hook"
-                className="flex-1 min-w-[260px] bg-bg border border-line px-1.5 py-0.5 text-ink" />
-              <button onClick={addHook} disabled={busy}
-                className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
-                add webhook
+                placeholder="https://your-pipeline/hook" className="field flex-1 min-w-[260px]" />
+              <button type="button" onClick={addHook} disabled={busy} className="btn btn-primary">
+                Add webhook
               </button>
             </div>
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mr-1">events</span>
+          </label>
+          <div className="space-y-1.5">
+            <div className="text-[12.5px] text-ink-2">
+              Events <span className="text-ink-3">{picked.length ? `(${picked.length} picked)` : "(none picked sends every event)"}</span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
               {events.map((e) => (
-                <button key={e}
+                <button key={e} type="button" title={e} aria-pressed={picked.includes(e)}
                   onClick={() => setPicked((p) => p.includes(e) ? p.filter((x) => x !== e) : [...p, e])}
-                  className={`px-1.5 py-0.5 text-[11.5px] border ${
-                    picked.includes(e) ? "border-accent text-ink" : "border-line text-ink-3 hover:text-ink-2"}`}>
-                  {e}
+                  className={`chip ${picked.includes(e) ? "chip-on" : ""}`}>
+                  {eventLabel(e)}
                 </button>
               ))}
-              <span className="text-[11px] text-ink-3 ml-1">
-                {picked.length ? "" : "none picked = every event"}
-              </span>
             </div>
+          </div>
 
-            {hooks.length > 0 && (
-              <table className="w-full text-[12px] mt-2">
+          {hooks.length > 0 ? (
+            <div className="overflow-x-auto rounded-md border hairline">
+              <table className="data-table">
                 <thead>
-                  <tr className="text-ink-3 text-left border-b hairline">
-                    <th className="py-1">url</th><th>events</th><th>state</th><th>last</th><th></th>
-                  </tr>
+                  <tr><th>Address</th><th>Events</th><th>State</th><th>Last delivery</th><th><span className="sr-only">Actions</span></th></tr>
                 </thead>
                 <tbody>
                   {hooks.map((h) => (
-                    <tr key={h.webhook_id} className="border-b hairline">
-                      <td className="py-1 text-ink-2 truncate max-w-[280px]">{h.url}</td>
-                      <td className="text-ink-3">{h.events.length ? h.events.join(", ") : "all"}</td>
+                    <tr key={h.webhook_id}>
+                      <td className="text-ink truncate max-w-[280px]" title={h.url}>{h.url}</td>
+                      <td>{h.events.length ? h.events.map(eventLabel).join(", ") : "All events"}</td>
                       <td className={h.active ? "text-pass" : "text-block"}>
-                        {h.active ? "active" : `off (${h.failure_count} fails)`}
+                        {h.active ? "Active" : `Off after ${h.failure_count} failures`}
                       </td>
-                      <td className="text-ink-3">{h.last_error ?? (h.last_status ?? "-")}</td>
+                      <td className="text-ink-3">{h.last_error ?? (h.last_status != null ? `HTTP ${h.last_status}` : "None yet")}</td>
                       <td className="text-right">
-                        <button onClick={async () => { if (!(await confirm({ title: "Remove this webhook?", body: h.url, danger: true, confirmLabel: "Remove" }))) return; try { await api.deleteWebhook(h.webhook_id); toast("Webhook removed", "success"); } catch (e) { toast(humanizeError(e), "error"); } refresh(); }}
-                          className="text-ink-3 hover:text-block"><T k="action.remove">remove</T></button>
+                        <button type="button" onClick={async () => { if (!(await confirm({ title: "Remove this webhook?", body: h.url, danger: true, confirmLabel: "Remove" }))) return; try { await api.deleteWebhook(h.webhook_id); toast("Webhook removed", "success"); } catch (e) { toast(humanizeError(e), "error"); } refresh(); }}
+                          className="btn btn-danger"><T k="action.remove">Remove</T></button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="rounded-md border hairline">
+              <EmptyState compact icon="link" title="No webhooks yet">
+                Add an address above to be told when labels are created, exports finish or a model is promoted.
+              </EmptyState>
+            </div>
+          )}
         </Section>
 
-        <Section title={`storage sources (${sources.length})`}>
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-[12px] flex-wrap">
-              <input value={sName} onChange={(e) => setSName(e.target.value)} placeholder="name"
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink w-32" />
-              <select value={sProvider} onChange={(e) => setSProvider(e.target.value)}
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink">
-                {["s3", "minio", "gcs", "azure"].map((p) => <option key={p} value={p}>{p}</option>)}
+        <Section title="Storage sources" count={sources.length}
+          desc="Buckets the import page can read from. Credentials are never stored here: the profile names a key held in the server's environment.">
+          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 items-end">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[12.5px] text-ink-2">Name</span>
+              <input value={sName} onChange={(e) => setSName(e.target.value)} placeholder="e.g. Fleet uploads" className="field" />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[12.5px] text-ink-2">Provider</span>
+              <select value={sProvider} onChange={(e) => setSProvider(e.target.value)} className="field">
+                {[["s3", "S3"], ["minio", "MinIO"], ["gcs", "GCS"], ["azure", "Azure"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
-              <input value={sBucket} onChange={(e) => setSBucket(e.target.value)} placeholder="bucket"
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink w-40" />
-              <input value={sPrefix} onChange={(e) => setSPrefix(e.target.value)} placeholder="prefix (optional)"
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink w-40" />
-              <input value={sProfile} onChange={(e) => setSProfile(e.target.value)}
-                placeholder="credential profile"
-                className="bg-bg border border-line px-1.5 py-0.5 text-ink w-40" />
-              <button onClick={addSource} disabled={busy}
-                className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
-                register
-              </button>
-            </div>
-            <div className="text-[11px] text-ink-3">
-              credentials are never stored here: the profile names a key held in the server environment
-            </div>
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[12.5px] text-ink-2">Bucket</span>
+              <input value={sBucket} onChange={(e) => setSBucket(e.target.value)} placeholder="bucket-name" className="field" />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[12.5px] text-ink-2">Prefix <span className="text-ink-3">(optional)</span></span>
+              <input value={sPrefix} onChange={(e) => setSPrefix(e.target.value)} placeholder="drives/2026/" className="field" />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[12.5px] text-ink-2">Credential profile</span>
+              <input value={sProfile} onChange={(e) => setSProfile(e.target.value)} placeholder="e.g. fleet-readonly" className="field" />
+            </label>
+            <button type="button" onClick={addSource} disabled={busy} className="btn btn-primary justify-self-start">
+              Register
+            </button>
+          </div>
 
-            {sources.length > 0 && (
-              <table className="w-full text-[12px] mt-2">
+          {sources.length > 0 ? (
+            <div className="overflow-x-auto rounded-md border hairline">
+              <table className="data-table">
                 <thead>
-                  <tr className="text-ink-3 text-left border-b hairline">
-                    <th className="py-1">name</th><th>uri</th><th>profile</th><th>objects</th><th></th>
-                  </tr>
+                  <tr><th>Name</th><th>Location</th><th>Profile</th><th className="num">Objects</th><th><span className="sr-only">Actions</span></th></tr>
                 </thead>
                 <tbody>
                   {sources.map((s) => (
-                    <tr key={s.source_id} className="border-b hairline">
-                      <td className="py-1 text-ink-2">{s.name}</td>
-                      <td className="text-ink-3 truncate max-w-[260px]">{s.uri}</td>
+                    <tr key={s.source_id}>
+                      <td className="text-ink">{s.name}</td>
+                      <td className="font-mono text-[12px] text-ink-3 truncate max-w-[260px]" title={s.uri}>{s.uri}</td>
                       <td className="text-ink-3">{s.credential_profile ?? "-"}</td>
-                      <td className="text-ink-3">{s.last_object_count ?? "-"}</td>
-                      <td className="text-right space-x-2">
-                        <button onClick={() => preview(s.source_id)} disabled={busy}
-                          className="text-ink-3 hover:text-accent disabled:opacity-40">preview</button>
-                        <button onClick={async () => { if (!(await confirm({ title: "Remove this storage source?", body: s.name, danger: true, confirmLabel: "Remove" }))) return; try { await api.deleteSource(s.source_id); toast("Source removed", "success"); } catch (e) { toast(humanizeError(e), "error"); } refresh(); }}
-                          className="text-ink-3 hover:text-block"><T k="action.remove">remove</T></button>
+                      <td className="num">{s.last_object_count != null ? s.last_object_count.toLocaleString() : "-"}</td>
+                      <td className="text-right whitespace-nowrap space-x-2">
+                        <button type="button" onClick={() => preview(s.source_id)} disabled={busy} className="btn">Preview</button>
+                        <button type="button" onClick={async () => { if (!(await confirm({ title: "Remove this storage source?", body: s.name, danger: true, confirmLabel: "Remove" }))) return; try { await api.deleteSource(s.source_id); toast("Source removed", "success"); } catch (e) { toast(humanizeError(e), "error"); } refresh(); }}
+                          className="btn btn-danger"><T k="action.remove">Remove</T></button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="rounded-md border hairline">
+              <EmptyState compact icon="database" title="No storage sources yet">
+                Register a bucket above and it becomes a place to import recordings from.
+              </EmptyState>
+            </div>
+          )}
         </Section>
       </div>
     </PageShell>

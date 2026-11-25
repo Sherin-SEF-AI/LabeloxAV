@@ -88,9 +88,9 @@ export default function ImagePanel({ panel, onFrame }: { panel: InspectorPanel; 
           ))}
         </svg>
       )}
-      <button onClick={() => setOverlays((v) => !v)} title="toggle annotation overlays"
-        className={`absolute top-1 right-1 text-[10.5px] border px-1 rounded ${overlays ? "border-accent/50 text-accent bg-accent/10" : "border-line text-ink-3"}`}>
-        overlays {overlays ? "on" : "off"}
+      <button onClick={() => setOverlays((v) => !v)} data-tip="Show or hide the labels on the image"
+        className={`absolute top-1 right-1 text-[11px] border px-1.5 py-0.5 rounded ${overlays ? "border-accent/60 text-accent-2 bg-panel/90" : "border-line text-ink-2 bg-panel/90"}`}>
+        Overlays {overlays ? "on" : "off"}
       </button>
     </div>
   );

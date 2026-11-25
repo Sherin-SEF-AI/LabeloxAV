@@ -5,6 +5,9 @@ import { T } from "@/lib/i18n";
 import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import SessionSelect from "@/components/shell/SessionSelect";
+import EmptyState from "@/components/ui/EmptyState";
+import { Stat } from "@/components/ui/kit";
+import { humanize, num, pct } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { invalidate, useQuery } from "@/lib/useQuery";
 import type {
@@ -49,9 +52,13 @@ const DETAIL_KEYS = [
 function detailOf(payload: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const k of DETAIL_KEYS) {
-    if (payload[k] !== undefined && payload[k] !== null) parts.push(`${k}=${String(payload[k])}`);
+    const v = payload[k];
+    if (v === undefined || v === null) continue;
+    const shown = typeof v === "number" ? (Number.isInteger(v) ? num(v) : v.toFixed(1))
+      : typeof v === "boolean" ? (v ? "yes" : "no") : humanize(String(v)).toLowerCase();
+    parts.push(`${humanize(k)}: ${shown}`);
   }
-  return parts.join("  ");
+  return parts.join(" · ");
 }
 
 // Event times are absolute capture time. Shown relative to the session origin, because a reviewer scrubs to
@@ -59,19 +66,7 @@ function detailOf(payload: Record<string, unknown>): string {
 function at(ns: number | null | undefined, originNs: number | null): string {
   if (ns == null) return "-";
   const t = originNs == null ? ns : ns - originNs;
-  return `${(t / 1e9).toFixed(2)}s`;
-}
-
-function Stat({ label, value, hint, tone }: {
-  label: string; value: string | number; hint?: string; tone?: string;
-}) {
-  return (
-    <div className="panel px-3 py-2 min-w-[130px]">
-      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</div>
-      <div className={`font-mono text-[18px] tabular-nums ${tone ?? "text-ink"}`}>{value}</div>
-      {hint && <div className="text-[11px] text-ink-3">{hint}</div>}
-    </div>
-  );
+  return `${(t / 1e9).toFixed(1)} s`;
 }
 
 export default function EventsPage() {
@@ -127,7 +122,7 @@ export default function EventsPage() {
     setBusy(true);
     try {
       const r = await api.deriveDrivingEvents(sessionId.trim());
-      toast(`derived ${r.derived}: ${r.inserted} new, ${r.updated} updated, ${r.pruned_stale} stale removed`,
+      toast(`Derived ${r.derived}: ${r.inserted} new, ${r.updated} updated, ${r.pruned_stale} stale removed`,
       );
       await load();
       // Deriving adds and removes events corpus-wide, as far as the event search is concerned.
@@ -160,8 +155,8 @@ export default function EventsPage() {
     try {
       const r = await api.classifySessionLanes(sessionId.trim(), { reclassify: true });
       setTypeResult(r);
-      const kinds = Object.entries(r.by_type ?? {}).map(([k, n]) => `${k} ${n}`).join(", ");
-      toast(`typed ${r.measured ?? 0} lanes: ${kinds || "nothing measurable"}`, "success");
+      const kinds = Object.entries(r.by_type ?? {}).map(([k, n]) => `${humanize(k).toLowerCase()} ${n}`).join(", ");
+      toast(`Typed ${r.measured ?? 0} lanes: ${kinds || "nothing measurable"}`, "success");
       setCoverage(await api.laneTypeCoverage());
     } catch (e) {
       toast(humanizeError(e), "error");
@@ -184,178 +179,202 @@ export default function EventsPage() {
 
   const derivedKinds = (taxonomy?.kinds ?? []).filter((k) => k.derived);
   const humanKinds = (taxonomy?.kinds ?? []).filter((k) => !k.derived);
+  const ready = Boolean(sessionId.trim());
 
   return (
     <PageShell active="EVENTS" title="Driving events"
-      subtitle="lane changes, signal phases, and the rules they break">
-      <div className="p-4 space-y-4 max-w-6xl">
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">session</span>
-          <SessionSelect value={sessionId} onChange={setSessionId} className="w-[340px]" />
-        </label>
-        <button className="btn" onClick={() => void load()} disabled={busy || !sessionId.trim()}>
-          load
-        </button>
-        <button className="btn" onClick={() => void derive()} disabled={busy || !sessionId.trim()}>
-          derive
-        </button>
-        <button className="btn" onClick={() => void linkLanes()} disabled={busy || !sessionId.trim()}>
-          link lanes
-        </button>
-        <button className="btn" onClick={() => void classifyLanes()} disabled={busy || !sessionId.trim()}>
-          type lanes
-        </button>
-      </div>
-
-      <p className="text-[11px] text-ink-3 max-w-[76ch]">
-        Deriving is safe to repeat: a matching candidate updates in place rather than duplicating, anything a
-        person has ruled on is left alone, and a candidate the geometry no longer implies is removed. Lane
-        linking gives a lane an identity across frames, which is what a crossing is measured against; without
-        it every lane exists in one frame only and no crossing can be seen. Typing reads each line off its
-        own paint, which is what decides whether crossing it was a manoeuvre or an offence; an unmeasured
-        line never makes a crossing a violation, because a type nobody looked at is not evidence.
-      </p>
+      subtitle="Lane changes, signal phases and the traffic rules they break, derived from a session and ruled on by a person.">
+      <div className="page-wrap space-y-4">
+      <section className="panel p-4 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1.5">
+            <span className="label-caps">Session</span>
+            <SessionSelect value={sessionId} onChange={setSessionId} className="w-[340px]" />
+          </label>
+          <button className="btn btn-primary" onClick={() => void load()} disabled={busy || !ready}>
+            Load events
+          </button>
+          <span className="w-px h-6 bg-line mx-1" aria-hidden />
+          <button className="btn" onClick={() => void derive()} disabled={busy || !ready}
+            data-tip="Find lane crossings and signal changes in this session. Safe to repeat.">
+            Derive events
+          </button>
+          <button className="btn" onClick={() => void linkLanes()} disabled={busy || !ready}
+            data-tip="Give each lane one identity across frames, so a crossing can be measured">
+            Link lanes
+          </button>
+          <button className="btn" onClick={() => void classifyLanes()} disabled={busy || !ready}
+            data-tip="Read each lane line's paint (solid, dashed, double) off the image">
+            Type lanes
+          </button>
+        </div>
+        <details className="text-[12px] text-ink-3">
+          <summary className="cursor-pointer text-ink-2 select-none">How this works</summary>
+          <div className="mt-2 space-y-1.5 max-w-[80ch] leading-relaxed">
+            <p>Deriving is safe to repeat: a matching candidate updates in place rather than duplicating, anything a
+              person has ruled on is left alone, and a candidate the geometry no longer implies is removed.</p>
+            <p>Lane linking gives a lane an identity across frames, which is what a crossing is measured against;
+              without it every lane exists in one frame only and no crossing can be seen.</p>
+            <p>Typing reads each line off its own paint, which decides whether crossing it was a manoeuvre or an
+              offence. An unmeasured line never makes a crossing a violation.</p>
+            <p>Every derived event is a candidate until a person confirms or rejects it.</p>
+          </div>
+        </details>
+      </section>
 
       {coverage && (
-        <div className="flex flex-wrap gap-2">
-          <Stat label="lanes" value={coverage.total} />
-          <Stat
-            label="type measured"
-            value={coverage.measured}
-            hint="the rest carry the old default"
-            tone={coverage.measured > 0 ? "text-pass" : "text-warn"}
-          />
-          <Stat
-            label="unmeasured"
-            value={coverage.unmeasured}
-            tone={coverage.unmeasured > 0 ? "text-warn" : "text-ink-3"}
-          />
-          {Object.entries(coverage.by_type).map(([kind, v]) => (
+        <section className="space-y-2">
+          <h2 className="section-title">Lane lines across all sessions</h2>
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8">
+            <Stat label="Lanes" value={num(coverage.total)} />
             <Stat
-              key={kind}
-              label={kind}
-              value={v.count}
-              hint={v.mean_confidence == null ? "never measured" : `conf ${v.mean_confidence.toFixed(2)}`}
+              label="Type measured"
+              value={num(coverage.measured)}
+              sub={coverage.total ? `${pct(coverage.measured / coverage.total)} of lanes` : undefined}
+              tone={coverage.measured > 0 ? "pass" : "warn"}
             />
-          ))}
-        </div>
+            <Stat
+              label="Unmeasured"
+              value={num(coverage.unmeasured)}
+              tone={coverage.unmeasured > 0 ? "warn" : "muted"}
+            />
+            {Object.entries(coverage.by_type).map(([kind, v]) => (
+              <Stat
+                key={kind}
+                label={humanize(kind)}
+                value={num(v.count)}
+                sub={v.mean_confidence == null ? "never measured" : `${pct(v.mean_confidence)} mean confidence`}
+              />
+            ))}
+          </div>
+        </section>
       )}
 
       {typeResult && (
-        <p className="text-[11px] text-ink-3">
-          this session: {typeResult.measured ?? 0} lanes typed over{" "}
-          {typeResult.frames_decoded ?? 0} frames, {typeResult.changed_type ?? 0} changed type
+        <p className="text-[12px] text-ink-2">
+          This session: {num(typeResult.measured ?? 0)} lanes typed over{" "}
+          {num(typeResult.frames_decoded ?? 0)} frames, {num(typeResult.changed_type ?? 0)} changed type
           {typeResult.unreadable_frames_lanes
-            ? `, ${typeResult.unreadable_frames_lanes} left unmeasured because their frame could not be read`
+            ? `, ${num(typeResult.unreadable_frames_lanes)} left unmeasured because their frame could not be read`
             : ""}
           .
         </p>
       )}
 
       {linkResult && (
-        <div className="flex flex-wrap gap-2">
-          <Stat label="lanes" value={linkResult.lanes} />
-          <Stat label="linked" value={linkResult.linked} />
-          <Stat label="identities" value={linkResult.identities} />
-          <Stat
-            label="multi frame"
-            value={linkResult.multi_frame_identities}
-            hint="only these can show a crossing"
-            tone={linkResult.multi_frame_identities > 0 ? "text-pass" : "text-warn"}
-          />
-        </div>
+        <section className="space-y-2">
+          <h2 className="section-title">Lane linking, this session</h2>
+          <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+            <Stat label="Lanes" value={num(linkResult.lanes)} />
+            <Stat label="Linked" value={num(linkResult.linked)} />
+            <Stat label="Identities" value={num(linkResult.identities)} />
+            <Stat
+              label="Multi frame"
+              value={num(linkResult.multi_frame_identities)}
+              sub="only these can show a crossing"
+              tone={linkResult.multi_frame_identities > 0 ? "pass" : "warn"}
+            />
+          </div>
+        </section>
       )}
 
       {summary && (
-        <div className="flex flex-wrap gap-2">
-          <Stat label="events" value={summary.total} />
-          <Stat
-            label="violations"
-            value={summary.violations}
-            tone={summary.violations > 0 ? "text-block" : "text-ink-3"}
-          />
-          <Stat label="awaiting review" value={summary.by_state.review ?? 0} tone="text-warn" />
-          <Stat label="confirmed" value={summary.by_state.confirmed ?? 0} tone="text-pass" />
-          <Stat label="rejected" value={summary.by_state.rejected ?? 0} />
-        </div>
+        <section className="space-y-2">
+          <h2 className="section-title">Events in this session</h2>
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+            <Stat label="Events" value={num(summary.total)} />
+            <Stat
+              label="Violations"
+              value={num(summary.violations)}
+              tone={summary.violations > 0 ? "block" : "muted"}
+            />
+            <Stat label="Awaiting review" value={num(summary.by_state.review ?? 0)} tone="warn" />
+            <Stat label="Confirmed" value={num(summary.by_state.confirmed ?? 0)} tone="pass" />
+            <Stat label="Rejected" value={num(summary.by_state.rejected ?? 0)} />
+          </div>
+        </section>
       )}
 
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">severity</span>
-          <select
-            className="input text-[12px]"
-            value={severity}
-            onChange={(e) => setSeverity(e.target.value)}
-          >
-            <option value="">any</option>
-            {(taxonomy?.severities ?? []).map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">state</span>
-          <select
-            className="input text-[12px]"
-            value={state}
-            onChange={(e) => setState(e.target.value)}
-          >
-            <option value="">any</option>
-            <option value="review">review</option>
-            <option value="confirmed">confirmed</option>
-            <option value="rejected">rejected</option>
-          </select>
-        </label>
-      </div>
+      {summary ? (
+      <section className="panel">
+        <div className="panel-head flex-wrap gap-3">
+          <h2 className="section-title">Event list</h2>
+          <div className="ml-auto flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2">
+              <span className="text-[12px] text-ink-3">Severity</span>
+              <select
+                className="field text-[12px]"
+                value={severity}
+                onChange={(e) => setSeverity(e.target.value)}
+              >
+                <option value="">Any</option>
+                {(taxonomy?.severities ?? []).map((s) => (
+                  <option key={s} value={s}>
+                    {humanize(s)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="text-[12px] text-ink-3">State</span>
+              <select
+                className="field text-[12px]"
+                value={state}
+                onChange={(e) => setState(e.target.value)}
+              >
+                <option value="">Any</option>
+                <option value="review">Awaiting review</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </label>
+          </div>
+        </div>
 
-      {events.length > 0 && (
-        <div className="panel overflow-x-auto">
-          <table className="w-full text-[12px]">
-            <thead className="text-ink-3">
-              <tr className="text-left">
-                <th className="px-2 py-1">kind</th>
-                <th className="px-2 py-1">severity</th>
-                <th className="px-2 py-1">start</th>
-                <th className="px-2 py-1">end</th>
-                <th className="px-2 py-1">conf</th>
-                <th className="px-2 py-1">detail</th>
-                <th className="px-2 py-1">state</th>
-                <th className="px-2 py-1" />
+      {events.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Event</th>
+                <th>Severity</th>
+                <th className="num">Start</th>
+                <th className="num">End</th>
+                <th className="num">Confidence</th>
+                <th>Detail</th>
+                <th>State</th>
+                <th><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
               {events.map((ev) => (
-                <tr key={ev.event_id} className="border-t border-line">
-                  <td className="px-2 py-1">{ev.kind}</td>
-                  <td className={`px-2 py-1 ${SEVERITY_TONE[ev.severity] ?? ""}`}>{ev.severity}</td>
-                  <td className="px-2 py-1 tabular-nums">{at(ev.t_start_ns, originNs)}</td>
-                  <td className="px-2 py-1 tabular-nums">{at(ev.t_end_ns, originNs)}</td>
-                  <td className="px-2 py-1 tabular-nums">
-                    {ev.conf == null ? "-" : ev.conf.toFixed(2)}
+                <tr key={ev.event_id}>
+                  <td className="text-ink">{humanize(ev.kind)}</td>
+                  <td className={SEVERITY_TONE[ev.severity] ?? ""}>{humanize(ev.severity)}</td>
+                  <td className="num">{at(ev.t_start_ns, originNs)}</td>
+                  <td className="num">{at(ev.t_end_ns, originNs)}</td>
+                  <td className="num">
+                    {ev.conf == null ? "-" : pct(ev.conf)}
                   </td>
-                  <td className="px-2 py-1 text-ink-3">{detailOf(ev.payload)}</td>
-                  <td className={`px-2 py-1 ${STATE_TONE[ev.state] ?? ""}`}>
-                    {ev.state}
+                  <td className="text-ink-3 text-[12px]">{detailOf(ev.payload)}</td>
+                  <td className={STATE_TONE[ev.state] ?? ""}>
+                    {ev.state === "review" ? "Awaiting review" : humanize(ev.state)}
                     {ev.evidence_changed && (
-                      <div className="text-warn text-[10px]" title="the evidence under this ruling changed">
-                        evidence moved: now reads {ev.evidence_changed.would_now_be}
+                      <div className="text-warn text-[11px]" data-tip="The evidence under this ruling changed">
+                        Evidence moved: now reads {humanize(ev.evidence_changed.would_now_be)}
                       </div>
                     )}
                   </td>
-                  <td className="px-2 py-1 whitespace-nowrap">
+                  <td className="whitespace-nowrap text-right">
                     {ev.state === "review" && (
-                      <>
-                        <button className="btn btn-sm" onClick={() => void rule(ev, "confirm")}>
-                          <T k="action.confirm_short">confirm</T>
-                        </button>{" "}
-                        <button className="btn btn-sm" onClick={() => void rule(ev, "reject")}>
-                          <T k="action.reject">reject</T>
+                      <span className="inline-flex gap-1.5">
+                        <button className="btn" onClick={() => void rule(ev, "confirm")}>
+                          <T k="action.confirm_short">Confirm</T>
                         </button>
-                      </>
+                        <button className="btn" onClick={() => void rule(ev, "reject")}>
+                          <T k="action.reject">Reject</T>
+                        </button>
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -363,39 +382,45 @@ export default function EventsPage() {
             </tbody>
           </table>
         </div>
+      ) : (
+        <EmptyState compact icon="activity" title="No events match"
+          action={<button className="btn" onClick={() => void derive()} disabled={busy || !ready}>Derive events</button>}>
+          If this session has never been derived, derive it. If deriving finds nothing, the session most likely has
+          lanes and tracked objects on different frames, which makes a crossing impossible to see.
+        </EmptyState>
       )}
-
-      {summary && events.length === 0 && (
-        <p className="text-[12px] text-ink-3">
-          No events match. If the session has never been derived, press derive. If deriving finds nothing,
-          the session most likely has lanes and tracked objects on different frames, which is the one thing
-          that makes a crossing unobservable.
-        </p>
+      </section>
+      ) : (
+        <div className="panel">
+          <EmptyState icon="activity" title="Choose a session to see its driving events">
+            Pick a session above and load it. Derive events first if it has never been processed.
+          </EmptyState>
+        </div>
       )}
 
       {taxonomy && (
-        <details className="panel px-3 py-2">
-          <summary className="text-[12px] cursor-pointer">
-            vocabulary ({taxonomy.kinds.length} kinds, version {taxonomy.version})
+        <details className="panel px-4 py-3">
+          <summary className="text-[13px] cursor-pointer text-ink-2 select-none">
+            Event vocabulary ({taxonomy.kinds.length} kinds, version {taxonomy.version})
           </summary>
-          <div className="mt-2 grid gap-3 md:grid-cols-2">
-            <KindList title="derived by geometry" kinds={derivedKinds} />
+          <div className="mt-3 grid gap-4 md:grid-cols-2">
+            <KindList title="Derived by geometry" kinds={derivedKinds} />
             <KindList
-              title="human only"
+              title="Human only"
               kinds={humanKinds}
-              note="no geometry we have can see intent, so nothing proposes these"
+              note="No geometry we have can see intent, so nothing proposes these."
             />
           </div>
-          <div className="mt-3">
-            <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">signal phase graph</div>
-            <div className="text-[12px]">
+          <div className="mt-4">
+            <div className="section-title">Signal phase graph</div>
+            <div className="text-[12px] mt-1 space-y-0.5">
               {Object.entries(taxonomy.signal_phase_graph).map(([from, to]) => (
                 <div key={from}>
-                  {from} to {to.join(", ")}
+                  {humanize(from)} to {to.map(humanize).join(", ")}
                 </div>
               ))}
             </div>
-            <p className="text-[11px] text-ink-3 mt-1 max-w-[70ch]">
+            <p className="section-desc mt-1.5 max-w-[70ch]">
               A transition outside this graph is almost never a broken signal. It is a mislabelled frame, and
               it is invisible frame by frame because each label looks reasonable on its own crop.
             </p>
@@ -410,16 +435,16 @@ export default function EventsPage() {
 function KindList({ title, kinds, note }: { title: string; kinds: EventKindSpec[]; note?: string }) {
   return (
     <div>
-      <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{title}</div>
-      {note && <div className="text-[11px] text-ink-3">{note}</div>}
-      <ul className="mt-1 space-y-1">
+      <div className="section-title">{title}</div>
+      {note && <div className="section-desc">{note}</div>}
+      <ul className="mt-2 space-y-2">
         {kinds.map((k) => (
-          <li key={k.kind} className="text-[12px]">
-            <span className={SEVERITY_TONE[k.severity] ?? ""}>{k.kind}</span>{" "}
+          <li key={k.kind} className="text-[12.5px]">
+            <span className={SEVERITY_TONE[k.severity] ?? "text-ink"}>{humanize(k.kind)}</span>{" "}
             <span className="text-ink-3">
-              {k.shape} on {k.anchor}
+              {humanize(k.shape).toLowerCase()} on {humanize(k.anchor).toLowerCase()}
             </span>
-            <div className="text-ink-3 text-[10px]">{k.description}</div>
+            <div className="text-ink-3 text-[12px]">{k.description}</div>
           </li>
         ))}
       </ul>

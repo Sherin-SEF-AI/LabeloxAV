@@ -14,6 +14,11 @@ import { describeScope, triageQuery } from "@/lib/triageScope";
 import { acceptState, useCurrentUser } from "@/lib/user";
 import { invalidate } from "@/lib/useQuery";
 import type { TriageRow } from "@/lib/types";
+import EmptyState from "@/components/ui/EmptyState";
+import { humanize } from "@/lib/format";
+
+// A key cap for the shortcut hints.
+const KBD = "inline-block min-w-[18px] text-center px-1 py-px rounded border hairline bg-head text-[11px] text-ink-2 font-mono";
 
 // Crop-grid review: many crops on screen, one keystroke each.
 //
@@ -38,7 +43,7 @@ export default function ReviewGridPage() {
   return (
     <Suspense fallback={
       <PageShell active="REVIEW GRID" title="Crop grid">
-        <div className="p-4 text-[12px] text-ink-3">loading the grid...</div>
+        <div className="p-6 text-[13px] text-ink-3" role="status">Loading the grid...</div>
       </PageShell>
     }>
       <Grid />
@@ -145,7 +150,7 @@ function Grid() {
       void invalidate("triage", "/api/home");
       const lost = (res.skipped_stale?.length ?? 0) + (res.skipped_missing?.length ?? 0);
       if (lost) {
-        toast(`${res.updated} applied, ${lost} skipped (changed or gone since this grid loaded)`, "error");
+        toast(`${res.updated} applied, ${lost} skipped (changed or removed since this grid loaded)`, "error");
         setDecided((d) => d - lost);
       }
     } catch (e) {
@@ -196,29 +201,51 @@ function Grid() {
     <PageShell
       active="REVIEW GRID"
       title="Crop grid"
-      subtitle={scopeLabel ? `${scopeLabel} · many crops, one keystroke each` : "many crops, one keystroke each"}
-    >
-      <div className="p-3 space-y-2">
-        <div className="flex flex-wrap items-center gap-3 text-[12px] text-ink-3">
-          <span className="text-ink">{queue.length} left</span>
-          <span>{decided} decided</span>
+      subtitle={scopeLabel ? `${scopeLabel} · many crops, one key each` : "Many crops at once, one key each"}
+      filters={
+        // Pinned above the grid, so the counts and the keys stay in view however far the grid scrolls.
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 w-full">
+          <span className="text-ink tabular-nums">{queue.length.toLocaleString()} left</span>
+          <span className="text-ink-3 tabular-nums">{decided.toLocaleString()} decided</span>
           {/* The claim this mode makes is a throughput claim, so it is measured on screen rather than
               asserted in a commit message. */}
-          {perMin != null && <span className="text-accent">{perMin}/min</span>}
+          {perMin != null && <span className="text-accent-2 tabular-nums">{perMin} a minute</span>}
           {selection.size > 0 && <span className="text-warn">{selection.size} selected</span>}
-          {current && <span className="text-ink-2">{current.class_name} · conf {current.conf?.toFixed(2)}</span>}
+          {current && (
+            <span className="text-ink-2" title={current.class_name}>
+              {humanize(current.class_name)}
+              <span className="text-ink-3"> · {current.conf > 0 ? `${Math.round(current.conf * 100)}% confident` : "no detector score"}</span>
+            </span>
+          )}
+          <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-3">
+            <span><kbd className={KBD}>←↑↓→</kbd> or <kbd className={KBD}>HJKL</kbd> move</span>
+            <span><kbd className={KBD}>Shift</kbd> + move: range</span>
+            <span><kbd className={KBD}>Space</kbd> select</span>
+            <span><kbd className={`${KBD} text-pass`}>A</kbd> accept</span>
+            <span><kbd className={`${KBD} text-block`}>R</kbd> reject</span>
+            <span><kbd className={KBD}>O</kbd> open frame</span>
+            <span><kbd className={KBD}>Esc</kbd> clear</span>
+          </span>
         </div>
+      }
+    >
+      <div className="p-4 space-y-2.5">
+        <p className="text-[12px] text-ink-3">With nothing selected, a key acts on the tile under the cursor (outlined in blue).</p>
 
-        {loading && <div className="text-[12px] text-ink-3">loading the grid...</div>}
+        {loading && <div className="text-[13px] text-ink-3" role="status">Loading the grid...</div>}
 
         {!loading && !page.length && (
-          <div className="panel px-3 py-6 text-[12px] text-ink-3 text-center">
-            Nothing left in this queue. A scoped grid ending is the batch finished, not an empty corpus.
+          <div className="panel">
+            <EmptyState icon="check" title="Nothing left in this queue"
+              action={<button onClick={() => router.push("/review/queue")} className="btn">Back to the review queue</button>}>
+              {scopeLabel ? `Every object in ${scopeLabel} has a decision. That is this batch finished, not an empty corpus.`
+                : "No objects are waiting for a decision right now."}
+            </EmptyState>
           </div>
         )}
 
         {sheet && page.length > 0 && (
-          <div className="panel p-2 overflow-x-auto">
+          <div className="panel p-2 overflow-x-auto w-fit max-w-full">
             <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${cols}, ${CELL}px)` }}>
               {page.map((row, i) => {
                 const p = placements[row.object_id];
@@ -238,7 +265,9 @@ function Grid() {
                       }
                       setCursor(i);
                     }}
-                    title={`${row.class_name} · ${row.why}`}
+                    title={`${humanize(row.class_name)} · ${row.why}`}
+                    aria-label={`${humanize(row.class_name)}${isSel ? ", selected" : ""}`}
+                    aria-pressed={isSel}
                     className={`relative block ${isCursor ? "ring-2 ring-accent" : isSel ? "ring-2 ring-warn" : "ring-1 ring-line"}`}
                     style={{ width: CELL, height: CELL }}
                   >
@@ -253,11 +282,11 @@ function Grid() {
                         }}
                       />
                     ) : (
-                      <span className="flex w-full h-full items-center justify-center text-[9px] text-ink-3">
-                        no crop
+                      <span className="flex w-full h-full items-center justify-center text-center px-2 text-[11px] text-ink-3 bg-bg-2">
+                        No image for this object
                       </span>
                     )}
-                    {isSel && <span className="absolute top-0 right-0 bg-warn text-bg text-[9px] px-1">+</span>}
+                    {isSel && <span className="absolute top-1 right-1 rounded-full bg-warn text-bg text-[11px] font-semibold w-4 h-4 leading-4 text-center" aria-hidden>✓</span>}
                   </button>
                 );
               })}
@@ -265,16 +294,6 @@ function Grid() {
           </div>
         )}
 
-        <div className="text-[11px] text-ink-3 flex flex-wrap gap-3">
-          <span><b className="text-ink">arrows/hjkl</b> move</span>
-          <span><b className="text-ink">shift+move</b> range</span>
-          <span><b className="text-ink">space</b> select</span>
-          <span><b className="text-accent">A</b> accept</span>
-          <span><b className="text-block">R</b> reject</span>
-          <span><b className="text-ink">O</b> open the frame</span>
-          <span><b className="text-ink">esc</b> clear</span>
-          <span className="text-ink-2">a verdict with nothing selected applies to the tile under the cursor</span>
-        </div>
       </div>
     </PageShell>
   );

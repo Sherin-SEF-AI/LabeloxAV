@@ -29,24 +29,34 @@ export function RouteErrorBody({ error, reset, what, home = "/" }: BoundaryProps
   }, [error]);
 
   return (
-    <div className="p-8 max-w-2xl mx-auto space-y-4" role="alert">
-      <h1 className="font-display text-lg text-ink">
-        {what ? t("error.segment_title", "{what} stopped working", { what }) : t("error.title", "Something broke on this page")}
-      </h1>
-      <p className="text-[12.5px] text-ink-3">
-        {what
-          ? t("error.segment_body", "The rest of the app is fine and the sidebar still works. Retrying re-renders just this page; if it keeps failing, the message below is what to report.")
-          : t("error.body", "The rest of the app is fine. Retrying re-renders just this page; if it keeps failing, the message below is what to report.")}
-      </p>
-      <pre className="panel p-3 text-[12px] text-warn overflow-x-auto whitespace-pre-wrap">
-        {error.message || t("error.unknown", "unknown error")}
-        {error.digest ? `\n\ndigest: ${error.digest}` : ""}
-      </pre>
-      <div className="flex items-center gap-2">
-        <button onClick={reset} className="btn btn-on">{t("action.retry", "retry")}</button>
-        <a href={home} className="text-[12.5px] border border-line text-ink-2 px-3 py-1 hover:border-accent">
-          {what ? t("error.back_home", "back to home") : t("error.back_triage", "back to triage")}
-        </a>
+    <div className="page-wrap-narrow" role="alert">
+      <div className="panel p-6 mt-6">
+        <div className="flex items-start gap-3">
+          <span className="flex items-center justify-center w-9 h-9 rounded-full bg-block/10 text-block shrink-0" aria-hidden>!</span>
+          <div className="min-w-0">
+            <h1 className="text-[16px] font-semibold text-ink">
+              {what ? t("error.segment_title", "{what} stopped working", { what }) : t("error.title", "Something broke on this page")}
+            </h1>
+            <p className="mt-1 text-[13px] text-ink-3 leading-relaxed">
+              {what
+                ? t("error.segment_body", "The rest of the app is fine and the sidebar still works. Try again; if it keeps failing, send the details below to whoever runs this installation.")
+                : t("error.body", "The rest of the app is fine. Try again; if it keeps failing, send the details below to whoever runs this installation.")}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 mt-5">
+          <button type="button" onClick={reset} className="btn btn-primary">{t("action.retry", "Retry")}</button>
+          <a href={home} className="btn">{t("error.back_home", "Go to Home")}</a>
+        </div>
+        {/* The message and digest are for a bug report, not for the person reading the page, so they are
+            one click away rather than a block of orange monospace in the middle of it. */}
+        <details className="mt-5 text-[12px]">
+          <summary className="cursor-pointer text-ink-3 hover:text-ink-2">{t("error.details", "Technical details")}</summary>
+          <pre className="mt-2 bg-bg-2 border border-line rounded p-3 text-[12px] text-ink-2 overflow-x-auto whitespace-pre-wrap">
+            {error.message || t("error.unknown", "Unknown error")}
+            {error.digest ? `\n\ndigest: ${error.digest}` : ""}
+          </pre>
+        </details>
       </div>
     </div>
   );

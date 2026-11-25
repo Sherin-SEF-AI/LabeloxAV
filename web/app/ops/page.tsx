@@ -1,14 +1,16 @@
 "use client";
 
-// M19 hardening + scale: the operability surface. A per-plane SLO board (which plane is the bottleneck), a
-// byte-stable reproducibility checker (a release must rebuild to the same bytes), and the label-budget
-// efficiency report (what each slice's labels actually bought). Operational Materialism: a plane row is green
-// only when it meets its SLO; a breach is amber/red; efficiency bars are neutral, ranked.
+// Operations: the operability surface. A per-plane SLO board (which plane is the bottleneck), a byte-stable
+// reproducibility checker (a release must rebuild to the same bytes), and the label-budget efficiency report
+// (what each slice's labels actually bought). A plane row is green only when it meets its SLO; a breach is
+// red; efficiency bars are neutral, ranked.
 
 import { useEffect, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
-import { Panel, Bar, Verdict, RunButton, useRun, ErrLine } from "@/components/engine/prim";
+import EmptyState from "@/components/ui/EmptyState";
+import { Panel, Bar, Verdict, useRun, ErrLine } from "@/components/ui/kit";
 import { getJSON, runJSON, parseInput } from "@/lib/engine";
+import { humanize, num } from "@/lib/format";
 
 type PlaneSlo = { plane: string; met: boolean;
   breaches: { metric: string; value: number | null; threshold: number; op: string; reason: string }[];
@@ -26,6 +28,36 @@ const EXAMPLE_EFF = JSON.stringify([
 ], null, 2);
 const EXAMPLE_A = JSON.stringify({ commit: "c1", samples: 1000, metrics: { map50: 0.612 } }, null, 2);
 
+// Planes are stored under their retired code names; show the names the sidebar uses.
+const PLANE_NAME: Record<string, string> = {
+  labelox: "Labelling", sanyx: "Ingest health", calyx: "Calibration", sievyx: "Curation",
+  oraclyx: "Pseudo ground truth", verdyx: "Slice evaluation", forgyx: "Edge deployment",
+};
+const planeName = (p: string) => PLANE_NAME[p.toLowerCase()] ?? humanize(p);
+
+function JsonField({ id, label, value, onChange, example, rows }: {
+  id: string; label: string; value: string; onChange: (s: string) => void; example: string; rows: number;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <label htmlFor={id} className="text-[12px] text-ink-2">{label}</label>
+        <button type="button" onClick={() => onChange(example)} className="link text-[12px]">Use example</button>
+      </div>
+      <textarea id={id} value={value} placeholder={example} onChange={(e) => onChange(e.target.value)} rows={rows}
+        className="field w-full font-mono text-[12px]" />
+    </div>
+  );
+}
+
+function RunButton({ busy, onClick, label }: { busy: boolean; onClick: () => void; label: string }) {
+  return (
+    <button type="button" onClick={onClick} disabled={busy} className="btn btn-primary mt-3">
+      {busy ? "Running..." : label}
+    </button>
+  );
+}
+
 export default function OpsPage() {
   const [board, setBoard] = useState<Board | null>(null);
   const [effIn, setEffIn] = useState("");
@@ -35,84 +67,93 @@ export default function OpsPage() {
   const repro = useRun<Repro>();
 
   useEffect(() => { getJSON<Board>("/api/hardening/slo/board").then(setBoard).catch(() => {}); }, []);
+  const hasPlanes = Boolean(board?.planes.length);
 
   return (
-    <PageShell active="Operations" title="Operations: SLOs, reproducibility, efficiency"
-      subtitle="per-plane service objectives, byte-stable rebuilds, and label-budget return"
-      right={board && <Verdict ok={board.all_met} yes="all planes met" no="slo breach" />}>
-      <div className="p-4 grid grid-cols-1 xl:grid-cols-2 gap-4 max-w-6xl">
+    <PageShell active="Operations" title="Operations"
+      subtitle="Service levels per part of the system, rebuild checks, and what labelling spend bought."
+      meta={board && hasPlanes ? <Verdict ok={board.all_met} yes="All service levels met" no="Service level breached" /> : undefined}>
+      <div className="page-wrap grid grid-cols-1 xl:grid-cols-2 gap-4">
         {/* SLO board */}
-        <Panel title="per-plane SLO board" hint="unobserved counts as a breach" className="xl:col-span-2">
-          {!board?.planes.length && <div className="text-ink-3 text-[12px] py-4 text-center">
-            no SLO ticks recorded yet (POST /api/hardening/slo to feed the board)</div>}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-            {board?.planes.map((p) => (
-              <div key={p.plane} className={`border p-2 ${p.met ? "border-pass/30" : "border-block/40"}`}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink">{p.plane}</span>
-                  <Verdict ok={p.met} yes="met" no="breach" />
-                </div>
-                {p.breaches.map((b) => (
-                  <div key={b.metric} className="text-[11px] text-block flex justify-between">
-                    <span>{b.metric}</span>
-                    <span>{b.reason === "unobserved" ? "unobserved" : `${b.value} ${b.op} ${b.threshold}`}</span>
+        <Panel title="Service levels" className="xl:col-span-2"
+          desc={hasPlanes ? "A part with no recent measurement counts as a breach." : undefined}>
+          {!hasPlanes ? (
+            <EmptyState compact icon="server" title="No service-level measurements yet">
+              Each part of the system (ingest, calibration, curation, evaluation and so on) reports whether it
+              is meeting its targets. Their status appears here once the first reports come in.
+              <details className="mt-3 text-left">
+                <summary className="cursor-pointer text-ink-2">For administrators</summary>
+                <p className="mt-1.5">Services report by posting to <code className="font-mono">/api/hardening/slo</code>.</p>
+              </details>
+            </EmptyState>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {board?.planes.map((p) => (
+                <div key={p.plane} className={`rounded border p-3 ${p.met ? "border-pass/30" : "border-block/40"}`}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[13px] font-medium text-ink">{planeName(p.plane)}</span>
+                    <Verdict ok={p.met} yes="Met" no="Breached" />
                   </div>
-                ))}
-                {p.met && <div className="text-[11px] text-ink-3">all objectives within budget</div>}
-              </div>
-            ))}
-          </div>
+                  {p.breaches.map((b) => (
+                    <div key={b.metric} className="text-[12px] text-block flex justify-between gap-2">
+                      <span>{humanize(b.metric)}</span>
+                      <span className="tabular-nums">{b.reason === "unobserved" ? "No measurement" : `${b.value} ${b.op} ${b.threshold}`}</span>
+                    </div>
+                  ))}
+                  {p.met && <div className="text-[12px] text-ink-3">All targets within budget</div>}
+                </div>
+              ))}
+            </div>
+          )}
         </Panel>
 
         {/* efficiency */}
-        <Panel title="label-budget efficiency">
-          <textarea value={effIn} placeholder={EXAMPLE_EFF} onChange={(e) => setEffIn(e.target.value)} rows={8}
-            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
-          <div className="mt-2"><RunButton busy={eff.busy}
-            onClick={() => eff.run(() => runJSON<EffReport>("/api/hardening/efficiency", { entries: parseInput(effIn, "effIn") }))}
-            label="report" /></div>
+        <Panel title="What the labelling budget bought"
+          desc="For each slice, how many labels went in and how much accuracy came out. Slices where accuracy fell are flagged.">
+          <JsonField id="eff-input" label="Labels and accuracy per slice (JSON)" value={effIn} onChange={setEffIn}
+            example={EXAMPLE_EFF} rows={8} />
+          <RunButton busy={eff.busy} label="Make report"
+            onClick={() => eff.run(() => runJSON<EffReport>("/api/hardening/efficiency", { entries: parseInput(effIn, "the labels per slice") }))} />
           <ErrLine err={eff.err} />
           {eff.out && (
             <div className="mt-3">
-              <div className="text-[11px] text-ink-3 mb-1">
-                best {eff.out.best_slice ?? "-"} · overall {eff.out.overall_gain_per_1k}/1k · {eff.out.total_labels} labels
+              <div className="text-[12px] text-ink-3 mb-2">
+                Best: {eff.out.best_slice ? humanize(eff.out.best_slice) : "-"} · overall {eff.out.overall_gain_per_1k} per 1,000 labels · {num(eff.out.total_labels)} labels
               </div>
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 {eff.out.per_slice.map((r) => {
                   const max = Math.max(0.0001, ...eff.out!.per_slice.map((x) => Math.abs(x.gain_per_1k)));
                   return (
-                    <div key={r.slice} className="flex items-center gap-2 text-[11px]">
-                      <span className={`w-24 shrink-0 truncate ${r.negative_roi ? "text-block" : "text-ink-2"}`}>{r.slice}</span>
-                      <Bar frac={Math.abs(r.gain_per_1k) / max} tone={r.negative_roi ? "block" : "pass"} />
-                      <span className="w-24 shrink-0 text-right text-ink-3">{r.gain_per_1k}/1k · {r.labels}</span>
+                    <div key={r.slice} className="flex items-center gap-2 text-[12px]">
+                      <span className={`w-32 shrink-0 truncate ${r.negative_roi ? "text-block" : "text-ink-2"}`}>{humanize(r.slice)}</span>
+                      <Bar frac={Math.abs(r.gain_per_1k) / max} state={r.negative_roi ? "block" : "pass"} />
+                      <span className="w-36 shrink-0 text-right text-ink-3 tabular-nums">{r.gain_per_1k} per 1k · {num(r.labels)}</span>
                     </div>
                   );
                 })}
               </div>
               {eff.out.wasted_spend_slices.length > 0 && (
-                <div className="text-[11px] text-block mt-2">wasted spend: {eff.out.wasted_spend_slices.join(", ")}</div>)}
+                <div className="text-[12px] text-block mt-2">No return on: {eff.out.wasted_spend_slices.map(humanize).join(", ")}</div>)}
             </div>
           )}
         </Panel>
 
         {/* reproducibility */}
-        <Panel title="byte-stable reproducibility">
-          <div className="text-[11px] text-ink-3 mb-1">build A</div>
-          <textarea value={runA} placeholder={EXAMPLE_A} onChange={(e) => setRunA(e.target.value)} rows={4}
-            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
-          <div className="text-[11px] text-ink-3 mt-2 mb-1">build B (rebuild)</div>
-          <textarea value={runB} placeholder={EXAMPLE_A} onChange={(e) => setRunB(e.target.value)} rows={4}
-            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
-          <div className="mt-2"><RunButton busy={repro.busy}
-            onClick={() => repro.run(() => runJSON<Repro>("/api/hardening/reproducible", { run_a: parseInput(runA, "runA"), run_b: parseInput(runB, "runB") }))}
-            label="compare" /></div>
+        <Panel title="Does a rebuild match?"
+          desc="Paste the manifest of a release and of its rebuild. A release must rebuild to exactly the same bytes.">
+          <div className="space-y-3">
+            <JsonField id="repro-a" label="Original build" value={runA} onChange={setRunA} example={EXAMPLE_A} rows={4} />
+            <JsonField id="repro-b" label="Rebuild" value={runB} onChange={setRunB} example={EXAMPLE_A} rows={4} />
+          </div>
+          <RunButton busy={repro.busy} label="Compare"
+            onClick={() => repro.run(() => runJSON<Repro>("/api/hardening/reproducible", { run_a: parseInput(runA, "the original build"), run_b: parseInput(runB, "the rebuild") }))} />
           <ErrLine err={repro.err} />
           {repro.out && (
             <div className="mt-3 space-y-1">
-              <Verdict ok={repro.out.reproducible} yes="byte-stable" no="diverged" />
-              <div className="text-[11px] text-ink-3 break-all">A {repro.out.hash_a.slice(0, 24)}</div>
-              <div className="text-[11px] text-ink-3 break-all">B {repro.out.hash_b.slice(0, 24)}</div>
-              {repro.out.first_divergence && <div className="text-[11px] text-block">first divergence: {repro.out.first_divergence}</div>}
+              <Verdict ok={repro.out.reproducible} yes="Identical" no="Different" />
+              <div className="text-[12px] text-ink-3 break-all font-mono">Original {repro.out.hash_a.slice(0, 24)}</div>
+              <div className="text-[12px] text-ink-3 break-all font-mono">Rebuild {repro.out.hash_b.slice(0, 24)}</div>
+              {repro.out.first_divergence && <div className="text-[12px] text-block">First difference: {repro.out.first_divergence}</div>}
             </div>
           )}
         </Panel>

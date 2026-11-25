@@ -1,6 +1,6 @@
 "use client";
 
-// M15 VERDYX safety + statistical eval: the metrics a driving safety case needs, beyond frame-averaged mAP.
+// Safety + statistical eval: the metrics a driving safety case needs, beyond frame-averaged mAP.
 // Critical-object recall over the India VRU + cattle classes, TTC-weighted recall (an imminent-collision miss
 // dominates), the near-miss slice a reviewer signs off on, a paired significance test for a challenger, and
 // shadow regression triage. Operational Materialism: recall is green above the floor, red below; a missed
@@ -8,8 +8,9 @@
 
 import { useState } from "react";
 import PageShell from "@/components/shell/PageShell";
-import { Panel, KV, Verdict, RunButton, useRun, ErrLine } from "@/components/engine/prim";
+import { Panel, KV, Verdict, Stat, useRun, ErrLine } from "@/components/ui/kit";
 import { runJSON, parseInput } from "@/lib/engine";
+import { humanize, num, pct } from "@/lib/format";
 
 type Safety = {
   critical: { n_critical: number; detected: number; recall: number | null };
@@ -26,6 +27,39 @@ const EXAMPLE_OBJ = JSON.stringify([
   { object_id: "c1", class_id: 8, detected: true, ttc_s: 4.0 },
   { object_id: "v1", class_id: 4, detected: true, ttc_s: 5.0 },
 ], null, 2);
+const EXAMPLE_CHAMP = "[0,1,1,0,1]";
+const EXAMPLE_CHALL = "[1,1,0,1,1]";
+const EXAMPLE_BASE = '{"vru_night": 0.9}';
+const EXAMPLE_CUR = '{"vru_night": 0.8}';
+
+// One labelled input with an "example" filler, so the expected shape is one click away rather than a
+// placeholder that vanishes on the first keystroke.
+function JsonField({ id, label, value, onChange, example, rows }: {
+  id: string; label: string; value: string; onChange: (s: string) => void; example: string; rows?: number;
+}) {
+  const cls = "field w-full font-mono text-[12px]";
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <label htmlFor={id} className="text-[12px] text-ink-2">{label}</label>
+        <button type="button" onClick={() => onChange(example)} className="link text-[12px]">Use example</button>
+      </div>
+      {rows
+        ? <textarea id={id} value={value} placeholder={example} onChange={(e) => onChange(e.target.value)} rows={rows} className={cls} />
+        : <input id={id} value={value} placeholder={example} onChange={(e) => onChange(e.target.value)} className={cls} />}
+    </div>
+  );
+}
+
+function RunButton({ busy, onClick, label }: { busy: boolean; onClick: () => void; label: string }) {
+  return (
+    <button type="button" onClick={onClick} disabled={busy} className="btn btn-primary mt-3">
+      {busy ? "Running..." : label}
+    </button>
+  );
+}
+
+const pct1 = (v: number | null) => pct(v, 1);
 
 export default function SafetyEval() {
   const [objs, setObjs] = useState("");
@@ -39,91 +73,81 @@ export default function SafetyEval() {
   const [current, setCurrent] = useState("");
   const triage = useRun<Triage>();
 
-  const pct = (v: number | null) => v === null ? "-" : `${(v * 100).toFixed(1)}%`;
-
   return (
-    <PageShell active="VERDYX" title="Safety and statistical evaluation"
-      subtitle="critical-object and TTC-weighted recall, significance, and shadow regression triage">
-      <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-6xl">
+    <PageShell active="Slice evaluation" title="Safety and statistical evaluation"
+      subtitle="Recall on the objects that matter most, whether a new model is really better, and slice regressions.">
+      <div className="page-wrap grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* safety recall */}
-        <Panel title="safety-weighted recall" hint="VRU + cattle, TTC-weighted" className="lg:col-span-2">
-          <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-3">
+        <Panel title="Recall on safety-critical objects" className="lg:col-span-2"
+          desc="Pedestrians, riders and cattle, with misses close to a collision weighted most. Paste one row per object: whether it was detected and its time to collision in seconds.">
+          <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
             <div>
-              <textarea value={objs} placeholder={EXAMPLE_OBJ} onChange={(e) => setObjs(e.target.value)} rows={9}
-                className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
-              <div className="mt-2"><RunButton busy={safety.busy}
-                onClick={() => safety.run(() => runJSON<Safety>("/api/verdyx/safety/recall", { objects: parseInput(objs, "objs") }))}
-                label="evaluate" /></div>
+              <JsonField id="safety-objects" label="Objects (JSON)" value={objs} onChange={setObjs}
+                example={EXAMPLE_OBJ} rows={9} />
+              <RunButton busy={safety.busy} label="Evaluate"
+                onClick={() => safety.run(() => runJSON<Safety>("/api/verdyx/safety/recall", { objects: parseInput(objs, "the objects") }))} />
               <ErrLine err={safety.err} />
             </div>
-            {safety.out && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <div className="border border-line p-2">
-                  <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">critical-object</div>
-                  <div className={`text-2xl font-semibold ${(safety.out.critical.recall ?? 0) >= 0.5 ? "text-pass" : "text-block"}`}>
-                    {pct(safety.out.critical.recall)}</div>
-                  <div className="text-[11px] text-ink-3">{safety.out.critical.detected}/{safety.out.critical.n_critical} VRU+cattle</div>
-                </div>
-                <div className="border border-line p-2">
-                  <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">TTC-weighted</div>
-                  <div className="text-2xl font-semibold text-ink">{pct(safety.out.ttc_weighted.ttc_weighted_recall)}</div>
-                  <div className="text-[11px] text-ink-3">imminent misses weigh most</div>
-                </div>
-                <div className="border border-line p-2">
-                  <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-1">near-miss slice</div>
-                  <div className={`text-2xl font-semibold ${safety.out.near_miss.missed_object_ids.length ? "text-block" : "text-pass"}`}>
-                    {pct(safety.out.near_miss.recall)}</div>
-                  <div className="text-[11px] text-ink-3">
-                    {safety.out.near_miss.missed_object_ids.length
-                      ? `missed: ${safety.out.near_miss.missed_object_ids.join(", ")}`
-                      : `${safety.out.near_miss.n_near_miss} within TTC, all caught`}</div>
-                </div>
+            {safety.out ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 content-start">
+                <Stat label="Critical-object recall" value={pct1(safety.out.critical.recall)}
+                  tone={(safety.out.critical.recall ?? 0) >= 0.5 ? "pass" : "block"}
+                  sub={`${num(safety.out.critical.detected)} of ${num(safety.out.critical.n_critical)} people and cattle found`} />
+                <Stat label="Weighted by time to collision" value={pct1(safety.out.ttc_weighted.ttc_weighted_recall)}
+                  sub="Imminent misses weigh most" />
+                <Stat label="Near-miss recall" value={pct1(safety.out.near_miss.recall)}
+                  tone={safety.out.near_miss.missed_object_ids.length ? "block" : "pass"}
+                  sub={safety.out.near_miss.missed_object_ids.length
+                    ? `Missed: ${safety.out.near_miss.missed_object_ids.join(", ")}`
+                    : `${num(safety.out.near_miss.n_near_miss)} close calls, all caught`} />
+              </div>
+            ) : (
+              <div className="flex items-center justify-center rounded border border-dashed border-line text-[12.5px] text-ink-3 p-6 text-center">
+                Results appear here: recall on critical objects, recall weighted by time to collision, and any near-miss the model failed to see.
               </div>
             )}
           </div>
         </Panel>
 
         {/* significance */}
-        <Panel title="paired significance" hint="challenger vs champion, per-object">
-          <label htmlFor="champ-scores" className="block text-[11px] text-ink-3 mb-1">champion per-object scores</label>
-          <input id="champ-scores" value={champ} placeholder="per-sample hits for the champion, e.g. [0,1,1,0,1]" onChange={(e) => setChamp(e.target.value)}
-            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
-          <label htmlFor="chall-scores" className="block text-[11px] text-ink-3 mt-2 mb-1">challenger per-object scores</label>
-          <input id="chall-scores" value={chall} placeholder="per-sample hits for the challenger, e.g. [1,1,0,1,1]" onChange={(e) => setChall(e.target.value)}
-            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
-          <div className="mt-2"><RunButton busy={sig.busy}
+        <Panel title="Is the challenger really better?"
+          desc="A paired test on the same objects: did the new model find more of them than chance would explain? Use 1 for found and 0 for missed, in the same order for both.">
+          <div className="space-y-3">
+            <JsonField id="champ-scores" label="Champion, per object" value={champ} onChange={setChamp} example={EXAMPLE_CHAMP} />
+            <JsonField id="chall-scores" label="Challenger, per object" value={chall} onChange={setChall} example={EXAMPLE_CHALL} />
+          </div>
+          <RunButton busy={sig.busy} label="Run test"
             onClick={() => sig.run(() => runJSON<Sig>("/api/verdyx/stats/significance",
-              { champion: parseInput(champ, "champ"), challenger: parseInput(chall, "chall") }))} label="test" /></div>
+              { champion: parseInput(champ, "the champion scores"), challenger: parseInput(chall, "the challenger scores") }))} />
           <ErrLine err={sig.err} />
           {sig.out && (
-            <div className="mt-3">
-              <Verdict ok={sig.out.significant} yes="significant improvement" no="not significant" />
-              <KV k="delta" v={sig.out.delta} tone={((sig.out.delta ?? 0) > 0) ? "pass" : "block"} />
-              <KV k="p-value" v={sig.out.p_value} tone="ink-3" />
-              <KV k="n" v={sig.out.n} tone="ink-3" />
+            <div className="mt-3 space-y-1">
+              <Verdict ok={sig.out.significant} yes="Significant improvement" no="Not significant" />
+              <KV k="Difference" v={sig.out.delta ?? "-"} state={((sig.out.delta ?? 0) > 0) ? "pass" : "block"} />
+              <KV k="p-value" v={sig.out.p_value ?? "-"} state="muted" />
+              <KV k="Objects compared" v={num(sig.out.n)} state="muted" />
             </div>
           )}
         </Panel>
 
         {/* shadow triage */}
-        <Panel title="shadow regression triage" hint="protected slice alarms">
-          <label htmlFor="baseline-recall" className="block text-[11px] text-ink-3 mb-1">baseline per-slice recall</label>
-          <input id="baseline-recall" value={baseline} placeholder={'per-slice metric, e.g. {"vru_night": 0.9}'} onChange={(e) => setBaseline(e.target.value)}
-            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
-          <label htmlFor="current-recall" className="block text-[11px] text-ink-3 mt-2 mb-1">current per-slice recall</label>
-          <input id="current-recall" value={current} placeholder={'per-slice metric, e.g. {"vru_night": 0.8}'} onChange={(e) => setCurrent(e.target.value)}
-            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
-          <div className="mt-2"><RunButton busy={triage.busy}
+        <Panel title="Slice regression check"
+          desc="Compare recall per slice before and after. A drop on a protected slice (pedestrians at night) raises an alarm.">
+          <div className="space-y-3">
+            <JsonField id="baseline-recall" label="Before, recall per slice" value={baseline} onChange={setBaseline} example={EXAMPLE_BASE} />
+            <JsonField id="current-recall" label="After, recall per slice" value={current} onChange={setCurrent} example={EXAMPLE_CUR} />
+          </div>
+          <RunButton busy={triage.busy} label="Check"
             onClick={() => triage.run(() => runJSON<Triage>("/api/verdyx/shadow/triage",
-              { baseline: parseInput(baseline, "baseline"), current: parseInput(current, "current"), protected: ["vru_night"] }))} label="triage" /></div>
+              { baseline: parseInput(baseline, "the before recall"), current: parseInput(current, "the after recall"), protected: ["vru_night"] }))} />
           <ErrLine err={triage.err} />
           {triage.out && (
-            <div className="mt-3">
-              <Verdict ok={!triage.out.alarm} yes="no regression" no="regression alarm" />
+            <div className="mt-3 space-y-1">
+              <Verdict ok={!triage.out.alarm} yes="No regression" no="Regression alarm" />
               {triage.out.regressions.map((r) => (
-                <div key={r.slice} className="flex justify-between text-[11px] mt-1">
-                  <span className={r.protected ? "text-block" : "text-warn"}>{r.slice}{r.protected ? " (protected)" : ""}</span>
-                  <span className="text-ink-3">{r.baseline} to {r.current} ({r.delta})</span>
+                <div key={r.slice} className="flex justify-between text-[12px] mt-1">
+                  <span className={r.protected ? "text-block" : "text-warn"}>{humanize(r.slice)}{r.protected ? " (protected)" : ""}</span>
+                  <span className="text-ink-3 tabular-nums">{r.baseline} to {r.current} ({r.delta})</span>
                 </div>
               ))}
             </div>

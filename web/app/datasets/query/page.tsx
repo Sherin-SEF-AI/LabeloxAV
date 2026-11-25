@@ -6,6 +6,9 @@ import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
 import { toast } from "@/lib/toast";
 import { useQuery } from "@/lib/useQuery";
+import { Stat } from "@/components/ui/kit";
+import EmptyState from "@/components/ui/EmptyState";
+import { humanize, num, plural } from "@/lib/format";
 
 // Build a dataset by describing it.
 //
@@ -32,8 +35,16 @@ type Preview = {
 type Vocab = { scene: string[]; state: string[]; group: string[]; class: string[] };
 
 const KIND_TONE: Record<string, string> = {
-  scene: "text-info", state: "text-warn", group: "text-accent", class: "text-ink",
+  scene: "text-info", state: "text-warn", group: "text-accent-2", class: "text-ink",
 };
+const KIND_LABEL: Record<string, string> = { scene: "Scene", group: "Group", state: "State", class: "Class" };
+
+// One clause of the compiled predicate as a line a reviewer can read. The JSON stays one click away.
+function clauseText(v: unknown): string {
+  if (Array.isArray(v)) return v.length > 6 ? `${v.slice(0, 6).join(", ")} and ${v.length - 6} more` : v.join(", ");
+  if (v && typeof v === "object") return Object.entries(v as Record<string, unknown>).map(([k, x]) => `${humanize(k)}: ${clauseText(x)}`).join("; ");
+  return String(v);
+}
 
 export default function DatasetQueryPage() {
   const [q, setQ] = useState("night AND vru");
@@ -72,7 +83,7 @@ export default function DatasetQueryPage() {
     try {
       const r = await api.datasetBuildShards(q);
       setBuilt(r);
-      toast(`${r.samples} samples in ${r.shards.length} shards`, "success");
+      toast(`${num(r.samples)} samples in ${plural(r.shards.length, "shard")}`, "success");
     } catch (e) {
       toast(humanizeError(e), "error");
     } finally {
@@ -91,132 +102,169 @@ export default function DatasetQueryPage() {
 
   return (
     <PageShell active="DATASETS" title="Dataset query"
-      subtitle="describe the data, see what the corpus can give you">
-      <div className="p-4 space-y-3 max-w-6xl">
+      subtitle="Describe the data you want and see what the corpus can give you before you build it.">
+      <div className="page-wrap space-y-4">
 
-        <div className="panel px-3 py-3 space-y-2">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            spellCheck={false}
-            placeholder="night AND vru AND reviewed"
-            className="input w-full font-mono text-[13px]"
-          />
-          {/* Terms are clickable rather than only documented: the compiler refuses what it does not know,
-              so the list of what works has to be in reach of the box that rejects you. */}
-          {vocab && (
-            <div className="space-y-1">
-              {([["scene", vocab.scene], ["group", vocab.group], ["state", vocab.state]] as const).map(
-                ([kind, items]) => (
-                  <div key={kind} className="flex flex-wrap items-center gap-1">
-                    <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 w-14">{kind}</span>
-                    {items.map((t) => (
-                      <button key={t} onClick={() => addTerm(t)}
-                        className={`text-[11px] px-1.5 py-0.5 border border-line hover:bg-line/40 ${KIND_TONE[kind]}`}>
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                ),
-              )}
-              <div className="text-[11px] text-ink-3">
-                plus any of the {vocab.class.length} ontology class names
+        <section className="panel">
+          <div className="panel-head"><h2 className="section-title">Query</h2>
+            {busy && <span className="ml-auto inline-flex items-center gap-1.5 text-[12px] text-ink-3"><span className="running-dot" />Counting...</span>}
+          </div>
+          <div className="p-4 space-y-3">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              spellCheck={false}
+              aria-label="Dataset query"
+              placeholder="night AND vru AND reviewed"
+              className="field w-full font-mono text-[13.5px] py-2"
+            />
+            {/* Terms are clickable rather than only documented: the compiler refuses what it does not know,
+                so the list of what works has to be in reach of the box that rejects you. */}
+            {vocab && (
+              <div className="space-y-2">
+                <div className="text-[12px] text-ink-3">Click a term to add it with AND:</div>
+                {([["scene", vocab.scene], ["group", vocab.group], ["state", vocab.state]] as const).map(
+                  ([kind, items]) => (
+                    <div key={kind} className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[12px] font-medium text-ink-2 w-16 shrink-0">{KIND_LABEL[kind]}</span>
+                      {items.map((t) => (
+                        <button key={t} type="button" onClick={() => addTerm(t)}
+                          className={`chip font-mono text-[12px] ${KIND_TONE[kind]}`}>
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  ),
+                )}
+                <div className="text-[12px] text-ink-3">
+                  Any of the {num(vocab.class.length)} ontology class names also work as terms.
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        </section>
 
         {err != null && (
-          <div className="panel px-3 py-2">
-            {/* The refusal is the feature. An unknown term that widened the selection instead would give a
-                plausible dataset missing the thing it was built for. */}
-            <LoadState error={err} onRetry={() => void run(q)} />
+          // The refusal is the feature. An unknown term that widened the selection instead would give a
+          // plausible dataset missing the thing it was built for.
+          <LoadState error={err} onRetry={() => void run(q)} />
+        )}
+
+        {busy && !pv && !err && <LoadState loading rows={3} />}
+
+        {!pv && !busy && err == null && !q.trim() && (
+          <div className="panel">
+            <EmptyState icon="layers" title="Describe the data you need">
+              Combine scene, group, state and class terms with AND, for example <span className="font-mono text-ink-2">night AND vru</span>.
+              The counts update as you type.
+            </EmptyState>
           </div>
         )}
 
-        {busy && !pv && <div className="text-[12px] text-ink-3">counting...</div>}
-
         {pv && !err && (
           <>
-            <div className="flex flex-wrap gap-2 text-[12px]">
-              <Stat label="frames" value={pv.frames.toLocaleString()} />
-              <Stat label="objects" value={pv.objects.toLocaleString()} />
-              <Stat label="classes" value={String(Object.keys(pv.classes).length)} />
-              {pv.sealed && <Stat label="pinned" value="sealed" tone="text-accent" />}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Stat label="Frames" value={num(pv.frames)} />
+              <Stat label="Objects" value={num(pv.objects)} />
+              <Stat label="Classes" value={num(Object.keys(pv.classes).length)} />
+              {pv.sealed && <Stat label="Pinned" value="Sealed" tone="accent" />}
             </div>
 
             {pv.frames === 0 && (
-              <div className="panel px-3 py-4 text-[12px] text-ink-3">
-                Nothing matches. That is an answer: this corpus holds no frames meeting all of those terms.
+              <div className="panel">
+                <EmptyState compact icon="search" title="Nothing matches">
+                  That is an answer: this corpus holds no frames meeting all of those terms. Try removing one.
+                </EmptyState>
               </div>
             )}
 
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2">
               <section className="panel">
-                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-                  what this compiles to
+                <div className="panel-head">
+                  <h2 className="section-title">What this selects</h2>
                 </div>
-                <div className="p-3 space-y-2">
+                <div className="p-4 space-y-3">
                   {/* Shown, not hidden: this is the difference between a dataset somebody can defend and one
-                      they can only describe. */}
-                  <pre className="text-[11px] text-ink-2 whitespace-pre-wrap break-all">
-                    {JSON.stringify(pv.predicate, null, 1)}
-                  </pre>
-                  <div className="space-y-1">
+                      they can only describe. Read as words first, with the exact JSON a click away. */}
+                  <div className="space-y-1.5">
                     {pv.terms.map((t) => (
-                      <div key={t.term} className="text-[11px]">
-                        <span className={KIND_TONE[t.kind] ?? "text-ink"}>{t.term}</span>
+                      <div key={t.term} className="text-[12.5px]">
+                        <span className={`font-mono text-[12px] ${KIND_TONE[t.kind] ?? "text-ink"}`}>{t.term}</span>
                         <span className="text-ink-3"> is a {t.kind}</span>
                         {t.expands_to && (
-                          <span className="text-ink-3"> and covers {t.expands_to.length} classes</span>
+                          <span className="text-ink-3" title={t.expands_to.join(", ")}> covering {plural(t.expands_to.length, "class", "classes")}</span>
                         )}
                       </div>
                     ))}
                   </div>
+                  {Object.keys(pv.predicate).length > 0 && (
+                    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[12.5px] border-t hairline pt-3">
+                      {Object.entries(pv.predicate).map(([k, v]) => (
+                        <div key={k} className="contents">
+                          <dt className="text-ink-3">{humanize(k)}</dt>
+                          <dd className="text-ink-2 break-words">{clauseText(v)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                  <details className="text-[12px]">
+                    <summary className="cursor-pointer text-ink-3 hover:text-ink-2">Show the compiled filter (JSON)</summary>
+                    <pre className="mt-2 p-2.5 rounded bg-bg-2 border hairline text-[12px] text-ink-2 font-mono whitespace-pre-wrap break-all">
+                      {JSON.stringify(pv.predicate, null, 2)}
+                    </pre>
+                  </details>
                 </div>
               </section>
 
               <section className="panel">
-                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-                  class mix
+                <div className="panel-head">
+                  <h2 className="section-title">Class mix</h2>
                 </div>
-                <div className="p-3 space-y-1">
+                <div className="p-4 space-y-1.5">
                   {Object.entries(pv.classes).slice(0, 14).map(([name, n]) => {
                     const max = Math.max(...Object.values(pv.classes), 1);
                     return (
-                      <div key={name} className="flex items-center gap-2 text-[11px]">
-                        <span className="w-32 truncate text-ink-2">{name}</span>
-                        <span className="flex-1 bg-line/40 h-2">
-                          <span className="block bg-accent h-2" style={{ width: `${(n / max) * 100}%` }} />
+                      <div key={name} className="flex items-center gap-3 text-[12.5px]">
+                        <span className="w-36 truncate text-ink-2" title={name}>{humanize(name).replace(/\b(suv|vru|lcv|hcv|muv)\b/gi, (m) => m.toUpperCase())}</span>
+                        <span className="flex-1 bg-bg-2 h-2 rounded-full overflow-hidden">
+                          <span className="block bg-accent h-2 rounded-full" style={{ width: `${(n / max) * 100}%` }} />
                         </span>
-                        <span className="w-14 text-right tabular-nums text-ink-3">{n}</span>
+                        <span className="w-16 text-right tabular-nums text-ink-3">{num(n)}</span>
                       </div>
                     );
                   })}
                   {!Object.keys(pv.classes).length && (
-                    <div className="text-[11px] text-ink-3">no labelled objects in this selection</div>
+                    <div className="text-[12.5px] text-ink-3">No labelled objects in this selection.</div>
+                  )}
+                  {Object.keys(pv.classes).length > 14 && (
+                    <div className="text-[12px] text-ink-3 pt-1">And {plural(Object.keys(pv.classes).length - 14, "more class", "more classes")}.</div>
                   )}
                 </div>
               </section>
             </div>
 
             <section className="panel">
-              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2 flex items-center justify-between">
-                <span>take it away</span>
+              <div className="panel-head">
+                <h2 className="section-title">Use this dataset</h2>
                 <button onClick={() => void build()} disabled={building || pv.frames === 0}
-                  className="border border-accent text-accent px-2 py-0.5 hover:bg-accent/10 disabled:opacity-30">
-                  {building ? "building..." : "build shards"}
+                  data-tip="Write the selection as training shards in storage"
+                  className="btn btn-primary ml-auto">
+                  {building && <span className="running-dot mr-1" />}
+                  {building ? "Building shards..." : "Build shards"}
                 </button>
               </div>
-              <div className="p-3 space-y-2">
+              <div className="p-4 space-y-3">
+                <p className="section-desc">
+                  The query is the dataset: load it by name in a training script, or build shards to hand off.
+                </p>
                 {/* The query is the artifact. A path names where somebody put a zip; this names what the
                     data is, which is what whoever inherits the config actually needs. */}
-                <pre className="text-[11px] text-ink-2 whitespace-pre-wrap">{snippet}</pre>
+                <pre className="p-3 rounded bg-bg-2 border hairline text-[12px] text-ink-2 font-mono whitespace-pre-wrap">{snippet}</pre>
                 {built && (
-                  <div className="text-[11px] text-ink-3 space-y-0.5">
-                    <div className="text-ink">{built.samples} samples in {built.shards.length} shards</div>
-                    {built.shards.slice(0, 3).map((s) => <div key={s}>{s}</div>)}
-                    {built.index_uri && <div>index: {built.index_uri}</div>}
+                  <div className="text-[12.5px] text-ink-3 space-y-1">
+                    <div className="text-pass font-medium">{num(built.samples)} samples in {plural(built.shards.length, "shard")}</div>
+                    {built.shards.slice(0, 3).map((sh) => <div key={sh} className="font-mono text-[12px] break-all">{sh}</div>)}
+                    {built.index_uri && <div>Index: <span className="font-mono text-[12px] break-all">{built.index_uri}</span></div>}
                   </div>
                 )}
               </div>
@@ -225,14 +273,5 @@ export default function DatasetQueryPage() {
         )}
       </div>
     </PageShell>
-  );
-}
-
-function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="panel px-3 py-2 min-w-[110px]">
-      <div className="text-[10px] uppercase text-ink-3">{label}</div>
-      <div className={`text-[18px] tabular-nums ${tone ?? "text-ink"}`}>{value}</div>
-    </div>
   );
 }

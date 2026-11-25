@@ -19,15 +19,15 @@ export default function Pager({ offset, limit, total, onOffset }: {
   const atEnd = offset + limit >= total;
 
   return (
-    <div className="flex items-center gap-3 text-[12px] text-ink-3">
+    <div className="flex items-center gap-3 text-[12px] text-ink-3 tabular-nums">
       <span>{t("pager.range", "{from}-{to} of {total}", { from: from.toLocaleString(), to: to.toLocaleString(), total: total.toLocaleString() })}</span>
       <div className="flex items-center gap-1">
         <button onClick={() => onOffset(0)} disabled={atStart} aria-label={t("pager.first", "first page")}
-          className="border border-line px-1.5 py-0.5 disabled:opacity-30 hover:border-accent">«</button>
+          className="btn px-2" data-tip={t("pager.first", "first page")}>«</button>
         <button onClick={() => onOffset(Math.max(0, offset - limit))} disabled={atStart} aria-label={t("pager.previous", "previous page")}
-          className="border border-line px-1.5 py-0.5 disabled:opacity-30 hover:border-accent">‹ {t("pager.prev_short", "prev")}</button>
+          className="btn">‹ {t("pager.prev_short", "Previous")}</button>
         <button onClick={() => onOffset(offset + limit)} disabled={atEnd} aria-label={t("pager.next", "next page")}
-          className="border border-line px-1.5 py-0.5 disabled:opacity-30 hover:border-accent">{t("pager.next_short", "next")} ›</button>
+          className="btn">{t("pager.next_short", "Next")} ›</button>
       </div>
     </div>
   );

@@ -328,7 +328,7 @@ describe("with LoadState", () => {
 
   it("spreads into the loading, failed and empty states the pages already render", async () => {
     const { unmount } = render(<Jobs fetcher={function ok() { return Promise.resolve(["a", "b"]); }} />);
-    expect(screen.getByText("loading")).toBeInTheDocument();
+    expect(screen.getByText(/^loading$/i)).toBeInTheDocument();
     expect(await screen.findByText("a")).toBeInTheDocument();
     unmount();
 

@@ -5,6 +5,7 @@ import { useCallback, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
 import Icon from "@/components/shell/Icon";
 import LoadState from "@/components/shell/LoadState";
+import EmptyState from "@/components/ui/EmptyState";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { apiGet, apiPost, humanizeError } from "@/lib/api";
 import { invalidate, useQuery } from "@/lib/useQuery";
@@ -54,13 +55,13 @@ labelox health`;
       <div className="flex items-start gap-3">
         <span className="mt-0.5 text-pass"><Icon name="check" size={18} /></span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-[14px] font-semibold text-ink">Key for &ldquo;{minted.name}&rdquo; created</h2>
+          <h2 className="section-title text-[14px]">Key for &ldquo;{minted.name}&rdquo; created</h2>
           <p className="mt-1 text-[12.5px] text-ink-2">Copy it now. Only its first characters are stored in readable form, so it cannot be shown again; if it is lost, rotate it.</p>
           <div className="mt-3 flex items-stretch gap-2">
             <code className="flex-1 min-w-0 font-mono text-[12.5px] text-ink bg-bg-2 border hairline rounded px-3 py-2 break-all select-all">{minted.api_key}</code>
             <button className="btn btn-primary shrink-0" onClick={() => void copy(minted.api_key, "Key")}>Copy key</button>
           </div>
-          <div className="mt-4 text-[12px] text-ink-3">Use it from a script or CI job:</div>
+          <div className="mt-4 text-[12.5px] text-ink-3">Use it from a script or CI job:</div>
           <pre className="mt-1 font-mono text-[12px] text-ink-2 bg-bg-2 border hairline rounded px-3 py-2 overflow-x-auto">{usage}</pre>
           <div className="mt-3 flex gap-2">
             <button className="btn" onClick={() => void copy(usage, "Commands")}>Copy commands</button>
@@ -96,34 +97,34 @@ function CreateForm({ onMinted }: { onMinted: (m: Minted) => void }) {
   return (
     <form onSubmit={submit} className="panel p-5 grid gap-4 sm:grid-cols-2">
       <div className="sm:col-span-2">
-        <h2 className="text-[14px] font-semibold text-ink">Create a key</h2>
+        <h2 className="section-title text-[14px]">Create a key</h2>
         <p className="mt-0.5 text-[12.5px] text-ink-3">One key per script or pipeline, named after it, so revoking one never breaks another.</p>
       </div>
       <label className="flex flex-col gap-1.5">
-        <span className="text-[12px] text-ink-2">Name</span>
+        <span className="text-[12.5px] text-ink-2">Name</span>
         <input className="field" value={name} onChange={(e) => setName(e.target.value)} required maxLength={64}
           placeholder="e.g. nightly-export" />
       </label>
       <label className="flex flex-col gap-1.5">
-        <span className="text-[12px] text-ink-2">Expires</span>
+        <span className="text-[12.5px] text-ink-2">Expires</span>
         <select className="field" value={expires ?? ""} onChange={(e) => setExpires(e.target.value ? Number(e.target.value) : null)}>
           {EXPIRY.map(([label, days]) => <option key={label} value={days ?? ""}>{label}</option>)}
         </select>
       </label>
       <label className="flex flex-col gap-1.5">
-        <span className="text-[12px] text-ink-2">Permissions</span>
+        <span className="text-[12.5px] text-ink-2">Permissions</span>
         <select className="field" value={role} onChange={(e) => setRole(e.target.value)}>
           {ROLES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
         </select>
       </label>
       <label className="flex flex-col gap-1.5">
-        <span className="text-[12px] text-ink-2">What it is for <span className="text-ink-3">(optional)</span></span>
+        <span className="text-[12.5px] text-ink-2">What it is for <span className="text-ink-3">(optional)</span></span>
         <input className="field" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={200}
           placeholder="e.g. exports the reviewed set every night" />
       </label>
       <div className="sm:col-span-2">
         <button className="btn btn-primary" type="submit" disabled={busy || !name.trim()}>
-          <Icon name="plus" size={13} />{busy ? "Creating" : "Create key"}
+          <Icon name="plus" size={13} />{busy ? "Creating…" : "Create key"}
         </button>
       </div>
     </form>
@@ -165,65 +166,71 @@ export default function ApiKeysPage() {
   if (user && user.role !== "admin") {
     return (
       <PageShell active="API keys" title="API keys">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-          <section className="panel p-5 text-[13px] text-ink-2">API keys are created and managed by administrators. Ask one for a key for your script.</section>
+        <div className="page-wrap-narrow">
+          <section className="panel">
+            <EmptyState icon="shield" title="Administrators manage API keys">
+              Ask an administrator for a key for your script, notebook or CI job.
+            </EmptyState>
+          </section>
         </div>
       </PageShell>
     );
   }
 
   return (
-    <PageShell active="API keys" title="API keys" subtitle="credentials for scripts, notebooks and CI">
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 flex flex-col gap-5">
+    <PageShell active="API keys" title="API keys" subtitle="Credentials for scripts, notebooks and CI">
+      <div className="page-wrap-narrow flex flex-col gap-4">
         {minted && <OneTimeKey minted={minted} onDone={() => setMinted(null)} />}
         <CreateForm onMinted={(m) => { setMinted(m); void load(); }} />
 
         <section className="panel">
-          <header className="flex items-center justify-between gap-3 px-4 pt-3.5 pb-2.5">
-            <h2 className="text-[13.5px] font-semibold text-ink">Keys</h2>
-            <label className="flex items-center gap-2 text-[12.5px] text-ink-3 cursor-pointer">
+          <header className="panel-head">
+            <h2 className="section-title">Keys</h2>
+            <label className="ml-auto flex items-center gap-2 text-[12.5px] text-ink-3 cursor-pointer">
               <input type="checkbox" checked={showRevoked} onChange={(e) => setShowRevoked(e.target.checked)} className="accent-primary" />
               Show revoked
             </label>
           </header>
-          <div className="px-4 pb-4">
+          <div className={rows && rows.length > 0 ? "" : "p-3"}>
             <LoadState loading={!rows && !error} error={error} onRetry={() => void load()}
-              empty={rows?.length === 0} emptyText="No keys yet. Create one above for each script or pipeline." />
+              empty={rows?.length === 0} emptyIcon="terminal"
+              emptyTitle={showRevoked ? "No keys" : "No active keys"}
+              emptyText="Create one above for each script or pipeline, so revoking one never breaks another." />
             {rows && rows.length > 0 && (
-              <div className="overflow-x-auto -mx-1">
-                <table className="w-full text-[12.5px]">
+              <div className="overflow-x-auto">
+                <table className="data-table">
                   <thead>
-                    <tr className="text-left text-ink-3 border-b hairline">
-                      <th className="font-medium px-1 py-2">Name</th>
-                      <th className="font-medium px-1 py-2">Key</th>
-                      <th className="font-medium px-1 py-2">Permissions</th>
-                      <th className="font-medium px-1 py-2">Created</th>
-                      <th className="font-medium px-1 py-2">Last used</th>
-                      <th className="font-medium px-1 py-2">Expires</th>
-                      <th className="px-1 py-2" />
+                    <tr>
+                      <th>Name</th>
+                      <th>Key</th>
+                      <th>Permissions</th>
+                      <th>Created</th>
+                      <th>Last used</th>
+                      <th>Expires</th>
+                      <th><span className="sr-only">Actions</span></th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((a) => (
-                      <tr key={a.service_account_id} className="border-b hairline last:border-0 align-top">
-                        <td className="px-1 py-2.5">
+                      <tr key={a.service_account_id} className="align-top">
+                        <td>
                           <div className="text-ink">{a.name}</div>
                           {a.description && <div className="text-[12px] text-ink-3">{a.description}</div>}
                         </td>
-                        <td className="px-1 py-2.5 font-mono text-[12px] text-ink-2">lbxk_{a.key_prefix.slice(0, 8)}…</td>
-                        <td className="px-1 py-2.5 text-ink-2 capitalize">{a.role ?? ""}</td>
-                        <td className="px-1 py-2.5 text-ink-2">{when(a.created_at)}</td>
-                        <td className="px-1 py-2.5 text-ink-2">{a.last_used_at ? when(a.last_used_at) : <span className="text-ink-3">never</span>}</td>
-                        <td className="px-1 py-2.5 text-ink-2">
-                          {a.revoked_at ? <span className="text-block">revoked {when(a.revoked_at)}</span>
-                            : !a.active ? <span className="text-warn">expired</span>
-                            : a.expires_at ? when(a.expires_at) : <span className="text-ink-3">never</span>}
+                        <td className="font-mono text-[12px]">lbxk_{a.key_prefix.slice(0, 8)}…</td>
+                        <td className="capitalize">{a.role ?? ""}</td>
+                        <td>{when(a.created_at)}</td>
+                        <td>{a.last_used_at ? when(a.last_used_at) : <span className="text-ink-3">Never</span>}</td>
+                        <td>
+                          {a.revoked_at ? <span className="text-block">Revoked {when(a.revoked_at)}</span>
+                            : !a.active ? <span className="text-warn">Expired</span>
+                            : a.expires_at ? when(a.expires_at) : <span className="text-ink-3">Never</span>}
                         </td>
-                        <td className="px-1 py-2.5 text-right whitespace-nowrap">
+                        <td className="text-right whitespace-nowrap">
                           {!a.revoked_at && (
                             <>
                               <button className="btn" onClick={() => void rotate(a)}>Rotate</button>{" "}
-                              <button className="btn" onClick={() => void revoke(a)}>Revoke</button>
+                              <button className="btn btn-danger" onClick={() => void revoke(a)}>Revoke</button>
                             </>
                           )}
                         </td>

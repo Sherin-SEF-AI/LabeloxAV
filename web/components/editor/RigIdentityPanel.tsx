@@ -71,11 +71,11 @@ export default function RigIdentityPanel({ sessionId, groupId, onClose, onSelect
         <button onClick={linkSelected} disabled={busy || sel.size < 2} title="link the selected objects into one identity"
           className="border border-accent/60 text-accent bg-accent/10 px-1.5 py-0.5 rounded hover:bg-accent/20 disabled:opacity-40">link {sel.size || ""}</button>
       </div>
-      {err && <div className="px-2 py-1 text-block text-[10px] border-b hairline">{err}</div>}
+      {err && <div className="px-2 py-1 text-block text-[10.5px] border-b hairline">{err}</div>}
       <div className="flex-1 overflow-y-auto p-2 space-y-2">
         {suggestions && suggestions.length > 0 && (
           <div className="space-y-1">
-            <div className="text-ink-3 uppercase text-[9px]">appearance suggestions</div>
+            <div className="text-ink-3 uppercase text-[10.5px]">appearance suggestions</div>
             {suggestions.map((s, i) => (
               <div key={i} className="flex items-center justify-between gap-1 border border-info/30 rounded px-1.5 py-1">
                 <span className="text-ink-2 truncate">{s.cam_a} ↔ {s.cam_b} <span className="text-ink-3">cos {s.cos}</span></span>
@@ -84,39 +84,39 @@ export default function RigIdentityPanel({ sessionId, groupId, onClose, onSelect
             ))}
           </div>
         )}
-        {suggestions && suggestions.length === 0 && <div className="text-ink-3 text-[10px]">no appearance suggestions above threshold</div>}
+        {suggestions && suggestions.length === 0 && <div className="text-ink-3 text-[10.5px]">no appearance suggestions above threshold</div>}
 
         <div className="space-y-1">
-          <div className="text-ink-3 uppercase text-[9px]">identities ({data?.rig_objects.length ?? 0})</div>
+          <div className="text-ink-3 uppercase text-[10.5px]">identities ({data?.rig_objects.length ?? 0})</div>
           {data?.rig_objects.map((r) => (
             <div key={r.rig_object_id} className={`border rounded px-1.5 py-1 ${r.conflict ? "border-block/60" : "border-line"}`}>
               <div className="flex items-center justify-between">
                 <span className="text-ink-2 truncate">{dot(r.class_id)}{r.class_name ?? "?"}</span>
-                {r.conflict && <span className="text-block text-[9px] uppercase">conflict</span>}
+                {r.conflict && <span className="text-block text-[10.5px] uppercase">conflict</span>}
               </div>
               <div className="mt-0.5 flex flex-wrap gap-1">
                 {r.members.map((m) => (
                   <button key={m.object_id} onClick={() => onSelectObject?.(m.object_id, m.cam)} title={`${m.cam}: ${m.class_name}`}
-                    className="border border-line rounded px-1 text-[9px] text-ink-3 hover:border-accent">{m.cam}</button>
+                    className="border border-line rounded px-1 text-[10.5px] text-ink-3 hover:border-accent">{m.cam}</button>
                 ))}
                 <button onClick={() => unlink(r.members[0].object_id)} disabled={busy} title="dissolve / remove first member"
-                  className="text-ink-3 hover:text-block text-[9px] ml-auto">unlink</button>
+                  className="text-ink-3 hover:text-block text-[10.5px] ml-auto">unlink</button>
               </div>
             </div>
           ))}
-          {data && data.rig_objects.length === 0 && <div className="text-ink-3 text-[10px]">no linked identities yet</div>}
+          {data && data.rig_objects.length === 0 && <div className="text-ink-3 text-[10.5px]">no linked identities yet</div>}
         </div>
 
         <div className="space-y-1">
-          <div className="text-ink-3 uppercase text-[9px]">unlinked ({data?.singletons.length ?? 0})</div>
+          <div className="text-ink-3 uppercase text-[10.5px]">unlinked ({data?.singletons.length ?? 0})</div>
           {data?.singletons.map((s) => (
             <label key={s.object_id} className="flex items-center gap-1.5 cursor-pointer hover:text-ink">
               <input type="checkbox" checked={sel.has(s.object_id)} onChange={() => toggle(s.object_id)} className="accent-accent" />
-              <span className="text-ink-3 text-[9px] uppercase w-10 shrink-0">{s.cam}</span>
+              <span className="text-ink-3 text-[10.5px] uppercase w-10 shrink-0">{s.cam}</span>
               <span className="text-ink-2 truncate">{dot(s.class_id)}{s.class_name}</span>
             </label>
           ))}
-          {data && data.singletons.length === 0 && <div className="text-ink-3 text-[10px]">all objects linked</div>}
+          {data && data.singletons.length === 0 && <div className="text-ink-3 text-[10.5px]">all objects linked</div>}
         </div>
       </div>
     </div>

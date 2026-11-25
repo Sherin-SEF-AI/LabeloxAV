@@ -7,6 +7,8 @@ import type { OntologyClass } from "@/lib/types";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { toast, toastError, toastSuccess } from "@/lib/toast";
 import LoadState from "@/components/shell/LoadState";
+import { Badge } from "@/components/ui/kit";
+import { humanize, shortId } from "@/lib/format";
 
 // Repairing the vocabulary, not only growing it.
 //
@@ -57,22 +59,22 @@ export default function OntologyRepair() {
       // Named, and with the reach stated: this is not a vocabulary edit, it rewrites labels.
       body: `Every object and track labelled ${nameOf(fromId)} becomes ${nameOf(toId)}. `
         + "This rewrites the corpus, and it is reversible as one run.",
-      confirmLabel: "merge",
+      confirmLabel: "Merge",
     });
     if (!ok) return;
     setBusy(true);
     try {
       const r = await api.ontologyMerge(Number(fromId), Number(toId));
       setLastMerge(r.run_id);
-      toast(`merged ${r.moved} object${r.moved === 1 ? "" : "s"}: ${r.from} → ${r.to}`, "success", 5000, {
-        label: "undo",
+      toast(`Merged ${r.moved} object${r.moved === 1 ? "" : "s"}: ${r.from} → ${r.to}`, "success", 5000, {
+        label: "Undo",
         run: async () => {
           try {
             const back = await api.ontologyRevertMerge(r.run_id);
-            toastSuccess(`reverted ${back.reverted}`);
+            toastSuccess(`Reverted ${back.reverted}`);
             setLastMerge(null);
           } catch (e) {
-            toastError(`undo failed: ${humanizeError(e)}`);
+            toastError(`Undo failed: ${humanizeError(e)}`);
           }
           void load();
         },
@@ -93,7 +95,7 @@ export default function OntologyRepair() {
     setBusy(true);
     try {
       const r = await api.ontologyRename(Number(renameId), newName.trim());
-      toastSuccess(`renamed to ${r.name}; every object carrying it follows`);
+      toastSuccess(`Renamed to ${r.name}; every object carrying it follows`);
       setNewName("");
       await load();
     } catch (e) {
@@ -108,13 +110,13 @@ export default function OntologyRepair() {
       title: `Retire ${name}`,
       body: "It stops being offered for new labels. Nothing is deleted: objects and immutable prediction "
         + "history that already point at it keep it.",
-      confirmLabel: "retire",
+      confirmLabel: "Retire",
     });
     if (!ok) return;
     setBusy(true);
     try {
       const r = await api.ontologyRetire([id]);
-      if (r.retired.length) toastSuccess(`retired ${name}`);
+      if (r.retired.length) toastSuccess(`Retired ${name}`);
       else toast(`${name} was not retired (it is not a sidecar class)`, "warn");
       await load();
     } catch (e) {
@@ -128,82 +130,87 @@ export default function OntologyRepair() {
 
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-        <span>repair the vocabulary</span>
-        <span className="ml-auto normal-case text-ink-3">admin only</span>
+      <div className="panel-head">
+        <h2 className="section-title">Repair the class vocabulary</h2>
+        <span className="ml-auto"><Badge>Admins only</Badge></span>
       </div>
-      <div className="p-3 space-y-4">
+      <div className="p-4 space-y-5">
         {err != null ? (
           <LoadState error={err} onRetry={() => void load()} />
         ) : loading ? (
-          <div className="text-[12.5px] text-ink-3/50 animate-pulse py-3 text-center">loading...</div>
+          <LoadState loading rows={3} />
         ) : (
           <>
-            <div className="space-y-1">
-              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">merge</div>
+            <div className="grid gap-5 lg:grid-cols-2">
+            <div className="space-y-1.5">
+              <div className="label-caps">Merge two classes</div>
               <div className="flex items-center gap-2 flex-wrap text-[12.5px]">
                 <select value={fromId} onChange={(e) => setFromId(e.target.value)}
                   aria-label="class to merge from"
-                  className="bg-bg border border-line px-1.5 py-0.5 text-ink min-w-[160px]">
-                  <option value="">from…</option>
-                  {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  className="field text-[12.5px] min-w-[170px]">
+                  <option value="">Merge this class...</option>
+                  {classes.map((c) => <option key={c.id} value={c.id}>{humanize(c.name)}</option>)}
                 </select>
-                <span className="text-ink-3">→</span>
+                <span className="text-ink-3" aria-hidden>→</span>
                 <select value={toId} onChange={(e) => setToId(e.target.value)}
                   aria-label="class to merge into"
-                  className="bg-bg border border-line px-1.5 py-0.5 text-ink min-w-[160px]">
-                  <option value="">into…</option>
-                  {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  className="field text-[12.5px] min-w-[170px]">
+                  <option value="">...into this one</option>
+                  {classes.map((c) => <option key={c.id} value={c.id}>{humanize(c.name)}</option>)}
                 </select>
                 <button onClick={doMerge} disabled={busy || !fromId || !toId || fromId === toId}
-                  className="border border-line px-2 py-0.5 hover:border-accent disabled:opacity-40">
-                  merge
+                  className="btn">
+                  Merge
                 </button>
-                {lastMerge && <span className="text-ink-3">last run {lastMerge.slice(0, 8)}</span>}
+                {lastMerge && <span className="text-ink-3 text-[12px]">Last run <span className="font-mono">{shortId(lastMerge)}</span></span>}
               </div>
-              <div className="text-[11px] text-ink-3">
-                rewrites every object and track carrying the class; refused across an l0 boundary
+              <div className="section-desc">
+                Moves every object and track to the second class. Refused when the two are different kinds of
+                thing (an object into road infrastructure, say).
               </div>
             </div>
 
-            <div className="space-y-1">
-              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">rename</div>
+            <div className="space-y-1.5">
+              <div className="label-caps">Rename a custom class</div>
               <div className="flex items-center gap-2 flex-wrap text-[12.5px]">
                 <select value={renameId} onChange={(e) => setRenameId(e.target.value)}
                   aria-label="class to rename"
-                  className="bg-bg border border-line px-1.5 py-0.5 text-ink min-w-[160px]">
-                  <option value="">class…</option>
-                  {custom.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  className="field text-[12.5px] min-w-[170px]">
+                  <option value="">Choose a class...</option>
+                  {custom.map((c) => <option key={c.id} value={c.id}>{humanize(c.name)}</option>)}
                 </select>
                 <input value={newName} onChange={(e) => setNewName(e.target.value)}
-                  placeholder="new name" aria-label="new class name"
-                  className="bg-bg border border-line px-1.5 py-0.5 text-ink" />
+                  placeholder="New name" aria-label="new class name"
+                  className="field text-[12.5px]" />
                 <button onClick={doRename} disabled={busy || !renameId || !newName.trim()}
-                  className="border border-line px-2 py-0.5 hover:border-accent disabled:opacity-40">
-                  rename
+                  className="btn">
+                  Rename
                 </button>
               </div>
-              <div className="text-[11px] text-ink-3">
-                custom classes only; the governed vocabulary is versioned in its file, not edited here
+              <div className="section-desc">
+                Custom classes only. The governed vocabulary is versioned in its own file and is not edited here.
               </div>
             </div>
+            </div>
 
-            <div className="space-y-1">
-              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">retire</div>
+            <div className="space-y-1.5">
+              <div className="label-caps">Retire a custom class</div>
               {custom.length === 0 ? (
-                <div className="text-[12px] text-ink-3">no custom classes to retire</div>
+                <div className="text-[12.5px] text-ink-3">There are no custom classes to retire.</div>
               ) : (
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1.5">
                   {custom.map((c) => (
                     <button key={c.id} onClick={() => doRetire(c.id, c.name)} disabled={busy}
-                      className="text-[12px] border border-line px-2 py-0.5 hover:border-accent disabled:opacity-40">
-                      {c.name} ✕
+                      aria-label={`Retire ${c.name}`} data-tip={`Retire ${c.name}`}
+                      className="chip hover:border-block/60 hover:text-block disabled:opacity-40">
+                      {humanize(c.name)} <span aria-hidden className="text-ink-3">✕</span>
                     </button>
                   ))}
                 </div>
               )}
-              <div className="text-[11px] text-ink-3">
-                stops it being offered; deletes nothing, because prediction history still points at it
+              <div className="section-desc">
+                A retired class is no longer offered for new labels. Nothing is deleted: existing labels and
+                prediction history keep it.
               </div>
             </div>
           </>

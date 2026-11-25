@@ -59,22 +59,22 @@ export default function RigTrackPanel({ sessionId, onClose, onOpenInstant }: {
           <button onClick={onClose} title="close" className="text-ink-3 hover:text-ink px-1">×</button>
         </div>
       </div>
-      {err && <div className="px-2 py-1 text-[10px] border-b hairline text-ink-3">{err}</div>}
+      {err && <div className="px-2 py-1 text-[10.5px] border-b hairline text-ink-3">{err}</div>}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {tracks?.map((t) => (
           <div key={t.rig_track_id} className={`border rounded ${t.inconsistent ? "border-block/60" : "border-line"}`}>
             <button onClick={() => openTrack(t.rig_track_id)} className="w-full flex items-center justify-between px-1.5 py-1 hover:bg-line/40">
               <span className="text-ink-2 truncate">{t.class_name ?? "?"} <span className="text-ink-3">· {t.instants} inst · {t.cameras.join(",")} · {secs(t.ts_start, t.ts_end)}</span></span>
-              {t.inconsistent && <span className="text-block text-[9px] uppercase shrink-0">inconsistent</span>}
+              {t.inconsistent && <span className="text-block text-[10.5px] uppercase shrink-0">inconsistent</span>}
             </button>
             {open === t.rig_track_id && timeline && (
               <div className="px-1.5 pb-1.5 flex gap-1 overflow-x-auto">
                 {timeline.instants.map((i) => (
                   <div key={i.rig_object_id} className={`shrink-0 border rounded px-1 py-0.5 ${i.conflict ? "border-block/50" : "border-line"}`}>
-                    <div className="text-ink-3 text-[9px]">{i.ts_ns != null ? new Date(i.ts_ns / 1e6).toISOString().slice(11, 19) : "?"}</div>
+                    <div className="text-ink-3 text-[10.5px]">{i.ts_ns != null ? new Date(i.ts_ns / 1e6).toISOString().slice(11, 19) : "?"}</div>
                     {i.members.map((m) => (
                       <button key={m.object_id} onClick={() => m.cam && onOpenInstant?.(m.object_id, m.cam)} title={`${m.cam}: ${m.class_name}`}
-                        className="block text-[9px] text-ink-2 hover:text-accent">{m.cam}:{m.class_name}</button>
+                        className="block text-[10.5px] text-ink-2 hover:text-accent">{m.cam}:{m.class_name}</button>
                     ))}
                   </div>
                 ))}
@@ -82,7 +82,7 @@ export default function RigTrackPanel({ sessionId, onClose, onOpenInstant }: {
             )}
           </div>
         ))}
-        {tracks && tracks.length === 0 && <div className="text-ink-3 text-[10px]">no rig tracks yet (link objects across views first)</div>}
+        {tracks && tracks.length === 0 && <div className="text-ink-3 text-[10.5px]">no rig tracks yet (link objects across views first)</div>}
       </div>
     </div>
   );

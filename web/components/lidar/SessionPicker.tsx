@@ -29,8 +29,8 @@ export default function SessionPicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <label className="sr-only" htmlFor="lidar-session-select">
-        capture session
+      <label className="text-[12px] font-medium text-ink-2" htmlFor="lidar-session-select">
+        Session
       </label>
       <select
         id="lidar-session-select"
@@ -39,10 +39,10 @@ export default function SessionPicker({
           onChange(e.target.value);
           if (e.target.value) onLoad(e.target.value);
         }}
-        className="min-w-0 rounded border border-line bg-bg-2 px-2 py-1 text-xs"
+        className="field min-w-0"
       >
         <option value="">
-          {err ? "session list unavailable" : sessions.length ? "select a session" : "loading sessions..."}
+          {err ? "Session list unavailable" : sessions.length ? "Choose a session" : "Loading sessions..."}
         </option>
         {sessions.map((s) => (
           <option key={s.session_id} value={s.session_id}>
@@ -64,9 +64,9 @@ export default function SessionPicker({
           onChange={(e) => onChange(e.target.value)}
           placeholder="or paste a session id"
           aria-label="session id"
-          className="min-w-0 flex-1 rounded border border-line bg-bg-2 px-2 py-1 text-xs"
+          className="field min-w-0 flex-1"
         />
-        <button className="rounded bg-primary text-white px-3 py-1 text-xs hover:bg-primary-2">Load</button>
+        <button type="submit" className="btn btn-primary">Load</button>
       </form>
     </div>
   );

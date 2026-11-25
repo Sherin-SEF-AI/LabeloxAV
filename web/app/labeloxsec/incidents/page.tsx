@@ -8,6 +8,8 @@ import PageShell from "@/components/shell/PageShell";
 import { toast } from "@/lib/toast";
 import { invalidate, useQuery } from "@/lib/useQuery";
 import type { CameraZone, PersonIdentityRow, SecurityIncident } from "@/lib/types";
+import EmptyState from "@/components/ui/EmptyState";
+import { duration, fromNs, humanize, num, shortId } from "@/lib/format";
 
 // LabeloxSec v2: zones, incidents, and cross-camera identity.
 //
@@ -24,11 +26,8 @@ const SEV_TONE: Record<string, string> = {
   info: "text-ink-2", warn: "text-warn", critical: "text-block",
 };
 
-const WINDOWS: [string, number][] = [["24h", 24], ["3 days", 72], ["week", 168]];
-
-function when(ns: number): string {
-  return new Date(ns / 1e6).toISOString().slice(0, 19).replace("T", " ");
-}
+const WINDOWS: [string, number][] = [["24 hours", 24], ["3 days", 72], ["Week", 168]];
+const STATUSES: [string, string][] = [["open", "Open"], ["ack", "Acknowledged"], ["closed", "Closed"], ["", "All"]];
 
 const NO_INCIDENTS: SecurityIncident[] = [];
 const NO_ZONES: CameraZone[] = [];
@@ -74,72 +73,69 @@ function IncidentsPage() {
     setBusy(true);
     try {
       await api.forgetIdentity(id);
-      toast("signature erased", "success");
+      toast("Signature erased", "success");
       await load();
     } catch (e) { toast(humanizeError(e), "error"); } finally { setBusy(false); }
   };
 
   return (
-    <PageShell active="INCIDENTS" title="Incidents"
-      subtitle="zone crossings, watchlist hits, and cross-camera sightings, stitched into events"
+    <PageShell active="Incidents" title="Incidents"
+      subtitle="Zone crossings, watchlist hits and cross-camera sightings, grouped into events."
       filters={
         <>
+          <span className="text-ink-3">Period</span>
           {WINDOWS.map(([label, h]) => (
-            <button key={h} onClick={() => setHours(h)}
-              className={`px-2 py-0.5 border ${
-                hours === h ? "border-accent text-ink" : "border-line text-ink-3 hover:text-ink-2"}`}>
+            <button key={h} type="button" onClick={() => setHours(h)} aria-pressed={hours === h}
+              className={`chip ${hours === h ? "chip-on" : ""}`}>
               {label}
             </button>
           ))}
-          <span className="text-ink-3">|</span>
-          {["open", "ack", "closed", ""].map((s) => (
-            <button key={s || "all"} onClick={() => setStatus(s)}
-              className={`px-2 py-0.5 border ${
-                status === s ? "border-accent text-ink" : "border-line text-ink-3 hover:text-ink-2"}`}>
-              {s || "all"}
+          <span className="text-ink-3 ml-3">Status</span>
+          {STATUSES.map(([s, label]) => (
+            <button key={s || "all"} type="button" onClick={() => setStatus(s)} aria-pressed={status === s}
+              className={`chip ${status === s ? "chip-on" : ""}`}>
+              {label}
             </button>
           ))}
         </>
       }>
-      <div className="p-4 space-y-4 max-w-6xl">
+      <div className="page-wrap space-y-4">
         {denied ? (
-          <div className="panel border border-block p-3 space-y-1">
-            <div className="text-[12px] text-block">
-              scene analytics is not authorised under this pack
+          <div role="alert" className="panel border-block/40 bg-block/5 p-4 space-y-1.5">
+            <div className="text-[13px] font-medium text-block">
+              Scene analytics is not allowed on this deployment
             </div>
-            <div className="text-[11.5px] text-ink-3">
-              Drawing a tripwire on a camera and following a person between cameras are security-domain
-              capabilities. Under the AV pack they are exactly what the privacy plane exists to prevent, so
-              the server refuses rather than this page showing an empty list.
-            </div>
+            <p className="text-[12.5px] text-ink-2 max-w-[75ch]">
+              Drawing a tripwire on a camera and following a person between cameras are only for authorised
+              security deployments. Here they are exactly what the privacy rules prevent, so the server refuses
+              them rather than this page showing an empty list.
+            </p>
           </div>
         ) : (
           <>
             <section className="panel">
-              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-                incidents ({incidents.length})
+              <div className="panel-head">
+                <h2 className="section-title">Incidents</h2>
+                <span className="text-[12px] text-ink-3 tabular-nums">{num(incidents.length)}</span>
               </div>
               {incidents.length === 0 ? (
-                <div className="p-4 text-[12px] text-ink-3">
-                  Nothing in this window. An incident is raised when a zone rule fires, a watched plate is
-                  read, or the same person is seen on a second camera.
-                </div>
+                <EmptyState compact icon="flag" title={incidentsQ.loading ? "Loading incidents..." : "No incidents in this period"}>
+                  An incident is raised when a zone rule fires, a watched plate is read, or the same person is seen
+                  on a second camera.
+                </EmptyState>
               ) : (
-                <table className="w-full text-[12px]">
+                <table className="data-table">
                   <thead>
-                    <tr className="text-ink-3 text-left border-b hairline">
-                      <th className="py-1">when</th><th>kind</th><th>what</th>
-                      <th>camera</th><th>plate</th><th>for</th><th></th>
+                    <tr>
+                      <th>When</th><th>Kind</th><th>What happened</th>
+                      <th>Camera</th><th>Plate</th><th className="num">Lasted</th><th></th>
                     </tr>
                   </thead>
                   <tbody>
                     {incidents.map((i) => (
-                      <tr key={i.incident_id}
-                        className={`border-b hairline ${i.severity === "critical" ? "bg-block/10" : ""}`}>
-                        <td className="py-1 text-ink-3">{when(i.start_ts_ns)}</td>
-                        <td className={SEV_TONE[i.severity] ?? "text-ink-2"}>
-                          {i.kind.replace(/_/g, " ")}
-                        </td>
+                      <tr key={i.incident_id} className={i.severity === "critical" ? "bg-block/10" : ""}>
+                        <td className="whitespace-nowrap">{fromNs(i.start_ts_ns)}</td>
+                        <td className={SEV_TONE[i.severity] ?? "text-ink-2"}>{humanize(i.kind)}</td>
                         <td className="text-ink">
                           {i.title}
                           {Number(i.evidence?.events ?? 1) > 1 && (
@@ -148,18 +144,22 @@ function IncidentsPage() {
                             <span className="text-ink-3"> ×{String(i.evidence.events)}</span>
                           )}
                         </td>
-                        <td className="text-ink-3">{i.camera_id ?? "-"}</td>
-                        <td className={i.plate ? "text-warn" : "text-ink-3"}>{i.plate ?? "-"}</td>
-                        <td className="text-ink-3 tabular-nums">{i.duration_s}s</td>
-                        <td className="text-right space-x-2">
-                          {i.status === "open" && (
-                            <button onClick={ack(i.incident_id, false)} disabled={busy}
-                              className="text-ink-3 hover:text-accent disabled:opacity-40">ack</button>
-                          )}
-                          {i.status !== "closed" && (
-                            <button onClick={ack(i.incident_id, true)} disabled={busy}
-                              className="text-ink-3 hover:text-pass disabled:opacity-40"><T k="action.close">close</T></button>
-                          )}
+                        <td>{i.camera_id ?? "-"}</td>
+                        <td className={`font-mono ${i.plate ? "text-warn" : ""}`}>{i.plate ?? "-"}</td>
+                        <td className="num">{duration(i.duration_s)}</td>
+                        <td className="text-right whitespace-nowrap">
+                          <span className="inline-flex gap-2">
+                            {i.status === "open" && (
+                              <button type="button" onClick={ack(i.incident_id, false)} disabled={busy} className="btn">
+                                Acknowledge
+                              </button>
+                            )}
+                            {i.status !== "closed" && (
+                              <button type="button" onClick={ack(i.incident_id, true)} disabled={busy} className="btn">
+                                <T k="action.close">Close</T>
+                              </button>
+                            )}
+                          </span>
                         </td>
                       </tr>
                     ))}
@@ -169,88 +169,79 @@ function IncidentsPage() {
             </section>
 
             <section className="panel">
-              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-                zones ({zones.length})
+              <div className="panel-head">
+                <h2 className="section-title">Zones</h2>
+                <span className="text-[12px] text-ink-3 tabular-nums">{num(zones.length)}</span>
               </div>
-              <div className="p-3">
-                {zones.length === 0 ? (
-                  <div className="text-[12px] text-ink-3">
-                    No zones. A fixed camera&apos;s frame does not move, which makes a polygon on it a
-                    permanent statement about the world: this quadrilateral is the loading bay, this
-                    segment is the gate line.
-                  </div>
-                ) : (
-                  <table className="w-full text-[12px]">
-                    <thead>
-                      <tr className="text-ink-3 text-left border-b hairline">
-                        <th className="py-1">name</th><th>camera</th><th>kind</th>
-                        <th>rule</th><th>classes</th><th></th>
+              {zones.length === 0 ? (
+                <EmptyState compact icon="polygon" title="No zones">
+                  A zone is an area or a line drawn on a fixed camera, such as a loading bay or a gate. Crossing
+                  or lingering in one raises an incident.
+                </EmptyState>
+              ) : (
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th><th>Camera</th><th>Kind</th>
+                      <th>Rule</th><th>Classes</th><th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {zones.map((z) => (
+                      <tr key={z.zone_id}>
+                        <td className="text-ink">{z.name}</td>
+                        <td>{z.camera_id}</td>
+                        <td>{humanize(z.kind)}</td>
+                        <td className={SEV_TONE[z.severity] ?? "text-ink-2"}>
+                          {humanize(z.rule)}{z.dwell_seconds ? ` after ${duration(z.dwell_seconds)}` : ""}
+                        </td>
+                        <td>{z.classes.length ? z.classes.map(humanize).join(", ") : "Every class"}</td>
+                        <td className="text-right">
+                          <button type="button" onClick={async () => {
+                            try { await api.deleteSecZone(z.zone_id); await load(); }
+                            catch (e) { toast(humanizeError(e), "error"); }
+                          }} className="btn btn-danger">Deactivate</button>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {zones.map((z) => (
-                        <tr key={z.zone_id} className="border-b hairline">
-                          <td className="py-1 text-ink">{z.name}</td>
-                          <td className="text-ink-3">{z.camera_id}</td>
-                          <td className="text-ink-3">{z.kind}</td>
-                          <td className={SEV_TONE[z.severity] ?? "text-ink-2"}>
-                            {z.rule}{z.dwell_seconds ? ` ${z.dwell_seconds}s` : ""}
-                          </td>
-                          <td className="text-ink-3">
-                            {z.classes.length ? z.classes.join(", ") : "every class"}
-                          </td>
-                          <td className="text-right">
-                            <button onClick={async () => {
-                              try { await api.deleteSecZone(z.zone_id); await load(); }
-                              catch (e) { toast(humanizeError(e), "error"); }
-                            }} className="text-ink-3 hover:text-block">deactivate</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </section>
 
             <section className="panel">
-              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-                cross-camera sightings ({identities.length})
+              <div className="panel-head">
+                <h2 className="section-title">Seen on more than one camera</h2>
+                <span className="text-[12px] text-ink-3 tabular-nums">{num(identities.length)}</span>
               </div>
-              <div className="p-3 space-y-2">
-                <div className="text-[11px] text-ink-3">
-                  Appearance signatures, never names. This can say the same person appeared at two gates
-                  and can never say who they are: there is nowhere in the record to put a name.
-                </div>
-                {identities.length === 0 ? (
-                  <div className="text-[12px] text-ink-3">
-                    Nobody has been seen on more than one camera.
-                  </div>
-                ) : (
-                  <table className="w-full text-[12px]">
-                    <thead>
-                      <tr className="text-ink-3 text-left border-b hairline">
-                        <th className="py-1">signature</th><th>cameras</th><th>tracks</th><th></th>
+              <p className="section-desc px-3.5 pt-3">
+                Appearance signatures, never names. This can say the same person appeared at two gates, and can
+                never say who they are: there is nowhere in the record to put a name.
+              </p>
+              {identities.length === 0 ? (
+                <EmptyState compact icon="person" title="Nobody has been seen on a second camera" />
+              ) : (
+                <table className="data-table mt-2">
+                  <thead>
+                    <tr><th>Signature</th><th>Cameras</th><th className="num">Tracks</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {identities.map((p) => (
+                      <tr key={p.identity_id}>
+                        <td className="font-mono text-[12px]">{shortId(p.identity_id)}</td>
+                        <td>{p.cameras.join(", ")}</td>
+                        <td className="num">{num(p.n_tracks)}</td>
+                        <td className="text-right">
+                          {/* Present because it must be: a signature is derived from a person's
+                              appearance, so it is personal data whether or not a name is attached. */}
+                          <button type="button" onClick={forget(p.identity_id)} disabled={busy} className="btn btn-danger"
+                            data-tip="Deletes this appearance signature; it is personal data">Erase</button>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {identities.map((p) => (
-                        <tr key={p.identity_id} className="border-b hairline">
-                          <td className="py-1 text-ink-2">{p.identity_id.slice(0, 8)}</td>
-                          <td className="text-ink-3">{p.cameras.join(", ")}</td>
-                          <td className="text-ink-3 tabular-nums">{p.n_tracks}</td>
-                          <td className="text-right">
-                            {/* Present because it must be: a signature is derived from a person's
-                                appearance, so it is personal data whether or not a name is attached. */}
-                            <button onClick={forget(p.identity_id)} disabled={busy}
-                              className="text-ink-3 hover:text-block disabled:opacity-40">erase</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </section>
           </>
         )}
@@ -263,7 +254,7 @@ function IncidentsPage() {
 export default function IncidentsPageRoute() {
   return (
     <PackGate pack="sec" title="Incidents"
-      what="LabeloxSec, for authorised security deployments: registration-plate reading, watchlists, zones and cross-camera re-identification">
+      what="LabeloxSec, for authorised security deployments: number-plate reading, watchlists, zones and following a person across cameras">
       <IncidentsPage />
     </PackGate>
   );

@@ -89,14 +89,20 @@ export function StateBadge({ state, source, conf }: { state: string; source?: st
   );
 }
 
-export function ConfBar({ conf }: { conf: number }) {
+// Confidence as a bar and a percentage. A confidence of exactly 0 (or none) is what a hand-drawn or imported
+// object carries: it was never scored, and "0.00" beside an empty bar read as "the model is sure this is
+// wrong", which is the opposite.
+export function ConfBar({ conf }: { conf: number | null | undefined }) {
+  if (conf === null || conf === undefined || !Number.isFinite(conf) || conf <= 0) {
+    return <span className="text-[12px] text-ink-3" data-tip="no model score: drawn by hand or imported">No score</span>;
+  }
   const color = conf >= 0.95 ? "bg-pass" : conf >= 0.6 ? "bg-warn" : "bg-accent";
   return (
     <span className="inline-flex items-center gap-2 text-[12px] tabular-nums">
       <span className="w-14 h-1.5 rounded-full overflow-hidden bg-line relative">
-        <span className={`absolute left-0 top-0 h-full ${color}`} style={{ width: `${conf * 100}%` }} />
+        <span className={`absolute left-0 top-0 h-full ${color}`} style={{ width: `${Math.min(1, conf) * 100}%` }} />
       </span>
-      {conf.toFixed(2)}
+      {Math.round(conf * 100)}%
     </span>
   );
 }

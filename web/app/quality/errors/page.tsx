@@ -14,6 +14,8 @@ import type { ErrorCandidateRow } from "@/lib/types";
 import { useCurrentUser } from "@/lib/user";
 import { invalidate, useQuery } from "@/lib/useQuery";
 import { REVIEW_QUEUE_KEY } from "@/lib/queryKeys";
+import EmptyState from "@/components/ui/EmptyState";
+import { humanize, pct } from "@/lib/format";
 
 // Ruling on error candidates the way review rules on labels: many crops on screen, one keystroke each.
 //
@@ -33,11 +35,29 @@ import { REVIEW_QUEUE_KEY } from "@/lib/queryKeys";
 const CELL = 128;
 const PAGE = 120;
 
+// What each detector checks, in words a labeller uses. The stored kind (`confident_learning`) stays the
+// value in the URL and the API; this is display only, with the code kept in the tooltip.
+const DETECTOR: Record<string, string> = {
+  confident_learning: "Disagrees with the model",
+  embedding_outlier: "Looks unlike its class",
+  track_inconsistent: "Class changes along its track",
+  track_consistency: "Class changes along its track",
+  cross_cam_inconsistent: "Disagrees across cameras",
+  critic_flag: "Flagged by the AI critic",
+  near_dup_inconsistent: "Differs from near-duplicates",
+  policy_violation: "Breaks a labelling rule",
+  reanalyze: "Flagged on re-check",
+};
+const detectorName = (k: string) => DETECTOR[k] ?? humanize(k);
+
+// A key cap for the shortcut hints.
+const KBD = "inline-block min-w-[18px] text-center px-1 py-px rounded border hairline bg-head text-[11px] text-ink-2 font-mono";
+
 export default function ErrorGridPage() {
   return (
     <Suspense fallback={
       <PageShell active="ERROR QUEUE" title="Error candidates">
-        <div className="p-4 text-[12px] text-ink-3">loading the queue...</div>
+        <div className="p-6 text-[13px] text-ink-3" role="status">Loading the queue...</div>
       </PageShell>
     }>
       <ErrorGrid />
@@ -136,7 +156,7 @@ function ErrorGrid() {
       if (lost) {
         // already_decided is the interesting one: somebody else ruled on these while this grid was open,
         // and their verdict stands rather than being overwritten.
-        toast(`${res.applied} applied, ${lost} skipped (already ruled on, or gone)`, "error");
+        toast(`${res.applied} applied, ${lost} skipped (already decided by someone else, or removed)`, "error");
         setDecided((d) => d - lost);
       }
       void loadPrecision();
@@ -198,25 +218,52 @@ function ErrorGrid() {
     <PageShell
       active="ERROR QUEUE"
       title="Error candidates"
-      subtitle={kind ? `${kind} · confirm or dismiss, one keystroke each` : "confirm or dismiss, one keystroke each"}
+      subtitle={kind ? `${detectorName(kind)} · confirm or dismiss, one key each` : "Labels that checks think are wrong: confirm or dismiss, one key each"}
+      filters={
+        // Pinned above the grid, so the counts and the keys stay in view however far it scrolls.
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 w-full">
+          <span className="text-ink tabular-nums">{queue.length.toLocaleString()} left</span>
+          <span className="text-ink-3 tabular-nums">{decided.toLocaleString()} decided</span>
+          {perMin != null && <span className="text-accent-2 tabular-nums">{perMin} a minute</span>}
+          {selection.size > 0 && <span className="text-warn">{selection.size} selected</span>}
+          {current && (
+            <span className="text-ink-2" title={current.kind}>
+              {detectorName(current.kind)}
+              <span className="text-ink-3"> · score {current.score?.toFixed(2)}</span>
+            </span>
+          )}
+          <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-3">
+            <span><kbd className={KBD}>←↑↓→</kbd> or <kbd className={KBD}>HJKL</kbd> move</span>
+            <span><kbd className={KBD}>Shift</kbd> + move: range</span>
+            <span><kbd className={KBD}>Space</kbd> select</span>
+            <span><kbd className={KBD}>A</kbd> select page</span>
+            <span><kbd className={`${KBD} text-block`}>C</kbd> confirm error</span>
+            <span><kbd className={KBD}>D</kbd> dismiss</span>
+            <span><kbd className={KBD}>O</kbd> open object</span>
+            <span><kbd className={KBD}>Esc</kbd> clear</span>
+          </span>
+        </div>
+      }
     >
-      <div className="p-3 space-y-2">
+      <div className="p-4 space-y-3">
         {me?.role === "admin" && <DetectorBenchmark />}
         {/* The detector scoreboard. Shown above the grid because which detector you are judging is the
             decision that matters most, and because a detector nobody has ruled on should say so rather
             than showing an interval that looks like a bad score. */}
         {precision && (
-          <div className="panel p-2 overflow-x-auto">
-            <div className="text-[11px] text-ink-3 mb-1">
-              detector precision, from human verdicts
-              {precision.caveat && <span className="text-warn"> · {precision.caveat}</span>}
+          <section className="panel">
+            <div className="panel-head">
+              <h2 className="section-title">Checks</h2>
+              <span className="section-desc ml-2">How often each check is right, from people&apos;s decisions</span>
+              {precision.caveat && <span className="ml-auto text-[12px] text-warn">{precision.caveat}</span>}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="p-3 flex flex-wrap gap-2">
               <button
                 onClick={() => router.push("/quality/errors")}
-                className={`px-2 py-1 text-[11px] ring-1 ${kind ? "ring-line text-ink-3" : "ring-accent text-accent"}`}
+                aria-pressed={!kind}
+                className={`chip ${kind ? "" : "chip-on"}`}
               >
-                all detectors
+                All checks
               </button>
               {kinds.map((k) => {
                 const d = precision.per_kind[k];
@@ -224,45 +271,49 @@ function ErrorGrid() {
                   <button
                     key={k}
                     onClick={() => router.push(`/quality/errors?kind=${encodeURIComponent(k)}`)}
-                    title={d.note || `${d.decided} verdicts`}
-                    className={`px-2 py-1 text-[11px] ring-1 ${k === kind ? "ring-accent text-accent" : "ring-line text-ink-2"}`}
+                    title={`${k}${d.note ? ` · ${d.note}` : ` · ${d.decided} decisions`}`}
+                    aria-pressed={k === kind}
+                    className={`chip ${k === kind ? "chip-on" : ""}`}
                   >
-                    {k} <span className="text-ink-3">{d.pending}</span>{" "}
-                    {d.usable
-                      ? <span className="text-ink">P {d.precision.p?.toFixed(2)} ({d.precision.lo.toFixed(2)}-{d.precision.hi.toFixed(2)})</span>
-                      : <span className="text-ink-3">unmeasured</span>}
+                    {detectorName(k)}
+                    <span className="text-ink-3 tabular-nums">{d.pending.toLocaleString()} waiting</span>
+                    {d.usable && d.precision.p != null
+                      ? <span className="text-ink">· {pct(d.precision.p)} right ({pct(d.precision.lo)} to {pct(d.precision.hi)})</span>
+                      : <span className="text-ink-3">· not measured yet</span>}
                   </button>
                 );
               })}
             </div>
-          </div>
+          </section>
         )}
 
-        <div className="flex flex-wrap items-center gap-3 text-[12px] text-ink-3">
-          <span className="text-ink">{queue.length} left</span>
-          <span>{decided} decided</span>
-          {perMin != null && <span className="text-accent">{perMin}/min</span>}
-          {selection.size > 0 && <span className="text-warn">{selection.size} selected</span>}
-          {current && <span className="text-ink-2">{current.kind} · score {current.score?.toFixed(3)}</span>}
-        </div>
+        <label className="block">
+          <span className="sr-only">Reason</span>
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Why (optional, saved on every candidate you decide next, e.g. 'scores frame similarity, not the object')"
+            className="field w-full text-[12.5px]"
+          />
+        </label>
+        <p className="text-[12px] text-ink-3">
+          Confirming applies the suggested class where there is one; dismissing says the check was wrong.
+          With nothing selected, a key acts on the tile under the cursor.
+        </p>
 
-        <input
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="why (recorded on every candidate in the batch, e.g. 'scores frame similarity, not the object')"
-          className="w-full bg-bg-2 px-2 py-1 text-[12px] text-ink ring-1 ring-line"
-        />
-
-        {loading && <div className="text-[12px] text-ink-3">loading the queue...</div>}
+        {loading && <div className="text-[13px] text-ink-3" role="status">Loading the queue...</div>}
 
         {!loading && !page.length && (
-          <div className="panel px-3 py-6 text-[12px] text-ink-3 text-center">
-            Nothing pending{kind ? ` for ${kind}` : ""}. Every candidate here has been ruled on.
+          <div className="panel">
+            <EmptyState icon="check" title={kind ? `Nothing waiting for "${detectorName(kind)}"` : "Nothing waiting"}
+              action={kind ? <button onClick={() => router.push("/quality/errors")} className="btn">Show all checks</button> : undefined}>
+              Every possible error here has been decided.
+            </EmptyState>
           </div>
         )}
 
         {sheet && page.length > 0 && (
-          <div className="panel p-2 overflow-x-auto">
+          <div className="panel p-2 overflow-x-auto w-fit max-w-full">
             <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${cols}, ${CELL}px)` }}>
               {page.map((row, i) => {
                 const p = placements[row.object_id];
@@ -282,7 +333,9 @@ function ErrorGrid() {
                       }
                       setCursor(i);
                     }}
-                    title={`${row.kind} · score ${row.score?.toFixed(3)}${row.proposed_label?.class_name ? ` · proposes ${row.proposed_label.class_name}` : ""}`}
+                    title={`${detectorName(row.kind)} · score ${row.score?.toFixed(2)}${row.proposed_label?.class_name ? ` · suggests ${humanize(row.proposed_label.class_name)}` : ""}`}
+                    aria-label={`${detectorName(row.kind)}${row.proposed_label?.class_name ? `, suggests ${humanize(row.proposed_label.class_name)}` : ""}${isSel ? ", selected" : ""}`}
+                    aria-pressed={isSel}
                     className={`relative block ${isCursor ? "ring-2 ring-accent" : isSel ? "ring-2 ring-warn" : "ring-1 ring-line"}`}
                     style={{ width: CELL, height: CELL }}
                   >
@@ -295,16 +348,16 @@ function ErrorGrid() {
                         }}
                       />
                     ) : (
-                      <span className="flex w-full h-full items-center justify-center text-[9px] text-ink-3">
-                        no crop
+                      <span className="flex w-full h-full items-center justify-center text-center px-2 text-[11px] text-ink-3 bg-bg-2">
+                        No image for this object
                       </span>
                     )}
                     {row.proposed_label?.class_name && (
-                      <span className="absolute bottom-0 left-0 right-0 bg-bg/80 text-[9px] text-accent truncate px-1">
-                        {row.proposed_label.class_name}
+                      <span className="absolute bottom-0 left-0 right-0 bg-bg/85 text-[11px] text-accent-2 truncate px-1 leading-4">
+                        → {humanize(row.proposed_label.class_name)}
                       </span>
                     )}
-                    {isSel && <span className="absolute top-0 right-0 bg-warn text-bg text-[9px] px-1">+</span>}
+                    {isSel && <span className="absolute top-1 right-1 rounded-full bg-warn text-bg text-[11px] font-semibold w-4 h-4 leading-4 text-center" aria-hidden>✓</span>}
                   </button>
                 );
               })}
@@ -312,17 +365,6 @@ function ErrorGrid() {
           </div>
         )}
 
-        <div className="text-[11px] text-ink-3 flex flex-wrap gap-3">
-          <span><b className="text-ink">arrows/hjkl</b> move</span>
-          <span><b className="text-ink">shift+move</b> range</span>
-          <span><b className="text-ink">space</b> select</span>
-          <span><b className="text-ink">A</b> select the page</span>
-          <span><b className="text-accent">C</b> confirm the error</span>
-          <span><b className="text-block">D</b> dismiss</span>
-          <span><b className="text-ink">O</b> open the object</span>
-          <span><b className="text-ink">esc</b> clear</span>
-          <span className="text-ink-2">confirming applies the proposed class where there is one; dismissing says the detector was wrong</span>
-        </div>
       </div>
     </PageShell>
   );

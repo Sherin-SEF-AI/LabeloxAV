@@ -12,9 +12,9 @@ type Pooled = { caught: number; planted: number; new_flags: number; recall: numb
 type Result = { pooled: Record<string, Pooled>; rate: number; sessions: { labels: number; refused?: string }[] };
 
 const NAMES: Record<string, string> = {
-  confident_learning: "Confident learning",
-  track_consistency: "Track consistency",
-  embedding_outlier: "Embedding outlier",
+  confident_learning: "Disagrees with the model",
+  track_consistency: "Class changes along its track",
+  embedding_outlier: "Looks unlike its class",
 };
 const pct = (x: number | null) => (x == null ? "n/a" : `${Math.round(x * 100)}%`);
 
@@ -64,7 +64,7 @@ export default function DetectorBenchmark() {
               ))}
             </tbody>
           </table>
-          <p className="mt-1.5 text-ink-3 text-[11.5px]">
+          <p className="mt-1.5 text-ink-3 text-[12px]">
             {planted} labels given a wrong class ({Math.round(result.rate * 100)}% of each session&apos;s accepted labels, a sibling class where one exists). Planted errors are single labels, easier than a wrong class on a whole track. Nothing was saved.
           </p>
         </div>

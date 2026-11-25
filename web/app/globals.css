@@ -240,6 +240,55 @@ body {
     color: rgb(var(--c-ink-3));
   }
   .side-icon-btn:hover { background: rgb(var(--c-side-hover)); color: rgb(var(--c-ink)); }
+
+  /* Page body. Most pages wrapped their content in a one-off `p-4 max-w-[...]` and the widths drifted
+     between 900 and 1800px, so the same app felt like several. Two widths: a reading column for forms and
+     settings, and a wide one for tables, grids and dashboards. */
+  .page-wrap { width: 100%; max-width: 1480px; margin: 0 auto; padding: 20px 24px 32px; }
+  .page-wrap-narrow { width: 100%; max-width: 920px; margin: 0 auto; padding: 20px 24px 32px; }
+
+  /* The title of a panel or a section: sentence case, readable size. It replaces a dozen variants of
+     10px uppercase grey that were hard to read on a laptop and shouted at the same time. */
+  .section-title { font-size: 13px; font-weight: 600; color: rgb(var(--c-ink)); letter-spacing: -0.005em; }
+  .section-desc { font-size: 12px; color: rgb(var(--c-ink-3)); line-height: 1.45; }
+
+  /* A small caps label for table headers and stat captions, never smaller than 11px. */
+  .label-caps { font-size: 11px; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: rgb(var(--c-ink-3)); }
+
+  /* Data tables: one look for every list of rows. Numbers line up right (add `num` to the cell). */
+  .data-table { width: 100%; font-size: 12.5px; border-collapse: separate; border-spacing: 0; }
+  :where(.data-table) thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: rgb(var(--c-panel-head));
+    text-align: left; font-size: 11px; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase;
+    color: rgb(var(--c-ink-3)); padding: 8px 12px; border-bottom: 1px solid rgb(var(--c-line)); white-space: nowrap;
+  }
+  /* :where() keeps these at the specificity of an element selector, so a `text-pass` or `px-2` on a cell
+     still wins over the table's defaults instead of being silently overridden. */
+  :where(.data-table) tbody td { padding: 8px 12px; border-bottom: 1px solid rgb(var(--c-line-2)); color: rgb(var(--c-ink-2)); vertical-align: middle; }
+  :where(.data-table) tbody tr:hover td { background: rgb(var(--c-head) / 0.6); }
+  .data-table tbody tr:last-child td { border-bottom: 0; }
+  .data-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* A link-styled action inside text or a row. */
+  .link { color: rgb(var(--c-accent-2)); }
+  .link:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+  /* Destructive button: separated from routine actions by colour, and confirmed by the caller. */
+  .btn-danger { color: rgb(var(--c-block)); border-color: rgb(var(--c-block) / 0.45); background: rgb(var(--c-block) / 0.06); }
+  .btn-danger:hover:not(:disabled) { background: rgb(var(--c-block) / 0.14); border-color: rgb(var(--c-block) / 0.7); }
+
+  /* A keycap for shortcut hints ("A accept · X reject"). */
+  .kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px;
+    border-radius: 4px; border: 1px solid rgb(var(--c-line-3)); border-bottom-width: 2px; background: rgb(var(--c-head));
+    font-family: var(--font-mono), ui-monospace, monospace; font-size: 11px; line-height: 1; color: rgb(var(--c-ink-2)); }
+
+  /* Chip: a removable / toggleable filter value. */
+  .chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 9px; border-radius: 999px;
+    font-size: 12px; color: rgb(var(--c-ink-2)); background: rgb(var(--c-btn)); border: 1px solid rgb(var(--c-btn-border));
+    transition: background-color 100ms ease, border-color 100ms ease, color 100ms ease; }
+  .chip:hover { color: rgb(var(--c-ink)); border-color: rgb(var(--c-btn-border-hover)); }
+  .chip-on, .chip-on:hover { color: rgb(var(--c-btn-on-ink)); background: rgb(var(--c-accent) / 0.16); border-color: rgb(var(--c-accent) / 0.55); }
 }
 
 ::selection {

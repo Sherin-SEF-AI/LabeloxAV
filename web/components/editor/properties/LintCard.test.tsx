@@ -69,11 +69,11 @@ describe("LintCard", () => {
     const onOpenIssues = vi.fn();
     const { rerender } = render(<LintCard lint={{ findings: [], systemic: {}, dormant: [] }}
       selectedIds={[]} onSelect={vi.fn()} onOpenIssues={onOpenIssues} />);
-    expect(screen.queryByText(/open .* as issue/)).toBeNull();
+    expect(screen.queryByText(/Open .* as issue/)).toBeNull();
 
     rerender(<LintCard lint={{ findings: [finding()], systemic: {}, dormant: [] }}
       selectedIds={[]} onSelect={vi.fn()} onOpenIssues={onOpenIssues} />);
-    expect(screen.getByText(/open 1 as issue/)).toBeTruthy();
+    expect(screen.getByText(/Open 1 as issue/)).toBeTruthy();
   });
 
   it("does not open issues on its own", async () => {
@@ -83,7 +83,7 @@ describe("LintCard", () => {
     render(<LintCard lint={{ findings: [finding()], systemic: {}, dormant: [] }}
       selectedIds={[]} onSelect={vi.fn()} onOpenIssues={onOpenIssues} />);
     expect(onOpenIssues).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByText(/open 1 as issue/));
+    await userEvent.click(screen.getByText(/Open 1 as issue/));
     expect(onOpenIssues).toHaveBeenCalledTimes(1);
   });
 });

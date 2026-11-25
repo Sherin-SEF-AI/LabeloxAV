@@ -20,56 +20,56 @@ export default function AboutPage() {
   const about: About | null = aboutQ.data ?? null;
 
   return (
-    <PageShell active="About" title="About" subtitle="version, source and licences">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 flex flex-col gap-5">
+    <PageShell active="About" title="About" subtitle="Version, source code and licences">
+      <div className="page-wrap-narrow flex flex-col gap-4">
         <LoadState {...aboutQ.loadState} />
         {about && (
           <>
             <section className="panel p-5 grid gap-x-6 gap-y-3 sm:grid-cols-[max-content_1fr] text-[13px]">
               <span className="text-ink-3">Version</span>
-              <span className="text-ink tabular-nums">{about.version ?? "unknown"}</span>
+              <span className="text-ink tabular-nums">{about.version ?? "Unknown"}</span>
               <span className="text-ink-3">Commit</span>
-              <span className="text-ink font-mono text-[12px] break-all">{about.commit ?? "unknown (no git metadata and LBX_CODE_SHA unset)"}</span>
+              <span className="text-ink font-mono text-[12px] break-all">{about.commit ?? <span className="text-ink-3 font-sans" title="No git metadata, and LBX_CODE_SHA is not set">Unknown</span>}</span>
               <span className="text-ink-3">Source</span>
               <span className="flex flex-col gap-1 min-w-0">
                 {about.source_of_this_version
-                  ? <a className="text-accent hover:text-accent-2 break-all" href={about.source_of_this_version} target="_blank" rel="noreferrer">Source of exactly this version</a>
+                  ? <a className="link break-all" href={about.source_of_this_version} target="_blank" rel="noreferrer">Source of exactly this version</a>
                   : null}
-                <a className="text-accent hover:text-accent-2 break-all" href={about.source_url} target="_blank" rel="noreferrer">{about.source_url}</a>
+                <a className="link break-all" href={about.source_url} target="_blank" rel="noreferrer">{about.source_url}</a>
                 {about.modified && <span className="text-ink-3 text-[12px]">This deployment runs modified code; the link above is where its administrators publish it.</span>}
               </span>
             </section>
 
             <section className="panel p-5 flex flex-col gap-3 text-[13px]">
-              <h2 className="text-[14px] font-semibold text-ink">Licences</h2>
-              <p className="text-ink-2">
+              <h2 className="section-title">Licences</h2>
+              <p className="text-ink-2 leading-relaxed">
                 LabeloxAV&apos;s own code is {about.own_licence}. The application as installed also runs the components below,
                 and two of them (Ultralytics and cleanlab) are libraries in the same process, so the combination is covered by the {about.combined_licence}.
                 For a team running it for itself that changes nothing; if you modify it and let people outside the team use it, they must be able to get your source.
               </p>
-              <div className="overflow-x-auto -mx-1">
-                <table className="w-full text-[12.5px]">
+              <div className="overflow-x-auto rounded-md border hairline">
+                <table className="data-table">
                   <thead>
-                    <tr className="text-left text-ink-3 border-b hairline">
-                      <th className="font-medium px-1 py-2">Component</th>
-                      <th className="font-medium px-1 py-2">Licence</th>
-                      <th className="font-medium px-1 py-2">Runs in</th>
-                      <th className="font-medium px-1 py-2">For</th>
+                    <tr>
+                      <th>Component</th>
+                      <th>Licence</th>
+                      <th>Runs in</th>
+                      <th>For</th>
                     </tr>
                   </thead>
                   <tbody>
                     {about.copyleft.map((c) => (
-                      <tr key={c.name} className="border-b hairline last:border-0 align-top">
-                        <td className="px-1 py-2 text-ink">{c.name}</td>
-                        <td className="px-1 py-2 text-ink-2 whitespace-nowrap">{c.licence}</td>
-                        <td className="px-1 py-2 text-ink-2">{c.where}</td>
-                        <td className="px-1 py-2 text-ink-3">{c.why}</td>
+                      <tr key={c.name} className="align-top">
+                        <td className="text-ink">{c.name}</td>
+                        <td className="whitespace-nowrap">{c.licence}</td>
+                        <td>{c.where}</td>
+                        <td className="text-ink-3">{c.why}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <a className="text-accent hover:text-accent-2" href={about.licensing_doc} target="_blank" rel="noreferrer">
+              <a className="link self-start" href={about.licensing_doc} target="_blank" rel="noreferrer">
                 What this means, situation by situation
               </a>
             </section>

@@ -7,6 +7,13 @@ import type { FrameObject, MulticamGroups } from "@/lib/types";
 import BackButton from "@/components/BackButton";
 import PageHeaderBar from "@/components/shell/PageHeaderBar";
 import Inspector from "@/components/shell/Inspector";
+import LoadState from "@/components/shell/LoadState";
+import { fromNs, shortId } from "@/lib/format";
+
+// Server sentences arrive lowercase ("this session has 1 camera..."); capitalise the first letter only, so
+// camera ids and class names inside them keep their case.
+const sentence = (t: string) => (t ? t[0].toUpperCase() + t.slice(1) : t);
+const views = (n: number) => `${n} view${n === 1 ? "" : "s"}`;
 
 // M3.1 multi-camera synchronized annotation workspace: all rig views at a chosen timestamp, annotate
 // once and link across views. Single-camera sessions show one view per instant (degrades gracefully).
@@ -26,20 +33,33 @@ export default function MulticamWorkspace() {
   const [pick, setPick] = useState<string | null>(null);
   const [plan, setPlan] = useState<Awaited<ReturnType<typeof api.agentCrossCamPlan>> | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadErr, setLoadErr] = useState<unknown>(null);
 
   const load = useCallback(async () => {
-    setGroups(await api.multicamGroups(sessionId));
+    try {
+      setGroups(await api.multicamGroups(sessionId));
+      setLoadErr(null);
+    } catch (e) {
+      setLoadErr(e);
+    }
   }, [sessionId]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     api.multicamReadiness(sessionId).then(setReady)
-      .catch((e) => setMsg(`could not check whether this session is linkable: ${humanizeError(e)}`));
+      .catch((e) => setMsg(`Could not check whether this session is linkable: ${humanizeError(e)}`));
   }, [sessionId]);
 
   const associate = async () => {
-    const r = await api.multicamAssociate(sessionId);
-    setMsg(r.reason ? r.reason : `linked ${r.associated} objects into ${r.rig_tracks} rig tracks across ${r.cameras.join(", ")}`);
+    setBusy(true);
+    try {
+      const r = await api.multicamAssociate(sessionId);
+      setMsg(r.reason ? sentence(r.reason) : `Linked ${r.associated} objects into ${r.rig_tracks} rig tracks across ${r.cameras.join(", ")}`);
+    } catch (e) {
+      setMsg(`Associate failed: ${humanizeError(e)}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const group = groups?.groups[sel];
@@ -67,8 +87,8 @@ export default function MulticamWorkspace() {
       const p = await api.agentCrossCamPlan(objectId);
       setPlan(p);
       setMsg(p.reason
-        ? p.reason
-        : `${p.counts.auto_accept + p.counts.review} of ${p.counts.targets} view(s) can see it`);
+        ? sentence(p.reason)
+        : `${p.counts.auto_accept + p.counts.review} of ${views(p.counts.targets)} can see it`);
     } catch (e) {
       setMsg(humanizeError(e));
     } finally {
@@ -83,8 +103,8 @@ export default function MulticamWorkspace() {
     try {
       const r = await api.agentCrossCam(pick);
       setMsg(r.created
-        ? `placed in ${r.created} view(s); undo from the agent run ${r.run_id.slice(0, 8)}`
-        : "nothing to place: no other view can see this object");
+        ? `Placed in ${views(r.created)}. Undo it from agent run ${shortId(r.run_id)}.`
+        : "Nothing to place: no other view can see this object");
       setPlan(null);
       setPick(null);
     } catch (e) {
@@ -97,54 +117,74 @@ export default function MulticamWorkspace() {
   return (
     <div className="min-h-screen flex flex-col">
       <PageHeaderBar
-        title="MULTICAM"
-        subtitle={sessionId.slice(0, 8)}
+        title="Multi-camera"
+        subtitle={shortId(sessionId)}
         meta={
           <>
             {/* A deep link or a fresh tab has no history, and the default fallback is "/" - which
                 drops someone who opened a rig view straight to the triage queue. The session this
                 view belongs to is the place they meant to be. */}
-            <BackButton fallback={`/annotations?session=${sessionId}`} label="session" />
-            {groups && <span className="text-ink-3">{cams.length} camera{cams.length !== 1 ? "s" : ""} · {groups.n_groups} sync groups {groups.multicamera ? "" : "(single-camera)"}</span>}
-            {msg && <span className="text-warn">{msg}</span>}
+            <BackButton fallback={`/annotations?session=${sessionId}`} label="Session" />
+            {groups && <span className="text-ink-3">{cams.length} camera{cams.length !== 1 ? "s" : ""} · {groups.n_groups} synchronised instants{groups.multicamera ? "" : " · single camera"}</span>}
           </>
         }
+        right={msg && <span role="status" title={msg} className={`max-w-[560px] truncate ${/fail|could not/i.test(msg) ? "text-warn" : "text-ink-2"}`}>{msg}</span>}
         primaryAction={
-          <button onClick={associate} className="border border-accent text-accent px-2 py-1 hover:bg-accent/10">associate across views</button>
+          <button type="button" onClick={associate} disabled={busy} className="btn btn-primary"
+            title="match objects that are the same physical thing across the rig's cameras into rig tracks">
+            Associate across views
+          </button>
         }
       />
 
       <div className="flex-1 flex min-h-0">
-        <Inspector title="sync groups" side="left">
-          <div className="p-3 space-y-2">
-            <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">synchronized instants (PPS ts_ns)</div>
-            <div className="flex flex-wrap items-center gap-px">
+        <Inspector title="Sync groups" side="left">
+          <div className="p-3 space-y-3">
+            <div>
+              <div className="section-title">Synchronised instants</div>
+              <p className="section-desc mt-0.5">Moments where the rig&apos;s cameras fired together. Pick one to see every view at that instant.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1">
               {groups?.groups.map((g, i) => (
-                <button key={i} onClick={() => setSel(i)} aria-pressed={i === sel}
-                  aria-label={`instant ${i + 1}: ts ${g.ts_ns}, ${Object.keys(g.frames).length} view(s)`}
-                  title={`ts ${g.ts_ns} · ${Object.keys(g.frames).length} view(s)`}
-                  className="w-2 shrink-0 h-8"
+                <button key={i} type="button" onClick={() => setSel(i)} aria-pressed={i === sel}
+                  aria-label={`instant ${i + 1}: ${fromNs(g.ts_ns)}, ${views(Object.keys(g.frames).length)}`}
+                  title={`instant ${i + 1} · ${fromNs(g.ts_ns)} · ${views(Object.keys(g.frames).length)}`}
+                  className="w-3 shrink-0 h-9 rounded-sm"
                   style={{ background: i === sel ? "#FF7A2F" : Object.keys(g.frames).length > 1 ? "#56D364" : "#3a3f46" }} />
               ))}
+            </div>
+            {group && (
+              <div className="text-[12.5px] text-ink-2">
+                Instant {sel + 1} of {groups?.n_groups ?? groups?.groups.length}
+                <div className="text-[12px] text-ink-3 tabular-nums">{fromNs(group.ts_ns)} · {views(Object.keys(group.frames).length)}</div>
+              </div>
+            )}
+            <div className="flex flex-col gap-1 text-[12px] text-ink-3 border-t hairline pt-2">
+              <span><span className="inline-block w-2.5 h-2.5 mr-1.5 rounded-sm align-[-1px]" style={{ background: "#FF7A2F" }} />Selected</span>
+              <span><span className="inline-block w-2.5 h-2.5 mr-1.5 rounded-sm align-[-1px]" style={{ background: "#56D364" }} />Seen by more than one camera</span>
+              <span><span className="inline-block w-2.5 h-2.5 mr-1.5 rounded-sm align-[-1px]" style={{ background: "#3a3f46" }} />One camera only</span>
             </div>
           </div>
         </Inspector>
 
         <main className="flex-1 overflow-auto p-4 min-w-0 space-y-3">
+          {(loadErr || !groups) && (
+            <LoadState loading={!groups && !loadErr} error={loadErr} rows={3} onRetry={() => { setLoadErr(null); void load(); }} />
+          )}
           {/* Why this session cannot be linked, in the order the fixes have to happen. Labelling objects
               on a session whose calibration has never been validated produces labels that cannot be
               projected anywhere, so the ordering is part of the answer. */}
           {ready && !ready.ready && (
-            <div className="panel p-3 text-[12px] space-y-2">
-              <div className="text-warn uppercase text-[10px]">
-                cross-view linking is not available on this session
+            <div className="panel p-3.5 text-[12.5px] space-y-2.5 border-warn/40">
+              <div className="section-title text-warn">
+                Cross-view linking is not available on this session
               </div>
               {ready.blockers.map((b, i) => (
                 <div key={b.code} className="flex gap-2">
-                  <span className="text-ink-3 shrink-0">{i + 1}.</span>
+                  <span className="text-ink-3 shrink-0 tabular-nums">{i + 1}.</span>
                   <span className="min-w-0">
-                    <span className="block text-ink-2">{b.detail}</span>
-                    <span className="block text-ink-3">{b.fix}</span>
+                    <span className="block text-ink">{sentence(b.detail)}</span>
+                    <span className="block text-ink-3">{sentence(b.fix)}</span>
                   </span>
                 </div>
               ))}
@@ -157,23 +197,23 @@ export default function MulticamWorkspace() {
 
           {/* Carry one object across the rig. Only offered where it can actually work. */}
           {ready?.ready && group && (
-            <div className="panel p-3 text-[12px] flex flex-wrap items-center gap-2">
-              <span className="text-ink-3">carry an object across from</span>
+            <div className="panel p-3 text-[12.5px] flex flex-wrap items-center gap-2">
+              <span className="text-ink-2">Carry an object across from</span>
               {cams.filter((c) => group.frames[c]).map((c) => (
-                <button key={c} onClick={() => setSrcCam(c === srcCam ? null : c)}
-                  className={`border px-2 py-0.5 rounded ${c === srcCam ? "border-accent text-accent" : "border-line text-ink-2 hover:border-accent"}`}>
+                <button key={c} type="button" onClick={() => setSrcCam(c === srcCam ? null : c)} aria-pressed={c === srcCam}
+                  className={`chip font-mono ${c === srcCam ? "chip-on" : ""}`}>
                   {c}
                 </button>
               ))}
               {srcCam && (
                 <span className="text-ink-3">
-                  {objects.length ? `${objects.length} object(s) - pick one below` : "no objects on this view"}
+                  {objects.length ? `${objects.length} object${objects.length === 1 ? "" : "s"}: pick one below` : "No objects on this view"}
                 </span>
               )}
               {plan && pick && (
-                <button onClick={commitCross} disabled={busy || !plan.counts.targets}
-                  className="ml-auto border border-pass/60 text-pass px-2 py-0.5 rounded hover:bg-pass/10 disabled:opacity-40">
-                  place in {plan.counts.auto_accept + plan.counts.review} view(s)
+                <button type="button" onClick={commitCross} disabled={busy || !plan.counts.targets}
+                  className="ml-auto btn btn-primary">
+                  Place in {views(plan.counts.auto_accept + plan.counts.review)}
                 </button>
               )}
             </div>
@@ -181,11 +221,12 @@ export default function MulticamWorkspace() {
 
           {/* The objects available to carry, from the chosen source view. */}
           {ready?.ready && srcCam && objects.length > 0 && (
-            <div className="panel p-2 flex flex-wrap gap-1.5 text-[11px]">
+            <div className="panel p-2.5 flex flex-wrap gap-1.5">
               {objects.map((o) => (
-                <button key={o.object_id} onClick={() => void planCross(o.object_id)} disabled={busy}
-                  className={`border px-1.5 py-0.5 rounded ${o.object_id === pick ? "border-accent text-accent" : "border-line text-ink-2 hover:border-accent"} disabled:opacity-40`}>
-                  {o.class_name}
+                <button key={o.object_id} type="button" onClick={() => void planCross(o.object_id)} disabled={busy}
+                  aria-pressed={o.object_id === pick}
+                  className={`chip ${o.object_id === pick ? "chip-on" : ""} disabled:opacity-40`}>
+                  {o.class_name.replace(/_/g, " ")}
                 </button>
               ))}
             </div>
@@ -193,14 +234,14 @@ export default function MulticamWorkspace() {
 
           {/* rig views at the selected instant */}
           {group && (
-            <div className={`grid gap-3 ${cams.length > 2 ? "grid-cols-2 lg:grid-cols-3" : cams.length === 2 ? "grid-cols-2" : "grid-cols-1 max-w-2xl"}`}>
+            <div className={`grid gap-3 ${cams.length > 2 ? "grid-cols-2 lg:grid-cols-3" : cams.length === 2 ? "grid-cols-2" : "grid-cols-1 max-w-5xl"}`}>
               {cams.map((cam) => {
                 const f = group.frames[cam];
                 return (
                   <div key={cam} className="panel">
-                    <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 px-2 py-1 border-b hairline flex justify-between">
-                      <span className="text-ink-2">{cam}</span>
-                      {f && <button onClick={() => router.push(`/frame/${f.frame_id}`)} className="text-info hover:text-accent">annotate →</button>}
+                    <div className="panel-head justify-between">
+                      <span className="text-[12.5px] font-medium text-ink font-mono">{cam}</span>
+                      {f && <button type="button" onClick={() => router.push(`/frame/${f.frame_id}`)} className="link text-[12px]">Annotate →</button>}
                     </div>
                     {f ? (
                       <div className="relative">
@@ -229,13 +270,13 @@ export default function MulticamWorkspace() {
                           );
                         })()}
                         {plan?.items.some((x) => x.frame_id === f.frame_id && x.action === "skip") && (
-                          <span className="absolute bottom-1 left-1 bg-bg/80 text-ink-3 text-[10.5px] px-1">
-                            not visible from here
+                          <span className="absolute bottom-1 left-1 bg-bg/80 text-ink-2 text-[11px] px-1.5 py-0.5 rounded">
+                            Not visible from here
                           </span>
                         )}
                       </div>
                     ) : (
-                      <div className="aspect-video bg-bg-2 flex items-center justify-center text-[11px] text-ink-3">no frame at this instant</div>
+                      <div className="aspect-video bg-bg-2 flex items-center justify-center text-[12px] text-ink-3">No frame from this camera at this instant</div>
                     )}
                   </div>
                 );

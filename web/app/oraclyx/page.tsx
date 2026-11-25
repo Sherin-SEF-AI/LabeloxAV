@@ -5,63 +5,70 @@
 // human queue. This shows the split (the whole point: humans only touch disagreements) and the distillation
 // set size. Operational Materialism, color only by state.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import PageShell from "@/components/shell/PageShell";
+import LoadState from "@/components/shell/LoadState";
+import EmptyState from "@/components/ui/EmptyState";
+import { Stat } from "@/components/ui/kit";
 import { apiGet } from "@/lib/api";
+import { num, pct } from "@/lib/format";
 
 type Board = { total: number; auto_accepted: number; routed_to_human: number; auto_accept_rate: number };
 
 export default function OraclyxBoard() {
   const [b, setB] = useState<Board | null>(null);
   const [distill, setDistill] = useState<number | null>(null);
-  useEffect(() => {
-    apiGet<Board>("/api/oraclyx/board").then(setB).catch(() => {});
+  const [err, setErr] = useState<unknown>(null);
+  const load = useCallback(() => {
+    setErr(null);
+    apiGet<Board>("/api/oraclyx/board").then(setB).catch(setErr);
     apiGet<{ n: number }>("/api/oraclyx/distillation").then((d) => setDistill(d.n)).catch(() => {});
   }, []);
+  useEffect(() => { load(); }, [load]);
 
   const auto = b?.auto_accepted ?? 0;
   const human = b?.routed_to_human ?? 0;
   const total = b?.total ?? 0;
 
   return (
-    <PageShell active="ORACLYX" title="ORACLYX consensus board"
-      right={<span className="text-[12px] text-ink-3">{total} pseudo-labels · {distill ?? 0} in distillation set</span>}>
-      <div className="p-4 max-w-3xl space-y-4">
-        <div className="grid grid-cols-3 gap-3 font-mono">
-          <div className="border border-line p-4">
-            <div className="text-[10px] uppercase text-ink-3">total</div>
-            <div className="text-2xl text-ink mt-1">{total}</div>
+    <PageShell active="ORACLYX" title="Consensus board"
+      subtitle="Labels the models all agree on are accepted; only the ones they disagree on go to a person"
+      right={<span className="text-[12.5px] text-ink-3">{num(distill ?? 0)} in the training set</span>}>
+      <div className="page-wrap-narrow space-y-4">
+        {err != null && <LoadState error={err} onRetry={load} />}
+        {!b && err == null ? <LoadState loading rows={3} /> : b && (!total ? (
+          <div className="panel">
+            <EmptyState icon="wand" title="No machine labels compared yet">
+              When several models label the same recordings, their answers are compared here. Agreement is
+              accepted automatically; disagreement goes to the review queue. Nothing has been compared yet.
+            </EmptyState>
           </div>
-          <div className="border border-line p-4">
-            <div className="text-[10px] uppercase text-ink-3">auto-truthed</div>
-            <div className="text-2xl text-pass mt-1">{auto}</div>
-            <div className="text-[10px] text-ink-3">consensus, no human touch</div>
+        ) : (<>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Stat label="Machine labels" value={num(total)} />
+            <Stat label="Accepted" value={num(auto)} tone="pass" sub="All models agreed, no person needed" />
+            <Stat label="Sent to a person" value={num(human)} tone="warn" sub="Models disagreed" />
           </div>
-          <div className="border border-line p-4">
-            <div className="text-[10px] uppercase text-ink-3">routed to human</div>
-            <div className="text-2xl text-warn mt-1">{human}</div>
-            <div className="text-[10px] text-ink-3">disagreement, highest value</div>
-          </div>
-        </div>
 
-        <div className="border border-line p-3">
-          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 mb-2">
-            consensus split · auto-accept rate {((b?.auto_accept_rate ?? 0) * 100).toFixed(1)}%
-          </div>
-          <div className="h-5 bg-line/40 relative flex text-[10.5px]">
-            <span className="h-full bg-pass flex items-center justify-center text-bg"
-              style={{ width: `${total ? (auto / total) * 100 : 0}%` }}>{auto || ""}</span>
-            <span className="h-full bg-warn flex items-center justify-center text-bg"
-              style={{ width: `${total ? (human / total) * 100 : 0}%` }}>{human || ""}</span>
-          </div>
-          <div className="mt-2 text-[10.5px] text-ink-3">
-            the fusion path auto-truths the easy majority so humans only ever touch the disagreements
-          </div>
-        </div>
-
-        {!total && <div className="text-[12px] text-ink-3 text-center py-6">
-          no pseudo-labels yet; ORACLYX records them as fusion runs over sessions
-        </div>}
+          <section className="panel">
+            <div className="panel-head">
+              <h2 className="section-title">Agreement</h2>
+              <span className="text-[12px] text-ink-3">{pct(b.auto_accept_rate, 1)} accepted without review</span>
+            </div>
+            <div className="p-3.5">
+              <div className="h-6 bg-bg-2 rounded-sm overflow-hidden flex text-[11px] font-medium">
+                <span className="h-full bg-pass flex items-center justify-center text-bg"
+                  style={{ width: `${(auto / total) * 100}%` }}>{auto ? num(auto) : ""}</span>
+                <span className="h-full bg-warn flex items-center justify-center text-bg"
+                  style={{ width: `${(human / total) * 100}%` }}>{human ? num(human) : ""}</span>
+              </div>
+              <div className="mt-2 flex gap-4 text-[12px] text-ink-3">
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-pass" />Accepted</span>
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-warn" />Sent to a person</span>
+              </div>
+            </div>
+          </section>
+        </>))}
       </div>
     </PageShell>
   );

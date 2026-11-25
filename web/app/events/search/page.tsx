@@ -6,6 +6,9 @@ import { api, humanizeError } from "@/lib/api";
 import { useQuery } from "@/lib/useQuery";
 import PageShell from "@/components/shell/PageShell";
 import LoadState from "@/components/shell/LoadState";
+import EmptyState from "@/components/ui/EmptyState";
+import { Stat } from "@/components/ui/kit";
+import { humanize, num, pct, plural } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import type { EventCorpusSummary, EventHit, EventSearchResult, EventTaxonomy } from "@/lib/types";
 
@@ -72,166 +75,179 @@ export default function EventSearchPage() {
     setWithState("R,Y");
     setWithinMs(2000);
     setSeverity(""); setState(""); setCity("");
-    toast("every lane change while a signal showed red or amber", "success");
+    toast("Every lane change while a signal showed red or amber", "success");
   }
 
   function open(hit: EventHit) {
     if (hit.frame_id) router.push(`/frame/${hit.frame_id}`);
-    else toast("this event has no frame to open", "error");
+    else toast("This event has no frame to open", "error");
   }
 
   const kinds = (taxonomy?.kinds ?? []).map((k) => k.kind);
+  const kindsLabel = (v: string) => v.split(",").map((k) => humanize(k).toLowerCase()).join(" or ");
+  const signalLabel = (v: string) =>
+    SIGNAL_STATES.find((s) => s.key === v)?.label ?? v.split(",").join(" or ");
 
   return (
     <PageShell active="EVENT SEARCH" title="Behaviour search"
-      subtitle="what happened across the corpus, not in one drive">
-      <div className="p-4 space-y-3 max-w-6xl">
+      subtitle="Search what happened across every drive, not just one: an event, optionally while another was happening.">
+      <div className="page-wrap space-y-4">
 
         {summary && (
-          <div className="flex flex-wrap gap-2 text-[12px]">
-            <Stat label="events" value={summary.total} />
-            <Stat label="violations" value={summary.by_severity.violation ?? 0}
-              tone={(summary.by_severity.violation ?? 0) > 0 ? "text-block" : undefined} />
-            <Stat label="notable" value={summary.by_severity.notable ?? 0} tone="text-warn" />
-            <Stat label="sessions" value={summary.sessions_with_events} />
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+            <Stat label="Events" value={num(summary.total)} />
+            <Stat label="Violations" value={num(summary.by_severity.violation ?? 0)}
+              tone={(summary.by_severity.violation ?? 0) > 0 ? "block" : undefined} />
+            <Stat label="Notable" value={num(summary.by_severity.notable ?? 0)} tone="warn" />
+            <Stat label="Sessions with events" value={num(summary.sessions_with_events)} />
             {Object.entries(summary.cities).map(([c, n]) => (
-              <Stat key={c} label={c.toLowerCase()} value={n} hint="sessions" />
+              <Stat key={c} label={c} value={num(n)} sub={n === 1 ? "session" : "sessions"} />
             ))}
           </div>
         )}
 
-        <div className="panel px-3 py-2 space-y-2 text-[12px]">
-          <div className="flex flex-wrap items-end gap-2">
-            <Field label="kind">
-              <select className="input text-[12px]" value={kind}
-                onChange={(e) => setKind(e.target.value)}>
-                <option value="">any</option>
-                {/* A preset can set several kinds at once, and without an option carrying that exact value
-                    the control falls back to displaying "any" while the query is in fact filtered, which is
-                    a control lying about what is being asked. */}
-                {kind && !kinds.includes(kind) && (
-                  <option value={kind}>{kind.split(",").join(" or ")}</option>
-                )}
-                {kinds.map((k) => <option key={k} value={k}>{k}</option>)}
-              </select>
-            </Field>
-            <Field label="severity">
-              <select className="input text-[12px]" value={severity}
-                onChange={(e) => setSeverity(e.target.value)}>
-                <option value="">any</option>
-                {(taxonomy?.severities ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </Field>
-            <Field label="review state">
-              <select className="input text-[12px]" value={state}
-                onChange={(e) => setState(e.target.value)}>
-                <option value="">any</option>
-                <option value="review">review</option>
-                <option value="confirmed">confirmed</option>
-                <option value="rejected">rejected</option>
-              </select>
-            </Field>
-            <Field label="city">
-              <select className="input text-[12px]" value={city}
-                onChange={(e) => setCity(e.target.value)}>
-                <option value="">any</option>
-                {Object.keys(summary?.cities ?? {}).map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </Field>
+        <section className="panel">
+          <div className="panel-head">
+            <h2 className="section-title">Find events</h2>
+            <div className="ml-auto">
+              <button onClick={askTheHardOne} className="btn"
+                data-tip="Every lane change while a traffic signal showed red or amber">
+                Try: lane change on red
+              </button>
+            </div>
           </div>
+          <div className="p-4 space-y-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <Field label="Event">
+                <select className="field text-[12.5px] min-w-[180px]" value={kind}
+                  onChange={(e) => setKind(e.target.value)}>
+                  <option value="">Any</option>
+                  {/* A preset can set several kinds at once, and without an option carrying that exact value
+                      the control falls back to displaying "any" while the query is in fact filtered, which is
+                      a control lying about what is being asked. */}
+                  {kind && !kinds.includes(kind) && (
+                    <option value={kind}>{humanize(kindsLabel(kind))}</option>
+                  )}
+                  {kinds.map((k) => <option key={k} value={k}>{humanize(k)}</option>)}
+                </select>
+              </Field>
+              <Field label="Severity">
+                <select className="field text-[12.5px]" value={severity}
+                  onChange={(e) => setSeverity(e.target.value)}>
+                  <option value="">Any</option>
+                  {(taxonomy?.severities ?? []).map((s) => <option key={s} value={s}>{humanize(s)}</option>)}
+                </select>
+              </Field>
+              <Field label="Review state">
+                <select className="field text-[12.5px]" value={state}
+                  onChange={(e) => setState(e.target.value)}>
+                  <option value="">Any</option>
+                  <option value="review">Awaiting review</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </Field>
+              <Field label="City">
+                <select className="field text-[12.5px]" value={city}
+                  onChange={(e) => setCity(e.target.value)}>
+                  <option value="">Any</option>
+                  {Object.keys(summary?.cities ?? {}).map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </Field>
+            </div>
 
-          {/* The conjunction. A filtered list of one kind is what a session view nearly does already; this
-              is the query that makes a corpus of events interrogable. */}
-          <div className="flex flex-wrap items-end gap-2 border-t hairline pt-2">
-            <span className="text-ink-3 uppercase text-[10px] pb-1.5">while</span>
-            <Field label="another event">
-              <select className="input text-[12px]" value={withKind}
-                onChange={(e) => setWithKind(e.target.value)}>
-                <option value="">nothing in particular</option>
-                {kinds.map((k) => <option key={k} value={k}>{k}</option>)}
-              </select>
-            </Field>
-            {withKind === "signal_phase" && (
-              <Field label="was showing">
-                <select className="input text-[12px]" value={withState}
-                  onChange={(e) => setWithState(e.target.value)}>
-                  <option value="">any colour</option>
-                  {SIGNAL_STATES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            {/* The conjunction. A filtered list of one kind is what a session view nearly does already; this
+                is the query that makes a corpus of events interrogable. */}
+            <div className="flex flex-wrap items-end gap-3 border-t hairline pt-3">
+              <span className="text-[12.5px] text-ink-2 pb-1.5">While</span>
+              <Field label="Another event">
+                <select className="field text-[12.5px] min-w-[180px]" value={withKind}
+                  onChange={(e) => setWithKind(e.target.value)}>
+                  <option value="">Nothing in particular</option>
+                  {kinds.map((k) => <option key={k} value={k}>{humanize(k)}</option>)}
                 </select>
               </Field>
-            )}
-            {withKind && (
-              <Field label="within">
-                <select className="input text-[12px]" value={withinMs}
-                  onChange={(e) => setWithinMs(Number(e.target.value))}>
-                  <option value={0}>exactly overlapping</option>
-                  <option value={1000}>1s either side</option>
-                  <option value={2000}>2s either side</option>
-                  <option value={5000}>5s either side</option>
-                </select>
-              </Field>
-            )}
-            <button onClick={askTheHardOne}
-              className="border border-accent text-accent px-2 py-1 hover:bg-accent/10">
-              lane change on red
-            </button>
+              {withKind === "signal_phase" && (
+                <Field label="Was showing">
+                  <select className="field text-[12.5px]" value={withState}
+                    onChange={(e) => setWithState(e.target.value)}>
+                    <option value="">Any colour</option>
+                    {SIGNAL_STATES.map((s) => <option key={s.key} value={s.key}>{humanize(s.label)}</option>)}
+                  </select>
+                </Field>
+              )}
+              {withKind && (
+                <Field label="Within">
+                  <select className="field text-[12.5px]" value={withinMs}
+                    onChange={(e) => setWithinMs(Number(e.target.value))}>
+                    <option value={0}>Exactly overlapping</option>
+                    <option value={1000}>1 s either side</option>
+                    <option value={2000}>2 s either side</option>
+                    <option value={5000}>5 s either side</option>
+                  </select>
+                </Field>
+              )}
+            </div>
           </div>
-        </div>
+        </section>
 
         {err != null && <LoadState error={err} onRetry={() => void run()} />}
 
         {res && !err && (
-          <>
+          <section className="panel">
             {/* The question, in words. A row of dropdowns states a query; a sentence states what was
                 actually asked, which is what somebody reads before trusting a count of zero. */}
-            <div className="text-[12px] text-ink-2">
-              asking:{" "}
-              <span className="text-ink">
-                {kind ? kind.split(",").join(" or ") : "any event"}
-                {severity ? `, severity ${severity}` : ""}
-                {state ? `, ${state}` : ""}
-                {city ? `, in ${city}` : ""}
-                {withKind ? ` while ${withKind}` : ""}
-                {withKind && withState ? ` was ${withState.split(",").join(" or ")}` : ""}
-                {withKind && withinMs ? ` (within ${withinMs / 1000}s)` : ""}
-              </span>
-            </div>
-            <div className="text-[12px] text-ink-3">
-              {res.total} match{res.total === 1 ? "" : "es"}
-              {res.returned < res.total ? `, showing the first ${res.returned} by confidence` : ""}
-              {res.detail ? ` (${res.detail})` : ""}
+            <div className="panel-head flex-wrap">
+              <div className="text-[12.5px] text-ink-2 normal-case tracking-normal font-normal">
+                <span className="text-ink font-medium">{plural(res.total, "match", "matches")}</span>
+                {" for "}
+                <span className="text-ink">
+                  {kind ? kindsLabel(kind) : "any event"}
+                  {severity ? `, severity ${severity}` : ""}
+                  {state ? `, ${state === "review" ? "awaiting review" : state}` : ""}
+                  {city ? `, in ${city}` : ""}
+                  {withKind ? ` while ${humanize(withKind).toLowerCase()}` : ""}
+                  {withKind && withState ? ` was ${signalLabel(withState)}` : ""}
+                  {withKind && withinMs ? ` (within ${withinMs / 1000} s)` : ""}
+                </span>
+              </div>
+              <div className="ml-auto text-[12px] text-ink-3 normal-case tracking-normal font-normal">
+                {res.returned < res.total ? `Showing the first ${num(res.returned)}, highest confidence first` : ""}
+                {res.detail ? ` (${res.detail})` : ""}
+              </div>
             </div>
 
             {res.results.length === 0 ? (
-              <div className="panel px-3 py-6 text-[12px] text-ink-3 text-center">
-                Nothing matches. A conjunction that returns nothing is an answer: it means the corpus holds
-                no case of the two things happening together, which is worth knowing.
-              </div>
+              <EmptyState compact icon="search" title="Nothing matches">
+                A search that returns nothing is an answer: the corpus holds no case of these things happening
+                together. Loosen a filter to widen it.
+              </EmptyState>
             ) : (
-              <div className="panel overflow-x-auto">
-                <table className="w-full text-[12px]">
-                  <thead className="text-ink-3 text-left">
+              <div className="overflow-x-auto">
+                <table className="data-table">
+                  <thead>
                     <tr>
-                      <th className="px-2 py-1">kind</th><th>severity</th><th>actor</th>
-                      <th>city</th><th>vehicle</th><th>at</th><th>for</th><th>conf</th>
-                      <th>state</th><th />
+                      <th>Event</th><th>Severity</th><th>Actor</th>
+                      <th>City</th><th>Vehicle</th><th className="num">At</th><th className="num">Lasts</th>
+                      <th className="num">Confidence</th><th>State</th><th><span className="sr-only">Open</span></th>
                     </tr>
                   </thead>
                   <tbody>
                     {res.results.map((h) => (
-                      <tr key={h.event_id} className="border-t border-line hover:bg-line/40">
-                        <td className="px-2 py-1">{h.kind}</td>
-                        <td className={SEVERITY_TONE[h.severity] ?? ""}>{h.severity}</td>
-                        <td className="text-ink-3">{h.actor_class ?? "-"}</td>
-                        <td className="text-ink-3">{h.city ?? "-"}</td>
-                        <td className="text-ink-3">{h.vehicle_id ?? "-"}</td>
-                        <td className="tabular-nums">{h.at_s == null ? "-" : `${h.at_s}s`}</td>
-                        <td className="tabular-nums text-ink-3">{h.duration_s}s</td>
-                        <td className="tabular-nums">{h.conf == null ? "-" : h.conf.toFixed(2)}</td>
-                        <td className="text-ink-3">{h.state}</td>
-                        <td className="text-right pr-2">
+                      <tr key={h.event_id}>
+                        <td className="text-ink">{humanize(h.kind)}</td>
+                        <td className={SEVERITY_TONE[h.severity] ?? ""}>{humanize(h.severity)}</td>
+                        <td>{h.actor_class ? humanize(h.actor_class) : "-"}</td>
+                        <td>{h.city ?? "-"}</td>
+                        <td>{h.vehicle_id ?? "-"}</td>
+                        <td className="num">{h.at_s == null ? "-" : `${Number(h.at_s).toFixed(1)} s`}</td>
+                        <td className="num text-ink-3">{`${Number(h.duration_s).toFixed(1)} s`}</td>
+                        <td className="num">{h.conf == null ? "-" : pct(h.conf)}</td>
+                        <td className="text-ink-3">{h.state === "review" ? "Awaiting review" : humanize(h.state)}</td>
+                        <td className="text-right">
                           <button onClick={() => open(h)} disabled={!h.frame_id}
-                            className="text-info hover:text-accent disabled:opacity-30">open &rarr;</button>
+                            data-tip={h.frame_id ? "Open the frame where this event starts" : "This event has no frame to open"}
+                            className="link disabled:opacity-30 whitespace-nowrap">Open frame &rarr;</button>
                         </td>
                       </tr>
                     ))}
@@ -239,10 +255,10 @@ export default function EventSearchPage() {
                 </table>
               </div>
             )}
-          </>
+          </section>
         )}
 
-        {busy && !res && <LoadState loading />}
+        {busy && !res && <LoadState loading rows={6} />}
       </div>
     </PageShell>
   );
@@ -250,21 +266,9 @@ export default function EventSearchPage() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</span>
+    <label className="flex flex-col gap-1.5">
+      <span className="label-caps">{label}</span>
       {children}
     </label>
-  );
-}
-
-function Stat({ label, value, hint, tone }: {
-  label: string; value: number | string; hint?: string; tone?: string;
-}) {
-  return (
-    <div className="panel px-3 py-2 min-w-[110px]">
-      <div className="text-[10px] uppercase text-ink-3">{label}</div>
-      <div className={`text-[18px] tabular-nums ${tone ?? "text-ink"}`}>{value}</div>
-      {hint && <div className="text-[10px] text-ink-3">{hint}</div>}
-    </div>
   );
 }

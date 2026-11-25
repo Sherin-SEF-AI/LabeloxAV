@@ -53,7 +53,7 @@ export default function ExplainPanel({ objectId }: { objectId: string }) {
 
       {/* structured factors */}
       <div className="border-t hairline pt-1.5 space-y-1">
-        <div className="text-ink-3 uppercase text-[9px]">paths</div>
+        <div className="label-caps">Paths</div>
         {ex.paths.length === 0 && <div className="text-ink-3">no model proposals recorded</div>}
         {ex.paths.map((p, i) => (
           <div key={i} className="flex items-center justify-between gap-2">
@@ -68,7 +68,7 @@ export default function ExplainPanel({ objectId }: { objectId: string }) {
 
       {cal.calibrated != null && (
         <div className="border-t hairline pt-1.5 flex items-center justify-between">
-          <span className="text-ink-3 uppercase text-[9px]">calibrated confidence</span>
+          <span className="label-caps">Calibrated confidence</span>
           <span>
             <span className={cal.auto_accept_floor != null && cal.calibrated >= cal.auto_accept_floor ? "text-pass" : "text-warn"}>{cal.calibrated}</span>
             <span className="text-ink-3"> / floor {cal.auto_accept_floor} · raw {cal.raw}</span>

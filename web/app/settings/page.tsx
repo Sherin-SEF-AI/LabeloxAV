@@ -68,19 +68,20 @@ function SystemStatus() {
   if (user && user.role !== "admin") {
     return (
       <Card title="System status" description="Installation health is visible to administrators.">
-        <p className="text-[12.5px] text-ink-3">Ask an administrator, or have them run <code className="font-mono text-ink-2">labeloxav doctor</code> on the server.</p>
+        <p className="text-[12.5px] text-ink-3">If something looks wrong, ask an administrator to check it here.</p>
       </Card>
     );
   }
 
   const overall = data ? STATUS[data.status] : null;
+  const problems = data ? data.checks.filter((c) => c.status === "warn" || c.status === "fail") : [];
   return (
     <Card
       title="System status"
-      description="The same checks as labeloxav doctor, run inside the application. Anything not OK says how to fix it."
+      description="Health checks for the services, models and job queue. Anything not OK says how to fix it."
       action={
         <button className="btn shrink-0" onClick={() => void load()} disabled={loading}>
-          <Icon name="undo" size={13} />{loading ? "Checking" : "Check again"}
+          <Icon name="undo" size={13} />{loading ? "Checking…" : "Check again"}
         </button>
       }>
       <LoadState loading={loading && !data} error={error} onRetry={() => void load()} />
@@ -93,13 +94,35 @@ function SystemStatus() {
             </span>
             {checkedAt && <span className="text-ink-3">checked {checkedAt.toLocaleTimeString()}</span>}
           </div>
+          {/* What needs a person comes first and is never folded away; the passing checks are one click
+              further, so a healthy installation does not push the rest of the page off the screen. */}
+          {problems.length > 0 && <CheckList rows={problems} />}
+          {data.checks.length > problems.length && (
+            <details className="group mt-3">
+              <summary className="cursor-pointer select-none text-[12.5px] text-ink-2 hover:text-ink list-none flex items-center gap-1.5">
+                <span className="text-ink-3 text-[10.5px] w-3 group-open:rotate-90 transition-transform" aria-hidden>▸</span>
+                {problems.length ? "Show the checks that pass" : `Show all ${data.checks.length} checks`}
+              </summary>
+              <div className="mt-3">
+                <CheckList rows={data.checks.filter((c) => c.status === "ok" || c.status === "info")} />
+              </div>
+            </details>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+function CheckList({ rows: all }: { rows: Check[] }) {
+  return (
           <div className="flex flex-col gap-4">
             {GROUPS.map(([group, label]) => {
-              const rows = data.checks.filter((c) => c.group === group);
+              const rows = all.filter((c) => c.group === group);
               if (!rows.length) return null;
               return (
                 <div key={group}>
-                  <h3 className="side-section px-0 mb-1.5">{label}</h3>
+                  <h3 className="label-caps mb-1.5">{label}</h3>
                   <ul className="rounded-md border hairline divide-y divide-line overflow-hidden">
                     {rows.map((c) => {
                       const st = STATUS[c.status];
@@ -123,9 +146,6 @@ function SystemStatus() {
               );
             })}
           </div>
-        </>
-      )}
-    </Card>
   );
 }
 
@@ -162,25 +182,24 @@ function Preferences() {
 }
 
 const LINKS: { href: string; label: string; hint: string; icon: string }[] = [
-  { href: "/profile", label: "Your account", hint: "password, two-factor authentication, sessions", icon: "user" },
-  { href: "/settings/team", label: "Team", hint: "invite teammates, issue sign-in links (administrators)", icon: "person" },
-  { href: "/settings/projects", label: "Projects", hint: "who sees which sessions, members, moving sessions (administrators)", icon: "folder" },
-  { href: "/settings/keys", label: "API keys", hint: "credentials for scripts, notebooks and CI (administrators)", icon: "terminal" },
-  { href: "/integrations", label: "Integrations", hint: "storage buckets and webhooks", icon: "link" },
-  { href: "/activity", label: "Activity", hint: "what you and the team have done", icon: "activity" },
-  { href: "/govern/pii-access", label: "Personal data access log", hint: "who viewed unblurred data (administrators)", icon: "shield" },
-  { href: "/settings/about", label: "About", hint: "version, where the source is, and the licences that apply", icon: "info" },
-  { href: "/settings/usage", label: "Models and usage", hint: "what the models were asked and what it cost, and what is on the GPU (administrators)", icon: "activity" },
+  { href: "/profile", label: "Your account", hint: "Password, two-factor authentication, sessions", icon: "user" },
+  { href: "/settings/team", label: "Team", hint: "Invite teammates, issue sign-in links (administrators)", icon: "person" },
+  { href: "/settings/projects", label: "Projects", hint: "Who sees which sessions, members, moving sessions (administrators)", icon: "folder" },
+  { href: "/settings/keys", label: "API keys", hint: "Credentials for scripts, notebooks and CI (administrators)", icon: "terminal" },
+  { href: "/integrations", label: "Integrations", hint: "Storage buckets and webhooks", icon: "link" },
+  { href: "/activity", label: "Activity", hint: "What you and the team have done", icon: "activity" },
+  { href: "/govern/pii-access", label: "Personal data access log", hint: "Who viewed unblurred data (administrators)", icon: "shield" },
+  { href: "/settings/usage", label: "Models and usage", hint: "What the models were asked, what it cost, what is on the GPU (administrators)", icon: "chart" },
   { href: "/console", label: "Resource console", hint: "GPU, memory, disk and everything running now", icon: "server" },
+  { href: "/settings/about", label: "About", hint: "Version, source code and licences", icon: "info" },
 ];
 
 export default function SettingsPage() {
   return (
     <PageShell active="Settings" title="Settings" subtitle="System status, preferences and account">
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 flex flex-col gap-5">
+      <div className="page-wrap-narrow flex flex-col gap-4">
         <SystemStatus />
-        <Preferences />
-        <Card title="More settings">
+        <Card title="Account, team and system">
           <ul className="grid sm:grid-cols-2 gap-2">
             {LINKS.map((l) => (
               <li key={l.href}>
@@ -195,6 +214,7 @@ export default function SettingsPage() {
             ))}
           </ul>
         </Card>
+        <Preferences />
       </div>
     </PageShell>
   );

@@ -70,7 +70,7 @@ describe("interpolation", () => {
   });
 
   it("does not interpolate keys that have no placeholders", () => {
-    expect(t("action.accept", undefined, { n: 1 })).toBe("accept");
+    expect(t("action.accept", undefined, { n: 1 })).toBe("Accept");
   });
 });
 

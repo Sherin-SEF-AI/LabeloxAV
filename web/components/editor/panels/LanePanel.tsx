@@ -39,7 +39,7 @@ export default function LanePanel({
 }) {
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2 text-[12px]">
-      <div className="text-ink-3 uppercase text-[10px]">lanes ({lanes.length})</div>
+      <div className="text-ink-3 uppercase text-[10.5px]">lanes ({lanes.length})</div>
       {lanes.map((l) => (
         <div key={l.lane_id} onClick={() => onSelectLane(l.lane_id)}
           className={`flex items-center gap-1.5 cursor-pointer ${l.lane_id === laneSel ? "text-ink" : "text-ink-3 hover:text-ink-2"}`}>
@@ -54,7 +54,7 @@ export default function LanePanel({
         if (!sl) return null;
         return (
           <div className="border-t hairline pt-2 space-y-2">
-            <div className="text-ink-3 uppercase text-[10px]">selected lane</div>
+            <div className="text-ink-3 uppercase text-[10.5px]">selected lane</div>
             <select value={sl.lane_type} onChange={(e) => onSetLaneType(e.target.value)} className="w-full bg-bg border border-line px-1 py-0.5 text-ink">
               {LANE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
@@ -69,7 +69,7 @@ export default function LanePanel({
           could look at and not correct. */}
       <div className="border-t hairline pt-2 space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-ink-3 uppercase text-[10px]">drivable surface</span>
+          <span className="text-ink-3 uppercase text-[10.5px]">drivable surface</span>
           <span className="text-ink-3">
             {drivable
               ? `${Object.values(drivable).reduce((n, ps) => n + ps.length, 0)} regions`
@@ -96,7 +96,7 @@ export default function LanePanel({
                 <button key={c.key}
                   onClick={() => onStartArea(c.key)}
                   title={`draw a ${c.label} region`}
-                  className={`border px-1 py-1 text-[10px] ${c.tone}`}>
+                  className={`border px-1 py-1 text-[10.5px] ${c.tone}`}>
                   + {c.label}
                 </button>
               ))}
@@ -110,10 +110,10 @@ export default function LanePanel({
 
         {areaSel && (
           <div className="border-t hairline pt-2 space-y-1">
-            <div className="text-ink-3 uppercase text-[10px]">
+            <div className="text-ink-3 uppercase text-[10.5px]">
               selected {areaSel.split(":")[0].replace("_", " ")} region
             </div>
-            <div className="text-ink-3 text-[10px]">
+            <div className="text-ink-3 text-[10.5px]">
               drag a handle to pull the boundary onto the kerb, then save
             </div>
             <div className="grid grid-cols-2 gap-1">

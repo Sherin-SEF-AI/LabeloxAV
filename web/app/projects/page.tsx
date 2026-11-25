@@ -12,6 +12,8 @@ import { useQueryFlag } from "@/lib/useQueryParam";
 import { getUser } from "@/lib/user";
 import { honeypotVerdict, nextAction } from "@/lib/labelJobActions";
 import { invalidate, useQuery } from "@/lib/useQuery";
+import EmptyState from "@/components/ui/EmptyState";
+import { duration, humanize, pct, shortId } from "@/lib/format";
 
 // The labeling-operations board: who is doing what, where it is stuck, and whether the work is any good.
 // stage runs left to right; state is the column within a stage, so "in validation, not yet started" is a
@@ -27,14 +29,17 @@ const STATE_TONE: Record<string, string> = {
   rejected: "text-block",
 };
 
-function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
+function Section({ title, desc, children, right }: { title: string; desc?: string; children: React.ReactNode; right?: React.ReactNode }) {
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-        <span>{title}</span>
-        {right && <span className="ml-auto normal-case">{right}</span>}
+      <div className="panel-head">
+        <h2 className="section-title">{title}</h2>
+        {right && <span className="ml-auto">{right}</span>}
       </div>
-      <div className="p-3">{children}</div>
+      <div className="p-3.5">
+        {desc && <p className="section-desc mb-3">{desc}</p>}
+        {children}
+      </div>
     </section>
   );
 }
@@ -63,6 +68,7 @@ function ProjectsBody() {
   const golds: { gold_id: string; name: string; n_objects: number }[] = goldsQ.data ?? [];
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [showNew, setShowNew] = useState(false);
 
   // new project form
   const [pName, setPName] = useState("");
@@ -109,13 +115,13 @@ function ProjectsBody() {
     try {
       if (kind === "start") {
         await api.lopSetState(j.job_id, "in_progress", j.version);
-        flash(`started ${j.job_id.slice(0, 8)}`);
+        flash(`Started job ${shortId(j.job_id)}`);
       } else {
         const r = await api.lopSubmit(j.job_id, j.version);
         flash(r.honeypot_failed
-          ? `sent back: honeypot accuracy ${(r.honeypot_accuracy ?? 0).toFixed(2)} is below the `
-            + `project floor of ${r.min_honeypot_accuracy.toFixed(2)}`
-          : `submitted; now ${r.stage} / ${r.state}`);
+          ? `Sent back: check-question accuracy ${pct(r.honeypot_accuracy ?? 0)} is below the `
+            + `project minimum of ${pct(r.min_honeypot_accuracy)}`
+          : `Submitted; now ${humanize(r.stage).toLowerCase()}, ${humanize(r.state).toLowerCase()}`);
       }
       await refreshProject();
       // A submit is the only writer of honeypot accuracy, which is what the scorecards page reads.
@@ -133,13 +139,13 @@ function ProjectsBody() {
   /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => { if (boardQ.error) flash(humanizeError(boardQ.error)); }, [boardQ.error]);
   useEffect(() => {
-    if (usersQ.error) flash("could not load the user list; assignment is unavailable");
+    if (usersQ.error) flash("Could not load the user list, so jobs cannot be assigned");
   }, [usersQ.error]);
-  useEffect(() => { if (goldsQ.error) flash("could not load gold sets"); }, [goldsQ.error]);
+  useEffect(() => { if (goldsQ.error) flash("Could not load gold sets"); }, [goldsQ.error]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
   const createProject = async () => {
-    if (!pName.trim()) { flash("name the project"); return; }
+    if (!pName.trim()) { flash("Give the project a name"); return; }
     setBusy(true);
     try {
       const p = await api.lopCreateProject({
@@ -149,27 +155,28 @@ function ProjectsBody() {
       projectsQ.setData((cur) => ({ ...cur, projects: [p, ...(cur?.projects ?? [])] }));
       setProjectId(p.project_id);
       setPName("");
-      flash(`created "${p.name}"`);
+      setShowNew(false);
+      flash(`Created "${p.name}"`);
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
   const createTask = async () => {
-    if (!projectId) { flash("pick a project"); return; }
-    if (!tName.trim()) { flash("name the task"); return; }
+    if (!projectId) { flash("Pick a project first"); return; }
+    if (!tName.trim()) { flash("Give the task a name"); return; }
     setBusy(true);
     try {
       const t = await api.lopCreateTask({
         project_id: projectId, name: tName.trim(),
         session_id: tSession.trim() || null, jobs_of: jobsOf,
       });
-      flash(`${t.n_frames} frames split into ${t.n_jobs} jobs, ${t.honeypots_seeded} honeypots seeded`);
+      flash(`${t.n_frames} frames split into ${t.n_jobs} jobs, with ${t.honeypots_seeded} check questions`);
       setTName("");
       await refreshProject();
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
   const addAsset = async () => {
-    if (!projectId || !newBody.trim()) { flash("give the asset a body or uri"); return; }
+    if (!projectId || !newBody.trim()) { flash("Add the text, or a link to the file"); return; }
     setBusy(true);
     try {
       const inline = newMedia === "text" || newMedia === "dialogue";
@@ -178,7 +185,7 @@ function ProjectsBody() {
         : { media_type: newMedia, uri: newBody.trim() }]);
       setNewBody("");
       await refreshProject();
-      flash("asset added");
+      flash("Asset added");
     } catch (e) { flash(humanizeError(e)); } finally { setBusy(false); }
   };
 
@@ -198,60 +205,91 @@ function ProjectsBody() {
     <PageShell
       active="PROJECTS"
       title="Projects"
-      subtitle="assign work, watch it move through the stages, and measure who is producing good labels"
+      subtitle="Assign labelling work, follow it through each stage, and see whose labels hold up"
       meta={project ? (
-        <span className="text-[12px] text-ink-3">
+        <span className="text-[12px] text-ink-3"
+          title="Check questions are frames with a known answer, mixed into jobs to measure accuracy">
           {project.honeypot_frac > 0
-            ? `${Math.round(project.honeypot_frac * 100)}% honeypots, floor ${project.min_honeypot_accuracy}`
-            : "no honeypot QA configured"}
+            ? `${Math.round(project.honeypot_frac * 100)}% check questions, ${pct(project.min_honeypot_accuracy)} needed to pass`
+            : "No check questions set up"}
         </span>
       ) : null}
-      right={msg ? <span className="text-[12px] text-accent">{msg}</span> : null}
-    >
-      <div className="p-4 space-y-4">
-        {/* Ahead of the selector, because an empty project list and an unreachable one look identical in it. */}
-        {bootErr != null && <LoadState error={bootErr} onRetry={() => window.location.reload()} />}
-        <div className="flex items-center gap-2 text-[12px] flex-wrap">
-          <span className="text-ink-3">project</span>
-          <select value={projectId} onChange={(e) => setProjectId(e.target.value)}
-            className="bg-bg border border-line px-1.5 py-0.5 text-ink min-w-[200px]">
-            <option value="">none</option>
+      primaryAction={
+        <button onClick={() => setShowNew((v) => !v)} className="btn btn-primary" aria-expanded={showNew}>New project</button>
+      }
+      right={msg ? <span role="status" className="text-[12px] text-ink-2">{msg}</span> : null}
+      filters={
+        <>
+          <label htmlFor="project-pick" className="text-ink-3">Project</label>
+          <select id="project-pick" value={projectId} onChange={(e) => setProjectId(e.target.value)}
+            className="field min-w-[240px]">
+            <option value="">None</option>
             {projects.map((p) => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
           </select>
-          <span className="text-ink-3 ml-3">new:</span>
-          <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder="project name"
-            className="bg-bg border border-line px-1.5 py-0.5 text-ink" />
-          <label htmlFor="hp-frac" className="text-ink-3">honeypot</label>
-          <input id="hp-frac" type="number" step="0.05" min="0" max="0.5" value={hpFrac}
-            onChange={(e) => setHpFrac(Number(e.target.value))}
-            className="bg-bg border border-line px-1.5 py-0.5 text-ink w-16" />
-          <select value={goldId} onChange={(e) => setGoldId(e.target.value)}
-            className="bg-bg border border-line px-1.5 py-0.5 text-ink max-w-[180px]">
-            <option value="">no gold set</option>
-            {golds.map((g) => <option key={g.gold_id} value={g.gold_id}>{g.name} ({g.n_objects})</option>)}
-          </select>
-          <button onClick={createProject} disabled={busy}
-            className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40"><T k="action.create">create</T></button>
-        </div>
+          {mineOnly && <span className="chip chip-on">Only my jobs</span>}
+        </>
+      }
+    >
+      <div className="page-wrap space-y-4">
+        {/* Ahead of the selector, because an empty project list and an unreachable one look identical in it. */}
+        {bootErr != null && <LoadState error={bootErr} onRetry={() => window.location.reload()} />}
 
+        {showNew && (
+          <Section title="New project" desc="Check questions are frames with a known answer mixed into each job; a job whose accuracy on them is too low is sent back.">
+            <div className="flex items-end gap-3 text-[12.5px] flex-wrap">
+              <label className="flex flex-col gap-1">
+                <span className="text-ink-3 text-[12px]">Name</span>
+                <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder="Project name"
+                  className="field min-w-[240px]" />
+              </label>
+              <label htmlFor="hp-frac" className="flex flex-col gap-1">
+                <span className="text-ink-3 text-[12px]">Share of check questions</span>
+                <input id="hp-frac" type="number" step="0.05" min="0" max="0.5" value={hpFrac}
+                  onChange={(e) => setHpFrac(Number(e.target.value))}
+                  className="field w-24" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-ink-3 text-[12px]">Answers from gold set</span>
+                <select value={goldId} onChange={(e) => setGoldId(e.target.value)} className="field max-w-[220px]">
+                  <option value="">No gold set</option>
+                  {golds.map((g) => <option key={g.gold_id} value={g.gold_id}>{g.name} ({g.n_objects})</option>)}
+                </select>
+              </label>
+              <button onClick={createProject} disabled={busy} className="btn btn-primary"><T k="action.create">Create</T></button>
+              <button onClick={() => setShowNew(false)} className="btn">Cancel</button>
+            </div>
+          </Section>
+        )}
+
+        {!projectsQ.loading && !bootErr && projects.length === 0 && !showNew && (
+          <div className="panel">
+            <EmptyState icon="clipboard" title="No projects yet"
+              action={<button onClick={() => setShowNew(true)} className="btn btn-primary">New project</button>}>
+              A project splits sessions into jobs, assigns them to people, and tracks each job through
+              annotation, validation and acceptance.
+            </EmptyState>
+          </div>
+        )}
+
+        <div className="grid gap-4 xl:grid-cols-2">
         {/* board */}
-        <Section title="board - jobs by stage and state">
-          <table className="text-[12px] w-full max-w-2xl">
+        <Section title="Jobs by stage" desc="Each job moves left to right through the stages; the columns show where it is within one.">
+          <table className="data-table">
             <thead>
-              <tr className="text-ink-3 text-left border-b hairline">
-                <th className="py-1">stage</th>
-                {STATES.map((s) => <th key={s} className="text-right px-2">{s.replace("_", " ")}</th>)}
+              <tr>
+                <th>Stage</th>
+                {STATES.map((s) => <th key={s} className="num">{humanize(s)}</th>)}
               </tr>
             </thead>
             <tbody>
               {STAGES.map((stage) => (
-                <tr key={stage} className="border-b hairline">
-                  <td className="py-1 text-ink-2">{stage}</td>
+                <tr key={stage}>
+                  <td className="text-ink-2">{humanize(stage)}</td>
                   {STATES.map((state) => {
                     const n = countAt(stage, state);
                     return (
-                      <td key={state} className={`text-right px-2 ${n ? STATE_TONE[state] : "text-ink-3/40"}`}>
-                        {n}
+                      <td key={state} className="num">
+                        <span className={n ? STATE_TONE[state] : "text-ink-3/50"}>{n}</span>
                       </td>
                     );
                   })}
@@ -260,75 +298,90 @@ function ProjectsBody() {
             </tbody>
           </table>
           {load.length > 0 && (
-            <div className="mt-3 text-[12px] text-ink-3">
-              open load: {load.map((l) => `${l.assignee} (${l.open_jobs})`).join(", ")}
+            <div className="mt-3 text-[12.5px] text-ink-3">
+              Open jobs per person: {load.map((l) => `${l.assignee} (${l.open_jobs})`).join(", ")}
             </div>
           )}
         </Section>
 
         {/* task creation */}
-        <Section title="new task - split a session into jobs">
-          <div className="flex items-center gap-2 text-[12px] flex-wrap">
-            <input value={tName} onChange={(e) => setTName(e.target.value)} placeholder="task name"
-              className="bg-bg border border-line px-1.5 py-0.5 text-ink" />
-            <SessionSelect value={tSession} onChange={setTSession} className="min-w-[320px]" />
-            <label htmlFor="jobs-of" className="text-ink-3">frames per job</label>
-            <input id="jobs-of" type="number" min="1" value={jobsOf} onChange={(e) => setJobsOf(Number(e.target.value))}
-              className="bg-bg border border-line px-1.5 py-0.5 text-ink w-20" />
-            <button onClick={createTask} disabled={busy || !projectId}
-              className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
-              create task
+        <Section title="New task" desc="Split a session's frames into jobs of a fixed size, ready to assign.">
+          <div className="flex items-end gap-3 text-[12.5px] flex-wrap">
+            <label className="flex flex-col gap-1">
+              <span className="text-ink-3 text-[12px]">Task name</span>
+              <input value={tName} onChange={(e) => setTName(e.target.value)} placeholder="e.g. Koramangala evening"
+                className="field min-w-[200px]" />
+            </label>
+            <div className="flex flex-col gap-1">
+              <span className="text-ink-3 text-[12px]">Session</span>
+              <SessionSelect value={tSession} onChange={setTSession} className="min-w-[280px]" />
+            </div>
+            <label htmlFor="jobs-of" className="flex flex-col gap-1">
+              <span className="text-ink-3 text-[12px]">Frames per job</span>
+              <input id="jobs-of" type="number" min="1" value={jobsOf} onChange={(e) => setJobsOf(Number(e.target.value))}
+                className="field w-24" />
+            </label>
+            <button onClick={createTask} disabled={busy || !projectId} className="btn">
+              Create task
             </button>
           </div>
         </Section>
+        </div>
 
         {/* jobs */}
-        <Section title={`jobs (${jobs.length})`}>
+        <Section title={`Jobs (${jobs.length})`}>
           {jobs.length === 0 ? (
-            <div className="text-[12px] text-ink-3 py-3">no jobs yet. create a task above.</div>
+            <EmptyState compact icon="list" title={projectId ? "No jobs yet" : "Pick a project"}>
+              {projectId ? "Create a task above to split a session into jobs." : "Choose a project at the top to see its jobs."}
+            </EmptyState>
           ) : (
-            <div className="overflow-auto max-h-96">
-              <table className="w-full text-[12px]">
+            <div className="overflow-auto max-h-[28rem] -mx-3.5 -mb-3.5">
+              <table className="data-table">
                 <thead>
-                  <tr className="text-ink-3 text-left border-b hairline">
-                    <th className="py-1">job</th><th>stage</th><th>state</th><th>frames</th>
-                    <th>honeypots</th><th>accuracy</th><th>assignee</th><th></th>
+                  <tr>
+                    <th>Job</th><th>Stage</th><th>State</th>
+                    <th className="num">Frames</th>
+                    <th className="num">Check questions</th><th className="num">Accuracy</th>
+                    <th>Assigned to</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {jobs.map((j) => (
-                    <tr key={j.job_id} className="border-b hairline">
-                      <td className="py-1 text-ink-3">{j.job_id.slice(0, 8)}</td>
-                      <td className="text-ink-2">{j.stage}</td>
-                      <td className={STATE_TONE[j.state] ?? "text-ink-3"}>{j.state}</td>
-                      <td className="text-ink-3">{j.n_frames}</td>
-                      <td className="text-ink-3">{j.n_honeypots || "-"}</td>
+                    <tr key={j.job_id}>
+                      <td className="font-mono text-[12px] text-ink-3" title={j.job_id}>{shortId(j.job_id)}</td>
+                      <td className="text-ink-2">{humanize(j.stage)}</td>
+                      <td><span className={STATE_TONE[j.state] ?? "text-ink-3"}>{humanize(j.state)}</span></td>
+                      <td className="num">{j.n_frames}</td>
+                      <td className="num">{j.n_honeypots || "-"}</td>
                       {/* Unmeasured is not failing. Until submit existed every job in the system was
                           unmeasured, and colouring those red would be a board that means nothing. */}
-                      <td className={{ unmeasured: "text-ink-3", pass: "text-pass", fail: "text-block" }[
-                        honeypotVerdict(j.honeypot_accuracy, project?.min_honeypot_accuracy)]}
-                        title={j.honeypot_accuracy == null ? "not scored yet; a job is scored when it is submitted" : ""}>
-                        {j.honeypot_accuracy == null ? "-" : j.honeypot_accuracy.toFixed(2)}
+                      <td className="num"
+                        title={j.honeypot_accuracy == null ? "Not scored yet; a job is scored when it is submitted" : ""}>
+                        <span className={{ unmeasured: "text-ink-3", pass: "text-pass", fail: "text-block" }[
+                          honeypotVerdict(j.honeypot_accuracy, project?.min_honeypot_accuracy)]}>
+                          {j.honeypot_accuracy == null ? "-" : pct(j.honeypot_accuracy)}
+                        </span>
                       </td>
                       <td>
                         <select value={j.assignee_id ?? ""} onChange={(e) => assign(j, e.target.value)}
-                          className="bg-bg border border-line px-1 py-0.5 text-ink-2 max-w-[140px]">
-                          <option value="">unassigned</option>
+                          aria-label={`Assign job ${shortId(j.job_id)}`}
+                          className="field text-[12px] max-w-[160px]">
+                          <option value="">Unassigned</option>
                           {users.map((u) => <option key={u.user_id} value={u.user_id}>{u.name}</option>)}
                         </select>
                       </td>
                       <td className="text-right whitespace-nowrap">
                         {j.frame_ids[0] && (
                           <button onClick={() => router.push(`/frame/${j.frame_ids[0]}?job=${j.job_id}`)}
-                            title="open the first frame of this job"
-                            className="text-ink-3 hover:text-accent"><T k="action.open">open</T></button>
+                            title="Open the first frame of this job"
+                            className="btn"><T k="action.open">Open</T></button>
                         )}
                         {(() => {
                           const a = nextAction(j, getUser()?.user_id ?? null);
                           return a ? (
                             <button onClick={() => act(j, a.kind)} disabled={busy} title={a.hint}
-                              className="ml-2 border border-line px-1.5 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
-                              {a.label}
+                              className="btn ml-2">
+                              {humanize(a.label)}
                             </button>
                           ) : null;
                         })()}
@@ -342,46 +395,53 @@ function ProjectsBody() {
         </Section>
 
         {/* multi-modal assets */}
-        <Section title={`assets (${assets.total})`}
+        <Section title={`Other assets (${assets.total})`}
+          desc="Text, audio, documents and other non-camera items labelled in this project."
           right={<span className="text-[12px] text-ink-3">
-            {Object.entries(annKinds).map(([k, v]) => `${k} ${v}`).join("  ") || "no annotations yet"}
+            {Object.entries(annKinds).map(([k, v]) => `${humanize(k)} ${v}`).join(" · ") || "No annotations yet"}
           </span>}>
-          <div className="flex items-center gap-2 text-[12px] flex-wrap mb-2">
-            <select value={newMedia} onChange={(e) => setNewMedia(e.target.value)}
-              className="bg-bg border border-line px-1.5 py-0.5 text-ink">
+          <div className="flex items-center gap-2 text-[12.5px] flex-wrap mb-3">
+            <select value={newMedia} onChange={(e) => setNewMedia(e.target.value)} aria-label="Asset type"
+              className="field">
               {["text", "dialogue", "audio", "timeseries", "document", "image"].map((m) =>
-                <option key={m} value={m}>{m}</option>)}
+                <option key={m} value={m}>{m === "timeseries" ? "Time series" : humanize(m)}</option>)}
             </select>
             <input value={newBody} onChange={(e) => setNewBody(e.target.value)}
-              placeholder={newMedia === "text" || newMedia === "dialogue" ? "inline text" : "uri"}
-              className="flex-1 min-w-[240px] bg-bg border border-line px-1.5 py-0.5 text-ink" />
-            <button onClick={addAsset} disabled={busy || !projectId}
-              className="border border-line px-2 py-0.5 text-ink-2 hover:border-accent disabled:opacity-40">
-              add asset
+              aria-label={newMedia === "text" || newMedia === "dialogue" ? "Text" : "Link to the file"}
+              placeholder={newMedia === "text" || newMedia === "dialogue" ? "The text to label" : "Link to the file"}
+              className="field flex-1 min-w-[240px]" />
+            <button onClick={addAsset} disabled={busy || !projectId} className="btn">
+              Add asset
             </button>
           </div>
           {assets.assets.length === 0 ? (
-            <div className="text-[12px] text-ink-3 py-2">
-              no assets. add one above, or POST to /api/assets to bulk import.
-            </div>
+            <>
+              <EmptyState compact icon="folder" title="No assets in this project">
+                Add one above. Large batches can be imported in one go.
+              </EmptyState>
+              <details className="text-[12px] text-ink-3">
+                <summary className="cursor-pointer hover:text-ink-2">For administrators</summary>
+                <p className="mt-1.5">Bulk import: POST a list of assets to <code className="font-mono">/api/assets</code>.</p>
+              </details>
+            </>
           ) : (
-            <div className="overflow-auto max-h-72">
-              <table className="w-full text-[12px]">
+            <div className="overflow-auto max-h-72 -mx-3.5 -mb-3.5">
+              <table className="data-table">
                 <thead>
-                  <tr className="text-ink-3 text-left border-b hairline">
-                    <th className="py-1">asset</th><th>media</th><th>state</th><th>preview</th><th></th>
+                  <tr>
+                    <th>Asset</th><th>Type</th><th>State</th>
+                    <th>Preview</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {assets.assets.map((a) => (
-                    <tr key={a.asset_id} className="border-b hairline">
-                      <td className="py-1 text-ink-3">{(a.external_id ?? a.asset_id).slice(0, 12)}</td>
-                      <td className="text-ink-2">{a.media_type}</td>
-                      <td className={a.state === "labeled" ? "text-pass" : "text-ink-3"}>{a.state}</td>
-                      <td className="text-ink-3 truncate max-w-[280px]">{a.text ?? a.uri ?? "-"}</td>
+                    <tr key={a.asset_id}>
+                      <td className="text-ink-2" title={a.asset_id}>{a.external_id ?? <span className="font-mono text-[12px] text-ink-3">{shortId(a.asset_id)}</span>}</td>
+                      <td className="text-ink-2">{humanize(a.media_type)}</td>
+                      <td><span className={a.state === "labeled" ? "text-pass" : "text-ink-3"}>{humanize(a.state)}</span></td>
+                      <td className="text-ink-3 truncate max-w-[320px]">{a.text ?? a.uri ?? "-"}</td>
                       <td className="text-right">
-                        <button onClick={() => router.push(`/annotate/asset/${a.asset_id}`)}
-                          className="text-ink-3 hover:text-accent">annotate</button>
+                        <button onClick={() => router.push(`/annotate/asset/${a.asset_id}`)} className="btn">Annotate</button>
                       </td>
                     </tr>
                   ))}
@@ -392,37 +452,47 @@ function ProjectsBody() {
         </Section>
 
         {/* scorecards */}
-        <Section title="annotator scorecards">
+        <Section title="Annotator scorecards" desc="Reviews done, time per review, and accuracy on check questions, per person.">
           {cards.length === 0 ? (
-            <div className="text-[12px] text-ink-3 py-3">no review activity yet</div>
+            <EmptyState compact icon="user" title="No review activity yet">
+              Scorecards fill in as people review and submit jobs.
+            </EmptyState>
           ) : (
-            <table className="w-full max-w-3xl text-[12px]">
+            <div className="overflow-auto -mx-3.5 -mb-3.5">
+            <table className="data-table">
               <thead>
-                <tr className="text-ink-3 text-left border-b hairline">
-                  <th className="py-1">annotator</th><th>role</th>
-                  <th className="text-right">reviews</th><th className="text-right">median</th>
-                  <th className="text-right">mean</th><th className="text-right">time</th>
-                  <th className="text-right">jobs</th><th className="text-right">honeypot</th>
+                <tr>
+                  <th>Person</th><th>Role</th>
+                  <th className="num">Reviews</th>
+                  <th className="num">Median per review</th>
+                  <th className="num">Mean per review</th>
+                  <th className="num">Total time</th>
+                  <th className="num">Jobs</th>
+                  <th className="num">Check accuracy</th>
                 </tr>
               </thead>
               <tbody>
                 {cards.map((c) => (
-                  <tr key={c.user_id} className="border-b hairline">
-                    <td className="py-1 text-ink-2">{c.name}</td>
-                    <td className="text-ink-3">{c.role}</td>
-                    <td className="text-right text-ink">{c.reviews}</td>
-                    <td className="text-right text-ink-3">{(c.median_time_ms / 1000).toFixed(1)}s</td>
-                    <td className="text-right text-ink-3">{(c.mean_time_ms / 1000).toFixed(1)}s</td>
-                    <td className="text-right text-ink-3">{c.total_time_min}m</td>
-                    <td className="text-right text-ink-3">{c.jobs}</td>
-                    <td className={`text-right ${c.honeypot_accuracy == null ? "text-ink-3"
-                      : c.honeypot_accuracy >= 0.9 ? "text-pass" : "text-block"}`}>
-                      {c.honeypot_accuracy == null ? "-" : c.honeypot_accuracy.toFixed(2)}
+                  <tr key={c.user_id}>
+                    <td><span className="text-ink">{c.name}</span></td>
+                    <td className="text-ink-3">{humanize(c.role)}</td>
+                    <td className="num"><span className={c.reviews ? "text-ink" : "text-ink-3"}>{c.reviews.toLocaleString()}</span></td>
+                    {/* No reviews, or no time recorded on them, is not "0.0 s" of work. */}
+                    <td className="num">{c.reviews && c.median_time_ms ? duration(c.median_time_ms / 1000) : "-"}</td>
+                    <td className="num">{c.reviews && c.mean_time_ms ? duration(c.mean_time_ms / 1000) : "-"}</td>
+                    <td className="num">{c.total_time_min ? duration(c.total_time_min * 60) : "-"}</td>
+                    <td className="num">{c.jobs || "-"}</td>
+                    <td className="num">
+                      <span className={c.honeypot_accuracy == null ? "text-ink-3"
+                        : c.honeypot_accuracy >= 0.9 ? "text-pass" : "text-block"}>
+                        {c.honeypot_accuracy == null ? "-" : pct(c.honeypot_accuracy)}
+                      </span>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </Section>
       </div>

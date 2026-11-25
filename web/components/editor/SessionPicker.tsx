@@ -228,17 +228,17 @@ export default function SessionPicker({ sessionId, onPick }: {
                     </span>
                     <span className="text-[10.5px] text-ink-3 truncate">{sessionDetail(s)}</span>
                   </span>
-                  {here && <span className="text-[10px] font-medium uppercase tracking-[0.06em] text-accent shrink-0">here</span>}
+                  {here && <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-accent shrink-0">here</span>}
                   {!here && s.session_id === prevId && (
-                    <span className="text-[10px] font-medium uppercase tracking-[0.06em] text-info shrink-0"
+                    <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-info shrink-0"
                           title="the drive you were in before this one">back</span>
                   )}
                   {!here && s.session_id !== prevId && recent.includes(s.session_id) && (
-                    <span className="text-[10px] font-medium uppercase tracking-[0.06em] text-ink-3 shrink-0"
+                    <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 shrink-0"
                           title="you have opened this drive before">seen</span>
                   )}
                   {DRIVE_STATUS[driveStatus(states.get(s.session_id))].label && (
-                    <span className={`text-[10px] font-medium uppercase tracking-[0.06em] shrink-0 ${DRIVE_STATUS[driveStatus(states.get(s.session_id))].tone}`}
+                    <span className={`text-[10.5px] font-medium uppercase tracking-[0.06em] shrink-0 ${DRIVE_STATUS[driveStatus(states.get(s.session_id))].tone}`}
                           title={DRIVE_STATUS[driveStatus(states.get(s.session_id))].tip}>
                       {DRIVE_STATUS[driveStatus(states.get(s.session_id))].label}
                     </span>
@@ -260,7 +260,7 @@ export default function SessionPicker({ sessionId, onPick }: {
                           <span className="text-[10.5px] text-accent tabular-nums w-7 text-right">{pct}%</span>
                           <button onClick={() => void stopRun(job.job_id)}
                             title="stop this auto-label run"
-                            className="text-[10px] font-medium uppercase tracking-[0.06em] text-block hover:text-block/80">stop</button>
+                            className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-block hover:text-block/80">stop</button>
                         </span>
                       );
                     }
@@ -270,7 +270,7 @@ export default function SessionPicker({ sessionId, onPick }: {
                         onClick={() => void startRun(s)}
                         disabled={starting != null}
                         title={`auto-label the next ${AUTOLABEL_BATCH} unlabelled frames of this drive`}
-                        className="text-[10px] font-medium uppercase tracking-[0.06em] text-ink-3 hover:text-accent disabled:opacity-40 shrink-0">
+                        className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 hover:text-accent disabled:opacity-40 shrink-0">
                         {starting === s.session_id ? "starting..." : "label"}
                       </button>
                     );
@@ -282,7 +282,7 @@ export default function SessionPicker({ sessionId, onPick }: {
           {prev && (
             <button onClick={() => void choose(prev)}
               className="w-full flex items-center gap-2 px-2 py-1.5 border-t hairline text-left hover:bg-line/40">
-              <span className="text-[10px] font-medium uppercase tracking-[0.06em] text-info shrink-0">back to</span>
+              <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-info shrink-0">back to</span>
               <span className="text-[12px] text-ink-2 truncate">{sessionLabel(prev)}</span>
             </button>
           )}

@@ -13,6 +13,8 @@ import { describeScope, triageQuery } from "@/lib/triageScope";
 import { acceptState, useCurrentUser } from "@/lib/user";
 import type { TriageRow } from "@/lib/types";
 import { invalidate, useQuery } from "@/lib/useQuery";
+import EmptyState from "@/components/ui/EmptyState";
+import { humanize } from "@/lib/format";
 
 // Rapid review: one crop, one keystroke.
 //
@@ -37,6 +39,14 @@ type Decided = { row: TriageRow; verdict: Verdict; className?: string };
 
 const PREFETCH = 4;
 
+// How far a crop may be enlarged. Filling the pane turned a 30-pixel rider into a wall of blocks that no
+// longer looked like anything; past about 5x an upscale adds size and no detail. The surrounding view
+// (the same object with more of the frame around it) is what answers "what is this" for small objects.
+const MAX_UPSCALE = 5;
+const CONTEXT_PAD = 2;
+const cropUrl = (id: string) => `/api/objects/${id}/crop`;
+const contextUrl = (id: string) => `/api/objects/${id}/crop?pad=${CONTEXT_PAD}`;
+
 function RapidBody() {
   // Bound to the locale this render used: the server and hydration see English, then the stored language.
   const t = useT();
@@ -50,6 +60,8 @@ function RapidBody() {
   const [loading, setLoading] = useState(true);
   const [reclassOpen, setReclassOpen] = useState(false);
   const [classQuery, setClassQuery] = useState("");
+  // The crop's own pixel size, read when it decodes, so it can be drawn at a capped multiple of it.
+  const [natural, setNatural] = useState<{ id: string; w: number; h: number } | null>(null);
   // The class list for the reclassify box. Shared with every other page that reads the ontology; without
   // it the box simply has no suggestions, which is what a failure has always looked like here.
   const ontologyQ = useQuery(["ontology"], () => api.ontology());
@@ -81,7 +93,9 @@ function RapidBody() {
   useEffect(() => {
     for (let i = index + 1; i <= index + PREFETCH && i < queue.length; i++) {
       const img = new Image();
-      img.src = `/api/objects/${queue[i].object_id}/crop`;
+      img.src = cropUrl(queue[i].object_id);
+      const ctx = new Image();
+      ctx.src = contextUrl(queue[i].object_id);
     }
   }, [index, queue]);
 
@@ -126,10 +140,10 @@ function RapidBody() {
     // the request, so when every reversal was being rejected the annotator was still told it had worked.
     void api.review(last.row.object_id, undoPayload(last.row, { reviewer: me?.name ?? "anon" }))
       .then(() => {
-        toast(`undid ${last.verdict} on ${last.row.class_name}`, "success");
+        toast(`Undid ${last.verdict} on ${humanize(last.row.class_name).toLowerCase()}`, "success");
         void invalidate("triage", "/api/home");
       })
-      .catch((e) => toast(`could not undo ${last.verdict} on ${last.row.class_name}: `
+      .catch((e) => toast(`Could not undo ${last.verdict} on ${humanize(last.row.class_name).toLowerCase()}: `
                           + `${humanizeError(e)}. The verdict still stands.`, "error"));
   }, [done, me]);
 
@@ -165,7 +179,11 @@ function RapidBody() {
   }, [done]);
 
   if (loading) {
-    return <PageShell active="RAPID REVIEW" title="Rapid review"><div className="p-4 text-[12px] text-ink-3">loading the queue...</div></PageShell>;
+    return (
+      <PageShell active="RAPID REVIEW" title="Rapid review">
+        <div className="h-full flex items-center justify-center text-[13px] text-ink-3" role="status">Loading the queue...</div>
+      </PageShell>
+    );
   }
 
   return (
@@ -174,60 +192,87 @@ function RapidBody() {
       title="Rapid review"
       // A scoped queue ends early by design. Saying what it was scoped to is the difference between "the
       // batch is finished" and "the corpus looks empty and something is broken".
-      subtitle={scopeLabel ? `${scopeLabel} · one crop, one keystroke` : "one crop, one keystroke"}
+      subtitle={scopeLabel ? `${scopeLabel} · one object, one key` : "One object at a time, one key per decision"}
       right={
-        <span className="text-[12px] text-ink-3">
-          {index}/{queue.length} · <span className="text-pass">{counts.accept}a</span>
-          {" "}<span className="text-block">{counts.reject}r</span>
-          {" "}<span className="text-warn">{counts.reclass}c</span>
-          {" "}{counts.skip}s
+        <span className="text-[12px] text-ink-3 tabular-nums flex items-center gap-2.5">
+          <span className="text-ink-2">{Math.min(index + 1, queue.length)} of {queue.length}</span>
+          <span className="text-pass" title="Accepted">{counts.accept} accepted</span>
+          <span className="text-block" title="Rejected">{counts.reject} rejected</span>
+          <span className="text-warn" title="Reclassified">{counts.reclass} reclassified</span>
+          <span title="Skipped">{counts.skip} skipped</span>
         </span>
       }
     >
       <div className="h-full flex flex-col">
         {!current ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-3 p-8">
-            <div className="font-mono text-[13px] text-ink">
-              {queue.length ? "queue cleared" : "nothing in the queue"}
-            </div>
-            <div className="text-[12px] text-ink-3">
-              {done.length} decided · {counts.accept} accepted, {counts.reject} rejected,
-              {" "}{counts.reclass} reclassified, {counts.skip} skipped
-            </div>
-            <button onClick={() => router.push("/review/queue")}
-              className="border border-line px-3 py-1 text-[12px] text-ink-2 hover:border-accent">
-              back to the review queue
-            </button>
+          <div className="flex-1 flex items-center justify-center p-8">
+            <EmptyState icon={queue.length ? "check" : "list"}
+              title={queue.length ? "Queue cleared" : "Nothing to review here"}
+              action={<button onClick={() => router.push("/review/queue")} className="btn">Back to the review queue</button>}>
+              {queue.length
+                ? `${done.length} decided: ${counts.accept} accepted, ${counts.reject} rejected, ${counts.reclass} reclassified, ${counts.skip} skipped.`
+                : scopeLabel ? `No objects match ${scopeLabel}.` : "No objects are waiting for a decision right now."}
+            </EmptyState>
           </div>
         ) : (
           <>
-            <div className="flex-1 min-h-0 flex items-center justify-center bg-bg-2 relative">
-              {/* Keyed on the object id so React swaps the element rather than reusing it, which would
-                  briefly show the previous crop under the new label. */}
-              {/* h-full w-full, not max-h/max-w: a crop of a distant rider is a few dozen pixels, and
-                  max-* never scales up, so the object under review rendered as a thumbnail in the middle of
-                  an empty screen. object-contain keeps the aspect ratio while filling the pane, and
-                  pixelated rendering is honest about the upscale rather than smearing it. */}
-              <img key={current.object_id} src={`/api/objects/${current.object_id}/crop`}
-                alt={current.class_name}
-                style={{ imageRendering: "pixelated" }}
-                className="h-full w-full object-contain p-6" />
-
-              <div className="absolute top-3 left-3 panel px-3 py-2 space-y-0.5">
-                <div className="font-mono text-[14px] text-ink">{current.class_name}</div>
-                <div className="text-[11.5px] text-ink-3">
-                  conf {current.conf.toFixed(2)} · {current.source}
-                  {current.import_format ? ` · ${current.import_format}` : ""}
-                </div>
-                {current.why && (
-                  <div className="text-[11.5px] text-warn max-w-[22rem]">{current.why}</div>
+            <div className="flex-1 min-h-0 flex bg-bg-2 relative">
+              <div className="flex-1 min-w-0 min-h-0 flex flex-col items-center justify-center p-6 gap-2">
+                {/* Keyed on the object id so React swaps the element rather than reusing it, which would
+                    briefly show the previous crop under the new label. Drawn at up to MAX_UPSCALE times its own
+                    size and never past the pane; object-contain keeps the aspect inside that box. */}
+                <img key={current.object_id} src={cropUrl(current.object_id)}
+                  alt={humanize(current.class_name)}
+                  onLoad={(e) => setNatural({ id: current.object_id, w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+                  style={natural?.id === current.object_id
+                    ? { width: natural.w * MAX_UPSCALE, height: natural.h * MAX_UPSCALE }
+                    : undefined}
+                  className="max-w-full max-h-full min-h-0 object-contain rounded border border-line bg-bg" />
+                {natural?.id === current.object_id && (
+                  <div className="text-[11.5px] text-ink-3 tabular-nums">
+                    Crop {natural.w} × {natural.h} px{natural.w < 120 && natural.h < 120 ? ", a small object: check the frame view" : ""}
+                  </div>
                 )}
               </div>
+
+              {/* What the object is and why it is here, and the same object with the frame around it. */}
+              <aside className="w-[340px] shrink-0 border-l hairline bg-panel overflow-y-auto p-4 space-y-4">
+                <div>
+                  <div className="text-[18px] font-semibold text-ink leading-tight" title={current.class_name}>{humanize(current.class_name)}</div>
+                  <div className="mt-1 text-[12.5px] text-ink-3">
+                    {current.conf > 0 ? `${Math.round(current.conf * 100)}% confident` : "No detector score"}
+                    {current.source ? ` · ${humanize(current.source)}` : ""}
+                    {current.import_format ? ` · ${current.import_format}` : ""}
+                  </div>
+                </div>
+                {current.why && (
+                  <div>
+                    <div className="label-caps mb-1.5">Why it needs you</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(current.flags?.length ? current.flags.map((f) => f.label) : current.why.split(/,\s*/)).map((w, i) => (
+                        <span key={`${w}-${i}`} className="text-[11.5px] px-1.5 py-0.5 rounded border border-warn/40 text-warn bg-warn/10">
+                          {humanize(w)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <div className="label-caps mb-1.5">In the frame</div>
+                  <img key={`ctx-${current.object_id}`} src={contextUrl(current.object_id)} alt={`${humanize(current.class_name)} with its surroundings`}
+                    className="w-full max-h-[300px] object-contain rounded border border-line skeleton"
+                    onLoad={(e) => { e.currentTarget.classList.remove("skeleton"); }}
+                    onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                  <button onClick={() => router.push(`/frame/${current.frame_id}`)} className="link text-[12.5px] mt-2">
+                    Open the whole frame (O)
+                  </button>
+                </div>
+              </aside>
 
               {reclassOpen && (
                 <div className="absolute inset-0 bg-bg/80 flex items-center justify-center">
                   <div className="panel p-3 w-[min(22rem,90vw)] space-y-2">
-                    <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">reclassify as</div>
+                    <div className="section-title">Reclassify as</div>
                     {/* eslint-disable-next-line jsx-a11y/no-autofocus -- opened by the C key in a one-keystroke loop; a box that did not take the next keystroke would break it */}
                     <input autoFocus aria-label="reclassify as" value={classQuery} onChange={(e) => setClassQuery(e.target.value)}
                       onKeyDown={(e) => {
@@ -236,15 +281,16 @@ function RapidBody() {
                           decide("reclass", matches[0]);
                         }
                       }}
-                      placeholder="type a class name"
-                      className="w-full bg-bg border border-line px-2 py-1 text-[12.5px] text-ink" />
+                      placeholder="Type a class name"
+                      className="field w-full text-[13px]" />
                     <div className="space-y-0.5">
                       {matches.map((c, i) => (
                         <button key={c}
                           onClick={() => { setReclassOpen(false); setClassQuery(""); decide("reclass", c); }}
-                          className={`block w-full text-left px-2 py-0.5 font-mono text-[11.5px]
-                                      ${i === 0 ? "text-ink bg-panel-2" : "text-ink-2 hover:text-ink"}`}>
-                          {c}{i === 0 ? "  (enter)" : ""}
+                          className={`flex w-full items-center text-left px-2 py-1 rounded text-[12.5px]
+                                      ${i === 0 ? "text-ink bg-head" : "text-ink-2 hover:text-ink hover:bg-head/60"}`}>
+                          <span title={c}>{humanize(c)}</span>
+                          {i === 0 && <span className="ml-auto text-[11px] text-ink-3">Enter</span>}
                         </button>
                       ))}
                     </div>
@@ -253,18 +299,18 @@ function RapidBody() {
               )}
             </div>
 
-            <div className="shrink-0 border-t hairline px-4 py-2 flex items-center gap-4 text-[12px]">
+            <div className="shrink-0 border-t hairline px-4 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12.5px]">
               {/* The verdict row, in the reviewer's own language. i18n shipped with four locales and one
                   consumer (the onboarding tour), so the surface an annotator spends a whole shift on -
                   this one - was English-only in a product built for Indian roads. The hotkeys stay Latin
                   because they are physical keys, and the class name below is never translated: renaming a
                   class in the interface would make it impossible to talk about with the ontology. */}
-              <Key k="A" label={t("action.accept", "accept")} tone="text-pass" onClick={() => decide("accept")} />
-              <Key k="R" label={t("action.reject", "reject")} tone="text-block" onClick={() => decide("reject")} />
-              <Key k="C" label={t("action.reclassify", "reclassify")} tone="text-warn" onClick={() => setReclassOpen(true)} />
-              <Key k="S" label={t("action.skip", "skip")} tone="text-ink-3" onClick={() => decide("skip")} />
-              <Key k="U" label={t("action.undo", "undo")} tone="text-ink-3" onClick={undo} />
-              <Key k="O" label="open the frame" tone="text-ink-3"
+              <Key k="A" label={t("action.accept", "Accept")} tone="text-pass" onClick={() => decide("accept")} />
+              <Key k="R" label={t("action.reject", "Reject")} tone="text-block" onClick={() => decide("reject")} />
+              <Key k="C" label={t("action.reclassify", "Reclassify")} tone="text-warn" onClick={() => setReclassOpen(true)} />
+              <Key k="S" label={t("action.skip", "Skip")} tone="text-ink-2" onClick={() => decide("skip")} />
+              <Key k="U" label={t("action.undo", "Undo")} tone="text-ink-2" onClick={undo} />
+              <Key k="O" label="Open the frame" tone="text-ink-2"
                 onClick={() => router.push(`/frame/${current.frame_id}`)} />
               <span className="ml-auto text-ink-3">
                 {inFlight.current > 0 ? t("editor.unsaved", "saving...") : t("editor.saved", "saved")}
@@ -282,7 +328,7 @@ function Key({ k, label, tone, onClick }: {
 }) {
   return (
     <button onClick={onClick} className={`flex items-center gap-1.5 ${tone} hover:opacity-80`}>
-      <kbd className="border border-line px-1.5 py-0.5 text-[10px] text-ink-2">{k}</kbd>
+      <kbd className="min-w-[20px] text-center rounded border border-line bg-head px-1.5 py-0.5 text-[11px] font-mono text-ink-2">{k}</kbd>
       {label}
     </button>
   );

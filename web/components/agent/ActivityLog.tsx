@@ -37,14 +37,13 @@ export default function ActivityLog({ log, onClear }: { log: Log; onClear: () =>
 
   return (
     <div className="panel">
-      <div className="flex items-center gap-3 px-4 py-2 border-b hairline">
-        <div className="text-ink font-medium text-sm">Activity</div>
-        <div className="text-ink-3 text-xs">
+      <div className="panel-head">
+        <h2 className="section-title">What you ran</h2>
+        <span className="text-[12px] text-ink-3">
           {running > 0 ? `${running} running` : `${log.entries.length} recent`}
-        </div>
-        <button onClick={onClear}
-          className="ml-auto text-[11px] border border-line text-ink-3 px-2 py-0.5 rounded hover:text-ink">
-          <T k="action.clear">clear</T>
+        </span>
+        <button type="button" onClick={onClear} className="btn ml-auto">
+          <T k="action.clear">Clear</T>
         </button>
       </div>
       {/* aria-live so a background result is announced when it lands, since it may arrive long after the
@@ -53,10 +52,10 @@ export default function ActivityLog({ log, onClear }: { log: Log; onClear: () =>
         {log.entries.map((e) => {
           const took = elapsed(e);
           return (
-            <div key={e.id} className="px-4 py-1.5 flex items-start gap-2 text-[12px]">
+            <div key={e.id} className="px-4 py-2 flex items-start gap-2.5 text-[12.5px]">
               <span className={`${DOT[e.status]} shrink-0`} aria-hidden>{MARK[e.status]}</span>
               <span className="text-ink-3 shrink-0 tabular-nums">{clockOf(e.startedAt)}</span>
-              <span className="text-ink-2 shrink-0">{e.action}</span>
+              {e.action && <span className="text-ink-2 shrink-0">{e.action[0].toUpperCase() + e.action.slice(1)}</span>}
               <span className="flex-1 break-words text-ink">
                 {e.message}
                 {e.hint ? <span className="text-warn"> ({e.hint})</span> : null}

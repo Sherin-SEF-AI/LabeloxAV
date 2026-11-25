@@ -18,6 +18,8 @@ import {
 import { importedSessions } from "@/lib/uploadQueue";
 import ImportedPanel from "@/components/annotate/ImportedPanel";
 import { T } from "@/lib/i18n";
+import Icon from "@/components/shell/Icon";
+import { humanize, pct, plural } from "@/lib/format";
 
 // New Annotation: upload clips, a folder of them, or an mcap; import each into its own session, then jump
 // into the editor when there was exactly one. The bytes go browser -> storage via presigned multipart; the
@@ -34,27 +36,37 @@ import { T } from "@/lib/i18n";
 // abandons uploads mid-transfer. Auto-open is now a property of a queue of exactly one.
 
 const FORMATS = [
-  { value: "auto", label: "auto (detect per file)" },
-  { value: "images", label: "images (zip / folder of images)" },
-  { value: "video", label: "video (.mp4 / .mov / .mkv / .avi / .webm / .m4v)" },
-  { value: "mcap", label: "mcap (robotics log)" },
+  { value: "auto", label: "Detect per file" },
+  { value: "images", label: "Images (zip or folder of images)" },
+  { value: "video", label: "Video (.mp4, .mov, .mkv, .avi, .webm, .m4v)" },
+  { value: "mcap", label: "MCAP (robotics log)" },
 ];
 
 const ACCEPT = "image/*,video/*,.zip,.mp4,.mov,.mkv,.avi,.webm,.m4v,.mcap";
 
-function Section({ title, right, children }: {
-  title: string; right?: React.ReactNode; children: React.ReactNode;
+function Section({ title, step, right, children }: {
+  title: string; step?: number; right?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-        <span>{title}</span>
-        {right && <span className="ml-auto normal-case">{right}</span>}
+      <div className="panel-head">
+        {step !== undefined && (
+          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-accent/15 text-accent-2 text-[11px] font-semibold tabular-nums shrink-0"
+            aria-hidden>{step}</span>
+        )}
+        <h2 className="section-title">{title}</h2>
+        {right && <span className="ml-auto flex items-center gap-2">{right}</span>}
       </div>
-      <div className="p-3">{children}</div>
+      <div className="p-4">{children}</div>
     </section>
   );
 }
+
+// The queue's statuses as words. `labeled` and `autolabeling` come from the second (autolabel) pass.
+const STATUS_LABEL: Record<string, string> = {
+  pending: "Waiting", uploading: "Uploading", importing: "Importing", autolabeling: "Autolabelling",
+  done: "Imported", labeled: "Labelled", error: "Failed", skipped: "Skipped",
+};
 
 const DOT: Record<string, string> = {
   pending: "bg-line", uploading: "bg-info", importing: "bg-warn",
@@ -72,41 +84,43 @@ function Row({ item, index, onOpen }: { item: QueueItem; index: number; onOpen: 
       // prefers-reduced-motion handling instead of adding a second animation nobody would remember to
       // disable.
       style={{ "--d": `${Math.min(index, 10) * 25}ms` } as React.CSSProperties}
-      className="fade-up flex items-center gap-2 px-2 py-1.5 border-b hairline last:border-0">
+      className="fade-up flex items-center gap-3 px-3 py-2 border-b hairline last:border-0">
       {active
         ? <span className="running-dot shrink-0" />
-        : <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT[item.status]}`} />}
-      <span className="text-[12px] text-ink truncate flex-1 min-w-0" title={item.name}>
-        {item.name}
-      </span>
-      <span className="text-[11px] text-ink-3 shrink-0">{humanSize(item.size)}</span>
-      <span className="text-[11px] text-ink-3 w-14 text-right shrink-0">{item.format}</span>
-      <span className="w-24 shrink-0">
+        : <span className={`w-2 h-2 rounded-full shrink-0 ${DOT[item.status] ?? "bg-line"}`} />}
+      <div className="flex-1 min-w-0">
+        <div className="text-[12.5px] text-ink truncate" title={item.name}>{item.name}</div>
+        {/* The failure reason on its own line, wrapped, rather than cut to "cannot open vid..." beside the name. */}
+        {item.detail && item.status === "error" && (
+          <div className="text-[12px] text-block mt-0.5 break-words">{item.detail}</div>
+        )}
+      </div>
+      <span className="text-[12px] text-ink-3 shrink-0 tabular-nums">{humanSize(item.size)}</span>
+      <span className="text-[12px] text-ink-3 w-16 text-right shrink-0">{humanize(item.format)}</span>
+      <span className="w-28 shrink-0">
         {active ? (
-          <span className="block h-1 bg-line rounded overflow-hidden">
-            <span className="block h-full bg-accent transition-[width] duration-300 ease-out"
-              style={{ width: `${Math.round(item.progress * 100)}%` }} />
+          <span className="flex items-center gap-2">
+            <span className="flex-1 h-1.5 bg-bg-2 rounded-full overflow-hidden">
+              <span className="block h-full bg-accent transition-[width] duration-300 ease-out"
+                style={{ width: `${Math.round(item.progress * 100)}%` }} />
+            </span>
+            <span className="text-[11px] text-ink-3 tabular-nums w-8 text-right">{pct(item.progress)}</span>
           </span>
         ) : (
-          <span className={`text-[11px] ${item.status === "error" ? "text-block" : item.status === "done" ? "text-pass" : "text-ink-3"}`}>
-            {item.status}
+          <span className={`text-[12px] ${item.status === "error" ? "text-block" : item.status === "done" || item.status === "labeled" ? "text-pass" : "text-ink-3"}`}>
+            {STATUS_LABEL[item.status] ?? humanize(item.status)}
           </span>
         )}
       </span>
-      {item.sessionId && (
+      {item.sessionId ? (
         // A button, not a link. This was an <a href>, so opening a finished clip navigated away, unmounted
         // the page and abandoned every upload still running, which is the same bug the auto-open rule
         // exists to prevent, left in a second place. It opens a panel beside the queue instead.
         <button onClick={() => onOpen(item)}
-          className="text-[11px] text-accent hover:underline shrink-0">
-          <T k="action.open">open</T>
+          className="link text-[12px] shrink-0 w-10 text-right">
+          <T k="action.open">Open</T>
         </button>
-      )}
-      {item.detail && item.status === "error" && (
-        <span className="text-[11px] text-block truncate max-w-[14rem]" title={item.detail}>
-          {item.detail}
-        </span>
-      )}
+      ) : <span className="w-10 shrink-0" aria-hidden />}
     </div>
   );
 }
@@ -175,165 +189,189 @@ export default function NewAnnotationPage() {
   }
 
   const label = running
-    ? `working ${summary.done + summary.failed}/${summary.total}`
+    ? `Working ${summary.done + summary.failed} of ${summary.total}`
     : items.length > 1 ? `Import ${items.length} files` : "Create annotation";
 
   const primaryAction = (
     <button onClick={onGo} disabled={!items.length || running}
-      className="btn disabled:opacity-50 transition-colors">
+      className="btn btn-primary transition-colors"
+      data-tip={!items.length ? "Add files first" : undefined}>
       {running && <span className="running-dot mr-1.5 align-middle" />}
       {label}
     </button>
   );
 
   return (
-    <PageShell active="NEW" title="New Annotation" primaryAction={primaryAction}>
-      <div className="p-4">
-        <div className="max-w-3xl w-full mx-auto space-y-4">
-          <Section
-            title="new annotation - upload images, video, or mcap"
-            right={items.length ? (
-              <button onClick={() => { clearUploads(); setSkipped([]); setDuplicates(0); setOpened(null); }}
-                disabled={running}
-                className="text-[11px] text-ink-3 hover:text-ink disabled:opacity-40"><T k="action.clear">clear</T></button>
-            ) : null}
-          >
-            {/* Outside the dropzone, deliberately. These were inside it, and calling .click() on one
-                dispatches a click that bubbles up to the dropzone's own onClick, which opens a second
-                chooser in the same gesture. The browser refuses that and says so:
-                  "File chooser dialog can only be shown with a user activation."
-                A hidden input does not need to live inside the drop target, and keeping it out means the
-                two handlers can never trigger each other. */}
-            <input ref={fileRef} type="file" accept={ACCEPT} multiple className="hidden"
-              onChange={(e) => take(e.target.files)} />
-            {/* A second input carrying webkitdirectory: one element cannot offer both a file picker and a
-                folder picker, and a folder is how these clips sit on disk. The prop is not in React's
-                HTMLInputElement types but is what every browser implements, so it is spread through a
-                typed record rather than cast away with `any`. */}
-            <input ref={dirRef} type="file" className="hidden" multiple
-              {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
-              onChange={(e) => take(e.target.files)} />
-            <div
-              {...pressable(() => fileRef.current?.click(), { disabled: running })}
-              onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-              onDragLeave={() => setDrag(false)}
-              onDrop={(e) => { e.preventDefault(); setDrag(false); if (!running) take(e.dataTransfer.files); }}
-              className={`border border-dashed rounded p-8 text-center cursor-pointer text-[12.5px] transition-all duration-150
-                ${drag ? "border-accent bg-accent/5 text-ink scale-[1.01]" : "border-line text-ink-3 hover:border-ink-3"}`}>
-              {items.length ? (
-                <span className="text-ink">
-                  {items.length} file{items.length === 1 ? "" : "s"} ready
-                  <span className="text-ink-3"> ({humanSize(items.reduce((a, i) => a + i.size, 0))})</span>
+    <PageShell active="NEW" title="New Annotation"
+      subtitle="Upload drive footage; each file becomes a session you can autolabel and review."
+      primaryAction={primaryAction}>
+      <div className="page-wrap-narrow space-y-4">
+        <Section
+          step={1}
+          title="Add footage"
+          right={items.length ? (
+            <button onClick={() => { clearUploads(); setSkipped([]); setDuplicates(0); setOpened(null); }}
+              disabled={running}
+              className="btn"><T k="action.clear">Clear</T></button>
+          ) : null}
+        >
+          {/* Outside the dropzone, deliberately. These were inside it, and calling .click() on one
+              dispatches a click that bubbles up to the dropzone's own onClick, which opens a second
+              chooser in the same gesture. The browser refuses that and says so:
+                "File chooser dialog can only be shown with a user activation."
+              A hidden input does not need to live inside the drop target, and keeping it out means the
+              two handlers can never trigger each other. */}
+          <input ref={fileRef} type="file" accept={ACCEPT} multiple className="hidden"
+            onChange={(e) => take(e.target.files)} />
+          {/* A second input carrying webkitdirectory: one element cannot offer both a file picker and a
+              folder picker, and a folder is how these clips sit on disk. The prop is not in React's
+              HTMLInputElement types but is what every browser implements, so it is spread through a
+              typed record rather than cast away with `any`. */}
+          <input ref={dirRef} type="file" className="hidden" multiple
+            {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+            onChange={(e) => take(e.target.files)} />
+          <div
+            {...pressable(() => fileRef.current?.click(), { disabled: running })}
+            aria-label="Choose files to upload, or drop them here"
+            onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+            onDragLeave={() => setDrag(false)}
+            onDrop={(e) => { e.preventDefault(); setDrag(false); if (!running) take(e.dataTransfer.files); }}
+            className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-lg px-6 py-12 text-center cursor-pointer transition-all duration-150
+              ${drag ? "border-accent bg-accent/5 scale-[1.01]" : "border-line bg-bg-2/40 hover:border-accent/60 hover:bg-accent/[0.03]"}
+              ${running ? "opacity-60 cursor-default" : ""}`}>
+            <span className={`flex items-center justify-center w-12 h-12 rounded-full border mb-1 ${drag ? "border-accent text-accent-2 bg-accent/10" : "border-line bg-head text-ink-2"}`}
+              aria-hidden>
+              <Icon name="upload" size={22} />
+            </span>
+            {items.length ? (
+              <>
+                <span className="text-[15px] font-medium text-ink">
+                  {plural(items.length, "file")} ready
+                  <span className="text-ink-3 font-normal"> ({humanSize(items.reduce((a, i) => a + i.size, 0))})</span>
                 </span>
-              ) : (
-                <>drag clips, a folder, or a .mcap here, or click to browse</>
+                <span className="text-[12.5px] text-ink-3">Drop more here or click to add files</span>
+              </>
+            ) : (
+              <>
+                <span className="text-[15px] font-medium text-ink">Drop clips, a folder or an MCAP file here</span>
+                <span className="text-[12.5px] text-ink-3">or <span className="text-accent-2">click to browse</span></span>
+                <span className="text-[12px] text-ink-3 mt-1">Video, images (or a zip of them) and .mcap logs</span>
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 mt-3">
+            <button onClick={() => !running && dirRef.current?.click()} disabled={running}
+              className="btn">
+              <Icon name="folder" size={14} />
+              Choose a folder
+            </button>
+            <span className="text-[12px] text-ink-3">
+              Every clip becomes its own session, imported one at a time.
+            </span>
+          </div>
+
+          {(skipped.length > 0 || duplicates > 0) && (
+            <div className="reveal text-[12px] text-ink-3 mt-3">
+              {/* Said rather than silent: a folder pick sweeps up sidecars and dotfiles, and uploading
+                  those would produce one failed import each and bury the real ones. */}
+              {skipped.length > 0 && <>{skipped.length} non-media file{skipped.length === 1 ? "" : "s"} skipped ({skipped.slice(0, 3).join(", ")}{skipped.length > 3 ? ", ..." : ""}). </>}
+              {duplicates > 0 && <>{duplicates} duplicate{duplicates === 1 ? "" : "s"} ignored.</>}
+            </div>
+          )}
+        </Section>
+
+        <Section step={2} title="Describe the drive">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-[12.5px]">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[12px] font-medium text-ink-2">Format</span>
+              <select value={format} onChange={(e) => setFormat(e.target.value)} disabled={running}
+                className="field">
+                {FORMATS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[12px] font-medium text-ink-2">Vehicle</span>
+              <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} disabled={running}
+                className="field" />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[12px] font-medium text-ink-2">City</span>
+              <input value={city} onChange={(e) => setCity(e.target.value)} disabled={running}
+                className="field" />
+            </label>
+          </div>
+
+          {err && <div className="text-[12px] text-block mt-3">{err}</div>}
+
+          <p className="section-desc mt-4">
+            Faces and number plates are blurred on every frame. A single file opens the editor when it finishes.
+          </p>
+          <details className="mt-2 text-[12px] text-ink-3">
+            <summary className="cursor-pointer hover:text-ink-2">How uploads work</summary>
+            <p className="mt-1.5 leading-relaxed">
+              Each file uploads straight to storage and imports into its own session. A batch keeps running if
+              you move around the app and notifies you when it is done, so you can carry on working; closing the
+              tab is the only thing that stops it. Larger videos take longer to decode.
+            </p>
+          </details>
+        </Section>
+
+        {items.length > 0 && (
+          <Section
+            step={3}
+            title={running || !summary.finished ? "Upload and import" : "Imported"}
+            right={
+              <span className="text-[12px] text-ink-3 tabular-nums">
+                {summary.done} done · {summary.failed > 0 ? <span className="text-block">{summary.failed} failed</span> : "0 failed"} · {summary.pending} waiting
+                <span className="ml-2 text-ink font-medium">{pct(summary.progress)}</span>
+              </span>
+            }
+          >
+            <div className="h-1.5 bg-bg-2 rounded-full overflow-hidden mb-3">
+              <div className="h-full bg-accent transition-[width] duration-500 ease-out"
+                style={{ width: `${summary.progress * 100}%` }} />
+            </div>
+            <div className="flex gap-3 items-start">
+              <div className="flex-1 min-w-0 border hairline rounded overflow-hidden max-h-[36rem] overflow-y-auto">
+                {items.map((i, n) => <Row key={i.id} item={i} index={n} onOpen={setOpened} />)}
+              </div>
+              {openedLive?.sessionId && (
+                <ImportedPanel item={openedLive} onClose={() => setOpened(null)} />
               )}
             </div>
-
-            <div className="flex items-center gap-3 mt-2">
-              <button onClick={() => !running && dirRef.current?.click()} disabled={running}
-                className="text-[12px] border border-line rounded px-2 py-1 text-ink-2 hover:border-accent hover:text-ink disabled:opacity-40 transition-colors">
-                choose a folder
-              </button>
-              <span className="text-[11px] text-ink-3">
-                every clip becomes its own session, imported one at a time
-              </span>
-            </div>
-
-            {(skipped.length > 0 || duplicates > 0) && (
-              <div className="reveal text-[11px] text-ink-3 mt-2">
-                {/* Said rather than silent: a folder pick sweeps up sidecars and dotfiles, and uploading
-                    those would produce one failed import each and bury the real ones. */}
-                {skipped.length > 0 && <>{skipped.length} non-media file{skipped.length === 1 ? "" : "s"} skipped ({skipped.slice(0, 3).join(", ")}{skipped.length > 3 ? ", ..." : ""}). </>}
-                {duplicates > 0 && <>{duplicates} duplicate{duplicates === 1 ? "" : "s"} ignored.</>}
+            {summary.finished && !running && (
+              <div className="reveal flex flex-wrap items-center gap-3 mt-3">
+                <span className="text-[12.5px] text-ink-2">
+                  {plural(summary.done, "session")} imported
+                  {summary.failed > 0 && <span className="text-block"> · {summary.failed} failed</span>}
+                </span>
+                {/* Offered only once every import has finished. Autolabel is GPU work on a machine with one
+                    slot, so starting it while clips are still decoding would put two jobs in flight and
+                    lose the ordering that makes a batch followable. */}
+                {labelable > 0 && (
+                  <button onClick={onAutolabel} className="btn btn-on">
+                    Autolabel {plural(labelable, "session")}
+                  </button>
+                )}
+                <button onClick={() => router.push("/annotations")}
+                  className="ml-auto link text-[12.5px]">
+                  Browse sessions →
+                </button>
               </div>
             )}
-
-            <div className="grid grid-cols-3 gap-3 mt-3 text-[12.5px]">
-              <label className="flex flex-col gap-1">
-                <span className="text-ink-3 uppercase text-[11px]">format</span>
-                <select value={format} onChange={(e) => setFormat(e.target.value)} disabled={running}
-                  className="bg-panel border border-line px-2 py-1 text-ink">
-                  {FORMATS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-ink-3 uppercase text-[11px]">vehicle</span>
-                <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} disabled={running}
-                  className="bg-panel border border-line px-2 py-1 text-ink" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-ink-3 uppercase text-[11px]">city</span>
-                <input value={city} onChange={(e) => setCity(e.target.value)} disabled={running}
-                  className="bg-panel border border-line px-2 py-1 text-ink" />
-              </label>
-            </div>
-
-            {err && <div className="text-[12px] text-block mt-2">{err}</div>}
-
-            <div className="text-[12px] text-ink-3 mt-3 leading-relaxed">
-              Each file uploads straight to storage and imports into its own session (PII faces and plates
-              are blurred on every frame). One file opens the editor when it finishes. A batch keeps running
-              if you move around the app, and notifies you when it is done, so you can carry on working;
-              closing the tab is the only thing that stops it. Larger videos take longer to decode.
-            </div>
           </Section>
+        )}
 
-          {items.length > 0 && (
-            <Section
-              title={`queue - ${summary.done} done, ${summary.failed} failed, ${summary.pending} waiting`}
-              right={
-                <span className="text-[11px] text-ink-3">
-                  {Math.round(summary.progress * 100)}%
-                </span>
-              }
-            >
-              <div className="h-1 bg-line rounded overflow-hidden mb-2">
-                <div className="h-full bg-accent transition-[width] duration-500 ease-out"
-                  style={{ width: `${summary.progress * 100}%` }} />
-              </div>
-              <div className="flex gap-3 items-start">
-                <div className="flex-1 min-w-0 border hairline rounded overflow-hidden max-h-[36rem] overflow-y-auto">
-                  {items.map((i, n) => <Row key={i.id} item={i} index={n} onOpen={setOpened} />)}
-                </div>
-                {openedLive?.sessionId && (
-                  <ImportedPanel item={openedLive} onClose={() => setOpened(null)} />
-                )}
-              </div>
-              {summary.finished && !running && (
-                <div className="reveal flex items-center gap-3 mt-2">
-                  <span className="text-[12px] text-ink-2">
-                    {summary.done} session{summary.done === 1 ? "" : "s"} imported
-                    {summary.failed > 0 && <span className="text-block"> · {summary.failed} failed</span>}
-                  </span>
-                  {/* Offered only once every import has finished. Autolabel is GPU work on a machine with one
-                      slot, so starting it while clips are still decoding would put two jobs in flight and
-                      lose the ordering that makes a batch followable. */}
-                  {labelable > 0 && (
-                    <button onClick={onAutolabel}
-                      className="text-[12px] border border-accent/50 text-accent rounded px-2 py-1 hover:bg-accent/10 transition-colors">
-                      autolabel {labelable} session{labelable === 1 ? "" : "s"}
-                    </button>
-                  )}
-                  <button onClick={() => router.push("/annotations")}
-                    className="ml-auto text-[12px] text-accent hover:underline">
-                    browse annotations -&gt;
-                  </button>
-                </div>
-              )}
-            </Section>
-          )}
-
-          <div className="text-[12px] text-ink-3 px-1 flex items-center gap-4">
-            <button onClick={() => router.push("/annotations")} className="text-accent hover:underline">
-              browse existing annotations -&gt;
-            </button>
-            {/* Added because the batch now keeps running after you leave, and nothing pointed at where to
-                watch it. An import is a job like any other, and the jobs page already lists them all. */}
-            <button onClick={() => router.push("/jobs")} className="text-accent hover:underline">
-              watch all import jobs -&gt;
-            </button>
-          </div>
+        <div className="text-[12.5px] px-1 flex items-center gap-5">
+          <button onClick={() => router.push("/annotations")} className="link">
+            Browse existing sessions →
+          </button>
+          {/* Added because the batch now keeps running after you leave, and nothing pointed at where to
+              watch it. An import is a job like any other, and the jobs page already lists them all. */}
+          <button onClick={() => router.push("/jobs")} className="link">
+            Watch import jobs →
+          </button>
         </div>
       </div>
     </PageShell>

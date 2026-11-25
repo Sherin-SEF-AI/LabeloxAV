@@ -11,6 +11,9 @@ import { cursorAfterRemoval, moveCursor, rangeBetween, targetIndices, toggle } f
 import { toast } from "@/lib/toast";
 import { acceptState, useCurrentUser } from "@/lib/user";
 import { invalidate, useQuery } from "@/lib/useQuery";
+import Icon from "@/components/shell/Icon";
+import EmptyState from "@/components/ui/EmptyState";
+import { humanize, plural } from "@/lib/format";
 
 // Similarity search. One surface for every query kind: natural-language text (SigLIP 2), an uploaded image,
 // a frame, or an object crop (DINOv3), all reranked for diversity and a similarity floor so the grid shows
@@ -220,60 +223,83 @@ function SearchBody() {
     return () => window.removeEventListener("keydown", onKey);
   }, [isObject, results, cursor, anchor, applyVerdict, router]);
 
-  const Chip = ({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) => (
-    <button onClick={onClick}
-      className={`border px-2 py-0.5 text-[12px] ${on ? "border-accent text-accent" : "border-line text-ink-3 hover:text-ink-2"}`}>
+  const Chip = ({ on, onClick, children, tip }: { on: boolean; onClick: () => void; children: React.ReactNode; tip?: string }) => (
+    <button type="button" onClick={onClick} aria-pressed={on} data-tip={tip}
+      className={`chip ${on ? "chip-on" : ""}`}>
       {children}
     </button>
   );
 
+  const runText = (text: string) => { const t = text.trim(); if (t) run({ kind: "text", q: t }); };
+
   const filters = (
-    <div className="flex flex-col gap-2 w-full">
+    <div className="flex flex-col gap-2.5 w-full py-0.5">
       {/* row 1: the query */}
       <div className="flex items-center gap-2 flex-wrap">
-        <input value={q} onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && q.trim() && run({ kind: "text", q })}
-          placeholder='natural language, e.g. "night rain autorickshaw" or "dense urban traffic"'
-          className="flex-1 min-w-[18rem] bg-bg border border-line px-3 py-1.5 text-[12.5px] text-ink" />
+        <div className="relative flex-1 min-w-[18rem]">
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none" aria-hidden>
+            <Icon name="search" size={15} />
+          </span>
+          <input value={q} onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && q.trim() && run({ kind: "text", q })}
+            aria-label="Describe what to find"
+            placeholder='Describe a scene, e.g. "night rain autorickshaw" or "dense urban traffic"'
+            className="field w-full pl-8 text-[13px]" />
+        </div>
         <button onClick={() => q.trim() && run({ kind: "text", q })} disabled={busy}
-          className="border border-accent text-accent px-3 py-1.5 text-[12.5px] hover:bg-accent/10 disabled:opacity-50"><T k="action.search">search</T></button>
-        <label className="border border-line px-2 py-1.5 text-[12.5px] text-ink-3 hover:border-accent cursor-pointer">
-          upload image
+          className="btn btn-primary"><T k="action.search">Search</T></button>
+        <label className="btn cursor-pointer" data-tip="Find frames that look like an image from your computer">
+          <Icon name="upload" size={14} />
+          Search by image
           <input type="file" accept="image/*" className="hidden"
             onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
         </label>
-        <span className="text-[11px] text-ink-3">space:</span>
-        {(["visual", "semantic", "fused"] as const).map((m) => <Chip key={m} on={mode === m} onClick={() => setMode(m)}>{m}</Chip>)}
+        <span className="text-[12px] text-ink-3 ml-1">Match on</span>
+        <div className="flex items-center gap-1" role="group" aria-label="Embedding space">
+          {([
+            ["visual", "Look", "Visual similarity (DINOv3): what it looks like"],
+            ["semantic", "Meaning", "Semantic similarity (SigLIP 2): what it depicts"],
+            ["fused", "Both", "Both spaces combined"],
+          ] as const).map(([m, label, tip]) => (
+            <Chip key={m} on={mode === m} onClick={() => setMode(m)} tip={tip}>{label}</Chip>
+          ))}
+        </div>
       </div>
 
       {/* row 2: the rerank controls */}
-      <div className="flex items-center gap-3 flex-wrap text-[12px] text-ink-3">
-        <Chip on={diversity} onClick={() => setDiversity((v) => !v)}>diverse</Chip>
-        {isObject && <Chip on={sameClass} onClick={() => setSameClass((v) => !v)}>same class</Chip>}
-        {isObject && <Chip on={excludeTrack} onClick={() => setExcludeTrack((v) => !v)}>exclude self</Chip>}
-        <label className="flex items-center gap-1">
-          min sim <span className="text-ink-2 w-8 text-right">{minSim.toFixed(2)}</span>
+      <div className="flex items-center gap-x-4 gap-y-2 flex-wrap text-[12px] text-ink-2">
+        <div className="flex items-center gap-1.5">
+          <Chip on={diversity} onClick={() => setDiversity((v) => !v)} tip="Drop near-duplicates so the grid shows distinct neighbours">Diverse</Chip>
+          {isObject && <Chip on={sameClass} onClick={() => setSameClass((v) => !v)} tip="Only objects of the same class">Same class</Chip>}
+          {isObject && <Chip on={excludeTrack} onClick={() => setExcludeTrack((v) => !v)} tip="Leave out the query object's own track">Exclude self</Chip>}
+        </div>
+        <label className="flex items-center gap-2">
+          Min similarity
           <input type="range" min={0} max={0.95} step={0.05} value={minSim}
             onChange={(e) => setMinSim(parseFloat(e.target.value))} className="w-28 accent-accent" />
+          <span className="text-ink tabular-nums w-8">{minSim.toFixed(2)}</span>
         </label>
-        <label className="flex items-center gap-1">
-          results
+        <label className="flex items-center gap-2">
+          Results
           <select value={k} onChange={(e) => setK(parseInt(e.target.value))}
-            className="bg-bg border border-line px-1 py-0.5 text-ink">
+            className="field py-0.5">
             {[12, 24, 48, 96].map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
         </label>
         <input value={city} onChange={(e) => setCity(e.target.value)} onKeyDown={(e) => e.key === "Enter" && rerun()}
-          placeholder="city (optional)" className="bg-bg border border-line px-2 py-0.5 text-ink w-28" />
-        {busy && <span className="text-warn">searching...</span>}
-        {note && <span className="text-block">{note}</span>}
+          aria-label="City filter" placeholder="City (optional)" className="field py-0.5 w-32" />
+        {busy && <span className="inline-flex items-center gap-1.5 text-ink-2"><span className="running-dot" />Searching...</span>}
       </div>
 
       {parsed && (parsed.classes.length > 0 || Object.keys(parsed.filters).length > 0) && (
-        <div className="text-[11px] text-ink-3">
-          parsed:{" "}
-          {Object.entries(parsed.filters).map(([a, v]) => <span key={a} className="text-info mr-2">{a}={v}</span>)}
-          {parsed.classes.map((c) => <span key={c} className="text-pass mr-2">class={c}</span>)}
+        <div className="flex items-center gap-1.5 flex-wrap text-[12px] text-ink-3">
+          Understood as
+          {Object.entries(parsed.filters).map(([a, v]) => (
+            <span key={a} className="px-1.5 py-px rounded border border-info/40 text-info">{humanize(a)}: {humanize(v)}</span>
+          ))}
+          {parsed.classes.map((c) => (
+            <span key={c} className="px-1.5 py-px rounded border border-pass/40 text-pass">{humanize(c)}</span>
+          ))}
         </div>
       )}
     </div>
@@ -282,36 +308,54 @@ function SearchBody() {
   return (
     <PageShell active="SEARCH" title="Search" filters={filters}>
       <div className="p-4 space-y-4">
-        {results.length > 0 ? (
+        {note && (
+          <div role="alert" className="panel border-block/40 bg-block/5 px-3.5 py-3 text-[12.5px] flex items-start gap-3">
+            <span className="text-block shrink-0 mt-px"><Icon name="info" size={15} /></span>
+            <div className="min-w-0 flex-1">
+              <div className="text-ink font-medium">Search failed</div>
+              <div className="text-ink-2 mt-0.5 break-words">{note}</div>
+            </div>
+            {last.current && (
+              <button type="button" className="btn shrink-0" onClick={() => last.current && run(last.current)}>Retry</button>
+            )}
+          </div>
+        )}
+        {busy && results.length === 0 ? (
+          <div className="panel p-3" role="status" aria-label="searching">
+            <div className="grid grid-cols-3 md:grid-cols-6 lg:grid-cols-8 gap-2">
+              {Array.from({ length: Math.min(k, 16) }, (_, i) => <span key={i} className="skeleton h-28 rounded" />)}
+            </div>
+          </div>
+        ) : results.length > 0 ? (
           <div className="panel p-3">
-            <div className="text-[12px] text-ink-3 mb-2 flex items-center gap-3 flex-wrap">
-              <span>{results.length} {res!.kind}s</span>
-              <span className="text-ink-3">{res!.mode} · DINOv3/SigLIP2</span>
-              {diversity && <span className="text-info">deduped</span>}
-              {minSim > 0 && <span className="text-info">≥ {minSim.toFixed(2)}</span>}
-              {isObject && selection.size > 0 && <span className="text-warn">{selection.size} selected</span>}
+            <div className="text-[12.5px] text-ink-3 mb-3 flex items-center gap-3 flex-wrap">
+              <span className="text-ink font-medium">{plural(results.length, res!.kind === "object" ? "object" : "frame")}</span>
+              <span>{humanize(res!.mode)} match</span>
+              {diversity && <span className="text-info">Near-duplicates removed</span>}
+              {minSim > 0 && <span className="text-info">Similarity ≥ {minSim.toFixed(2)}</span>}
+              {isObject && selection.size > 0 && <span className="text-warn font-medium">{selection.size} selected</span>}
               {/* Label the found set. Without this the page could find every object that looks like the
                   one you are fixing and offer nothing to do about it but visit them one at a time. */}
               {isObject && (
                 <span className="ml-auto flex items-center gap-1.5 relative">
-                  <span className="text-ink-3">
-                    {selection.size > 0 ? `apply to ${selection.size}` : "apply to the one under the cursor"}
+                  <span className="text-ink-3 mr-1">
+                    {selection.size > 0 ? `Apply to ${selection.size}` : "Apply to the tile under the cursor"}
                   </span>
                   <button ref={pickAnchor} onClick={() => setPickOpen((o) => !o)} disabled={applying || !onto}
                     aria-haspopup="dialog" aria-expanded={pickOpen}
                     title="set a class on the selection (C)"
-                    className="border border-accent text-accent px-2 py-0.5 rounded hover:bg-accent/10 disabled:opacity-40">
-                    <b>C</b> set class
+                    className="btn btn-on">
+                    Set class <kbd className="font-mono text-[11px] opacity-70">C</kbd>
                   </button>
                   <button onClick={() => void applyVerdict("confirm")} disabled={applying}
                     title="confirm the selection as it is (A)"
-                    className="border border-pass/60 text-pass px-2 py-0.5 rounded hover:bg-pass/10 disabled:opacity-40">
-                    <b>A</b> <T k="action.accept">accept</T>
+                    className="btn text-pass">
+                    <T k="action.accept">Accept</T> <kbd className="font-mono text-[11px] opacity-70">A</kbd>
                   </button>
                   <button onClick={() => void applyVerdict("reject")} disabled={applying}
                     title="reject the selection (R)"
-                    className="border border-line text-ink-3 px-2 py-0.5 rounded hover:border-block hover:text-block disabled:opacity-40">
-                    <b>R</b> <T k="action.reject">reject</T>
+                    className="btn btn-danger">
+                    <T k="action.reject">Reject</T> <kbd className="font-mono text-[11px] opacity-70">R</kbd>
                   </button>
                   {onto && (
                     <ClassPopover anchorRef={pickAnchor} open={pickOpen} onClose={() => setPickOpen(false)}
@@ -348,48 +392,92 @@ function SearchBody() {
                     setCursor(i);
                   }}
                   onDoubleClick={() => { if (r.object_id) router.push(`/object/${r.object_id}`); }}
-                  className={`relative border text-left group ${
+                  className={`relative border rounded overflow-hidden text-left group transition-colors ${
                     isObject && i === cursor ? "border-accent ring-1 ring-accent"
                       : isObject && selection.has(i) ? "border-warn" : "border-line hover:border-accent"}`}
                   title={`${r.class_name ?? r.scene?.weather ?? ""} · sim ${r.score.toFixed(3)}${
                     isObject ? " · click to select, double-click to open" : ""}`}>
                   {isObject && selection.has(i) && (
-                    <span className="absolute top-0 right-0 z-10 bg-warn text-bg text-[9px] px-1">+</span>
+                    <span className="absolute top-1 right-1 z-10 w-5 h-5 rounded-full bg-warn text-bg flex items-center justify-center"
+                      aria-label="selected"><Icon name="check" size={12} /></span>
                   )}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={r.image_url || r.crop_url} alt="" className="w-full h-20 object-cover bg-bg-2" />
-                  <div className="flex items-center justify-between px-1 py-0.5">
-                    <span className="text-[10.5px] text-ink-3 truncate">{r.class_name ?? ""}</span>
-                    <span className="text-[10.5px] text-accent">{r.score.toFixed(2)}</span>
+                  <Thumb src={r.image_url || r.crop_url} />
+                  <div className="flex items-center justify-between gap-1 px-1.5 py-1">
+                    <span className="text-[11.5px] text-ink-2 truncate">{r.class_name ? humanize(r.class_name) : ""}</span>
+                    <span className="text-[11.5px] text-accent-2 tabular-nums">{r.score.toFixed(2)}</span>
                   </div>
                 </button>
               ))}
             </div>
             {isObject && (
-              <div className="mt-2 text-[11px] text-ink-3 flex flex-wrap gap-3">
-                <span><b className="text-ink">arrows</b> move</span>
-                <span><b className="text-ink">shift+move</b> range</span>
-                <span><b className="text-ink">space</b> select</span>
-                <span><b className="text-accent">C</b> set class</span>
-                <span><b className="text-pass">A</b> accept</span>
-                <span><b className="text-block">R</b> reject</span>
-                <span><b className="text-ink">O</b> open</span>
-                <span className="text-ink-2">a verdict with nothing selected applies to the tile under the cursor</span>
+              <div className="mt-3 text-[12px] text-ink-3 flex flex-wrap gap-x-4 gap-y-1">
+                <span><kbd className="text-ink">Arrows</kbd> move</span>
+                <span><kbd className="text-ink">Shift + move</kbd> range</span>
+                <span><kbd className="text-ink">Space</kbd> select</span>
+                <span><kbd className="text-accent-2">C</kbd> set class</span>
+                <span><kbd className="text-pass">A</kbd> accept</span>
+                <span><kbd className="text-block">R</kbd> reject</span>
+                <span><kbd className="text-ink">O</kbd> open</span>
+                <span className="text-ink-2">A verdict with nothing selected applies to the tile under the cursor.</span>
               </div>
             )}
           </div>
         ) : (
-          !busy && (
-            <div className="panel px-3 py-10 text-center text-[12.5px] text-ink-3">
-              {res
-                ? kind === "object"
-                  ? "no similar objects above the threshold. lower min sim, or the object may not be embedded yet."
-                  : "no similar results. lower min sim, or the frame may not be embedded yet."
-                : "type a description, upload an image, or open a frame or object and click “find similar”."}
+          !busy && !note && (
+            <div className="panel">
+              {res ? (
+                <EmptyState icon="search" title={kind === "object" ? "No similar objects" : "No similar results"}
+                  action={minSim > 0 ? <button type="button" className="btn" onClick={() => setMinSim(0)}>Reset min similarity</button> : undefined}>
+                  {minSim > 0
+                    ? "Nothing scored above the similarity floor. Lower it to see more distant matches."
+                    : kind === "object"
+                      ? "This object may not be embedded yet, so it has no neighbours to compare against."
+                      : "This frame may not be embedded yet, so it has no neighbours to compare against."}
+                </EmptyState>
+              ) : (
+                <EmptyState icon="search" title="Find frames and objects by description or example"
+                  action={
+                    <div className="flex flex-wrap justify-center gap-2 max-w-xl">
+                      {EXAMPLES.map((ex) => (
+                        <button key={ex} type="button" className="chip" onClick={() => { setQ(ex); runText(ex); }}>
+                          {ex}
+                        </button>
+                      ))}
+                    </div>
+                  }>
+                  Describe a scene in plain words, search by an image, or use Find similar on any frame or object.
+                  Try one of these:
+                </EmptyState>
+              )}
             </div>
           )
         )}
       </div>
     </PageShell>
   );
+}
+
+// Starting points for an empty search: the kinds of scene people come here to find.
+const EXAMPLES = [
+  "night rain autorickshaw",
+  "dense urban traffic",
+  "pedestrian crossing at dusk",
+  "cattle on the road",
+  "truck overtaking on highway",
+  "wet road with reflections",
+];
+
+// A result tile's image. A missing or failed crop used to leave a black box with no explanation.
+function Thumb({ src }: { src?: string | null }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) {
+    return (
+      <div className="w-full h-24 bg-bg-2 flex flex-col items-center justify-center gap-1 text-ink-3">
+        <Icon name="eyeOff" size={16} />
+        <span className="text-[11px]">No image</span>
+      </div>
+    );
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt="" loading="lazy" onError={() => setFailed(true)} className="w-full h-24 object-cover bg-bg-2" />;
 }

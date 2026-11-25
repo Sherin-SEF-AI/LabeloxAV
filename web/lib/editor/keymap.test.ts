@@ -168,7 +168,7 @@ describe("override resolution", () => {
 describe("collision rejection", () => {
   it("refuses a key another tool has in the same mode, and says which", () => {
     const r = rebind({}, "tool:box", "g");
-    expect(r).toEqual({ ok: false, reason: 'G is already "polygon" in Objects' });
+    expect(r).toEqual({ ok: false, reason: 'G is already "Polygon" in Objects' });
   });
 
   it("refuses a tool key an action has", () => {

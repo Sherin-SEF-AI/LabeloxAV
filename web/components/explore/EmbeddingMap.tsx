@@ -53,9 +53,12 @@ type Props = {
   selected: Set<string>;
   onSelect: (ids: string[], additive: boolean) => void;
   onHover?: (p: ProjectionPoint | null) => void;
+  // What to show over an empty canvas. The page knows why it is empty (loading, no projection, or filtered
+  // to nothing); the map alone could only ever say "no projection".
+  empty?: React.ReactNode;
 };
 
-export default function EmbeddingMap({ points, colorBy, tagFilter, selected, onSelect, onHover }: Props) {
+export default function EmbeddingMap({ points, colorBy, tagFilter, selected, onSelect, onHover, empty }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ w: 800, h: 560 });
@@ -191,8 +194,8 @@ export default function EmbeddingMap({ points, colorBy, tagFilter, selected, onS
         onMouseLeave={() => { drawing.current = false; setLasso([]); onHover?.(null); }}
       />
       {!points.length && (
-        <div className="absolute inset-0 flex items-center justify-center text-[12px] text-ink-3">
-          no projection loaded. fit one to see the corpus laid out by similarity.
+        <div className="absolute inset-0 flex items-center justify-center text-[12.5px] text-ink-3">
+          {empty ?? "No projection loaded. Fit one to see the corpus laid out by similarity."}
         </div>
       )}
     </div>

@@ -7,6 +7,7 @@ import { describeFailure } from "@/lib/actionError";
 import { pollDelay } from "@/lib/pollDelay";
 import type { AgentRunRow } from "@/lib/types";
 import { invalidate, useQuery } from "@/lib/useQuery";
+import { humanize } from "@/lib/format";
 
 // What the agent is doing right now, and what it just finished.
 //
@@ -28,6 +29,10 @@ const TONE: Record<string, string> = {
   error: "text-block border-block/50",
   interrupted: "text-block border-block/50",
   planned: "text-ink-3 border-line",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  running: "Running", committed: "Done", reverted: "Undone", error: "Failed", interrupted: "Interrupted", planned: "Planned",
 };
 
 function dur(fromIso: string | null, toIso: string | null): string | null {
@@ -76,7 +81,7 @@ export default function JobWatcher({ limit = 12 }: { limit?: number }) {
     setBusy(r.run_id); setNote(null);
     try {
       const out = await api.agentRevertRun(r.run_id);
-      setNote(`${r.kind} reverted: ${out.reverted} restored, ${out.skipped} left alone`);
+      setNote(`${humanize(r.kind)} undone: ${out.reverted} restored, ${out.skipped} left alone because a person has changed them since`);
       // Every cached run list, whatever its limit: the console dialog reads the same runs.
       await invalidate("agentRuns");
     } catch (e) {
@@ -90,12 +95,12 @@ export default function JobWatcher({ limit = 12 }: { limit?: number }) {
 
   return (
     <div className="panel">
-      <div className="flex items-center gap-3 px-4 py-2 border-b hairline">
+      <div className="panel-head">
         {liveCount > 0 && <span className="running-dot" aria-hidden />}
-        <div className="text-ink font-medium text-sm">Agent jobs</div>
-        <div className="text-ink-3 text-xs">
-          {liveCount > 0 ? `${liveCount} running` : `last ${runs.length}`}
-        </div>
+        <h2 className="section-title">Agent jobs</h2>
+        <span className="text-[12px] text-ink-3">
+          {liveCount > 0 ? `${liveCount} running` : `Last ${runs.length}`}
+        </span>
       </div>
 
       <div className="divide-y hairline">
@@ -107,25 +112,24 @@ export default function JobWatcher({ limit = 12 }: { limit?: number }) {
             <div key={r.run_id} className={`px-4 py-2 fade-up ${live ? "running" : ""}`}
               style={{ ["--d" as string]: `${Math.min(i, 8) * 35}ms` }}>
               <div className="flex items-center gap-2.5 flex-wrap">
-                <span className={`text-[10.5px] uppercase border px-1.5 rounded ${TONE[r.status] || "border-line text-ink-3"}`}>
-                  {r.status}
+                <span className={`text-[11px] border px-1.5 py-px rounded ${TONE[r.status] || "border-line text-ink-3"}`}>
+                  {STATUS_LABEL[r.status] ?? humanize(r.status)}
                 </span>
-                <span className="text-[12px] text-ink">{r.kind}</span>
-                {took && <span className="text-[11px] text-ink-3 tabular-nums">{took}</span>}
+                <span className="text-[12.5px] text-ink">{humanize(r.kind)}</span>
+                {took && <span className="text-[12px] text-ink-3 tabular-nums">{took}</span>}
                 {r.fraction !== null && r.fraction !== undefined && (
-                  <span className="text-[11px] text-accent tabular-nums">
+                  <span className="text-[12px] text-accent-2 tabular-nums">
                     {Math.round(r.fraction * 100)}%
                   </span>
                 )}
                 {r.changed > 0 && (
-                  <span className="text-[11px] text-ink-3">{r.changed} objects changed</span>
+                  <span className="text-[12px] text-ink-3">{r.changed.toLocaleString()} objects changed</span>
                 )}
                 {r.status === "committed" && r.changed > 0 && (
                   <button onClick={() => revert(r)} disabled={busy !== null}
                     title="restore every object this run touched, unless a person has since"
-                    className="lift ml-auto text-[11px] border border-line text-ink-3 px-2 py-0.5
-                               rounded hover:text-ink hover:border-block disabled:opacity-40">
-                    {busy === r.run_id ? "reverting" : "revert"}
+                    type="button" className="btn btn-danger ml-auto">
+                    {busy === r.run_id ? "Undoing..." : "Undo"}
                   </button>
                 )}
               </div>
@@ -138,22 +142,22 @@ export default function JobWatcher({ limit = 12 }: { limit?: number }) {
               )}
 
               {rs.length > 0 && (
-                <div className="mt-1 flex gap-3 flex-wrap text-[11px] text-ink-3">
+                <div className="mt-1 flex gap-3 flex-wrap text-[12px] text-ink-3">
                   {rs.map(([k, v]) => (
-                    <span key={k}><span className="text-ink-2 tabular-nums">{v.toLocaleString()}</span> {k}</span>
+                    <span key={k}><span className="text-ink-2 tabular-nums">{v.toLocaleString()}</span> {humanize(k).toLowerCase()}</span>
                   ))}
                 </div>
               )}
 
               {r.error && (
-                <div className="mt-1 text-[11px] text-block break-words">{r.error}</div>
+                <div className="mt-1 text-[12px] text-block break-words">{r.error}</div>
               )}
             </div>
           );
         })}
       </div>
 
-      {note && <div className="px-4 py-2 border-t hairline text-[12px] text-ink-2">{note}</div>}
+      {note && <div role="status" className="px-4 py-2 border-t hairline text-[12.5px] text-ink-2">{note}</div>}
     </div>
   );
 }

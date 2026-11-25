@@ -10,6 +10,8 @@ import SessionSelect from "@/components/shell/SessionSelect";
 import { apiGet, apiPost, humanizeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useCurrentUser } from "@/lib/user";
+import EmptyState from "@/components/ui/EmptyState";
+import { ago, humanize } from "@/lib/format";
 
 // Ask in words; the assistant answers from the data with read-only tools, and anything that would change
 // labels or start work comes back as a proposal a reviewer approves (services/assistant). Nothing on this
@@ -62,12 +64,12 @@ function ProposalCard({ p, canDecide, onDecided }: { p: Proposal; canDecide: boo
     <li className="border hairline rounded p-3 flex flex-col gap-2">
       <div className="flex items-start gap-2">
         <span className="text-[13px] text-ink flex-1">{p.summary}</span>
-        <span className={`text-[11px] uppercase tracking-[0.06em] shrink-0 ${STATUS_TONE[p.status] ?? "text-ink-3"}`}>{p.status}</span>
+        <span className={`text-[12px] font-medium shrink-0 ${STATUS_TONE[p.status] ?? "text-ink-3"}`}>{humanize(p.status)}</span>
       </div>
-      {p.request && <p className="text-[12px] text-ink-3">Asked: &ldquo;{p.request}&rdquo;</p>}
+      {p.request && <p className="text-[12px] text-ink-3">Asked: &ldquo;{p.request}&rdquo;{p.created_at ? ` · ${ago(p.created_at)}` : ""}</p>}
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-ink-2 tabular-nums">
         {p.preview.count != null && <span>{p.preview.count.toLocaleString()} {p.preview.unit ?? "labels"}</span>}
-        {classes.length > 0 && <span>{classes.join(", ")}</span>}
+        {classes.length > 0 && <span>{classes.map(humanize).join(", ")}</span>}
         {(p.preview.human_labels_left_alone ?? 0) > 0 && <span>{p.preview.human_labels_left_alone} human labels left alone</span>}
       </div>
       {p.status === "failed" && p.result && <p className="text-[12px] text-block">{String((p.result as { error?: string }).error ?? "")}</p>}
@@ -130,30 +132,36 @@ function AssistantPage() {
   const pending = proposals.filter((p) => p.status === "pending").length;
 
   return (
-    <PageShell active="Assistant" title="Assistant" subtitle="ask about the data; changes wait for a reviewer"
+    <PageShell active="Assistant" title="Assistant" subtitle="Ask about the data in plain words; any change it suggests waits for a reviewer"
       right={status && (
         <span className={`text-[12px] ${status.ready ? "text-ink-3" : "text-warn"}`} title={status.detail ?? undefined}>
           {status.model}{status.local ? " · on this machine" : ` · ${status.provider}`}{status.ready ? "" : " · not ready"}
         </span>
       )}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,380px)] items-start">
+      <div className="page-wrap grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,380px)] items-start">
         <section className="panel flex flex-col min-h-[60vh]">
           {status && !status.ready && (
-            <div className="px-4 py-2.5 border-b hairline text-[12.5px] text-warn">The model is not ready: {status.detail}</div>
+            <div role="alert" className="px-4 py-2.5 border-b hairline text-[12.5px] text-warn bg-warn/5">The assistant&apos;s model is not ready{status.detail ? `: ${status.detail}` : "."}</div>
           )}
           <div className="px-4 py-3 border-b hairline flex flex-wrap items-center gap-2 text-[12.5px]">
             <span className="text-ink-3">Working in</span>
-            <div className="w-full sm:w-80"><SessionSelect value={sessionId} onChange={setSessionId} placeholder="no particular session" /></div>
-            {sessionId && <button className="text-accent hover:text-accent-2" onClick={() => setSessionId("")}><T k="action.clear">clear</T></button>}
+            <div className="w-full sm:w-80"><SessionSelect value={sessionId} onChange={setSessionId} placeholder="Any session" /></div>
+            {sessionId && <button className="link" onClick={() => setSessionId("")}><T k="action.clear">Clear</T></button>}
           </div>
           <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4 max-h-[62vh]" aria-live="polite">
             {turns.length === 0 && (
-              <div className="flex flex-col gap-3 text-[13px] text-ink-2">
-                <p>Ask about labels, sessions, the review queue or likely errors. Questions are answered from the data; anything that would change labels or start work becomes a proposal for a reviewer to approve.</p>
-                <div className="flex flex-wrap gap-2">
-                  {EXAMPLES.map((x) => <button key={x} className="btn text-left" onClick={() => void send(x)}>{x}</button>)}
-                </div>
-              </div>
+              <EmptyState icon="comment" title="Ask about labels, sessions, the review queue or likely errors"
+                action={
+                  <div className="flex flex-col items-stretch gap-2 w-full max-w-md">
+                    <span className="label-caps text-left">Try asking</span>
+                    {EXAMPLES.map((x) => (
+                      <button key={x} className="btn justify-start text-left" onClick={() => void send(x)}>{x}</button>
+                    ))}
+                  </div>
+                }>
+                Answers come from the data. Anything that would change labels or start work becomes a proposal
+                for a reviewer to approve.
+              </EmptyState>
             )}
             {turns.map((t, i) => (
               <div key={i} className={`flex flex-col gap-1.5 ${t.role === "user" ? "items-end" : "items-start"}`}>
@@ -172,34 +180,39 @@ function AssistantPage() {
                 )}
               </div>
             ))}
-            {busy && <div className="text-[12.5px] text-ink-3">Thinking...</div>}
+            {busy && <div role="status" className="self-start rounded px-3 py-2 bg-bg-2 text-[13px] text-ink-3">Thinking...</div>}
             <div ref={end} />
           </div>
           <form className="border-t hairline p-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); void send(text); }}>
             <input className="field flex-1 min-w-0" value={text} onChange={(e) => setText(e.target.value)} maxLength={2000}
-                   placeholder="e.g. how many cattle are there in this session?" aria-label="Message" disabled={busy} />
+                   placeholder="Ask a question, e.g. how many cattle are in this session?" aria-label="Message" disabled={busy} />
             <button className="btn btn-primary shrink-0" type="submit" disabled={busy || !text.trim()}>
               <Icon name="next" size={13} />Send
             </button>
           </form>
         </section>
 
-        <section className="panel p-4 flex flex-col gap-3">
-          <header className="flex items-center gap-2">
-            <h2 className="text-[13.5px] font-semibold text-ink">Proposals{pending ? ` (${pending} waiting)` : ""}</h2>
-            <label className="ml-auto flex items-center gap-1.5 text-[12px] text-ink-3">
+        <section className="panel flex flex-col">
+          <header className="panel-head">
+            <h2 className="section-title">Proposals{pending ? ` (${pending} waiting)` : ""}</h2>
+            <label className="ml-auto flex items-center gap-1.5 text-[12px] text-ink-3 cursor-pointer">
               <input type="checkbox" checked={showDecided} onChange={(e) => setShowDecided(e.target.checked)} />
-              show decided
+              Show decided
             </label>
           </header>
-          <p className="text-[12px] text-ink-3">
-            Approving runs the change the way a person would: class changes go back to review and can be reverted; auto-labelling queues a job.
-          </p>
-          {proposals.length === 0
-            ? <p className="text-[12.5px] text-ink-3">Nothing waiting.</p>
-            : <ul className="flex flex-col gap-2.5">{proposals.map((p) => (
-                <ProposalCard key={p.proposal_id} p={p} canDecide={canDecide} onDecided={() => void loadProposals()} />
-              ))}</ul>}
+          <div className="p-3.5 flex flex-col gap-3">
+            <p className="section-desc">
+              Approving makes the change the way a person would: class changes go back to review and can be undone;
+              auto-labelling starts a job.
+            </p>
+            {proposals.length === 0
+              ? <EmptyState compact icon="check" title={showDecided ? "No proposals yet" : "Nothing waiting"}>
+                  When the assistant suggests a change, it appears here for a reviewer.
+                </EmptyState>
+              : <ul className="flex flex-col gap-2.5">{proposals.map((p) => (
+                  <ProposalCard key={p.proposal_id} p={p} canDecide={canDecide} onDecided={() => void loadProposals()} />
+                ))}</ul>}
+          </div>
         </section>
       </div>
     </PageShell>

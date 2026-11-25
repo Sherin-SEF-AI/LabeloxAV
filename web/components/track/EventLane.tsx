@@ -1,6 +1,7 @@
 "use client";
 
 import { T } from "@/lib/i18n";
+import { humanize } from "@/lib/format";
 
 // The event lane: typed spans drawn across the same frames the crop strip shows.
 //
@@ -31,8 +32,9 @@ const STATE_TONE: Record<string, string> = {
   rejected: "bg-block/20 border-block",
 };
 
-// Column geometry, shared with the crop strip above: w-28 (7rem) cells with gap-2 (0.5rem) between them.
-const CELL_REM = 7;
+// Column geometry, shared with the crop strip above: w-24 (6rem, the strip's 96px tile) cells with gap-2
+// (0.5rem) between them. It was w-28 while the tiles were 96px, so spans drifted off the crops they covered.
+const CELL_REM = 6;
 const GAP_REM = 0.5;
 const widthFor = (n: number) => `${n * CELL_REM + (n - 1) * GAP_REM}rem`;
 
@@ -143,7 +145,7 @@ export default function EventLane({ trackId, items, onChanged }: {
         start_frame_id: items[a].frame_id,
         end_frame_id: items[b].frame_id,
       });
-      toast(`${eventType} over ${b - a + 1} frames`, "success");
+      toast(`${humanize(eventType)} over ${b - a + 1} frames`, "success");
       await load();
       onChanged?.();
     } catch (e) {
@@ -165,12 +167,12 @@ export default function EventLane({ trackId, items, onChanged }: {
 
   return (
     <section className="panel">
-      <div className="flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-        <span>events ({events.length})</span>
-        <span className="text-ink-3/70 normal-case">drag across the lane to mark a span</span>
+      <div className="panel-head">
+        <h2 className="section-title">Events <span className="font-normal text-ink-3">({events.length})</span></h2>
+        <span className="text-[12px] text-ink-3">Drag across the lane to mark a span</span>
         {!applicable.length && (
-          <span className="ml-auto text-warn normal-case">
-            no event types apply to a track of this class
+          <span className="ml-auto text-[12px] text-warn">
+            No event types apply to a track of this class
           </span>
         )}
       </div>
@@ -179,9 +181,9 @@ export default function EventLane({ trackId, items, onChanged }: {
         {/* Off is a real choice: 86% of tracks have no changepoint at all, and on the rest an annotator
             may be marking something the speed does not show. */}
         {cps.length > 0 && (
-          <label className="flex items-center gap-1.5 text-[11px] text-ink-3 cursor-pointer">
+          <label className="flex items-center gap-1.5 text-[12px] text-ink-3 cursor-pointer">
             <input type="checkbox" checked={snapOn} onChange={(e) => setSnapOn(e.target.checked)} />
-            snap span edges to the {cps.length} point{cps.length === 1 ? "" : "s"} where this
+            Snap span edges to the {cps.length} point{cps.length === 1 ? "" : "s"} where this
             track&apos;s speed changes
           </label>
         )}
@@ -196,7 +198,7 @@ export default function EventLane({ trackId, items, onChanged }: {
                 title={cp
                   ? `the speed changes here: ${cp.before.toFixed(0)} to ${cp.after.toFixed(0)} km/h`
                   : undefined}
-                className={`relative shrink-0 w-28 h-6 border ${inDrag ? "bg-accent/30 border-accent" : "border-line hover:border-ink-3"}`}>
+                className={`relative shrink-0 w-24 h-6 rounded-sm border ${inDrag ? "bg-accent/30 border-accent" : "border-line hover:border-ink-3"}`}>
                 {/* Where the motion actually changes. Drawn so an annotator can see what an edge will
                     snap to before dragging, rather than being surprised by it afterwards. */}
                 {cp && (
@@ -215,14 +217,14 @@ export default function EventLane({ trackId, items, onChanged }: {
             <button
               onClick={() => setSelected(selected === e.event_id ? null : e.event_id)}
               aria-label={`${e.event_type}, ${e.state}`}
-              title={`${e.event_type} - ${e.state}${e.source === "heuristic" ? " (heuristic proposal)" : ""}`}
+              title={`${humanize(e.event_type)} - ${e.state}${e.source === "heuristic" ? " (heuristic proposal)" : ""}`}
               style={{ width: widthFor(span), ...(e.state === "proposed" ? HATCH : {}) }}
-              className={`shrink-0 h-6 border px-1.5 text-left text-[11px] text-ink truncate ${STATE_TONE[e.state] ?? "bg-line border-line"}`}>
-              {e.event_type}
+              className={`shrink-0 h-6 rounded-sm border px-1.5 text-left text-[12px] text-ink truncate ${STATE_TONE[e.state] ?? "bg-line border-line"}`}>
+              {humanize(e.event_type)}
               {e.confidence != null && <span className="ml-1 text-ink-3">{e.confidence.toFixed(2)}</span>}
             </button>
             {selected === e.event_id && (
-              <div className="shrink-0 flex items-center gap-1.5 pl-2 text-[11px]">
+              <div className="shrink-0 flex items-center gap-2 pl-2 text-[12px]">
                 {e.state !== "accepted" && (
                   <button onClick={() => setState(e.event_id, "accepted")}
                     className="text-pass hover:underline"><T k="action.accept">accept</T></button>
@@ -231,7 +233,7 @@ export default function EventLane({ trackId, items, onChanged }: {
                   <button onClick={() => setState(e.event_id, "rejected")}
                     className="text-block hover:underline"><T k="action.reject">reject</T></button>
                 )}
-                <span className="text-ink-3">{e.source}</span>
+                <span className="text-ink-3">{humanize(e.source)}</span>
                 {e.evidence && Object.keys(e.evidence).length > 0 && (
                   // Why it fired, not merely that it did. A proposal a reviewer cannot interrogate is one
                   // they learn to accept without looking.
@@ -246,23 +248,23 @@ export default function EventLane({ trackId, items, onChanged }: {
         ))}
 
         {pending && (
-          <div className="border border-line bg-bg-2 p-2 space-y-1">
-            <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wide text-ink-3">
-              frames {pending[0] + 1} to {pending[1] + 1} - what happened?
+          <div className="border border-line rounded bg-bg-2 p-2.5 space-y-2">
+            <div className="text-[12.5px] font-medium text-ink">
+              Frames {pending[0] + 1} to {pending[1] + 1}: what happened?
             </div>
             <div className="flex flex-wrap gap-1 items-center">
               {applicable.map((t) => (
                 <button key={t.name} onClick={() => create(t.name)} title={t.definition}
-                  className="border border-line px-1.5 py-0.5 text-[11px] text-ink-2 hover:border-accent hover:text-ink">
-                  {t.name}
+                  className="chip">
+                  {humanize(t.name)}
                 </button>
               ))}
               <button onClick={() => setPending(null)}
-                className="ml-auto text-[11px] text-ink-3 hover:text-ink"><T k="action.cancel">cancel</T></button>
+                className="btn ml-auto"><T k="action.cancel">Cancel</T></button>
             </div>
             {/* The definition is the interface, so it is on hover of every choice rather than something an
                 annotator has to go and look up while deciding. */}
-            <div className="text-[11px] text-ink-3">hover a type for its labeling definition</div>
+            <div className="text-[12px] text-ink-3">Hover a type for its labelling definition.</div>
           </div>
         )}
       </div>

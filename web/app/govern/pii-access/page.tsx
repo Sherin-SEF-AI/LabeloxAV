@@ -6,6 +6,10 @@ import PageShell from "@/components/shell/PageShell";
 import { toast } from "@/lib/toast";
 import { useQuery } from "@/lib/useQuery";
 import type { PiiAccessRow } from "@/lib/types";
+import LoadState from "@/components/shell/LoadState";
+import EmptyState from "@/components/ui/EmptyState";
+import { Segmented, Stat } from "@/components/ui/kit";
+import { ago, humanize, num, plural, shortId } from "@/lib/format";
 
 // Who looked at personal data.
 //
@@ -16,9 +20,13 @@ import type { PiiAccessRow } from "@/lib/types";
 // Admin-only, and the page says why: this is a record about employees as much as about data subjects, and a
 // reviewer being able to browse colleagues' viewing history would be surveillance rather than compliance.
 
-const WINDOWS: [string, number][] = [["24h", 24], ["week", 168], ["month", 720], ["quarter", 2160]];
+const WINDOWS: [string, number][] = [["24 hours", 24], ["Week", 168], ["Month", 720], ["Quarter", 2160]];
 
 const NO_ROWS: PiiAccessRow[] = [];
+
+const ACTION_WORDS: Record<string, string> = {
+  view: "Viewed", read_plate: "Read a plate", download: "Downloaded", export: "Exported",
+};
 
 export default function PiiAccessPage() {
   const [hours, setHours] = useState(168);
@@ -49,76 +57,53 @@ export default function PiiAccessPage() {
 
   return (
     <PageShell active="PII ACCESS" title="PII access log"
-      subtitle="who viewed personal data, and whether it was redacted"
+      subtitle="Who viewed personal data (faces, number plates), and whether it was redacted when they did."
       filters={
         <>
-          <div className="flex items-center gap-1">
-            {WINDOWS.map(([label, h]) => (
-              <button key={h} onClick={() => setHours(h)}
-                className={`px-2 py-0.5 border ${
-                  hours === h ? "border-accent text-ink" : "border-line text-ink-3 hover:text-ink-2"}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <span className="text-ink-3">|</span>
-          {["", "view", "read_plate", "download", "export"].map((a) => (
-            <button key={a || "all"} onClick={() => setAction(a)}
-              className={`px-2 py-0.5 border ${
-                action === a ? "border-accent text-ink" : "border-line text-ink-3 hover:text-ink-2"}`}>
-              {a || "all actions"}
-            </button>
-          ))}
+          <span className="text-ink-3">Period</span>
+          <Segmented value={String(hours)} onChange={(v) => setHours(Number(v))}
+            options={WINDOWS.map(([label, h]) => ({ value: String(h), label }))} />
+          <span className="text-ink-3 ml-3">Action</span>
+          <Segmented value={action || "all"} onChange={(v) => setAction(v === "all" ? "" : v)}
+            options={["all", "view", "read_plate", "download", "export"].map((a) => ({
+              value: a, label: a === "all" ? "All" : ACTION_WORDS[a] ?? humanize(a) }))} />
           <input value={subject} onChange={(e) => setSubject(e.target.value)}
-            placeholder="subject id"
-            className="ml-auto bg-bg border border-line px-1.5 py-0.5 text-ink w-52" />
+            placeholder="Filter by subject id" aria-label="Filter by subject id"
+            className="field ml-auto text-[12px] w-56" />
         </>
       }
     >
-      <div className="p-4 space-y-4 max-w-6xl">
+      <div className="page-wrap space-y-4">
         {denied ? (
-          <div className="panel border border-block p-3 space-y-1">
-            <div className="text-[12px] text-block">this log is administrator-only</div>
-            <div className="text-[11.5px] text-ink-3">
-              It records who viewed personal data, which makes it a record about people who work here as much
-              as about the subjects in the corpus. Browsing a colleague&apos;s viewing history is surveillance
-              rather than compliance, so the floor is deliberately high.
-            </div>
+          <div className="panel">
+            <EmptyState icon="shield" title="This log is for administrators only">
+              It records who viewed personal data, which makes it a record about the people who work here as much
+              as about the people in the recordings. Browsing a colleague&apos;s viewing history would be
+              surveillance rather than compliance, so access is deliberately restricted.
+            </EmptyState>
           </div>
         ) : (
           <>
             {summary && (
-              <div className="flex gap-2 flex-wrap">
-                <div className="panel px-3 py-2 min-w-[120px]">
-                  <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">accesses</div>
-                  <div className="text-[18px] font-semibold text-ink tabular-nums">{summary.accesses}</div>
-                </div>
-                <div className="panel px-3 py-2 min-w-[120px]">
-                  <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">unredacted</div>
-                  {/* The number a policy is actually written about: viewing a blurred frame is ordinary
-                      work, viewing the original is the governed act. */}
-                  <div className={`font-mono text-[18px] tabular-nums ${
-                    summary.unredacted ? "text-warn" : "text-ink"}`}>{summary.unredacted}</div>
-                  <div className="text-[11px] text-ink-3">the governed act</div>
-                </div>
+              <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+                <Stat label="Accesses" value={num(summary.accesses)} />
+                {/* The number a policy is actually written about: viewing a blurred frame is ordinary
+                    work, viewing the original is the governed act. */}
+                <Stat label="Unredacted" value={num(summary.unredacted)} tone={summary.unredacted ? "warn" : undefined}
+                  sub="views of the original, unblurred" />
                 {Object.entries(summary.by_action).map(([a, n]) => (
-                  <div key={a} className="panel px-3 py-2 min-w-[110px]">
-                    <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{a}</div>
-                    <div className="text-[18px] font-semibold text-ink tabular-nums">{n}</div>
-                  </div>
+                  <Stat key={a} label={ACTION_WORDS[a] ?? humanize(a)} value={num(n)} />
                 ))}
               </div>
             )}
 
             {summary && Object.keys(summary.by_user).length > 0 && (
               <section className="panel">
-                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-                  by person
-                </div>
-                <div className="p-3 flex gap-1 flex-wrap">
+                <div className="panel-head"><h2 className="section-title">By person</h2></div>
+                <div className="p-3 flex gap-1.5 flex-wrap">
                   {Object.entries(summary.by_user).sort((a, b) => b[1] - a[1]).map(([u, n]) => (
-                    <span key={u} className="border border-line px-1.5 py-0.5 text-[11.5px] text-ink-2">
-                      {u} <span className="text-ink-3">{n}</span>
+                    <span key={u} className="chip cursor-default">
+                      {u} <span className="text-ink-3 tabular-nums">{num(n)}</span>
                     </span>
                   ))}
                 </div>
@@ -126,44 +111,52 @@ export default function PiiAccessPage() {
             )}
 
             <section className="panel">
-              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-                accesses ({rows.length} of {total})
+              <div className="panel-head">
+                <h2 className="section-title">Accesses</h2>
+                <span className="ml-auto text-[12px] text-ink-3 font-normal">
+                  {rows.length < total ? `Showing ${num(rows.length)} of ${num(total)}` : plural(total, "access", "accesses")}
+                </span>
               </div>
-              <div className="p-3">
-                {rows.length === 0 ? (
-                  <div className="text-[12px] text-ink-3">
-                    Nothing recorded in this window. An access is written when a frame known to contain a
-                    face or a plate is served, and when the security console reads a registration mark.
-                  </div>
-                ) : (
-                  <table className="w-full text-[12px]">
+              {listQ.loading && !listQ.data ? (
+                <div className="p-3"><LoadState loading rows={5} /></div>
+              ) : rows.length === 0 ? (
+                <EmptyState compact icon="shield" title="Nothing recorded in this period">
+                  An access is written when a frame known to contain a face or a plate is served, and when the
+                  security console reads a registration number.
+                </EmptyState>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="data-table">
                     <thead>
-                      <tr className="text-ink-3 text-left border-b hairline">
-                        <th className="py-1">when</th><th>who</th><th>action</th>
-                        <th>subject</th><th>kinds</th><th>state</th>
+                      <tr>
+                        <th>When</th><th>Who</th><th>Action</th>
+                        <th>What</th><th>Contains</th><th>Shown</th>
                       </tr>
                     </thead>
                     <tbody>
                       {rows.map((r) => (
-                        <tr key={r.access_id} className="border-b hairline">
-                          <td className="py-1 text-ink-3">
-                            {r.created_at?.slice(0, 19).replace("T", " ") ?? "-"}
+                        <tr key={r.access_id}>
+                          <td className="text-ink-3 whitespace-nowrap" title={r.created_at ?? undefined}>
+                            {ago(r.created_at)}
                           </td>
-                          <td className="text-ink-2">{r.user_name ?? "unknown"}</td>
-                          <td className="text-ink-3">{r.action}</td>
-                          <td className="text-ink-3">
-                            {r.subject_type} {r.subject_id.slice(0, 8)}
+                          <td className="text-ink">{r.user_name ?? "Unknown"}</td>
+                          <td>{ACTION_WORDS[r.action] ?? humanize(r.action)}</td>
+                          <td>
+                            {humanize(r.subject_type)}{" "}
+                            {r.subject_type === "frame"
+                              ? <a href={`/frame/${r.subject_id}`} className="link font-mono text-[11.5px]">{shortId(r.subject_id)}</a>
+                              : <span className="font-mono text-[11.5px] text-ink-3">{shortId(r.subject_id)}</span>}
                           </td>
-                          <td className="text-ink-3">{r.pii_kinds.join(", ") || "-"}</td>
+                          <td className="text-ink-3">{r.pii_kinds.map(humanize).join(", ") || "-"}</td>
                           <td className={r.redacted ? "text-ink-3" : "text-warn"}>
-                            {r.redacted ? "redacted" : "unredacted"}
+                            {r.redacted ? "Redacted" : "Unredacted"}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                )}
-              </div>
+                </div>
+              )}
             </section>
           </>
         )}

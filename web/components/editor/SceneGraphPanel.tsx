@@ -56,11 +56,11 @@ export default function SceneGraphPanel({ frameId, embedded = false }: { frameId
       {/* scene-graph relations */}
       {rels.length > 0 && (
         <div className="space-y-1">
-          <div className="text-ink-3 uppercase text-[9px]">relations ({rels.length})</div>
+          <div className="text-ink-3 uppercase text-[10.5px]">relations ({rels.length})</div>
           {rels.slice(0, 20).map((r) => (
             <div key={r.relationship_id} className="flex items-center gap-1">
               <span className="flex-1 truncate text-ink-2">{r.from_name} <span className="text-accent">{r.kind.replace(/_/g, " ")}</span> {r.to_name}</span>
-              <span className={`text-[9px] uppercase ${r.status === "confirmed" ? "text-pass" : "text-warn"}`}>{r.status}</span>
+              <span className={`text-[10.5px] uppercase ${r.status === "confirmed" ? "text-pass" : "text-warn"}`}>{r.status}</span>
               {r.status !== "confirmed" && (
                 <>
                   <button onClick={() => relStatus(r.relationship_id, "confirmed")} disabled={busy} title="confirm" className="text-pass hover:text-accent">✓</button>
@@ -78,9 +78,9 @@ export default function SceneGraphPanel({ frameId, embedded = false }: { frameId
         return (
           <div key={t.target_id} className="border border-line rounded p-1.5 bg-bg-2 space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-ink-3 uppercase text-[9px]">vlm target · {(t.grounding.object_ids || []).length} objs · {(t.grounding.relation_ids || []).length} rels</span>
+              <span className="text-ink-3 uppercase text-[10.5px]">vlm target · {(t.grounding.object_ids || []).length} objs · {(t.grounding.relation_ids || []).length} rels</span>
               <span className="flex items-center gap-1">
-                <span className={`text-[9px] uppercase ${t.status === "approved" ? "text-pass" : t.status === "rejected" ? "text-block" : "text-warn"}`}>{t.status}</span>
+                <span className={`text-[10.5px] uppercase ${t.status === "approved" ? "text-pass" : t.status === "rejected" ? "text-block" : "text-warn"}`}>{t.status}</span>
                 {t.status === "generated" && (
                   <>
                     <button onClick={() => tgtStatus(t.target_id, "approved")} disabled={busy} title="approve for export" className="text-pass hover:text-accent">approve</button>

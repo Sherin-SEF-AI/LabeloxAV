@@ -163,7 +163,14 @@ function humanize(status: number, path: string, detail: string): string {
   if (status === 404) return `Not found: ${what}.`;
   if (status === 409) return detail || "That conflicts with the current state.";
   if (status === 422) return detail || "Some input was invalid.";
-  if (status === 503) return "The service is busy (the GPU may be in use). Try again shortly.";
+  // A 503 carries its own reason more often than not ("lakeFS is not reachable", "GPU busy with training"),
+  // and a blanket "the GPU may be in use" hid that: /collaborate blamed the GPU for a stopped branch service.
+  // Keep a short, sentence-like detail; fall back to the generic line for HTML pages or nothing at all.
+  if (status === 503) {
+    const d = detail.trim();
+    if (d && d.length <= 240 && !d.startsWith("<")) return `${d.charAt(0).toUpperCase()}${d.slice(1)}`;
+    return "The service is busy (the GPU may be in use). Try again shortly.";
+  }
   if (status >= 500) return `Something went wrong loading ${what}. Please retry.`;
   return detail || `Request failed (${status}).`;
 }

@@ -57,8 +57,8 @@ describe("opening", () => {
 describe("what it lists", () => {
   it("prints each tool and action with the key in force", () => {
     open();
-    expect(keyButton(/^rebind box, currently B$/)).toHaveTextContent("B");
-    expect(keyButton(/^rebind fit the frame to the window, currently F$/)).toBeInTheDocument();
+    expect(keyButton(/^rebind box, currently B$/i)).toHaveTextContent("B");
+    expect(keyButton(/^rebind fit the frame to the window, currently F$/i)).toBeInTheDocument();
   });
 
   it("keeps the fixed rows, and adds the keys this editor binds", () => {
@@ -75,15 +75,15 @@ describe("what it lists", () => {
 
   it("says which mode a tool belongs to when it is not in all of them", () => {
     open();
-    expect(screen.getByText(/whole extent/).textContent).toContain("Objects");
-    expect(screen.getByText(/^keypoint/).textContent).toContain("Pose and behavior");
+    expect(screen.getByText(/whole extent/i).textContent).toContain("Objects");
+    expect(screen.getByText(/^keypoint/i).textContent).toContain("Pose and behavior");
   });
 
   it("filters by the search box", async () => {
     open();
     await userEvent.type(screen.getByPlaceholderText("search shortcuts..."), "polygon");
-    expect(keyButton(/^rebind polygon/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^rebind box/ })).toBeNull();
+    expect(keyButton(/^rebind polygon/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^rebind box/i })).toBeNull();
     expect(screen.queryByText("Cmd Z")).toBeNull();
   });
 
@@ -97,10 +97,10 @@ describe("what it lists", () => {
 describe("rebinding", () => {
   it("click a key, press a key: the binding moves, is stored, and the handler would now resolve it", async () => {
     open();
-    await userEvent.click(keyButton(/^rebind box/));
-    expect(screen.getByRole("button", { name: "press a key for box" })).toHaveTextContent("press a key");
+    await userEvent.click(keyButton(/^rebind box/i));
+    expect(screen.getByRole("button", { name: "press a key for Box" })).toHaveTextContent("press a key");
     fireEvent.keyDown(document.body, { key: "n" });
-    expect(keyButton(/^rebind box, currently N$/)).toHaveTextContent("N");
+    expect(keyButton(/^rebind box, currently N$/i)).toHaveTextContent("N");
     expect(screen.getByText(/was B/)).toBeInTheDocument();
     expect(JSON.parse(window.localStorage.getItem(KEYMAP_STORAGE_KEY) ?? "null")).toEqual({ "tool:box": "n" });
     expect(toolForHotkey("objects", "n", effectiveModes(getKeymap()))).toBe("box");
@@ -109,7 +109,7 @@ describe("rebinding", () => {
 
   it("the key being offered never reaches the page's own handler", async () => {
     open();
-    await userEvent.click(keyButton(/^rebind box/));
+    await userEvent.click(keyButton(/^rebind box/i));
     spy.mockClear();
     fireEvent.keyDown(document.body, { key: "n" });
     expect(spy).not.toHaveBeenCalled();
@@ -117,20 +117,20 @@ describe("rebinding", () => {
 
   it("Escape cancels the capture, keeps the overlay open, and does not reach the page", async () => {
     open();
-    await userEvent.click(keyButton(/^rebind box/));
+    await userEvent.click(keyButton(/^rebind box/i));
     spy.mockClear();
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(spy).not.toHaveBeenCalled();
     expect(screen.getByText("keyboard shortcuts")).toBeInTheDocument();
-    expect(keyButton(/^rebind box, currently B$/)).toBeInTheDocument();
+    expect(keyButton(/^rebind box, currently B$/i)).toBeInTheDocument();
     expect(getKeymap()).toEqual({});
   });
 
   it("refuses a key another tool has in the same mode, says why, and changes nothing", async () => {
     open();
-    await userEvent.click(keyButton(/^rebind box/));
+    await userEvent.click(keyButton(/^rebind box/i));
     fireEvent.keyDown(document.body, { key: "g" });
-    expect(screen.getByRole("alert")).toHaveTextContent('G is already "polygon" in Objects');
+    expect(screen.getByRole("alert")).toHaveTextContent('G is already "Polygon" in Objects');
     expect(getKeymap()).toEqual({});
     expect(window.localStorage.getItem(KEYMAP_STORAGE_KEY)).toBeNull();
     // Still armed: the next key is another attempt, not a tool switch.
@@ -141,17 +141,17 @@ describe("rebinding", () => {
 
   it("refuses a reserved key", async () => {
     open();
-    await userEvent.click(keyButton(/^rebind box/));
+    await userEvent.click(keyButton(/^rebind box/i));
     fireEvent.keyDown(document.body, { key: "1" });
     expect(screen.getByRole("alert")).toHaveTextContent(/1 is reserved/);
   });
 
   it("refuses a chord, and waits through a modifier pressed on its own", async () => {
     open();
-    await userEvent.click(keyButton(/^rebind box/));
+    await userEvent.click(keyButton(/^rebind box/i));
     fireEvent.keyDown(document.body, { key: "Shift" });
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByRole("button", { name: "press a key for box" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "press a key for Box" })).toBeInTheDocument();
     fireEvent.keyDown(document.body, { key: "n", ctrlKey: true });
     expect(screen.getByRole("alert")).toHaveTextContent(/without Cmd, Ctrl or Alt/);
     expect(getKeymap()).toEqual({});
@@ -159,14 +159,14 @@ describe("rebinding", () => {
 
   it("clicking the armed key again disarms it", async () => {
     open();
-    await userEvent.click(keyButton(/^rebind box/));
-    await userEvent.click(screen.getByRole("button", { name: "press a key for box" }));
-    expect(keyButton(/^rebind box, currently B$/)).toBeInTheDocument();
+    await userEvent.click(keyButton(/^rebind box/i));
+    await userEvent.click(screen.getByRole("button", { name: "press a key for Box" }));
+    expect(keyButton(/^rebind box, currently B$/i)).toBeInTheDocument();
   });
 
   it("closing mid-capture leaves nothing armed behind the closed overlay", async () => {
     open();
-    await userEvent.click(keyButton(/^rebind box/));
+    await userEvent.click(keyButton(/^rebind box/i));
     await userEvent.click(screen.getByRole("button", { name: "esc" }));
     spy.mockClear();
     fireEvent.keyDown(document.body, { key: "n" });
@@ -177,7 +177,7 @@ describe("rebinding", () => {
 
   it("rebinds an action the same way", async () => {
     open();
-    await userEvent.click(keyButton(/^rebind fit the frame/));
+    await userEvent.click(keyButton(/^rebind fit the frame/i));
     fireEvent.keyDown(document.body, { key: "z" });
     expect(getKeymap()).toEqual({ "action:fit": "z" });
   });
@@ -192,11 +192,11 @@ describe("reset to defaults", () => {
 
   it("puts every key back and clears what was stored", async () => {
     open();
-    await userEvent.click(keyButton(/^rebind box/));
+    await userEvent.click(keyButton(/^rebind box/i));
     fireEvent.keyDown(document.body, { key: "n" });
     expect(screen.getByText("1 changed from the defaults")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Reset to defaults" }));
-    expect(keyButton(/^rebind box, currently B$/)).toBeInTheDocument();
+    expect(keyButton(/^rebind box, currently B$/i)).toBeInTheDocument();
     expect(getKeymap()).toEqual({});
     expect(window.localStorage.getItem(KEYMAP_STORAGE_KEY)).toBeNull();
   });
@@ -204,6 +204,6 @@ describe("reset to defaults", () => {
   it("reads a keymap stored on an earlier visit", () => {
     window.localStorage.setItem(KEYMAP_STORAGE_KEY, JSON.stringify({ "tool:box": "n" }));
     open();
-    expect(keyButton(/^rebind box, currently N$/)).toBeInTheDocument();
+    expect(keyButton(/^rebind box, currently N$/i)).toBeInTheDocument();
   });
 });

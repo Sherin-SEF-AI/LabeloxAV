@@ -14,6 +14,11 @@ import BackButton from "@/components/BackButton";
 import PageHeaderBar from "@/components/shell/PageHeaderBar";
 import EventLane from "@/components/track/EventLane";
 import ClassPopover from "@/components/editor/properties/ClassPopover";
+import LoadState from "@/components/shell/LoadState";
+import { humanize, shortId } from "@/lib/format";
+
+// Ontology class names read as words ("two wheeler") but keep their case: "suv" is not "Suv".
+const classLabel = (n: string | null | undefined) => (n ?? "").replace(/_/g, " ");
 
 // Tube review: scan a track across frames as a strip, confirm the whole thing with one key, and fix the
 // odd wrong crop in place instead of leaving for the frame editor and coming back.
@@ -47,6 +52,7 @@ export default function TrackEditor() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [vocab, setVocab] = useState<IntentVocab | null>(null);
+  const [loadErr, setLoadErr] = useState<unknown>(null);
 
   // Strip review state
   const [placements, setPlacements] = useState<Record<string, Placement>>({});
@@ -61,6 +67,7 @@ export default function TrackEditor() {
 
   const load = useCallback(async () => {
     const [t, o, v] = await Promise.all([api.track(id), api.ontology(), api.intentVocab().catch(() => null)]);
+    setLoadErr(null);
     setTrack(t);
     setOnto(o);
     setVocab(v);
@@ -77,23 +84,23 @@ export default function TrackEditor() {
 
   const proposeIntent = useCallback(async () => {
     setBusy(true);
-    try { const r = await api.intentPropose(id); setMsg(r.proposed.length ? `proposed: ${r.proposed.join(", ")}` : "no geometric intent (left unknown)"); await load(); }
+    try { const r = await api.intentPropose(id); setMsg(r.proposed.length ? `Proposed: ${r.proposed.map(humanize).join(", ")}` : "No intent could be read from the trajectory (left unknown)"); await load(); }
     catch (e) { setMsg(humanizeError(e)); } finally { setBusy(false); }
   }, [id, load]);
   const vlmIntent = useCallback(async () => {
-    setBusy(true); setMsg("asking the VLM...");
-    try { const r = await api.intentVlm(id); setMsg(r.proposed ? `VLM proposed: ${r.proposed}` : `VLM: ${r.reason ?? "unclear (unknown)"}`); await load(); }
+    setBusy(true); setMsg("Asking the VLM...");
+    try { const r = await api.intentVlm(id); setMsg(r.proposed ? `VLM proposed: ${humanize(r.proposed)}` : `VLM: ${r.reason ?? "unclear (unknown)"}`); await load(); }
     catch (e) { setMsg(humanizeError(e)); } finally { setBusy(false); }
   }, [id, load]);
   const setIntent = useCallback(async (intent: string) => {
     if (!intentKind) return;
     setBusy(true);
-    try { await api.intentSet(id, intent, intentKind); setMsg(intent === "unknown" ? "cleared intent" : `confirmed intent: ${intent}`); await load(); }
+    try { await api.intentSet(id, intent, intentKind); setMsg(intent === "unknown" ? "Intent cleared" : `Intent confirmed: ${humanize(intent)}`); await load(); }
     catch (e) { setMsg(humanizeError(e)); } finally { setBusy(false); }
   }, [id, intentKind, load]);
 
   useEffect(() => {
-    load().catch((e) => setMsg(humanizeError(e)));
+    load().catch((e) => setLoadErr(e));
   }, [load]);
 
   const items = useMemo(() => track?.items ?? [], [track]);
@@ -139,7 +146,7 @@ export default function TrackEditor() {
       setBusy(true);
       try {
         const r = await api.relabelTrack(id, className);
-        setMsg(`relabeled ${r.relabeled} frames to ${className}`);
+        setMsg(`Relabelled ${r.relabeled} frames to ${classLabel(className)}`);
         await load();
       } catch (e) {
         setMsg(humanizeError(e));
@@ -159,13 +166,13 @@ export default function TrackEditor() {
     try {
       const r = await api.acceptTrack(id, { time_spent_ms: elapsed });
       setDecided((d) => d + r.accepted);
-      const parts = [`accepted ${r.accepted} frames as ${r.state}`];
+      const parts = [`Accepted ${r.accepted} frames as ${r.state}`];
       if (r.clamped) parts.push("clamped to your role's ceiling");
       if (r.skipped_human.length) parts.push(`${r.skipped_human.length} left alone (already human)`);
       // Not a blocker, but the one thing that can make a whole-track verdict wrong, so it is said out loud.
-      if (r.id_switch_events) parts.push(`${r.id_switch_events} id-switch event(s) on this track: check the strip`);
-      setMsg(parts.join(" - "));
-      if (r.run_id) toast(`accepted ${r.accepted} frames`, "success");
+      if (r.id_switch_events) parts.push(`${r.id_switch_events} identity switch${r.id_switch_events === 1 ? "" : "es"} on this track: check the strip`);
+      setMsg(parts.join(". "));
+      if (r.run_id) toast(`Accepted ${r.accepted} frames`, "success");
       await load();
     } catch (e) {
       setMsg(humanizeError(e));
@@ -202,7 +209,7 @@ export default function TrackEditor() {
         toast(`${res.updated} applied, ${lost} skipped (changed or gone since this page loaded)`, "error");
         setDecided((d) => d - lost);
       } else {
-        toast(`${res.updated} ${action === "reject" ? "rejected" : action === "reclassify" ? `set to ${className}` : "accepted"}`, "success");
+        toast(`${res.updated} ${action === "reject" ? "rejected" : action === "reclassify" ? `set to ${classLabel(className)}` : "accepted"}`, "success");
       }
       await load();
     } catch (e) {
@@ -231,7 +238,7 @@ export default function TrackEditor() {
     setBusy(true);
     try {
       const r = await api.interpolateTrack(id);
-      setMsg(r.created ? `interpolated ${r.created} gap frames (confirm them in the editor)` : "no gaps to fill");
+      setMsg(r.created ? `Interpolated ${r.created} gap frames (confirm them in the editor)` : "No gaps to fill");
       await load();
     } catch (e) {
       setMsg(humanizeError(e));
@@ -305,64 +312,73 @@ export default function TrackEditor() {
     [onto, search],
   );
 
-  if (!track) return <div className="min-h-screen flex items-center justify-center font-mono text-ink-3">{msg ?? "loading track..."}</div>;
+  if (!track) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <PageHeaderBar title="Track" subtitle={shortId(id)} meta={<BackButton label="Back" />} />
+        <div className="page-wrap-narrow">
+          <LoadState loading={!loadErr} error={loadErr} rows={4}
+            onRetry={() => { setLoadErr(null); load().catch((e) => setLoadErr(e)); }} />
+        </div>
+      </div>
+    );
+  }
 
   const current = items[cursor];
 
   return (
     <div className="min-h-screen flex flex-col">
-      <div className="flex items-center gap-3 px-4 h-11 border-b hairline shrink-0">
-        <BackButton />
-        <button onClick={() => router.push("/")} className="font-display font-bold" title="Home">
-          Labelox<span className="text-accent">AV</span>
-        </button>
-        <span className="text-[12.5px] text-ink-3">/ TRACK <span className="text-ink-2">{id.slice(0, 8)}</span></span>
-      </div>
-
       <PageHeaderBar
         title="Track"
-        subtitle={id.slice(0, 8)}
+        subtitle={shortId(id)}
         meta={
           <>
-            <span className="text-ink-3">{track.n_frames} frames</span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 inline-block" style={{ background: classColor(track.items[0]?.class_id ?? 0) }} />
-              {track.dominant}
+            <BackButton label="Back" />
+            <span className="flex items-center gap-1.5 ml-1 text-ink-2">
+              <span className="w-2.5 h-2.5 inline-block rounded-sm" style={{ background: classColor(track.items[0]?.class_id ?? 0) }} />
+              {classLabel(track.dominant)}
             </span>
+            <span className="text-ink-3">{track.n_frames} frames</span>
             {track.flips ? (
-              <span className="text-block">class flips: {Object.keys(track.classes).length} classes</span>
+              <span className="text-block">Class changes along the track: {Object.keys(track.classes).length} classes</span>
             ) : (
-              <span className="text-pass">consistent</span>
+              <span className="text-pass">One class throughout</span>
             )}
             {decided > 0 && <span className="text-ink-3">{decided} decided</span>}
-            {perMin != null && <span className="text-accent">{perMin}/min</span>}
+            {perMin != null && <span className="text-accent">{perMin} per min</span>}
           </>
+        }
+        primaryAction={
+          <button type="button" onClick={() => router.push(`/annotate/timeline/${id}`)}
+            title="open the keyframe + interpolation video timeline workspace" className="btn">
+            Timeline workspace →
+          </button>
         }
       />
 
       <main className="flex-1 overflow-auto p-4 space-y-4">
-        {msg && <div className="panel px-3 py-1.5 text-[12px] text-warn">{msg}</div>}
+        {msg && <div role="status" className="panel px-3.5 py-2 text-[12.5px] text-ink-2">{msg}</div>}
 
         {/* The event lane sits directly under the strip and shares its column geometry, so a span reads
             against the crops it covers rather than against a separate time axis. */}
         {/* tube review strip */}
         <section className="panel">
-          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2 flex items-center gap-3 flex-wrap">
-            <span>timeline ({track.n_frames})</span>
-            <span className="text-ink-2 normal-case">
-              <b className="text-accent">A</b> accept whole track (or the selection) ·
-              {" "}<b className="text-accent">C</b> change class ·
-              {" "}<b className="text-accent">R</b> reject ·
-              {" "}<b className="text-accent">space</b> select ·
-              {" "}<b className="text-accent">shift+←→</b> range ·
-              {" "}<b className="text-accent">O</b> open frame
+          <div className="panel-head flex-wrap gap-x-4">
+            <h2 className="section-title">Frames <span className="font-normal text-ink-3">({track.n_frames})</span></h2>
+            <span className="text-[12px] text-ink-3 flex items-center gap-x-3 gap-y-1 flex-wrap">
+              <span><kbd className="text-accent font-semibold">A</kbd> accept whole track (or the selection)</span>
+              <span><kbd className="text-accent font-semibold">C</kbd> change class</span>
+              <span><kbd className="text-accent font-semibold">R</kbd> reject</span>
+              <span><kbd className="text-accent font-semibold">Space</kbd> select</span>
+              <span><kbd className="text-accent font-semibold">Shift ←→</kbd> range</span>
+              <span><kbd className="text-accent font-semibold">O</kbd> open frame</span>
             </span>
             <span className="ml-auto flex items-center gap-2">
-              {selection.size > 0 && <span className="text-accent normal-case">{selection.size} selected</span>}
-              <button onClick={acceptWholeTrack} disabled={busy}
+              {selection.size > 0 && <span className="text-accent text-[12px]">{selection.size} selected</span>}
+              <button type="button" onClick={acceptWholeTrack} disabled={busy}
                 title="confirm every frame on this track (state only: no box moves and no class is asserted)"
-                className="border border-pass/60 text-pass px-2 py-0.5 rounded hover:bg-pass/10 disabled:opacity-40 normal-case">
-                accept all {track.n_frames}
+                className="btn btn-primary">
+                Accept all {track.n_frames}
               </button>
             </span>
           </div>
@@ -413,23 +429,23 @@ export default function TrackEditor() {
                       }}
                     />
                   ) : (
-                    <div className="bg-bg-2 flex items-center justify-center text-[10.5px] text-ink-3"
+                    <div className={`bg-bg-2 flex items-center justify-center text-[11px] text-ink-3 ${p ? "" : "skeleton rounded-none"}`}
                       style={{ width: CELL, height: CELL }}>
-                      {p ? "no crop" : "..."}
+                      {p ? "No crop" : ""}
                     </div>
                   )}
                   <div className="flex items-center gap-1 px-1 py-0.5 text-[11px]">
                     <span className="w-2 h-2 inline-block shrink-0" style={{ background: classColor(it.class_id) }} />
-                    <span className={`truncate ${flip ? "text-block" : "text-ink-2"}`}>{it.class_name}</span>
+                    <span className={`truncate ${flip ? "text-block" : "text-ink-2"}`}>{classLabel(it.class_name)}</span>
                     <span className="ml-auto text-ink-3">{i + 1}</span>
                   </div>
                   {/* State and source, because "accept the track" is a claim about these and a reviewer
                       should be able to see which frames it will actually move. */}
-                  <div className="px-1 pb-0.5 text-[10.5px] flex items-center gap-1">
+                  <div className="px-1 pb-0.5 text-[11px] flex items-center gap-1">
                     <span className={it.state === "accepted" ? "text-pass" : it.state === "rejected" ? "text-block" : "text-ink-3"}>
-                      {it.state}
+                      {humanize(it.state)}
                     </span>
-                    <span className="ml-auto text-ink-3 truncate">{it.source}</span>
+                    <span className="ml-auto text-ink-3 truncate">{humanize(it.source)}</span>
                   </div>
                 </div>
               );
@@ -448,81 +464,80 @@ export default function TrackEditor() {
 
         <EventLane trackId={id} items={track.items} />
 
+        <div className="grid gap-4 items-start lg:grid-cols-2">
+        {/* relabel whole track */}
+        <section className="panel">
+          <div className="panel-head">
+            <h2 className="section-title">Relabel the whole track</h2>
+            <span className="ml-auto text-[12px] text-ink-3">One fix, all {track.n_frames} frames</span>
+          </div>
+          <div className="p-3.5">
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="search class..."
+              aria-label="search classes"
+              className="field w-full mb-2" />
+            <div className="max-h-56 overflow-auto grid grid-cols-2 sm:grid-cols-3 gap-1">
+              {filtered.slice(0, 40).map((c) => (
+                <button key={c.id} type="button" disabled={busy} onClick={() => relabel(c.name)}
+                  title={c.name}
+                  className="flex items-center gap-1.5 px-2 py-1.5 rounded border border-line text-[12.5px] text-ink-2 text-left hover:border-accent hover:text-ink disabled:opacity-50">
+                  <span className="w-2.5 h-2.5 inline-block shrink-0 rounded-sm" style={{ background: classColor(c.id) }} />
+                  <span className="truncate">{classLabel(c.name)}</span>
+                  {c.india && <span className="ml-auto text-accent" title="India-specific class" aria-label="India-specific class">*</span>}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3.5 pt-3 border-t hairline flex items-center gap-2">
+              <button type="button" onClick={onInterpolate} disabled={busy}
+                title="fill the gaps between this track's keyframes with interpolated boxes (no drift)"
+                className="btn">
+                Interpolate gaps
+              </button>
+              <button type="button" onClick={onDelete} disabled={busy} className="btn btn-danger ml-auto">
+                Delete track
+              </button>
+            </div>
+          </div>
+        </section>
+
         {/* M-F.2 behavior / intent (track-level, from a closed vocabulary; proposals need human confirmation) */}
         {intentKind && (
-          <section className="panel max-w-2xl">
-            <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2 flex items-center justify-between">
-              <span>behavior / intent ({intentKind})</span>
-              <span className="flex items-center gap-2">
-                <button onClick={proposeIntent} disabled={busy} className="border border-line px-1.5 py-0.5 rounded text-ink-3 hover:border-accent disabled:opacity-40">propose from trajectory</button>
-                {intentKind === "vru" && <button onClick={vlmIntent} disabled={busy} className="border border-info/50 text-info px-1.5 py-0.5 rounded hover:bg-info/10 disabled:opacity-40">propose from VLM</button>}
+          <section className="panel">
+            <div className="panel-head">
+              <h2 className="section-title">Behaviour and intent <span className="font-normal text-ink-3">({intentKind === "vru" ? "road user" : "vehicle"})</span></h2>
+              <span className="ml-auto flex items-center gap-2">
+                <button type="button" onClick={proposeIntent} disabled={busy} className="btn">Propose from trajectory</button>
+                {intentKind === "vru" && <button type="button" onClick={vlmIntent} disabled={busy} className="btn">Propose from VLM</button>}
               </span>
             </div>
-            <div className="p-3 space-y-3 text-[12px]">
+            <div className="p-3.5 space-y-3 text-[12.5px]">
               {/* current intents */}
               <div className="flex flex-wrap gap-1.5">
-                {(track.intents || []).length === 0 && <span className="text-ink-3">no intent yet. propose from trajectory or VLM, or set one below.</span>}
+                {(track.intents || []).length === 0 && <span className="text-ink-3">No intent yet. Propose one from the trajectory or the VLM, or set one below.</span>}
                 {(track.intents || []).map((it, i) => (
                   <span key={i} title={`source ${it.source} · confidence ${it.confidence}`}
-                    className={`inline-flex items-center gap-1 border px-1.5 py-0.5 rounded ${it.status === "confirmed" ? "border-pass/60 text-pass" : "border-warn/60 text-warn"}`}>
-                    {it.intent}
-                    <span className="text-ink-3 text-[9px] uppercase">{it.source}</span>
+                    className={`inline-flex items-center gap-1.5 border px-2 py-0.5 rounded ${it.status === "confirmed" ? "border-pass/60 text-pass" : "border-warn/60 text-warn"}`}>
+                    {humanize(it.intent)}
+                    <span className="text-ink-3 text-[11px]">{humanize(it.source)}</span>
                     {it.status === "proposed" && it.source !== "human" && (
-                      <button onClick={() => setIntent(it.intent)} disabled={busy} title="confirm this intent" aria-label={`confirm the intent ${it.intent}`} className="text-pass hover:text-accent ml-0.5">✓</button>
+                      <button type="button" onClick={() => setIntent(it.intent)} disabled={busy} title="confirm this intent" aria-label={`confirm the intent ${it.intent}`} className="text-pass hover:text-accent ml-0.5">✓</button>
                     )}
                   </span>
                 ))}
               </div>
               {/* set from the closed vocabulary */}
-              <div className="flex flex-wrap items-center gap-1.5 border-t hairline pt-2">
-                <span className="text-ink-3 uppercase text-[9px] w-full">set intent (closed vocabulary)</span>
-                {(intentKind === "vehicle" ? vocab?.vehicle : vocab?.vru)?.map((v) => (
-                  <button key={v} onClick={() => setIntent(v)} disabled={busy}
-                    className="border border-line px-1.5 py-0.5 rounded text-ink-2 hover:border-accent disabled:opacity-40">{v}</button>
-                ))}
-                <button onClick={() => setIntent("unknown")} disabled={busy}
-                  className="border border-line px-1.5 py-0.5 rounded text-ink-3 hover:border-block disabled:opacity-40">unknown</button>
+              <div className="border-t hairline pt-3">
+                <div className="text-[12px] text-ink-3 mb-2">Set intent</div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {(intentKind === "vehicle" ? vocab?.vehicle : vocab?.vru)?.map((v) => (
+                    <button key={v} type="button" onClick={() => setIntent(v)} disabled={busy} className="chip">{humanize(v)}</button>
+                  ))}
+                  <button type="button" onClick={() => setIntent("unknown")} disabled={busy} className="chip text-ink-3">Unknown</button>
+                </div>
               </div>
             </div>
           </section>
         )}
-
-        {/* relabel whole track */}
-        <section className="panel max-w-md">
-          <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-            relabel entire track (one fix, all {track.n_frames} frames)
-          </div>
-          <div className="p-3">
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="search class..."
-              className="w-full bg-panel border border-line px-2 py-1 text-[12px] text-ink mb-2" />
-            <div className="max-h-48 overflow-auto grid grid-cols-2 gap-1">
-              {filtered.slice(0, 40).map((c) => (
-                <button key={c.id} disabled={busy} onClick={() => relabel(c.name)}
-                  className="flex items-center gap-1.5 px-1.5 py-1 border border-line text-[12px] text-ink-2 text-left hover:border-accent hover:text-ink disabled:opacity-50">
-                  <span className="w-2.5 h-2.5 inline-block shrink-0" style={{ background: classColor(c.id) }} />
-                  <span className="truncate">{c.name}</span>
-                  {c.india && <span className="ml-auto text-accent">*</span>}
-                </button>
-              ))}
-            </div>
-            <div className="mt-3 flex items-center gap-2">
-              <button onClick={onInterpolate} disabled={busy}
-                title="fill the gaps between this track's keyframes with interpolated boxes (no drift)"
-                className="text-[12px] border border-line text-ink-2 px-2 py-1 hover:border-accent disabled:opacity-50">
-                interpolate gaps
-              </button>
-              <button onClick={() => router.push(`/annotate/timeline/${id}`)}
-                title="open the keyframe + interpolation video timeline workspace"
-                className="text-[12px] border border-accent text-accent px-2 py-1 hover:bg-accent/10">
-                timeline workspace →
-              </button>
-              <button onClick={onDelete} disabled={busy}
-                className="text-[12px] border border-line text-ink-3 px-2 py-1 hover:border-block hover:text-block disabled:opacity-50">
-                delete track
-              </button>
-            </div>
-          </div>
-        </section>
+        </div>
       </main>
     </div>
   );

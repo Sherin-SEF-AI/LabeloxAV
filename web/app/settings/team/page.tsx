@@ -6,6 +6,7 @@ import { T } from "@/lib/i18n";
 import PageShell from "@/components/shell/PageShell";
 import Icon from "@/components/shell/Icon";
 import LoadState from "@/components/shell/LoadState";
+import EmptyState from "@/components/ui/EmptyState";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { apiGet, apiPost, humanizeError } from "@/lib/api";
 import { invalidate, useQuery } from "@/lib/useQuery";
@@ -37,7 +38,7 @@ function SignInLink({ link, onDone }: { link: Link; onDone: () => void }) {
   };
   return (
     <section className="panel p-5 border-pass/40" role="alert">
-      <h2 className="text-[14px] font-semibold text-ink">Sign-in link for {link.name}</h2>
+      <h2 className="section-title text-[14px]">Sign-in link for {link.name}</h2>
       <p className="mt-1 text-[12.5px] text-ink-2">
         Send this to {link.name}. Opening it lets them choose a password and sign in. It works once and expires in {link.expires_in_hours} hours;
         it is not shown again, so issue a new one if it is lost.
@@ -99,64 +100,68 @@ export default function TeamPage() {
   if (me && me.role !== "admin") {
     return (
       <PageShell active="Team" title="Team">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-          <section className="panel p-5 text-[13px] text-ink-2">The team is managed by administrators. Ask one to invite a teammate.</section>
+        <div className="page-wrap-narrow">
+          <section className="panel">
+            <EmptyState icon="person" title="Administrators manage the team">
+              Ask an administrator to invite a teammate or issue a new sign-in link.
+            </EmptyState>
+          </section>
         </div>
       </PageShell>
     );
   }
 
   return (
-    <PageShell active="Team" title="Team" subtitle="who has an account, and how new people get in">
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 flex flex-col gap-5">
+    <PageShell active="Team" title="Team" subtitle="Who has an account, and how new people get in">
+      <div className="page-wrap-narrow flex flex-col gap-4">
         {link && <SignInLink link={link} onDone={() => setLink(null)} />}
 
         <form onSubmit={invite} className="panel p-5 grid gap-4 sm:grid-cols-[1fr_1fr_auto] items-end">
           <div className="sm:col-span-3">
-            <h2 className="text-[14px] font-semibold text-ink">Invite a teammate</h2>
+            <h2 className="section-title text-[14px]">Invite a teammate</h2>
             <p className="mt-0.5 text-[12.5px] text-ink-3">You get a link to send them. They choose their own password.</p>
           </div>
           <label className="flex flex-col gap-1.5">
-            <span className="text-[12px] text-ink-2">Name they sign in with</span>
+            <span className="text-[12.5px] text-ink-2">Name they sign in with</span>
             <input className="field" value={name} onChange={(e) => setName(e.target.value)} required maxLength={64} placeholder="e.g. priya" />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-[12px] text-ink-2">Role</span>
+            <span className="text-[12.5px] text-ink-2">Role</span>
             <select className="field" value={role} onChange={(e) => setRole(e.target.value)}>
               {ROLES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>
           <button className="btn btn-primary" type="submit" disabled={busy || !name.trim()}>
-            <Icon name="plus" size={13} />{busy ? "Inviting" : "Invite"}
+            <Icon name="plus" size={13} />{busy ? "Inviting…" : "Invite"}
           </button>
         </form>
 
         <section className="panel">
-          <header className="flex items-center justify-between px-4 pt-3.5 pb-2.5">
-            <h2 className="text-[13.5px] font-semibold text-ink">Members{members ? ` (${members.length})` : ""}</h2>
+          <header className="panel-head">
+            <h2 className="section-title">Members{members ? <span className="font-normal text-ink-3 tabular-nums"> ({members.length})</span> : null}</h2>
           </header>
-          <div className="px-4 pb-4">
+          <div className={members ? "" : "p-3"}>
             <LoadState loading={!members && !error} error={error} onRetry={() => void load()} />
             {members && (
-              <div className="overflow-x-auto -mx-1">
-                <table className="w-full text-[12.5px]">
+              <div className="overflow-x-auto">
+                <table className="data-table">
                   <thead>
-                    <tr className="text-left text-ink-3 border-b hairline">
-                      <th className="font-medium px-1 py-2">Name</th>
-                      <th className="font-medium px-1 py-2">Role</th>
-                      <th className="font-medium px-1 py-2 text-right">Reviews</th>
-                      <th className="px-1 py-2" />
+                    <tr>
+                      <th>Name</th>
+                      <th>Role</th>
+                      <th className="num">Reviews</th>
+                      <th><span className="sr-only">Actions</span></th>
                     </tr>
                   </thead>
                   <tbody>
                     {members.map((m) => (
-                      <tr key={m.user_id} className="border-b hairline last:border-0">
-                        <td className="px-1 py-2.5 text-ink">{m.name}{m.user_id === me?.user_id && <span className="text-ink-3"> (you)</span>}</td>
-                        <td className={`px-1 py-2.5 capitalize ${ROLE_TONE[m.role] ?? "text-ink-2"}`}>{m.role}</td>
-                        <td className="px-1 py-2.5 text-right text-ink-2">{m.reviews.toLocaleString()}</td>
-                        <td className="px-1 py-2.5 text-right whitespace-nowrap">
+                      <tr key={m.user_id} className="group">
+                        <td className="text-ink">{m.name}{m.user_id === me?.user_id && <span className="text-ink-3"> (you)</span>}</td>
+                        <td className={`capitalize ${ROLE_TONE[m.role] ?? "text-ink-2"}`}>{m.role}</td>
+                        <td className="num">{m.reviews.toLocaleString()}</td>
+                        <td className="text-right whitespace-nowrap opacity-60 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                           <button className="btn" onClick={() => void newLink(m)}>New sign-in link</button>{" "}
-                          <button className="btn" onClick={() => void signOutEverywhere(m)}>Sign out everywhere</button>
+                          <button className="btn btn-danger" onClick={() => void signOutEverywhere(m)}>Sign out everywhere</button>
                         </td>
                       </tr>
                     ))}

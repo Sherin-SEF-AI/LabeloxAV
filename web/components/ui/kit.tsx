@@ -58,23 +58,41 @@ export function Panel({ title, desc, right, children, collapsible = false, defau
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section className={`bg-panel border border-line rounded ${className}`}>
+    <section className={`panel ${className}`}>
       <div className="panel-head">
-        <button type="button" onClick={() => collapsible && setOpen(!open)}
-          className={`flex items-center gap-1.5 ${collapsible ? "hover:text-ink" : "cursor-default"}`}>
-          {collapsible && <span className="text-ink-3 text-[9px]">{open ? "▾" : "▸"}</span>}
-          <span className="uppercase tracking-wide text-[10px] text-ink-2 font-medium">{title}</span>
-        </button>
+        {collapsible ? (
+          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+            className="flex items-center gap-1.5 hover:text-ink">
+            <span className="text-ink-3 text-[10px] w-2.5" aria-hidden>{open ? "▾" : "▸"}</span>
+            <h2 className="section-title">{title}</h2>
+          </button>
+        ) : <h2 className="section-title">{title}</h2>}
         {right && <div className="ml-auto flex items-center gap-2">{right}</div>}
       </div>
       {open && (
-        <div className="p-3">
-          {desc && <p className="text-[11px] text-ink-3 mb-2 leading-snug">{desc}</p>}
+        <div className="p-3.5">
+          {desc && <p className="section-desc mb-3">{desc}</p>}
           {children}
         </div>
       )}
     </section>
   );
+}
+
+// A headline number: a caption, the value, and an optional line beneath it. Pages each drew their own KPI
+// tiles at 9-10px captions; this is the one tile. `tone` colours the value only when it carries meaning.
+export function Stat({ label, value, sub, tone, href, className = "" }: {
+  label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: State; href?: string; className?: string;
+}) {
+  const body = (
+    <>
+      <div className="label-caps truncate">{label}</div>
+      <div className={`mt-1.5 text-[22px] leading-none font-semibold tracking-tight tabular-nums ${tone ? STATE_TEXT[tone] : "text-ink"}`}>{value}</div>
+      {sub && <div className="mt-1.5 text-[12px] text-ink-3 truncate">{sub}</div>}
+    </>
+  );
+  const cls = `panel px-4 py-3.5 min-w-0 block ${href ? "lift" : ""} ${className}`;
+  return href ? <a href={href} className={cls}>{body}</a> : <div className={cls}>{body}</div>;
 }
 
 // A labeled field row. The label sits left, the control right, like a Blender properties row.

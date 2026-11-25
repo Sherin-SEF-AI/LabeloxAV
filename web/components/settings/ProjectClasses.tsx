@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, apiGet, apiPut, humanizeError } from "@/lib/api";
 import { useQuery } from "@/lib/useQuery";
 import { classColor } from "@/lib/colors";
+import { humanize } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import type { OntologyClass } from "@/lib/types";
 
@@ -102,8 +103,8 @@ export default function ProjectClasses({ projectId, projectName, classSet, class
 
   return (
     <div className="flex flex-col gap-2">
-      <h3 className="text-[13px] font-semibold text-ink">
-        Classes <span className="font-normal text-ink-3 tabular-nums">({classCount} of {of})</span>
+      <h3 className="section-title">
+        Classes <span className="ml-0.5 font-normal text-ink-3 tabular-nums">({classCount} of {of})</span>
       </h3>
       <p className="text-[12px] text-ink-3">
         What the editor offers and what auto-labelling writes for this project&apos;s sessions. Detections of other classes are left out; labels already saved keep their class.
@@ -135,12 +136,12 @@ export default function ProjectClasses({ projectId, projectName, classSet, class
               const on = items.filter((c) => picked.has(c.id)).length;
               return (
                 <fieldset key={group} className="flex flex-col gap-1">
-                  <legend className="flex w-full items-center gap-2 text-[11px] uppercase tracking-[0.06em] text-ink-3">
+                  <legend className="flex w-full items-center gap-2 label-caps">
                     <span>{group}</span>
                     <span className="tabular-nums normal-case tracking-normal">{on}/{items.length}</span>
-                    <button type="button" className="ml-auto normal-case tracking-normal text-accent hover:text-accent-2"
+                    <button type="button" className="link ml-auto normal-case tracking-normal font-normal text-[12px]"
                             onClick={() => toggleGroup(items, on < items.length)}>
-                      {on < items.length ? "all" : "none"}
+                      {on < items.length ? "Select all" : "Select none"}
                     </button>
                   </legend>
                   <div className="flex flex-wrap gap-1.5">
@@ -153,7 +154,7 @@ export default function ProjectClasses({ projectId, projectName, classSet, class
                           <input type="checkbox" className="sr-only" checked={checked} disabled={locked}
                                  onChange={() => toggle(c)} />
                           <span className="inline-block h-2 w-2 rounded-full" style={{ background: classColor(c.id) }} aria-hidden />
-                          {c.name}
+                          {humanize(c.name)}
                         </label>
                       );
                     })}

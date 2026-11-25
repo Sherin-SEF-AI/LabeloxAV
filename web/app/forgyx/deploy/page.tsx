@@ -1,16 +1,33 @@
 "use client";
 
-// M16 FORGYX hardware-in-the-loop: co-optimize a model to its target, verify its thermal envelope from a real
+// Hardware-in-the-loop deployment: co-optimize a model to its target, verify its thermal envelope from a real
 // device-farm run, and stage the rollout. Co-optimization ranks (prune, int8) configs against the target
 // latency budget; the thermal check refuses without real device readings; rollout refuses skipping canary to
-// the whole fleet. Operational Materialism: feasible/passed states are green, refused states red.
+// the whole fleet. Feasible/passed states are green, refused states red.
 
 import { useState } from "react";
 import PageShell from "@/components/shell/PageShell";
-import { Panel, KV, Verdict, RunButton, useRun, ErrLine, NumField } from "@/components/engine/prim";
+import { Panel, KV, Verdict, Field, NumberInput, useRun, ErrLine, Badge } from "@/components/ui/kit";
 import { runJSON } from "@/lib/engine";
+import { humanize } from "@/lib/format";
 
-const TARGETS = ["sentrixai_litert", "agx_orin_trt", "orin_nano_trt", "pi_hailo"];
+const TARGETS: [string, string][] = [
+  ["sentrixai_litert", "SentrixAI (LiteRT)"],
+  ["agx_orin_trt", "Jetson AGX Orin (TensorRT)"],
+  ["orin_nano_trt", "Jetson Orin Nano (TensorRT)"],
+  ["pi_hailo", "Raspberry Pi + Hailo"],
+];
+
+// The rollout actions the server accepts, with what each means to the person pressing it.
+const ACTIONS: { action: string; label: string; danger?: boolean }[] = [
+  { action: "canary", label: "Start canary" },
+  { action: "full", label: "Roll out to the fleet" },
+  { action: "rolled_back", label: "Roll back", danger: true },
+];
+const STATE_NAME: Record<string, string> = {
+  none: "Not rolled out", canary: "Canary (a few vehicles)", full: "Whole fleet", rolled_back: "Rolled back",
+};
+const stateName = (s: string) => STATE_NAME[s] ?? humanize(s);
 
 type Coopt = { target: string; budget_ms: number; feasible: boolean;
   chosen: { prune: number; int8: boolean; est_latency_ms: number; est_map50: number } | null;
@@ -18,6 +35,14 @@ type Coopt = { target: string; budget_ms: number; feasible: boolean;
 type Thermal = { passed: boolean; throttled: boolean; over_power: boolean; sustained_fps: number;
   cold_fps: number; headroom_c: number; power_w: number; power_ceiling_w: number; throttle_temp_c: number };
 type Rollout = { from: string; action: string; allowed: boolean; new_state: string; reason: string | null };
+
+function RunButton({ busy, onClick, label }: { busy: boolean; onClick: () => void; label: string }) {
+  return (
+    <button type="button" onClick={onClick} disabled={busy} className="btn btn-primary mt-3">
+      {busy ? "Running..." : label}
+    </button>
+  );
+}
 
 export default function DeployPage() {
   const [target, setTarget] = useState("agx_orin_trt");
@@ -33,98 +58,108 @@ export default function DeployPage() {
 
   const [state, setState] = useState("none");
   const rollout = useRun<Rollout>();
+  const current = rollout.out?.new_state ?? state;
 
   return (
-    <PageShell active="FORGYX" title="Hardware-in-the-loop deployment"
-      subtitle="co-optimize to target, verify thermal envelope, stage rollout">
-      <div className="p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 max-w-6xl">
-        {/* co-optimization */}
-        <Panel title="model-target co-optimization" hint="vs latency budget">
-          <label className="flex items-center gap-2 text-[12px] mb-2">
-            <span className="text-ink-3">target</span>
-            <select value={target} onChange={(e) => setTarget(e.target.value)}
-              className="flex-1 bg-bg-2 border border-line px-1 py-0.5 text-ink outline-none focus:border-accent">
-              {TARGETS.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </label>
-          <div className="space-y-2 mb-2">
-            <NumField label="base latency ms" value={lat} onChange={setLat} w="w-24" />
-            <NumField label="base map50" value={map50} onChange={setMap50} w="w-24" />
-          </div>
-          <RunButton busy={coopt.busy}
-            onClick={() => coopt.run(() => runJSON<Coopt>("/api/forgyx/cooptimize",
-              { target, base_latency_ms: lat, base_map50: map50 }))} label="plan" />
-          <ErrLine err={coopt.err} />
-          {coopt.out && (
-            <div className="mt-3">
-              <Verdict ok={coopt.out.feasible} yes="feasible" no="no config fits" />
-              <KV k="budget" v={`${coopt.out.budget_ms} ms`} tone="ink-3" />
-              {coopt.out.chosen && (
-                <div className="border border-pass/30 p-2 mt-2 text-[11px]">
-                  <div className="text-ink-2">chosen config</div>
-                  <KV k="prune" v={coopt.out.chosen.prune} tone="ink" />
-                  <KV k="int8" v={coopt.out.chosen.int8 ? "yes" : "no"} tone="ink" />
-                  <KV k="est latency" v={`${coopt.out.chosen.est_latency_ms} ms`} tone="pass" />
-                  <KV k="est map50" v={coopt.out.chosen.est_map50} tone="ink" />
-                </div>
-              )}
-            </div>
-          )}
-        </Panel>
+    <PageShell active="Edge deployment" title="Hardware-in-the-loop deployment"
+      subtitle="Fit a model to a vehicle computer, check it stays cool under load, then roll it out in stages.">
+      <div className="page-wrap space-y-4">
+        <div className="panel p-4 flex flex-wrap items-center gap-3">
+          <label htmlFor="deploy-target" className="text-[12.5px] text-ink-2">Vehicle computer</label>
+          <select id="deploy-target" value={target} onChange={(e) => setTarget(e.target.value)} className="field w-72">
+            {TARGETS.map(([t, name]) => <option key={t} value={t}>{name}</option>)}
+          </select>
+          <span className="text-[12px] text-ink-3">Used by all three steps below.</span>
+        </div>
 
-        {/* thermal */}
-        <Panel title="thermal / power envelope" hint="real device-farm run">
-          <div className="space-y-2 mb-2">
-            <NumField label="peak temp C" value={peak} onChange={setPeak} w="w-24" />
-            <NumField label="power W" value={power} onChange={setPower} w="w-24" />
-            <NumField label="throttled fps" value={fps} onChange={setFps} w="w-24" />
-            <NumField label="cold fps" value={cold} onChange={setCold} w="w-24" />
-          </div>
-          <RunButton busy={thermal.busy}
-            onClick={() => thermal.run(() => runJSON<Thermal>("/api/forgyx/thermal",
-              { target, readings: { peak_temp_c: peak, power_w: power, throttled_fps: fps }, cold_fps: cold }))} label="check" />
-          <ErrLine err={thermal.err} />
-          {thermal.out && (
-            <div className="mt-3">
-              <Verdict ok={thermal.out.passed} yes="within envelope" no="throttled / over power" />
-              <KV k="headroom" v={`${thermal.out.headroom_c} C`} tone={thermal.out.headroom_c > 0 ? "pass" : "block"} />
-              <KV k="sustained fps" v={`${thermal.out.sustained_fps} / ${thermal.out.cold_fps}`} tone="ink-3" />
-              <KV k="power" v={`${thermal.out.power_w} / ${thermal.out.power_ceiling_w} W`}
-                tone={thermal.out.over_power ? "block" : "ink-3"} />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* co-optimization */}
+          <Panel title="1. Fit the model to the device"
+            desc="Finds the pruning and 8-bit settings that meet the device's latency budget while losing the least accuracy.">
+            <div className="space-y-1">
+              <Field label="Current latency (ms)"><NumberInput value={lat} onChange={setLat} /></Field>
+              <Field label="Current mAP50"><NumberInput value={map50} onChange={setMap50} /></Field>
             </div>
-          )}
-        </Panel>
+            <RunButton busy={coopt.busy} label="Find settings"
+              onClick={() => coopt.run(() => runJSON<Coopt>("/api/forgyx/cooptimize",
+                { target, base_latency_ms: lat, base_map50: map50 }))} />
+            <ErrLine err={coopt.err} />
+            {coopt.out && (
+              <div className="mt-3 space-y-1">
+                <Verdict ok={coopt.out.feasible} yes="Fits the budget" no="No setting fits" />
+                <KV k="Latency budget" v={`${coopt.out.budget_ms} ms`} state="muted" />
+                {coopt.out.chosen && (
+                  <div className="rounded border border-pass/30 bg-pass/5 p-2.5 mt-2">
+                    <div className="text-[12px] text-ink-2 mb-1">Recommended settings</div>
+                    <KV k="Pruning" v={coopt.out.chosen.prune} />
+                    <KV k="8-bit (int8)" v={coopt.out.chosen.int8 ? "Yes" : "No"} />
+                    <KV k="Estimated latency" v={`${coopt.out.chosen.est_latency_ms} ms`} state="pass" />
+                    <KV k="Estimated mAP50" v={coopt.out.chosen.est_map50} />
+                  </div>
+                )}
+              </div>
+            )}
+          </Panel>
 
-        {/* rollout */}
-        <Panel title="rollout / rollback" hint="canary before fleet">
-          <div className="flex items-center gap-2 text-[12px] mb-3">
-            <span className="text-ink-3">state</span>
-            <span className="px-2 py-0.5 border border-line text-ink">{rollout.out?.new_state ?? state}</span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {["canary", "full", "rolled_back"].map((action) => (
-              <button key={action} disabled={rollout.busy}
-                onClick={() => rollout.run(async () => {
-                  const r = await runJSON<Rollout>("/api/forgyx/rollout",
-                    { current_state: rollout.out?.new_state ?? state, action });
-                  setState(r.new_state);
-                  return r;
-                })}
-                className="text-[12px] px-2 py-1 border border-line text-ink-2 hover:text-accent hover:border-accent disabled:opacity-40">
-                {action}
-              </button>
-            ))}
-          </div>
-          <ErrLine err={rollout.err} />
-          {rollout.out && (
-            <div className="mt-3">
-              <Verdict ok={rollout.out.allowed} yes={`${rollout.out.from} to ${rollout.out.action}`} no="transition refused" />
-              {rollout.out.reason && <div className="text-[11px] text-block mt-1">{rollout.out.reason}</div>}
+          {/* thermal */}
+          <Panel title="2. Check heat and power"
+            desc="Enter readings from a real run on the device. A model that throttles when hot is slower in the vehicle than on the bench.">
+            <div className="space-y-1">
+              <Field label="Peak temperature (°C)"><NumberInput value={peak} onChange={setPeak} /></Field>
+              <Field label="Power draw (W)"><NumberInput value={power} onChange={setPower} /></Field>
+              <Field label="Frames per second when hot"><NumberInput value={fps} onChange={setFps} /></Field>
+              <Field label="Frames per second when cold"><NumberInput value={cold} onChange={setCold} /></Field>
             </div>
-          )}
-          <button onClick={() => { setState("none"); rollout.setOut(null); }}
-            className="mt-3 text-[11px] text-ink-3 hover:text-accent">reset to none</button>
-        </Panel>
+            <RunButton busy={thermal.busy} label="Check"
+              onClick={() => thermal.run(() => runJSON<Thermal>("/api/forgyx/thermal",
+                { target, readings: { peak_temp_c: peak, power_w: power, throttled_fps: fps }, cold_fps: cold }))} />
+            <ErrLine err={thermal.err} />
+            {thermal.out && (
+              <div className="mt-3 space-y-1">
+                <Verdict ok={thermal.out.passed} yes="Within limits" no="Throttles or draws too much power" />
+                <KV k="Temperature headroom" v={`${thermal.out.headroom_c} °C`} state={thermal.out.headroom_c > 0 ? "pass" : "block"} />
+                <KV k="Sustained frame rate" v={`${thermal.out.sustained_fps} of ${thermal.out.cold_fps} fps`} state="muted" />
+                <KV k="Power" v={`${thermal.out.power_w} of ${thermal.out.power_ceiling_w} W`}
+                  state={thermal.out.over_power ? "block" : "muted"} />
+              </div>
+            )}
+          </Panel>
+
+          {/* rollout */}
+          <Panel title="3. Roll out in stages"
+            desc="A canary on a few vehicles comes before the whole fleet; skipping it is refused.">
+            <div className="flex items-center gap-2 text-[12.5px] mb-3">
+              <span className="text-ink-3">Current stage</span>
+              <Badge state={current === "full" ? "pass" : current === "rolled_back" ? "block" : current === "canary" ? "warn" : "muted"}>
+                {stateName(current)}
+              </Badge>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {ACTIONS.map(({ action, label, danger }) => (
+                <button key={action} type="button" disabled={rollout.busy}
+                  onClick={() => rollout.run(async () => {
+                    const r = await runJSON<Rollout>("/api/forgyx/rollout",
+                      { current_state: rollout.out?.new_state ?? state, action });
+                    setState(r.new_state);
+                    return r;
+                  })}
+                  className={`btn ${danger ? "btn-danger ml-auto" : ""}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <ErrLine err={rollout.err} />
+            {rollout.out && (
+              <div className="mt-3 space-y-1">
+                <Verdict ok={rollout.out.allowed}
+                  yes={`${stateName(rollout.out.from)} to ${stateName(rollout.out.action)}`} no="Step refused" />
+                {rollout.out.reason && <div className="text-[12px] text-block mt-1">{rollout.out.reason}</div>}
+              </div>
+            )}
+            <button type="button" onClick={() => { setState("none"); rollout.setOut(null); }}
+              className="link mt-4 text-[12px] block">Start over</button>
+          </Panel>
+        </div>
       </div>
     </PageShell>
   );

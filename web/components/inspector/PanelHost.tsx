@@ -26,8 +26,8 @@ const Scene3DPanel = dynamic(() => import("@/components/inspector/Scene3DPanel")
 // the shared MCAP reader. Adding a panel type is one case here plus its component.
 
 const TITLE: Record<string, string> = {
-  image: "camera", imu_plot: "time-series", can_plot: "CAN signals", map: "GPS map",
-  raw: "raw message", can_table: "CAN table", audio: "audio", scene3d: "3D",
+  image: "Camera", imu_plot: "Time series", can_plot: "CAN signals", map: "GPS map",
+  raw: "Raw message", can_table: "CAN table", audio: "Audio", scene3d: "3D point cloud",
 };
 
 export default function PanelHost({ panel, onRemove, onFrame, onCycleSpan, onGrow, onShrink,
@@ -54,12 +54,12 @@ export default function PanelHost({ panel, onRemove, onFrame, onCycleSpan, onGro
           their own gestures, and making the body draggable would take orbit and zoom away from them. */}
       <div draggable onDragStart={onDragStart}
         className="flex items-center gap-2 px-2 py-1 border-b hairline cursor-grab active:cursor-grabbing">
-        <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] tracking-wider text-ink-3 truncate">{title}</span>
+        <span className="text-[12px] font-medium text-ink-2 truncate">{title}</span>
         <span className="ml-auto flex items-center gap-0.5">
-          <button onClick={onShrink} className="text-[11px] text-ink-3 hover:text-ink px-1" title="shorter" aria-label={`make the ${title} panel shorter`}>&minus;</button>
-          <button onClick={onGrow} className="text-[11px] text-ink-3 hover:text-ink px-1" title="taller" aria-label={`make the ${title} panel taller`}>+</button>
-          <button onClick={onCycleSpan} className="text-[11px] text-ink-3 hover:text-ink px-1" title="toggle full width" aria-label={`toggle full width for the ${title} panel`}>&harr;</button>
-          <button onClick={onRemove} className="text-[11px] text-ink-3 hover:text-block px-1" title="remove panel" aria-label={`remove the ${title} panel`}>x</button>
+          <button onClick={onShrink} className="text-[13px] leading-none text-ink-3 hover:text-ink px-1.5 py-0.5 rounded hover:bg-head" data-tip="Shorter" aria-label={`make the ${title} panel shorter`}>&minus;</button>
+          <button onClick={onGrow} className="text-[13px] leading-none text-ink-3 hover:text-ink px-1.5 py-0.5 rounded hover:bg-head" data-tip="Taller" aria-label={`make the ${title} panel taller`}>+</button>
+          <button onClick={onCycleSpan} className="text-[13px] leading-none text-ink-3 hover:text-ink px-1.5 py-0.5 rounded hover:bg-head" data-tip="Toggle full width" aria-label={`toggle full width for the ${title} panel`}>&harr;</button>
+          <button onClick={onRemove} className="text-[13px] leading-none text-ink-3 hover:text-block px-1.5 py-0.5 rounded hover:bg-head" data-tip="Remove panel" aria-label={`remove the ${title} panel`}>&times;</button>
         </span>
       </div>
       <div className="flex-1 min-h-0">
@@ -70,7 +70,7 @@ export default function PanelHost({ panel, onRemove, onFrame, onCycleSpan, onGro
         {panel.type === "can_table" && <CanPanel />}
         {panel.type === "audio" && panel.topic && <AudioPanel topic={panel.topic} />}
         {panel.type === "scene3d" && <Scene3DPanel />}
-        {!known.includes(panel.type) && <div className="p-3 text-[12px] text-ink-3">unknown panel type: {panel.type}</div>}
+        {!known.includes(panel.type) && <div className="p-3 text-[12px] text-ink-3">Unknown panel type: {panel.type}</div>}
       </div>
     </div>
   );

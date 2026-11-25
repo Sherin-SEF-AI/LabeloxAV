@@ -13,6 +13,8 @@ import ScoreBar from "@/components/shell/ScoreBar";
 import { ConfBar } from "@/components/StateBadge";
 import { invalidate, useQuery } from "@/lib/useQuery";
 import { REVIEW_QUEUE_KEY } from "@/lib/queryKeys";
+import EmptyState from "@/components/ui/EmptyState";
+import { humanize, shortId } from "@/lib/format";
 
 const ExplainPanel = dynamic(() => import("@/components/ExplainPanel"), { ssr: false });
 
@@ -64,7 +66,7 @@ export default function ReviewQueuePage() {
       if (note) setMsg(note);
     } catch (e) {
       setMsg(null);
-      toastError(`${what} failed: ${humanizeError(e)}`);
+      toastError(`${humanize(what)} failed: ${humanizeError(e)}`);
       return;
     }
     await load();
@@ -73,88 +75,134 @@ export default function ReviewQueuePage() {
   }, [load]);
 
   const confirm = (id: string) =>
-    act("confirm", async () => { await api.errorConfirm(id); return "confirmed as error (fed to retrain)"; });
+    act("confirm", async () => { await api.errorConfirm(id); return "Confirmed as an error; it goes into the next training run"; });
   const dismiss = (id: string) =>
-    act("dismiss", async () => { await api.errorDismiss(id); return "dismissed"; });
+    act("dismiss", async () => { await api.errorDismiss(id); return "Dismissed"; });
   const runDetect = () =>
-    act("detection run", async () => { const r = await api.errorRun(); return `detected ${r.persisted}`; });
+    act("detection run", async () => { const r = await api.errorRun(); return `Found ${r.persisted} possible errors`; });
   const ruleControl = (id: string, verdict: "correct" | "incorrect") =>
     act("verdict", async () => {
       await api.controlVerdict(id, verdict);
-      return verdict === "correct" ? "the gate was right here" : "recorded as a gate error";
+      return verdict === "correct" ? "Recorded: the label was right" : "Recorded: the label was wrong";
     });
   const ruleRecall = (id: string, verdict: "confirmed" | "rejected") =>
     act("verdict", async () => {
       const r = await api.recallRule(id, verdict);
       return verdict === "confirmed"
-        ? (r.object_routed_to_review ? "confirmed; the object is in the review queue" : "confirmed")
-        : "rejected; the object was left alone";
+        ? (r.object_routed_to_review ? "Confirmed; the object is now in the review queue" : "Confirmed")
+        : "Rejected; nothing was changed";
     });
+
+  const TABS: { key: typeof tab; label: string; count: number; tip: string; warn?: boolean }[] = [
+    { key: "value", label: "Most useful to label", count: items.length,
+      tip: "Objects where a decision teaches the model the most" },
+    { key: "errors", label: "Possible errors", count: errs.length,
+      tip: "Accepted labels that checks think are wrong" },
+    { key: "recall", label: "Missed objects", count: recall.length,
+      tip: "Objects the detector may have missed entirely" },
+    // The whole backlog, not the page of it that was fetched. This read `control.length`, which is capped at
+    // 100 by the request, so a queue of 601 unjudged samples announced itself as 100: the one number that says
+    // how far the gate is from being measured, understated six-fold on the tab somebody decides whether to open.
+    { key: "control", label: "Spot-check auto-accepts", count: precision?.pending ?? control.length,
+      tip: "A random sample of labels accepted without a person", warn: Boolean(precision?.pending) },
+  ];
+  const hasRows = tab === "value" ? items.length > 0 : tab === "errors" ? errs.length > 0
+    : tab === "recall" ? recall.length > 0 : control.length > 0;
 
   return (
     <PageShell active="REVIEW" title="Review Queue"
-      right={msg ? <span className="text-warn">{msg}</span> : undefined}
-      primaryAction={
+      subtitle="Decide on the objects where a person's call matters most"
+      right={msg ? <span role="status" className="text-[12px] text-ink-2">{msg}</span> : undefined}
+      filters={
         <>
-          <button onClick={() => setTab("value")} className={`px-2 py-1 border ${tab === "value" ? "border-accent text-accent" : "border-line text-ink-3"}`}>value queue ({items.length})</button>
-          <button onClick={() => setTab("errors")} className={`px-2 py-1 border ${tab === "errors" ? "border-accent text-accent" : "border-line text-ink-3"}`}>error candidates ({errs.length})</button>
-          <button onClick={() => setTab("recall")} className={`px-2 py-1 border ${tab === "recall" ? "border-accent text-accent" : "border-line text-ink-3"}`}>missed objects ({recall.length})</button>
-          {/* The whole backlog, not the page of it that was fetched. This read `control.length`, which is
-              capped at 100 by the request, so a queue of 601 unjudged samples announced itself as 100: the
-              one number that says how far the gate is from being measured, understated six-fold on the tab
-              somebody decides whether to open. */}
-          <button onClick={() => setTab("control")} className={`px-2 py-1 border ${tab === "control" ? "border-accent text-accent" : precision?.pending ? "border-warn text-warn" : "border-line text-ink-3"}`}>gate audit ({precision?.pending ?? control.length})</button>
-          {tab === "errors" && <button onClick={runDetect} className="border border-line px-2 py-1 hover:border-accent">re-run detection</button>}
+          <div role="tablist" aria-label="Review queues" className="flex items-center gap-1.5">
+            {TABS.map((tb) => (
+              <button key={tb.key} role="tab" aria-selected={tab === tb.key} onClick={() => setTab(tb.key)} data-tip={tb.tip}
+                className={`chip ${tab === tb.key ? "chip-on" : tb.warn ? "text-warn border-warn/45" : ""}`}>
+                {tb.label}<span className="tabular-nums opacity-80">{tb.count.toLocaleString()}</span>
+              </button>
+            ))}
+          </div>
+          {tab === "errors" && <button onClick={runDetect} className="btn ml-auto">Check for errors again</button>}
         </>
       }>
-      <div className="p-4 space-y-3 text-[12px]">
+      <div className="page-wrap space-y-3 text-[12.5px]">
         {/* A failure says so and offers a retry, instead of an empty table that reads as a finished shift. */}
         {err != null && <LoadState error={err} onRetry={() => void load()} />}
 
+        {!err && !loading && !hasRows && (
+          <div className="panel">
+            {tab === "value" ? (
+              <EmptyState icon="check" title="Nothing waiting to be labelled">
+                Objects appear here once auto-label has run on a session and left some for a person.
+              </EmptyState>
+            ) : tab === "errors" ? (
+              <EmptyState icon="flag" title="No possible errors found"
+                action={<button onClick={runDetect} className="btn">Check for errors</button>}>
+                The checks look for accepted labels that disagree with the model or with their own track.
+              </EmptyState>
+            ) : tab === "recall" ? (
+              <EmptyState icon="search" title="No missed objects to check">
+                Missed objects are found per session, from gaps in tracks and from a second detector.
+              </EmptyState>
+            ) : (
+              <EmptyState icon="check" title="No auto-accepts waiting for a check">
+                A small random share of what is accepted automatically is set aside here for a person to check.
+              </EmptyState>
+            )}
+          </div>
+        )}
+
         {tab === "value" ? (
-          <table className="w-full">
-            <thead><tr className="text-ink-3 text-left border-b hairline"><th className="px-2 py-1 w-14"></th><th>class</th><th>conf</th>
-              <th><button onClick={() => setSortQ((s) => !s)} title="sort by lowest label quality first"
-                className={sortQ ? "text-accent" : "hover:text-ink"}>quality{sortQ ? " ↓" : ""}</button></th>
-              <th>value</th><th>uncertain</th><th>diverse</th><th>rare</th><th>err</th><th></th></tr></thead>
+          (loading || items.length > 0) && (
+          <div className="panel overflow-x-auto">
+          <table className="data-table">
+            <thead><tr>
+              <th className="w-16"><span className="sr-only">Crop</span></th>
+              <th>Class</th><th>Confidence</th>
+              <th><button onClick={() => setSortQ((s) => !s)} title="Sort by lowest label quality first" aria-pressed={sortQ}
+                className={`uppercase ${sortQ ? "text-accent-2" : "hover:text-ink"}`}>Label quality{sortQ ? " ↓" : ""}</button></th>
+              <th data-tip="How much a decision here helps the model, all signals combined">Value</th>
+              <th>Uncertain</th><th>Unusual</th><th>Rare class</th><th>Error-prone</th><th></th></tr></thead>
             <tbody>
               {loading && items.length === 0 && Array.from({ length: 10 }).map((_, r) => (
-                <tr key={`sk${r}`} className="border-b hairline">
+                <tr key={`sk${r}`}>
                   {Array.from({ length: 9 }).map((__, c) => (
-                    <td key={c} className="px-2 py-1.5"><span className="block h-3 skeleton" style={{ width: c === 0 ? "80%" : "60%", animationDelay: `${(r * 8 + c) * 40}ms` }} /></td>
+                    <td key={c}><span className="block h-3 skeleton" style={{ width: c === 0 ? "80%" : "60%", animationDelay: `${(r * 8 + c) * 40}ms` }} /></td>
                   ))}
                 </tr>
               ))}
               {(sortQ ? [...items].sort((a, b) => (a.quality_score ?? 1) - (b.quality_score ?? 1)) : items).map((it) => (
                 <Fragment key={it.object_id}>
-                  <tr className="border-b hairline hover:bg-line">
+                  <tr>
                     {/* The crop, because this is visual triage. Without it the queue asks a reviewer to rank
                         boxes they cannot see, and every judgement costs a round trip into the editor. The
                         endpoint has existed all along; only the img tag was missing. Lazy so a 200-row queue
                         does not fire 200 requests before the first screenful is readable. */}
-                    <td className="px-2 py-1">
+                    <td className="!py-1.5">
                       <img src={`/api/objects/${it.object_id}/crop`} alt="" loading="lazy"
-                        className="w-12 h-12 object-cover rounded bg-bg-2 border border-line"
+                        className="w-12 h-12 object-cover rounded border border-line skeleton"
+                        onLoad={(e) => { e.currentTarget.classList.remove("skeleton"); }}
                         onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
                     </td>
-                    <td className="px-2 py-1 text-ink-2">{it.class_name}</td>
+                    <td title={it.class_name}><span className="text-ink">{humanize(it.class_name)}</span></td>
                     <td><ConfBar conf={it.conf} /></td>
-                    <td>{it.quality_score != null
+                    <td className="tabular-nums">{it.quality_score != null
                       ? <span className={it.quality_score >= 0.4 ? "text-pass" : it.quality_score >= 0.25 ? "text-warn" : "text-block"}>{it.quality_score.toFixed(2)}</span>
                       : <span className="text-ink-3">-</span>}</td>
-                    <td className="text-accent">{it.value.toFixed(3)}</td>
+                    <td className="tabular-nums"><span className="text-accent-2">{it.value.toFixed(2)}</span></td>
                     <td><ScoreBar value={it.scores.uncertainty} /></td>
                     <td><ScoreBar value={it.scores.diversity} /></td>
                     <td><ScoreBar value={it.scores.rarity} /></td>
                     <td><ScoreBar value={it.scores.error_prone} tone="warn" /></td>
-                    <td className="text-right pr-2 space-x-2 whitespace-nowrap">
-                      <button onClick={() => setWhyOpen((w) => (w === it.object_id ? null : it.object_id))}
-                        className={whyOpen === it.object_id ? "text-accent" : "text-ink-3 hover:text-ink"}>why</button>
-                      <button onClick={() => router.push(`/frame/${it.frame_id}`)} className="text-info hover:text-accent">label →</button>
+                    <td className="text-right whitespace-nowrap">
+                      <button onClick={() => setWhyOpen((w) => (w === it.object_id ? null : it.object_id))} aria-expanded={whyOpen === it.object_id}
+                        className={`mr-3 ${whyOpen === it.object_id ? "text-accent-2" : "text-ink-3 hover:text-ink"}`}>Why</button>
+                      <button onClick={() => router.push(`/frame/${it.frame_id}`)} className="btn">Label</button>
                     </td>
                   </tr>
                   {whyOpen === it.object_id && (
-                    <tr className="border-b hairline"><td colSpan={10} className="px-3 py-2 bg-bg-2">
+                    <tr><td colSpan={10} className="bg-bg-2">
                       <ExplainPanel objectId={it.object_id} />
                     </td></tr>
                   )}
@@ -162,108 +210,118 @@ export default function ReviewQueuePage() {
               ))}
             </tbody>
           </table>
+          </div>
+          )
         ) : tab === "errors" ? (
-          <table className="w-full">
-            <thead><tr className="text-ink-3 text-left border-b hairline"><th className="px-2 py-1">kind</th><th>score</th><th>proposed fix</th><th>detail</th><th></th></tr></thead>
+          errs.length > 0 && (
+          <div className="panel overflow-x-auto">
+          <table className="data-table">
+            <thead><tr><th>Check</th><th>Score</th><th>Suggested class</th><th>Detail</th><th></th></tr></thead>
             <tbody>
               {errs.map((e) => (
-                <tr key={e.candidate_id} className="border-b hairline">
-                  <td className="px-2 py-1 text-ink-2">{e.kind}</td>
+                <tr key={e.candidate_id}>
+                  <td title={e.kind}><span className="text-ink">{humanize(e.kind)}</span></td>
                   <td><ScoreBar value={e.score} tone="warn" /></td>
-                  <td className="text-info">{e.proposed_label?.class_name || "(review)"}</td>
-                  <td className="text-ink-3 truncate max-w-[280px]">{JSON.stringify(e.detail)}</td>
-                  <td className="text-right pr-2 space-x-2">
-                    <button onClick={() => confirm(e.candidate_id)} className="text-block hover:text-accent"><T k="action.confirm_short">confirm</T></button>
-                    <button onClick={() => dismiss(e.candidate_id)} className="text-ink-3 hover:text-ink"><T k="action.dismiss">dismiss</T></button>
+                  <td className="text-ink-2">{e.proposed_label?.class_name ? humanize(e.proposed_label.class_name) : <span className="text-ink-3">Needs a look</span>}</td>
+                  <td className="text-ink-3 truncate max-w-[320px]" title={JSON.stringify(e.detail)}>{detailText(e.detail)}</td>
+                  <td className="text-right whitespace-nowrap space-x-2">
+                    <button onClick={() => confirm(e.candidate_id)} className="btn btn-danger"
+                      title="Yes, this label is wrong; it is sent back for a fix"><T k="action.confirm_short">Confirm</T></button>
+                    <button onClick={() => dismiss(e.candidate_id)} className="btn"><T k="action.dismiss">Dismiss</T></button>
                   </td>
                 </tr>
               ))}
-              {!errs.length && <tr><td colSpan={5} className="text-ink-3 text-center py-4">no error candidates (run detection)</td></tr>}
             </tbody>
           </table>
+          </div>
+          )
         ) : tab === "recall" ? (
           <>
             {/* Per channel, not only a total: the reliability fit needs a minimum number of verdicts per
                 channel before it will apply a measurement, so a healthy-looking total can hide a channel
                 nobody has ruled on and the priors for it stay guesses. */}
-            {recallProg && (
-              <div className="text-ink-3">
-                {recallProg.judged} of {recallProg.total} judged
+            {recallProg && recallProg.total > 0 && (
+              <div className="text-ink-3 flex flex-wrap gap-x-4 gap-y-1">
+                <span className="text-ink-2">{recallProg.judged.toLocaleString()} of {recallProg.total.toLocaleString()} checked</span>
                 {Object.entries(recallProg.per_channel).map(([ch, t]) => (
-                  <span key={ch} className="ml-3">
-                    {ch}: <span className="text-ink-2">{t.confirmed + t.rejected}</span>/{t.confirmed + t.rejected + t.pending}
+                  <span key={ch}>
+                    {humanize(ch)}: <span className="text-ink-2 tabular-nums">{t.confirmed + t.rejected}</span> of {t.confirmed + t.rejected + t.pending}
                   </span>
                 ))}
               </div>
             )}
-            <table className="w-full">
-              <thead><tr className="text-ink-3 text-left border-b hairline">
-                <th className="px-2 py-1">found by</th><th>value</th><th>frame</th><th></th>
-              </tr></thead>
+            {recall.length > 0 && (
+            <div className="panel overflow-x-auto">
+            <table className="data-table">
+              <thead><tr><th>Found by</th><th>Value</th><th>Frame</th><th></th></tr></thead>
               <tbody>
                 {recall.map((c) => (
-                  <tr key={c.candidate_id} className="border-b hairline">
-                    <td className="px-2 py-1 text-ink-2">{c.channels.join(", ")}</td>
+                  <tr key={c.candidate_id}>
+                    <td className="text-ink-2">{c.channels.map(humanize).join(", ")}</td>
                     <td><ScoreBar value={c.fn_value} tone="warn" /></td>
                     <td>
-                      <button onClick={() => router.push(`/frame/${c.frame_id}?focus=${c.object_id}`)}
-                        className="text-info hover:text-accent">{c.frame_id.slice(0, 8)}</button>
+                      <button onClick={() => router.push(`/frame/${c.frame_id}?focus=${c.object_id}`)} className="link">
+                        Open frame <span className="font-mono text-[11px] text-ink-3">{shortId(c.frame_id)}</span>
+                      </button>
                     </td>
-                    <td className="text-right pr-2 space-x-2">
+                    <td className="text-right whitespace-nowrap space-x-2">
                       <button onClick={() => ruleRecall(c.candidate_id, "confirmed")}
-                        title="a real object the detector missed; route it to the review queue"
-                        className="text-pass hover:text-accent"><T k="action.confirm_short">confirm</T></button>
+                        title="A real object the detector missed; it goes to the review queue"
+                        className="btn text-pass border-pass/45"><T k="action.confirm_short">Confirm</T></button>
                       <button onClick={() => ruleRecall(c.candidate_id, "rejected")}
-                        title="a bad suggestion; the object is left alone"
-                        className="text-ink-3 hover:text-ink"><T k="action.reject">reject</T></button>
+                        title="A bad suggestion; nothing is changed"
+                        className="btn"><T k="action.reject">Reject</T></button>
                     </td>
                   </tr>
                 ))}
-                {!recall.length && (
-                  <tr><td colSpan={4} className="text-ink-3 text-center py-4">
-                    nothing mined yet. Recall mining runs per session and finds objects the detector missed.
-                  </td></tr>
-                )}
               </tbody>
             </table>
+            </div>
+            )}
           </>
         ) : (
           <>
             {/* The number this queue exists to produce. Null is not zero: it means nobody has judged a
                 single sample, which is what the drift detector has been watching all along. */}
             <div className="text-ink-3">
-              measured gate precision:{" "}
+              How often auto-accept is right:{" "}
               {precision?.precision == null
-                ? <span className="text-warn">not measured yet ({precision?.pending ?? 0} awaiting a verdict)</span>
-                : <span className="text-ink-2">{(precision.precision * 100).toFixed(1)}% over {precision.reviewed} judged</span>}
+                ? <span className="text-warn">not measured yet ({(precision?.pending ?? 0).toLocaleString()} waiting for a check)</span>
+                : <span className="text-ink-2">{(precision.precision * 100).toFixed(1)}% of {precision.reviewed.toLocaleString()} checked</span>}
             </div>
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5">
               {control.map((c) => (
-                <div key={c.sample_id} className="border border-line">
+                <div key={c.sample_id} className="panel overflow-hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={c.crop_url} alt="" className="w-full h-20 object-cover bg-bg-2" />
-                  <div className="px-1 py-0.5 text-[10px] text-ink-2 truncate" title={c.class_name}>
-                    {c.class_name} {c.conf != null ? c.conf.toFixed(2) : ""}
+                  <img src={c.crop_url} alt={humanize(c.class_name)} className="w-full h-24 object-cover skeleton"
+                    onLoad={(e) => { e.currentTarget.classList.remove("skeleton"); }} />
+                  <div className="px-2 py-1 text-[12px] text-ink-2 truncate flex items-center gap-1" title={c.class_name}>
+                    <span className="truncate">{humanize(c.class_name)}</span>
+                    {c.conf != null && <span className="ml-auto text-[11px] text-ink-3 tabular-nums">{Math.round(c.conf * 100)}%</span>}
                   </div>
                   <div className="flex border-t hairline">
                     <button onClick={() => ruleControl(c.sample_id, "correct")}
-                      title="the gate labelled this correctly"
-                      className="flex-1 text-pass text-[10px] py-0.5 hover:bg-pass/10">right</button>
+                      title="The label is right"
+                      className="flex-1 text-pass text-[12px] py-1 hover:bg-pass/10">Right</button>
                     <button onClick={() => ruleControl(c.sample_id, "incorrect")}
-                      title="the gate got this wrong; it counts against measured precision"
-                      className="flex-1 text-block text-[10px] py-0.5 hover:bg-block/10 border-l hairline">wrong</button>
+                      title="The label is wrong; it counts against how often auto-accept is right"
+                      className="flex-1 text-block text-[12px] py-1 hover:bg-block/10 border-l hairline">Wrong</button>
                   </div>
                 </div>
               ))}
             </div>
-            {!control.length && (
-              <div className="text-ink-3 text-center py-4">
-                nothing awaiting a verdict. The gate mirrors a small random share of its auto-accepts here.
-              </div>
-            )}
           </>
         )}
       </div>
     </PageShell>
   );
+}
+
+// An error candidate's evidence, as "key: value" pairs rather than a JSON blob.
+function detailText(detail: Record<string, unknown> | null | undefined): string {
+  if (!detail) return "";
+  return Object.entries(detail)
+    .filter(([, v]) => v !== null && v !== undefined && typeof v !== "object")
+    .map(([k, v]) => `${humanize(k)}: ${typeof v === "number" && !Number.isInteger(v) ? v.toFixed(2) : String(v)}`)
+    .join(" · ");
 }

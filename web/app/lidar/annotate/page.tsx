@@ -17,6 +17,11 @@ import { useConfirm } from "@/components/ConfirmProvider";
 import Inspector from "@/components/shell/Inspector";
 import { StateBadge } from "@/components/StateBadge";
 import SessionPicker from "@/components/lidar/SessionPicker";
+import EmptyState from "@/components/ui/EmptyState";
+import { fromNs, humanize, num, shortId } from "@/lib/format";
+
+// Ontology class names read as words ("two wheeler") but keep their case: "suv" is not "Suv".
+const classLabel = (n: string | null | undefined) => (n ?? "").replace(/_/g, " ");
 
 const PointCloudViewer = dynamic(() => import("@/components/lidar/PointCloudViewer"), { ssr: false });
 const EgoTrajectoryPlot = dynamic(() => import("@/components/lidar/EgoTrajectory"), { ssr: false });
@@ -53,12 +58,12 @@ export default function CuboidAnnotatePage() {
   );
 
   const loadClouds = useCallback(async (sid: string) => {
-    if (!sid.trim()) { setErr("enter a session id"); return; }
+    if (!sid.trim()) { setErr("Choose a session first."); return; }
     setErr(null);
     try {
       const r = await api.lidarClouds(sid.trim());
       setClouds(r.clouds);
-      if (!r.clouds.length) setErr("No clouds in this session.");
+      if (!r.clouds.length) setErr("No point clouds in this session. Build pseudo-LiDAR for it on the Point clouds page.");
       // Loaded beside the clouds rather than on demand: the trajectory is what makes two clouds
       // comparable, so its absence is something to see before annotating, not after.
       try {
@@ -203,19 +208,24 @@ export default function CuboidAnnotatePage() {
   };
 
   return (
-    <PageShell active="CUBOID ANNOTATE" title="Cuboid annotation" right="AI lift 2D to 3D">
+    <PageShell active="CUBOID ANNOTATE" title="Cuboid annotation">
       <div data-theme="dark" className="flex h-full bg-[#0a0e14] text-ink">
-        <Inspector title="Cuboid annotation" side="left" width="w-80">
+        <Inspector title="Cuboids" side="left" width="w-80">
           <div className="flex flex-col gap-3 p-4">
 <SessionPicker value={sessionId} onChange={setSessionId} onLoad={loadClouds} />
 
         {clouds.length > 0 && (
           <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
             {clouds.map((c) => (
-              <button key={c.cloud_id} onClick={() => openCloud(c)}
-                className={`rounded border px-2 py-1 text-left text-xs ${
-                  cloud?.cloud_id === c.cloud_id ? "border-accent/60 bg-accent/15" : "border-line bg-bg-2"}`}>
-                {c.source} | {c.point_count.toLocaleString()} pts | {c.cloud_id.slice(0, 8)}
+              <button key={c.cloud_id} type="button" onClick={() => openCloud(c)} aria-pressed={cloud?.cloud_id === c.cloud_id}
+                title={`${c.cloud_id} · ts_ns ${c.ts_ns}`}
+                className={`rounded border px-2.5 py-1.5 text-left text-[12px] ${
+                  cloud?.cloud_id === c.cloud_id ? "border-accent/60 bg-accent/15" : "border-line bg-bg-2 hover:border-line-3"}`}>
+                <div className="flex justify-between">
+                  <span className="font-medium">{c.source === "lidar" ? "LiDAR" : humanize(c.source)}</span>
+                  <span className="text-ink-3 tabular-nums">{num(c.point_count)} points</span>
+                </div>
+                <div className="truncate text-[11px] text-ink-3">{fromNs(c.ts_ns)} · <span className="font-mono">{shortId(c.cloud_id)}</span></div>
               </button>
             ))}
           </div>
@@ -225,14 +235,15 @@ export default function CuboidAnnotatePage() {
             cuboid sits in the coordinate frame of its own instant and cannot be compared to the next. */}
         {sessionId && (
           <div className="rounded border border-line bg-bg-2">
-            <div className="border-b border-line px-2 py-1 text-[10px] uppercase text-ink-3">
-              ego trajectory
+            <div className="border-b border-line px-2.5 py-1.5 text-[12px] font-medium text-ink-2">
+              Ego trajectory
             </div>
             <EgoTrajectoryPlot trajectory={trajectory} currentTs={cloud?.ts_ns ?? null} height={160} />
             {trajectory && trajectory.poses === 0 && (
-              <button onClick={buildPose} disabled={busy}
-                className="m-2 rounded border border-line px-2 py-1 text-xs hover:border-accent/60 disabled:opacity-40">
-                recover trajectory
+              <button type="button" onClick={buildPose} disabled={busy}
+                title="estimate the vehicle's path from this session's GNSS and frames"
+                className="btn m-2">
+                Recover trajectory
               </button>
             )}
           </div>
@@ -243,8 +254,8 @@ export default function CuboidAnnotatePage() {
             drawn from it would be confidence nobody has. */}
         {grids.length > 0 && (
           <div className="rounded border border-line bg-bg-2 p-2">
-            <div className="mb-1 text-[10px] uppercase text-ink-3">
-              occupancy · {grids.length} grids
+            <div className="mb-1 text-[12px] font-medium text-ink-2">
+              Occupancy <span className="font-normal text-ink-3">· {grids.length} grids</span>
             </div>
             <input type="range" min={0} max={grids.length - 1} value={gridIdx} className="w-full"
               aria-label="occupancy time"
@@ -253,16 +264,16 @@ export default function CuboidAnnotatePage() {
                 setGridIdx(i);
                 api.occupancyVoxels(grids[i].grid_id).then(setOcc).catch(() => setOcc(null));
               }} />
-            <div className="text-[10px] text-ink-2">
-              {grids[gridIdx]?.occupied.toLocaleString()} voxels ·{" "}
+            <div className="text-[11px] text-ink-2">
+              {num(grids[gridIdx]?.occupied)} voxels ·{" "}
               {grids[gridIdx]?.flow_share != null
                 ? `${((grids[gridIdx].flow_share ?? 0) * 100).toFixed(1)}% with a track velocity`
                 : "no flow recorded"}
               {grids[gridIdx] && !grids[gridIdx].placed_by_pose && " · not placed by a pose"}
             </div>
             {occ?.truncated && (
-              <div className="text-[10px] text-warn">
-                showing {occ.n.toLocaleString()} of {occ.total.toLocaleString()} voxels
+              <div className="text-[11px] text-warn">
+                Showing {num(occ.n)} of {num(occ.total)} voxels
               </div>
             )}
           </div>
@@ -270,27 +281,31 @@ export default function CuboidAnnotatePage() {
 
         {cloud && (
           <div className="flex gap-2">
-            <button onClick={aiLift} disabled={busy}
-              className="flex-1 rounded bg-pass/25 px-2 py-1.5 text-xs hover:bg-pass/35 disabled:opacity-40">
+            <button type="button" onClick={aiLift} disabled={busy}
+              title="turn the 2D boxes on the synchronised camera frame into ground-snapped 3D cuboids"
+              className="btn btn-primary flex-1">
               AI lift 2D to 3D
             </button>
-            <button onClick={addCuboid}
-              className="rounded border border-line px-2 py-1.5 text-xs hover:border-accent/60">+ box</button>
+            <button type="button" onClick={addCuboid} title="add a box 12 m ahead of the vehicle"
+              className="btn">+ Add box</button>
           </div>
         )}
 
         {cloud && (
           <div>
-            <div className="mb-1 text-xs uppercase tracking-wider text-ink-3">Cuboids ({cuboids.length})</div>
+            <div className="mb-1.5 text-[12px] font-medium text-ink-2">Cuboids <span className="font-normal text-ink-3">({cuboids.length})</span></div>
+            {cuboids.length === 0 && (
+              <div className="text-[12px] text-ink-3">None yet. AI lift creates them from the camera&apos;s 2D boxes, or add one by hand.</div>
+            )}
             <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
               {cuboids.map((c) => (
-                <button key={c.object_3d_id} onClick={() => setSelectedId(c.object_3d_id)}
-                  className={`flex justify-between rounded border px-2 py-1 text-left text-xs ${
-                    selectedId === c.object_3d_id ? "border-white bg-head" : "border-line bg-bg-2"}`}>
-                  <span>{c.class_name}</span>
+                <button key={c.object_3d_id} type="button" onClick={() => setSelectedId(c.object_3d_id)} aria-pressed={selectedId === c.object_3d_id}
+                  className={`flex justify-between rounded border px-2 py-1 text-left text-[12px] ${
+                    selectedId === c.object_3d_id ? "border-accent bg-head" : "border-line bg-bg-2"}`}>
+                  <span>{classLabel(c.class_name)}</span>
                   <span className="flex items-center gap-1.5">
                     <StateBadge state={c.state} />
-                    <span className="text-ink-3">{c.box_source}</span>
+                    <span className="text-ink-3">{humanize(c.box_source)}</span>
                   </span>
                 </button>
               ))}
@@ -299,54 +314,55 @@ export default function CuboidAnnotatePage() {
         )}
 
         {selected && (
-          <div className="flex flex-col gap-2 rounded border border-line bg-bg-2 p-2 text-xs">
+          <div className="flex flex-col gap-2 rounded border border-line bg-bg-2 p-2.5 text-[12px]">
             <div className="flex items-center gap-2 text-ink-2">
-              <span>Selected</span>
+              <span className="font-medium">Selected box</span>
               <StateBadge state={selected.state} />
             </div>
             <label className="flex items-center justify-between gap-2">
-              class
+              Class
               <select value={selected.class_id}
                 onChange={(e) => { const id = Number(e.target.value); patchLocal(selected.object_3d_id, { class_id: id, class_name: classes.find((x) => x.id === id)?.name }); saveCuboid(selected.object_3d_id, { class_id: id }); }}
-                className="min-w-0 flex-1 rounded border border-line bg-bg-2 px-1 py-0.5">
-                {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                className="field min-w-0 flex-1 py-1">
+                {classes.map((c) => <option key={c.id} value={c.id}>{classLabel(c.name)}</option>)}
               </select>
             </label>
-            {["L", "W", "H"].map((lab, i) => (
+            {["Length", "Width", "Height"].map((lab, i) => (
               <label key={lab} className="flex items-center gap-2">
-                <span className="w-3">{lab}</span>
+                <span className="w-12">{lab}</span>
                 <input type="range" min={0.3} max={14} step={0.1} value={selected.dims[i]}
                   onChange={(e) => setDim(i, Number(e.target.value))}
                   onMouseUp={() => saveCuboid(selected.object_3d_id, { dims: selected.dims })}
                   className="flex-1" />
-                <span className="w-10 text-right text-ink-2">{selected.dims[i].toFixed(1)}</span>
+                <span className="w-12 text-right text-ink-2 tabular-nums">{selected.dims[i].toFixed(1)} m</span>
               </label>
             ))}
             <label className="flex items-center gap-2">
-              <span className="w-3">yaw</span>
+              <span className="w-12">Heading</span>
               <input type="range" min={-3.14159} max={3.14159} step={0.01} value={selected.yaw}
                 onChange={(e) => patchLocal(selected.object_3d_id, { yaw: Number(e.target.value) })}
                 onMouseUp={() => saveCuboid(selected.object_3d_id, { yaw: selected.yaw })}
                 className="flex-1" />
-              <span className="w-10 text-right text-ink-2">{(selected.yaw * 57.3).toFixed(0)}</span>
+              <span className="w-12 text-right text-ink-2 tabular-nums">{(selected.yaw * 57.3).toFixed(0)}°</span>
             </label>
             <div className="flex gap-2">
-              <button onClick={() => groundSnap(selected.object_3d_id)}
-                className="flex-1 rounded bg-head px-2 py-1 hover:bg-btn-2">Ground snap</button>
-              <button onClick={() => removeCuboid(selected.object_3d_id)}
-                className="rounded bg-block/20 px-2 py-1 hover:bg-block/30"><T k="common.delete">Delete</T></button>
+              <button type="button" onClick={() => groundSnap(selected.object_3d_id)}
+                title="drop the box so its base sits on the ground"
+                className="btn flex-1">Ground snap</button>
+              <button type="button" onClick={() => removeCuboid(selected.object_3d_id)}
+                className="btn btn-danger"><T k="common.delete">Delete</T></button>
             </div>
-            <div className="text-ink-3">Drag the box in the BEV view to move it.</div>
+            <div className="text-ink-3">Drag the box in the bird&apos;s-eye view to move it.</div>
           </div>
         )}
 
-        {err && <div className="rounded border border-block/40 bg-block/10 p-2 text-xs text-block">{err}</div>}
+        {err && <div role="alert" className="rounded border border-block/40 bg-block/10 p-2.5 text-[12px] text-block">{err}</div>}
           </div>
         </Inspector>
 
       <main className="flex flex-1 flex-col">
         <div className="relative flex-1 border-b border-line">
-          <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-ink-3">3D</div>
+          <div className="absolute left-3 top-3 z-10 text-[12px] font-medium text-ink-3">3D view</div>
           {data && (
             <PointCloudViewer points={data.points} count={data.count} colorBy={colorBy}
               occupancy={occ ? { voxels: occ.voxels, flow: occ.flow, origin: occ.origin,
@@ -355,14 +371,25 @@ export default function CuboidAnnotatePage() {
               intensityRange={[data.intensityMin, data.intensityMax]} source={data.source} mode="perspective"
               cuboids={cuboids} selectedId={selectedId} onSelectCuboid={setSelectedId} />
           )}
-          {!data && <div className="flex h-full items-center justify-center text-sm text-ink-3">Load a session and pick a cloud.</div>}
+          {!data && (
+            <div className="flex h-full items-center justify-center">
+              {busy ? <span role="status" className="text-[12.5px] text-ink-3">Loading points...</span> : (
+                <EmptyState icon="cuboid" title={clouds.length ? "Pick a cloud" : "No cloud loaded"}>
+                  {clouds.length
+                    ? "Choose one of the clouds on the left to place and refine 3D boxes on it."
+                    : "Choose a session on the left. Its point clouds are listed under it."}
+                </EmptyState>
+              )}
+            </div>
+          )}
         </div>
         <div className="relative h-2/5 min-h-[220px]">
-          <div className="absolute left-3 top-3 z-10 text-xs uppercase tracking-wider text-ink-3">BEV (drag to move)</div>
-          <div className="absolute right-3 top-3 z-10 flex gap-1">
+          <div className="absolute left-3 top-3 z-10 text-[12px] font-medium text-ink-3">Bird&apos;s-eye view <span className="font-normal">(drag a box to move it)</span></div>
+          <div className="absolute right-3 top-3 z-10 flex items-center gap-1" role="group" aria-label="colour points by">
+            <span className="text-[12px] text-ink-3 mr-1">Colour by</span>
             {(["height", "intensity"] as ColorBy[]).map((k) => (
-              <button key={k} onClick={() => setColorBy(k)}
-                className={`rounded px-2 py-0.5 text-xs ${colorBy === k ? "bg-primary text-white" : "bg-head"}`}>{k}</button>
+              <button key={k} type="button" onClick={() => setColorBy(k)} aria-pressed={colorBy === k}
+                className={`btn ${colorBy === k ? "btn-on" : ""}`}>{humanize(k)}</button>
             ))}
           </div>
           {data && (

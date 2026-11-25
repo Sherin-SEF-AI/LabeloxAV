@@ -6,6 +6,9 @@ import { api, humanizeError } from "@/lib/api";
 import PageShell from "@/components/shell/PageShell";
 import { toast } from "@/lib/toast";
 import { invalidate } from "@/lib/useQuery";
+import { Badge, Stat } from "@/components/ui/kit";
+import EmptyState from "@/components/ui/EmptyState";
+import { num, pct, plural } from "@/lib/format";
 
 // Migrating in from another tool, with the cost stated before it is paid.
 //
@@ -47,7 +50,7 @@ export default function MigratePage() {
   const [res, setRes] = useState<{ frames: number; report: Report } | null>(null);
 
   const dryRun = useCallback(async () => {
-    if (!source.trim()) { toast("point at a source first", "error"); return; }
+    if (!source.trim()) { toast("Enter a source first", "error"); return; }
     setBusy(true);
     setRes(null);
     try {
@@ -65,7 +68,7 @@ export default function MigratePage() {
       const r = await api.startImport({
         format, source_uri: source.trim(), target_vehicle: vehicle, city: city || undefined,
       });
-      toast("import started", "success");
+      toast("Import started", "success");
       // The import page this lands on, the jobs table and home all list the job just created.
       void invalidate("listImports", "jobs", "/api/home");
       router.push(`/import?job=${r.job_id}`);
@@ -81,99 +84,116 @@ export default function MigratePage() {
 
   return (
     <PageShell active="MIGRATE" title="Migrate from another tool"
-      subtitle="see what the taxonomy costs before importing it">
-      <div className="p-4 space-y-3 max-w-6xl">
+      subtitle="See what the class mapping costs before you import anything.">
+      <div className="page-wrap-narrow space-y-4">
 
-        <div className="panel px-3 py-3 space-y-2">
-          <div className="flex flex-wrap items-end gap-2">
-            <Field label="from">
-              <select value={format} onChange={(e) => setFormat(e.target.value)}
-                className="input text-[12px]">
-                {FORMATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-            </Field>
-            <Field label="source (s3:// uri, zip or directory)">
-              <input value={source} onChange={(e) => setSource(e.target.value)} spellCheck={false}
-                placeholder="s3://uploads/labelbox-export.ndjson"
-                className="input text-[12px] w-[26rem]" />
-            </Field>
-            <Field label="vehicle">
-              <input value={vehicle} onChange={(e) => setVehicle(e.target.value)}
-                className="input text-[12px] w-32" />
-            </Field>
-            <Field label="city">
-              <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="optional"
-                className="input text-[12px] w-28" />
-            </Field>
-            <button onClick={() => void dryRun()} disabled={busy}
-              className="border border-accent text-accent px-3 py-1 hover:bg-accent/10 disabled:opacity-30 text-[12px]">
-              {busy ? "reading..." : "dry run"}
-            </button>
+        <section className="panel">
+          <div className="panel-head"><h2 className="section-title">Source export</h2></div>
+          <div className="p-4 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-[200px_minmax(0,1fr)] gap-4">
+              <Field label="From">
+                <select value={format} onChange={(e) => setFormat(e.target.value)}
+                  className="field">
+                  {FORMATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </Field>
+              <Field label="Source" hint="An s3:// URI, a zip or a directory">
+                <input value={source} onChange={(e) => setSource(e.target.value)} spellCheck={false}
+                  placeholder="s3://uploads/labelbox-export.ndjson"
+                  onKeyDown={(e) => { if (e.key === "Enter") void dryRun(); }}
+                  className="field w-full font-mono text-[12px]" />
+              </Field>
+              <Field label="Vehicle">
+                <input value={vehicle} onChange={(e) => setVehicle(e.target.value)}
+                  className="field" />
+              </Field>
+              <Field label="City" hint="Optional">
+                <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. BLR"
+                  className="field sm:w-48" />
+              </Field>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <button onClick={() => void dryRun()} disabled={busy || !source.trim()}
+                data-tip={!source.trim() ? "Enter a source first" : undefined}
+                className="btn btn-primary">
+                {busy && !rep && <span className="running-dot mr-1" />}
+                {busy && !rep ? "Reading export..." : "Run a dry run"}
+              </button>
+              <span className="section-desc">
+                Writes nothing: it parses the export and applies the same class remap the import would.
+              </span>
+            </div>
           </div>
-          <div className="text-[11px] text-ink-3">
-            A dry run writes nothing. It parses the export and applies the same remap the import would.
+        </section>
+
+        {!rep && !busy && (
+          <div className="panel">
+            <EmptyState icon="flask" title="Check the mapping first">
+              A dry run shows which of your classes map cleanly, which collapse together, and which fall into
+              a fallback class. You decide whether to import once you have seen it.
+            </EmptyState>
           </div>
-        </div>
+        )}
 
         {rep && (
           <>
-            <div className="flex flex-wrap gap-2 text-[12px]">
-              <Stat label="frames" value={res.frames.toLocaleString()} />
-              <Stat label="their classes" value={String(rep.source_classes)} />
-              <Stat label="objects" value={rep.objects.toLocaleString()} />
-              <Stat label="mapped cleanly" value={rep.mapped_cleanly.toLocaleString()} tone="text-accent" />
-              <Stat label="into fallback" value={`${(rep.fallback_fraction * 100).toFixed(1)}%`}
-                tone={lossy ? "text-block" : "text-ink"} />
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <Stat label="Frames" value={num(res.frames)} />
+              <Stat label="Their classes" value={num(rep.source_classes)} />
+              <Stat label="Objects" value={num(rep.objects)} />
+              <Stat label="Mapped cleanly" value={num(rep.mapped_cleanly)} tone="pass" />
+              <Stat label="Into fallback" value={pct(rep.fallback_fraction, 1)}
+                tone={lossy ? "block" : undefined} />
             </div>
 
             {lossy && (
               // Said plainly and before the import, because this is the number a customer will care about
               // after it and cannot undo.
-              <div className="panel px-3 py-2 border-l-2 border-block text-[12px] text-ink-2">
-                {rep.into_fallback.toLocaleString()} of {rep.objects.toLocaleString()} objects
-                ({(rep.fallback_fraction * 100).toFixed(1)}%) would land in a fallback class rather than a
+              <div role="alert" className="panel px-4 py-3 border-l-2 border-l-block text-[12.5px] text-ink-2 leading-relaxed">
+                <span className="text-ink font-medium">{num(rep.into_fallback)} of {num(rep.objects)} objects
+                ({pct(rep.fallback_fraction, 1)}) would land in a fallback class</span> rather than a
                 real one. Those labels survive the import and lose their meaning. Widening the ontology or
                 the mapping table first is usually cheaper than re-labelling afterwards.
               </div>
             )}
 
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2">
               <section className="panel">
-                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-                  distinctions that would be lost
+                <div className="panel-head">
+                  <h2 className="section-title">Distinctions that would be lost</h2>
                 </div>
-                <div className="p-3 space-y-1">
+                <div className="p-4 space-y-2">
                   {rep.merges.length === 0 && (
-                    <div className="text-[11px] text-ink-3">
+                    <div className="text-[12.5px] text-pass">
                       No two of their classes collapse onto one of ours.
                     </div>
                   )}
                   {rep.merges.slice(0, 12).map((m) => (
-                    <div key={m.ontology_class} className="text-[11px]">
-                      <span className="text-block">{m.source_classes.join(" + ")}</span>
+                    <div key={m.ontology_class} className="text-[12.5px] leading-relaxed">
+                      <span className="text-block font-mono text-[12px]">{m.source_classes.join(" + ")}</span>
                       <span className="text-ink-3"> all become </span>
-                      <span className="text-ink">{m.ontology_class}</span>
-                      <span className="text-ink-3"> ({m.objects.toLocaleString()} objects)</span>
+                      <span className="text-ink font-mono text-[12px]">{m.ontology_class}</span>
+                      <span className="text-ink-3"> ({plural(m.objects, "object")})</span>
                     </div>
                   ))}
                 </div>
               </section>
 
               <section className="panel">
-                <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2">
-                  classes with nowhere to go
+                <div className="panel-head">
+                  <h2 className="section-title">Classes with nowhere to go</h2>
                 </div>
-                <div className="p-3 space-y-1">
+                <div className="p-4 space-y-2">
                   {rep.unmapped.length === 0 && (
-                    <div className="text-[11px] text-accent">
+                    <div className="text-[12.5px] text-pass">
                       Every class maps to a real one. Nothing falls back.
                     </div>
                   )}
                   {rep.unmapped.slice(0, 12).map((u) => (
-                    <div key={u.source_class} className="flex justify-between text-[11px]">
-                      <span className="text-warn truncate">{u.source_class}</span>
-                      <span className="text-ink-3">
-                        {u.falls_back_to} · {u.objects.toLocaleString()}
+                    <div key={u.source_class} className="flex justify-between gap-3 text-[12.5px]">
+                      <span className="text-warn font-mono text-[12px] truncate">{u.source_class}</span>
+                      <span className="text-ink-3 shrink-0">
+                        to <span className="font-mono text-[12px] text-ink-2">{u.falls_back_to}</span> · {num(u.objects)}
                       </span>
                     </div>
                   ))}
@@ -182,30 +202,39 @@ export default function MigratePage() {
             </div>
 
             <section className="panel">
-              <div className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3 border-b hairline px-3 py-2 flex items-center justify-between">
-                <span>the full mapping</span>
-                <button onClick={() => void commit()} disabled={busy}
-                  className="border border-accent text-accent px-2 py-0.5 hover:bg-accent/10 disabled:opacity-30">
-                  import anyway
-                </button>
+              <div className="panel-head">
+                <h2 className="section-title">Full mapping</h2>
+                <div className="ml-auto flex items-center gap-3">
+                  {lossy && <span className="text-[12px] text-block">Some labels lose their meaning</span>}
+                  <button onClick={() => void commit()} disabled={busy}
+                    className={lossy ? "btn btn-danger" : "btn btn-primary"}>
+                    {lossy ? "Import anyway" : "Import"}
+                  </button>
+                </div>
               </div>
-              <div className="p-3 overflow-x-auto">
-                <table className="w-full text-[11px]">
-                  <thead className="text-ink-3 text-left">
-                    <tr><th className="py-1">their class</th><th>becomes</th><th className="text-right">objects</th></tr>
+              <div className="overflow-x-auto">
+                <table className="data-table">
+                  <thead>
+                    <tr><th className="text-left">Their class</th><th className="text-left">Becomes</th><th className="num">Objects</th></tr>
                   </thead>
                   <tbody>
                     {rep.mapping.slice(0, 40).map((m) => (
-                      <tr key={m.source_class} className="border-t border-line">
-                        <td className="py-0.5">{m.source_class}</td>
+                      <tr key={m.source_class}>
+                        <td className="font-mono text-[12px]">{m.source_class}</td>
                         <td className={m.clean ? "text-ink" : "text-warn"}>
-                          {m.ontology_class}{m.clean ? "" : "  (fallback)"}
+                          <span className="font-mono text-[12px]">{m.ontology_class}</span>
+                          {!m.clean && <span className="ml-2"><Badge state="warn">Fallback</Badge></span>}
                         </td>
-                        <td className="text-right tabular-nums text-ink-3">{m.objects.toLocaleString()}</td>
+                        <td className="num">{num(m.objects)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                {rep.mapping.length > 40 && (
+                  <div className="px-3 py-2 text-[12px] text-ink-3 border-t hairline">
+                    Showing 40 of {num(rep.mapping.length)} classes.
+                  </div>
+                )}
               </div>
             </section>
           </>
@@ -215,20 +244,13 @@ export default function MigratePage() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-3">{label}</span>
+    <label className="flex flex-col gap-1.5 min-w-0">
+      <span className="text-[12px] font-medium text-ink-2">
+        {label}{hint && <span className="font-normal text-ink-3"> · {hint}</span>}
+      </span>
       {children}
     </label>
-  );
-}
-
-function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="panel px-3 py-2 min-w-[110px]">
-      <div className="text-[10px] uppercase text-ink-3">{label}</div>
-      <div className={`text-[18px] tabular-nums ${tone ?? "text-ink"}`}>{value}</div>
-    </div>
   );
 }

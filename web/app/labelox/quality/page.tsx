@@ -10,6 +10,7 @@ import PageShell from "@/components/shell/PageShell";
 import OntologyRepair from "@/components/labelui/OntologyRepair";
 import { Panel, KV, Verdict, RunButton, useRun, ErrLine, NumField } from "@/components/engine/prim";
 import { runJSON, parseInput } from "@/lib/engine";
+import { humanize, shortId } from "@/lib/format";
 
 type Audit = { n: number; n_pass: number; n_fail: number; missed_gold: number;
   verdicts: { object_id: string; verdict: string; iou: number }[] };
@@ -38,36 +39,40 @@ export default function QualityPage() {
 
   return (
     <PageShell active="Labelox" title="Label quality and 4D propagation"
-      subtitle="gold audit, the learned-reconciler parity gate, and single-identity propagation">
-      <div className="p-4 space-y-4 max-w-6xl">
+      subtitle="Repair the class vocabulary, audit labels against gold, and check tools that decide which labels are trusted.">
+      <div className="page-wrap space-y-4">
         {/* The vocabulary could be added to and never repaired: merge, rename and retire existed on the
             server and the interface offered only "add a class". A mistake in the ontology is a label
             quality problem, which is why it belongs on this page. */}
         <OntologyRepair />
-      </div>
-      <div className="p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 max-w-6xl">
+
+        <div>
+          <h2 className="section-title">Try the quality checks</h2>
+          <p className="section-desc mt-0.5">Paste or adjust inputs and run each check to see what it would decide.</p>
+        </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* gold audit */}
-        <Panel title="gold-set audit" hint="catches bad labels">
-          <div className="text-[11px] text-ink-3 mb-1">predicted annotations</div>
-          <textarea value={pred} placeholder={EXAMPLE_PRED} onChange={(e) => setPred(e.target.value)} rows={5}
-            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
-          <div className="text-[11px] text-ink-3 mt-2 mb-1">gold</div>
-          <textarea value={gold} placeholder={EXAMPLE_GOLD} onChange={(e) => setGold(e.target.value)} rows={3}
-            className="w-full bg-bg-2 border border-line px-2 py-1 text-[11px] text-ink outline-none focus:border-accent" />
-          <div className="mt-2"><RunButton busy={audit.busy}
+        <Panel title="Gold-set audit" hint="Catches bad labels">
+          <label className="block text-[12px] text-ink-2 mb-1" htmlFor="audit-pred">Predicted annotations (JSON)</label>
+          <textarea id="audit-pred" value={pred} placeholder={EXAMPLE_PRED} onChange={(e) => setPred(e.target.value)} rows={5}
+            className="field w-full font-mono text-[11.5px]" />
+          <label className="block text-[12px] text-ink-2 mt-3 mb-1" htmlFor="audit-gold">Gold annotations (JSON)</label>
+          <textarea id="audit-gold" value={gold} placeholder={EXAMPLE_GOLD} onChange={(e) => setGold(e.target.value)} rows={3}
+            className="field w-full font-mono text-[11.5px]" />
+          <div className="mt-3"><RunButton busy={audit.busy}
             onClick={() => audit.run(() => runJSON<Audit>("/api/labelox/quality/audit",
-              { predicted: parseInput(pred, "pred"), gold: parseInput(gold, "gold") }))} label="audit" /></div>
+              { predicted: parseInput(pred, "pred"), gold: parseInput(gold, "gold") }))} label="Run audit" /></div>
           <ErrLine err={audit.err} />
           {audit.out && (
             <div className="mt-3">
-              <KV k="pass / fail" v={`${audit.out.n_pass} / ${audit.out.n_fail}`}
+              <KV k="Passed / failed" v={`${audit.out.n_pass} / ${audit.out.n_fail}`}
                 tone={audit.out.n_fail ? "block" : "pass"} />
-              <KV k="missed gold" v={audit.out.missed_gold} tone="ink-3" />
+              <KV k="Gold objects missed" v={audit.out.missed_gold} tone="ink-3" />
               <div className="space-y-0.5 mt-1">
                 {audit.out.verdicts.map((v) => (
-                  <div key={v.object_id} className="flex justify-between text-[11px]">
-                    <span className="text-ink-2">{v.object_id}</span>
-                    <span className={v.verdict === "pass" ? "text-pass" : "text-block"}>{v.verdict} · iou {v.iou}</span>
+                  <div key={v.object_id} className="flex justify-between text-[12px]">
+                    <span className="text-ink-2 font-mono">{v.object_id}</span>
+                    <span className={v.verdict === "pass" ? "text-pass" : "text-block"}>{humanize(v.verdict)} · IoU {v.iou}</span>
                   </div>
                 ))}
               </div>
@@ -76,49 +81,55 @@ export default function QualityPage() {
         </Panel>
 
         {/* parity gate */}
-        <Panel title="reconciler parity gate" hint="learned must beat heuristic">
-          <div className="space-y-2 mb-2">
-            <NumField label="learned map50" value={learned} onChange={setLearned} w="w-24" />
-            <NumField label="heuristic map50" value={heur} onChange={setHeur} w="w-24" />
-            <NumField label="margin" value={margin} onChange={setMargin} w="w-24" />
+        <Panel title="Reconciler parity gate" hint="Learned must beat heuristic">
+          <div className="space-y-2 mb-3">
+            <NumField label="Learned mAP50" value={learned} onChange={setLearned} w="w-24" />
+            <NumField label="Heuristic mAP50" value={heur} onChange={setHeur} w="w-24" />
+            <NumField label="Required margin" value={margin} onChange={setMargin} w="w-24" />
           </div>
           <RunButton busy={parity.busy}
             onClick={() => parity.run(() => runJSON<Parity>("/api/labelox/reconcile/parity",
-              { learned_metrics: { map50: learned }, heuristic_metrics: { map50: heur }, margin }))} label="check gate" />
+              { learned_metrics: { map50: learned }, heuristic_metrics: { map50: heur }, margin }))} label="Check gate" />
           <ErrLine err={parity.err} />
           {parity.out && (
             <div className="mt-3">
-              <Verdict ok={parity.out.promote} yes="promote learned" no="keep heuristic" />
-              <KV k="delta" v={parity.out.delta} tone={parity.out.delta > 0 ? "pass" : "block"} />
-              <div className="text-[11px] text-ink-3 mt-1">{parity.out.reason}</div>
+              <Verdict ok={parity.out.promote} yes="Promote learned" no="Keep heuristic" />
+              <KV k="Difference" v={parity.out.delta} tone={parity.out.delta > 0 ? "pass" : "block"} />
+              <div className="text-[12px] text-ink-3 mt-1">{parity.out.reason}</div>
             </div>
           )}
         </Panel>
 
         {/* 4D propagation */}
-        <Panel title="4D propagation" hint="one identity, healed gaps">
-          <NumField label="frames" value={nframes} onChange={setNframes} w="w-20" />
-          <div className="mt-2"><RunButton busy={prop.busy}
+        <Panel title="4D propagation" hint="One identity, gaps filled">
+          <NumField label="Frames" value={nframes} onChange={setNframes} w="w-20" />
+          <div className="mt-3"><RunButton busy={prop.busy}
             onClick={() => prop.run(() => runJSON<Prop>("/api/labelox/propagate4d",
               { keyframe_box: [10, 10, 50, 50], n_frames: nframes, velocity: [1, 0, 1, 0],
-                known: { [Math.max(1, nframes - 2)]: [30, 10, 70, 50] } }))} label="propagate" /></div>
+                known: { [Math.max(1, nframes - 2)]: [30, 10, 70, 50] } }))} label="Propagate" /></div>
           <ErrLine err={prop.err} />
           {prop.out && (
             <div className="mt-3">
-              <KV k="identities" v={prop.out.identities} tone={prop.out.identities === 1 ? "pass" : "block"} />
-              <KV k="healed gaps" v={prop.out.healed_gaps} tone="ink" />
-              <KV k="track" v={prop.out.track_id.slice(0, 8)} tone="ink-3" />
+              <KV k="Identities" v={prop.out.identities} tone={prop.out.identities === 1 ? "pass" : "block"} />
+              <KV k="Gaps filled" v={prop.out.healed_gaps} tone="ink" />
+              <KV k="Track" v={shortId(prop.out.track_id)} tone="ink-3" />
               <div className="flex flex-wrap gap-0.5 mt-2">
                 {prop.out.boxes.map((b) => (
-                  <span key={b.frame} title={b.source}
-                    className={`w-4 h-4 ${b.source === "keyframe" ? "bg-accent" :
+                  <span key={b.frame} title={`Frame ${b.frame}: ${b.source}`}
+                    className={`w-4 h-4 rounded-sm ${b.source === "keyframe" ? "bg-accent" :
                       b.source === "observed" ? "bg-info" : b.source === "interpolated" ? "bg-pass" : "bg-ink-3"}`} />
                 ))}
               </div>
-              <div className="text-[10.5px] text-ink-3 mt-1">keyframe / observed / interpolated / propagated</div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-ink-3 mt-2">
+                <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-accent" />Keyframe</span>
+                <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-info" />Observed</span>
+                <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-pass" />Interpolated</span>
+                <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-ink-3" />Propagated</span>
+              </div>
             </div>
           )}
         </Panel>
+      </div>
       </div>
     </PageShell>
   );
