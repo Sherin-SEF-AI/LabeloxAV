@@ -80,7 +80,8 @@ async def rig_prior_for_vehicle(db, vehicle_id: str, limit: int = 500) -> dict:
     rows = (await db.execute(
         select(CameraCalibration, DbSession.vehicle_id)
         .join(DbSession, CameraCalibration.session_id == DbSession.session_id)
-        .where(DbSession.vehicle_id == vehicle_id).limit(limit))).all()
+        # The base timeline only: a manual alignment beside a row is a correction of it, not a second rig state.
+        .where(DbSession.vehicle_id == vehicle_id, CameraCalibration.source != "manual").limit(limit))).all()
 
     overrides = {}
     for o in (await db.execute(

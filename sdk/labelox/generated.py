@@ -3603,6 +3603,136 @@ class LabeloxClient:
         return self._call("POST", f"/api/tools/agents/edit/propose",
                           params=None, json_body=body)
 
+    def get_tools_driving_align_frames_by_frame_id_view(self, frame_id: str, max_points: int | None = 40000) -> Any:
+        """Align View"""
+        return self._call("GET", f"/api/tools/driving/align/frames/{frame_id}/view",
+                          params={"max_points": max_points}, json_body=None)
+
+    def post_tools_driving_align_refine(self, body: Any = None) -> Any:
+        """Align Refine"""
+        return self._call("POST", f"/api/tools/driving/align/refine",
+                          params=None, json_body=body)
+
+    def post_tools_driving_align_save(self, body: Any = None) -> Any:
+        """Align Save"""
+        return self._call("POST", f"/api/tools/driving/align/save",
+                          params=None, json_body=body)
+
+    def post_tools_driving_align_score(self, body: Any = None) -> Any:
+        """Align Score"""
+        return self._call("POST", f"/api/tools/driving/align/score",
+                          params=None, json_body=body)
+
+    def get_tools_driving_align_sessions(self) -> Any:
+        """Align Sessions"""
+        return self._call("GET", f"/api/tools/driving/align/sessions",
+                          params=None, json_body=None)
+
+    def delete_tools_driving_align_sessions_by_session_id_cameras_by_cam_id_manual(self, session_id: str, cam_id: str) -> Any:
+        """Align Revert"""
+        return self._call("DELETE", f"/api/tools/driving/align/sessions/{session_id}/cameras/{cam_id}/manual",
+                          params=None, json_body=None)
+
+    def get_tools_driving_align_sessions_by_session_id_frames(self, session_id: str, cam_id: Any | None = None) -> Any:
+        """Align Frames"""
+        return self._call("GET", f"/api/tools/driving/align/sessions/{session_id}/frames",
+                          params={"cam_id": cam_id}, json_body=None)
+
+    def get_tools_driving_align_sessions_by_session_id_history(self, session_id: str, cam_id: Any | None = None) -> Any:
+        """Align History"""
+        return self._call("GET", f"/api/tools/driving/align/sessions/{session_id}/history",
+                          params={"cam_id": cam_id}, json_body=None)
+
+    def post_tools_driving_align_solve_pairs(self, body: Any = None) -> Any:
+        """Align Solve Pairs"""
+        return self._call("POST", f"/api/tools/driving/align/solve-pairs",
+                          params=None, json_body=body)
+
+    def get_tools_driving_frames_by_frame_id_bev_lanes(self, frame_id: str) -> Any:
+        """Bev Lanes"""
+        return self._call("GET", f"/api/tools/driving/frames/{frame_id}/bev-lanes",
+                          params=None, json_body=None)
+
+    def put_tools_driving_frames_by_frame_id_bev_lanes(self, frame_id: str, body: Any = None) -> Any:
+        """Put Bev Lane"""
+        return self._call("PUT", f"/api/tools/driving/frames/{frame_id}/bev-lanes",
+                          params=None, json_body=body)
+
+    def post_tools_driving_frames_by_frame_id_lanes_propagate_pose(self, frame_id: str, body: Any = None) -> Any:
+        """Propagate Pose"""
+        return self._call("POST", f"/api/tools/driving/frames/{frame_id}/lanes/propagate-pose",
+                          params=None, json_body=body)
+
+    def delete_tools_driving_lane_relations_by_relation_id(self, relation_id: str) -> Any:
+        """Delete Lane Relation"""
+        return self._call("DELETE", f"/api/tools/driving/lane-relations/{relation_id}",
+                          params=None, json_body=None)
+
+    def post_tools_driving_lanes_export(self, body: Any = None) -> Any:
+        """Export Lanes"""
+        return self._call("POST", f"/api/tools/driving/lanes/export",
+                          params=None, json_body=body)
+
+    def post_tools_driving_lanes_by_lane_id_relations(self, lane_id: str, body: Any = None) -> Any:
+        """Add Lane Relation"""
+        return self._call("POST", f"/api/tools/driving/lanes/{lane_id}/relations",
+                          params=None, json_body=body)
+
+    def delete_tools_driving_paths_intents_by_event_id(self, event_id: str) -> Any:
+        """Delete Track Intent"""
+        return self._call("DELETE", f"/api/tools/driving/paths/intents/{event_id}",
+                          params=None, json_body=None)
+
+    def delete_tools_driving_paths_labels_by_path_id(self, path_id: str) -> Any:
+        """Delete Path Label"""
+        return self._call("DELETE", f"/api/tools/driving/paths/labels/{path_id}",
+                          params=None, json_body=None)
+
+    def get_tools_driving_paths_sessions(self, limit: int | None = 60) -> Any:
+        """Path Sessions"""
+        return self._call("GET", f"/api/tools/driving/paths/sessions",
+                          params={"limit": limit}, json_body=None)
+
+    def get_tools_driving_paths_sessions_by_session_id(self, session_id: str) -> Any:
+        """Path Session"""
+        return self._call("GET", f"/api/tools/driving/paths/sessions/{session_id}",
+                          params=None, json_body=None)
+
+    def put_tools_driving_paths_sessions_by_session_id_ego(self, session_id: str, body: Any = None) -> Any:
+        """Put Ego Path"""
+        return self._call("PUT", f"/api/tools/driving/paths/sessions/{session_id}/ego",
+                          params=None, json_body=body)
+
+    def post_tools_driving_paths_sessions_by_session_id_ego_smooth(self, session_id: str, body: Any = None) -> Any:
+        """Smooth Ego Path"""
+        return self._call("POST", f"/api/tools/driving/paths/sessions/{session_id}/ego/smooth",
+                          params=None, json_body=body)
+
+    def get_tools_driving_paths_sessions_by_session_id_scenario(self, session_id: str) -> Any:
+        """Scenario"""
+        return self._call("GET", f"/api/tools/driving/paths/sessions/{session_id}/scenario",
+                          params=None, json_body=None)
+
+    def get_tools_driving_paths_tracks_by_track_id_forecast(self, track_id: str, anchor_frame_id: Any | None = None, horizon_s: float | None = 3.0, dt_s: float | None = 0.25) -> Any:
+        """Track Forecast"""
+        return self._call("GET", f"/api/tools/driving/paths/tracks/{track_id}/forecast",
+                          params={"anchor_frame_id": anchor_frame_id, "horizon_s": horizon_s, "dt_s": dt_s}, json_body=None)
+
+    def put_tools_driving_paths_tracks_by_track_id_future(self, track_id: str, body: Any = None) -> Any:
+        """Put Future"""
+        return self._call("PUT", f"/api/tools/driving/paths/tracks/{track_id}/future",
+                          params=None, json_body=body)
+
+    def get_tools_driving_paths_tracks_by_track_id_intents(self, track_id: str) -> Any:
+        """Track Intents"""
+        return self._call("GET", f"/api/tools/driving/paths/tracks/{track_id}/intents",
+                          params=None, json_body=None)
+
+    def post_tools_driving_paths_tracks_by_track_id_intents(self, track_id: str, body: Any = None) -> Any:
+        """Add Track Intent"""
+        return self._call("POST", f"/api/tools/driving/paths/tracks/{track_id}/intents",
+                          params=None, json_body=body)
+
     def get_tools_jobs(self, kind: Any | None = None, session_id: Any | None = None, limit: int | None = 20) -> Any:
         """List Tool Jobs"""
         return self._call("GET", f"/api/tools/jobs",
@@ -3617,6 +3747,76 @@ class LabeloxClient:
         """Cancel Tool Job"""
         return self._call("POST", f"/api/tools/jobs/{job_id}/cancel",
                           params=None, json_body=None)
+
+    def post_tools_quality_consensus_groups_by_replica_group_preview(self, replica_group: str, body: Any = None) -> Any:
+        """Consensus Preview"""
+        return self._call("POST", f"/api/tools/quality/consensus/groups/{replica_group}/preview",
+                          params=None, json_body=body)
+
+    def post_tools_quality_consensus_merge(self, body: Any = None) -> Any:
+        """Consensus Merge"""
+        return self._call("POST", f"/api/tools/quality/consensus/merge",
+                          params=None, json_body=body)
+
+    def get_tools_quality_consensus_tasks(self, limit: int | None = 100) -> Any:
+        """Consensus Tasks"""
+        return self._call("GET", f"/api/tools/quality/consensus/tasks",
+                          params={"limit": limit}, json_body=None)
+
+    def get_tools_quality_consensus_tasks_by_task_id(self, task_id: str, iou_thresh: float | None = 0.5, quorum: int | None = 2, include_model: bool | None = True, require_human: bool | None = True) -> Any:
+        """Consensus Board"""
+        return self._call("GET", f"/api/tools/quality/consensus/tasks/{task_id}",
+                          params={"iou_thresh": iou_thresh, "quorum": quorum, "include_model": include_model, "require_human": require_human}, json_body=None)
+
+    def get_tools_quality_consensus_tasks_by_task_id_disagreements(self, task_id: str, status: str | None = 'open', limit: int | None = 200) -> Any:
+        """Consensus Disagreements"""
+        return self._call("GET", f"/api/tools/quality/consensus/tasks/{task_id}/disagreements",
+                          params={"status": status, "limit": limit}, json_body=None)
+
+    def get_tools_quality_errors_by_candidate_id_why(self, candidate_id: str) -> Any:
+        """Error Why"""
+        return self._call("GET", f"/api/tools/quality/errors/{candidate_id}/why",
+                          params=None, json_body=None)
+
+    def get_tools_quality_frames_by_frame_id_why(self, frame_id: str, status: str | None = 'pending') -> Any:
+        """Frame Why"""
+        return self._call("GET", f"/api/tools/quality/frames/{frame_id}/why",
+                          params={"status": status}, json_body=None)
+
+    def get_tools_quality_rare_scenes_latest(self, space: Any | None = None) -> Any:
+        """Rare Latest"""
+        return self._call("GET", f"/api/tools/quality/rare-scenes/latest",
+                          params={"space": space}, json_body=None)
+
+    def post_tools_quality_rare_scenes_rank(self, body: Any = None) -> Any:
+        """Rare Rank"""
+        return self._call("POST", f"/api/tools/quality/rare-scenes/rank",
+                          params=None, json_body=body)
+
+    def post_tools_quality_rare_scenes_search(self, body: Any = None) -> Any:
+        """Rare Search"""
+        return self._call("POST", f"/api/tools/quality/rare-scenes/search",
+                          params=None, json_body=body)
+
+    def post_tools_quality_rare_scenes_task(self, body: Any = None) -> Any:
+        """Rare Task"""
+        return self._call("POST", f"/api/tools/quality/rare-scenes/task",
+                          params=None, json_body=body)
+
+    def post_tools_quality_vlm_check(self, body: Any = None) -> Any:
+        """Vlm Check"""
+        return self._call("POST", f"/api/tools/quality/vlm/check",
+                          params=None, json_body=body)
+
+    def post_tools_quality_vlm_check_batch(self, body: Any = None) -> Any:
+        """Vlm Check Batch"""
+        return self._call("POST", f"/api/tools/quality/vlm/check-batch",
+                          params=None, json_body=body)
+
+    def get_tools_quality_vlm_checks(self, ids: str) -> Any:
+        """Vlm Checks"""
+        return self._call("GET", f"/api/tools/quality/vlm/checks",
+                          params={"ids": ids}, json_body=None)
 
     def post_tools_scene3d_clouds_by_cloud_id_assist_ai(self, cloud_id: str) -> Any:
         """Assist Ai"""
@@ -3727,6 +3927,151 @@ class LabeloxClient:
         """Track Review Apply"""
         return self._call("POST", f"/api/tools/scene3d/tracks3d/{track_3d_id}/review",
                           params=None, json_body=body)
+
+    def post_tools_sensors_events_import(self, body: Any = None) -> Any:
+        """Events Import"""
+        return self._call("POST", f"/api/tools/sensors/events/import",
+                          params=None, json_body=body)
+
+    def post_tools_sensors_events_streams_by_stream_id_accumulate(self, stream_id: str, body: Any = None) -> Any:
+        """Events Accumulate"""
+        return self._call("POST", f"/api/tools/sensors/events/streams/{stream_id}/accumulate",
+                          params=None, json_body=body)
+
+    def get_tools_sensors_events_streams_by_stream_id_frames(self, stream_id: str, limit: int | None = 500) -> Any:
+        """Events Frames"""
+        return self._call("GET", f"/api/tools/sensors/events/streams/{stream_id}/frames",
+                          params={"limit": limit}, json_body=None)
+
+    def get_tools_sensors_events_streams_by_stream_id_preview_jpg(self, stream_id: str, t_ns: Any | None = None, mode: str | None = 'count', window_ms: float | None = 33.0, tau_ms: float | None = 30.0) -> Any:
+        """Events Preview"""
+        return self._call("GET", f"/api/tools/sensors/events/streams/{stream_id}/preview.jpg",
+                          params={"t_ns": t_ns, "mode": mode, "window_ms": window_ms, "tau_ms": tau_ms}, json_body=None)
+
+    def get_tools_sensors_overview(self) -> Any:
+        """Overview"""
+        return self._call("GET", f"/api/tools/sensors/overview",
+                          params=None, json_body=None)
+
+    def get_tools_sensors_radar_frames_by_frame_id_overlay(self, frame_id: str) -> Any:
+        """Radar Overlay"""
+        return self._call("GET", f"/api/tools/sensors/radar/frames/{frame_id}/overlay",
+                          params=None, json_body=None)
+
+    def post_tools_sensors_radar_import(self, body: Any = None) -> Any:
+        """Radar Import"""
+        return self._call("POST", f"/api/tools/sensors/radar/import",
+                          params=None, json_body=body)
+
+    def get_tools_sensors_radar_sessions_by_session_id_bev(self, session_id: str, ts_ns: int) -> Any:
+        """Radar Bev"""
+        return self._call("GET", f"/api/tools/sensors/radar/sessions/{session_id}/bev",
+                          params={"ts_ns": ts_ns}, json_body=None)
+
+    def post_tools_sensors_radar_sessions_by_session_id_fuse(self, session_id: str, body: Any = None) -> Any:
+        """Radar Fuse"""
+        return self._call("POST", f"/api/tools/sensors/radar/sessions/{session_id}/fuse",
+                          params=None, json_body=body)
+
+    def get_tools_sensors_radar_sessions_by_session_id_fusion(self, session_id: str) -> Any:
+        """Radar Fusion"""
+        return self._call("GET", f"/api/tools/sensors/radar/sessions/{session_id}/fusion",
+                          params=None, json_body=None)
+
+    def get_tools_sensors_radar_sessions_by_session_id_sweeps(self, session_id: str, limit: int | None = 2000) -> Any:
+        """Radar Sweeps"""
+        return self._call("GET", f"/api/tools/sensors/radar/sessions/{session_id}/sweeps",
+                          params={"limit": limit}, json_body=None)
+
+    def post_tools_sensors_reconstruct(self, body: Any = None) -> Any:
+        """Reconstruct"""
+        return self._call("POST", f"/api/tools/sensors/reconstruct",
+                          params=None, json_body=body)
+
+    def get_tools_sensors_reconstruct_sessions(self) -> Any:
+        """Reconstruct Sessions"""
+        return self._call("GET", f"/api/tools/sensors/reconstruct/sessions",
+                          params=None, json_body=None)
+
+    def get_tools_sensors_reconstructions(self, session_id: Any | None = None, limit: int | None = 50) -> Any:
+        """Reconstructions"""
+        return self._call("GET", f"/api/tools/sensors/reconstructions",
+                          params={"session_id": session_id, "limit": limit}, json_body=None)
+
+    def delete_tools_sensors_reconstructions_by_recon_id(self, recon_id: str) -> Any:
+        """Reconstruction Delete"""
+        return self._call("DELETE", f"/api/tools/sensors/reconstructions/{recon_id}",
+                          params=None, json_body=None)
+
+    def get_tools_sensors_reconstructions_by_recon_id(self, recon_id: str) -> Any:
+        """Reconstruction"""
+        return self._call("GET", f"/api/tools/sensors/reconstructions/{recon_id}",
+                          params=None, json_body=None)
+
+    def post_tools_sensors_reconstructions_by_recon_id_place(self, recon_id: str, body: Any = None) -> Any:
+        """Reconstruction Place"""
+        return self._call("POST", f"/api/tools/sensors/reconstructions/{recon_id}/place",
+                          params=None, json_body=body)
+
+    def get_tools_sensors_reconstructions_by_recon_id_placed(self, recon_id: str) -> Any:
+        """Reconstruction Placed"""
+        return self._call("GET", f"/api/tools/sensors/reconstructions/{recon_id}/placed",
+                          params=None, json_body=None)
+
+    def get_tools_sensors_reconstructions_by_recon_id_preview_bin(self, recon_id: str) -> Any:
+        """Reconstruction Preview"""
+        return self._call("GET", f"/api/tools/sensors/reconstructions/{recon_id}/preview.bin",
+                          params=None, json_body=None)
+
+    def get_tools_sensors_reconstructions_by_recon_id_splats_ply(self, recon_id: str) -> Any:
+        """Reconstruction Ply"""
+        return self._call("GET", f"/api/tools/sensors/reconstructions/{recon_id}/splats.ply",
+                          params=None, json_body=None)
+
+    def get_tools_sensors_reconstructions_by_recon_id_views_by_index_jpg(self, recon_id: str, index: int) -> Any:
+        """Reconstruction View"""
+        return self._call("GET", f"/api/tools/sensors/reconstructions/{recon_id}/views/{index}.jpg",
+                          params=None, json_body=None)
+
+    def post_tools_sensors_variants(self, body: Any = None) -> Any:
+        """Variants Build"""
+        return self._call("POST", f"/api/tools/sensors/variants",
+                          params=None, json_body=body)
+
+    def post_tools_sensors_variants_check(self, body: Any = None) -> Any:
+        """Variant Check"""
+        return self._call("POST", f"/api/tools/sensors/variants/check",
+                          params=None, json_body=body)
+
+    def get_tools_sensors_variants_hard_frames(self, source: str | None = 'errors', session_id: Any | None = None, limit: int | None = 60, include_review: bool | None = False) -> Any:
+        """Variant Hard Frames"""
+        return self._call("GET", f"/api/tools/sensors/variants/hard-frames",
+                          params={"source": source, "session_id": session_id, "limit": limit, "include_review": include_review}, json_body=None)
+
+    def get_tools_sensors_variants_perturbations(self) -> Any:
+        """Variant Perturbations"""
+        return self._call("GET", f"/api/tools/sensors/variants/perturbations",
+                          params=None, json_body=None)
+
+    def get_tools_sensors_variants_preview_jpg(self, frame_id: str, perturbation: str, strength: Any | None = None, seed: int | None = 7, max_width: int | None = 960) -> Any:
+        """Variant Preview"""
+        return self._call("GET", f"/api/tools/sensors/variants/preview.jpg",
+                          params={"frame_id": frame_id, "perturbation": perturbation, "strength": strength, "seed": seed, "max_width": max_width}, json_body=None)
+
+    def get_tools_sensors_variants_runs(self, limit: int | None = 30) -> Any:
+        """Variant Runs"""
+        return self._call("GET", f"/api/tools/sensors/variants/runs",
+                          params={"limit": limit}, json_body=None)
+
+    def post_tools_sensors_variants_runs_by_job_id_revert(self, job_id: str) -> Any:
+        """Variant Revert"""
+        return self._call("POST", f"/api/tools/sensors/variants/runs/{job_id}/revert",
+                          params=None, json_body=None)
+
+    def get_tools_sensors_variants_summary(self) -> Any:
+        """Variant Summary Route"""
+        return self._call("GET", f"/api/tools/sensors/variants/summary",
+                          params=None, json_body=None)
 
     def post_tools_video_describe_session(self, body: Any = None) -> Any:
         """Describe Session"""
@@ -4181,4 +4526,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 819 routes generated from the server schema.
+# 888 routes generated from the server schema.

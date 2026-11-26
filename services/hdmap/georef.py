@@ -224,7 +224,8 @@ async def georef_session(session_id: UUID, height_m: float | None = None) -> dic
     # "nominal" knows the lanes are placed with a guessed focal length, a principal point assumed to be at
     # the image centre and an assumed mount height, and should not treat the result as survey data.
     cals = {f"{c}@{w}x{h}": {"source": c0.source, "quality": round(float(c0.quality), 3),
-                             "height_m": round(abs(float(c0.xyz_m[2])) or 1.5, 3)}
+                             "height_m": round(c0.camera_height_m() if hasattr(c0, "camera_height_m")
+                                                   else (abs(float(c0.xyz_m[2])) or 1.5), 3)}
             for (c, w, h), c0 in cam_cal.items()}
     out = {"session_id": str(session_id), "elements": n_lane + n_sign, "lanes": n_lane, "signs": n_sign,
            "frames": len(pts), "calibration": cals,

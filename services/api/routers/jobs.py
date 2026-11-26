@@ -17,7 +17,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import AutolabelJob, ExportJob, ImportJob, MapFusionJob, RelabelJob, ToolJob, TrainingJob
+from db.models import (
+    AutolabelJob,
+    ExportJob,
+    ImportJob,
+    MapFusionJob,
+    RelabelJob,
+    ToolJob,
+    TrainingJob,
+)
 from services.activity import record_activity
 from services.api.deps import ApiOut, JobOut, db_session, require_role
 from services.job_control import QUEUED_CLOUD

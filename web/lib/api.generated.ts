@@ -26,6 +26,14 @@ export type AcceptTrackIn = {
   reviewer?: string;
 };
 
+export type AccumulateIn = {
+  mode?: "count" | "time_surface";
+  window_ms?: number;
+  tau_ms?: number;
+  max_frames?: number;
+  replace?: boolean;
+};
+
 export type AdaptiveIn = {
   regressions: Record<string, unknown>[];
   odd_gaps: Record<string, unknown>[];
@@ -164,6 +172,13 @@ export type BenchmarkIn = {
   rate?: number;
 };
 
+export type BevLaneIn = {
+  lane_id?: string | null;
+  bev_points: number[][];
+  lane_type?: string;
+  is_ego?: boolean;
+};
+
 export type BevProjectIn = {
   points: unknown[];
   lane_type?: string;
@@ -243,6 +258,16 @@ export type ChatIn = {
   messages: Message[];
   session_id?: string | null;
   frame_id?: string | null;
+};
+
+export type CheckBatchIn = {
+  object_ids?: string[] | null;
+  session_id?: string | null;
+  limit?: number;
+};
+
+export type CheckIn = {
+  object_ids: string[];
 };
 
 /** One line of `scripts/doctor.sh`: services.doctor.Check, field for field. */
@@ -584,6 +609,17 @@ export type EfficiencyIn = {
   entries: Record<string, unknown>[];
 };
 
+export type EgoIn = {
+  points: number[][];
+  source?: "human" | "smoothed";
+  notes?: string | null;
+};
+
+export type EligibilityIn = {
+  frame_ids: string[];
+  include_review?: boolean;
+};
+
 export type EngageIn = {
   reason?: string;
   task?: string;
@@ -620,6 +656,21 @@ export type EventIn = {
   t_start_ns: number;
   t_end_ns?: number | null;
   payload?: Record<string, unknown>;
+};
+
+export type EventsImportIn = {
+  source_uri: string;
+  format?: ("npy" | "h5" | "mcap") | null;
+  session_id?: string | null;
+  vehicle_id?: string | null;
+  city?: string | null;
+  sensor?: string;
+  width?: number | null;
+  height?: number | null;
+  columns?: string;
+  time_unit?: "ns" | "us" | "ms" | "s";
+  topics?: string[] | null;
+  time_offset_ns?: number;
 };
 
 export type ExperimentIn = {
@@ -664,6 +715,12 @@ export type ExternalRunIn = {
   gold_id?: string | null;
   code_sha?: string;
   params?: Record<string, unknown> | null;
+};
+
+export type ExtrinsicIn = {
+  frame_ids: string[];
+  rpy_deg: number[];
+  xyz_m: number[];
 };
 
 export type FanoutApplyIn = {
@@ -802,6 +859,19 @@ export type FreshIn = {
   review_low?: number | null;
   require_agreement?: boolean | null;
   commit?: boolean;
+};
+
+export type FuseIn = {
+  tol_mps?: number;
+  apply?: boolean;
+};
+
+export type FutureIn = {
+  anchor_frame_id: string;
+  points: number[][];
+  source?: "human" | "baseline_ctrv";
+  seed?: Record<string, unknown> | null;
+  notes?: string | null;
 };
 
 export type GateBatchIn = {
@@ -956,6 +1026,13 @@ export type IngestIn = {
   session_ids?: string[] | null;
 };
 
+export type IntentIn = {
+  event_type: string;
+  start_frame_id: string;
+  end_frame_id: string;
+  notes?: string | null;
+};
+
 export type IntentSetIn = {
   intent: string;
   kind: string;
@@ -1092,9 +1169,11 @@ export type MembershipOut = {
   member: boolean;
 };
 
-export type MergeIn = {
-  from_id: number;
-  to_id: number;
+export type MergeParams = {
+  iou_thresh?: number;
+  quorum?: number;
+  include_model?: boolean;
+  require_human?: boolean;
 };
 
 export type MergeTrackIn = {
@@ -1368,6 +1447,14 @@ export type OverrideIn = {
   reason: string;
 };
 
+export type PairsIn = {
+  frame_id: string;
+  points: number[][];
+  uv: number[][];
+  rpy_deg?: number[] | null;
+  xyz_m?: number[] | null;
+};
+
 export type ParityIn = {
   learned_metrics: Record<string, unknown>;
   heuristic_metrics: Record<string, unknown>;
@@ -1376,6 +1463,15 @@ export type ParityIn = {
 
 export type PendingSetupIn = {
   mfa_handle: string;
+};
+
+export type PlaceIn = {
+  center: number[];
+  dims: number[];
+  yaw?: number;
+  class_id: number;
+  ground_snap?: boolean;
+  max_range_m?: number;
 };
 
 export type PlanIn = {
@@ -1501,16 +1597,25 @@ export type Propagate4dIn = {
   known?: Record<string, number[]> | null;
 };
 
-export type PropagateIn = {
-  span?: number;
-  drift?: number;
-  high?: number;
-};
-
 export type ProposalIn = {
   bbox: number[];
   polygons?: number[][];
   conf?: number | null;
+};
+
+export type RadarImportIn = {
+  session_id: string;
+  source_uri: string;
+  format?: "nuscenes" | "mcap" | "pcd";
+  channels?: string[] | null;
+  keyframes_only?: boolean;
+  filter_points?: boolean;
+  topics?: string[] | null;
+  extrinsics?: Record<string, number[][]> | null;
+  sensor_to_ego?: number[][] | null;
+  time_source?: "log" | "header";
+  sensor?: string | null;
+  ts_ns?: number | null;
 };
 
 export type RadarIn = {
@@ -1518,10 +1623,6 @@ export type RadarIn = {
   camera_velocity: number;
   radar_returns: Record<string, unknown>[];
   ego_speed?: number;
-};
-
-export type RankIn = {
-  items: Record<string, unknown>[];
 };
 
 export type ReanalyzeAllIn = {
@@ -1541,6 +1642,17 @@ export type ReconcileIn = {
   apply_min_conf?: number;
 };
 
+export type ReconstructIn = {
+  session_id: string;
+  method?: "gsplat" | "pointmap";
+  cam_id?: string | null;
+  start_ts_ns?: number | null;
+  n_frames?: number;
+  stride?: number;
+  iters?: number;
+  max_width?: number;
+};
+
 export type RecoverIn = {
   cam_id: string;
   nominal: number[][];
@@ -1554,6 +1666,12 @@ export type RedactionProofIn = {
   release_commit: string;
   frame_ids: string[];
   method_version?: string;
+};
+
+export type RefineIn = {
+  frame_ids: string[];
+  rpy_deg?: number[] | null;
+  xyz_m?: number[] | null;
 };
 
 export type RegionOcrIn = {
@@ -1602,6 +1720,13 @@ export type RelabelTrackIn = {
 export type RelateIn = {
   to_object_id: string;
   kind: string;
+};
+
+export type RelationIn = {
+  relation: string;
+  target_lane_id?: string | null;
+  target_object_id?: string | null;
+  target_element_id?: string | null;
 };
 
 /** One directed relationship on a frame (the India case is rider_of on a two-wheeler). */
@@ -1709,6 +1834,25 @@ export type SafetyIn = {
   objects: Record<string, unknown>[];
   ttc_horizon_s?: number;
   near_miss_ttc_s?: number;
+};
+
+export type SaveIn = {
+  frame_ids: string[];
+  rpy_deg: number[];
+  xyz_m: number[];
+  method?: "manual" | "auto" | "pairs";
+  notes?: string | null;
+  pairs_points?: number[][] | null;
+  pairs_uv?: number[][] | null;
+};
+
+export type SearchIn = {
+  text?: string | null;
+  frame_id?: string | null;
+  space?: string | null;
+  k?: number;
+  rarest_first?: boolean;
+  session_id?: string | null;
 };
 
 export type SeedAuditIn = {
@@ -1839,6 +1983,10 @@ export type SloIn = {
   window_s?: number;
 };
 
+export type SmoothIn = {
+  window?: number;
+};
+
 export type SourceIn = {
   name: string;
   provider: string;
@@ -1924,15 +2072,6 @@ export type TargetlessIn = {
   horizon_y: number;
   cx: number;
   cy: number;
-};
-
-export type TaskIn = {
-  project_id: string;
-  name: string;
-  session_id?: string | null;
-  predicate?: Record<string, unknown>;
-  jobs_of?: number;
-  replicas?: number;
 };
 
 export type TelemetryIn = {
@@ -2124,6 +2263,14 @@ export type ValidationError = {
   type: string;
 };
 
+export type VariantsIn = {
+  frame_ids: string[];
+  perturbations: string[];
+  strengths?: Record<string, number>;
+  seed?: number;
+  include_review?: boolean;
+};
+
 export type VerdictIn = {
   verdict: string;
 };
@@ -2192,6 +2339,12 @@ export type services__api__routers__agent__AuditIn = {
   since_hours?: number;
 };
 
+export type services__api__routers__agent__PropagateIn = {
+  span?: number;
+  drift?: number;
+  high?: number;
+};
+
 export type services__api__routers__calyx__DriftIn = {
   cam_id: string;
   cam_points: number[][];
@@ -2251,6 +2404,15 @@ export type services__api__routers__labelops__ProjectIn = {
   gold_id?: string | null;
 };
 
+export type services__api__routers__labelops__TaskIn = {
+  project_id: string;
+  name: string;
+  session_id?: string | null;
+  predicate?: Record<string, unknown>;
+  jobs_of?: number;
+  replicas?: number;
+};
+
 export type services__api__routers__labelox__AuditIn = {
   predicted: Record<string, unknown>[];
   gold: Record<string, unknown>[];
@@ -2261,6 +2423,15 @@ export type services__api__routers__lidar__BuildIn = {
   limit?: number;
   stride?: number | null;
   max_points?: number | null;
+};
+
+export type services__api__routers__meta__MergeIn = {
+  from_id: number;
+  to_id: number;
+};
+
+export type services__api__routers__oraclyx__RankIn = {
+  items: Record<string, unknown>[];
 };
 
 export type services__api__routers__project_settings__ProjectIn = {
@@ -2278,6 +2449,41 @@ export type services__api__routers__synth__BuildIn = {
   class_names: string[];
   n_frames?: number;
   seed?: string | null;
+};
+
+export type services__api__routers__tools_driving__ExportIn = {
+  frame_ids: string[];
+};
+
+export type services__api__routers__tools_driving__PropagateIn = {
+  frames?: number;
+  lane_ids?: string[] | null;
+};
+
+export type services__api__routers__tools_quality__MergeIn = {
+  iou_thresh?: number;
+  quorum?: number;
+  include_model?: boolean;
+  require_human?: boolean;
+  task_id?: string | null;
+  replica_group?: string | null;
+};
+
+export type services__api__routers__tools_quality__RankIn = {
+  space?: string;
+  k?: number;
+  top?: number;
+  per_session?: number;
+  per_cluster?: number;
+  session_id?: string | null;
+  city?: string | null;
+};
+
+export type services__api__routers__tools_quality__TaskIn = {
+  project_id: string;
+  name: string;
+  frame_ids: string[];
+  jobs_of?: number;
 };
 
 export type services__api__routers__training__SweepIn = {
@@ -2534,12 +2740,12 @@ export type Operations = {
     response: unknown;
   };
   "POST /api/agent/objects/{object_id}/propagate": {
-    body: PropagateIn | null;
+    body: services__api__routers__agent__PropagateIn | null;
     path: { object_id: string };
     response: unknown;
   };
   "POST /api/agent/objects/{object_id}/propagate/plan": {
-    body: PropagateIn | null;
+    body: services__api__routers__agent__PropagateIn | null;
     path: { object_id: string };
     response: unknown;
   };
@@ -4094,7 +4300,7 @@ export type Operations = {
     response: unknown;
   };
   "POST /api/labelops/tasks": {
-    body: TaskIn;
+    body: services__api__routers__labelops__TaskIn;
     response: unknown;
   };
   "GET /api/labelops/tasks/{task_id}/agreement": {
@@ -4553,7 +4759,7 @@ export type Operations = {
     response: ClassCreatedOut;
   };
   "POST /api/ontology/classes/merge": {
-    body: MergeIn;
+    body: services__api__routers__meta__MergeIn;
     response: unknown;
   };
   "POST /api/ontology/classes/rename": {
@@ -4575,7 +4781,7 @@ export type Operations = {
     response: unknown;
   };
   "POST /api/oraclyx/disagreements/rank": {
-    body: RankIn;
+    body: services__api__routers__oraclyx__RankIn;
     response: unknown;
   };
   "GET /api/oraclyx/distillation": {
@@ -5234,6 +5440,120 @@ export type Operations = {
     body: EditIn;
     response: unknown;
   };
+  "GET /api/tools/driving/align/frames/{frame_id}/view": {
+    path: { frame_id: string };
+    query: { max_points?: number };
+    response: unknown;
+  };
+  "POST /api/tools/driving/align/refine": {
+    body: RefineIn;
+    response: unknown;
+  };
+  "POST /api/tools/driving/align/save": {
+    body: SaveIn;
+    response: unknown;
+  };
+  "POST /api/tools/driving/align/score": {
+    body: ExtrinsicIn;
+    response: unknown;
+  };
+  "GET /api/tools/driving/align/sessions": {
+    response: unknown;
+  };
+  "DELETE /api/tools/driving/align/sessions/{session_id}/cameras/{cam_id}/manual": {
+    path: { session_id: string; cam_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/driving/align/sessions/{session_id}/frames": {
+    path: { session_id: string };
+    query: { cam_id?: string | null };
+    response: unknown;
+  };
+  "GET /api/tools/driving/align/sessions/{session_id}/history": {
+    path: { session_id: string };
+    query: { cam_id?: string | null };
+    response: unknown;
+  };
+  "POST /api/tools/driving/align/solve-pairs": {
+    body: PairsIn;
+    response: unknown;
+  };
+  "GET /api/tools/driving/frames/{frame_id}/bev-lanes": {
+    path: { frame_id: string };
+    response: unknown;
+  };
+  "PUT /api/tools/driving/frames/{frame_id}/bev-lanes": {
+    body: BevLaneIn;
+    path: { frame_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/driving/frames/{frame_id}/lanes/propagate-pose": {
+    body: services__api__routers__tools_driving__PropagateIn;
+    path: { frame_id: string };
+    response: unknown;
+  };
+  "DELETE /api/tools/driving/lane-relations/{relation_id}": {
+    path: { relation_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/driving/lanes/export": {
+    body: services__api__routers__tools_driving__ExportIn;
+    response: unknown;
+  };
+  "POST /api/tools/driving/lanes/{lane_id}/relations": {
+    body: RelationIn;
+    path: { lane_id: string };
+    response: unknown;
+  };
+  "DELETE /api/tools/driving/paths/intents/{event_id}": {
+    path: { event_id: string };
+    response: unknown;
+  };
+  "DELETE /api/tools/driving/paths/labels/{path_id}": {
+    path: { path_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/driving/paths/sessions": {
+    query: { limit?: number };
+    response: unknown;
+  };
+  "GET /api/tools/driving/paths/sessions/{session_id}": {
+    path: { session_id: string };
+    response: unknown;
+  };
+  "PUT /api/tools/driving/paths/sessions/{session_id}/ego": {
+    body: EgoIn;
+    path: { session_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/driving/paths/sessions/{session_id}/ego/smooth": {
+    body: SmoothIn;
+    path: { session_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/driving/paths/sessions/{session_id}/scenario": {
+    path: { session_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/driving/paths/tracks/{track_id}/forecast": {
+    path: { track_id: string };
+    query: { anchor_frame_id?: string | null; horizon_s?: number; dt_s?: number };
+    response: unknown;
+  };
+  "PUT /api/tools/driving/paths/tracks/{track_id}/future": {
+    body: FutureIn;
+    path: { track_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/driving/paths/tracks/{track_id}/intents": {
+    path: { track_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/driving/paths/tracks/{track_id}/intents": {
+    body: IntentIn;
+    path: { track_id: string };
+    response: unknown;
+  };
   "GET /api/tools/jobs": {
     query: { kind?: string | null; session_id?: string | null; limit?: number };
     response: ToolJobOut[];
@@ -5245,6 +5565,66 @@ export type Operations = {
   "POST /api/tools/jobs/{job_id}/cancel": {
     path: { job_id: string };
     response: ToolJobOut;
+  };
+  "POST /api/tools/quality/consensus/groups/{replica_group}/preview": {
+    body: MergeParams;
+    path: { replica_group: string };
+    response: unknown;
+  };
+  "POST /api/tools/quality/consensus/merge": {
+    body: services__api__routers__tools_quality__MergeIn;
+    response: unknown;
+  };
+  "GET /api/tools/quality/consensus/tasks": {
+    query: { limit?: number };
+    response: unknown;
+  };
+  "GET /api/tools/quality/consensus/tasks/{task_id}": {
+    path: { task_id: string };
+    query: { iou_thresh?: number; quorum?: number; include_model?: boolean; require_human?: boolean };
+    response: unknown;
+  };
+  "GET /api/tools/quality/consensus/tasks/{task_id}/disagreements": {
+    path: { task_id: string };
+    query: { status?: string; limit?: number };
+    response: unknown;
+  };
+  "GET /api/tools/quality/errors/{candidate_id}/why": {
+    path: { candidate_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/quality/frames/{frame_id}/why": {
+    path: { frame_id: string };
+    query: { status?: string };
+    response: unknown;
+  };
+  "GET /api/tools/quality/rare-scenes/latest": {
+    query: { space?: string | null };
+    response: unknown;
+  };
+  "POST /api/tools/quality/rare-scenes/rank": {
+    body: services__api__routers__tools_quality__RankIn;
+    response: unknown;
+  };
+  "POST /api/tools/quality/rare-scenes/search": {
+    body: SearchIn;
+    response: unknown;
+  };
+  "POST /api/tools/quality/rare-scenes/task": {
+    body: services__api__routers__tools_quality__TaskIn;
+    response: unknown;
+  };
+  "POST /api/tools/quality/vlm/check": {
+    body: CheckIn;
+    response: unknown;
+  };
+  "POST /api/tools/quality/vlm/check-batch": {
+    body: CheckBatchIn;
+    response: unknown;
+  };
+  "GET /api/tools/quality/vlm/checks": {
+    query: { ids: string };
+    response: unknown;
   };
   "POST /api/tools/scene3d/clouds/{cloud_id}/assist/ai": {
     path: { cloud_id: string };
@@ -5345,6 +5725,125 @@ export type Operations = {
   "POST /api/tools/scene3d/tracks3d/{track_3d_id}/review": {
     body: TrackReviewIn;
     path: { track_3d_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/sensors/events/import": {
+    body: EventsImportIn;
+    response: unknown;
+  };
+  "POST /api/tools/sensors/events/streams/{stream_id}/accumulate": {
+    body: AccumulateIn;
+    path: { stream_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/sensors/events/streams/{stream_id}/frames": {
+    path: { stream_id: string };
+    query: { limit?: number };
+    response: unknown;
+  };
+  "GET /api/tools/sensors/events/streams/{stream_id}/preview.jpg": {
+    path: { stream_id: string };
+    query: { t_ns?: number | null; mode?: "count" | "time_surface"; window_ms?: number; tau_ms?: number };
+    response: unknown;
+  };
+  "GET /api/tools/sensors/overview": {
+    response: unknown;
+  };
+  "GET /api/tools/sensors/radar/frames/{frame_id}/overlay": {
+    path: { frame_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/sensors/radar/import": {
+    body: RadarImportIn;
+    response: unknown;
+  };
+  "GET /api/tools/sensors/radar/sessions/{session_id}/bev": {
+    path: { session_id: string };
+    query: { ts_ns: number };
+    response: unknown;
+  };
+  "POST /api/tools/sensors/radar/sessions/{session_id}/fuse": {
+    body: FuseIn;
+    path: { session_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/sensors/radar/sessions/{session_id}/fusion": {
+    path: { session_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/sensors/radar/sessions/{session_id}/sweeps": {
+    path: { session_id: string };
+    query: { limit?: number };
+    response: unknown;
+  };
+  "POST /api/tools/sensors/reconstruct": {
+    body: ReconstructIn;
+    response: unknown;
+  };
+  "GET /api/tools/sensors/reconstruct/sessions": {
+    response: unknown;
+  };
+  "GET /api/tools/sensors/reconstructions": {
+    query: { session_id?: string | null; limit?: number };
+    response: unknown;
+  };
+  "GET /api/tools/sensors/reconstructions/{recon_id}": {
+    path: { recon_id: string };
+    response: unknown;
+  };
+  "DELETE /api/tools/sensors/reconstructions/{recon_id}": {
+    path: { recon_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/sensors/reconstructions/{recon_id}/place": {
+    body: PlaceIn;
+    path: { recon_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/sensors/reconstructions/{recon_id}/placed": {
+    path: { recon_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/sensors/reconstructions/{recon_id}/preview.bin": {
+    path: { recon_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/sensors/reconstructions/{recon_id}/splats.ply": {
+    path: { recon_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/sensors/reconstructions/{recon_id}/views/{index}.jpg": {
+    path: { recon_id: string; index: number };
+    response: unknown;
+  };
+  "POST /api/tools/sensors/variants": {
+    body: VariantsIn;
+    response: unknown;
+  };
+  "POST /api/tools/sensors/variants/check": {
+    body: EligibilityIn;
+    response: unknown;
+  };
+  "GET /api/tools/sensors/variants/hard-frames": {
+    query: { source?: "errors" | "corrected" | "session"; session_id?: string | null; limit?: number; include_review?: boolean };
+    response: unknown;
+  };
+  "GET /api/tools/sensors/variants/perturbations": {
+    response: unknown;
+  };
+  "GET /api/tools/sensors/variants/preview.jpg": {
+    query: { frame_id: string; perturbation: string; strength?: number | null; seed?: number; max_width?: number };
+    response: unknown;
+  };
+  "GET /api/tools/sensors/variants/runs": {
+    query: { limit?: number };
+    response: unknown;
+  };
+  "POST /api/tools/sensors/variants/runs/{job_id}/revert": {
+    path: { job_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/sensors/variants/summary": {
     response: unknown;
   };
   "POST /api/tools/video/describe/session": {
@@ -5726,4 +6225,4 @@ export type Body<K extends keyof Operations> = Operations[K] extends { body: inf
 /** What this operation returns (`unknown` until the server declares it). */
 export type Result<K extends keyof Operations> = Operations[K]["response"];
 
-export const API_SCHEMA_STATS = { operations: 831, typedResponses: 93, schemas: 309 } as const;
+export const API_SCHEMA_STATS = { operations: 900, typedResponses: 93, schemas: 336 } as const;

@@ -39,11 +39,33 @@ def _lane_boundaries(fused: list[dict]) -> list[dict]:
             continue
         out.append({"id": f.get("element_id") or f["wkt"][:24], "points": coords,
                     "lane_type": (f.get("attrs") or {}).get("lane_type"),
-                    "confidence": float(f.get("confidence") or 0.0)})
+                    "confidence": float(f.get("confidence") or 0.0),
+                    # Pairing is confined to boundaries observed together when the element says where it was
+                    # observed (the lane editor's per-frame export); fused map elements carry no group.
+                    "group": (f.get("attrs") or {}).get("group")})
     return out
 
 
-def to_lanelet2_osm(fused: list[dict]) -> str:
+def _topology(fused: list[dict], hints: dict | None) -> dict:
+    """Lanelets from the lane elements, honouring a person's pairings and successors when given."""
+    from services.hdmap.topology import build_lanelets
+
+    hints = hints or {}
+    return build_lanelets(_lane_boundaries(fused), forced_pairs=hints.get("pairs") or None,
+                          forced_successors=hints.get("successors") or None)
+
+
+def _stop_lines(fused: list[dict]) -> dict[str, list[tuple[float, float]]]:
+    out = {}
+    for f in fused:
+        if f.get("kind") == "stop_line":
+            shape, coords = parse_wkt(f["wkt"])
+            if shape == "line" and len(coords) >= 2:
+                out[str(f.get("element_id"))] = coords
+    return out
+
+
+def to_lanelet2_osm(fused: list[dict], hints: dict | None = None) -> str:
     """Lanelet2 OSM-XML: boundary ways, lanelet relations over them, and signs as tagged nodes.
 
     The relations are the point. Lanelet2 derives routing from lanelets that share boundary ways, so
@@ -51,7 +73,6 @@ def to_lanelet2_osm(fused: list[dict]) -> str:
     chaining computed in `topology` is written as an explicit tag as well for readers that want it
     without recomputing.
     """
-    from services.hdmap.topology import build_lanelets
 
     lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<osm version="0.6" generator="labeloxav">']
     nid = [-1]
@@ -79,10 +100,37 @@ def to_lanelet2_osm(fused: list[dict]) -> str:
         lines.append("  </way>")
         return wid[0]
 
-    topo = build_lanelets(_lane_boundaries(fused))
+    topo = _topology(fused, hints)
     # One way per distinct boundary polyline, shared by every lanelet that uses it, so a boundary between
     # two lanes is one way referenced twice rather than two coincident ways.
     ways: dict[tuple, int] = {}
+
+    # Stop lines and signals a person linked to lanes in the editor (lane_relation controlled_by / stops_at),
+    # as Lanelet2 traffic-light regulatory elements: the light as a short way, the stop line as ref_line.
+    stop_ways = {sid: way(coords, {"type": "stop_line"}) for sid, coords in _stop_lines(fused).items()}
+    reg_for_lane: dict[str, list[int]] = {}
+    for reg in (hints or {}).get("regulatory") or []:
+        members = []
+        if reg.get("signal"):
+            lo, la = reg["signal"]
+            light = way([(lo - 2e-6, la), (lo + 2e-6, la)],
+                        {"type": "traffic_light", "subtype": "red_yellow_green",
+                         "position": reg.get("position", "measured")})
+            members.append(f'    <member type="way" ref="{light}" role="refers"/>')
+        if reg.get("stop_line_id") and str(reg["stop_line_id"]) in stop_ways:
+            members.append(f'    <member type="way" ref="{stop_ways[str(reg["stop_line_id"])]}" role="ref_line"/>')
+        if not members:
+            continue
+        rid[0] -= 1
+        lines.append(f'  <relation id="{rid[0]}" visible="true">')
+        lines.extend(members)
+        lines.append('    <tag k="type" v="regulatory_element"/>')
+        lines.append(f'    <tag k="subtype" v="{"traffic_light" if reg.get("signal") else "stop_line"}"/>')
+        if reg.get("id"):
+            lines.append(f'    <tag k="source_id" v="{escape(str(reg["id"]))}"/>')
+        lines.append("  </relation>")
+        for lid in reg.get("lane_ids") or []:
+            reg_for_lane.setdefault(str(lid), []).append(rid[0])
 
     def boundary_way(coords: tuple, subtype: str) -> int:
         key = tuple(round(c, 9) for pt in coords for c in pt)
@@ -105,6 +153,8 @@ def to_lanelet2_osm(fused: list[dict]) -> str:
         lines.append('    <tag k="one_way" v="yes"/>')
         lines.append(f'    <tag k="width" v="{ll.width_m:.2f}"/>')
         lines.append(f'    <tag k="confidence" v="{ll.confidence:.2f}"/>')
+        regs = sorted({r for e in ll.source_elements for r in reg_for_lane.get(str(e), [])})
+        lines.extend(f'    <member type="relation" ref="{r}" role="regulatory_element"/>' for r in regs)
         lines.append("  </relation>")
 
     for a, b in topo["successors"]:
@@ -138,7 +188,7 @@ def to_lanelet2_osm(fused: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def to_opendrive(fused: list[dict], center: tuple[float, float]) -> str:
+def to_opendrive(fused: list[dict], center: tuple[float, float], hints: dict | None = None) -> str:
     """OpenDRIVE: one road per lanelet, with a driving lane and links to the road ahead.
 
     Previously every road carried `<center><lane id="0" type="none"/></center>` and nothing else, so the
@@ -149,7 +199,6 @@ def to_opendrive(fused: list[dict], center: tuple[float, float]) -> str:
     Geometry stays piecewise `<line/>`. Fitting arcs or spirals to a traced boundary would be a second,
     lossy model of geometry already measured per point, and OpenDRIVE consumers accept polylines.
     """
-    from services.hdmap.topology import build_lanelets
 
     clat, clon = center
     mlon = 111320.0 * math.cos(math.radians(clat))
@@ -162,7 +211,8 @@ def to_opendrive(fused: list[dict], center: tuple[float, float]) -> str:
            f'    <geoReference><![CDATA[+proj=tmerc +lat_0={clat:.6f} +lon_0={clon:.6f} +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m]]></geoReference>',
            "  </header>"]
 
-    topo = build_lanelets(_lane_boundaries(fused))
+    topo = _topology(fused, hints)
+    regs = (hints or {}).get("regulatory") or []
     # Road ids are one-based and follow lanelet order, so the successor pairs index straight onto them.
     succ: dict[int, int] = {}
     pred: dict[int, int] = {}
@@ -208,6 +258,23 @@ def to_opendrive(fused: list[dict], center: tuple[float, float]) -> str:
         out.append("        </lane></right>")
         out.append("      </laneSection>")
         out.append("    </lanes>")
+        mine = [r for r in regs if set(map(str, r.get("lane_ids") or [])) & set(ll.source_elements)]
+        if mine:
+            # Signals sit at the end of the road they govern (s = length): the lane was drawn up to the stop
+            # line, which is where a signal applies. 1000001 is OpenDRIVE's generic traffic light, 294 the stop
+            # line (StVO numbering, the de-facto catalogue).
+            out.append("    <signals>")
+            for k, r in enumerate(mine):
+                sid = f"{idx}{k:02d}"
+                if r.get("signal"):
+                    out.append(f'      <signal s="{length:.3f}" t="0.0" id="{sid}1" name="traffic_light" '
+                               'dynamic="yes" orientation="+" zOffset="2.5" country="OpenDRIVE" type="1000001" '
+                               'subtype="-1" value="-1" height="1.0" width="0.4"/>')
+                if r.get("stop_line_id"):
+                    out.append(f'      <signal s="{length:.3f}" t="0.0" id="{sid}2" name="stop_line" '
+                               'dynamic="no" orientation="+" zOffset="0.0" country="DE" type="294" '
+                               'subtype="-1" value="-1"/>')
+            out.append("    </signals>")
         out.append("  </road>")
 
     # An unpaired boundary has no width and therefore no lane, but it is measured geometry and is kept as

@@ -30,7 +30,7 @@ log = get_logger("intelligence.intent")
 # Closed, governed vocabularies (stamped with the ontology version on write). Underscored canonical values.
 VRU_INTENTS = ["crossing", "waiting", "running", "jaywalking", "looking_at_vehicle", "hesitating", "entering_lane"]
 VEHICLE_INTENTS = ["changing_lane", "u_turn", "parking", "overtaking", "merging", "cut_in", "hard_brake",
-                   "yielding", "wrong_side"]
+                   "yielding", "wrong_side", "turning_left", "turning_right", "stopping"]
 # The subset each assist path can propose; everything else stays unknown until a human sets it.
 _TRAJECTORY_VRU = {"crossing", "waiting", "running", "entering_lane"}
 _TRAJECTORY_VEHICLE = {"cut_in", "hard_brake", "u_turn", "overtaking", "wrong_side", "parking"}

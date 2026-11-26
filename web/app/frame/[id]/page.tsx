@@ -59,6 +59,7 @@ import CuboidPanel from "@/components/editor/panels/CuboidPanel";
 import LanePanel from "@/components/editor/panels/LanePanel";
 import ReviewPanel from "@/components/editor/panels/ReviewPanel";
 import CursorReadout from "@/components/editor/CursorReadout";
+import ErrorOverlay from "@/components/editor/ErrorOverlay";
 import { camLabel } from "@/lib/editor/camLabel";
 import { IS_DEMO_BUILD } from "@/lib/demoFlag";
 import { setCursor as publishCursor } from "@/lib/editor/cursorStore";
@@ -1795,6 +1796,9 @@ export default function FrameEditor() {
     // A crash in the renderer shows a panel with a retry here, instead of unmounting the page that is
     // holding the unsaved work. The reducer is above this boundary, so a retry remounts over the same state.
     <CanvasErrorBoundary>
+      {/* Likely errors, explained on the image (services/errordetect/explain.py): pointer-transparent except
+          its own tags and card, so drawing underneath works as before. */}
+      <div className="relative w-full h-full">
       <EditorCanvas
         imageUrl={meta.image_url} imgW={meta.width} imgH={meta.height}
         objects={st.objects} selectedId={st.selectedId} tool={effectiveTool(st.tool, readOnly)}
@@ -1834,6 +1838,9 @@ export default function FrameEditor() {
         onTrackPoint={vt.onTrackPoint}
         proposals={vt.canvasProposals}
       />
+      <ErrorOverlay frameId={id} viewport={st.viewport} selectedObjectId={st.selectedId}
+        onSelectObject={onCanvasSelect} visible={mode !== "lidar3d" && mode !== "events"} />
+      </div>
     </CanvasErrorBoundary>
   );
 

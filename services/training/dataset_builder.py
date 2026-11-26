@@ -22,7 +22,7 @@ import yaml
 
 from core.config import get_settings
 from core.logging import get_logger
-from core.origin import REAL, SYNTHETIC, SYNTHETIC_STATE
+from core.origin import PERTURBED, REAL, SYNTHETIC, SYNTHETIC_STATE
 from core.storage import get_object_store
 from db.session import get_sessionmaker
 from services.autolabel.ontology import get_ontology
@@ -109,7 +109,9 @@ async def _select(spec: BuildSpec):
         )
         states = list(spec.states)
         if spec.include_synthetic:
-            stmt = stmt.where(Frame.origin.in_((REAL, SYNTHETIC)))
+            # Opted in: copy-paste composites and photometric variants (rain, night...), whose copied labels
+            # are exact. _partition keeps every non-real frame out of validation.
+            stmt = stmt.where(Frame.origin.in_((REAL, SYNTHETIC, PERTURBED)))
             if states:
                 states.append(SYNTHETIC_STATE)
         else:

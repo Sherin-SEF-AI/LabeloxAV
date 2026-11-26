@@ -173,6 +173,7 @@ def _centreline(left: list[tuple[float, float]], right: list[tuple[float, float]
 
 
 def build_lanelets(boundaries: list[dict], *, min_w: float = MIN_LANE_W_M, max_w: float = MAX_LANE_W_M,
+                   forced_pairs: list[tuple] | None = None, forced_successors: list[tuple] | None = None,
                    ) -> dict:
     """Pair boundaries into lanelets, then chain the lanelets that follow one another.
 
@@ -196,7 +197,17 @@ def build_lanelets(boundaries: list[dict], *, min_w: float = MIN_LANE_W_M, max_w
     Pairing is nearest-valid rather than globally optimal. A global assignment would be the better answer
     on a wide multi-lane road, and is the upgrade seam here, but it needs more boundaries than a single
     drive of a two-lane street produces and would be untestable on this corpus today.
+
+    `forced_pairs` and `forced_successors` are what a person said in the lane editor, as (left_id, right_id)
+    and (from_id, to_id) over boundary ids. A forced pair becomes a lanelet without the width and heading
+    tests (the person looked at the road; the tests exist because a heuristic did not), with the right
+    boundary turned to run the same way as the left. Boundaries in a forced pair are not offered to the
+    heuristic. A forced successor between boundaries makes the lanelets they bound follow one another,
+    added to whatever the end-to-start chaining finds.
     """
+    if forced_pairs:
+        return _build_with_hints(boundaries, min_w=min_w, max_w=max_w, forced_pairs=forced_pairs,
+                                 forced_successors=forced_successors or [])
     lines = [list(b["points"]) for b in boundaries if len(b.get("points") or ()) >= 2]
     keep = [b for b in boundaries if len(b.get("points") or ()) >= 2]
     dropped = [{"id": b.get("id"), "reason": "fewer than two points"}
@@ -277,7 +288,56 @@ def build_lanelets(boundaries: list[dict], *, min_w: float = MIN_LANE_W_M, max_w
     unpaired = dropped + [{"id": keep[i].get("id"),
                            "reason": reasons.get(i, "paired boundary was claimed by another lane")}
                           for i in range(len(keep)) if i not in used]
-    return {"lanelets": lanelets, "successors": chain(lanelets), "unpaired": unpaired, "origin": origin}
+    succ = chain(lanelets)
+    if forced_successors:
+        succ = sorted(set(succ) | set(_hinted_successors(lanelets, forced_successors)))
+    return {"lanelets": lanelets, "successors": succ, "unpaired": unpaired, "origin": origin}
+
+
+def _hinted_successors(lanelets: list[Lanelet], forced_successors: list[tuple]) -> list[tuple[int, int]]:
+    """Lanelet successor pairs implied by boundary successors: a lanelet follows another when either of its
+    boundaries continues one of the other's."""
+    follows = {(str(a), str(b)) for a, b in forced_successors}
+    out = []
+    for i, a in enumerate(lanelets):
+        for j, b in enumerate(lanelets):
+            if i != j and any((x, y) in follows for x in a.source_elements for y in b.source_elements):
+                out.append((i, j))
+    return out
+
+
+def _build_with_hints(boundaries: list[dict], *, min_w: float, max_w: float, forced_pairs: list[tuple],
+                      forced_successors: list[tuple]) -> dict:
+    by_id = {str(b.get("id")): b for b in boundaries if len(b.get("points") or ()) >= 2}
+    used: set[str] = set()
+    lanelets: list[Lanelet] = []
+    unpaired: list[dict] = []
+    allpts = [list(b["points"]) for b in by_id.values()]
+    origin = _origin(allpts)
+    for left_id, right_id in forced_pairs:
+        lb, rb = by_id.get(str(left_id)), by_id.get(str(right_id))
+        if lb is None or rb is None:
+            unpaired.append({"id": str(left_id if lb is None else right_id),
+                             "reason": "a boundary named in a person's pairing has fewer than two points"})
+            continue
+        ll, rl = to_local(list(lb["points"]), origin), to_local(list(rb["points"]), origin)
+        if _angle_diff(heading(ll), heading(rl)) > math.pi / 2:
+            rl = rl[::-1]
+        off, _agree = signed_offset(ll, rl)
+        lanelets.append(Lanelet(
+            left=tuple(to_world(resample(ll, 24), origin)), right=tuple(to_world(resample(rl, 24), origin)),
+            centre=tuple(to_world(_centreline(ll, rl), origin)), width_m=round(abs(off), 3),
+            left_type=str(lb.get("lane_type") or "unknown"), right_type=str(rb.get("lane_type") or "unknown"),
+            confidence=round(min(float(lb.get("confidence") or 0.0), float(rb.get("confidence") or 0.0)), 4),
+            source_elements=(str(left_id), str(right_id))))
+        used.update((str(left_id), str(right_id)))
+    rest = [b for k, b in by_id.items() if k not in used]
+    auto = build_lanelets(rest, min_w=min_w, max_w=max_w) if len(rest) >= 2 else {
+        "lanelets": [], "unpaired": [{"id": b.get("id"), "reason": "no other boundary to pair with"} for b in rest]}
+    lanelets += auto["lanelets"]
+    unpaired += auto["unpaired"]
+    succ = sorted(set(chain(lanelets)) | set(_hinted_successors(lanelets, forced_successors)))
+    return {"lanelets": lanelets, "successors": succ, "unpaired": unpaired, "origin": origin}
 
 
 def chain(lanelets: list[Lanelet], tol_m: float = SUCCESSOR_TOL_M) -> list[tuple[int, int]]:

@@ -89,7 +89,7 @@ class BevView:
 def view_for(cal, *, near_m: float = DEFAULT_NEAR_M, half_width_m: float = DEFAULT_HALF_WIDTH_M,
              px_per_m: float = DEFAULT_PX_PER_M, far_m: float | None = None) -> BevView:
     """The patch of road worth showing for one camera, bounded by what its lift can support."""
-    height_m = abs(float(cal.xyz_m[2])) or 1.5
+    height_m = cal.camera_height_m() if hasattr(cal, "camera_height_m") else (abs(float(cal.xyz_m[2])) or 1.5)
     limit = ipm_range_m(float(cal.fy), height_m)
     far = far_m if far_m is not None else limit
     far = max(MIN_FAR_M, min(MAX_FAR_M, far, limit))

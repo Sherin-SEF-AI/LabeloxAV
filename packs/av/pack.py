@@ -286,6 +286,14 @@ def _track_events() -> TrackEventSpec:
                        "wrong_side when it stays there.", V),
         TrackEventType("weaving", "Repeated lateral movement across lane lines without settling, over at "
                        "least three crossings.", V),
+        # Path-and-intent labelling (/trajectories) needs the plain manoeuvres too, not only the hazards.
+        TrackEventType("turning_left", "Starts when the vehicle begins to turn left at a junction or into a "
+                       "side road; ends when it is heading along the new road.", V),
+        TrackEventType("turning_right", "Starts when the vehicle begins to turn right at a junction or into a "
+                       "side road; ends when it is heading along the new road.", V),
+        TrackEventType("stopping", "Starts when the vehicle begins to slow to a stop that is not a hard brake; "
+                       "ends when it is stationary. Use stopping_in_live_lane when it then stays in a running "
+                       "lane.", V),
     ))
 
 

@@ -56,7 +56,8 @@ async def upsert_calibration(session_id, cam_id: str, fields: dict, source: str,
     quality = quality if quality is not None else SOURCE_QUALITY.get(source, 0.3)
     async with get_sessionmaker()() as db:
         row = (await db.execute(select(CameraCalibration).where(
-            CameraCalibration.session_id == session_id, CameraCalibration.cam_id == cam_id))).scalar_one_or_none()
+            CameraCalibration.session_id == session_id, CameraCalibration.cam_id == cam_id,
+            CameraCalibration.source != "manual"))).scalar_one_or_none()
         if row is not None and _RANK.get(row.source, 0) > rank:
             return {"stored": False, "reason": "existing higher-trust source", "source": row.source}
         if row is None:

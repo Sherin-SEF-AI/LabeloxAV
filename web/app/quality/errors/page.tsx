@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import PageShell from "@/components/shell/PageShell";
 import DetectorBenchmark from "@/components/quality/DetectorBenchmark";
+import ErrorWhyPanel from "@/components/quality/ErrorWhyPanel";
 import { api, humanizeError } from "@/lib/api";
 import {
   cursorAfterRemoval, moveCursor, rangeBetween, targetIndices, toggle,
@@ -16,6 +17,8 @@ import { invalidate, useQuery } from "@/lib/useQuery";
 import { REVIEW_QUEUE_KEY } from "@/lib/queryKeys";
 import EmptyState from "@/components/ui/EmptyState";
 import { humanize, pct } from "@/lib/format";
+import { verdictTone } from "@/lib/tools/quality";
+import { getErrorWhy, getVlmChecks, type ErrorWhy, type VlmCheck } from "@/lib/tools/qualityApi";
 
 // Ruling on error candidates the way review rules on labels: many crops on screen, one keystroke each.
 //
@@ -132,6 +135,35 @@ function ErrorGrid() {
       }
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageKey]);
+
+  // Why the tile under the cursor was flagged (tool #12), fetched as the cursor settles so arrowing through
+  // the grid does not fire a request per keystroke.
+  const [why, setWhy] = useState<ErrorWhy | null>(null);
+  const [whyErr, setWhyErr] = useState<string | null>(null);
+  const cursorCid = page[cursor]?.candidate_id ?? null;
+  useEffect(() => {
+    setWhyErr(null);
+    if (!cursorCid) { setWhy(null); return; }
+    let stop = false;
+    const t = setTimeout(() => {
+      getErrorWhy(cursorCid)
+        .then((w) => { if (!stop) setWhy(w); })
+        .catch((e) => { if (!stop) { setWhy(null); setWhyErr(humanizeError(e)); } });
+    }, 180);
+    return () => { stop = true; clearTimeout(t); };
+  }, [cursorCid]);
+
+  // The vision model's stored verdicts for the page, one request, marked on the tiles (tool #13).
+  const [vlm, setVlm] = useState<Record<string, VlmCheck>>({});
+  useEffect(() => {
+    if (!page.length) { setVlm({}); return; }
+    let stop = false;
+    getVlmChecks(page.map((r) => r.object_id))
+      .then((r) => { if (!stop) setVlm(r.checks); })
+      .catch(() => { if (!stop) setVlm({}); });
+    return () => { stop = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageKey]);
 
@@ -312,6 +344,7 @@ function ErrorGrid() {
           </div>
         )}
 
+        <div className="flex flex-col xl:flex-row gap-3 items-start">
         {sheet && page.length > 0 && (
           <div className="panel p-2 overflow-x-auto w-fit max-w-full">
             <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${cols}, ${CELL}px)` }}>
@@ -358,12 +391,33 @@ function ErrorGrid() {
                       </span>
                     )}
                     {isSel && <span className="absolute top-1 right-1 rounded-full bg-warn text-bg text-[11px] font-semibold w-4 h-4 leading-4 text-center" aria-hidden>✓</span>}
+                    {vlm[row.object_id] && (
+                      <span className={`absolute top-1 left-1 rounded px-1 text-[11px] leading-4 bg-bg/85 ${
+                        { pass: "text-pass", warn: "text-warn", block: "text-block", muted: "text-ink-3", info: "text-info" }[verdictTone(vlm[row.object_id].verdict)]}`}
+                        title={`Vision model: ${vlm[row.object_id].reason}`}>
+                        VLM {vlm[row.object_id].verdict === "correct" ? "ok" : vlm[row.object_id].verdict === "incorrect" ? "no" : "?"}
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </div>
           </div>
         )}
+        {page.length > 0 && (
+          <aside className="panel w-full xl:w-[480px] xl:sticky xl:top-2 shrink-0" aria-label="Why this was flagged">
+            <div className="panel-head">
+              <h2 className="section-title">Why this was flagged</h2>
+              <span className="section-desc ml-2">the tile under the cursor</span>
+            </div>
+            <div className="p-3">
+              {whyErr && <div className="text-[12px] text-block" role="alert">{whyErr}</div>}
+              {(!why || why.candidate_id !== cursorCid) && !whyErr && <div className="text-[12px] text-ink-3" role="status">Loading the explanation...</div>}
+              {why && why.candidate_id === cursorCid && <ErrorWhyPanel why={why} />}
+            </div>
+          </aside>
+        )}
+        </div>
 
       </div>
     </PageShell>

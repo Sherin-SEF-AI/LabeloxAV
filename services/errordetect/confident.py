@@ -58,6 +58,10 @@ async def detect_confident_learning(db: AsyncSession, session_id: str | None = N
     from cleanlab.filter import find_label_issues
 
     issues = find_label_issues(labels=y, pred_probs=pred, return_indices_ranked_by="self_confidence")
+    # The embedding neighbourhood the classifier learned from, recorded per flagged object so the
+    # explanation (services/errordetect/explain.py) can show the crops behind the verdict instead of a
+    # probability. Only for the flagged rows: a few hundred dot products against the pool.
+    Xn = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-9)
     out = []
     for i in issues:
         given = int(y[i])
@@ -70,6 +74,15 @@ async def detect_confident_learning(db: AsyncSession, session_id: str | None = N
                     "proposed_label": {"class_id": prop_cid, "class_name": onto.by_id(prop_cid).name},
                     "detail": {"given_class": onto.by_id(classes[given]).name,
                                "given_prob": round(float(pred[i][given]), 4),
-                               "proposed_prob": round(float(pred[i][proposed]), 4)}})
+                               "proposed_prob": round(float(pred[i][proposed]), 4),
+                               "neighbours": _neighbours(Xn, i, oids, y, classes, onto)}})
     log.info("ed.confident", flagged=len(out), pool=len(oids))
     return out
+
+
+def _neighbours(Xn: np.ndarray, i: int, oids: list, y: np.ndarray, classes: list[int], onto, k: int = 6) -> list[dict]:
+    sims = Xn @ Xn[i]
+    sims[i] = -2.0
+    top = np.argsort(-sims)[:k]
+    return [{"object_id": str(oids[j]), "class_name": onto.by_id(classes[int(y[j])]).name,
+             "sim": round(float(sims[j]), 4)} for j in top]

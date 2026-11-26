@@ -23,7 +23,7 @@ from core.config import get_settings
 _R_OPT2EGO = np.array([[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]], dtype=np.float32)
 
 # how far to trust each calibration source, in [0, 1]; flows onto the cuboid as a quality signal
-SOURCE_QUALITY = {"measured": 1.0, "dataset": 0.9, "estimated": 0.6, "nominal": 0.3}
+SOURCE_QUALITY = {"measured": 1.0, "dataset": 0.9, "manual": 0.85, "estimated": 0.6, "nominal": 0.3}
 
 
 @dataclass
@@ -132,8 +132,11 @@ async def resolve_calibration(session_id, cam_id: str, img_w: int, img_h: int) -
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
     async with get_sessionmaker()() as db:
+        # A manual alignment (/calibration/align) sits beside the dataset or estimated row and wins over it; the
+        # row it corrects is never rewritten, so reverting the alignment restores the original.
         row = (await db.execute(select(CameraCalibration).where(
-            CameraCalibration.session_id == session_id, CameraCalibration.cam_id == cam_id))).scalar_one_or_none()
+            CameraCalibration.session_id == session_id, CameraCalibration.cam_id == cam_id)
+            .order_by((CameraCalibration.source == "manual").desc()).limit(1))).scalar_one_or_none()
         sensors = (await db.execute(select(DbSession.sensors).where(DbSession.session_id == session_id))).scalar()
     if row is None:
         return nominal_calibration(cam_id, img_w, img_h)
@@ -174,7 +177,7 @@ async def resolved_session_calibration(session_id) -> dict:
                      "fx": round(c.fx, 1), "fy": round(c.fy, 1), "cx": round(c.cx, 1), "cy": round(c.cy, 1),
                      "pitch_deg": round(c.rpy_deg[1], 2), "yaw_deg": round(c.rpy_deg[2], 2),
                      "height_m": round(c.camera_height_m(), 3)})
-    rank = {"nominal": 0, "estimated": 1, "dataset": 2, "measured": 3}
+    rank = {"nominal": 0, "estimated": 1, "manual": 2, "dataset": 3, "measured": 4}
     level = min((c["source"] for c in cams), key=lambda s: rank.get(s, 0)) if cams else "nominal"
     mean_q = round(sum(c["quality"] for c in cams) / len(cams), 3) if cams else SOURCE_QUALITY["nominal"]
     return {"session_id": str(session_id), "cameras": cams,

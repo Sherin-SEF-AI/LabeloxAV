@@ -8,7 +8,9 @@ The design is one sentence: score a run's frames, perturb the same frames, score
 labels, and report the drop per class with its interval.
 
 **The labels never move.** A rider behind an added occlusion is still a rider at the same box. That is what
-makes the comparison a comparison, and it is why perturbed frames are never given objects of their own.
+makes the comparison a comparison, and it is why the images this evaluator perturbs in memory are never given
+objects of their own. (Stored variants from /synthetic do carry copies of their source labels, in the quarantined
+`synthetic` state that gold, precision and settlement never read; tests/test_synthetic_variants.py holds that.)
 
 **A drop is reported with an interval or not at all.** A recall of 3 of 4 falling to 2 of 4 is not a 25%
 regression, it is four objects. `MIN_SUPPORT` is the floor below which a class is reported unmeasured with

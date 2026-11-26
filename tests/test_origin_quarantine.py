@@ -268,8 +268,11 @@ class TestMigrationDowngrade:
 
         async with get_sessionmaker()() as db:
             fx = await _seed(db)
-        env = {"LBX_POSTGRES__DB": "labeloxav_test"}
         import os
+
+        # The database this run is configured for (conftest defaults it to labeloxav_test), never a hardcoded
+        # one: a downgrade aimed at another database would rewrite somebody else's schema.
+        env = {"LBX_POSTGRES__DB": os.environ.get("LBX_POSTGRES__DB", "labeloxav_test")}
 
         full = {**os.environ, **env}
         down = subprocess.run([".venv/bin/alembic", "downgrade", "0107_settlement_sprt"], env=full,

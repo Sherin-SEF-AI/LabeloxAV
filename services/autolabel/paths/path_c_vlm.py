@@ -365,6 +365,159 @@ class VlmVerifier:
             provider=next((r.provider for r in winners if r.provider), ""),
         )
 
+    def check_label(self, image_bgr: np.ndarray, bbox: tuple, class_id: int, *,
+                    purpose: str = "vlm_label_check") -> LabelCheck:
+        """Ask whether this object's current label is right, with a one-sentence reason and an alternative.
+
+        A different question from `verify_object`, which asks "what is this?" and always names something.
+        Asked to confirm a specific claim the model can decline, and its reason is what lets a reviewer
+        overrule it in a glance. The alternatives are the label's plausible confusions
+        (`vlm_review._alternatives`: its L1 siblings, topped up across the ontology when there are few).
+
+        Every call goes through the client's `chat_json`, which posts through `services/llm/ledger.py`
+        under `purpose`, so the spend lands in the ledger by provider and model. A client that cannot carry
+        an arbitrary prompt falls back to a naming call and says so in the reason.
+        """
+        import time
+
+        from services.labelops.vlm_review import _alternatives, _chat_capable
+
+        given = self.onto.by_id(int(class_id)).name
+        alternatives = [a for a in _alternatives(self.onto, int(class_id)) if a != given]
+        crop = crop_object(image_bgr, tuple(float(v) for v in bbox[:4]), self.settings.models.vlm.crop_margin)
+        out = LabelCheck(given_class=given)
+        target = _chat_capable(self.client)
+        t0 = time.perf_counter()
+        if target is None:
+            res = self.client.verify(crop, [given, *alternatives], {})
+            out.latency_ms = int((time.perf_counter() - t0) * 1000)
+            out.provider = res.provider or "local"
+            if not res.class_name:
+                out.error = "no class returned"
+                return out
+            same = res.class_name == given
+            out.ok = True
+            out.verdict = "correct" if same else "incorrect"
+            out.alternative = None if same else res.class_name
+            out.reason = _one_sentence(res.caption) or "derived from a naming call, not a direct check"
+            return out
+
+        ok, buf = cv2.imencode(".jpg", crop)
+        if not ok:
+            out.error = "could not encode the crop"
+            return out
+        chat = target if hasattr(target, "chat_json") else target.client
+        local = isinstance(chat, OllamaVlmClient) or type(chat).__name__ == "LlamaServerVlmClient"
+        # `judge_tag` names a local model; a cloud client keeps its own.
+        model = (self.settings.models.vlm.judge_tag if local else None) or getattr(target, "model", None)
+        prompt = check_prompt(given, alternatives)
+        try:
+            try:
+                data = chat.chat_json(prompt, model=model, image_jpeg=buf.tobytes(), temperature=0.0,
+                                      schema=check_schema(alternatives), purpose=purpose)
+            except TypeError:
+                # The cloud clients take no schema; the prompt carries the contract there.
+                data = chat.chat_json(prompt, model=model, image_jpeg=buf.tobytes(), temperature=0.0,
+                                      purpose=purpose)
+        except Exception as exc:  # noqa: BLE001
+            out.latency_ms = int((time.perf_counter() - t0) * 1000)
+            out.error = f"{type(exc).__name__}: {str(exc)[:160]}"
+            log.warning("vlm.check_failed", error=out.error)
+            return out
+        out.latency_ms = int((time.perf_counter() - t0) * 1000)
+        out.provider = ("ollama" if isinstance(chat, OllamaVlmClient) else "llamacpp" if local
+                        else type(chat).__name__.replace("Client", "").lower())
+        out.model = str(model or "")
+        out.verdict, out.reason, out.alternative = parse_check_reply(data if isinstance(data, dict) else {},
+                                                                     given, alternatives)
+        out.ok = True
+        return out
+
+
+# ---- a label check with a reason (tool #13) -----------------------------------------------------------
+
+CHECK_VERDICTS = ("correct", "incorrect", "unsure")
+# Stored in the schema's enum where "no alternative" has to be a string: Ollama's grammar handles a string
+# enum reliably, a mixed string/null one less so.
+NO_ALTERNATIVE = "none"
+
+
+@dataclass
+class LabelCheck:
+    """A vision model's opinion on one existing label: is it right, why, and what else it might be.
+
+    `ok` is False when the model was never reached (an outage, an unreadable reply), which is distinct from
+    an `unsure` verdict: unsure means it looked and declined, and folding the two together lets a dead server
+    read as a finding about the labels (services/labelops/vlm_review.py records why that matters).
+    """
+    verdict: str = "unsure"
+    reason: str = ""
+    alternative: str | None = None
+    given_class: str = ""
+    provider: str = ""
+    model: str = ""
+    latency_ms: int = 0
+    ok: bool = False
+    error: str | None = None
+
+
+def check_prompt(given_class: str, alternatives: list[str]) -> str:
+    """Ask whether the label is right, for a one-sentence reason a reviewer can check against the crop."""
+    from services.domain import active_pack
+
+    preamble = active_pack().autolabel_profile.vlm_prompt_template
+    return (
+        f"{preamble}\n"
+        f"This crop is labelled: {given_class}.\n"
+        "Is that label correct for the main object in the crop?\n"
+        "verdict: 'correct', 'incorrect', or 'unsure' when the crop is too small, blurred, occluded or "
+        "ambiguous to judge (an honest unsure is better than a guess).\n"
+        "reason: ONE short sentence naming what you can see that decides it (shape, wheels, markings, "
+        "colour, context). No preamble.\n"
+        f"alternative_class: when the verdict is incorrect, the best class from {alternatives}; otherwise "
+        f"'{NO_ALTERNATIVE}'.\n"
+        'Respond with strict JSON only: {"verdict": ..., "reason": ..., "alternative_class": ...}'
+    )
+
+
+def check_schema(alternatives: list[str]) -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string", "enum": list(CHECK_VERDICTS)},
+            "reason": {"type": "string"},
+            "alternative_class": {"type": "string", "enum": [*alternatives, NO_ALTERNATIVE]},
+        },
+        "required": ["verdict", "reason", "alternative_class"],
+    }
+
+
+def _one_sentence(text: str, limit: int = 240) -> str:
+    t = " ".join(str(text or "").split())
+    for stop in (". ", "! ", "? "):
+        i = t.find(stop)
+        if 0 < i < limit:
+            t = t[: i + 1]
+            break
+    return t[:limit].strip()
+
+
+def parse_check_reply(data: dict, given_class: str, alternatives: list[str]) -> tuple[str, str, str | None]:
+    """(verdict, reason, alternative) from a raw reply, refusing anything outside the contract.
+
+    An unknown verdict becomes `unsure`. An alternative counts only beside `incorrect`, only from the offered
+    list, and never as the asked class itself: "incorrect, it is a car" about a car is no opinion at all, and
+    is recorded as unsure (the same rule `vlm_review.parse_judge_reply` applies).
+    """
+    verdict = str(data.get("verdict", "")).strip().lower()
+    if verdict not in CHECK_VERDICTS:
+        verdict = "unsure"
+    alt = str(data.get("alternative_class") or data.get("correct_class") or "").strip()
+    alternative = alt if (verdict == "incorrect" and alt in alternatives and alt != given_class) else None
+    if verdict == "incorrect" and alt == given_class:
+        verdict = "unsure"
+    return verdict, _one_sentence(data.get("reason", "")), alternative
+
 
 class LlamaServerVlmClient:
     """Path C served by llama.cpp's llama-server, over its OpenAI-compatible endpoint.

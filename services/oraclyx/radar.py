@@ -65,3 +65,55 @@ def fuse_track(track: list[dict], radar_by_frame: dict[int, list[dict]], ego_spe
         rec = fuse_radar_velocity(b["bbox"], cam_v, returns, ego_speed, tol_kmh)
         out.append({"frame": b["frame"], **rec})
     return out
+
+
+# --- 3D: Doppler onto a Track3D's velocity ------------------------------------------------------------------
+#
+# A radar measures one component of an object's velocity: the radial one, along the line of sight. A 3D track
+# knows the whole vector, but from differencing box centres a tenth of a second apart, which is noisy where the
+# radar is precise. Fusion keeps the track's tangential component and replaces its radial component with the
+# radar's, after the same consistency gate as above: a Doppler reading that disagrees with the track by more
+# than `tol_mps` is more likely a different object than a better measurement, and is rejected, not averaged.
+# All speeds here are over the ground (ego motion removed) in m/s, and vectors are in one frame (the scan's
+# ego frame), so the caller does the frame bookkeeping once.
+
+
+def fuse_radial(track_vel: list[float], los: list[float], radar_radial: float | None,
+                tol_mps: float = 3.0) -> dict:
+    """Replace the radial component of `track_vel` (2D or 3D) with a Doppler reading along `los`.
+
+    `los` is the line of sight from the radar to the object (any length). Returns the fused velocity, its
+    speed, and which source the radial component came from: "radar", "track_rejected_radar" (the reading
+    disagreed by more than `tol_mps`), or "track" (no reading)."""
+    v = [float(x) for x in track_vel]
+    u = [float(x) for x in los][: len(v)]
+    n = math.sqrt(sum(x * x for x in u)) or 1.0
+    u = [x / n for x in u]
+    track_radial = sum(a * b for a, b in zip(v, u, strict=True))
+    if radar_radial is None:
+        return {"velocity": v, "speed_mps": round(math.sqrt(sum(x * x for x in v)), 3), "source": "track",
+                "radial_track_mps": round(track_radial, 3), "residual_mps": None}
+    residual = abs(float(radar_radial) - track_radial)
+    if residual > tol_mps:
+        return {"velocity": v, "speed_mps": round(math.sqrt(sum(x * x for x in v)), 3),
+                "source": "track_rejected_radar", "radial_track_mps": round(track_radial, 3),
+                "radial_radar_mps": round(float(radar_radial), 3), "residual_mps": round(residual, 3)}
+    fused = [a + (float(radar_radial) - track_radial) * b for a, b in zip(v, u, strict=True)]
+    return {"velocity": [round(x, 4) for x in fused], "speed_mps": round(math.sqrt(sum(x * x for x in fused)), 3),
+            "source": "radar", "radial_track_mps": round(track_radial, 3),
+            "radial_radar_mps": round(float(radar_radial), 3), "residual_mps": round(residual, 3)}
+
+
+def fuse_track3d(points: list[dict], tol_mps: float = 3.0) -> dict:
+    """Doppler fusion along one 3D track. Each point is {ts_ns, velocity (track, over ground), los, radial
+    (radar, over ground) or None}. Returns per-point records and a summary saying how many points the radar
+    spoke for, how many it was overruled on, and the median fused speed."""
+    recs = []
+    for p in points:
+        r = fuse_radial(p["velocity"], p["los"], p.get("radial"), tol_mps)
+        recs.append({"ts_ns": int(p["ts_ns"]), **r, "n_returns": int(p.get("n_returns", 0))})
+    speeds = sorted(r["speed_mps"] for r in recs)
+    by = {s: sum(1 for r in recs if r["source"] == s) for s in ("radar", "track_rejected_radar", "track")}
+    return {"points": recs, "fused": by["radar"], "rejected": by["track_rejected_radar"], "no_radar": by["track"],
+            "median_speed_mps": speeds[len(speeds) // 2] if speeds else None,
+            "source": "radar" if by["radar"] else "track"}

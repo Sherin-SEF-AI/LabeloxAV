@@ -219,7 +219,8 @@ async def fix_calibration_rows(root: Path, apply: bool = True) -> list[dict]:
             calib = kitti_camera_calibration(date_dir)
             row = (await db.execute(select(CameraCalibration).where(
                 CameraCalibration.session_id == sess.session_id,
-                CameraCalibration.cam_id == CAM_ID))).scalar_one_or_none()
+                CameraCalibration.cam_id == CAM_ID,
+                CameraCalibration.source != "manual"))).scalar_one_or_none()
             want = {"fx": calib["fx"], "fy": calib["fy"], "cx": calib["cx"], "cy": calib["cy"],
                     "ref_width": calib["ref_width"], "rpy_deg": calib["rpy_deg"], "xyz_m": calib["xyz_m"]}
             sensors = dict(sess.sensors or {})

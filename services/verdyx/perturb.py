@@ -13,10 +13,17 @@ the darkness or the fact that dark frames in this corpus are also mostly highway
 cannot be compared to the previous run, so the finding would be unreproducible in exactly the situation
 where somebody wants to check it.
 
-**Perturbed frames are never given objects.** A perturbation moves pixels and does not move the truth: the
-rider behind the added occlusion is still a rider at the same box. Writing labels for a perturbed frame
-would create a second copy of every object with a different origin, and the whole measurement is that the
-labels stay fixed while the pixels change.
+**The truth does not move.** A perturbation moves pixels and not the scene: the rider behind the added
+occlusion is still a rider at the same box. The counterfactual evaluator therefore scores a perturbed image
+against the source frame's own labels, in memory, and writes nothing.
+
+**Stored variants carry copies, quarantined.** The synthetic-variants tool (services/synth/variants.py) does
+persist perturbed frames for training, as `Frame.origin = 'perturbed'`, with the source frame's labels copied
+in the synthetic state and source (core/origin.py). Only the `PHOTOMETRIC` perturbations are offered there:
+they change appearance and leave every pixel where it was, so a copied box, mask or polyline is exactly as
+right on the variant as on the source. Occlusion is not photometric (it hides what a label says is
+visible) and is never stored. Those copies are invisible to everything that measures a model, by the same
+rules as copy-paste composites, and reach a trainset only through `BuildSpec.include_synthetic`.
 """
 
 from __future__ import annotations
@@ -35,7 +42,13 @@ DEFAULT_STRENGTHS = {
     "rain": 0.5,
     "fog": 0.5,
     "motion_blur": 0.5,
+    "night": 0.6,
 }
+
+# The perturbations that change how a frame looks and never where anything is in it. A label copied from the
+# source frame is exactly right on these; it is not on `occlude` (hides what the label calls visible) or on
+# `remove_object` (takes away what the label calls present).
+PHOTOMETRIC = ("rain", "dusk", "night", "fog", "motion_blur")
 
 
 def _rng(seed: int) -> np.random.Generator:
@@ -82,6 +95,32 @@ def dusk(image: np.ndarray, gamma: float = 0.45) -> np.ndarray:
     import cv2
 
     return cv2.LUT(image, lut)
+
+
+def night(image: np.ndarray, strength: float = 0.6, *, seed: int = 7) -> np.ndarray:
+    """Night: far less light, a colder cast, sensor noise, and the bright things blooming.
+
+    Darker than `dusk` and different in kind, because a camera at night is not a camera at dusk with the
+    gamma turned further. Exposure falls (a power curve, so the shadows go first), colour drains as the
+    sensor runs out of signal, the white balance goes blue under street lighting, read noise that daylight
+    swamps becomes visible, and what is still bright (lamps, signs, reflections) blooms into its
+    surroundings. Every change is per pixel or a blur of brightness: nothing moves, so labels carry over.
+    """
+    import cv2
+
+    s = float(max(0.0, min(1.0, strength)))
+    img = image.astype(np.float32) / 255.0
+    bright = np.clip((img.max(axis=2) - 0.82) / 0.18, 0.0, 1.0)
+    out = img ** (1.0 + 2.4 * s)
+    lum = out.mean(axis=2, keepdims=True)
+    out = out * (1.0 - 0.55 * s) + lum * (0.55 * s)
+    out = out * np.array([0.82, 0.9, 1.12], dtype=np.float32) ** s
+    k = max(3, int(round(min(img.shape[:2]) * 0.03)) | 1)
+    glow = cv2.GaussianBlur(bright, (k, k), 0)[..., None] * np.array([1.0, 0.92, 0.75], dtype=np.float32)
+    out = out + glow * (0.55 * s)
+    noise = _rng(seed).normal(0.0, 0.025 * s, size=out.shape[:2]).astype(np.float32)[..., None]
+    out = out + noise
+    return (np.clip(out, 0.0, 1.0) * 255.0).astype(np.uint8)
 
 
 def motion_blur(image: np.ndarray, strength: float = 0.5, *, seed: int = 7) -> np.ndarray:
@@ -186,4 +225,6 @@ def apply(name: str, image: np.ndarray, *, strength: float | None = None, box: l
         return fog(image, strength=s, depth_m=depth_m)
     if name == "motion_blur":
         return motion_blur(image, strength=s, seed=seed)
+    if name == "night":
+        return night(image, strength=s, seed=seed)
     raise ValueError(f"unknown perturbation {name!r}; known: {sorted(DEFAULT_STRENGTHS)}")
