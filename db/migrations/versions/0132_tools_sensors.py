@@ -93,6 +93,10 @@ def upgrade() -> None:
     )
     op.create_index("ix_reconstruction_session", "reconstruction", ["session_id", "created_at"])
     op.create_index("ix_reconstruction_job", "reconstruction", ["job_id"])
+    # Every foreign key gets an index leading on it (tests/test_fk_indexes.py): deletes of the parent row
+    # otherwise scan this table.
+    op.create_index("ix_event_stream_created_by", "event_stream", ["created_by"])
+    op.create_index("ix_reconstruction_created_by", "reconstruction", ["created_by"])
 
 
 def downgrade() -> None:

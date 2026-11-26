@@ -106,3 +106,8 @@ class Reconstruction(Base):
         CheckConstraint("method in ('gsplat','pointmap')", name="ck_reconstruction_method"),
         CheckConstraint("status in ('pending','running','done','error','canceled')", name="ck_reconstruction_status"),
     )
+
+
+# Indexes on the foreign keys (migration 0132), declared here so the metadata matches the schema.
+Index("ix_event_stream_created_by", EventStream.created_by)
+Index("ix_reconstruction_created_by", Reconstruction.created_by)

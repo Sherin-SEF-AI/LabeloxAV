@@ -77,7 +77,7 @@ export default function ReconstructPage() {
     api.ontology().then((o) => {
       setClasses(o.classes);
       setClassId((cur) => cur ?? (o.classes.find((c) => c.name === "sedan") ?? o.classes[0])?.id ?? null);
-    }).catch(() => {});
+    }).catch((e) => setLoadErr(humanizeError(e)));
   }, []);
 
   const session: ReconSession | undefined = sess?.sessions.find((s) => s.session_id === sessionId);
@@ -113,7 +113,7 @@ export default function ReconstructPage() {
   useEffect(() => { void loadRec(rid); }, [rid, loadRec]);
 
   const { job } = useToolJob(jobId, { onDone: () => { void loadList(); if (rid) void loadRec(rid); } });
-  const { job: pjob } = useToolJob(placeJob, { onDone: () => { if (rid) reconPlaced(rid).then((p) => setPlaced(p.placed)).catch(() => {}); } });
+  const { job: pjob } = useToolJob(placeJob, { onDone: () => { if (rid) reconPlaced(rid).then((p) => setPlaced(p.placed)).catch((e) => setErr(humanizeError(e))); } });
 
   const start = async () => {
     if (!session || !cam) return;

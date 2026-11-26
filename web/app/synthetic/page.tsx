@@ -46,8 +46,8 @@ export default function SyntheticPage() {
   const [loading, setLoading] = useState(false);
 
   const loadRuns = useCallback(() => {
-    variantRuns().then((r) => setRuns(r.runs)).catch(() => {});
-    variantSummary().then(setSummary).catch(() => {});
+    variantRuns().then((r) => setRuns(r.runs)).catch((e) => setErr(humanizeError(e)));
+    variantSummary().then(setSummary).catch((e) => setErr(humanizeError(e)));
   }, []);
 
   useEffect(() => {
@@ -119,7 +119,8 @@ export default function SyntheticPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-6 gap-2 max-h-[560px] overflow-auto pr-1">
                 {frames.map((f) => (
                   <div key={f.frame_id} className={`rounded border overflow-hidden text-[11px] ${picked.has(f.frame_id) ? "border-accent" : "border-line"} ${f.eligible ? "" : "opacity-60"}`}>
-                    <button type="button" className="block w-full" onClick={() => setPreviewFrame(f.frame_id)} title="Preview the variants of this frame">
+                    <button type="button" className="block w-full" onClick={() => setPreviewFrame(f.frame_id)} title="Preview the variants of this frame"
+                      aria-label="Preview the variants of this frame">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={`/api/frames/${f.frame_id}/image`} alt="Source frame" loading="lazy" className="w-full aspect-video object-cover" />
                     </button>
@@ -216,7 +217,7 @@ function CopyPaste() {
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const names = useMemo(() => classes.split(",").map((s) => s.trim()).filter(Boolean), [classes]);
-  const load = useCallback(() => { synthRuns().then((r) => setRuns(r.runs)).catch(() => {}); }, []);
+  const load = useCallback(() => { synthRuns().then((r) => setRuns(r.runs)).catch((e) => setErr(humanizeError(e))); }, []);
   useEffect(() => { load(); }, [load]);
 
   return (

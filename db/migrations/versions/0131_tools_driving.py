@@ -121,6 +121,15 @@ def upgrade() -> None:
                     unique=True, postgresql_where=sa.text("source <> 'manual'"))
     op.create_index("ix_camera_calibration_session_cam_manual", "camera_calibration", ["session_id", "cam_id"],
                     unique=True, postgresql_where=sa.text("source = 'manual'"))
+    # Every foreign key gets an index leading on it (tests/test_fk_indexes.py): deletes of the parent row
+    # otherwise scan this table.
+    op.create_index("ix_calibration_alignment_calibration", "calibration_alignment", ["calibration_id"])
+    op.create_index("ix_calibration_alignment_created_by", "calibration_alignment", ["created_by"])
+    op.create_index("ix_lane_relation_created_by", "lane_relation", ["created_by"])
+    op.create_index("ix_lane_relation_target_element", "lane_relation", ["target_element_id"])
+    op.create_index("ix_lane_relation_target_object", "lane_relation", ["target_object_id"])
+    op.create_index("ix_path_label_anchor_frame", "path_label", ["anchor_frame_id"])
+    op.create_index("ix_path_label_created_by", "path_label", ["created_by"])
 
 
 def downgrade() -> None:

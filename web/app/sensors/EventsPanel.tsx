@@ -40,13 +40,13 @@ export default function EventsPanel({ streams, sessions, onChanged }: {
   useEffect(() => { if (!sel && streams.length) setSel(streams[0].stream_id); }, [streams, sel]);
   useEffect(() => {
     setFrames(null);
-    if (sel) eventsFrames(sel).then(setFrames).catch(() => {});
+    if (sel) eventsFrames(sel).then(setFrames).catch((e) => setErr(humanizeError(e)));
   }, [sel]);
 
   const { job } = useToolJob(jobId, {
     onDone: (j) => {
       onChanged();
-      if (sel) eventsFrames(sel).then(setFrames).catch(() => {});
+      if (sel) eventsFrames(sel).then(setFrames).catch((e) => setErr(humanizeError(e)));
       if (j.status === "error") setErr(j.error);
     },
   });

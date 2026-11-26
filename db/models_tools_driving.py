@@ -131,3 +131,13 @@ class CalibrationAlignment(Base):
         CheckConstraint("method in ('manual','auto','pairs')", name="ck_calibration_alignment_method"),
         Index("ix_calibration_alignment_session", "session_id", "cam_id"),
     )
+
+
+# Indexes on the foreign keys (migration 0131), declared here so the metadata matches the schema.
+Index("ix_calibration_alignment_calibration", CalibrationAlignment.calibration_id)
+Index("ix_calibration_alignment_created_by", CalibrationAlignment.created_by)
+Index("ix_lane_relation_created_by", LaneRelation.created_by)
+Index("ix_lane_relation_target_element", LaneRelation.target_element_id)
+Index("ix_lane_relation_target_object", LaneRelation.target_object_id)
+Index("ix_path_label_anchor_frame", PathLabel.anchor_frame_id)
+Index("ix_path_label_created_by", PathLabel.created_by)

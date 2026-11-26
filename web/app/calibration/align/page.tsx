@@ -92,7 +92,7 @@ export default function AlignPage() {
       setEdgeImg(em);
       setFields({ edge: em ? channel(em, view.width, view.height, false) : new Float32Array(view.width * view.height),
                   gray: channel(im, view.width, view.height, true) });
-    })().catch(() => {});
+    })().catch((e) => { if (live) setMsg(`Could not load this view: ${humanizeError(e)}`); });
     return () => { live = false; };
   }, [view]);
 

@@ -44,7 +44,7 @@ export default function SensorsPage() {
     load();
     api.sessionsPage({ limit: 200 }).then((p) => setAllSessions(p.sessions.map((s) => ({
       session_id: s.session_id, label: `${s.route ?? s.vehicle_id}${s.city ? ` / ${s.city}` : ""} / ${s.session_id.slice(0, 8)}`,
-    })))).catch(() => {});
+    })))).catch((e) => setLoadErr(humanizeError(e)));
   }, [load]);
 
   return (

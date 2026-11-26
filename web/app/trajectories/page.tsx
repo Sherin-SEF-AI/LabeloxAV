@@ -66,7 +66,8 @@ export default function TrajectoriesPage() {
     setFrameImg(null);
     if (!anchorFrame) return;
     let live = true;
-    api.frame(anchorFrame).then((m) => { if (live) setFrameImg(m.image_url); }).catch(() => {});
+    api.frame(anchorFrame).then((m) => { if (live) setFrameImg(m.image_url); })
+      .catch((e) => { if (live) setMsg(`Could not load the frame image: ${humanizeError(e)}`); });
     return () => { live = false; };
   }, [anchorFrame]);
 
