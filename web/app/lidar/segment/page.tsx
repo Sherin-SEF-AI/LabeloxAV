@@ -72,7 +72,7 @@ export default function PointLabelsPage() {
     api.ontology().then((o) => {
       setClasses(o.classes);
       setCls((c) => c ?? o.classes.find((x) => x.name === "road")?.id ?? o.classes[0]?.id ?? null);
-    }).catch(() => {});
+    }).catch((e) => setErr(`Could not load the class list: ${humanizeError(e)}`));
     ptv3Status().then(setPtv3).catch(() => setPtv3(null));
   }, []);
 
