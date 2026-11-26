@@ -3538,6 +3538,21 @@ class LabeloxClient:
         return self._call("GET", f"/api/system/resources",
                           params=None, json_body=None)
 
+    def get_tools_jobs(self, kind: Any | None = None, session_id: Any | None = None, limit: int | None = 20) -> Any:
+        """List Tool Jobs"""
+        return self._call("GET", f"/api/tools/jobs",
+                          params={"kind": kind, "session_id": session_id, "limit": limit}, json_body=None)
+
+    def get_tools_jobs_by_job_id(self, job_id: str) -> Any:
+        """Get Tool Job"""
+        return self._call("GET", f"/api/tools/jobs/{job_id}",
+                          params=None, json_body=None)
+
+    def post_tools_jobs_by_job_id_cancel(self, job_id: str) -> Any:
+        """Cancel Tool Job"""
+        return self._call("POST", f"/api/tools/jobs/{job_id}/cancel",
+                          params=None, json_body=None)
+
     def delete_track_events_by_event_id(self, event_id: str) -> Any:
         """Delete Event"""
         return self._call("DELETE", f"/api/track-events/{event_id}",
@@ -3961,4 +3976,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 775 routes generated from the server schema.
+# 778 routes generated from the server schema.

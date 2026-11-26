@@ -1866,6 +1866,24 @@ export type ThermalIn = {
   cold_fps: number;
 };
 
+export type ToolJobOut = {
+  job_id: string;
+  kind: string;
+  label: string;
+  status: string;
+  gpu: boolean;
+  session_id?: string | null;
+  params: Record<string, unknown>;
+  result?: Record<string, unknown> | null;
+  progress: number;
+  stage?: string | null;
+  error?: string | null;
+  created_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  quiet_hours?: boolean;
+};
+
 export type TrackAttrsIn = {
   attrs: Record<string, unknown>;
 };
@@ -5048,6 +5066,18 @@ export type Operations = {
   "GET /api/system/resources": {
     response: unknown;
   };
+  "GET /api/tools/jobs": {
+    query: { kind?: string | null; session_id?: string | null; limit?: number };
+    response: ToolJobOut[];
+  };
+  "GET /api/tools/jobs/{job_id}": {
+    path: { job_id: string };
+    response: ToolJobOut;
+  };
+  "POST /api/tools/jobs/{job_id}/cancel": {
+    path: { job_id: string };
+    response: ToolJobOut;
+  };
   "PATCH /api/track-events/{event_id}": {
     body: TrackEventPatch;
     path: { event_id: string };
@@ -5402,4 +5432,4 @@ export type Body<K extends keyof Operations> = Operations[K] extends { body: inf
 /** What this operation returns (`unknown` until the server declares it). */
 export type Result<K extends keyof Operations> = Operations[K]["response"];
 
-export const API_SCHEMA_STATS = { operations: 787, typedResponses: 90, schemas: 291 } as const;
+export const API_SCHEMA_STATS = { operations: 790, typedResponses: 93, schemas: 292 } as const;

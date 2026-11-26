@@ -68,5 +68,5 @@ async def test_every_job_kind_reports_a_number():
     async with get_sessionmaker()() as db:
         waiting = (await _job_snapshot(db))["waiting"]
 
-    assert set(waiting) == {"training", "import", "export", "autolabel"}
+    assert set(waiting) == {"training", "import", "export", "autolabel", "tool"}
     assert all(isinstance(v, int) for v in waiting.values())

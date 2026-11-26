@@ -3801,6 +3801,7 @@ class ToolJob(Base):
         Index("ix_tool_job_status", "status", "gpu", "created_at"),
         Index("ix_tool_job_kind", "kind", "created_at"),
         Index("ix_tool_job_session", "session_id"),
+        Index("ix_tool_job_created_by", "created_by"),
     )
 
 

@@ -44,9 +44,11 @@ def upgrade() -> None:
     op.create_index("ix_tool_job_status", "tool_job", ["status", "gpu", "created_at"])
     op.create_index("ix_tool_job_kind", "tool_job", ["kind", "created_at"])
     op.create_index("ix_tool_job_session", "tool_job", ["session_id"])
+    op.create_index("ix_tool_job_created_by", "tool_job", ["created_by"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_tool_job_created_by", table_name="tool_job")
     op.drop_index("ix_tool_job_session", table_name="tool_job")
     op.drop_index("ix_tool_job_kind", table_name="tool_job")
     op.drop_index("ix_tool_job_status", table_name="tool_job")
