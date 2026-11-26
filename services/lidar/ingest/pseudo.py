@@ -146,6 +146,37 @@ def lift_frame_group(images: dict[str, np.ndarray], ts_ns: int, calibration_vers
     return cloud
 
 
+def lift_with_calibration(images: dict[str, tuple[np.ndarray, object]], ts_ns: int, calibration_version: str,
+                          model_id: str | None = None, stride: int = 4, max_points: int = 400_000,
+                          z_max: float = 60.0) -> Cloud:
+    """The pseudo-LiDAR lift through each camera's resolved calibration (services/calibration/resolve.py)
+    rather than the nominal rig: any cam_id, its stored intrinsics and full 6-DOF mount. `images` maps a cam_id
+    to (bgr image, Calibration at that image size). The camera-only occupancy path uses this, so a session
+    whose camera is not one of the rig's four nominal ones still gets a cloud in the frame its labels use."""
+    cfg = get_settings()
+    model_id = model_id or cfg.lidar.depth_model
+    xyz_parts: list[np.ndarray] = []
+    int_parts: list[np.ndarray] = []
+    for cam_id, (image_bgr, cal) in images.items():
+        work = (_undistort_fisheye(image_bgr, cal.fx, cal.fy, cal.cx, cal.cy, cal.dist)
+                if cal.model == "fisheye" and cal.dist else image_bgr)
+        depth = estimate_depth(work, model_id)
+        luma = cv2.cvtColor(work, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+        xyz_cam, inten = backproject(depth, cal.fx, cal.fy, cal.cx, cal.cy, luma, stride=stride, z_max=z_max)
+        # cam = (ego - t) @ R with R orthonormal, so ego = cam @ R.T + t
+        ego = (xyz_cam.astype(np.float64) @ cal.R().astype(np.float64).T + cal.t().astype(np.float64)).astype(np.float32)
+        xyz_parts.append(ego)
+        int_parts.append(inten)
+        log.info("lidar.pseudo_cam_resolved", cam=cam_id, points=int(ego.shape[0]), cal=cal.source)
+    xyz = np.vstack(xyz_parts) if xyz_parts else np.zeros((0, 3), np.float32)
+    inten = np.concatenate(int_parts) if int_parts else np.zeros((0,), np.float32)
+    cloud = Cloud(xyz=xyz, intensity=inten, ts_ns=ts_ns, source="pseudo", frame="ego",
+                  depth_model=model_id, calibration_version=calibration_version)
+    if cloud.n > max_points:
+        cloud = cloud.decimate(max_points, seed=ts_ns % (2**31))
+    return cloud
+
+
 def place_in_world(cloud: Cloud, lat: float, lon: float, heading_rad: float) -> Cloud:
     """Place an ego-frame cloud into a local ENU world frame (x east, y north, z up) anchored at the GNSS
     position, using the heading (radians from north, clockwise). The lateral sign follows the Phase 3

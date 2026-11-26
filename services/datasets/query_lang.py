@@ -133,3 +133,49 @@ def compile_query(q: str) -> dict:
 
     log.info("datasets.query_compiled", q=q, predicate=pred)
     return {"query": q, "predicate": pred, "terms": resolved}
+
+
+# The words people use in a sentence for the same scene and state terms ("at night", "rainy", "on highways",
+# "still in review"). Only for finding terms inside free text (services/agent/nl_edit.py); a query string still
+# goes through compile_query and its exact vocabulary.
+_TEXT_ALIASES: dict[str, str] = {
+    "rainy": "rain", "raining": "rain", "foggy": "fog", "misty": "fog", "sunny": "clear", "cloudy": "overcast",
+    "highways": "highway", "expressway": "highway", "city streets": "urban", "rural roads": "rural",
+    "daytime": "day", "nighttime": "night", "at dusk": "dusk", "at dawn": "dawn",
+    "unreviewed": "unreviewed", "not reviewed": "unreviewed", "in review": "unreviewed",
+    "auto-accepted": "auto_accepted", "auto accepted": "auto_accepted", "auto_accepted": "auto_accepted",
+}
+
+
+def terms_in_text(text: str) -> dict:
+    """Find the scene and state terms a sentence uses, and return them as the same predicate compile_query
+    builds, plus the spans they came from so a caller can remove them before reading the rest.
+
+    `day` is only taken as a scene term on its own: "last 7 days", "today" and "yesterday" are dates, which a
+    caller strips before calling this.
+    """
+    import re
+
+    t = text.lower()
+    found: list[tuple[str, str, int, int]] = []   # (word, canonical term, start, end)
+    words = {**{k: k for k in _SCENE_TERMS}, **{k: k for k in _STATE_TERMS if k != "accepted" and k != "rejected"},
+             **_TEXT_ALIASES}
+    for word in sorted(words, key=len, reverse=True):
+        for m in re.finditer(rf"(?<![\w-]){re.escape(word)}(?![\w-])", t):
+            if any(not (m.end() <= s or m.start() >= e) for _, _, s, e in found):
+                continue   # a longer phrase already claimed these characters
+            found.append((word, words[word], m.start(), m.end()))
+    pred: dict = {}
+    terms: list[dict] = []
+    for _word, term, start, end in sorted(found, key=lambda f: f[2]):
+        if term in _SCENE_TERMS:
+            axis, value = _SCENE_TERMS[term]
+            if value not in pred.setdefault(axis, []):
+                pred[axis].append(value)
+            terms.append({"word": text[start:end], "kind": "scene", "axis": axis, "value": value})
+        else:
+            for s in _STATE_TERMS[term]:
+                if s not in pred.setdefault("states", []):
+                    pred["states"].append(s)
+            terms.append({"word": text[start:end], "kind": "state", "states": _STATE_TERMS[term]})
+    return {"predicate": pred, "terms": terms, "spans": [(s, e) for _, _, s, e in found]}

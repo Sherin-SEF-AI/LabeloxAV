@@ -36,6 +36,9 @@ export const GLOBAL: { keys: string; label: string }[] = [
   { keys: "X", label: "reject selected (Review mode)" },
   { keys: "H", label: "helmets on or off for every occupant (two/three-wheeler)" },
   { keys: "O", label: "cycle occupant count 1 to 6 (two/three-wheeler)" },
+  { keys: "/", label: "describe: label what a phrase matches on this frame" },
+  { keys: "Y", label: "sweep this frame's machine labels, one key per decision" },
+  { keys: "N", label: "pass over this one for now (Sweep)" },
   { keys: "Enter", label: "finish the AI mask in progress" },
   { keys: "Esc", label: "discard the AI mask / close overlays" },
 ];
@@ -49,6 +52,7 @@ export const TOOLS: { keys: string; label: string }[] = [
   { keys: "S", label: "SAM point" },
   { keys: "M", label: "SAM box" },
   { keys: "W", label: "magic wand" },
+  { keys: "T", label: "track mask (SAM 2 video: click once, follow it through the clip)" },
   { keys: "P", label: "brush" },
   { keys: "E", label: "eraser" },
   { keys: "U", label: "superpixels (cells)" },

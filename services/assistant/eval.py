@@ -110,6 +110,13 @@ def cases(sid: str, fid: str) -> list[Case]:
               "list_projects": _any}),
         Case("Fine-tune the model on autorickshaws and cattle only.",
              {"propose_training": lambda a: _classes(a, "class_names", "autorickshaw", "cattle")}),
+        # Many sessions at once (#17): a city, not a session id, is the scope.
+        Case("Relabel every pickup in Delhi sessions as LCV.",
+             {"propose_bulk_edit": lambda a: _has(a, "command", "pickup") or (
+                 _classes(a, "from_classes", "pickup") and _has(a, "cities", "del"))}),
+        Case("Send all cyclists at night in Bengaluru drives back for review.",
+             {"propose_bulk_edit": lambda a: _has(a, "command", "cyclist") or (
+                 _classes(a, "from_classes", "cyclist") and (_has(a, "cities", "beng") or _has(a, "cities", "blr")))}),
     ]
 
 

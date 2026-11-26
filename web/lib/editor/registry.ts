@@ -39,6 +39,9 @@ export const MODES: EditorMode[] = [
         { key: "sam-point", label: "SAM point", hotkey: "S" },
         { key: "sam-box", label: "SAM box", hotkey: "M" },
         { key: "magic-wand", label: "Wand", hotkey: "W" },
+        // Click an object once and SAM 2 carries its mask through the clip (services/temporal/sam2_video.py).
+        // A click on a frame the last track covers corrects that track instead of starting a new one.
+        { key: "track-mask", label: "Track mask", hotkey: "T" },
       ] },
       { key: "mask", label: "Mask edit", tools: [
         { key: "brush", label: "Brush", hotkey: "P" },

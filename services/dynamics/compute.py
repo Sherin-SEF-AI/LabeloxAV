@@ -139,7 +139,7 @@ async def compute_session_dynamics(session_id: UUID) -> dict:
             cal = calib[cam]
             fx, fy, cx, cy = cal.fx, cal.fy, cal.cx, cal.cy
             cam_pitch = math.radians(float(cal.rpy_deg[1]))
-            cam_height = float(cal.xyz_m[2]) or sp.camera_height_m
+            cam_height = cal.camera_height_m(fallback=sp.camera_height_m)
             u, v = (bbox[0] + bbox[2]) / 2.0, bbox[3]   # bottom-centre = where the object meets the road
             fl = ipm_pixel_to_vehicle(u, v, fx, fy, cx, cy, cam_height, cam_pitch,
                                       dist=cal.dist, fisheye=cal.model == "fisheye")

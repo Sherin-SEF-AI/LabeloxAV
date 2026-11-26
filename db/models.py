@@ -2460,10 +2460,12 @@ class OccupancyGrid(Base):
     occupied: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     flow_voxels: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_run.run_id", ondelete="SET NULL"))
+    base_grid_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("occupancy_grid.grid_id", ondelete="CASCADE"))  # 0128: the grid a human layer edits
+    edited_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))  # 0128
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
-        CheckConstraint("source in ('pseudo','lidar','fused')", name="ck_occupancy_source"),
+        CheckConstraint("source in ('pseudo','lidar','fused','human')", name="ck_occupancy_source"),
         CheckConstraint("voxel_m > 0", name="ck_occupancy_voxel_positive"),
         CheckConstraint("array_length(dims, 1) = 3", name="ck_occupancy_dims_3d"),
         CheckConstraint("array_length(origin, 1) = 3", name="ck_occupancy_origin_3d"),
@@ -2593,6 +2595,10 @@ class PointSegmentation(Base):
     method: Mapped[str | None] = mapped_column(String(32))                     # ptv3 | projected_2d
     n_points: Mapped[int | None] = mapped_column(Integer)
     low_conf_frac: Mapped[float | None] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="auto", server_default="auto")  # 0128: auto|model|human
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")  # 0128
+    base_seg_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("point_segmentation.seg_id", ondelete="SET NULL"))  # 0128
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))  # 0128
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_point_segmentation_cloud", "cloud_id"),)

@@ -8,38 +8,88 @@ runtime, many agents" rule, kept minimal.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
 
 log = get_logger("agent.runtime.schedule")
 
+# Campaign stages that put a model on the card: the VLM judge, a retrain, and the gate's promotion eval (which
+# scores the challenger on gold). During office hours a campaign whose next stage is one of these waits.
+GPU_CAMPAIGN_STAGES = frozenset({"judge", "train", "promote"})
 
-async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None) -> list[dict]:
+
+async def _tick_campaigns_quiet(db: AsyncSession) -> dict:
+    """Office-hours campaign tick: advance only campaigns whose next stage is CPU work (mine, label, evaluate).
+
+    campaign.tick(dry_run=True) answers which stage would run without running it; a GPU stage is left for the
+    evening, the same way the tool queue leaves auto-labelling kinds pending.
+    """
+    from sqlalchemy import select
+
+    from db.models import Campaign
+    from services.flywheel.campaign import run_stage, tick
+
+    rows = (await db.execute(select(Campaign).where(Campaign.status.in_(("pending", "running")))
+                             .order_by(Campaign.created_at))).scalars().all()
+    if not rows:
+        return {"ran": False, "reason": "no active campaigns"}
+    ticked, deferred = [], []
+    for c in rows:
+        try:
+            probe = await tick(db, str(c.campaign_id), dry_run=True)
+            if probe.get("action") != "would_run":
+                continue
+            stage = str(probe.get("stage") or "")
+            if not stage or stage in GPU_CAMPAIGN_STAGES:
+                deferred.append({"campaign": c.name, "stage": stage})
+                continue
+            r = await run_stage(db, str(c.campaign_id), stage)
+            ticked.append({"campaign": c.name, "action": r.get("action") or r.get("stage") or stage,
+                           "status": (r.get("campaign") or {}).get("status")})
+        except Exception as exc:  # noqa: BLE001 - one campaign's failure never stops the others
+            log.error("schedule.campaign_quiet_tick_failed", name=c.name, error=str(exc))
+            ticked.append({"campaign": c.name, "action": "error", "error": str(exc)[:200]})
+    return {"ran": bool(ticked), "ticked": ticked, "deferred_gpu": deferred}
+
+
+async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None,
+                  now: datetime | None = None) -> list[dict]:
+    from services.tools.registry import in_quiet_hours
+
     actions: list[dict] = []
+    # Office hours (phase4.govern.quiet_hours_ist): the people using this box need the GPU, so the agents that
+    # run every tick do their CPU work and leave anything that loads a model for the evening.
+    quiet = in_quiet_hours(now)
 
     # continuous embedder: every tick, drain a bounded slice of the unembedded backlog so find-similar
-    # coverage tracks new data instead of drifting to zero. Not gated to off-hours (coverage should stay
-    # current all day); it self-guards on free VRAM, so when a detector or a training run holds the card it
-    # yields this tick rather than competing.
-    try:
-        from services.intelligence.embed.daemon import maybe_embed_pending
+    # coverage tracks new data instead of drifting to zero. It self-guards on free VRAM, so when a detector or
+    # a training run holds the card it yields this tick rather than competing. Embedding is all GPU work, so
+    # in office hours it does not run at all; the backlog it leaves is drained after 18:00.
+    if not quiet:
+        try:
+            from services.intelligence.embed.daemon import maybe_embed_pending
 
-        e = await maybe_embed_pending(db)
-        if e.get("ran"):
-            actions.append({"action": "embed_pending", "frames": e.get("embedded_frames"),
-                            "objects": e.get("embedded_objects"), "remaining": e.get("pending_after")})
-    except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
-        log.error("schedule.embed_daemon_failed", error=str(exc))
+            e = await maybe_embed_pending(db)
+            if e.get("ran"):
+                actions.append({"action": "embed_pending", "frames": e.get("embedded_frames"),
+                                "objects": e.get("embedded_objects"), "remaining": e.get("pending_after")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.embed_daemon_failed", error=str(exc))
 
     # standing campaigns: advance each one by at most one stage per tick. The state machine self-guards
     # (waits on humans at the label stage, on the GPU lease at train, on approvals unless a stage is on
     # autopilot), so ticking is cheap when nothing can move and this is what makes campaigns autonomous
-    # rather than autonomous-while-watched.
+    # rather than autonomous-while-watched. In office hours only CPU stages advance.
     try:
-        from services.flywheel.campaign import maybe_tick_campaigns
+        if quiet:
+            t = await _tick_campaigns_quiet(db)
+        else:
+            from services.flywheel.campaign import maybe_tick_campaigns
 
-        t = await maybe_tick_campaigns(db)
+            t = await maybe_tick_campaigns(db)
         if t.get("ran"):
             actions.append({"action": "campaign_tick", "ticked": t.get("ticked")})
     except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
@@ -47,7 +97,8 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
 
     # settlement lifecycle, the cheap half: tally judging lots as verdicts arrive, settle accepted
     # ones the guards allow. Inline (no worker): a tally is a handful of reads and settle_lot commits
-    # chunk by chunk itself.
+    # chunk by chunk itself. It loads no model (tally, top-up and settle are database work and the
+    # sampling arithmetic in services/labelops/sampling.py), so office hours do not stop it.
     try:
         from services.govern.settlement_agent import maybe_tally_and_settle
 
@@ -246,6 +297,20 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
                     actions.append({"action": label, "run_id": y.get("run_id")})
         except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
             log.error("schedule.yardstick_failed", error=str(exc))
+
+    # The overnight autopilot (/autopilot): once a night, outside office hours and only when a person switched
+    # it on, queue the night's GPU job (auto-label new sessions, VLM check, error sweep, ladder-gated
+    # auto-accept, morning report). The job itself runs in the GPU worker; this only decides that tonight is due.
+    if not quiet:
+        try:
+            from services.agent.autopilot import maybe_autopilot
+
+            ap = await maybe_autopilot(db, now=now)
+            if ap.get("ran"):
+                actions.append({"action": "autopilot_night", "night_id": ap.get("night_id"),
+                                "job_id": ap.get("job_id")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.autopilot_failed", error=str(exc))
 
     # the morning digest and the weekly report, last on purpose: the digest declines to send while any
     # agent run is still in flight, so putting it after every launcher gives tonight's agents their turn

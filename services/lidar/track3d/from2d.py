@@ -133,7 +133,7 @@ async def _range_prior(item: dict) -> float | None:
     from services.oraclyx.mono_depth import metric_depth
 
     calib = await resolve_calibration(item["session_id"], item["cam_id"], item["width"], item["height"])
-    height_m = float(calib.xyz_m[2] or 0.0) or float(get_settings().rig.camera_height_m)
+    height_m = calib.camera_height_m(fallback=float(get_settings().rig.camera_height_m))
     est = metric_depth(item["bbox"], item["class_id"], calib.fy, calib.cy,
                        cam_height_m=height_m, pitch_rad=math.radians(float(calib.rpy_deg[1])))
     return float(est["depth_m"]) if est else None

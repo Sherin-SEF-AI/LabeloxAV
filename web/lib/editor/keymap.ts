@@ -35,6 +35,13 @@ export const ACTIONS: ActionDef[] = [
   { id: "toggleHelmets", label: "helmets on or off for every occupant (two/three-wheeler)", hotkey: "H" },
   { id: "bumpOccupants", label: "cycle occupant count 1 to 6 (two/three-wheeler)", hotkey: "O" },
   { id: "fit", label: "fit the frame to the window", hotkey: "F" },
+  // Agent A's tools. Describe opens the phrase box (YOLO-World + SAM proposals for this frame). Sweep walks
+  // this frame's machine labels one at a time in Review mode, where A, X and 1 to 9 decide each one and N
+  // passes over it.
+  { id: "describe", label: "describe: label what a phrase matches on this frame", hotkey: "/", onlyModes: ["objects"] },
+  { id: "sweep", label: "sweep this frame's machine labels, one key per decision", hotkey: "Y",
+    onlyModes: ["objects", "review"] },
+  { id: "sweepSkip", label: "pass over this one for now (Sweep)", hotkey: "N", onlyModes: ["review"] },
 ];
 
 /** Binding id -> key. Only bindings that differ from their default appear. */

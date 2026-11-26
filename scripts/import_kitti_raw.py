@@ -18,7 +18,6 @@ import uuid
 from pathlib import Path
 
 import click
-import numpy as np
 
 # Defaults, overridable per run. Kept as constants so the original single-drive invocation still works
 # unchanged, while a second drive is one flag rather than an edit.
@@ -29,16 +28,17 @@ CAM = "image_02"
 CAM_ID = "cam_front"
 
 
-def _read_calib(path: Path) -> dict:
-    out: dict[str, np.ndarray] = {}
-    for line in path.read_text().splitlines():
-        if ":" not in line:
-            continue
-        k, v = line.split(":", 1)
-        try:
-            out[k.strip()] = np.array([float(x) for x in v.split()])
-        except ValueError:
-            continue
+# KITTI's Velodyne sits 1.73 m above the road (the cameras at 1.65 m). Clouds, cuboids and point labels of a
+# KITTI session are in the Velodyne frame, so its road is at z = -1.73, not z = 0 as on the camera fleet.
+VELO_HEIGHT_M = 1.73
+
+
+def kitti_sensor_frame(imu_to_velo: dict | None) -> dict:
+    """What a session's `sensors` must say for 3D consumers to place KITTI data: the ego frame is the
+    Velodyne's, how high it is above the road, and the OXTS -> Velodyne lever arm for world placement."""
+    out: dict = {"ego_frame": "velodyne", "lidar_height_m": VELO_HEIGHT_M}
+    if imu_to_velo is not None:
+        out["imu_to_velo"] = imu_to_velo
     return out
 
 
@@ -79,6 +79,7 @@ async def run(root: Path, vehicle: str, limit: int | None,
     from db.models import Session as DbSession
     from db.session import get_sessionmaker
     from services.autolabel.ontology import get_ontology
+    from services.lidar.calib.kitti import kitti_camera_calibration, kitti_imu_to_velo
     from services.lidar.ingest.readers import read_kitti_bin
     from services.lidar.ingest.store import store_cloud
 
@@ -93,12 +94,14 @@ async def run(root: Path, vehicle: str, limit: int | None,
     cam_ts = _timestamps(drive_dir, CAM)
     oxts = _oxts_rows(drive_dir)
 
-    # Real intrinsics from the drive's own calibration, and the rectified projection KITTI publishes.
-    c2c = _read_calib(root / date / "calib_cam_to_cam.txt")
-    P2 = c2c["P_rect_02"].reshape(3, 4)
-    fx, fy, cx, cy = float(P2[0, 0]), float(P2[1, 1]), float(P2[0, 2]), float(P2[1, 2])
-    size = c2c.get("S_rect_02")
-    width, height = (int(size[0]), int(size[1])) if size is not None else (1242, 375)
+    # Real intrinsics AND extrinsics from the drive's own calibration: the rectified projection P_rect_02 and
+    # the Velodyne -> camera transform (calib_velo_to_cam, through R_rect_00), expressed in the Velodyne frame
+    # the clouds are stored in. Projecting a cloud point through this row reproduces KITTI's own
+    # P_rect_02 @ R_rect_00 @ Tr_velo_to_cam to well under a pixel (services/lidar/calib/kitti.py).
+    calib = kitti_camera_calibration(root / date)
+    fx, fy, cx, cy = calib["fx"], calib["fy"], calib["cx"], calib["cy"]
+    width, height = calib["ref_width"], calib["height"]
+    imu_to_velo = kitti_imu_to_velo(root / date)
 
     import cv2
 
@@ -115,13 +118,14 @@ async def run(root: Path, vehicle: str, limit: int | None,
             sensors={"source": "KITTI raw", "drive": drive, "lidar": "Velodyne HDL-64E",
                      "camera": "PointGrey Flea2 (image_02, rectified)",
                      "license": "CC BY-NC-SA 3.0, KIT and Toyota Technological Institute",
-                     "attribution": "Geiger et al., Vision meets Robotics: The KITTI Dataset"}))
+                     "attribution": "Geiger et al., Vision meets Robotics: The KITTI Dataset",
+                     **kitti_sensor_frame(imu_to_velo)}))
         await db.flush()
         # The drive's measured intrinsics, so every projection in the product uses real numbers here
         # rather than the nominal rig defaults.
         db.add(CameraCalibration(
             session_id=sid, cam_id=CAM_ID, model="pinhole", fx=fx, fy=fy, cx=cx, cy=cy, dist=[],
-            ref_width=width, rpy_deg=[0.0, 0.0, 0.0], xyz_m=[1.03, 0.0, 1.65],
+            ref_width=width, rpy_deg=calib["rpy_deg"], xyz_m=calib["xyz_m"],
             source="dataset", quality=0.95))
         await db.commit()
 
@@ -181,7 +185,71 @@ async def run(root: Path, vehicle: str, limit: int | None,
 
     return {"session_id": str(sid), "frames": n_frames, "clouds": n_clouds, "poses": n_poses,
             "calibration": {"fx": round(fx, 2), "fy": round(fy, 2), "cx": round(cx, 2),
-                            "cy": round(cy, 2), "width": width, "height": height}}
+                            "cy": round(cy, 2), "width": width, "height": height,
+                            "rpy_deg": calib["rpy_deg"], "xyz_m": calib["xyz_m"]}}
+
+
+async def fix_calibration_rows(root: Path, apply: bool = True) -> list[dict]:
+    """Correct the camera_calibration rows of KITTI sessions imported before the extrinsics were read.
+
+    Idempotent: each KITTI raw session (route "KITTI <drive>") whose date folder holds the calibration files
+    gets the exact rpy/xyz/intrinsics; a row already equal is reported unchanged. The session's `sensors` gains
+    the Velodyne frame note and the IMU lever arm. Sessions whose calibration is not on disk are reported and
+    left alone. Nothing else is touched: frames, clouds, poses and labels stay as they are.
+    """
+    from sqlalchemy import select
+
+    from db.models import CameraCalibration
+    from db.models import Session as DbSession
+    from db.session import get_sessionmaker
+    from services.lidar.calib.kitti import kitti_camera_calibration, kitti_imu_to_velo
+
+    out: list[dict] = []
+    async with get_sessionmaker()() as db:
+        sessions = (await db.execute(select(DbSession).where(DbSession.route.like("KITTI 20%")))).scalars().all()
+        for sess in sessions:
+            drive = (sess.sensors or {}).get("drive") or sess.route.split(" ", 1)[1]
+            date = drive[:10]
+            date_dir = root / date
+            rec = {"session_id": str(sess.session_id), "drive": drive}
+            if not (date_dir / "calib_velo_to_cam.txt").exists() or not (date_dir / "calib_cam_to_cam.txt").exists():
+                rec["status"] = f"calibration not on disk under {date_dir}"
+                out.append(rec)
+                continue
+            calib = kitti_camera_calibration(date_dir)
+            row = (await db.execute(select(CameraCalibration).where(
+                CameraCalibration.session_id == sess.session_id,
+                CameraCalibration.cam_id == CAM_ID))).scalar_one_or_none()
+            want = {"fx": calib["fx"], "fy": calib["fy"], "cx": calib["cx"], "cy": calib["cy"],
+                    "ref_width": calib["ref_width"], "rpy_deg": calib["rpy_deg"], "xyz_m": calib["xyz_m"]}
+            sensors = dict(sess.sensors or {})
+            frame_note = kitti_sensor_frame(kitti_imu_to_velo(date_dir))
+            if row is None:
+                rec["status"] = "created"
+                if apply:
+                    db.add(CameraCalibration(session_id=sess.session_id, cam_id=CAM_ID, model="pinhole", dist=[],
+                                             source="dataset", quality=0.95, **want))
+            else:
+                before = {"rpy_deg": list(row.rpy_deg or []), "xyz_m": list(row.xyz_m or [])}
+                same = all(
+                    (getattr(row, k) == v) if not isinstance(v, list)
+                    else [round(float(x), 6) for x in (getattr(row, k) or [])] == v
+                    for k, v in want.items())
+                rec["before"] = before
+                rec["status"] = "unchanged" if same else "corrected"
+                if apply and not same:
+                    for k, v in want.items():
+                        setattr(row, k, v)
+                    row.source, row.quality = "dataset", 0.95
+            if any(sensors.get(k) != v for k, v in frame_note.items()):
+                rec["sensors"] = "updated"
+                if apply:
+                    sess.sensors = {**sensors, **frame_note}
+            rec["after"] = {"rpy_deg": want["rpy_deg"], "xyz_m": want["xyz_m"]}
+            out.append(rec)
+        if apply:
+            await db.commit()
+    return out
 
 
 @click.command()
@@ -190,10 +258,18 @@ async def run(root: Path, vehicle: str, limit: int | None,
 @click.option("--limit", type=int, default=None)
 @click.option("--drive", default=DRIVE, help="drive folder name, e.g. 2011_09_26_drive_0027_sync")
 @click.option("--date", "date_", default=DATE, help="capture date folder holding the drive and its calibration")
-def main(root: str, vehicle: str, limit: int | None, drive: str, date_: str) -> None:
+@click.option("--fix-calibration", is_flag=True,
+              help="import nothing: correct the camera calibration of already-imported KITTI sessions")
+@click.option("--dry-run", is_flag=True, help="with --fix-calibration, report without writing")
+def main(root: str, vehicle: str, limit: int | None, drive: str, date_: str, fix_calibration: bool,
+         dry_run: bool) -> None:
     from core.logging import setup_logging
 
     setup_logging("INFO")
+    if fix_calibration:
+        for rec in asyncio.run(fix_calibration_rows(Path(root), apply=not dry_run)):
+            print(f"  {rec}")
+        return
     res = asyncio.run(run(Path(root), vehicle, limit, drive=drive, date=date_))
     for k, v in res.items():
         print(f"  {k}: {v}")

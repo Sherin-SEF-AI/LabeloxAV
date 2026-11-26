@@ -29,6 +29,8 @@ Rules:
 After proposing, say what you proposed and that it waits for approval. Never say a change has been made.
 - A change needs a scope: one session or one frame. If the person did not say which, use the session they are \
 working in when one is given below, otherwise ask or call find_sessions.
+- A change over many sessions (a city such as "Delhi sessions", a vehicle, a date range, "at night") uses \
+propose_bulk_edit with the person's sentence as command; do not pick one session for it.
 - If a lookup finds nothing but its result lists what does exist (a city code, a class name), retry with the \
 matching one before answering.
 - Be brief and concrete. Lead with the answer."""

@@ -29,8 +29,12 @@ from services.lidar.segment3d.semantic import (
 log = get_logger("lidar_segment3d")
 
 
-async def segment_cloud(cloud_id: uuid.UUID, method: str | None = None) -> dict:
-    """Segment a cloud into per-point semantic and instance labels and store point_segmentation."""
+async def segment_cloud(cloud_id: uuid.UUID, method: str | None = None, allow_gpu: bool = False) -> dict:
+    """Segment a cloud into per-point semantic and instance labels and store point_segmentation.
+
+    PTv3 loads a model onto the GPU, so it runs here only when the caller holds the GPU (`allow_gpu`, the GPU
+    worker's `scene3d_ptv3` job). A request handler gets the projected segmentation, as it always has, and
+    the reply says PTv3 is a job."""
     cfg = get_settings().lidar
     method = method or cfg.segmenter
     async with get_sessionmaker()() as db:
@@ -47,7 +51,9 @@ async def segment_cloud(cloud_id: uuid.UUID, method: str | None = None) -> dict:
     _, plane, _ = segment_ground(cloud)
 
     result, method_used, model_version = None, "projected_2d", "projected-3d-0.1"
-    if method == "ptv3":
+    if method == "ptv3" and not allow_gpu:
+        log.info("lidar.ptv3_is_a_gpu_job", cloud=str(cloud_id))
+    elif method == "ptv3":
         try:
             result = segment_ptv3(cloud)
             method_used, model_version = "ptv3", cfg.segmenter_ckpt

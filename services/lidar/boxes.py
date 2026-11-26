@@ -103,3 +103,42 @@ def iou_3d(a: dict, b: dict) -> float:
     vol_b = b["dims"][0] * b["dims"][1] * b["dims"][2]
     union = vol_a + vol_b - inter_vol
     return inter_vol / union if union > 1e-6 else 0.0
+
+
+def cuboid_image_box(center, dims, yaw: float, cam_id: str, img_w: int, img_h: int, calib=None,
+                     pitch: float = 0.0, roll: float = 0.0, near_m: float = 0.1,
+                     min_px: float = 2.0) -> tuple[list[float] | None, str]:
+    """The 2D box a cuboid covers in one camera image, or None and the reason it covers none.
+
+    The box is the image-clipped hull of the cuboid's projection, with every edge first clipped at a near
+    plane in front of the lens. Dropping corners behind the camera instead (the hull of the in-front corners
+    only) shrinks the box of anything the camera is partly beside, such as a parked car the ego is passing;
+    projecting them is worse, since a point behind the lens lands on the wrong side of the image.
+    """
+    from services.calibration.resolve import nominal_calibration
+    from services.lidar.project import _project_cam_points
+
+    cal = calib or nominal_calibration(cam_id, img_w, img_h)
+    corners = cuboid_corners(center, dims, yaw, pitch, roll).astype(np.float64)
+    cam = (corners - cal.t().astype(np.float64)) @ cal.R().astype(np.float64)
+    pts = [cam[i] for i in range(8) if cam[i, 2] > near_m]
+    for a, b in BOX_EDGES:
+        za, zb = cam[a, 2], cam[b, 2]
+        if (za > near_m) != (zb > near_m):
+            s = (near_m - za) / (zb - za)
+            pts.append(cam[a] + s * (cam[b] - cam[a]))
+    if not pts:
+        return None, "behind the camera"
+    arr = np.asarray(pts, dtype=np.float32)
+    proj = _project_cam_points(arr, cal.fx, cal.fy, cal.cx, cal.cy, cal.model, cal.dist, img_w, img_h)
+    uv = proj["uv"][proj["in_front"]]
+    if len(uv) == 0:
+        return None, "behind the camera"
+    x0, y0 = float(uv[:, 0].min()), float(uv[:, 1].min())
+    x1, y1 = float(uv[:, 0].max()), float(uv[:, 1].max())
+    if x1 < 0 or y1 < 0 or x0 >= img_w or y0 >= img_h:
+        return None, "outside the image"
+    box = [max(0.0, x0), max(0.0, y0), min(float(img_w), x1), min(float(img_h), y1)]
+    if box[2] - box[0] < min_px or box[3] - box[1] < min_px:
+        return None, f"smaller than {min_px:g} px"
+    return [round(v, 1) for v in box], "ok"

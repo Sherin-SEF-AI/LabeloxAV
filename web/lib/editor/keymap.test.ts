@@ -384,7 +384,10 @@ describe("registry lookups over a rebound registry", () => {
 describe("the page's letter list is the keymap's, not a second copy", () => {
   const PAGE = readFileSync(join(__dirname, "../../app/frame/[id]/page.tsx"), "utf8");
   const pageLetters = [...new Set([...PAGE.matchAll(/k === "([a-z])"/g)].map((m) => m[1]))].sort();
-  const actionLetters = [...new Set(ACTIONS.map((a) => a.hotkey.toLowerCase()))].sort();
+  // Letters only: the page's list is scraped as `k === "x"`, and a punctuation default (Describe's `/`) is
+  // neither written that way there nor printed as a letter row by the overlay.
+  const isLetter = (k: string) => /^[a-z]$/.test(k);
+  const actionLetters = [...new Set(ACTIONS.map((a) => a.hotkey.toLowerCase()))].filter(isLetter).sort();
 
   it("lists exactly the letters the actions ship with", () => {
     expect(pageLetters).toEqual(actionLetters);
@@ -395,7 +398,7 @@ describe("the page's letter list is the keymap's, not a second copy", () => {
     // The same two directions as the overlay's test, read from the keymap directly rather than through
     // the page, so this holds whatever the page's comment says.
     const printed = [...GLOBAL, ...TOOLS].map((r) => r.keys).filter((k) => /^[A-Za-z]$/.test(k)).map((k) => k.toLowerCase());
-    const bound = new Set(bindings().map((b) => b.default));
+    const bound = new Set(bindings().map((b) => b.default).filter(isLetter));
     expect(printed.filter((k) => !bound.has(k))).toEqual([]);
     expect([...bound].filter((k) => !printed.includes(k))).toEqual([]);
   });

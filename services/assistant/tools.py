@@ -311,9 +311,13 @@ async def _resolve_edit(ctx: Context, a: dict, operation: str) -> tuple[dict, li
     res = await resolve(ctx.db, plan, frame_id=fid, session_id=sid, limit=MAX_PREVIEW)
     states = set(a.get("states") or [])
     objs = [o for o in res["objects"] if not states or o["state"] in states]
-    # Human labels are never changed by a language edit (nl_edit refuses them); say so in the preview.
+    # Human-confirmed labels are never changed by a language edit (nl_edit refuses them: drawn by a person, or a
+    # machine label a reviewer accepted); say so in the preview, so its count is what an approval changes.
+    from sqlalchemy import and_
+
     human = {str(i) for i in (await ctx.db.execute(select(Object.object_id).where(
-        Object.object_id.in_([uuid.UUID(o["object_id"]) for o in objs]), Object.source == "human"))).scalars()}
+        Object.object_id.in_([uuid.UUID(o["object_id"]) for o in objs]),
+        or_(Object.source == "human", and_(Object.state == "accepted", Object.source != "vlm_review"))))).scalars()}
     kept = [o for o in objs if o["object_id"] not in human]
     by_class: dict[str, int] = {}
     for o in kept:
@@ -341,6 +345,92 @@ async def propose_flag_for_review(ctx: Context, a: dict) -> dict:
               f"({', '.join(f'{v} {k[5:]}' for k, v in counts.items() if k.startswith('from_'))})"
     return await _store(ctx, "propose_flag_for_review", {"plan": plan, "object_ids": [o["object_id"] for o in objs]},
                         summary, {"count": len(objs), **counts, "sample": objs[:12]})
+
+
+def bulk_preview_for_proposal(res: dict) -> dict:
+    """What a bulk proposal shows a reviewer: the counts and a few crops, not the id list it carries."""
+    return {"count": res["count"], "unit": "labels", "sessions": res["sessions"], "by_class": res["by_class"],
+            "by_session": res["by_session"][:50], "left_alone": res["left_alone"],
+            "human_labels_left_alone": res["left_alone"]["human_confirmed"],
+            "interpretation": res["interpretation"], "warnings": res["warnings"], "sample": res["sample"][:12]}
+
+
+async def store_bulk_proposal(ctx: Context, plan: dict, res: dict) -> dict:
+    """Store a resolved bulk edit as a proposal (the reviewer-approval path every assistant change takes)."""
+    if not res["can_propose"]:
+        raise ToolError("nothing to propose: " + ("; ".join(res["warnings"]) or "nothing matched"))
+    onto = get_ontology()
+    classes = ", ".join(f"{v} {k}" for k, v in sorted(res["by_class"].items(), key=lambda kv: -kv[1])[:6])
+    where = "; ".join((plan.get("scope") or {}).get("described") or []) or "every session"
+    if plan["operation"] == "reclassify":
+        summary = (f"Change {res['count']:,} label(s) to {onto.by_id(int(plan['to_class_id'])).name} across "
+                   f"{res['sessions']} session(s) ({classes}; {where}), sent back to review")
+    else:
+        summary = f"Send {res['count']:,} label(s) back to review across {res['sessions']} session(s) ({classes}; {where})"
+    return await _store(ctx, "propose_bulk_edit", {"plan": plan, "object_ids": res["object_ids"]}, summary,
+                        bulk_preview_for_proposal(res))
+
+
+async def propose_bulk_edit(ctx: Context, a: dict) -> dict:
+    """A class change or a send-back-to-review across many sessions: a city, a vehicle, a date range, scene
+    terms or a dataset query. Either the person's own sentence (`command`) or the parts given separately."""
+    from services.agent.nl_edit import parse_bulk_edit, resolve_bulk
+
+    onto = get_ontology()
+    if a.get("command"):
+        plan = parse_bulk_edit(str(a["command"]), onto)
+    else:
+        op = a.get("operation") or ("reclassify" if a.get("to_class") else "flag")
+        if op not in ("reclassify", "flag"):
+            raise ToolError("operation is reclassify or flag")
+        select_ids = _class_ids(a.get("from_classes") or a.get("class_names"))
+        if not select_ids:
+            raise ToolError("name the classes to change (from_classes)")
+        to_id = _class_ids([a["to_class"]])[0] if op == "reclassify" and a.get("to_class") else None
+        if op == "reclassify" and to_id is None:
+            raise ToolError("reclassify needs to_class")
+        scope: dict = {"cities": [], "city_names": [], "vehicles": [str(v) for v in a.get("vehicles") or []],
+                       "date_from": a.get("date_from"), "date_to": a.get("date_to"), "predicate": {},
+                       "query": None, "described": []}
+        for raw in a.get("cities") or []:
+            code = CITY_CODES.get(str(raw).strip().lower(), str(raw).strip().upper())
+            scope["cities"].append(code)
+            scope["city_names"].append(str(raw).strip().title())
+        if scope["cities"]:
+            scope["described"].append("in " + ", ".join(scope["city_names"]))
+        if scope["vehicles"]:
+            scope["described"].append("vehicle " + ", ".join(scope["vehicles"]))
+        if scope["date_from"] or scope["date_to"]:
+            scope["described"].append(f"recorded {scope['date_from'] or '...'} to {scope['date_to'] or '...'}")
+        if a.get("query"):
+            from services.datasets.query_lang import QueryError, compile_query
+
+            try:
+                compiled = compile_query(str(a["query"]))
+            except QueryError as exc:
+                raise ToolError(str(exc)) from None
+            pred = dict(compiled["predicate"])
+            extra = pred.pop("class_names", [])
+            select_ids = sorted(set(select_ids) | set(_class_ids(extra)))
+            scope["predicate"] = pred
+            scope["query"] = str(a["query"])
+            scope["described"].append(f"matching “{a['query']}”")
+        if a.get("states"):
+            scope["predicate"]["states"] = list(a["states"])
+        if sid := await _visible_session(ctx, a.get("session_id")):
+            scope["session_ids"] = [str(sid)]
+            scope["described"].append(f"session {sid}")
+        names = ", ".join(onto.by_id(i).name for i in select_ids)
+        plan = {"operation": op, "select_class_ids": select_ids, "to_class_id": to_id, "mask_missing": False,
+                "attr": None, "referential": False, "kind": "bulk", "errors": [], "scope": scope,
+                "raw": (f"relabel {names} as {onto.by_id(to_id).name}" if to_id is not None
+                        else f"send {names} back for review") + (f" ({'; '.join(scope['described'])})"
+                                                                 if scope["described"] else "")}
+    res = await resolve_bulk(ctx.db, plan, hidden=ctx.hidden)
+    if not res["can_propose"]:
+        return {"proposal_id": None, "status": "nothing proposed", "matched": res["count"],
+                "left_alone": res["left_alone"], "warnings": res["warnings"]}
+    return await store_bulk_proposal(ctx, plan, res)
 
 
 async def propose_autolabel(ctx: Context, a: dict) -> dict:
@@ -465,6 +555,14 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          "session or frame. Creates a proposal; changes nothing itself.",
          _schema({"class_names": _STRS, "session_id": _STR, "frame_id": _STR, "states": _STRS}, ["class_names"]),
          "propose", propose_flag_for_review),
+    Tool("propose_bulk_edit", "Propose a class change (operation reclassify, with to_class) or a send-back-to-"
+         "review (operation flag) across MANY sessions: by city (cities, e.g. Delhi), vehicle ids, a recording "
+         "date range (date_from / date_to, YYYY-MM-DD), review states, or a dataset query such as 'night AND "
+         "rain'. Or pass the person's sentence as command. Creates a proposal; changes nothing itself. Human-"
+         "confirmed labels are never changed.",
+         _schema({"command": _STR, "operation": _STR, "from_classes": _STRS, "to_class": _STR, "cities": _STRS,
+                  "vehicles": _STRS, "date_from": _STR, "date_to": _STR, "query": _STR, "states": _STRS,
+                  "session_id": _STR}), "propose", propose_bulk_edit),
     Tool("propose_autolabel", "Propose running auto-labelling on one session. Creates a proposal; starts nothing.",
          _schema({"session_id": _STR, "only_unlabelled": {"type": "boolean"}}, ["session_id"]), "propose",
          propose_autolabel),
@@ -478,7 +576,7 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
 async def execute(db: AsyncSession, p: AssistantProposal, user: Any) -> dict:
     """Run an approved proposal through the path a person would use. Raises on failure."""
     created_by = str(user.user_id) if getattr(user, "user_id", None) else None
-    if p.tool in ("propose_reclassify", "propose_flag_for_review"):
+    if p.tool in ("propose_reclassify", "propose_flag_for_review", "propose_bulk_edit"):
         from services.agent.nl_edit import apply_edit
 
         res = await apply_edit(db, p.args["plan"], [uuid.UUID(i) for i in p.args["object_ids"]],
@@ -514,4 +612,5 @@ async def execute(db: AsyncSession, p: AssistantProposal, user: Any) -> dict:
     raise ToolError(f"unknown proposal tool {p.tool}")
 
 
-__all__ = ["MAX_PREVIEW", "TOOLS", "Context", "Tool", "ToolError", "execute"]
+__all__ = ["MAX_PREVIEW", "TOOLS", "Context", "Tool", "ToolError", "bulk_preview_for_proposal", "execute",
+           "store_bulk_proposal"]

@@ -230,9 +230,11 @@ async def build_grid_for_cloud(db: AsyncSession, cloud: PointCloud, *, voxel_m: 
         Frame.session_id == cloud.session_id, Frame.ts_ns == cloud.ts_ns).limit(1))).scalar_one_or_none()
 
     store = get_object_store()
-    uri = store.put_bytes(f"occupancy/{cloud.session_id}/{cloud.ts_ns}.npz",
-                          pack_grid(voxels, flow, dims), "application/octet-stream")
     source = "pseudo" if cloud.source == "pseudo" else "lidar"
+    # The source is in the key: a session with both a LiDAR scan and a camera lift at one instant has two
+    # grids there, and a key of session and time alone let the second build overwrite the first one's blob.
+    uri = store.put_bytes(f"occupancy/{cloud.session_id}/{cloud.ts_ns}.{source}.npz",
+                          pack_grid(voxels, flow, dims), "application/octet-stream")
     fields = {"frame_id": frame_id, "origin": [float(v) for v in origin], "voxel_m": float(voxel_m),
               "dims": list(dims), "grid_uri": uri,
               "ego_pose_ts": int(pose.ts_ns) if pose is not None else None,

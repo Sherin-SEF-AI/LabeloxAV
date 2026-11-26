@@ -42,6 +42,19 @@ class Calibration:
     xyz_m: tuple[float, float, float] = (0.0, 0.0, 0.0)     # camera mount position in the ego frame
     source: str = "nominal"
     quality: float = 0.3
+    # Height of the ego origin above the road. Zero for the usual ground-level ego frame; a session whose ego
+    # frame is the LiDAR (KITTI: session.sensors.ego_frame == "velodyne") sits lidar_height_m above it, so
+    # xyz_m[2] alone is no longer the camera's height above the road.
+    ego_height_m: float = 0.0
+
+    def camera_height_m(self, fallback: float = 1.5) -> float:
+        """The camera's height above the road, for the road-plane (IPM) projections.
+
+        A stored height of exactly zero means the extrinsic was never filled in; fall back rather than place
+        the camera on the road surface, where the projection diverges.
+        """
+        h = float(self.xyz_m[2]) + float(self.ego_height_m or 0.0)
+        return abs(h) or fallback
 
     def K(self) -> np.ndarray:
         return np.array([[self.fx, 0.0, self.cx], [0.0, self.fy, self.cy], [0.0, 0.0, 1.0]], dtype=np.float64)
@@ -104,7 +117,7 @@ def ipm_args(cal) -> dict:
     """
     return {
         "fx": float(cal.fx), "fy": float(cal.fy), "cx": float(cal.cx), "cy": float(cal.cy),
-        "height_m": abs(float(cal.xyz_m[2])) or 1.5,
+        "height_m": cal.camera_height_m() if hasattr(cal, "camera_height_m") else (abs(float(cal.xyz_m[2])) or 1.5),
         "pitch_rad": math.radians(float(cal.rpy_deg[1])),
         "dist": list(cal.dist or []),
         "fisheye": (cal.model == "fisheye"),
@@ -116,13 +129,28 @@ async def resolve_calibration(session_id, cam_id: str, img_w: int, img_h: int) -
     from sqlalchemy import select
 
     from db.models import CameraCalibration
+    from db.models import Session as DbSession
     from db.session import get_sessionmaker
     async with get_sessionmaker()() as db:
         row = (await db.execute(select(CameraCalibration).where(
             CameraCalibration.session_id == session_id, CameraCalibration.cam_id == cam_id))).scalar_one_or_none()
+        sensors = (await db.execute(select(DbSession.sensors).where(DbSession.session_id == session_id))).scalar()
     if row is None:
         return nominal_calibration(cam_id, img_w, img_h)
-    return calibration_from_row(row, img_w, img_h)
+    cal = calibration_from_row(row, img_w, img_h)
+    cal.ego_height_m = ego_height_from_sensors(sensors)
+    return cal
+
+
+def ego_height_from_sensors(sensors) -> float:
+    """How far above the road the session's ego origin is (see Calibration.ego_height_m)."""
+    s = sensors if isinstance(sensors, dict) else {}
+    if s.get("ego_frame") == "velodyne":
+        try:
+            return float(s.get("lidar_height_m") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    return 0.0
 
 
 async def resolved_session_calibration(session_id) -> dict:
@@ -145,7 +173,7 @@ async def resolved_session_calibration(session_id) -> dict:
         cams.append({"cam_id": cam, "source": c.source, "quality": round(c.quality, 3),
                      "fx": round(c.fx, 1), "fy": round(c.fy, 1), "cx": round(c.cx, 1), "cy": round(c.cy, 1),
                      "pitch_deg": round(c.rpy_deg[1], 2), "yaw_deg": round(c.rpy_deg[2], 2),
-                     "height_m": round(c.xyz_m[2], 3)})
+                     "height_m": round(c.camera_height_m(), 3)})
     rank = {"nominal": 0, "estimated": 1, "dataset": 2, "measured": 3}
     level = min((c["source"] for c in cams), key=lambda s: rank.get(s, 0)) if cams else "nominal"
     mean_q = round(sum(c["quality"] for c in cams) / len(cams), 3) if cams else SOURCE_QUALITY["nominal"]

@@ -99,7 +99,13 @@ type Props = {
    * tools are not reachable here either.
    */
   readOnly?: boolean;
+  /** Track-mask tool: a click (Shift: a "not this" click) that starts or corrects a SAM 2 video track. */
+  onTrackPoint?: (pt: number[], label: number) => void;
+  /** Describe-tool proposals, previewed dashed until accepted. `on` is ticked for accepting. */
+  proposals?: CanvasProposal[] | null;
 };
+
+export type CanvasProposal = { bbox: number[]; polygons: number[][]; label: string; on: boolean };
 
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 20;
@@ -577,6 +583,29 @@ function InteractionLayer(p: InteractionLayerProps) {
 
 // ---- the stage ----------------------------------------------------------------------------------------
 
+// Describe proposals: dashed, so a proposal is never mistaken for a label that exists. Green when ticked.
+function ProposalLayer({ proposals, s }: { proposals: CanvasProposal[]; s: number }) {
+  return (
+    <Layer listening={false}>
+      {proposals.map((pr, i) => {
+        const [x1, y1, x2, y2] = pr.bbox;
+        const col = pr.on ? "#56D364" : "#8B949E";
+        return (
+          <Group key={`prop${i}`}>
+            {pr.polygons.map((poly, j) => (
+              <Line key={j} points={poly} closed stroke={col} strokeWidth={1.5 / s}
+                fill={pr.on ? "rgba(86,211,100,0.18)" : "rgba(139,148,158,0.10)"} />
+            ))}
+            <Rect x={x1} y={y1} width={x2 - x1} height={y2 - y1} stroke={col} strokeWidth={2 / s}
+              dash={[6 / s, 4 / s]} />
+            <KText x={x1} y={y1 - 16 / s} text={pr.label} fontSize={12 / s} fill={col} />
+          </Group>
+        );
+      })}
+    </Layer>
+  );
+}
+
 function EditorCanvas(p: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   // Start at 0x0, not a guessed 800x600: the fit effect keys off `size` and runs once when scale is the
@@ -706,6 +735,8 @@ function EditorCanvas(p: Props) {
       setStroke([[x, y]]); // begin a stroke; stamps accumulate on move, commit on up
     } else if (p.tool === "sam-point") {
       p.onSamPoint([x, y], e.evt.shiftKey ? 0 : 1);
+    } else if (p.tool === "track-mask") {
+      p.onTrackPoint?.([x, y], e.evt.shiftKey ? 0 : 1);
     } else if (p.tool === "select" && e.target === e.target.getStage()) {
       p.onSelect(null); // clicked empty canvas
     }
@@ -830,6 +861,7 @@ function EditorCanvas(p: Props) {
           keypointDraft={p.keypointDraft} skeletonEdges={p.skeletonEdges}
           measure={measure} mPerPx={p.mPerPx} marquee={marquee} draw={draw} trRef={trRef}
           readOnly={p.readOnly} />
+        {p.proposals?.length ? <ProposalLayer proposals={p.proposals} s={s} /> : null}
       </Stage>
     </div>
   );

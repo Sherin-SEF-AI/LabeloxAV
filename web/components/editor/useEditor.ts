@@ -9,7 +9,7 @@ import { useMemo, useReducer, useRef, type Dispatch } from "react";
 import { canNudge, translateObject } from "@/lib/editor/geometry";
 import { actionAllowed } from "@/lib/editor/readOnly";
 
-export type Tool = "select" | "box" | "amodal" | "polygon" | "polyline" | "adverse" | "cuboid" | "keypoint" | "measure" | "sam-point" | "sam-box" | "magic-wand" | "brush" | "eraser" | "superpixel";
+export type Tool = "select" | "box" | "amodal" | "polygon" | "polyline" | "adverse" | "cuboid" | "keypoint" | "measure" | "sam-point" | "sam-box" | "magic-wand" | "track-mask" | "brush" | "eraser" | "superpixel";
 
 export type EdObject = {
   id: string; // server object_id, or "tmp-N" for locally-created

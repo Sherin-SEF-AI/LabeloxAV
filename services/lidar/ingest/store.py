@@ -26,7 +26,12 @@ async def store_cloud(cloud: Cloud, session_id: uuid.UUID, source: str | None = 
     cfg = get_settings()
     store = store or get_object_store()
     store.ensure_bucket()
-    uri = store.put_bytes(f"{cfg.lidar.cloud_prefix}/{session_id}/{cloud.ts_ns}.npz",
+    src = source or cloud.source
+    # A LiDAR scan keeps the original key. Anything else at the same instant (a camera lift of a LiDAR session)
+    # gets its source in the key: with session and time alone, lifting the camera frames of a LiDAR session
+    # overwrote the LiDAR scans' blobs, and both rows then read the pseudo cloud.
+    key = f"{cloud.ts_ns}.npz" if src in ("lidar", "dataset") else f"{cloud.ts_ns}.{src}.npz"
+    uri = store.put_bytes(f"{cfg.lidar.cloud_prefix}/{session_id}/{key}",
                           cloud.to_npz_bytes(), "application/octet-stream")
     async with get_sessionmaker()() as db:
         row = PointCloud(session_id=session_id, ts_ns=cloud.ts_ns, source=source or cloud.source,

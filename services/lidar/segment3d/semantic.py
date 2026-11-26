@@ -89,15 +89,70 @@ def segment_projected(cloud: Cloud, cuboids: list[dict], ground_plane: list[floa
             "classes_present": classes, "n_instances": int(len(cuboids))}
 
 
+# A 3D segmenter's class names (SemanticKITTI, nuScenes, Waymo) to this ontology, most specific first. A name
+# with no counterpart stays unlabelled rather than being forced into a wrong class.
+SEGMENTER_TO_ONTOLOGY: dict[str, tuple[str, ...]] = {
+    "car": ("vehicle_fallback", "sedan"), "truck": ("truck",), "other-vehicle": ("vehicle_fallback",),
+    "bus": ("bus",), "trailer": ("multi_axle_trailer", "truck"), "construction_vehicle": ("construction_veh",),
+    "construction-vehicle": ("construction_veh",), "bicycle": ("cycle",), "motorcycle": ("motorcycle",),
+    "person": ("pedestrian",), "pedestrian": ("pedestrian",), "bicyclist": ("cyclist", "rider"),
+    "motorcyclist": ("rider",), "road": ("road",), "driveable_surface": ("road",), "parking": ("parking_area",),
+    "sidewalk": ("sidewalk",), "other-ground": ("non_drivable_fallback",), "other_flat": ("non_drivable_fallback",),
+    "terrain": ("green_belt", "non_drivable_fallback"), "building": ("buildings",), "manmade": ("buildings",),
+    "fence": ("fence",), "barrier": ("barrier",), "vegetation": ("vegetation",), "trunk": ("tree",),
+    "pole": ("pole",), "traffic-sign": ("traffic_sign",), "traffic_cone": ("cone",),
+}
+
+
+def segmenter_class_map(names: list[str], onto: Ontology | None = None) -> np.ndarray:
+    """Index i of a segmenter's class list -> ontology id (or BACKGROUND)."""
+    onto = onto or get_ontology()
+    out = np.full(len(names), BACKGROUND, dtype=np.int32)
+    for i, name in enumerate(names):
+        for cand in SEGMENTER_TO_ONTOLOGY.get(name.lower(), ()):
+            try:
+                out[i] = onto.by_name(cand).id
+                break
+            except Exception:  # noqa: BLE001 - try the next candidate
+                continue
+    return out
+
+
 def segment_ptv3(cloud: Cloud, ckpt: str | None = None) -> dict:
-    """PTv3 semantic segmentation via Pointcept. Requires the framework on the burst node; raises the seam
-    locally."""
-    cfg = get_settings().lidar
-    ckpt = ckpt or cfg.segmenter_ckpt
+    """PTv3 semantic segmentation on the local GPU, when the model is installed (segment3d/ptv3_infer.py,
+    weights under models/ptv3/). Raises SegmentationUnavailable with the reason when it is not, so the caller
+    falls back to the projected segmentation and says why."""
     try:
-        import pointcept  # noqa: F401
+        from services.lidar.segment3d import ptv3_infer
     except Exception as exc:
         raise SegmentationUnavailable(
-            f"PTv3 segmentation ({ckpt}) needs Pointcept on the A100 burst node. Run via the lidar_perception "
-            "job; the local worker will not execute it.") from exc
-    raise SegmentationUnavailable("Pointcept present but the inference wrapper runs on the burst node only.")
+            "PTv3 is not installed on this machine (services/lidar/segment3d/ptv3_infer.py is absent or does "
+            f"not import: {exc})") from exc
+    ok, reason = ptv3_infer.available()
+    if not ok:
+        raise SegmentationUnavailable(f"PTv3 unavailable: {reason}")
+    if cloud.n < 64:
+        # serialisation and pooling need a real scan; a handful of points is not one
+        raise SegmentationUnavailable(f"PTv3 needs a real scan; this cloud has {cloud.n} points")
+    cfg = get_settings().lidar
+    strength = None if cloud.intensity is None else np.asarray(cloud.intensity, dtype=np.float32)
+    # The checkpoint was trained on nuScenes, whose intensity/255 runs far darker than KITTI reflectance
+    # (medians ~0.05 vs ~0.27); a bright cloud is scaled down to the training range (ptv3_infer docstring).
+    scale = 0.3 if strength is not None and cloud.n and float(np.median(strength)) > 0.15 else 1.0
+    # Absolute z is a feature: a cloud in a ground-origin ego frame (pseudo-LiDAR) is moved to sensor height.
+    z_shift = 0.0 if cloud.frame in ("kitti_velo", "nuscenes_lidar", "sensor", "velodyne") else -1.8
+    res = ptv3_infer.infer(np.asarray(cloud.xyz, dtype=np.float32), strength, z_shift=z_shift,
+                           strength_scale=scale)
+    names = list(res["class_names"])
+    lut = segmenter_class_map(names)
+    raw = np.asarray(res["labels"], dtype=np.int64)
+    valid = (raw >= 0) & (raw < len(lut))
+    semantic = np.full(cloud.n, BACKGROUND, dtype=np.int32)
+    semantic[valid] = lut[raw[valid]]
+    conf = np.asarray(res["conf"], dtype=np.float32)
+    low = float((conf < cfg.seg_low_conf).mean()) if cloud.n else 0.0
+    present = sorted({int(x) for x in np.unique(semantic) if x != BACKGROUND})
+    return {"semantic": semantic, "instance": np.full(cloud.n, BACKGROUND, dtype=np.int32), "conf": conf,
+            "low_conf_frac": low, "classes_present": present, "n_instances": 0,
+            "raw_labels": raw.astype(np.int32), "class_names": names,
+            "checkpoint": str(res.get("checkpoint") or ckpt or cfg.segmenter_ckpt)}

@@ -66,6 +66,8 @@ import { bannerFor } from "@/lib/editor/presence";
 import { canvasMenuAllowed, effectiveTool, menuEventAllowed, readOnlyNotice } from "@/lib/editor/readOnly";
 import { usePresence } from "@/lib/editor/usePresence";
 import { PresenceAvatars, ReadOnlyBanner } from "@/components/editor/PresenceBar";
+import { useVideoTools } from "@/components/editor/videoTools/useVideoTools";
+import VideoToolsLayer from "@/components/editor/videoTools/VideoToolsLayer";
 
 // Frame-centric professional annotation editor. Pan/zoom canvas, draw + edit boxes, SAM-assisted masks,
 // layers panel, class palette, attributes, keyboard-driven, batched save. Operational Materialism tokens.
@@ -461,6 +463,14 @@ export default function FrameEditor() {
     if (linkFrom && oid && oid !== linkFrom) { relate(oid); return; }
     dispatch({ t: "select", id: oid });
   };
+  // Track mask (SAM 2 video), Describe, and Sweep with its correction fan-out (components/editor/videoTools).
+  // The arrows are called after render, by which time refreshObjects below exists.
+  const vt = useVideoTools({
+    frameId: id, sessionId: meta?.session_id ?? null, className: currentClass?.name ?? null, selected,
+    objects: st.objects, refresh: () => refreshObjects(), select: (oid) => doSelect(oid), viewOnly,
+    onSweepStart: () => switchMode("review"),
+  });
+  const { sweepOn, sweepAfter, offerFanout } = vt;
   const delRelationship = async (rid: string) => {
     if (viewOnly()) return;
     await api.deleteRelationship(rid).catch(() => {});
@@ -755,7 +765,8 @@ export default function FrameEditor() {
       // Only review mode walks the value queue. Anywhere else the reviewer picked this object themselves,
       // from the canvas menu, and advancing sent them to whichever frame the queue ranked next, away from
       // the frame they were checking, or announced "review queue complete" for a queue they never opened.
-      if (mode === "review") advanceReview(o.id);
+      if (vt.sweepOn) vt.sweepAfter(o.id);
+      else if (mode === "review") advanceReview(o.id);
     } catch (e) { flash("review failed: " + humanizeError(e)); }
   };
   // Move to the next value-queue item (excluding the one just handled): select it if it is on this frame,
@@ -823,10 +834,12 @@ export default function FrameEditor() {
       // picker, and the 700ms autosave debounce is what collapses a burst of them into one decision.
       if (!selected.isNew && c.name !== old) {
         classChangedRef.current.set(selected.id, old);
-        recordCorrection(selected.id, "class", old, c.name);
+        // In a sweep the fan-out card offers the look-alikes along with the track, as one batch.
+        if (!sweepOn) recordCorrection(selected.id, "class", old, c.name);
       }
+      if (sweepOn) sweepAfter(selected.id);
     },
-    [selected, dispatch, recordCorrection, viewOnly],
+    [selected, dispatch, recordCorrection, viewOnly, sweepOn, sweepAfter],
   );
 
   // create a new custom class on the fly, then apply it (to the selected object, or as the new-object class)
@@ -1004,6 +1017,12 @@ export default function FrameEditor() {
       pending.delete(oid);
       const o = objs.find((x) => x.id === oid);
       if (!o) continue;
+      // A correction made in a sweep is offered to the track, the look-alikes and the same model confusion
+      // together, applied as one undoable batch, instead of travelling down the track on its own.
+      if (sweepOn && wasClass !== o.class_name) {
+        void offerFanout({ objectId: oid, from: wasClass, to: o.class_name });
+        continue;
+      }
       if (!shouldPropagate(o, wasClass, o.class_name)) {
         // Silence is what the original complaint was, so an untracked object says why nothing travelled
         // rather than looking identical to a working propagation.
@@ -1035,7 +1054,7 @@ export default function FrameEditor() {
         toast(`the class change did not reach the rest of the track: ${humanizeError(e)}`, "error");
       }
     }
-  }, [loadLayers]);
+  }, [loadLayers, sweepOn, offerFanout]);
 
   const save = useCallback(async () => {
     if (!dirty || savingRef.current) return;
@@ -1527,6 +1546,7 @@ export default function FrameEditor() {
   // with, and lib/editor/keymap.test.ts fails if this list and ACTIONS ever differ:
   //   k === "a" confirmFrame, reviewAccept     k === "x" reviewReject     k === "f" fit
   //   k === "h" toggleHelmets                  k === "o" bumpOccupants
+  //   k === "y" sweep                          k === "n" sweepSkip       (and "/" describe)
   const runKeyAction = (action: string) => {
     switch (action) {
       case "confirmFrame": confirmFrame(false); return;
@@ -1536,6 +1556,9 @@ export default function FrameEditor() {
       case "toggleHelmets": toggleHelmets(); return;
       case "bumpOccupants": bumpOccupants(); return;
       case "fit": fit(); return;
+      case "describe": vt.openDescribe(); return;
+      case "sweep": vt.toggleSweep(); return;
+      case "sweepSkip": vt.sweepSkip(); return;
     }
   };
   const runKey = (intent: Exclude<KeyIntent, { t: "pan" }>) => {
@@ -1808,6 +1831,8 @@ export default function FrameEditor() {
         onUpdateMask={onCanvasUpdateMask}
         onCursor={publishCursor}
         onImageLoad={setLoadedImage}
+        onTrackPoint={vt.onTrackPoint}
+        proposals={vt.canvasProposals}
       />
     </CanvasErrorBoundary>
   );
@@ -2120,6 +2145,11 @@ export default function FrameEditor() {
                   className="btn w-full mt-1">Auto-segment</button>
               </>
             } />}
+          {(mode === "objects" || mode === "review") && !rigView && (
+            <VideoToolsLayer vt={vt} mode={mode} tool={st.tool} frameId={id}
+              classes={pickOnto?.classes ?? onto.classes} onGoto={(fid) => void gotoFrame(fid)}
+              onTool={(t) => dispatch({ t: "tool", tool: t as Tool })} keyOf={keyOf} />
+          )}
           {/* Review mode: a quiet bottom-center action bar so the reviewer accepts/rejects without leaving the canvas */}
           {mode === "review" && selected && (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 panel px-3 py-1.5 flex items-center gap-3 text-[12px]">
@@ -2127,7 +2157,7 @@ export default function FrameEditor() {
               <ConfBar conf={selected.conf} />
               <button onClick={() => reviewObject("accept")} className="border border-pass text-pass px-2 py-0.5 hover:bg-pass/10">accept ({keyOf("action:reviewAccept")})</button>
               <button onClick={() => reviewObject("reject")} className="border border-block text-block px-2 py-0.5 hover:bg-block/10">reject ({keyOf("action:reviewReject")})</button>
-              <button onClick={() => advanceReview(selected.id)} className="text-ink-3 hover:text-ink">skip</button>
+              <button onClick={() => (vt.sweepOn ? vt.sweepSkip() : advanceReview(selected.id))} className="text-ink-3 hover:text-ink">skip</button>
             </div>
           )}
           {/* Rewritten because the behaviour changed. Clicking again used to commit this mask and start

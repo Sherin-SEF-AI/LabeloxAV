@@ -53,3 +53,6 @@ demos/
 # Debian package build tree and output (scripts/build_deb.sh). The .deb is a release asset, not source.
 .build/
 dist/
+
+# PTv3 point-segmentation code checkout and weights (downloaded; see services/lidar/segment3d/ptv3_infer.py)
+models/ptv3/

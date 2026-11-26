@@ -105,6 +105,7 @@ describe("keys while view-only", () => {
     { t: "samUndo" }, { t: "tool", tool: "box" }, { t: "tool", tool: "polygon" }, { t: "tool", tool: "brush" },
     { t: "action", id: "confirmFrame" }, { t: "action", id: "reviewAccept" }, { t: "action", id: "reviewReject" },
     { t: "action", id: "toggleHelmets" }, { t: "action", id: "bumpOccupants" },
+    { t: "action", id: "describe" }, { t: "action", id: "sweep" }, { t: "action", id: "sweepSkip" },
   ];
 
   it("keeps looking, selecting, copying and moving between frames", () => {

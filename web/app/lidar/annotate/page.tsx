@@ -18,6 +18,7 @@ import Inspector from "@/components/shell/Inspector";
 import { StateBadge } from "@/components/StateBadge";
 import SessionPicker from "@/components/lidar/SessionPicker";
 import EmptyState from "@/components/ui/EmptyState";
+import { Segmented } from "@/components/ui/kit";
 import { fromNs, humanize, num, shortId } from "@/lib/format";
 
 // Ontology class names read as words ("two wheeler") but keep their case: "suv" is not "Suv".
@@ -25,6 +26,8 @@ const classLabel = (n: string | null | undefined) => (n ?? "").replace(/_/g, " "
 
 const PointCloudViewer = dynamic(() => import("@/components/lidar/PointCloudViewer"), { ssr: false });
 const EgoTrajectoryPlot = dynamic(() => import("@/components/lidar/EgoTrajectory"), { ssr: false });
+// #3 label once in 3D: a cuboid drawn once in the session scene, put on every scan and camera (own workspace).
+const LabelOnceWorkspace = dynamic(() => import("@/components/lidar/LabelOnceWorkspace"), { ssr: false });
 
 const DEFAULT_DIMS: Record<string, number[]> = {
   sedan: [4.2, 1.8, 1.5], suv: [4.6, 1.9, 1.7], truck: [7.0, 2.5, 3.0], bus: [11.0, 2.6, 3.2],
@@ -47,6 +50,7 @@ export default function CuboidAnnotatePage() {
   const [grids, setGrids] = useState<OccupancyGridRow[]>([]);
   const [occ, setOcc] = useState<OccupancyVoxels | null>(null);
   const [gridIdx, setGridIdx] = useState(0);
+  const [mode, setMode] = useState<"scan" | "once">("scan");
 
   useEffect(() => {
     api.ontology().then((o) => setClasses(o.classes)).catch(() => {});
@@ -208,7 +212,15 @@ export default function CuboidAnnotatePage() {
   };
 
   return (
-    <PageShell active="CUBOID ANNOTATE" title="Cuboid annotation">
+    <PageShell active="CUBOID ANNOTATE" title="Cuboid annotation"
+      right={<Segmented options={[{ value: "scan", label: "Cuboids on a scan" },
+        { value: "once", label: "Label once in 3D", tip: "draw one cuboid in the whole session's scene; it lands on every scan and camera" }]}
+        value={mode} onChange={(v) => setMode(v as "scan" | "once")} />}>
+      {mode === "once" ? (
+        <div data-theme="dark" className="flex h-full bg-[#0a0e14] text-ink">
+          <LabelOnceWorkspace sessionId={sessionId} classes={classes} />
+        </div>
+      ) : (
       <div data-theme="dark" className="flex h-full bg-[#0a0e14] text-ink">
         <Inspector title="Cuboids" side="left" width="w-80">
           <div className="flex flex-col gap-3 p-4">
@@ -400,6 +412,7 @@ export default function CuboidAnnotatePage() {
         </div>
       </main>
       </div>
+      )}
     </PageShell>
   );
 }
