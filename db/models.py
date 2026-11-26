@@ -1861,7 +1861,10 @@ class CameraCalibration(Base):
     quality: Mapped[float] = mapped_column(Float, nullable=False, default=0.3)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_camera_calibration_session_cam", "session_id", "cam_id", unique=True),)
+    __table_args__ = (Index("ix_camera_calibration_session_cam", "session_id", "cam_id", unique=True,
+                            postgresql_where=sql_text("source <> 'manual'")),
+                      Index("ix_camera_calibration_session_cam_manual", "session_id", "cam_id", unique=True,
+                            postgresql_where=sql_text("source = 'manual'")))  # 0131: a manual alignment sits beside
 
 
 class TimelineEvent(Base):
@@ -2473,6 +2476,7 @@ class OccupancyGrid(Base):
         UniqueConstraint("session_id", "ts_ns", "source", name="uq_occupancy_session_ts_source"),
         Index("ix_occupancy_session_ts", "session_id", "ts_ns"),
         Index("ix_occupancy_frame", "frame_id"),
+        Index("ix_occupancy_edited_by", "edited_by"),
     )
 
 
@@ -2601,7 +2605,9 @@ class PointSegmentation(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))  # 0128
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_point_segmentation_cloud", "cloud_id"),)
+    __table_args__ = (Index("ix_point_segmentation_cloud", "cloud_id"),
+                      Index("ix_point_segmentation_base_seg", "base_seg_id"),
+                      Index("ix_point_segmentation_created_by", "created_by"))
 
 
 # ---- LiDAR module Phase 3 (3D scene intelligence + export) ----

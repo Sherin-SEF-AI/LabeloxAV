@@ -3538,6 +3538,71 @@ class LabeloxClient:
         return self._call("GET", f"/api/system/resources",
                           params=None, json_body=None)
 
+    def get_tools_agents_autopilot(self) -> Any:
+        """Autopilot Status"""
+        return self._call("GET", f"/api/tools/agents/autopilot",
+                          params=None, json_body=None)
+
+    def post_tools_agents_autopilot_dry_run(self) -> Any:
+        """Autopilot Dry Run"""
+        return self._call("POST", f"/api/tools/agents/autopilot/dry-run",
+                          params=None, json_body=None)
+
+    def post_tools_agents_autopilot_kill(self, body: Any = None) -> Any:
+        """Autopilot Kill"""
+        return self._call("POST", f"/api/tools/agents/autopilot/kill",
+                          params=None, json_body=body)
+
+    def get_tools_agents_autopilot_nights(self, limit: int | None = 30, dry_runs: bool | None = True) -> Any:
+        """Autopilot Nights"""
+        return self._call("GET", f"/api/tools/agents/autopilot/nights",
+                          params={"limit": limit, "dry_runs": dry_runs}, json_body=None)
+
+    def get_tools_agents_autopilot_nights_by_night_id(self, night_id: str) -> Any:
+        """Autopilot Night"""
+        return self._call("GET", f"/api/tools/agents/autopilot/nights/{night_id}",
+                          params=None, json_body=None)
+
+    def post_tools_agents_autopilot_rearm(self) -> Any:
+        """Autopilot Rearm"""
+        return self._call("POST", f"/api/tools/agents/autopilot/rearm",
+                          params=None, json_body=None)
+
+    def post_tools_agents_autopilot_run_now(self) -> Any:
+        """Autopilot Run Now"""
+        return self._call("POST", f"/api/tools/agents/autopilot/run-now",
+                          params=None, json_body=None)
+
+    def put_tools_agents_autopilot_settings(self, body: Any = None) -> Any:
+        """Autopilot Settings"""
+        return self._call("PUT", f"/api/tools/agents/autopilot/settings",
+                          params=None, json_body=body)
+
+    def post_tools_agents_edit_preview(self, body: Any = None) -> Any:
+        """Edit Preview"""
+        return self._call("POST", f"/api/tools/agents/edit/preview",
+                          params=None, json_body=body)
+
+    def get_tools_agents_edit_proposals(self, limit: int | None = 20) -> Any:
+        """Edit Proposals"""
+        return self._call("GET", f"/api/tools/agents/edit/proposals",
+                          params={"limit": limit}, json_body=None)
+
+    def get_tools_agents_edit_proposals_by_proposal_id(self, proposal_id: str) -> Any:
+        """Edit Proposal"""
+        return self._call("GET", f"/api/tools/agents/edit/proposals/{proposal_id}",
+                          params=None, json_body=None)
+
+    def post_tools_agents_edit_proposals_by_proposal_id_revert(self, proposal_id: str) -> Any:
+        """Edit Revert"""
+        return self._call("POST", f"/api/tools/agents/edit/proposals/{proposal_id}/revert",
+                          params=None, json_body=None)
+
+    def post_tools_agents_edit_propose(self, body: Any = None) -> Any:
+        """Edit Propose"""
+        return self._call("POST", f"/api/tools/agents/edit/propose",
+                          params=None, json_body=body)
+
     def get_tools_jobs(self, kind: Any | None = None, session_id: Any | None = None, limit: int | None = 20) -> Any:
         """List Tool Jobs"""
         return self._call("GET", f"/api/tools/jobs",
@@ -3552,6 +3617,146 @@ class LabeloxClient:
         """Cancel Tool Job"""
         return self._call("POST", f"/api/tools/jobs/{job_id}/cancel",
                           params=None, json_body=None)
+
+    def post_tools_scene3d_clouds_by_cloud_id_assist_ai(self, cloud_id: str) -> Any:
+        """Assist Ai"""
+        return self._call("POST", f"/api/tools/scene3d/clouds/{cloud_id}/assist/ai",
+                          params=None, json_body=None)
+
+    def post_tools_scene3d_clouds_by_cloud_id_assist_cluster(self, cloud_id: str, body: Any = None, stride: int | None = 1) -> Any:
+        """Assist Cluster"""
+        return self._call("POST", f"/api/tools/scene3d/clouds/{cloud_id}/assist/cluster",
+                          params={"stride": stride}, json_body=body)
+
+    def post_tools_scene3d_clouds_by_cloud_id_assist_from_2d(self, cloud_id: str, stride: int | None = 1) -> Any:
+        """Assist From 2D"""
+        return self._call("POST", f"/api/tools/scene3d/clouds/{cloud_id}/assist/from-2d",
+                          params={"stride": stride}, json_body=None)
+
+    def post_tools_scene3d_clouds_by_cloud_id_assist_from_cuboids(self, cloud_id: str, stride: int | None = 1) -> Any:
+        """Assist From Cuboids"""
+        return self._call("POST", f"/api/tools/scene3d/clouds/{cloud_id}/assist/from-cuboids",
+                          params={"stride": stride}, json_body=None)
+
+    def post_tools_scene3d_clouds_by_cloud_id_assist_ground(self, cloud_id: str, stride: int | None = 1) -> Any:
+        """Assist Ground"""
+        return self._call("POST", f"/api/tools/scene3d/clouds/{cloud_id}/assist/ground",
+                          params={"stride": stride}, json_body=None)
+
+    def get_tools_scene3d_clouds_by_cloud_id_labels(self, cloud_id: str, stride: int | None = 1, seg_id: Any | None = None) -> Any:
+        """Seg Labels"""
+        return self._call("GET", f"/api/tools/scene3d/clouds/{cloud_id}/labels",
+                          params={"stride": stride, "seg_id": seg_id}, json_body=None)
+
+    def put_tools_scene3d_clouds_by_cloud_id_labels(self, cloud_id: str, stride: int, base_seg_id: Any | None = None) -> Any:
+        """Seg Save"""
+        return self._call("PUT", f"/api/tools/scene3d/clouds/{cloud_id}/labels",
+                          params={"stride": stride, "base_seg_id": base_seg_id}, json_body=None)
+
+    def get_tools_scene3d_clouds_by_cloud_id_points(self, cloud_id: str, max: int | None = 400000) -> Any:
+        """Seg Points"""
+        return self._call("GET", f"/api/tools/scene3d/clouds/{cloud_id}/points",
+                          params={"max": max}, json_body=None)
+
+    def get_tools_scene3d_clouds_by_cloud_id_segmentations(self, cloud_id: str) -> Any:
+        """Seg Versions"""
+        return self._call("GET", f"/api/tools/scene3d/clouds/{cloud_id}/segmentations",
+                          params=None, json_body=None)
+
+    def get_tools_scene3d_occupancy_by_grid_id(self, grid_id: str) -> Any:
+        """Occ Get"""
+        return self._call("GET", f"/api/tools/scene3d/occupancy/{grid_id}",
+                          params=None, json_body=None)
+
+    def post_tools_scene3d_occupancy_by_grid_id_edit(self, grid_id: str, body: Any = None) -> Any:
+        """Occ Edit"""
+        return self._call("POST", f"/api/tools/scene3d/occupancy/{grid_id}/edit",
+                          params=None, json_body=body)
+
+    def post_tools_scene3d_occupancy_by_grid_id_propagate(self, grid_id: str, body: Any = None) -> Any:
+        """Occ Propagate"""
+        return self._call("POST", f"/api/tools/scene3d/occupancy/{grid_id}/propagate",
+                          params=None, json_body=body)
+
+    def get_tools_scene3d_ptv3_status(self) -> Any:
+        """Ptv3 Status"""
+        return self._call("GET", f"/api/tools/scene3d/ptv3/status",
+                          params=None, json_body=None)
+
+    def get_tools_scene3d_sessions_by_session_id_label_once(self, session_id: str) -> Any:
+        """Label Once Tracks"""
+        return self._call("GET", f"/api/tools/scene3d/sessions/{session_id}/label-once",
+                          params=None, json_body=None)
+
+    def post_tools_scene3d_sessions_by_session_id_label_once(self, session_id: str, body: Any = None) -> Any:
+        """Label Once"""
+        return self._call("POST", f"/api/tools/scene3d/sessions/{session_id}/label-once",
+                          params=None, json_body=body)
+
+    def get_tools_scene3d_sessions_by_session_id_occupancy(self, session_id: str) -> Any:
+        """Occ List"""
+        return self._call("GET", f"/api/tools/scene3d/sessions/{session_id}/occupancy",
+                          params=None, json_body=None)
+
+    def post_tools_scene3d_sessions_by_session_id_occupancy_build(self, session_id: str, body: Any = None) -> Any:
+        """Occ Build"""
+        return self._call("POST", f"/api/tools/scene3d/sessions/{session_id}/occupancy/build",
+                          params=None, json_body=body)
+
+    def get_tools_scene3d_sessions_by_session_id_overview(self, session_id: str) -> Any:
+        """Overview"""
+        return self._call("GET", f"/api/tools/scene3d/sessions/{session_id}/overview",
+                          params=None, json_body=None)
+
+    def get_tools_scene3d_sessions_by_session_id_scene_points(self, session_id: str, every: int | None = 10, max: int | None = 600000, range_m: float | None = 40.0) -> Any:
+        """Scene Points"""
+        return self._call("GET", f"/api/tools/scene3d/sessions/{session_id}/scene/points",
+                          params={"every": every, "max": max, "range_m": range_m}, json_body=None)
+
+    def get_tools_scene3d_sessions_by_session_id_scene_poses(self, session_id: str) -> Any:
+        """Scene Poses"""
+        return self._call("GET", f"/api/tools/scene3d/sessions/{session_id}/scene/poses",
+                          params=None, json_body=None)
+
+    def get_tools_scene3d_tracks3d_by_track_3d_id_review(self, track_3d_id: str) -> Any:
+        """Track Review"""
+        return self._call("GET", f"/api/tools/scene3d/tracks3d/{track_3d_id}/review",
+                          params=None, json_body=None)
+
+    def post_tools_scene3d_tracks3d_by_track_3d_id_review(self, track_3d_id: str, body: Any = None) -> Any:
+        """Track Review Apply"""
+        return self._call("POST", f"/api/tools/scene3d/tracks3d/{track_3d_id}/review",
+                          params=None, json_body=body)
+
+    def post_tools_video_describe_session(self, body: Any = None) -> Any:
+        """Describe Session"""
+        return self._call("POST", f"/api/tools/video/describe/session",
+                          params=None, json_body=body)
+
+    def post_tools_video_fanout_apply(self, body: Any = None) -> Any:
+        """Fanout Apply"""
+        return self._call("POST", f"/api/tools/video/fanout/apply",
+                          params=None, json_body=body)
+
+    def post_tools_video_fanout_preview(self, body: Any = None) -> Any:
+        """Fanout Preview"""
+        return self._call("POST", f"/api/tools/video/fanout/preview",
+                          params=None, json_body=body)
+
+    def post_tools_video_fanout_by_run_id_undo(self, run_id: str) -> Any:
+        """Fanout Undo"""
+        return self._call("POST", f"/api/tools/video/fanout/{run_id}/undo",
+                          params=None, json_body=None)
+
+    def post_tools_video_frames_by_frame_id_describe_accept(self, frame_id: str, body: Any = None) -> Any:
+        """Describe Accept"""
+        return self._call("POST", f"/api/tools/video/frames/{frame_id}/describe/accept",
+                          params=None, json_body=body)
+
+    def post_tools_video_track(self, body: Any = None) -> Any:
+        """Track Mask"""
+        return self._call("POST", f"/api/tools/video/track",
+                          params=None, json_body=body)
 
     def delete_track_events_by_event_id(self, event_id: str) -> Any:
         """Delete Event"""
@@ -3976,4 +4181,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 778 routes generated from the server schema.
+# 819 routes generated from the server schema.

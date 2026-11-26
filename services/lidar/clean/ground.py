@@ -24,8 +24,26 @@ def _ransac_ground(xyz: np.ndarray, dist_thresh: float, max_iter: int) -> tuple[
 
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(xyz.astype(np.float64))
+    # Seeded: the same cloud gives the same ground every time. A person clicking "ground" twice, and the test
+    # that checks it, must not get two different answers from RANSAC's random draws.
+    o3d.utility.random.seed(0)
     model, inliers = pcd.segment_plane(distance_threshold=dist_thresh, ransac_n=3, num_iterations=max_iter)
     a, b, c, d = model
+    # Refit by least squares on the RANSAC inliers, then re-select inliers against the refined plane. A plane
+    # through three random points is tilted by their noise; over a wide scan that tilt lifts the band far
+    # from the sensor until the bottoms of cars count as road. The refit is the plane all the inliers agree on.
+    idx = np.asarray(inliers, dtype=int)
+    if idx.size >= 3:
+        pts = xyz[idx].astype(np.float64)
+        centroid = pts.mean(axis=0)
+        _, _, vt = np.linalg.svd(pts - centroid, full_matrices=False)
+        n = vt[-1]
+        if n[2] < 0:
+            n = -n
+        a, b, c = (float(v) for v in n)
+        d = float(-n @ centroid)
+        dist = np.abs(xyz.astype(np.float64) @ n + d)
+        inliers = np.nonzero(dist <= dist_thresh)[0]
     normal = np.array([a, b, c], dtype=np.float64)
     norm = np.linalg.norm(normal) or 1.0
     verticality = abs(normal[2]) / norm   # 1.0 = perfectly horizontal plane (vertical normal)

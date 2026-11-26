@@ -52,6 +52,8 @@ class AutopilotConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(),
                                                  onupdate=func.now())
 
+    __table_args__ = (Index("ix_autopilot_config_updated_by", "updated_by"),)
+
 
 class AutopilotNight(Base):
     """One night the autopilot ran, or a dry run of one: the plan, the morning report, the GPU time used."""

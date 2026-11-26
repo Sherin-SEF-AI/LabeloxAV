@@ -65,12 +65,14 @@ def upgrade() -> None:
     )
     op.create_index("ix_autopilot_night_created", "autopilot_night", ["created_at"])
     op.create_index("ix_autopilot_night_created_by", "autopilot_night", ["created_by"])
+    op.create_index("ix_autopilot_config_updated_by", "autopilot_config", ["updated_by"])
     op.create_index("uq_autopilot_night_real", "autopilot_night", ["night_date"], unique=True,
                     postgresql_where=sa.text("dry_run = false"))
 
 
 def downgrade() -> None:
     op.drop_index("uq_autopilot_night_real", table_name="autopilot_night")
+    op.drop_index("ix_autopilot_config_updated_by", table_name="autopilot_config")
     op.drop_index("ix_autopilot_night_created_by", table_name="autopilot_night")
     op.drop_index("ix_autopilot_night_created", table_name="autopilot_night")
     op.drop_table("autopilot_night")

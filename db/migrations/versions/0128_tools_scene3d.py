@@ -49,9 +49,15 @@ def upgrade() -> None:
     op.create_check_constraint("ck_occupancy_human_has_base", "occupancy_grid",
                                "(source = 'human') = (base_grid_id is not null)")
     op.create_index("ix_occupancy_base_grid", "occupancy_grid", ["base_grid_id"])
+    op.create_index("ix_occupancy_edited_by", "occupancy_grid", ["edited_by"])
+    op.create_index("ix_point_segmentation_base_seg", "point_segmentation", ["base_seg_id"])
+    op.create_index("ix_point_segmentation_created_by", "point_segmentation", ["created_by"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_point_segmentation_created_by", table_name="point_segmentation")
+    op.drop_index("ix_point_segmentation_base_seg", table_name="point_segmentation")
+    op.drop_index("ix_occupancy_edited_by", table_name="occupancy_grid")
     op.drop_index("ix_occupancy_base_grid", table_name="occupancy_grid")
     op.drop_constraint("ck_occupancy_human_has_base", "occupancy_grid", type_="check")
     # Human edit layers cannot exist under the old source check; they go with the columns that describe them.

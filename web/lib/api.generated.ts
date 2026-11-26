@@ -313,6 +313,12 @@ export type CliqueRewardIn = {
   recall_after?: number | null;
 };
 
+export type ClusterIn = {
+  point: number[];
+  eps?: number;
+  min_points?: number;
+};
+
 export type CodeIn = {
   code: string;
   mfa_handle?: string | null;
@@ -495,10 +501,26 @@ export type DatasheetIn = {
   title?: string | null;
 };
 
+export type DescribeAcceptIn = {
+  phrase: string;
+  class_name: string;
+  proposals: ProposalIn[];
+};
+
 export type DescribeIn = {
   phrase: string;
   class_id?: number | null;
   max_proposals?: number | null;
+};
+
+export type DescribeSessionIn = {
+  session_id: string;
+  phrase: string;
+  class_name: string;
+  min_conf?: number | null;
+  cam_id?: string | null;
+  max_frames?: number | null;
+  dry_run?: boolean;
 };
 
 export type DetectIn = {
@@ -551,6 +573,11 @@ export type DrivingEventIn = {
   track_id?: string | null;
   frame_id?: string | null;
   payload?: Record<string, unknown>;
+};
+
+export type EditIn = {
+  command: string;
+  session_id?: string | null;
 };
 
 export type EfficiencyIn = {
@@ -637,6 +664,24 @@ export type ExternalRunIn = {
   gold_id?: string | null;
   code_sha?: string;
   params?: Record<string, unknown> | null;
+};
+
+export type FanoutApplyIn = {
+  object_id: string;
+  to_class: string;
+  track_object_ids?: string[];
+  lookalike_object_ids?: string[];
+  confusion_object_ids?: string[];
+  expected_versions?: Record<string, number> | null;
+  time_spent_ms?: number;
+};
+
+export type FanoutPreviewIn = {
+  object_id: string;
+  from_class: string;
+  to_class: string;
+  threshold?: number;
+  limit?: number;
 };
 
 export type FeaturesOut = {
@@ -964,6 +1009,20 @@ export type KeyframeIn = {
   is_keyframe?: boolean;
 };
 
+export type KillIn = {
+  reason?: string;
+};
+
+export type LabelOnceIn = {
+  center: number[];
+  dims: number[];
+  yaw?: number;
+  class_id: number;
+  ground_snap?: boolean;
+  max_range_m?: number;
+  project?: boolean;
+};
+
 export type LaneIn = {
   control_points: unknown[];
   lane_type?: string;
@@ -1223,6 +1282,29 @@ export type ObjectDetail = {
   ocr_conf?: number | null;
 };
 
+export type OccBuildIn = {
+  mode?: "auto" | "lidar" | "camera";
+  every?: number;
+  limit?: number;
+};
+
+export type OccEditIn = {
+  ops: OccOp[];
+};
+
+export type OccOp = {
+  kind: "paint" | "box";
+  value: "occupied" | "free" | "reset";
+  voxels?: number[][] | null;
+  lo?: number[] | null;
+  hi?: number[] | null;
+};
+
+export type OccPropagateIn = {
+  count?: number;
+  ops?: OccOp[] | null;
+};
+
 export type OccupancyBuildIn = {
   t0?: number | null;
   t1?: number | null;
@@ -1405,6 +1487,13 @@ export type ProjectsOut = {
   projects: ProjectOut[];
 };
 
+export type PromptIn = {
+  frame_id: string;
+  points?: number[][];
+  labels?: number[];
+  box?: number[] | null;
+};
+
 export type Propagate4dIn = {
   keyframe_box: number[];
   n_frames: number;
@@ -1416,6 +1505,12 @@ export type PropagateIn = {
   span?: number;
   drift?: number;
   high?: number;
+};
+
+export type ProposalIn = {
+  bbox: number[];
+  polygons?: number[][];
+  conf?: number | null;
 };
 
 export type RadarIn = {
@@ -1695,6 +1790,15 @@ export type SetCalibIn = {
   ref_height?: number;
 };
 
+export type SettingsIn = {
+  enabled?: boolean | null;
+  gpu_minutes?: number | null;
+  max_sessions?: number | null;
+  vlm_max_checks?: number | null;
+  earliest_start_ist?: string | null;
+  steps?: Record<string, boolean> | null;
+};
+
 export type SignificanceIn = {
   champion: number[];
   challenger: number[];
@@ -1901,6 +2005,22 @@ export type TrackEventPatch = {
   notes?: string | null;
   start_frame_id?: string | null;
   end_frame_id?: string | null;
+};
+
+export type TrackIn = {
+  frame_id: string;
+  object_id?: string | null;
+  track_id?: string | null;
+  class_name?: string | null;
+  prompts?: PromptIn[];
+  before?: number;
+  after?: number;
+};
+
+export type TrackReviewIn = {
+  action: "accept" | "reject";
+  object_3d_ids?: string[] | null;
+  include_2d?: boolean;
 };
 
 /** A training job row. The four JSONB columns are passed through as stored: `counts` carries the */
@@ -5066,6 +5186,54 @@ export type Operations = {
   "GET /api/system/resources": {
     response: unknown;
   };
+  "GET /api/tools/agents/autopilot": {
+    response: unknown;
+  };
+  "POST /api/tools/agents/autopilot/dry-run": {
+    response: unknown;
+  };
+  "POST /api/tools/agents/autopilot/kill": {
+    body: KillIn;
+    response: unknown;
+  };
+  "GET /api/tools/agents/autopilot/nights": {
+    query: { limit?: number; dry_runs?: boolean };
+    response: unknown;
+  };
+  "GET /api/tools/agents/autopilot/nights/{night_id}": {
+    path: { night_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/agents/autopilot/rearm": {
+    response: unknown;
+  };
+  "POST /api/tools/agents/autopilot/run-now": {
+    response: unknown;
+  };
+  "PUT /api/tools/agents/autopilot/settings": {
+    body: SettingsIn;
+    response: unknown;
+  };
+  "POST /api/tools/agents/edit/preview": {
+    body: EditIn;
+    response: unknown;
+  };
+  "GET /api/tools/agents/edit/proposals": {
+    query: { limit?: number };
+    response: unknown;
+  };
+  "GET /api/tools/agents/edit/proposals/{proposal_id}": {
+    path: { proposal_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/agents/edit/proposals/{proposal_id}/revert": {
+    path: { proposal_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/agents/edit/propose": {
+    body: EditIn;
+    response: unknown;
+  };
   "GET /api/tools/jobs": {
     query: { kind?: string | null; session_id?: string | null; limit?: number };
     response: ToolJobOut[];
@@ -5077,6 +5245,132 @@ export type Operations = {
   "POST /api/tools/jobs/{job_id}/cancel": {
     path: { job_id: string };
     response: ToolJobOut;
+  };
+  "POST /api/tools/scene3d/clouds/{cloud_id}/assist/ai": {
+    path: { cloud_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/scene3d/clouds/{cloud_id}/assist/cluster": {
+    body: ClusterIn;
+    path: { cloud_id: string };
+    query: { stride?: number };
+    response: unknown;
+  };
+  "POST /api/tools/scene3d/clouds/{cloud_id}/assist/from-2d": {
+    path: { cloud_id: string };
+    query: { stride?: number };
+    response: unknown;
+  };
+  "POST /api/tools/scene3d/clouds/{cloud_id}/assist/from-cuboids": {
+    path: { cloud_id: string };
+    query: { stride?: number };
+    response: unknown;
+  };
+  "POST /api/tools/scene3d/clouds/{cloud_id}/assist/ground": {
+    path: { cloud_id: string };
+    query: { stride?: number };
+    response: unknown;
+  };
+  "GET /api/tools/scene3d/clouds/{cloud_id}/labels": {
+    path: { cloud_id: string };
+    query: { stride?: number; seg_id?: string | null };
+    response: unknown;
+  };
+  "PUT /api/tools/scene3d/clouds/{cloud_id}/labels": {
+    path: { cloud_id: string };
+    query: { stride: number; base_seg_id?: string | null };
+    response: unknown;
+  };
+  "GET /api/tools/scene3d/clouds/{cloud_id}/points": {
+    path: { cloud_id: string };
+    query: { max?: number };
+    response: unknown;
+  };
+  "GET /api/tools/scene3d/clouds/{cloud_id}/segmentations": {
+    path: { cloud_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/scene3d/occupancy/{grid_id}": {
+    path: { grid_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/scene3d/occupancy/{grid_id}/edit": {
+    body: OccEditIn;
+    path: { grid_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/scene3d/occupancy/{grid_id}/propagate": {
+    body: OccPropagateIn;
+    path: { grid_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/scene3d/ptv3/status": {
+    response: unknown;
+  };
+  "GET /api/tools/scene3d/sessions/{session_id}/label-once": {
+    path: { session_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/scene3d/sessions/{session_id}/label-once": {
+    body: LabelOnceIn;
+    path: { session_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/scene3d/sessions/{session_id}/occupancy": {
+    path: { session_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/scene3d/sessions/{session_id}/occupancy/build": {
+    body: OccBuildIn;
+    path: { session_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/scene3d/sessions/{session_id}/overview": {
+    path: { session_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/scene3d/sessions/{session_id}/scene/points": {
+    path: { session_id: string };
+    query: { every?: number; max?: number; range_m?: number };
+    response: unknown;
+  };
+  "GET /api/tools/scene3d/sessions/{session_id}/scene/poses": {
+    path: { session_id: string };
+    response: unknown;
+  };
+  "GET /api/tools/scene3d/tracks3d/{track_3d_id}/review": {
+    path: { track_3d_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/scene3d/tracks3d/{track_3d_id}/review": {
+    body: TrackReviewIn;
+    path: { track_3d_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/video/describe/session": {
+    body: DescribeSessionIn;
+    response: unknown;
+  };
+  "POST /api/tools/video/fanout/apply": {
+    body: FanoutApplyIn;
+    response: unknown;
+  };
+  "POST /api/tools/video/fanout/preview": {
+    body: FanoutPreviewIn;
+    response: unknown;
+  };
+  "POST /api/tools/video/fanout/{run_id}/undo": {
+    path: { run_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/video/frames/{frame_id}/describe/accept": {
+    body: DescribeAcceptIn;
+    path: { frame_id: string };
+    response: unknown;
+  };
+  "POST /api/tools/video/track": {
+    body: TrackIn;
+    response: unknown;
   };
   "PATCH /api/track-events/{event_id}": {
     body: TrackEventPatch;
@@ -5432,4 +5726,4 @@ export type Body<K extends keyof Operations> = Operations[K] extends { body: inf
 /** What this operation returns (`unknown` until the server declares it). */
 export type Result<K extends keyof Operations> = Operations[K]["response"];
 
-export const API_SCHEMA_STATS = { operations: 790, typedResponses: 93, schemas: 292 } as const;
+export const API_SCHEMA_STATS = { operations: 831, typedResponses: 93, schemas: 309 } as const;
