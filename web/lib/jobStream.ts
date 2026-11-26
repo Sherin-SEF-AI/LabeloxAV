@@ -167,7 +167,7 @@ export function summarizeJobs(s: JobStream | null): JobsSummary {
   if (!s) return { running, waiting: 0, connected: jobsConnected() };
   // `ingest` rides the same stream but is a progress summary rather than a list of jobs, so it has no job_id
   // to key on and is not a job for this purpose.
-  for (const kind of ["import", "autolabel", "training", "export"] as const) {
+  for (const kind of ["import", "autolabel", "training", "export", "tool"] as const) {
     for (const r of s[kind] ?? []) {
       if (ACTIVE.has(r.status)) {
         running.push({ job_id: r.job_id, kind, progress: Math.max(0, Math.min(1, r.progress ?? 0)) });

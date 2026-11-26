@@ -94,13 +94,15 @@ export type JobStream = {
   import: JobStreamRow[];
   export: JobStreamRow[];
   autolabel: JobStreamRow[];
+  // Annotation-tool jobs (services/tools/registry.py); optional so an older server still parses.
+  tool?: JobStreamRow[];
   // Ingest rides the same stream rather than getting one of its own: one connection serves every page
   // that watches work happen, instead of each opening its own.
   ingest: IngestProgress[];
   // Queued totals over every row, not over the tails above. The lists are capped at a recent window, so a
   // client counting them under-reports: 67 autolabel jobs parked for the cloud A100 are all older than the
   // ten most recent, and the top bar read "1 queued" against 68. Optional so an older server still parses.
-  waiting?: { training?: number; import?: number; export?: number; autolabel?: number };
+  waiting?: { training?: number; import?: number; export?: number; autolabel?: number; tool?: number };
 };
 
 export function useJobStream(): StreamState<JobStream> {

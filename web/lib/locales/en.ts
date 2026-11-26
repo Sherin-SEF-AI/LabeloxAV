@@ -106,6 +106,16 @@ export const EN: Dict = {
   // labelKey in lib/i18n.ts); then common buttons, LoadState, the palette, the account menu and home.
   // shell
   "shell.work": "Work",
+  "shell.consensus": "Consensus",
+  "shell.rare_scenes": "Rare scenes",
+  "shell.point_labels": "Point labels",
+  "shell.occupancy": "Occupancy",
+  "shell.paths_and_intent": "Paths and intent",
+  "shell.radar_and_events": "Radar and events",
+  "shell.camera_lidar_alignment": "Camera-LiDAR alignment",
+  "shell.autopilot": "Autopilot",
+  "shell.scene_reconstruction": "Scene reconstruction",
+  "shell.synthetic_variants": "Synthetic variants",
   "shell.home": "Home",
   "shell.my_queue": "My queue",
   "shell.review": "Review",

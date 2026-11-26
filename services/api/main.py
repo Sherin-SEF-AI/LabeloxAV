@@ -814,3 +814,19 @@ mount_optional_routers(app, set(get_settings().packs.optional))
 app.include_router(ocr.router, prefix="/api", tags=["ocr"], dependencies=PROJECT_GUARD)
 app.include_router(track_events.router, prefix="/api", tags=["tracks"], dependencies=PROJECT_GUARD)
 app.include_router(presence.router, prefix="/api", tags=["presence"], dependencies=PROJECT_GUARD)
+
+# The advanced annotation tools: one shared job-status router, then one router per tool area.
+from services.api.routers import (  # noqa: E402
+    tool_jobs,
+    tools_agents,
+    tools_driving,
+    tools_quality,
+    tools_scene3d,
+    tools_sensors,
+    tools_video,
+)
+
+for _tools_router, _tag in ((tool_jobs, "tools"), (tools_video, "tools-video"), (tools_quality, "tools-quality"),
+                            (tools_scene3d, "tools-3d"), (tools_driving, "tools-driving"),
+                            (tools_sensors, "tools-sensors"), (tools_agents, "tools-agents")):
+    app.include_router(_tools_router.router, prefix="/api", tags=[_tag], dependencies=PROJECT_GUARD)

@@ -865,6 +865,9 @@ class GovernSettings(BaseModel):
     drift_psi_breach: float = 0.2        # population-stability-index breach on embeddings / label dist
     ood_zscore: float = 3.0              # input this far from the corpus centroid defers regardless of confidence
     offhours_utc: list[int] = [18, 19, 20, 21, 22, 23, 0, 1, 2, 3]  # when the controller may burst the A100
+    # Office hours in India (IST, half-hour precise), when nothing that auto-labels may start on this box: the
+    # people using it need the GPU and the memory. "HH:MM-HH:MM"; empty turns the quiet window off.
+    quiet_hours_ist: str = "10:00-18:00"
     controller_poll_s: float = 60.0      # the autonomy daemon ticks the controller this often
     controller_lock_key: int = 816       # Postgres advisory-lock id so only one controller daemon runs
     # M18 governance: the key that signs a release redaction-proof attestation so a buyer can verify PII

@@ -83,6 +83,16 @@ export const KN: Dict = {
   // labelKey in lib/i18n.ts); then common buttons, LoadState, the palette, the account menu and home.
   // shell
   "shell.work": "ಕೆಲಸ",
+  "shell.consensus": "ಒಮ್ಮತ",
+  "shell.rare_scenes": "ಅಪರೂಪದ ದೃಶ್ಯಗಳು",
+  "shell.point_labels": "ಬಿಂದು ಲೇಬಲ್‌ಗಳು",
+  "shell.occupancy": "ಆಕ್ರಮಣ ಗ್ರಿಡ್",
+  "shell.paths_and_intent": "ಮಾರ್ಗ ಮತ್ತು ಉದ್ದೇಶ",
+  "shell.radar_and_events": "ರೇಡಾರ್ ಮತ್ತು ಈವೆಂಟ್‌ಗಳು",
+  "shell.camera_lidar_alignment": "ಕ್ಯಾಮೆರಾ-LiDAR ಹೊಂದಾಣಿಕೆ",
+  "shell.autopilot": "ಸ್ವಯಂಚಾಲಿತ ಚಾಲಕ",
+  "shell.scene_reconstruction": "ದೃಶ್ಯ ಪುನರ್ನಿರ್ಮಾಣ",
+  "shell.synthetic_variants": "ಕೃತಕ ರೂಪಾಂತರಗಳು",
   "shell.home": "ಮುಖಪುಟ",
   "shell.my_queue": "ನನ್ನ ಸಾಲು",
   "shell.review": "ಪರಿಶೀಲನೆ",

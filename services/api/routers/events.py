@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
 from core.logging import get_logger
-from db.models import AutolabelJob, ExportJob, ImportJob, TrainingJob
+from db.models import AutolabelJob, ExportJob, ImportJob, ToolJob, TrainingJob
 from db.session import get_sessionmaker
 
 log = get_logger("events")
@@ -150,7 +150,7 @@ async def _job_snapshot(db: AsyncSession) -> dict:
                         "counts": j.counts or {}, "metrics": (j.metrics or {}).get("live")}
                        for j in training]
 
-    for key, model in (("import", ImportJob), ("export", ExportJob), ("autolabel", AutolabelJob)):
+    for key, model in (("import", ImportJob), ("export", ExportJob), ("autolabel", AutolabelJob), ("tool", ToolJob)):
         rows = (await db.execute(
             select(model).order_by(model.created_at.desc()).limit(10))).scalars().all()
         out[key] = [{"job_id": str(r.job_id), "status": r.status,
@@ -166,7 +166,7 @@ async def _job_snapshot(db: AsyncSession) -> dict:
     # when there were sixty-eight. Under-reporting is worse than not reporting: it reads as a healthy system.
     waiting: dict[str, int] = {}
     for wkey, wmodel in (("training", TrainingJob), ("import", ImportJob),
-                         ("export", ExportJob), ("autolabel", AutolabelJob)):
+                         ("export", ExportJob), ("autolabel", AutolabelJob), ("tool", ToolJob)):
         waiting[wkey] = int((await db.execute(
             select(func.count()).select_from(wmodel)
             .where(wmodel.status.in_(WAITING_STATUSES)))).scalar() or 0)

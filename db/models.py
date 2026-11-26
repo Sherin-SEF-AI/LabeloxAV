@@ -3768,3 +3768,47 @@ class AssistantProposal(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("ix_assistant_proposal_status", "status", "created_at"),)
+
+
+class ToolJob(Base):
+    """Background work for the annotation tools, one table for every kind (migration 0126).
+
+    `kind` names the function registered in services/tools/registry.py; `gpu` says whether the GPU worker
+    claims it (one at a time, under the GPU slot) or the API runs it in the background.
+    """
+
+    __tablename__ = "tool_job"
+
+    job_id: Mapped[uuid.UUID] = _uuid_pk()
+    kind: Mapped[str] = mapped_column(String(48), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
+    gpu: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sql_text("false"))
+    session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    params: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=sql_text("'{}'::jsonb"))
+    result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    progress: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.user_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_tool_job_status", "status", "gpu", "created_at"),
+        Index("ix_tool_job_kind", "kind", "created_at"),
+        Index("ix_tool_job_session", "session_id"),
+    )
+
+
+# The annotation tools' own tables, one module per area so they could be built side by side without every
+# change landing in this file. Imported last: they subclass Base and may reference the classes above.
+from db.models_tools_video import *  # noqa: E402,F401,F403
+from db.models_tools_scene3d import *  # noqa: E402,F401,F403
+from db.models_tools_agents import *  # noqa: E402,F401,F403
+from db.models_tools_quality import *  # noqa: E402,F401,F403
+from db.models_tools_driving import *  # noqa: E402,F401,F403
+from db.models_tools_sensors import *  # noqa: E402,F401,F403

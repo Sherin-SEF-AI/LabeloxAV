@@ -83,6 +83,16 @@ export const HI: Dict = {
   // labelKey in lib/i18n.ts); then common buttons, LoadState, the palette, the account menu and home.
   // shell
   "shell.work": "काम",
+  "shell.consensus": "सहमति",
+  "shell.rare_scenes": "दुर्लभ दृश्य",
+  "shell.point_labels": "बिंदु लेबल",
+  "shell.occupancy": "अधिभोग",
+  "shell.paths_and_intent": "पथ और इरादा",
+  "shell.radar_and_events": "रडार और इवेंट",
+  "shell.camera_lidar_alignment": "कैमरा-LiDAR संरेखण",
+  "shell.autopilot": "ऑटोपायलट",
+  "shell.scene_reconstruction": "दृश्य पुनर्निर्माण",
+  "shell.synthetic_variants": "कृत्रिम रूपांतर",
   "shell.home": "होम",
   "shell.my_queue": "मेरी सूची",
   "shell.review": "समीक्षा",

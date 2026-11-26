@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import AutolabelJob, ExportJob, ImportJob, MapFusionJob, RelabelJob, TrainingJob
+from db.models import AutolabelJob, ExportJob, ImportJob, MapFusionJob, RelabelJob, ToolJob, TrainingJob
 from services.activity import record_activity
 from services.api.deps import ApiOut, JobOut, db_session, require_role
 from services.job_control import QUEUED_CLOUD
@@ -53,6 +53,7 @@ CANCELABLE = {
     "export": ExportJob,
     "relabel": RelabelJob,
     "map_fusion": MapFusionJob,
+    "tool": ToolJob,
 }
 
 
@@ -138,6 +139,17 @@ async def jobs(limit: Annotated[int, Query(ge=1, le=2_000)] = 100, db: AsyncSess
                     "detail": "queued for cloud A100 (champion re-inference)" if cloud and j.status == QUEUED_CLOUD
                               else (j.stage or "") + (f" {r.get('applied', '')} applied" if r.get("applied") is not None else ""),
                     "link": "/govern", "error": j.error,
+                    "created_at": _iso(j.created_at), "updated_at": _iso(j.updated_at)})
+
+    from services.tools.registry import load_kinds
+
+    kinds = load_kinds()
+    for j in (await db.execute(select(ToolJob).order_by(ToolJob.created_at.desc()).limit(limit))).scalars():
+        tk = kinds.get(j.kind)
+        out.append({"job_id": str(j.job_id), "kind": "tool", "status": j.status, "progress": j.progress,
+                    "label": tk.label if tk else j.kind,
+                    "detail": j.stage or "",
+                    "link": (j.params or {}).get("link") or "/jobs", "error": j.error,
                     "created_at": _iso(j.created_at), "updated_at": _iso(j.updated_at)})
 
     out.sort(key=lambda r: r["created_at"] or "", reverse=True)

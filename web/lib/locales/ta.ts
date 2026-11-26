@@ -83,6 +83,16 @@ export const TA: Dict = {
   // labelKey in lib/i18n.ts); then common buttons, LoadState, the palette, the account menu and home.
   // shell
   "shell.work": "பணி",
+  "shell.consensus": "ஒருமித்த கருத்து",
+  "shell.rare_scenes": "அரிய காட்சிகள்",
+  "shell.point_labels": "புள்ளி லேபிள்கள்",
+  "shell.occupancy": "இட ஆக்கிரமிப்பு",
+  "shell.paths_and_intent": "பாதை மற்றும் நோக்கம்",
+  "shell.radar_and_events": "ரேடார் மற்றும் நிகழ்வுகள்",
+  "shell.camera_lidar_alignment": "கேமரா-LiDAR சீரமைப்பு",
+  "shell.autopilot": "தானியங்கி இயக்கி",
+  "shell.scene_reconstruction": "காட்சி மறுகட்டமைப்பு",
+  "shell.synthetic_variants": "செயற்கை மாறுபாடுகள்",
   "shell.home": "முகப்பு",
   "shell.my_queue": "என் வரிசை",
   "shell.review": "மதிப்பாய்வு",

@@ -96,7 +96,7 @@ async def _lock_alive(lock_conn) -> bool:
 
 
 async def run_next() -> str | None:
-    """Claim and run one job. Returns what ran ("autolabel" / "training"), or None if both queues are empty."""
+    """Claim and run one job. Returns what ran ("autolabel" / "training" / "tool"), or None if every queue is empty."""
     from services.training.jobs import run_job_guarded
     from services.training.worker import claim_training_job, vram_preflight
 
@@ -137,6 +137,29 @@ async def run_next() -> str | None:
             log.info("gpu_worker.requeued_on_stop", kind="training", job_id=train_id)
             raise
         return "training"
+
+    # 3. annotation-tool jobs (SAM 2 video tracking, session-wide prompts, 3D propagation...). After the two
+    # long-standing queues; services/tools/registry.py skips auto-labelling kinds during office hours.
+    from services.tools.registry import claim_gpu_job
+    from services.tools.registry import run_job as run_tool_job
+
+    async with get_sessionmaker()() as db:
+        tool_id = await claim_gpu_job(db)
+    if tool_id is not None:
+        log.info("gpu_worker.claimed", kind="tool", job_id=str(tool_id))
+        task = asyncio.ensure_future(run_tool_job(tool_id))
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+            from services.tools.registry import requeue_orphans as requeue_tool_orphans
+
+            async with get_sessionmaker()() as db:
+                await requeue_tool_orphans(db, gpu=True)
+            raise
+        return "tool"
     return None
 
 
@@ -170,6 +193,9 @@ async def worker_loop(*, once: bool = False) -> int:
         try:
             async with get_sessionmaker()() as db:
                 await requeue_orphans(db, settings.jobs.max_attempts)
+                from services.tools.registry import requeue_orphans as requeue_tool_orphans
+
+                await requeue_tool_orphans(db, gpu=True, max_attempts=settings.jobs.max_attempts)
             await reset_training_orphans()
             was_paused = False
             while not stop.is_set():
