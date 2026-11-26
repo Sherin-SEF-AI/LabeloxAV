@@ -603,7 +603,10 @@ async def variant_preview(frame_id: uuid.UUID, perturbation: str, strength: floa
     fr = await db.get(Frame, frame_id)
     if fr is None:
         raise HTTPException(404, "frame not found")
-    data = await asyncio.to_thread(get_object_store().get_bytes, fr.img_uri)
+    try:
+        data = await asyncio.to_thread(get_object_store().get_bytes, fr.img_uri)
+    except Exception as exc:  # noqa: BLE001  a missing blob is the frame's problem, not a server error (as /frames/{id}/image)
+        raise HTTPException(404, "frame image unavailable") from exc
 
     def _do() -> bytes:
         img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)

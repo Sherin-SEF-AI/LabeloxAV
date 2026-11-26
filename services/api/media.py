@@ -29,6 +29,11 @@ _MEDIA_READ_PATTERNS = (
     # An asset's bytes, for the document and audio editors. Same reason as the frame image above: the
     # editors render an <img>/<audio> pointing at this, and neither can set a header.
     re.compile(r"^/api/assets/[^/]+/media$"),
+    # The annotation tools' rendered images (services/api/routers/tools_sensors.py): an event-camera preview,
+    # a reconstruction's rendered views and a synthetic variant's preview, all shown as <img>.
+    re.compile(r"^/api/tools/sensors/events/streams/[^/]+/preview\.jpg$"),
+    re.compile(r"^/api/tools/sensors/reconstructions/[^/]+/views/\d+\.jpg$"),
+    re.compile(r"^/api/tools/sensors/variants/preview\.jpg$"),
 )
 
 

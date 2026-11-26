@@ -198,3 +198,16 @@ def test_a_garbage_cookie_is_refused_rather_than_crashing():
         assert c.get(f"/api/frames/{uuid.uuid4()}/image").status_code == 401
         c.cookies.set(MEDIA_COOKIE, "lbx2.aaa.bbb")
         assert c.get(f"/api/frames/{uuid.uuid4()}/image").status_code == 401
+
+
+def test_the_annotation_tools_rendered_images_accept_the_media_cookie_and_nothing_else_does():
+    """An <img> cannot send a header, so the tools' rendered images must be media reads; their JSON must not."""
+    from services.api.media import is_media_read
+
+    for path in ("/api/tools/sensors/events/streams/abc/preview.jpg",
+                 "/api/tools/sensors/reconstructions/abc/views/3.jpg",
+                 "/api/tools/sensors/variants/preview.jpg"):
+        assert is_media_read(path), path
+    for path in ("/api/tools/sensors/overview", "/api/tools/sensors/reconstructions/abc/preview.bin",
+                 "/api/tools/sensors/variants/preview.jpg/../../overview", "/api/tools/jobs"):
+        assert not is_media_read(path), path
