@@ -3819,9 +3819,9 @@ class ToolJob(Base):
 
 # The annotation tools' own tables, one module per area so they could be built side by side without every
 # change landing in this file. Imported last: they subclass Base and may reference the classes above.
-from db.models_tools_video import *  # noqa: E402,F401,F403
-from db.models_tools_scene3d import *  # noqa: E402,F401,F403
 from db.models_tools_agents import *  # noqa: E402,F401,F403
-from db.models_tools_quality import *  # noqa: E402,F401,F403
 from db.models_tools_driving import *  # noqa: E402,F401,F403
+from db.models_tools_quality import *  # noqa: E402,F401,F403
+from db.models_tools_scene3d import *  # noqa: E402,F401,F403
 from db.models_tools_sensors import *  # noqa: E402,F401,F403
+from db.models_tools_video import *  # noqa: E402,F401,F403

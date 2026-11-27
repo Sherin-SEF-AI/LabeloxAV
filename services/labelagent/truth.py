@@ -110,7 +110,7 @@ def block_key(vehicle_id: str, ts_ns: int) -> str:
 def split_of(key: str, test_fraction: float = TEST_FRACTION) -> str:
     """A block's side of the split. A hash rather than a random draw, so it is the same on every run and a
     block never changes sides when new data arrives."""
-    h = int(hashlib.sha1(str(key).encode()).hexdigest()[:8], 16)
+    h = int(hashlib.sha1(str(key).encode(), usedforsecurity=False).hexdigest()[:8], 16)
     return "test" if (h % 1000) < int(test_fraction * 1000) else "calib"
 
 
