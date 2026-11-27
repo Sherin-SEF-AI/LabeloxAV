@@ -93,11 +93,12 @@ def vram_free_mb(device: str | int | None = None) -> float | None:
         free, _total = torch.cuda.mem_get_info(idx)
     except Exception:  # noqa: BLE001 - an invalid ordinal or an uninitialised context
         try:
-            torch.cuda.init()  # type: ignore[no-untyped-call]
+            init: Any = torch.cuda.init      # typed in some torch builds and not others; CI has the other
+            init()
             free, _total = torch.cuda.mem_get_info(idx)
         except Exception:  # noqa: BLE001
             return None
-    return free / (1024 * 1024)
+    return float(free) / (1024 * 1024)
 
 
 def vram_total_mb(device: str | int | None = None) -> float | None:
@@ -109,7 +110,7 @@ def vram_total_mb(device: str | int | None = None) -> float | None:
         _free, total = torch.cuda.mem_get_info(device_index(device))
     except Exception:  # noqa: BLE001
         return None
-    return total / (1024 * 1024)
+    return float(total) / (1024 * 1024)
 
 
 def empty_cuda_cache() -> None:
