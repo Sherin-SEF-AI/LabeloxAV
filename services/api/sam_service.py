@@ -39,8 +39,12 @@ def segment(
     box: list[float] | None = None,
     precise: bool = False,
 ) -> dict:
+    from core.model_manager import cuda_available
+
     model = _get_model()
     dev = get_settings().gpu.device
+    if str(dev).startswith("cuda") and not cuda_available():
+        dev = "cpu"   # a CPU-only install still segments, slower, instead of failing on a device it lacks
     kwargs: dict = {"device": dev, "verbose": False}
     if box is not None:
         kwargs["bboxes"] = [box]
